@@ -276,6 +276,44 @@ function Stars({ count = 60 }: { count?: number }) {
   );
 }
 
+// ── PWA 설치 버튼 ─────────────────────────────────────────────
+function PWAInstallBtn({ theme }: { theme: "dark" | "light" }) {
+  const [prompt, setPrompt] = useState<any>(null);
+  const [installed, setInstalled] = useState(false);
+
+  useEffect(() => {
+    const handler = (e: any) => { e.preventDefault(); setPrompt(e); };
+    window.addEventListener("beforeinstallprompt", handler);
+    window.addEventListener("appinstalled", () => setInstalled(true));
+    return () => window.removeEventListener("beforeinstallprompt", handler);
+  }, []);
+
+  if (installed || !prompt) return null;
+
+  return (
+    <button
+      onClick={async () => { prompt.prompt(); const r = await prompt.userChoice; if (r.outcome === "accepted") setInstalled(true); }}
+      style={{
+        position: "fixed", bottom: 24, left: "50%", transform: "translateX(-50%)",
+        display: "flex", alignItems: "center", gap: 8,
+        padding: "12px 24px", borderRadius: 99,
+        background: "linear-gradient(135deg,#00ff88,#00cc66)",
+        color: "#000", fontWeight: 800, fontSize: 13,
+        border: "none", cursor: "pointer", zIndex: 999,
+        fontFamily: "'Noto Sans KR', sans-serif",
+        boxShadow: "0 8px 24px rgba(0,255,136,.45)",
+        animation: "pwa-bounce 2s ease-in-out infinite",
+        whiteSpace: "nowrap",
+      }}>
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+        <path d="M12 2v13M7 11l5 5 5-5M3 19h18" stroke="#000" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/>
+      </svg>
+      Publy 앱 설치하기
+    </button>
+  );
+}
+
+
 export default function LoginPage({ onLogin, onAdminLogin, theme, onThemeToggle }: Props) {
   const [mode, setMode] = useState<"login" | "register">("login");
   const [email, setEmail] = useState("");
@@ -386,6 +424,7 @@ export default function LoginPage({ onLogin, onAdminLogin, theme, onThemeToggle 
             ))}
           </div>
         </div>
+      <PWAInstallBtn theme={theme} />
       </div>
     </>
   );
