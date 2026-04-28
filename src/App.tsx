@@ -93,6 +93,7 @@ export default function App() {
   if (view==="admin") return (
     <AdminPage
       onBack={handleAdminLogout}
+      onDashboard={() => { if(user) setView("dashboard"); else setView("login"); }}
       theme={theme}
       onThemeToggle={toggleTheme}
     />
@@ -102,6 +103,7 @@ export default function App() {
     <DashboardPage
       user={user}
       onLogout={handleLogout}
+      onAdminLogin={() => setView("admin-login")}
       theme={theme}
       onThemeToggle={toggleTheme}
     />
