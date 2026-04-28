@@ -1,3 +1,19 @@
+import { useState, useEffect, useCallback } from "react";
+import { PublyUser, getQuota, getHistory, getAccounts, PublyQuota, PublyHistory, PublyAccount, upsertAccount, useQuota, addHistory } from "../lib/supabase";
+
+type Tab = "publish" | "write" | "accounts" | "history" | "settings";
+
+const TABS = [
+  { key:"publish",  icon:"🚀", label:"발행하기" },
+  { key:"write",    icon:"✍️", label:"글 생성" },
+  { key:"accounts", icon:"🔗", label:"계정 관리" },
+  { key:"history",  icon:"📋", label:"기록" },
+  { key:"settings", icon:"⚙️", label:"설정" },
+] as const;
+
+const PLAN_LABELS: Record<string,string> = { free:"FREE", basic:"BASIC", pro:"PRO" };
+const PLAN_COLORS: Record<string,string> = { free:"#888", basic:"#4285F4", pro:"#00ff88" };
+const BOT = "http://localhost:3333";
 
 // ── AI 선택 & API 키 설정 ────────────────────────────────────
 const GEMINI_MODELS_V2 = ["gemini-2.0-flash","gemini-2.0-flash-lite","gemini-2.5-flash","gemini-2.5-flash-lite"];
@@ -622,7 +638,7 @@ export default function DashboardPage({ user, onLogout, onAdminLogin, theme, onT
                       <div style={{fontSize:40,marginBottom:12}}>📭</div>
                       발행 기록이 없습니다
                     </div>
-                  ) : history.map((h,i)=>(
+                  ) : history.map((h:PublyHistory,i:number)=>(
                     <div key={h.id} className="v2-hist-item" style={{animationDelay:`${i*.04}s`,borderColor:h.status==="success"?"rgba(0,255,136,.15)":h.status==="fail"?"rgba(255,68,68,.15)":"var(--border)"}}>
                       <span style={{fontSize:20}}>{h.platform==="naver"?"🟢":"🟠"}</span>
                       <div style={{flex:1,minWidth:0}}>
@@ -703,7 +719,7 @@ export default function DashboardPage({ user, onLogout, onAdminLogin, theme, onT
               {/* 최근 발행 */}
               <div className="v2-right-section" style={{flex:1}}>
                 <div className="v2-right-title">🕐 최근 발행</div>
-                {history.slice(0,8).map((h,i)=>(
+                {history.slice(0,8).map((h:PublyHistory,i:number)=>(
                   <div key={h.id} style={{display:"flex",alignItems:"center",gap:8,padding:"8px 0",borderBottom:"1px solid var(--border)",animation:`v2-fade .3s ease ${i*.05}s both`}}>
                     <span style={{fontSize:14}}>{h.platform==="naver"?"🟢":"🟠"}</span>
                     <div style={{flex:1,minWidth:0}}>
