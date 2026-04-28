@@ -415,6 +415,13 @@ export default function DashboardPage({ user, onLogout, onAdminLogin, theme, onT
   const [accounts, setAccounts]   = useState<PublyAccount[]>([]);
   const [platform, setPlatform]   = useState<"naver"|"tistory">("naver");
   const [showGuide, setShowGuide] = useState(false);
+  const [pwaPrompt, setPwaPrompt] = useState<any>(null);
+
+  useEffect(() => {
+    const handler = (e: any) => { e.preventDefault(); setPwaPrompt(e); };
+    window.addEventListener("beforeinstallprompt", handler);
+    return () => window.removeEventListener("beforeinstallprompt", handler);
+  }, []);
 
   // 발행 폼
   const [pubTitle,   setPubTitle]   = useState("");
@@ -637,6 +644,12 @@ export default function DashboardPage({ user, onLogout, onAdminLogin, theme, onT
 
           <div className="v2-header-right">
             <button className="v2-icon-btn" onClick={onThemeToggle} style={{border:"1px solid var(--border)",cursor:"pointer"}}>{theme==="dark"?"☀️":"🌙"}</button>
+            {pwaPrompt && (
+              <button onClick={async()=>{pwaPrompt.prompt();const r=await pwaPrompt.userChoice;if(r.outcome==="accepted")setPwaPrompt(null);}}
+                style={{display:"flex",alignItems:"center",gap:5,padding:"6px 12px",borderRadius:99,border:"1px solid rgba(0,255,136,.3)",background:"var(--accent-dim)",color:"var(--accent)",fontSize:11,fontWeight:800,cursor:"pointer",fontFamily:"'Noto Sans KR',sans-serif",whiteSpace:"nowrap"}}>
+                ⬇️ 앱 설치
+              </button>
+            )}
             <button className="v2-icon-btn" onClick={checkBot} title="새로고침">🔄</button>
             <div className="v2-user-chip">
               <div className="v2-user-avatar">{(user.name||user.email)[0].toUpperCase()}</div>
