@@ -1,7 +1,7 @@
 {
   "name": "publy",
   "version": "1.0.0",
-  "description": "Publy - 네이버/티스토리 자동발행 앱",
+  "description": "Publy - \ub124\uc774\ubc84/\ud2f0\uc2a4\ud1a0\ub9ac \uc790\ub3d9\ubc1c\ud589 \uc571",
   "main": "dist-electron/main.js",
   "scripts": {
     "dev": "vite",
@@ -15,7 +15,9 @@
     "playwright": "^1.43.0",
     "bcryptjs": "^2.4.3",
     "axios": "^1.6.8",
-    "fs-extra": "^11.2.0"
+    "fs-extra": "^11.2.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
   },
   "devDependencies": {
     "@types/bcryptjs": "^2.4.6",
@@ -34,7 +36,9 @@
   "build": {
     "appId": "com.publy.app",
     "productName": "Publy",
-    "directories": { "output": "release" },
+    "directories": {
+      "output": "release"
+    },
     "win": {
       "target": "nsis",
       "icon": "public/icon.ico"
