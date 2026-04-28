@@ -273,7 +273,14 @@ function ApiKeySettings() {
 
       {/* 이미지 API 키 */}
       <div style={{padding:"14px 16px",borderRadius:14,background:"rgba(139,92,246,.08)",border:"1px solid rgba(139,92,246,.2)"}}>
-        <div style={{fontSize:10,fontWeight:700,letterSpacing:".12em",textTransform:"uppercase",color:"#8B5CF6",marginBottom:10}}>🖼️ 이미지 API 키</div>
+        <div style={{fontSize:10,fontWeight:700,letterSpacing:".12em",textTransform:"uppercase",color:"#8B5CF6",marginBottom:8}}>🖼️ 이미지 API 키</div>
+        <div style={{display:"flex",alignItems:"center",gap:7,padding:"8px 12px",borderRadius:10,background:"rgba(16,163,127,.1)",border:"1px solid rgba(16,163,127,.25)",marginBottom:11}}>
+          <span style={{fontSize:14}}>💡</span>
+          <span style={{fontSize:11,color:"#10A37F",fontWeight:600,lineHeight:1.5}}>
+            <strong>OpenAI 키는 글쓰기 + 이미지 생성 모두 하나의 키로 사용 가능합니다.</strong><br/>
+            <span style={{fontWeight:400,color:"var(--muted)"}}>글쓰기에서 입력한 OpenAI 키를 그대로 사용하세요. 따로 발급할 필요 없습니다.</span>
+          </span>
+        </div>
         {imageKeys.map(k=><PublyKeyInput key={k.id} k={k}/>)}
       </div>
     </div>
@@ -377,7 +384,9 @@ select.v2-input{appearance:auto;}.dark select.v2-input{color-scheme:dark;}.light
 .v2-warn-red{background:rgba(255,68,68,.08);border:1px solid rgba(255,68,68,.2);color:#ff8888;}
 .v2-guide-trigger{display:flex;align-items:center;gap:8px;padding:10px 14px;border-radius:12px;cursor:pointer;border:1.5px dashed;font-size:12px;font-weight:700;font-family:'Noto Sans KR',sans-serif;transition:all .22s;animation:v2-float 3s ease-in-out infinite;background:linear-gradient(135deg,rgba(245,158,11,.08),rgba(245,158,11,.04));border-color:rgba(245,158,11,.3);color:#d97706;position:relative;overflow:hidden;}
 .v2-guide-trigger:hover{border-color:rgba(245,158,11,.5);transform:translateY(-2px);}
-.v2-guide-panel{position:fixed;top:56px;right:0;bottom:0;width:min(420px,100vw);background:var(--bg2);border-left:1px solid var(--border);z-index:1000;overflow-y:auto;padding:24px;box-shadow:-20px 0 60px rgba(0,0,0,.2);animation:v2-slide-in .3s ease both;}
+.v2-guide-panel{position:fixed;top:56px;right:0;bottom:0;width:min(420px,100vw);border-left:1px solid var(--border);z-index:1000;overflow-y:auto;padding:24px;animation:v2-slide-in .3s ease both;}
+.v2-root.dark .v2-guide-panel{background:#080f18;box-shadow:-20px 0 60px rgba(0,0,0,.6);}
+.v2-root.light .v2-guide-panel{background:#ffffff;box-shadow:-20px 0 40px rgba(0,0,0,.12);border-left:1px solid rgba(0,0,0,.1);}
 @keyframes v2-slide-in{from{transform:translateX(100%);opacity:0}to{transform:translateX(0);opacity:1}}
 .v2-quick-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;}
 .v2-quick-btn{padding:14px 10px;border-radius:13px;border:1px solid var(--border);background:var(--card);cursor:pointer;text-align:center;transition:all .2s;font-family:'Noto Sans KR',sans-serif;}
@@ -577,7 +586,7 @@ export default function DashboardPage({ user, onLogout, onAdminLogin, theme, onT
           <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:20}}>
             <div>
               <div style={{fontFamily:"'Bebas Neue',sans-serif",fontSize:22,letterSpacing:".15em",color:"#d97706"}}>사용 설명서</div>
-              <div style={{fontSize:11,color:"var(--muted)"}}>Publy 자동발행 가이드</div>
+              <div style={{fontSize:11,color:"var(--muted)",marginTop:3}}>Publy 자동발행 가이드</div>
             </div>
             <button onClick={()=>setShowGuide(false)} style={{background:"none",border:"none",cursor:"pointer",fontSize:20,color:"var(--muted)"}}>✕</button>
           </div>
