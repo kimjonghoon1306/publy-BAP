@@ -3,6 +3,7 @@ import { supabase, PublyUser } from "../lib/supabase";
 
 interface Props {
   onBack: () => void;
+  onDashboard: () => void;
   theme: "dark" | "light";
   onThemeToggle: () => void;
 }
@@ -249,7 +250,7 @@ const GUIDE_STEPS = [
   { title:"통계 확인", color:"#4285F4", items:["전체 발행 현황 확인","활성 회원 파악","실패 건 모니터링"] },
 ];
 
-export default function AdminPage({ onBack, theme, onThemeToggle }: Props) {
+export default function AdminPage({ onBack, onDashboard, theme, onThemeToggle }: Props) {
   const [tab,       setTab]       = useState<"users"|"stats"|"settings">("users");
   const [users,     setUsers]     = useState<UserWithQuota[]>([]);
   const [loading,   setLoading]   = useState(true);
@@ -378,7 +379,24 @@ export default function AdminPage({ onBack, theme, onThemeToggle }: Props) {
           <div className="adm-header-right">
             <button className="adm-icon-btn" onClick={()=>setShowGuide(v=>!v)} title="가이드">📖</button>
             <button className="adm-icon-btn" onClick={onThemeToggle}>{theme==="dark"?"☀️":"🌙"}</button>
-            <button className="adm-back-btn" onClick={onBack}>← 일반 로그인</button>
+            <button
+              onClick={onDashboard}
+              style={{
+                display:"flex", alignItems:"center", gap:8,
+                padding:"8px 16px", borderRadius:12, cursor:"pointer",
+                background:"linear-gradient(135deg,rgba(0,255,136,.12),rgba(0,200,100,.08))",
+                border:"1px solid rgba(0,255,136,.3)",
+                color:"#00c875", fontSize:12, fontWeight:700,
+                fontFamily:"'Noto Sans KR',sans-serif", transition:"all .2s",
+              }}
+              onMouseEnter={e=>{e.currentTarget.style.transform="translateX(-2px)"; e.currentTarget.style.boxShadow="0 4px 16px rgba(0,255,136,.2)";}}
+              onMouseLeave={e=>{e.currentTarget.style.transform=""; e.currentTarget.style.boxShadow="";}}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+                <path d="M15 18L9 12L15 6" stroke="#00c875" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/>
+              </svg>
+              대시보드로
+            </button>
+            <button className="adm-back-btn" onClick={onBack}>로그아웃</button>
           </div>
         </div>
 
