@@ -286,6 +286,7 @@ export default function AdminPage({onBack,onDashboard,theme,onThemeToggle}:Props
   const [newPlat,setNewPlat]=useState<"naver"|"tistory">("naver");const [newUser,setNewUser]=useState("");const [newPw,setNewPw]=useState("");const [newBlog,setNewBlog]=useState("");const [addingAcc,setAddingAcc]=useState(false);const [connId,setConnId]=useState<string|null>(null);
   const [users,setUsers]=useState<UserFull[]>([]);const [loading,setLoading]=useState(true);const [search,setSearch]=useState("");const [selUser,setSelUser]=useState<UserFull|null>(null);
   const [editMap,setEditMap]=useState<Record<string,any>>({});const [saving,setSaving]=useState<string|null>(null);
+  const [showAdmGuide,setShowAdmGuide]=useState(false);
   const [newNote,setNewNote]=useState("");const [newPayAmt,setNewPayAmt]=useState("");const [newPayNote,setNewPayNote]=useState("");const [addingPay,setAddingPay]=useState(false);
   const [newPw1,setNewPw1]=useState("");const [newPw2,setNewPw2]=useState("");const [pwMsg,setPwMsg]=useState("");
   const [flowEmail,setFlowEmail]=useState(()=>localStorage.getItem("admin_flow_email")||"");const [flowPw,setFlowPw]=useState(()=>localStorage.getItem("admin_flow_pw")||"");
@@ -391,7 +392,7 @@ export default function AdminPage({onBack,onDashboard,theme,onThemeToggle}:Props
             <button onClick={()=>setShowAdmGuide(false)} style={{background:"none",border:"none",cursor:"pointer",fontSize:18,color:"var(--m)"}}>✕</button>
           </div>
           {ADM_GUIDE_STEPS.map((s,i)=>(
-            <div key={i} style={{padding:"13px 15px",borderRadius:13,border:`1px solid ${s.color}30`,marginBottom:10,animationDelay:`${i*.07}s`}} style={{background:'var(--bg2)'}}>
+            <div key={i} style={{padding:"13px 15px",borderRadius:13,border:`1px solid ${s.color}30`,marginBottom:10}}>
               <div style={{display:"flex",alignItems:"center",gap:7,marginBottom:9}}>
                 <div style={{width:20,height:20,borderRadius:6,background:`${s.color}20`,border:`1px solid ${s.color}40`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:10,fontWeight:800,color:s.color}}>{i+1}</div>
                 <span style={{fontSize:13,fontWeight:700,color:"var(--t)"}}>{s.title}</span>
@@ -408,7 +409,7 @@ export default function AdminPage({onBack,onDashboard,theme,onThemeToggle}:Props
       )}
 
       {/* 사용설명서 플로팅 버튼 */}
-      <button className="adm-guide-float" onClick={()=>setShowAdmGuide(v=>!v)}>
+      <button className="adm-guide-float" onClick={()=>setShowAdmGuide((v:boolean)=>!v)}>
         📖 사용 설명서
       </button>
 
