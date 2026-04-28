@@ -391,7 +391,7 @@ export default function AdminPage({onBack,onDashboard,theme,onThemeToggle}:Props
             <button onClick={()=>setShowAdmGuide(false)} style={{background:"none",border:"none",cursor:"pointer",fontSize:18,color:"var(--m)"}}>✕</button>
           </div>
           {ADM_GUIDE_STEPS.map((s,i)=>(
-            <div key={i} style={{padding:"13px 15px",borderRadius:13,border:`1px solid ${s.color}30`,marginBottom:10,animationDelay:`${i*.07}s`}} className={`ar ${''}`}>
+            <div key={i} style={{padding:"13px 15px",borderRadius:13,border:`1px solid ${s.color}30`,marginBottom:10,animationDelay:`${i*.07}s`}} style={{background:'var(--bg2)'}}>
               <div style={{display:"flex",alignItems:"center",gap:7,marginBottom:9}}>
                 <div style={{width:20,height:20,borderRadius:6,background:`${s.color}20`,border:`1px solid ${s.color}40`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:10,fontWeight:800,color:s.color}}>{i+1}</div>
                 <span style={{fontSize:13,fontWeight:700,color:"var(--t)"}}>{s.title}</span>
