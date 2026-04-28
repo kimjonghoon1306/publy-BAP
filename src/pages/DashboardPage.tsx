@@ -106,9 +106,10 @@ const CSS = `
 .plan-pro     { background:var(--accent-dim); color:var(--accent); border:1px solid rgba(0,255,136,.3); animation:v2-glow 2.5s infinite; }
 .v2-header-right { display:flex; align-items:center; gap:8px; flex-shrink:0; }
 .v2-icon-btn {
-  width:36px; height:36px; border-radius:11px; cursor:pointer; font-size:16px;
+  width:36px; height:36px; border-radius:11px; cursor:pointer !important; font-size:16px;
   display:flex; align-items:center; justify-content:center; border:1px solid var(--border);
-  background:var(--card); transition:all .2s; color:var(--text);
+  background:var(--card); transition:all .2s; color:var(--text); outline:none;
+  -webkit-appearance:none; user-select:none;
 }
 .v2-icon-btn:hover { border-color:var(--border2); transform:scale(1.08); }
 .v2-user-chip {
@@ -303,7 +304,7 @@ select.v2-input { appearance:auto; }
 
 /* ── 가이드 슬라이드 패널 ── */
 .v2-guide-panel {
-  position:fixed; top:0; right:0; bottom:0; width:min(420px,100vw);
+  position:fixed; top:56px; right:0; bottom:0; width:min(420px,100vw);
   background:var(--bg2); border-left:1px solid var(--border);
   z-index:1000; overflow-y:auto; padding:24px;
   box-shadow:-20px 0 60px rgba(0,0,0,.2);
@@ -574,7 +575,7 @@ export default function DashboardPage({ user, onLogout, onAdminLogin, theme, onT
           </div>
 
           <div className="v2-header-right">
-            <button className="v2-icon-btn" onClick={onThemeToggle}>{theme==="dark"?"☀️":"🌙"}</button>
+            <button className="v2-icon-btn" onClick={onThemeToggle} style={{border:"1px solid var(--border)",cursor:"pointer"}}>{theme==="dark"?"☀️":"🌙"}</button>
             <button className="v2-icon-btn" onClick={checkBot} title="새로고침">🔄</button>
             <div className="v2-user-chip">
               <div className="v2-user-avatar">{(user.name||user.email)[0].toUpperCase()}</div>
@@ -606,7 +607,7 @@ export default function DashboardPage({ user, onLogout, onAdminLogin, theme, onT
 
             <div className="v2-sidebar-footer">
               <button className="v2-guide-trigger" style={{width:"100%",justifyContent:"center"}} onClick={()=>setShowGuide(v=>!v)}>
-                <span style={{position:"relative",zIndex:1}}>📖 사용 설명서</span>
+                📖 사용 설명서
               </button>
               <div style={{marginTop:12,padding:"10px 12px",borderRadius:11,background:"var(--card)",border:"1px solid var(--border)"}}>
                 <div style={{fontSize:10,color:"var(--muted)",marginBottom:6,letterSpacing:".1em",textTransform:"uppercase"}}>오늘 발행</div>
@@ -917,12 +918,7 @@ export default function DashboardPage({ user, onLogout, onAdminLogin, theme, onT
                 ))}
               </div>
 
-              {/* 사용 설명서 */}
-              <div className="v2-right-section">
-                <button className="v2-guide-trigger" style={{width:"100%",justifyContent:"center"}} onClick={()=>setShowGuide(v=>!v)}>
-                  <span style={{position:"relative",zIndex:1}}>📖 사용 설명서</span>
-                </button>
-              </div>
+
             </div>
           </div>
         </div>
