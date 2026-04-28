@@ -1,0 +1,14 @@
+<svg width="512" height="512" viewBox="0 0 192 192" xmlns="http://www.w3.org/2000/svg">
+  <rect width="512" height="512" rx="40" fill="#02040a"/>
+  <rect width="512" height="512" rx="40" fill="url(#grad)"/>
+  <defs>
+    <linearGradient id="grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#00ff88" stop-opacity="0.15"/>
+      <stop offset="100%" stop-color="#00cc66" stop-opacity="0.05"/>
+    </linearGradient>
+  </defs>
+  <polygon points="96,30 156,150 36,150" fill="none" stroke="#00ff88" stroke-width="6" stroke-linejoin="round"/>
+  <polygon points="96,55 136,135 56,135" fill="#00ff88" opacity="0.35"/>
+  <circle cx="96" cy="122" r="10" fill="#00ff88"/>
+  <text x="96" y="178" font-family="Arial Black" font-size="22" font-weight="900" fill="#00ff88" text-anchor="middle" letter-spacing="4">PUBLY</text>
+</svg>
