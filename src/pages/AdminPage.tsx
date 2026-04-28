@@ -15,6 +15,14 @@ interface UserFull {
 }
 
 
+const ADM_GUIDE_STEPS = [
+  {title:"봇 서버 실행", color:"#00c875", items:["터미널 → cd naver-bot","npm run dev 실행","이 페이지 상단 서버 온라인 확인"]},
+  {title:"관리자 자동발행", color:"#f59e0b", items:["자동발행 탭 → 계정 관리에서 계정 추가","계정 연결 버튼 클릭","글 생성 탭에서 키워드로 글 생성","발행하기 탭에서 자동 발행"]},
+  {title:"회원 관리", color:"#4285F4", items:["회원관리 탭에서 회원 클릭","등급/건수/만료일 수정 후 저장","결제 내역 및 메모 추가 가능"]},
+  {title:"서버 점검", color:"#a78bfa", items:["봇 오프라인 시 npm run dev 재실행","실패 건은 히스토리에서 확인","API 키 오류 시 설정 탭에서 재입력"]},
+];
+
+
 const GEMINI_MODELS_ADM = ["gemini-2.0-flash","gemini-2.0-flash-lite","gemini-2.5-flash","gemini-2.5-flash-lite"];
 
 const ADM_WRITE_AI = [
@@ -152,6 +160,13 @@ function AdminApiKeySettings(){
       {/* 이미지 키 */}
       <div className="acd" style={{padding:"16px 18px",marginBottom:12}}>
         <div className="asl2" style={{color:"#8B5CF6"}}>🖼️ 이미지 API 키</div>
+        <div style={{display:"flex",alignItems:"center",gap:7,padding:"8px 11px",borderRadius:9,background:"rgba(16,163,127,.1)",border:"1px solid rgba(16,163,127,.25)",marginBottom:10}}>
+          <span style={{fontSize:13}}>💡</span>
+          <span style={{fontSize:10,color:"#10A37F",fontWeight:600,lineHeight:1.5}}>
+            <strong>OpenAI 키는 글쓰기 + 이미지 생성을 하나의 키로 사용 가능합니다.</strong><br/>
+            <span style={{fontWeight:400,color:"var(--m)"}}>글쓰기에 입력한 OpenAI 키를 그대로 사용하세요. 따로 발급 불필요.</span>
+          </span>
+        </div>
         {ADM_IMAGE_AI.map(k=><AdmKeyInput key={k.id} k={k}/>)}
       </div>
     </div>
@@ -176,6 +191,12 @@ const CSS = `
 .ar.light{--bg:#fffbf0;--bg2:#fef9e7;--c:rgba(255,255,255,.92);--c2:rgba(255,255,255,.98);--b:rgba(180,120,0,.1);--b2:rgba(180,120,0,.25);--t:#1a1200;--m:rgba(26,18,0,.5);--a:#b45309;--a2:#92400e;--ad:rgba(180,83,9,.1);--hb:rgba(255,251,240,.95);--nb:rgba(254,249,231,.97);--ib:rgba(180,83,9,.05);--ib2:rgba(180,83,9,.15);--d:#dc2626;--s:#059669;--i:#2563eb;--gd:rgba(0,150,80,.1);--g:#059669}
 .ar{width:100vw;height:100vh;overflow:hidden;display:flex;flex-direction:column;font-family:'Noto Sans KR',sans-serif;color:var(--t);background:var(--bg);transition:background .3s;}
 *::-webkit-scrollbar{width:4px;}*::-webkit-scrollbar-thumb{background:rgba(245,158,11,.2);border-radius:99px;}
+.adm-guide-overlay{position:fixed;top:56px;right:0;bottom:0;width:min(400px,100vw);z-index:1000;overflow-y:auto;padding:22px;border-left:1px solid var(--b);animation:adm-slide-in .3s ease both;}
+.ar.dark .adm-guide-overlay{background:#080b05;box-shadow:-16px 0 48px rgba(0,0,0,.6);}
+.ar.light .adm-guide-overlay{background:#ffffff;box-shadow:-16px 0 32px rgba(0,0,0,.1);}
+.adm-guide-float{position:fixed;bottom:88px;right:20px;z-index:99;padding:10px 16px;border-radius:99px;border:none;cursor:pointer;font-weight:800;font-size:12px;font-family:'Noto Sans KR',sans-serif;display:flex;align-items:center;gap:7px;background:linear-gradient(135deg,#f59e0b,#d97706);color:#000;box-shadow:0 6px 20px rgba(245,158,11,.4);animation:ag 3s ease-in-out infinite;transition:all .2s;}
+.adm-guide-float:hover{transform:translateY(-3px);box-shadow:0 10px 28px rgba(245,158,11,.55);}
+@media(min-width:769px){.adm-guide-float{bottom:28px;}}
 .asc{position:fixed;left:0;right:0;height:1px;pointer-events:none;z-index:0;background:linear-gradient(90deg,transparent,rgba(245,158,11,.15),transparent);animation:asc 12s linear infinite;}
 .ah{height:56px;flex-shrink:0;display:flex;align-items:center;padding:0 20px;gap:12px;background:var(--hb);border-bottom:1px solid var(--b);backdrop-filter:blur(24px);position:relative;z-index:30;}
 .al{font-family:'Bebas Neue',sans-serif;font-size:19px;letter-spacing:.22em;background:linear-gradient(135deg,var(--a),var(--a2));-webkit-background-clip:text;-webkit-text-fill-color:transparent;}
@@ -359,6 +380,38 @@ export default function AdminPage({onBack,onDashboard,theme,onThemeToggle}:Props
   return(
     <>
       <style>{CSS}</style>
+      {/* 사용설명서 패널 */}
+      {showAdmGuide && (
+        <div className="adm-guide-overlay">
+          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:18}}>
+            <div>
+              <div style={{fontFamily:"'Bebas Neue',sans-serif",fontSize:20,letterSpacing:".15em",color:"var(--a)"}}>사용 설명서</div>
+              <div style={{fontSize:10,color:"var(--m)"}}>관리자 운영 가이드</div>
+            </div>
+            <button onClick={()=>setShowAdmGuide(false)} style={{background:"none",border:"none",cursor:"pointer",fontSize:18,color:"var(--m)"}}>✕</button>
+          </div>
+          {ADM_GUIDE_STEPS.map((s,i)=>(
+            <div key={i} style={{padding:"13px 15px",borderRadius:13,border:`1px solid ${s.color}30`,marginBottom:10,animationDelay:`${i*.07}s`}} className={`ar ${''}`}>
+              <div style={{display:"flex",alignItems:"center",gap:7,marginBottom:9}}>
+                <div style={{width:20,height:20,borderRadius:6,background:`${s.color}20`,border:`1px solid ${s.color}40`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:10,fontWeight:800,color:s.color}}>{i+1}</div>
+                <span style={{fontSize:13,fontWeight:700,color:"var(--t)"}}>{s.title}</span>
+              </div>
+              {s.items.map((item,j)=>(
+                <div key={j} style={{display:"flex",alignItems:"center",gap:7,marginBottom:5}}>
+                  <div style={{width:4,height:4,borderRadius:"50%",background:s.color,flexShrink:0}}/>
+                  <span style={{fontSize:12,color:"var(--m)",lineHeight:1.5}}>{item}</span>
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* 사용설명서 플로팅 버튼 */}
+      <button className="adm-guide-float" onClick={()=>setShowAdmGuide(v=>!v)}>
+        📖 사용 설명서
+      </button>
+
       <div className="asc"/>
 
       {/* 회원 상세 모달 */}
