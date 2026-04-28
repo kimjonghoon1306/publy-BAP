@@ -14,6 +14,151 @@ interface UserFull {
   payments?: any[]; notes?: any[]; history_count?: number;
 }
 
+
+const GEMINI_MODELS_ADM = ["gemini-2.0-flash","gemini-2.0-flash-lite","gemini-2.5-flash","gemini-2.5-flash-lite"];
+
+const ADM_WRITE_AI = [
+  {id:"gemini",label:"Gemini Flash",sub:"Google AI · 무료",placeholder:"AIza...",storageKey:"publy_gemini_key",link:"https://aistudio.google.com/app/apikey",color:"#4285F4",logo:"G",free:true},
+  {id:"groq",label:"Groq (Llama 3)",sub:"초고속 · 무료",placeholder:"gsk_...",storageKey:"publy_groq_key",link:"https://console.groq.com/keys",color:"#F55036",logo:"L",free:true},
+  {id:"openai",label:"OpenAI GPT-4",sub:"글쓰기 최강",placeholder:"sk-...",storageKey:"publy_openai_key",link:"https://platform.openai.com/api-keys",color:"#10A37F",logo:"O",free:false},
+];
+
+const ADM_IMAGE_AI = [
+  {id:"openai_img",label:"OpenAI DALL-E",sub:"이미지 생성+분석",placeholder:"sk-...",storageKey:"publy_openai_key",link:"https://platform.openai.com/api-keys",color:"#10A37F",logo:"O",free:false},
+  {id:"replicate",label:"Replicate (Flux)",sub:"고품질 이미지",placeholder:"r8_...",storageKey:"publy_replicate_key",link:"https://replicate.com/account/api-tokens",color:"#8B5CF6",logo:"R",free:false},
+];
+
+function AdmAICard({item,selected,onClick}:{item:any,selected:boolean,onClick:()=>void}){
+  return(
+    <button onClick={onClick} style={{
+      flex:1,padding:"12px 10px",borderRadius:14,cursor:"pointer",
+      fontFamily:"'Noto Sans KR',sans-serif",textAlign:"left",
+      border:`2px solid ${selected?item.color:"var(--b)"}`,
+      background:selected?`${item.color}15`:"var(--ib)",
+      transform:selected?"translateY(-4px) scale(1.04)":"translateY(0) scale(1)",
+      boxShadow:selected?`0 10px 24px ${item.color}35`:"none",
+      transition:"all .25s cubic-bezier(.34,1.56,.64,1)",
+      position:"relative",overflow:"hidden",
+    }}>
+      {selected&&<div style={{position:"absolute",top:0,left:0,right:0,height:2,background:`linear-gradient(90deg,transparent,${item.color},transparent)`}}/>}
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:7}}>
+        <div style={{width:28,height:28,borderRadius:8,background:selected?item.color:`${item.color}30`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:12,fontWeight:900,color:selected?"#000":item.color,transition:"all .2s"}}>{item.logo}</div>
+        {selected
+          ?<span style={{fontSize:9,fontWeight:800,padding:"2px 7px",borderRadius:99,background:item.color,color:"#000"}}>✓ 선택됨</span>
+          :<span style={{fontSize:9,fontWeight:800,padding:"2px 7px",borderRadius:99,background:item.free?"rgba(0,200,117,.15)":"rgba(245,158,11,.15)",color:item.free?"#00c875":"#f59e0b"}}>{item.free?"무료":"유료"}</span>
+        }
+      </div>
+      <div style={{fontSize:11,fontWeight:700,color:selected?item.color:"var(--t)"}}>{item.label}</div>
+      <div style={{fontSize:9,color:"var(--m)",marginTop:2}}>{item.sub}</div>
+    </button>
+  );
+}
+
+function AdmKeyInput({k}:{k:any}){
+  const [val,setVal]=useState(()=>localStorage.getItem(k.storageKey)||"");
+  const [show,setShow]=useState(false);
+  const [saved,setSaved]=useState(false);
+  const [testing,setTesting]=useState(false);
+  const [testMsg,setTestMsg]=useState("");
+
+  function save(){
+    if(!val.trim()){setTestMsg("❌ 키 입력 필요");return;}
+    localStorage.setItem(k.storageKey,val.trim());
+    setSaved(true);setTestMsg("✅ 저장됨");
+    setTimeout(()=>{setSaved(false);setTestMsg("");},3000);
+  }
+
+  async function testKey(){
+    if(!val.trim()){setTestMsg("❌ 키 입력 필요");return;}
+    setTesting(true);setTestMsg("");
+    try{
+      if(k.id==="gemini"){
+        for(const model of GEMINI_MODELS_ADM){
+          const r=await fetch("https://generativelanguage.googleapis.com/v1beta/models/"+model+":generateContent?key="+val.trim(),{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({contents:[{parts:[{text:"hi"}]}],generationConfig:{maxOutputTokens:10}}),signal:AbortSignal.timeout(8000)});
+          if(r.ok){setTestMsg("✅ 연결 성공 ("+model+")");break;}
+          if(r.status===401||r.status===403){setTestMsg("❌ API 키 오류");break;}
+        }
+      } else if(k.id==="groq"){
+        const r=await fetch("https://api.groq.com/openai/v1/models",{headers:{"Authorization":"Bearer "+val.trim()},signal:AbortSignal.timeout(8000)});
+        setTestMsg(r.ok?"✅ Groq 연결 성공":"❌ 연결 실패");
+      } else if(k.id==="openai"||k.id==="openai_img"){
+        const r=await fetch("https://api.openai.com/v1/models",{headers:{"Authorization":"Bearer "+val.trim()},signal:AbortSignal.timeout(8000)});
+        setTestMsg(r.ok?"✅ OpenAI 연결 성공":"❌ 연결 실패");
+      } else {
+        setTestMsg("저장 후 실제 생성으로 테스트");
+      }
+    }catch(e:any){setTestMsg("❌ "+e.message);}
+    finally{setTesting(false);}
+  }
+
+  return(
+    <div style={{padding:"12px 14px",borderRadius:12,border:`1px solid ${val?"rgba(245,158,11,.3)":"var(--b)"}`,background:"var(--bg)",marginBottom:8,transition:"border-color .2s"}}>
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:8}}>
+        <div style={{display:"flex",alignItems:"center",gap:7}}>
+          <div style={{width:24,height:24,borderRadius:6,background:k.color,display:"flex",alignItems:"center",justifyContent:"center",fontSize:10,fontWeight:900,color:"#000"}}>{k.logo}</div>
+          <div><div style={{fontSize:11,fontWeight:700,color:"var(--t)"}}>{k.label}</div><div style={{fontSize:9,color:"var(--m)"}}>{k.sub}</div></div>
+          {val&&<span style={{fontSize:9,fontWeight:800,padding:"2px 6px",borderRadius:99,background:"var(--ad)",color:"var(--a)"}}>입력됨</span>}
+        </div>
+        <a href={k.link} target="_blank" rel="noopener noreferrer" style={{fontSize:9,fontWeight:700,color:k.color,textDecoration:"none",padding:"3px 8px",borderRadius:7,border:"1px solid "+k.color+"30",background:k.color+"10"}}>🔗 발급</a>
+      </div>
+      <div style={{display:"flex",gap:6,marginBottom:6}}>
+        <div style={{flex:1,position:"relative"}}>
+          <input type={show?"text":"password"} placeholder={k.placeholder} value={val}
+            onChange={e=>setVal(e.target.value)} onKeyDown={e=>e.key==="Enter"&&save()}
+            style={{width:"100%",padding:"8px 30px 8px 10px",borderRadius:8,border:"1px solid var(--ib2)",background:"var(--ib)",color:"var(--t)",fontSize:11,fontFamily:"'JetBrains Mono',monospace",outline:"none"}}/>
+          <button onClick={()=>setShow(v=>!v)} style={{position:"absolute",right:8,top:"50%",transform:"translateY(-50%)",background:"none",border:"none",cursor:"pointer",color:"var(--m)",fontSize:11}}>{show?"🙈":"👁️"}</button>
+        </div>
+        <button onClick={save} style={{padding:"8px 12px",borderRadius:8,border:"none",cursor:"pointer",fontWeight:800,fontSize:10,fontFamily:"'Noto Sans KR',sans-serif",background:saved?"var(--a)":"var(--ad)",color:saved?"#000":"var(--a)",flexShrink:0}}>{saved?"✅ 저장":"💾 저장"}</button>
+      </div>
+      <div style={{display:"flex",gap:6,alignItems:"center"}}>
+        <button onClick={testKey} disabled={testing} style={{padding:"4px 10px",borderRadius:7,border:"1px solid "+k.color+"30",background:k.color+"10",color:k.color,fontSize:9,fontWeight:700,cursor:"pointer",display:"flex",alignItems:"center",gap:3}}>
+          {testing&&<span style={{width:8,height:8,borderRadius:"50%",border:"2px solid "+k.color+"40",borderTopColor:k.color,animation:"as 1s linear infinite",display:"inline-block"}}/>}
+          🔌 테스트
+        </button>
+        {testMsg&&<span style={{fontSize:9,color:testMsg.includes("✅")?"var(--s)":"var(--d)"}}>{testMsg}</span>}
+      </div>
+    </div>
+  );
+}
+
+function AdminApiKeySettings(){
+  const [writeAI,setWriteAI]=useState(()=>localStorage.getItem("publy_write_ai")||"gemini");
+  const [imageAI,setImageAI]=useState(()=>localStorage.getItem("publy_image_ai")||"openai_img");
+
+  return(
+    <div style={{marginBottom:14}}>
+      {/* 글쓰기 AI 선택 */}
+      <div className="acd" style={{padding:"16px 18px",marginBottom:12}}>
+        <div className="asl2">🤖 글쓰기 AI 선택</div>
+        <div style={{display:"flex",gap:8,marginBottom:16}}>
+          {ADM_WRITE_AI.map(item=>(
+            <AdmAICard key={item.id} item={item} selected={writeAI===item.id} onClick={()=>{setWriteAI(item.id);localStorage.setItem("publy_write_ai",item.id);}}/>
+          ))}
+        </div>
+        <div className="asl2">🖼️ 이미지 AI 선택</div>
+        <div style={{display:"flex",gap:8}}>
+          {ADM_IMAGE_AI.map(item=>(
+            <AdmAICard key={item.id} item={item} selected={imageAI===item.id} onClick={()=>{setImageAI(item.id);localStorage.setItem("publy_image_ai",item.id);}}/>
+          ))}
+        </div>
+      </div>
+
+      {/* 글쓰기 키 */}
+      <div className="acd" style={{padding:"16px 18px",marginBottom:12}}>
+        <div className="asl2" style={{color:"var(--a)"}}>📝 글쓰기 API 키</div>
+        {ADM_WRITE_AI.map(k=><AdmKeyInput key={k.id} k={k}/>)}
+      </div>
+
+      {/* 이미지 키 */}
+      <div className="acd" style={{padding:"16px 18px",marginBottom:12}}>
+        <div className="asl2" style={{color:"#8B5CF6"}}>🖼️ 이미지 API 키</div>
+        {ADM_IMAGE_AI.map(k=><AdmKeyInput key={k.id} k={k}/>)}
+      </div>
+    </div>
+  );
+}
+
+
 const BOT = "http://localhost:3333";
 
 const CSS = `
@@ -486,11 +631,8 @@ export default function AdminPage({onBack,onDashboard,theme,onThemeToggle}:Props
 
             {/* 설정 */}
             {tab==="settings"&&(
-              <div style={{animation:"af .3s ease both",maxWidth:520}}>
-                <div className="acd" style={{padding:"18px 20px",marginBottom:12}}>
-                  <div className="asl2">🤖 Claude API Key</div>
-                  <input className="ainp" type="password" style={{width:"100%",padding:"11px 13px",fontSize:13}} placeholder="sk-ant-..." defaultValue={localStorage.getItem("publy_claude_key")||""} onChange={e=>localStorage.setItem("publy_claude_key",e.target.value)}/>
-                </div>
+              <div style={{animation:"af .3s ease both"}}>
+                <AdminApiKeySettings />
                 <div className="acd" style={{padding:"18px 20px",marginBottom:12}}>
                   <div className="asl2">🎨 Google Flow</div>
                   <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:9,marginBottom:10}}>
