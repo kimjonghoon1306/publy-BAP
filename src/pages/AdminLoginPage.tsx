@@ -7,7 +7,7 @@ interface Props {
   onThemeToggle: () => void;
 }
 
-const ADMIN_PW = "publy_admin_2024!"; // 관리자 비밀번호
+const DEFAULT_PW = "123456"; // 관리자 비밀번호
 
 const CSS = `
 @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@700;900&family=Noto+Sans+KR:wght@400;600;700&display=swap');
@@ -119,7 +119,8 @@ export default function AdminLoginPage({ onAdminAuth, onBack, theme, onThemeTogg
     if (!pw) { setError("비밀번호를 입력하세요"); return; }
     setLoading(true);
     await new Promise(r => setTimeout(r, 600));
-    if (pw === ADMIN_PW) {
+    const currentPw = localStorage.getItem("publy_admin_pw") || DEFAULT_PW;
+    if (pw === currentPw) {
       sessionStorage.setItem("publy_admin_auth", "true");
       onAdminAuth();
     } else {
