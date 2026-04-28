@@ -736,6 +736,39 @@ export default function AdminPage({onBack,onDashboard,theme,onThemeToggle}:Props
                   <button className="abp" style={{padding:"10px 20px",fontSize:13}} onClick={changeAdminPw}>🔐 변경</button>
                   {pwMsg&&<div style={{marginTop:9,padding:"8px 11px",borderRadius:8,background:pwMsg.includes("✅")?"var(--ad)":"rgba(239,68,68,.08)",fontSize:12,color:pwMsg.includes("✅")?"var(--a)":"var(--d)"}}>{pwMsg}</div>}
                 </div>
+
+                {/* BlogAuto Pro 연동 */}
+                <div className="acd" style={{padding:"18px 20px",marginBottom:12,border:"1px solid rgba(99,102,241,.3)",background:"rgba(99,102,241,.05)"}}>
+                  <div className="asl2" style={{color:"#6366f1"}}>🔗 BlogAuto Pro 연동</div>
+                  <div style={{fontSize:11,color:"var(--m)",marginBottom:14,lineHeight:1.6}}>
+                    BlogAuto Pro는 AI 블로그 자동화 플랫폼입니다.<br/>
+                    회원 관리, API 키 설정, 발행 현황을 통합 관리할 수 있습니다.
+                  </div>
+                  <div style={{display:"flex",flexDirection:"column",gap:9}}>
+                    <a href="https://tarrydaily.com/superadmin" target="_blank" rel="noopener noreferrer"
+                      style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"13px 16px",borderRadius:12,background:"linear-gradient(135deg,rgba(99,102,241,.15),rgba(139,92,246,.1))",border:"1px solid rgba(99,102,241,.3)",textDecoration:"none",transition:"all .2s"}}>
+                      <div style={{display:"flex",alignItems:"center",gap:10}}>
+                        <div style={{width:34,height:34,borderRadius:9,background:"linear-gradient(135deg,#6366f1,#8b5cf6)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,fontWeight:900,color:"#fff",flexShrink:0}}>B</div>
+                        <div>
+                          <div style={{fontSize:13,fontWeight:800,color:"#6366f1",lineHeight:1.2}}>BlogAuto Pro 관리자</div>
+                          <div style={{fontSize:10,color:"var(--m)",marginTop:2}}>회원 · API키 · 발행현황 통합 관리</div>
+                        </div>
+                      </div>
+                      <span style={{fontSize:16,color:"#6366f1"}}>→</span>
+                    </a>
+                    <a href="https://tarrydaily.com/naver" target="_blank" rel="noopener noreferrer"
+                      style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"13px 16px",borderRadius:12,background:"rgba(3,199,90,.06)",border:"1px solid rgba(3,199,90,.25)",textDecoration:"none",transition:"all .2s"}}>
+                      <div style={{display:"flex",alignItems:"center",gap:10}}>
+                        <div style={{width:34,height:34,borderRadius:9,background:"linear-gradient(135deg,#03C75A,#059669)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,color:"#fff",flexShrink:0}}>N</div>
+                        <div>
+                          <div style={{fontSize:13,fontWeight:800,color:"#03C75A",lineHeight:1.2}}>자동발행 허브</div>
+                          <div style={{fontSize:10,color:"var(--m)",marginTop:2}}>네이버 · 티스토리 발행 현황 확인</div>
+                        </div>
+                      </div>
+                      <span style={{fontSize:16,color:"#03C75A"}}>→</span>
+                    </a>
+                  </div>
+                </div>
               </div>
             )}
           </div>
