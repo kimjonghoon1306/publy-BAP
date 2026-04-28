@@ -1,393 +1,190 @@
-import { useState, useEffect, useCallback, useRef } from "react";
-import { PublyUser, getQuota, getHistory, getAccounts, PublyQuota, PublyHistory, PublyAccount, upsertAccount, useQuota, addHistory } from "../lib/supabase";
 
-interface Props {
-  user: PublyUser;
-  onLogout: () => void;
-  onAdminLogin: () => void;
-  theme: "dark" | "light";
-  onThemeToggle: () => void;
-}
+// ── AI 선택 & API 키 설정 ────────────────────────────────────
+const GEMINI_MODELS_V2 = ["gemini-2.0-flash","gemini-2.0-flash-lite","gemini-2.5-flash","gemini-2.5-flash-lite"];
 
-type Tab = "publish" | "write" | "accounts" | "history" | "settings";
-const BOT = "http://localhost:3333";
-
-const CSS = `
-@import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Space+Grotesk:wght@300;400;500;600;700&family=Noto+Sans+KR:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
-
-*{box-sizing:border-box;}
-
-@keyframes v2-fade   { from{opacity:0;transform:translateY(10px)} to{opacity:1;transform:translateY(0)} }
-@keyframes v2-spin   { to{transform:rotate(360deg)} }
-@keyframes v2-blink  { 0%,100%{opacity:1} 50%{opacity:.25} }
-@keyframes v2-float  { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-4px)} }
-@keyframes v2-glow   { 0%,100%{box-shadow:0 0 0 0 rgba(0,255,136,.35)} 50%{box-shadow:0 0 0 8px rgba(0,255,136,0)} }
-@keyframes v2-shine  { 0%{background-position:-200% 0} 100%{background-position:200% 0} }
-@keyframes v2-pulse  { 0%{transform:scale(1);opacity:.7} 100%{transform:scale(2.5);opacity:0} }
-@keyframes v2-scroll { 0%{transform:translateY(0)} 100%{transform:translateY(-50%)} }
-@keyframes v2-scan   { 0%{top:0%} 100%{top:100%} }
-@keyframes v2-bar    { from{width:0} to{width:var(--w,100%)} }
-@keyframes v2-count  { from{opacity:0;transform:scale(.5)} to{opacity:1;transform:scale(1)} }
-
-/* ── 테마 변수 ── */
-.v2-root.dark {
-  --bg:#02040a; --bg2:#050810; --bg3:#070b14;
-  --card:rgba(255,255,255,.032); --card2:rgba(255,255,255,.05);
-  --border:rgba(255,255,255,.07); --border2:rgba(0,255,136,.15);
-  --text:#f0f8ff; --muted:rgba(255,255,255,.42);
-  --accent:#00ff88; --accent2:#00cc66; --accent-dim:rgba(0,255,136,.12);
-  --nav-bg:rgba(2,4,10,.95); --header-bg:rgba(5,8,16,.92);
-  --input-bg:rgba(255,255,255,.055); --input-border:rgba(255,255,255,.1);
-  --scrollbar:rgba(0,255,136,.2);
-  --sidebar-w:220px;
-}
-.v2-root.light {
-  --bg:#f0f9ff; --bg2:#e8f5ff; --bg3:#f8fffe;
-  --card:rgba(255,255,255,.9); --card2:rgba(255,255,255,.95);
-  --border:rgba(0,0,0,.07); --border2:rgba(0,180,80,.2);
-  --text:#09090b; --muted:rgba(0,0,0,.48);
-  --accent:#00b060; --accent2:#009050; --accent-dim:rgba(0,176,96,.1);
-  --nav-bg:rgba(240,249,255,.97); --header-bg:rgba(255,255,255,.95);
-  --input-bg:rgba(0,0,0,.04); --input-border:rgba(0,0,0,.1);
-  --scrollbar:rgba(0,176,96,.25);
-  --sidebar-w:220px;
-}
-
-/* ── 레이아웃 ── */
-.v2-root {
-  width:100vw; height:100vh; overflow:hidden;
-  display:flex; flex-direction:column;
-  font-family:'Noto Sans KR',sans-serif;
-  color:var(--text); background:var(--bg);
-  transition:background .3s, color .3s;
-}
-
-/* 스크롤바 */
-*::-webkit-scrollbar { width:4px; height:4px; }
-*::-webkit-scrollbar-track { background:transparent; }
-*::-webkit-scrollbar-thumb { background:var(--scrollbar); border-radius:99px; }
-
-/* ── 헤더 ── */
-.v2-header {
-  height:56px; flex-shrink:0; display:flex; align-items:center;
-  padding:0 20px; gap:16px;
-  background:var(--header-bg); border-bottom:1px solid var(--border);
-  backdrop-filter:blur(24px); position:relative; z-index:30;
-}
-.v2-logo {
-  font-family:'Bebas Neue',sans-serif; font-size:22px; letter-spacing:.25em;
-  background:linear-gradient(135deg,var(--accent),var(--accent2));
-  -webkit-background-clip:text; -webkit-text-fill-color:transparent;
-  flex-shrink:0;
-}
-.v2-logo-icon {
-  width:32px; height:32px; border-radius:9px; flex-shrink:0;
-  background:linear-gradient(135deg,var(--accent),var(--accent2));
-  display:flex; align-items:center; justify-content:center;
-  box-shadow:0 0 16px var(--accent-dim);
-}
-.v2-header-center { flex:1; display:flex; align-items:center; gap:10px; padding:0 16px; }
-.v2-status-chip {
-  display:flex; align-items:center; gap:6px; padding:5px 12px;
-  border-radius:99px; border:1px solid; font-size:11px; font-weight:600;
-  transition:all .2s;
-}
-.v2-status-online  { border-color:rgba(0,255,136,.3); background:rgba(0,255,136,.08); color:var(--accent); }
-.v2-status-offline { border-color:var(--border); background:var(--card); color:var(--muted); }
-.v2-quota-wrap { display:flex; align-items:center; gap:8px; }
-.v2-quota-bar-bg { width:100px; height:5px; border-radius:99px; background:var(--border); overflow:hidden; }
-.v2-quota-bar-fill { height:100%; border-radius:99px; background:linear-gradient(90deg,var(--accent),var(--accent2)); animation:v2-bar .8s ease both; }
-.v2-plan-chip {
-  font-size:9px; font-weight:800; padding:3px 9px; border-radius:99px;
-  letter-spacing:.1em; font-family:'Space Grotesk',sans-serif;
-}
-.plan-free    { background:rgba(120,120,120,.15); color:#999; border:1px solid rgba(120,120,120,.2); }
-.plan-basic   { background:rgba(66,133,244,.15); color:#4285F4; border:1px solid rgba(66,133,244,.25); }
-.plan-pro     { background:var(--accent-dim); color:var(--accent); border:1px solid rgba(0,255,136,.3); animation:v2-glow 2.5s infinite; }
-.v2-header-right { display:flex; align-items:center; gap:8px; flex-shrink:0; }
-.v2-icon-btn {
-  width:36px; height:36px; border-radius:11px; cursor:pointer !important; font-size:16px;
-  display:flex; align-items:center; justify-content:center; border:1px solid var(--border);
-  background:var(--card); transition:all .2s; color:var(--text); outline:none;
-  -webkit-appearance:none; user-select:none;
-}
-.v2-icon-btn:hover { border-color:var(--border2); transform:scale(1.08); }
-.v2-user-chip {
-  display:flex; align-items:center; gap:7px; padding:5px 12px 5px 6px;
-  border-radius:99px; border:1px solid var(--border); background:var(--card);
-  font-size:12px; font-weight:600; cursor:default;
-}
-.v2-user-avatar {
-  width:24px; height:24px; border-radius:50%;
-  background:linear-gradient(135deg,var(--accent),var(--accent2));
-  display:flex; align-items:center; justify-content:center;
-  font-size:11px; font-weight:800; color:#000;
-}
-.v2-logout-btn {
-  padding:6px 13px; border-radius:10px; border:1px solid var(--border);
-  background:var(--card); color:var(--muted); font-size:12px; font-weight:600;
-  cursor:pointer; font-family:'Noto Sans KR',sans-serif; transition:all .2s;
-}
-.v2-logout-btn:hover { color:var(--text); border-color:var(--border2); }
-
-/* ── 바디 ── */
-.v2-body { flex:1; display:flex; overflow:hidden; }
-
-/* ── 사이드바 ── */
-.v2-sidebar {
-  width:var(--sidebar-w); flex-shrink:0; overflow-y:auto;
-  background:var(--nav-bg); border-right:1px solid var(--border);
-  display:flex; flex-direction:column; padding:16px 12px;
-  gap:4px;
-}
-.v2-nav-section-label {
-  font-size:9px; font-weight:700; letter-spacing:.15em; text-transform:uppercase;
-  color:var(--muted); padding:8px 10px 4px; margin-top:8px;
-}
-.v2-nav-btn {
-  display:flex; align-items:center; gap:11px; padding:10px 12px;
-  border-radius:12px; border:none; cursor:pointer; width:100%;
-  font-size:13px; font-weight:500; font-family:'Noto Sans KR',sans-serif;
-  color:var(--muted); background:transparent; transition:all .18s; text-align:left;
-  position:relative;
-}
-.v2-nav-btn:hover { background:var(--card2); color:var(--text); }
-.v2-nav-btn.active {
-  background:var(--accent-dim); color:var(--accent);
-  font-weight:700; border:1px solid rgba(0,255,136,.2);
-}
-.v2-nav-btn.active::before {
-  content:''; position:absolute; left:0; top:20%; bottom:20%;
-  width:3px; border-radius:99px; background:var(--accent);
-  box-shadow:0 0 8px var(--accent);
-}
-.v2-nav-icon { font-size:17px; flex-shrink:0; }
-.v2-nav-badge {
-  margin-left:auto; font-size:9px; font-weight:800;
-  padding:2px 7px; border-radius:99px;
-  background:var(--accent-dim); color:var(--accent);
-}
-
-/* 사이드바 하단 */
-.v2-sidebar-footer { margin-top:auto; padding-top:12px; border-top:1px solid var(--border); }
-.v2-dot { width:8px; height:8px; border-radius:50%; flex-shrink:0; }
-.v2-dot-on  { background:var(--accent); animation:v2-blink 2s infinite; }
-.v2-dot-off { background:#555; }
-.light .v2-dot-off { background:#bbb; }
-
-/* ── 메인 콘텐츠 ── */
-.v2-main { flex:1; display:flex; overflow:hidden; }
-
-/* 중앙 패널 */
-.v2-center {
-  flex:1; overflow-y:auto; padding:24px;
-  display:flex; flex-direction:column; gap:16px;
-}
-
-/* 우측 패널 */
-.v2-right {
-  width:300px; flex-shrink:0; overflow-y:auto;
-  border-left:1px solid var(--border);
-  background:var(--nav-bg); display:flex; flex-direction:column; gap:0;
-}
-.v2-right-section { padding:18px; border-bottom:1px solid var(--border); }
-.v2-right-title {
-  font-size:10px; font-weight:700; letter-spacing:.12em; text-transform:uppercase;
-  color:var(--muted); margin-bottom:12px; display:flex; align-items:center; gap:6px;
-}
-
-/* ── 카드 ── */
-.v2-card {
-  background:var(--card); border:1px solid var(--border);
-  border-radius:16px; position:relative; overflow:hidden;
-  transition:border-color .2s;
-}
-.v2-card::before {
-  content:''; position:absolute; top:0; left:20%; right:20%; height:1px;
-  background:linear-gradient(90deg,transparent,var(--border2),transparent);
-}
-.dark .v2-card:hover { border-color:rgba(0,255,136,.18); }
-.light .v2-card:hover { box-shadow:0 4px 20px rgba(0,0,0,.07); }
-
-/* ── 입력 ── */
-.v2-input {
-  width:100%; padding:12px 14px;
-  background:var(--input-bg); border:1.5px solid var(--input-border);
-  border-radius:12px; color:var(--text);
-  font-size:13px; font-family:'Noto Sans KR',sans-serif;
-  outline:none; transition:all .2s;
-}
-.v2-input:focus {
-  border-color:rgba(0,255,136,.45) !important;
-  box-shadow:0 0 0 3px rgba(0,255,136,.08) !important;
-}
-.v2-input::placeholder { color:var(--muted); }
-select.v2-input { appearance:auto; }
-.dark  select.v2-input { color-scheme:dark; }
-.light select.v2-input { color-scheme:light; }
-
-/* ── 버튼 ── */
-.v2-btn-primary {
-  padding:12px 20px; border:none; border-radius:12px; cursor:pointer;
-  font-family:'Noto Sans KR',sans-serif; font-weight:800; font-size:13px;
-  background:linear-gradient(135deg,var(--accent),var(--accent2));
-  color:#000; display:flex; align-items:center; gap:7px;
-  transition:all .22s; position:relative; overflow:hidden;
-}
-.v2-btn-primary::after {
-  content:''; position:absolute; inset:0;
-  background:linear-gradient(90deg,transparent,rgba(255,255,255,.2),transparent);
-  background-size:200% 100%; animation:v2-shine 3s ease-in-out infinite;
-}
-.v2-btn-primary:hover { transform:translateY(-2px); box-shadow:0 10px 28px rgba(0,255,136,.38); }
-.v2-btn-primary:disabled { opacity:.38; cursor:not-allowed; transform:none; }
-
-.v2-btn-secondary {
-  padding:10px 16px; border:1px solid var(--border); border-radius:11px;
-  cursor:pointer; font-family:'Noto Sans KR',sans-serif; font-weight:600; font-size:12px;
-  background:var(--card); color:var(--muted); display:flex; align-items:center; gap:6px;
-  transition:all .18s;
-}
-.v2-btn-secondary:hover { border-color:var(--border2); color:var(--text); }
-
-/* ── 섹션 타이틀 ── */
-.v2-section-label {
-  font-size:10px; font-weight:700; letter-spacing:.14em; text-transform:uppercase;
-  color:var(--muted); margin-bottom:10px; display:flex; align-items:center; gap:6px;
-}
-
-/* ── 플랫폼 버튼 ── */
-.v2-platform-btn {
-  flex:1; padding:14px 12px; border-radius:14px; border:1.5px solid var(--border);
-  cursor:pointer; background:var(--card);
-  display:flex; align-items:center; gap:11px; transition:all .22s;
-  font-family:'Noto Sans KR',sans-serif;
-}
-.v2-platform-btn.p-naver   { border-color:#03C75A; background:rgba(3,199,90,.08); animation:v2-glow 2.5s infinite; }
-.v2-platform-btn.p-tistory { border-color:#FF6B35; background:rgba(255,107,53,.08); }
-.v2-platform-btn:hover:not(.p-naver):not(.p-tistory) { border-color:var(--border2); }
-
-/* ── 히스토리 아이템 ── */
-.v2-hist-item {
-  display:flex; align-items:center; gap:10px; padding:10px 12px;
-  border-radius:11px; border:1px solid var(--border); background:var(--card);
-  margin-bottom:7px; transition:all .15s; animation:v2-fade .3s ease both;
-}
-.v2-hist-item:hover { border-color:var(--border2); }
-
-/* ── 상태 배지 ── */
-.v2-status-badge { font-size:9px; font-weight:800; padding:3px 8px; border-radius:99px; flex-shrink:0; }
-.badge-success { background:rgba(0,255,136,.12); color:var(--accent); }
-.badge-fail    { background:rgba(255,68,68,.12); color:#ff6666; }
-.badge-pending { background:rgba(245,158,11,.12); color:#f59e0b; }
-
-/* ── 안내 박스 ── */
-.v2-warn { padding:11px 14px; border-radius:12px; font-size:12px; margin-bottom:12px; display:flex; align-items:center; gap:8px; }
-.v2-warn-yellow { background:rgba(245,158,11,.08); border:1px solid rgba(245,158,11,.2); color:#f59e0b; }
-.v2-warn-red    { background:rgba(255,68,68,.08); border:1px solid rgba(255,68,68,.2); color:#ff8888; }
-
-/* ── 사용 설명서 ── */
-.v2-guide-trigger {
-  display:flex; align-items:center; gap:8px; padding:10px 14px;
-  border-radius:12px; cursor:pointer; border:1.5px dashed;
-  font-size:12px; font-weight:700; font-family:'Noto Sans KR',sans-serif;
-  transition:all .22s; animation:v2-float 3s ease-in-out infinite;
-  background:linear-gradient(135deg,rgba(245,158,11,.08),rgba(245,158,11,.04));
-  border-color:rgba(245,158,11,.3); color:#d97706; position:relative; overflow:hidden;
-}
-.v2-guide-trigger::after {
-  content:''; position:absolute; inset:0;
-  background:linear-gradient(90deg,transparent,rgba(255,255,255,.1),transparent);
-  background-size:200%; animation:v2-shine 2.5s infinite;
-}
-.v2-guide-trigger:hover { border-color:rgba(245,158,11,.5); transform:translateY(-2px); }
-
-/* ── 가이드 슬라이드 패널 ── */
-.v2-guide-panel {
-  position:fixed; top:56px; right:0; bottom:0; width:min(420px,100vw);
-  background:var(--bg2); border-left:1px solid var(--border);
-  z-index:1000; overflow-y:auto; padding:24px;
-  box-shadow:-20px 0 60px rgba(0,0,0,.2);
-  animation:v2-slide-in .3s ease both;
-}
-@keyframes v2-slide-in { from{transform:translateX(100%);opacity:0} to{transform:translateX(0);opacity:1} }
-.v2-guide-step {
-  padding:14px 16px; border-radius:14px; border:1px solid;
-  margin-bottom:10px; animation:v2-fade .3s ease both;
-}
-
-/* ── 빠른 실행 ── */
-.v2-quick-grid { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
-.v2-quick-btn {
-  padding:14px 10px; border-radius:13px; border:1px solid var(--border);
-  background:var(--card); cursor:pointer; text-align:center; transition:all .2s;
-  font-family:'Noto Sans KR',sans-serif;
-}
-.v2-quick-btn:hover { border-color:var(--border2); transform:translateY(-2px); background:var(--card2); }
-
-/* ── 통계 ── */
-.v2-stat-grid { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
-.v2-stat-card { padding:12px 14px; border-radius:12px; border:1px solid var(--border); background:var(--card); }
-
-/* ── 모바일 ── */
-@media(max-width:900px)  { .v2-right  { display:none; } }
-@media(max-width:768px)  { .v2-sidebar { display:none; } .v2-mobile-bar { display:flex !important; } .v2-center { padding:16px 14px 90px; } }
-@media(max-width:480px)  { .v2-header { padding:0 12px; } }
-
-/* 모바일 탭바 */
-.v2-mobile-bar {
-  display:none; position:fixed; bottom:0; left:0; right:0; z-index:100;
-  padding:8px 12px 20px; gap:4px;
-  background:var(--header-bg); border-top:1px solid var(--border);
-  backdrop-filter:blur(24px);
-}
-.v2-mob-btn {
-  flex:1; display:flex; flex-direction:column; align-items:center; gap:3px;
-  padding:8px 4px; border-radius:13px; border:none; cursor:pointer;
-  background:transparent; transition:all .18s; font-family:'Noto Sans KR',sans-serif;
-}
-.v2-mob-btn.active { background:var(--accent-dim); }
-.v2-mob-icon  { font-size:22px; }
-.v2-mob-label { font-size:9px; font-weight:600; color:var(--muted); letter-spacing:.02em; }
-.v2-mob-btn.active .v2-mob-label { color:var(--accent); }
-
-/* 스피너 */
-.v2-spinner {
-  width:15px; height:15px; border-radius:50%;
-  border:2.5px solid rgba(0,0,0,.2); border-top-color:#000;
-  animation:v2-spin 1s linear infinite; display:inline-block; vertical-align:middle; margin-right:6px;
-}
-`;
-
-const TABS = [
-  { key:"publish",  icon:"🚀", label:"발행하기" },
-  { key:"write",    icon:"✍️", label:"글 생성" },
-  { key:"accounts", icon:"🔗", label:"계정 관리" },
-  { key:"history",  icon:"📋", label:"히스토리" },
-  { key:"settings", icon:"⚙️", label:"설정" },
-] as const;
-
-const PLAN_COLORS: Record<string,string> = { free:"#999", basic:"#4285F4", pro:"#00ff88" };
-const PLAN_LABELS: Record<string,string> = { free:"FREE", basic:"BASIC", pro:"PRO" };
-
-const GUIDE_STEPS = [
-  {
-    title:"봇 서버 실행", color:"#00ff88",
-    items:["PC에서 naver-bot 폴더 열기","npm run dev 실행","우측 상단 '온라인' 확인"],
-  },
-  {
-    title:"계정 연결", color:"#4285F4",
-    items:["계정 관리 탭으로 이동","네이버/티스토리 아이디·비번 입력","연결 버튼 클릭 → 자동 로그인"],
-  },
-  {
-    title:"글 생성", color:"#f59e0b",
-    items:["글 생성 탭으로 이동","키워드 입력 후 생성","내용 확인 후 발행으로 넘기기"],
-  },
-  {
-    title:"자동 발행", color:"#a78bfa",
-    items:["발행하기 탭에서 계정 선택","이미지 프롬프트 입력(선택)","자동 발행 클릭 → 완료"],
-  },
+// 글쓰기 AI 목록
+const WRITE_AI_LIST = [
+  {id:"gemini",label:"Gemini Flash",sub:"Google AI",placeholder:"AIza...",storageKey:"publy_gemini_key",link:"https://aistudio.google.com/app/apikey",color:"#4285F4",logo:"G",badge:"무료",free:true},
+  {id:"groq",label:"Groq (Llama 3)",sub:"초고속 완전 무료",placeholder:"gsk_...",storageKey:"publy_groq_key",link:"https://console.groq.com/keys",color:"#F55036",logo:"L",badge:"무료",free:true},
+  {id:"openai",label:"OpenAI GPT-4",sub:"글쓰기 최강",placeholder:"sk-...",storageKey:"publy_openai_key",link:"https://platform.openai.com/api-keys",color:"#10A37F",logo:"O",badge:"유료",free:false},
 ];
+
+// 이미지 AI 목록
+const IMAGE_AI_LIST = [
+  {id:"openai_img",label:"OpenAI DALL-E",sub:"이미지 생성 + 분석",placeholder:"sk-...",storageKey:"publy_openai_key",link:"https://platform.openai.com/api-keys",color:"#10A37F",logo:"O",badge:"유료",free:false},
+  {id:"replicate",label:"Replicate (Flux)",sub:"고품질 이미지 생성",placeholder:"r8_...",storageKey:"publy_replicate_key",link:"https://replicate.com/account/api-tokens",color:"#8B5CF6",logo:"R",badge:"유료",free:false},
+];
+
+// AI 선택 카드 컴포넌트
+function AISelectCard({item, selected, onClick}:{item:any,selected:boolean,onClick:()=>void}) {
+  return (
+    <button onClick={onClick} style={{
+      flex:1, padding:"14px 12px", borderRadius:16, cursor:"pointer",
+      fontFamily:"'Noto Sans KR',sans-serif", textAlign:"left",
+      border:`2px solid ${selected?item.color:"var(--border)"}`,
+      background:selected?`${item.color}15`:"var(--input-bg)",
+      transform:selected?"translateY(-4px) scale(1.03)":"translateY(0) scale(1)",
+      boxShadow:selected?`0 12px 28px ${item.color}35, 0 0 0 1px ${item.color}30`:"none",
+      transition:"all .25s cubic-bezier(.34,1.56,.64,1)",
+      position:"relative", overflow:"hidden",
+    }}>
+      {/* 선택 시 글로우 효과 */}
+      {selected && (
+        <div style={{position:"absolute",inset:0,background:`linear-gradient(135deg,${item.color}10,transparent)`,pointerEvents:"none"}}/>
+      )}
+      {/* 상단 라인 */}
+      {selected && (
+        <div style={{position:"absolute",top:0,left:0,right:0,height:2,background:`linear-gradient(90deg,transparent,${item.color},transparent)`}}/>
+      )}
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:8}}>
+        <div style={{
+          width:32,height:32,borderRadius:9,
+          background:selected?item.color:`${item.color}30`,
+          display:"flex",alignItems:"center",justifyContent:"center",
+          fontSize:14,fontWeight:900,color:selected?"#000":item.color,
+          transition:"all .2s", boxShadow:selected?`0 4px 12px ${item.color}50`:"none",
+        }}>{item.logo}</div>
+        {selected
+          ? <span style={{fontSize:9,fontWeight:800,padding:"3px 8px",borderRadius:99,background:item.color,color:"#000",animation:"v2-glow 2s infinite"}}>✓ 선택됨</span>
+          : <span style={{fontSize:9,fontWeight:800,padding:"2px 7px",borderRadius:99,background:item.free?"rgba(0,200,117,.15)":"rgba(245,158,11,.15)",color:item.free?"#00c875":"#f59e0b"}}>{item.badge}</span>
+        }
+      </div>
+      <div style={{fontSize:12,fontWeight:700,color:selected?item.color:"var(--text)"}}>{item.label}</div>
+      <div style={{fontSize:10,color:"var(--muted)",marginTop:2}}>{item.sub}</div>
+    </button>
+  );
+}
+
+// API 키 입력 컴포넌트
+function PublyKeyInput({k}:{k:any}) {
+  const [val,setVal]=useState(()=>localStorage.getItem(k.storageKey)||"");
+  const [show,setShow]=useState(false);
+  const [saved,setSaved]=useState(false);
+  const [testing,setTesting]=useState(false);
+  const [testMsg,setTestMsg]=useState("");
+
+  function save(){
+    if(!val.trim()){setTestMsg("❌ 키를 입력하세요");return;}
+    localStorage.setItem(k.storageKey,val.trim());
+    setSaved(true);setTestMsg("✅ 저장됨");
+    setTimeout(()=>{setSaved(false);setTestMsg("");},3000);
+  }
+
+  async function testKey(){
+    if(!val.trim()){setTestMsg("❌ 키 입력 필요");return;}
+    setTesting(true);setTestMsg("");
+    try{
+      if(k.id==="gemini"){
+        for(const model of GEMINI_MODELS_V2){
+          const r=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${val.trim()}`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({contents:[{parts:[{text:"hi"}]}],generationConfig:{maxOutputTokens:10}}),signal:AbortSignal.timeout(8000)});
+          if(r.ok){setTestMsg(`✅ 연결 성공 (${model})`);break;}
+          if(r.status===401||r.status===403){setTestMsg("❌ API 키 오류");break;}
+        }
+      } else if(k.id==="groq"){
+        const r=await fetch("https://api.groq.com/openai/v1/models",{headers:{"Authorization":`Bearer ${val.trim()}`},signal:AbortSignal.timeout(8000)});
+        setTestMsg(r.ok?"✅ Groq 연결 성공":"❌ 연결 실패");
+      } else if(k.id==="openai"||k.id==="openai_img"){
+        const r=await fetch("https://api.openai.com/v1/models",{headers:{"Authorization":`Bearer ${val.trim()}`},signal:AbortSignal.timeout(8000)});
+        setTestMsg(r.ok?"✅ OpenAI 연결 성공":"❌ 연결 실패");
+      } else {
+        setTestMsg("저장 후 실제 생성으로 테스트");
+      }
+    }catch(e:any){setTestMsg("❌ "+e.message);}
+    finally{setTesting(false);}
+  }
+
+  return(
+    <div style={{padding:"14px 16px",borderRadius:13,border:`1px solid ${val?"rgba(0,255,136,.2)":"var(--border)"}`,background:"var(--input-bg)",marginBottom:9,transition:"border-color .2s"}}>
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:9}}>
+        <div style={{display:"flex",alignItems:"center",gap:8}}>
+          <div style={{width:28,height:28,borderRadius:7,background:k.color,display:"flex",alignItems:"center",justifyContent:"center",fontSize:12,fontWeight:900,color:"#000",flexShrink:0}}>{k.logo}</div>
+          <div>
+            <div style={{fontSize:12,fontWeight:700,color:"var(--text)"}}>{k.label}</div>
+            <div style={{fontSize:10,color:"var(--muted)"}}>{k.sub}</div>
+          </div>
+          {val&&<span style={{fontSize:9,fontWeight:800,padding:"2px 7px",borderRadius:99,background:"rgba(0,255,136,.15)",color:"var(--accent)"}}>키 입력됨</span>}
+        </div>
+        <a href={k.link} target="_blank" rel="noopener noreferrer" style={{fontSize:10,fontWeight:700,color:k.color,textDecoration:"none",padding:"4px 10px",borderRadius:8,border:`1px solid ${k.color}30`,background:`${k.color}10`,display:"flex",alignItems:"center",gap:3}}>
+          🔗 발급받기
+        </a>
+      </div>
+      <div style={{display:"flex",gap:7,marginBottom:7}}>
+        <div style={{flex:1,position:"relative"}}>
+          <input type={show?"text":"password"} placeholder={k.placeholder} value={val}
+            onChange={e=>setVal(e.target.value)} onKeyDown={e=>e.key==="Enter"&&save()}
+            style={{width:"100%",padding:"9px 34px 9px 11px",borderRadius:9,border:`1px solid ${val?"rgba(0,255,136,.3)":"var(--input-border)"}`,background:"var(--bg)",color:"var(--text)",fontSize:12,fontFamily:"'JetBrains Mono',monospace",outline:"none",transition:"border-color .2s"}}/>
+          <button onClick={()=>setShow(v=>!v)} style={{position:"absolute",right:9,top:"50%",transform:"translateY(-50%)",background:"none",border:"none",cursor:"pointer",color:"var(--muted)",fontSize:13}}>
+            {show?"🙈":"👁️"}
+          </button>
+        </div>
+        <button onClick={save} style={{padding:"9px 14px",borderRadius:9,border:"none",cursor:"pointer",fontWeight:800,fontSize:11,fontFamily:"'Noto Sans KR',sans-serif",background:saved?"var(--accent)":"var(--accent-dim)",color:saved?"#000":"var(--accent)",flexShrink:0,transition:"all .2s"}}>
+          {saved?"✅ 저장됨":"💾 저장"}
+        </button>
+      </div>
+      <div style={{display:"flex",gap:7,alignItems:"center"}}>
+        <button onClick={testKey} disabled={testing} style={{padding:"5px 12px",borderRadius:8,border:`1px solid ${k.color}30`,background:`${k.color}10`,color:k.color,fontSize:10,fontWeight:700,cursor:"pointer",fontFamily:"'Noto Sans KR',sans-serif",display:"flex",alignItems:"center",gap:4}}>
+          {testing&&<span style={{width:9,height:9,borderRadius:"50%",border:`2px solid ${k.color}40`,borderTopColor:k.color,animation:"v2-spin 1s linear infinite",display:"inline-block"}}/>}
+          🔌 연결 테스트
+        </button>
+        {testMsg&&<span style={{fontSize:10,color:testMsg.includes("✅")?"var(--accent)":"#ff8888"}}>{testMsg}</span>}
+      </div>
+    </div>
+  );
+}
+
+function ApiKeySettings() {
+  const [writeAI, setWriteAI] = useState(()=>localStorage.getItem("publy_write_ai")||"gemini");
+  const [imageAI, setImageAI] = useState(()=>localStorage.getItem("publy_image_ai")||"openai_img");
+
+  // 글쓰기 AI 변경 저장
+  function selectWriteAI(id:string){
+    setWriteAI(id);
+    localStorage.setItem("publy_write_ai",id);
+  }
+  function selectImageAI(id:string){
+    setImageAI(id);
+    localStorage.setItem("publy_image_ai",id);
+  }
+
+  // 현재 선택된 AI의 키 정보
+  const selectedWriteKey = WRITE_AI_LIST.find(a=>a.id===writeAI);
+  const selectedImageKey = IMAGE_AI_LIST.find(a=>a.id===imageAI);
+
+  // 중복 없이 표시할 키 목록
+  const writeKeys = WRITE_AI_LIST;
+  const imageKeys = IMAGE_AI_LIST;
+
+  return (
+    <div className="v2-card" style={{padding:"22px"}}>
+      <div className="v2-section-label">🤖 글쓰기 AI 선택</div>
+      <div style={{display:"flex",gap:10,marginBottom:18}}>
+        {WRITE_AI_LIST.map(item=>(
+          <AISelectCard key={item.id} item={item} selected={writeAI===item.id} onClick={()=>selectWriteAI(item.id)}/>
+        ))}
+      </div>
+
+      <div className="v2-section-label">🖼️ 이미지 AI 선택</div>
+      <div style={{display:"flex",gap:10,marginBottom:22}}>
+        {IMAGE_AI_LIST.map(item=>(
+          <AISelectCard key={item.id} item={item} selected={imageAI===item.id} onClick={()=>selectImageAI(item.id)}/>
+        ))}
+      </div>
+
+      {/* 글쓰기 API 키 */}
+      <div style={{padding:"14px 16px",borderRadius:14,background:"var(--accent-dim)",border:"1px solid rgba(0,255,136,.2)",marginBottom:14}}>
+        <div style={{fontSize:10,fontWeight:700,letterSpacing:".12em",textTransform:"uppercase",color:"var(--accent)",marginBottom:10}}>📝 글쓰기 API 키</div>
+        {writeKeys.map(k=><PublyKeyInput key={k.id} k={k}/>)}
+      </div>
+
+      {/* 이미지 API 키 */}
+      <div style={{padding:"14px 16px",borderRadius:14,background:"rgba(139,92,246,.08)",border:"1px solid rgba(139,92,246,.2)"}}>
+        <div style={{fontSize:10,fontWeight:700,letterSpacing:".12em",textTransform:"uppercase",color:"#8B5CF6",marginBottom:10}}>🖼️ 이미지 API 키</div>
+        {imageKeys.map(k=><PublyKeyInput key={k.id} k={k}/>)}
+      </div>
+    </div>
+  );
+}
+
 
 export default function DashboardPage({ user, onLogout, onAdminLogin, theme, onThemeToggle }: Props) {
   const [tab, setTab]             = useState<Tab>("publish");
