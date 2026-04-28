@@ -4,6 +4,7 @@ import { PublyUser, getQuota, getHistory, getAccounts, PublyQuota, PublyHistory,
 interface Props {
   user: PublyUser;
   onLogout: () => void;
+  onAdminLogin: () => void;
   theme: "dark" | "light";
   onThemeToggle: () => void;
 }
@@ -387,7 +388,7 @@ const GUIDE_STEPS = [
   },
 ];
 
-export default function DashboardPage({ user, onLogout, theme, onThemeToggle }: Props) {
+export default function DashboardPage({ user, onLogout, onAdminLogin, theme, onThemeToggle }: Props) {
   const [tab, setTab]             = useState<Tab>("publish");
   const [botOnline, setBotOnline] = useState(false);
   const [quota, setQuota]         = useState<PublyQuota|null>(null);
@@ -579,6 +580,12 @@ export default function DashboardPage({ user, onLogout, theme, onThemeToggle }: 
               <div className="v2-user-avatar">{(user.name||user.email)[0].toUpperCase()}</div>
               <span style={{fontSize:12}}>{user.name||user.email.split("@")[0]}</span>
             </div>
+            <button className="v2-icon-btn" onClick={onAdminLogin} title="관리자"
+              style={{fontSize:"18px",transition:"transform .3s"}}
+              onMouseEnter={e=>(e.currentTarget.style.transform="rotate(45deg) scale(1.1)")}
+              onMouseLeave={e=>(e.currentTarget.style.transform="")}>
+              ⚙️
+            </button>
             <button className="v2-logout-btn" onClick={onLogout}>로그아웃</button>
           </div>
         </div>
