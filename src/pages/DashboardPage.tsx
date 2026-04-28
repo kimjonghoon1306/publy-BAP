@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { PublyUser, getQuota, getHistory, getAccounts, PublyQuota, PublyHistory, PublyAccount, upsertAccount, useQuota, addHistory } from "../lib/supabase";
+import { PublyUser, getQuota, getHistory, getAccounts, PublyQuota, PublyHistory, PublyAccount, upsertAccount, useQuota, addHistory, signIn } from "../lib/supabase";
 
 type Tab = "publish" | "write" | "accounts" | "history" | "settings";
 
@@ -144,6 +144,85 @@ function PublyKeyInput({k}:{k:any}) {
         </button>
         {testMsg&&<span style={{fontSize:10,color:testMsg.includes("✅")?"var(--accent)":"#ff8888"}}>{testMsg}</span>}
       </div>
+    </div>
+  );
+}
+
+
+// ── 비밀번호 변경 컴포넌트 ─────────────────────────────────────
+function PwChangeSection({ email }: { email: string }) {
+  const [curPw,  setCurPw]  = useState("");
+  const [newPw,  setNewPw]  = useState("");
+  const [newPw2, setNewPw2] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [msg,    setMsg]    = useState("");
+  const [showCur, setShowCur] = useState(false);
+  const [showNew, setShowNew] = useState(false);
+
+  async function handleChange() {
+    if (!curPw || !newPw || !newPw2) { setMsg("❌ 모든 항목을 입력하세요"); return; }
+    if (newPw !== newPw2) { setMsg("❌ 새 비밀번호가 일치하지 않습니다"); return; }
+    if (newPw.length < 4) { setMsg("❌ 4자 이상 입력하세요"); return; }
+    setLoading(true); setMsg("");
+    try {
+      // 현재 비밀번호 확인
+      await signIn(email, curPw);
+      // 새 비밀번호로 업데이트
+      const bcrypt = await import("bcryptjs");
+      const hash = await bcrypt.hash(newPw, 10);
+      const { supabase } = await import("../lib/supabase");
+      const { error } = await supabase
+        .from("publy_users")
+        .update({ password_hash: hash })
+        .eq("email", email);
+      if (error) throw new Error(error.message);
+      setMsg("✅ 비밀번호가 변경됐습니다");
+      setCurPw(""); setNewPw(""); setNewPw2("");
+      setTimeout(() => setMsg(""), 4000);
+    } catch(e: any) {
+      setMsg(e.message.includes("올바르지") ? "❌ 현재 비밀번호가 틀렸습니다" : "❌ " + e.message);
+    } finally { setLoading(false); }
+  }
+
+  return (
+    <div className="v2-card" style={{padding:"20px 22px",marginTop:14}}>
+      <div className="v2-section-label">🔐 비밀번호 변경</div>
+      <div style={{display:"flex",flexDirection:"column",gap:11}}>
+        {[
+          {l:"현재 비밀번호", v:curPw, s:setCurPw, show:showCur, toggle:()=>setShowCur(v=>!v), ph:"현재 비밀번호"},
+          {l:"새 비밀번호",   v:newPw, s:setNewPw, show:showNew, toggle:()=>setShowNew(v=>!v), ph:"새 비밀번호 (4자 이상)"},
+          {l:"새 비밀번호 확인", v:newPw2, s:setNewPw2, show:showNew, toggle:()=>setShowNew(v=>!v), ph:"새 비밀번호 확인"},
+        ].map(f=>(
+          <div key={f.l}>
+            <label style={{fontSize:10,color:"var(--muted)",fontWeight:700,display:"block",marginBottom:5,letterSpacing:".1em",textTransform:"uppercase"}}>{f.l}</label>
+            <div style={{position:"relative"}}>
+              <input type={f.show?"text":"password"} className="v2-input" placeholder={f.ph}
+                value={f.v} onChange={e=>f.s(e.target.value)}
+                onKeyDown={e=>e.key==="Enter"&&handleChange()}
+                style={{paddingRight:38}}/>
+              <button onClick={f.toggle}
+                style={{position:"absolute",right:11,top:"50%",transform:"translateY(-50%)",background:"none",border:"none",cursor:"pointer",color:"var(--muted)",fontSize:14}}>
+                {f.show?"🙈":"👁️"}
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
+      <button className="v2-btn-primary" style={{marginTop:14,padding:"11px 22px",fontSize:13}}
+        onClick={handleChange} disabled={loading}>
+        {loading
+          ? <><span className="v2-spinner"/>변경 중...</>
+          : <>🔐 비밀번호 변경</>
+        }
+      </button>
+      {msg && (
+        <div style={{marginTop:10,padding:"9px 13px",borderRadius:10,fontSize:12,
+          background:msg.includes("✅")?"var(--accent-dim)":"rgba(255,68,68,.08)",
+          border:`1px solid ${msg.includes("✅")?"rgba(0,255,136,.2)":"rgba(255,68,68,.2)"}`,
+          color:msg.includes("✅")?"var(--accent)":"#ff8888"}}>
+          {msg}
+        </div>
+      )}
     </div>
   );
 }
@@ -814,6 +893,9 @@ export default function DashboardPage({ user, onLogout, onAdminLogin, theme, onT
                       </div>
                     ))}
                   </div>
+
+                  {/* 비밀번호 변경 */}
+                  <PwChangeSection email={user.email} />
                 </div>
               )}
             </div>
