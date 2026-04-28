@@ -1,14 +1,43 @@
-<svg width="512" height="512" viewBox="0 0 192 192" xmlns="http://www.w3.org/2000/svg">
-  <rect width="512" height="512" rx="40" fill="#02040a"/>
-  <rect width="512" height="512" rx="40" fill="url(#grad)"/>
+<svg width="512" height="512" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
   <defs>
-    <linearGradient id="grad" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#00ff88" stop-opacity="0.15"/>
-      <stop offset="100%" stop-color="#00cc66" stop-opacity="0.05"/>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0a1628"/>
+      <stop offset="100%" stop-color="#050a12"/>
     </linearGradient>
+    <linearGradient id="g1" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#00ff88"/>
+      <stop offset="100%" stop-color="#00cc66"/>
+    </linearGradient>
+    <filter id="glow">
+      <feGaussianBlur stdDeviation="8" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
   </defs>
-  <polygon points="96,30 156,150 36,150" fill="none" stroke="#00ff88" stroke-width="6" stroke-linejoin="round"/>
-  <polygon points="96,55 136,135 56,135" fill="#00ff88" opacity="0.35"/>
-  <circle cx="96" cy="122" r="10" fill="#00ff88"/>
-  <text x="96" y="178" font-family="Arial Black" font-size="22" font-weight="900" fill="#00ff88" text-anchor="middle" letter-spacing="4">PUBLY</text>
+
+  <!-- 배경 -->
+  <rect width="512" height="512" rx="96" fill="url(#bg)"/>
+
+  <!-- 배경 서클 장식 -->
+  <circle cx="256" cy="256" r="192" fill="none" stroke="#00ff88" stroke-width="2" opacity="0.1"/>
+  <circle cx="256" cy="256" r="148" fill="none" stroke="#00ff88" stroke-width="1.5" opacity="0.07"/>
+
+  <!-- P 글자 -->
+  <text x="256" y="336"
+    font-family="Arial Black, sans-serif"
+    font-size="290"
+    font-weight="900"
+    fill="url(#g1)"
+    text-anchor="middle"
+    filter="url(#glow)"
+    letter-spacing="-8">P</text>
+
+  <!-- 하단 브랜드명 -->
+  <rect x="116" y="394" width="280" height="52" rx="26" fill="#00ff88" opacity="0.1"/>
+  <text x="256" y="429"
+    font-family="Arial, sans-serif"
+    font-size="28"
+    font-weight="700"
+    fill="#00ff88"
+    text-anchor="middle"
+    letter-spacing="10">PUBLY</text>
 </svg>
