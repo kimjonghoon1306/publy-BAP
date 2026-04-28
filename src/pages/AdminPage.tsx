@@ -167,6 +167,19 @@ export default function AdminPage({ onBack, theme, onThemeToggle }: Props) {
   const [loading, setLoading] = useState(true);
   const [editMap, setEditMap] = useState<Record<string,{quota?:number;days?:number;plan?:string}>>({});
   const [saving, setSaving] = useState<string|null>(null);
+  const [newAdminPw, setNewAdminPw] = useState("");
+  const [newAdminPw2, setNewAdminPw2] = useState("");
+  const [pwMsg, setPwMsg] = useState("");
+
+  function changeAdminPw() {
+    if (!newAdminPw || !newAdminPw2) { setPwMsg("비밀번호를 입력하세요"); return; }
+    if (newAdminPw !== newAdminPw2) { setPwMsg("비밀번호가 일치하지 않습니다"); return; }
+    if (newAdminPw.length < 4) { setPwMsg("4자 이상 입력하세요"); return; }
+    localStorage.setItem("publy_admin_pw", newAdminPw);
+    setNewAdminPw(""); setNewAdminPw2("");
+    setPwMsg("✅ 비밀번호 변경 완료");
+    setTimeout(() => setPwMsg(""), 3000);
+  }
 
   useEffect(() => { loadUsers(); }, []);
 
@@ -279,6 +292,33 @@ export default function AdminPage({ onBack, theme, onThemeToggle }: Props) {
                 <div style={{fontSize:11,marginTop:3}} className="ap-muted">{s.label}</div>
               </div>
             ))}
+          </div>
+
+          {/* 비밀번호 변경 */}
+          <div className="user-section" style={{marginBottom:20,padding:"18px 20px"}}>
+            <p style={{fontSize:13,fontWeight:700,marginBottom:14}} className="ap-text">🔐 관리자 비밀번호 변경</p>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr auto",gap:10,alignItems:"end"}}>
+              <div>
+                <label style={{fontSize:10,fontWeight:700,letterSpacing:".08em",textTransform:"uppercase",display:"block",marginBottom:5}} className="ap-muted">새 비밀번호</label>
+                <input className="ap-input" type="password" placeholder="새 비밀번호" style={{width:"100%"}}
+                  value={newAdminPw} onChange={e=>setNewAdminPw(e.target.value)}/>
+              </div>
+              <div>
+                <label style={{fontSize:10,fontWeight:700,letterSpacing:".08em",textTransform:"uppercase",display:"block",marginBottom:5}} className="ap-muted">비밀번호 확인</label>
+                <input className="ap-input" type="password" placeholder="비밀번호 확인" style={{width:"100%"}}
+                  value={newAdminPw2} onChange={e=>setNewAdminPw2(e.target.value)}
+                  onKeyDown={e=>e.key==="Enter"&&changeAdminPw()}/>
+              </div>
+              <button className="ap-btn ap-btn-amber" style={{padding:"8px 16px"}} onClick={changeAdminPw}>변경</button>
+            </div>
+            {pwMsg && (
+              <div style={{marginTop:10,fontSize:12,padding:"7px 12px",borderRadius:8,
+                background:pwMsg.includes("✅")?"rgba(0,255,136,.08)":"rgba(255,68,68,.08)",
+                border:`1px solid ${pwMsg.includes("✅")?"rgba(0,255,136,.2)":"rgba(255,68,68,.2)"}`,
+                color:pwMsg.includes("✅")?"#00cc66":"#ff8888"}}>
+                {pwMsg}
+              </div>
+            )}
           </div>
 
           {/* 회원 목록 */}
