@@ -580,8 +580,12 @@ export default function DashboardPage({ user, onLogout, onAdminLogin, theme, onT
                     <div className="v2-section-label">🔗 발행 계정</div>
                     {connAccs.length===0 ? (
                       <div style={{textAlign:"center",padding:"18px",color:"var(--muted)",fontSize:12}}>
-                        연결된 계정 없음 →{" "}
-                        <button style={{background:"none",border:"none",color:"var(--accent)",cursor:"pointer",fontSize:12,fontWeight:700}} onClick={()=>setTab("accounts")}>계정 관리 이동</button>
+                        <div style={{textAlign:"center",paddingTop:8}}>
+                          <div style={{fontSize:28,marginBottom:8}}>🔗</div>
+                          <div style={{fontSize:12,fontWeight:700,color:"var(--text)",marginBottom:4}}>연결된 계정이 없어요</div>
+                          <div style={{fontSize:11,color:"var(--muted)",marginBottom:12}}>계정 관리에서 네이버/티스토리 계정을 추가하세요</div>
+                          <button className="v2-btn-primary" style={{margin:"0 auto",padding:"9px 20px",fontSize:12}} onClick={()=>setTab("accounts")}>🔗 계정 관리로 이동</button>
+                        </div>
                       </div>
                     ) : connAccs.map(a=>(
                       <label key={a.id} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 13px",borderRadius:11,cursor:"pointer",marginBottom:7,background:pubAccId===a.id?"var(--accent-dim)":"var(--input-bg)",border:`1.5px solid ${pubAccId===a.id?"rgba(0,255,136,.4)":"var(--border)"}`}}>
@@ -625,6 +629,17 @@ export default function DashboardPage({ user, onLogout, onAdminLogin, theme, onT
               {/* ─ 글 생성 ─ */}
               {tab==="write" && (
                 <div style={{animation:"v2-fade .3s ease both"}}>
+                  {/* 글쓰기 AI 선택 */}
+                  <div className="v2-card" style={{padding:"18px 20px",marginBottom:14}}>
+                    <div className="v2-section-label">🤖 글쓰기 AI 선택</div>
+                    <div style={{display:"flex",gap:10,marginBottom:0}}>
+                      {WRITE_AI_LIST.map(item=>(
+                        <AISelectCard key={item.id} item={item}
+                          selected={localStorage.getItem("publy_write_ai")===item.id||((!localStorage.getItem("publy_write_ai"))&&item.id==="gemini")}
+                          onClick={()=>{localStorage.setItem("publy_write_ai",item.id);window.dispatchEvent(new Event("storage"));}}/>
+                      ))}
+                    </div>
+                  </div>
                   <div className="v2-card" style={{padding:"20px 22px",marginBottom:14}}>
                     <div className="v2-section-label">✨ AI 글 생성</div>
                     <div style={{display:"grid",gridTemplateColumns:"1fr 110px",gap:10,marginBottom:12}}>
@@ -751,9 +766,16 @@ export default function DashboardPage({ user, onLogout, onAdminLogin, theme, onT
                     </div>
                   </div>
                   {history.length===0 ? (
-                    <div className="v2-card" style={{padding:"64px",textAlign:"center",color:"var(--muted)"}}>
-                      <div style={{fontSize:40,marginBottom:12}}>📭</div>
-                      발행 기록이 없습니다
+                    <div className="v2-card" style={{padding:"48px 24px",textAlign:"center"}}>
+                      <div style={{fontSize:56,marginBottom:14,animation:"v2-float 3s ease-in-out infinite"}}>🚀</div>
+                      <div style={{fontSize:16,fontWeight:800,color:"var(--text)",marginBottom:8}}>아직 발행 기록이 없어요</div>
+                      <div style={{fontSize:12,color:"var(--muted)",lineHeight:1.7,marginBottom:20}}>
+                        첫 번째 블로그 글을 자동으로 발행해보세요!<br/>
+                        계정을 연결하고 글을 생성하면 자동으로 발행됩니다.
+                      </div>
+                      <button className="v2-btn-primary" style={{margin:"0 auto",padding:"12px 24px"}} onClick={()=>setTab("publish")}>
+                        🚀 지금 발행하러 가기
+                      </button>
                     </div>
                   ) : history.map((h:PublyHistory,i:number)=>(
                     <div key={h.id} className="v2-hist-item" style={{animationDelay:`${i*.04}s`,borderColor:h.status==="success"?"rgba(0,255,136,.15)":h.status==="fail"?"rgba(255,68,68,.15)":"var(--border)"}}>
@@ -774,20 +796,21 @@ export default function DashboardPage({ user, onLogout, onAdminLogin, theme, onT
 
               {/* ─ 설정 ─ */}
               {tab==="settings" && (
-                <div style={{animation:"v2-fade .3s ease both",maxWidth:560}}>
-                  <div className="v2-card" style={{padding:"20px 22px",marginBottom:14}}>
-                    <div className="v2-section-label">🤖 AI API 키</div>
-                    <label style={{fontSize:10,color:"var(--muted)",fontWeight:700,display:"block",marginBottom:5}}>Claude API Key (글 생성용)</label>
-                    <input className="v2-input" type="password" placeholder="sk-ant-..."
-                      defaultValue={localStorage.getItem("publy_claude_key")||""}
-                      onChange={e=>localStorage.setItem("publy_claude_key",e.target.value)}/>
-                  </div>
-                  <div className="v2-card" style={{padding:"20px 22px"}}>
+                <div style={{animation:"v2-fade .3s ease both"}}>
+                  <ApiKeySettings />
+                  <div className="v2-card" style={{padding:"20px 22px",marginTop:14}}>
                     <div className="v2-section-label">👤 내 계정</div>
-                    {[{l:"이름",v:user.name||"-"},{l:"이메일",v:user.email},{l:"플랜",v:PLAN_LABELS[user.plan]},{l:"가입일",v:new Date(user.created_at).toLocaleDateString("ko-KR")}].map(item=>(
-                      <div key={item.l} style={{display:"flex",justifyContent:"space-between",padding:"10px 0",borderBottom:"1px solid var(--border)"}}>
+                    {[
+                      {l:"이름",     v:user.name||"-"},
+                      {l:"이메일",   v:user.email},
+                      {l:"플랜",     v:PLAN_LABELS[user.plan]},
+                      {l:"잔여 건수",v:`${quota?.remaining_quota??"-"}건`},
+                      {l:"만료일",   v:quota?new Date(quota.reset_date).toLocaleDateString("ko-KR"):"-"},
+                      {l:"가입일",   v:new Date(user.created_at).toLocaleDateString("ko-KR")},
+                    ].map(item=>(
+                      <div key={item.l} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"11px 0",borderBottom:"1px solid var(--border)"}}>
                         <span style={{fontSize:12,color:"var(--muted)"}}>{item.l}</span>
-                        <span style={{fontSize:12,fontWeight:700}}>{item.v}</span>
+                        <span style={{fontSize:13,fontWeight:700,color:"var(--text)"}}>{item.v}</span>
                       </div>
                     ))}
                   </div>
@@ -848,6 +871,36 @@ export default function DashboardPage({ user, onLogout, onAdminLogin, theme, onT
                 ))}
               </div>
 
+
+              {/* 서버 상태 */}
+              <div className="v2-right-section">
+                <div className="v2-right-title">🖥️ 서버 상태</div>
+                <div style={{display:"flex",flexDirection:"column",gap:7}}>
+                  {[
+                    {label:"봇 서버",ok:botOnline,desc:"localhost:3333"},
+                    {label:"네이버 계정",ok:accounts.some(a=>a.is_connected&&a.platform==="naver"),desc:`${accounts.filter(a=>a.platform==="naver").length}개 등록`},
+                    {label:"티스토리",ok:accounts.some(a=>a.is_connected&&a.platform==="tistory"),desc:`${accounts.filter(a=>a.platform==="tistory").length}개 등록`},
+                  ].map((s,i)=>(
+                    <div key={i} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"8px 10px",borderRadius:9,background:"var(--card)",border:"1px solid var(--border)"}}>
+                      <div>
+                        <div style={{fontSize:12,fontWeight:600,color:"var(--text)"}}>{s.label}</div>
+                        <div style={{fontSize:9,color:"var(--muted)"}}>{s.desc}</div>
+                      </div>
+                      <div style={{display:"flex",alignItems:"center",gap:5}}>
+                        <span className={`v2-dot ${s.ok?"v2-dot-on":"v2-dot-off"}`}/>
+                        <span style={{fontSize:10,color:s.ok?"var(--accent)":"var(--muted)",fontWeight:700}}>{s.ok?"정상":"미연결"}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* 사용설명서 */}
+              <div className="v2-right-section">
+                <button className="v2-guide-trigger" style={{width:"100%",justifyContent:"center"}} onClick={()=>setShowGuide(v=>!v)}>
+                  📖 사용 설명서
+                </button>
+              </div>
 
             </div>
           </div>
