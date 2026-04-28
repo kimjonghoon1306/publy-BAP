@@ -1,21 +1,19 @@
 {
   "name": "publy",
   "version": "1.0.0",
-  "description": "Publy - \ub124\uc774\ubc84/\ud2f0\uc2a4\ud1a0\ub9ac \uc790\ub3d9\ubc1c\ud589 \uc571",
+  "description": "Publy - 네이버/티스토리 자동발행 앱",
   "main": "dist-electron/main.js",
   "scripts": {
     "dev": "vite",
-    "build": "tsc && vite build",
+    "build": "tsc --noEmit && vite build",
     "electron:dev": "concurrently \"vite\" \"wait-on http://localhost:5173 && electron .\"",
-    "electron:build": "vite build && electron-builder",
+    "electron:build:win": "vite build && electron-builder --win",
+    "electron:build:mac": "vite build && electron-builder --mac",
     "preview": "vite preview"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.39.0",
-    "playwright": "^1.43.0",
     "bcryptjs": "^2.4.3",
-    "axios": "^1.6.8",
-    "fs-extra": "^11.2.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0"
   },
@@ -36,16 +34,31 @@
   "build": {
     "appId": "com.publy.app",
     "productName": "Publy",
-    "directories": {
-      "output": "release"
-    },
+    "copyright": "Copyright © 2024 Publy",
+    "directories": { "output": "release" },
+    "files": [
+      "dist/**/*",
+      "dist-electron/**/*"
+    ],
+    "extraResources": [
+      { "from": "../naver-bot", "to": "naver-bot", "filter": ["**/*", "!node_modules/**"] }
+    ],
     "win": {
-      "target": "nsis",
+      "target": [{ "target": "nsis", "arch": ["x64"] }],
       "icon": "public/icon.ico"
     },
     "mac": {
-      "target": "dmg",
+      "target": [{ "target": "dmg", "arch": ["x64", "arm64"] }],
       "icon": "public/icon.icns"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "installerIcon": "public/icon.ico",
+      "installerHeaderIcon": "public/icon.ico",
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Publy"
     }
   }
 }
