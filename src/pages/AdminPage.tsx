@@ -358,7 +358,7 @@ export default function AdminPage({onBack,onDashboard,theme,onThemeToggle}:Props
 
   async function handleAddAcc(){if(!newUser||!newPw)return;setAddingAcc(true);try{await upsertAccount({user_id:ADM_UID,platform:newPlat,username:newUser,password_encrypted:btoa(newPw),blog_name:newBlog||undefined,is_connected:false});getAccounts(ADM_UID).then(setAdmAccs);setNewUser("");setNewPw("");setNewBlog("");}catch(e:any){alert(e.message);}finally{setAddingAcc(false);}}
 
-  async function handleConnect(acc:PublyAccount){if(!botOnline){alert("봇 서버 실행 필요");return;}setConnId(acc.id);try{await fetch(`${BOT}/api/${acc.platform}/save-session`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({userId:ADM_UID,id:acc.username,pw:atob((acc as any).password_encrypted||""),blogName:acc.blog_name})});getAccounts(ADM_UID).then(setAdmAccs);}catch(e:any){alert("연결 실패: "+e.message);}finally{setConnId(null);}}
+  async function handleConnect(acc:PublyAccount){if(!botOnline){alert("봇 서버 실행 필요");return;}setConnId(acc.id);try{const r=await fetch(`${BOT}/api/${acc.platform}/save-session`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({userId:ADM_UID,id:acc.username,pw:atob((acc as any).password_encrypted||""),blogName:acc.blog_name})});if(!r.ok){const d=await r.json();throw new Error(d.error);}await supabase.from("publy_accounts").update({is_connected:true,connected_at:new Date().toISOString()}).eq("id",acc.id);getAccounts(ADM_UID).then(setAdmAccs);}catch(e:any){alert("연결 실패: "+e.message);}finally{setConnId(null);}}
 
   function edit(uid:string,key:string,val:any){setEditMap(p=>({...p,[uid]:{...p[uid],[key]:val}}))}
 
