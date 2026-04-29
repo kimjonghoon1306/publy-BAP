@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { PublyUser, getQuota, getHistory, getAccounts, PublyQuota, PublyHistory, PublyAccount, upsertAccount, useQuota, addHistory, signIn } from "../lib/supabase";
+import { supabase, PublyUser, getQuota, getHistory, getAccounts, PublyQuota, PublyHistory, PublyAccount, upsertAccount, useQuota, addHistory, signIn } from "../lib/supabase";
 
 type Tab = "publish" | "write" | "accounts" | "history" | "settings";
 
@@ -445,6 +445,7 @@ export default function DashboardPage({ user, onLogout, onAdminLogin, theme, onT
   const [newPw,       setNewPw]       = useState("");
   const [newBlog,     setNewBlog]     = useState("");
   const [addingAcc,   setAddingAcc]   = useState(false);
+  const [showPw,      setShowPw]      = useState(false);
   const [connectingId,setConnectingId]= useState<string|null>(null);
 
   // Flow
