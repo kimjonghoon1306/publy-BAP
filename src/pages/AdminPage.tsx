@@ -745,7 +745,7 @@ export default function AdminPage({onBack,onDashboard,theme,onThemeToggle}:Props
                     회원 관리, API 키 설정, 발행 현황을 통합 관리할 수 있습니다.
                   </div>
                   <div style={{display:"flex",flexDirection:"column",gap:9}}>
-                    <a href="https://tarrydaily.com/superadmin" target="_blank" rel="noopener noreferrer"
+                    <a href="https://blogautopro.com/superadmin" target="_blank" rel="noopener noreferrer"
                       style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"13px 16px",borderRadius:12,background:"linear-gradient(135deg,rgba(99,102,241,.15),rgba(139,92,246,.1))",border:"1px solid rgba(99,102,241,.3)",textDecoration:"none",transition:"all .2s"}}>
                       <div style={{display:"flex",alignItems:"center",gap:10}}>
                         <div style={{width:34,height:34,borderRadius:9,background:"linear-gradient(135deg,#6366f1,#8b5cf6)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,fontWeight:900,color:"#fff",flexShrink:0}}>B</div>
@@ -756,7 +756,7 @@ export default function AdminPage({onBack,onDashboard,theme,onThemeToggle}:Props
                       </div>
                       <span style={{fontSize:16,color:"#6366f1"}}>→</span>
                     </a>
-                    <a href="https://tarrydaily.com/naver" target="_blank" rel="noopener noreferrer"
+                    <a href="https://blogautopro.com/naver" target="_blank" rel="noopener noreferrer"
                       style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"13px 16px",borderRadius:12,background:"rgba(3,199,90,.06)",border:"1px solid rgba(3,199,90,.25)",textDecoration:"none",transition:"all .2s"}}>
                       <div style={{display:"flex",alignItems:"center",gap:10}}>
                         <div style={{width:34,height:34,borderRadius:9,background:"linear-gradient(135deg,#03C75A,#059669)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,color:"#fff",flexShrink:0}}>N</div>
