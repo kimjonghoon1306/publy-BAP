@@ -573,7 +573,9 @@ export default function DashboardPage({ user, onLogout, onAdminLogin, theme, onT
         method:"POST", headers:{"Content-Type":"application/json"},
         body:JSON.stringify({ userId:acc.user_id, id:acc.username, pw:atob((acc as any).password_encrypted||""), blogName:acc.blog_name }),
       });
-      if (!(await r.json()).success) throw new Error("연결 실패");
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error||"연결 실패");
+      await supabase.from("publy_accounts").update({is_connected:true,connected_at:new Date().toISOString()}).eq("id",acc.id);
       getAccounts(user.id).then(setAccounts);
     } catch(e:any) { alert("연결 실패: "+e.message); }
     finally { setConnectingId(null); }
@@ -870,7 +872,7 @@ export default function DashboardPage({ user, onLogout, onAdminLogin, theme, onT
                       </div>
                       <div>
                         <label style={{fontSize:10,color:"var(--muted)",fontWeight:700,display:"block",marginBottom:5}}>비밀번호</label>
-                        <input className="v2-input" type="password" placeholder="비밀번호" value={newPw} onChange={e=>setNewPw(e.target.value)}/>
+                        <div style={{position:"relative"}}><input className="v2-input" type={showPw?"text":"password"} placeholder="비밀번호" value={newPw} onChange={e=>setNewPw(e.target.value)} style={{width:"100%",paddingRight:34}}/><button onClick={()=>setShowPw(p=>!p)} style={{position:"absolute",right:8,top:"50%",transform:"translateY(-50%)",background:"none",border:"none",cursor:"pointer",fontSize:14,color:"var(--muted)"}}>{showPw?"🙈":"👁"}</button></div>
                       </div>
                     </div>
                     <button className="v2-btn-primary" style={{padding:"9px 16px",fontSize:12}} onClick={handleAddAccount} disabled={addingAcc}>
@@ -893,6 +895,7 @@ export default function DashboardPage({ user, onLogout, onAdminLogin, theme, onT
                         <button className="v2-btn-primary" style={{padding:"7px 14px",fontSize:11}} onClick={()=>handleConnect(a)} disabled={!!connectingId||!botOnline}>
                           {connectingId===a.id?<><span className="v2-spinner"/>연결 중...</>:a.is_connected?"재연결":"연결"}
                         </button>
+                        <button onClick={async()=>{if(!confirm("삭제할까요?"))return;await supabase.from("publy_accounts").delete().eq("id",a.id);getAccounts(user.id).then(setAccounts);}} style={{padding:"7px 11px",fontSize:12,background:"rgba(239,68,68,.1)",border:"1px solid rgba(239,68,68,.3)",borderRadius:8,color:"#ef4444",cursor:"pointer",fontWeight:700}}>🗑</button>
                       </div>
                     </div>
                   ))}
