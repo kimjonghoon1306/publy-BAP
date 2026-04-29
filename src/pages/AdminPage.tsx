@@ -283,7 +283,7 @@ export default function AdminPage({onBack,onDashboard,theme,onThemeToggle}:Props
   const [pubTitle,setPubTitle]=useState("");const [pubContent,setPubContent]=useState("");const [pubTags,setPubTags]=useState("");const [pubImg,setPubImg]=useState("");const [pubAccId,setPubAccId]=useState("");const [publishing,setPublishing]=useState(false);const [pubMsg,setPubMsg]=useState("");
   const [keyword,setKeyword]=useState("");const [generating,setGenerating]=useState(false);const [genTitle,setGenTitle]=useState("");const [genContent,setGenContent]=useState("");const [genTags,setGenTags]=useState("");
   const [pubSub,setPubSub]=useState<"publish"|"write"|"accounts">("publish");
-  const [newPlat,setNewPlat]=useState<"naver"|"tistory">("naver");const [newUser,setNewUser]=useState("");const [newPw,setNewPw]=useState("");const [newBlog,setNewBlog]=useState("");const [addingAcc,setAddingAcc]=useState(false);const [connId,setConnId]=useState<string|null>(null);
+  const [newPlat,setNewPlat]=useState<"naver"|"tistory">("naver");const [newUser,setNewUser]=useState("");const [newPw,setNewPw]=useState("");const [newBlog,setNewBlog]=useState("");const [addingAcc,setAddingAcc]=useState(false);const [showPw,setShowPw]=useState(false);const [connId,setConnId]=useState<string|null>(null);
   const [users,setUsers]=useState<UserFull[]>([]);const [loading,setLoading]=useState(true);const [search,setSearch]=useState("");const [selUser,setSelUser]=useState<UserFull|null>(null);
   const [editMap,setEditMap]=useState<Record<string,any>>({});const [saving,setSaving]=useState<string|null>(null);
   const [showAdmGuide,setShowAdmGuide]=useState(false);
@@ -626,7 +626,7 @@ export default function AdminPage({onBack,onDashboard,theme,onThemeToggle}:Props
                       <div style={{display:"grid",gridTemplateColumns:"90px 1fr 1fr",gap:9,marginBottom:9}}>
                         <div><label style={{fontSize:9,color:"var(--m)",fontWeight:700,display:"block",marginBottom:3}}>플랫폼</label><select className="ainp" style={{width:"100%"}} value={newPlat} onChange={e=>setNewPlat(e.target.value as any)}><option value="naver">네이버</option><option value="tistory">티스토리</option></select></div>
                         <div><label style={{fontSize:9,color:"var(--m)",fontWeight:700,display:"block",marginBottom:3}}>아이디</label><input className="ainp" style={{width:"100%"}} placeholder="아이디" value={newUser} onChange={e=>setNewUser(e.target.value)}/></div>
-                        <div><label style={{fontSize:9,color:"var(--m)",fontWeight:700,display:"block",marginBottom:3}}>비밀번호</label><input className="ainp" type="password" style={{width:"100%"}} placeholder="비밀번호" value={newPw} onChange={e=>setNewPw(e.target.value)}/></div>
+                        <div><label style={{fontSize:9,color:"var(--m)",fontWeight:700,display:"block",marginBottom:3}}>비밀번호</label><div style={{position:"relative"}}><input className="ainp" type={showPw?"text":"password"} style={{width:"100%",paddingRight:32}} placeholder="비밀번호" value={newPw} onChange={e=>setNewPw(e.target.value)}/><button onClick={()=>setShowPw(p=>!p)} style={{position:"absolute",right:8,top:"50%",transform:"translateY(-50%)",background:"none",border:"none",cursor:"pointer",fontSize:14,color:"var(--m)"}}>{showPw?"🙈":"👁"}</button></div></div>
                       </div>
                       <button className="abp" style={{padding:"8px 15px",fontSize:12}} onClick={handleAddAcc} disabled={addingAcc}>{addingAcc?<><span className="asp2"/>추가 중...</>:<>➕ 추가</>}</button>
                     </div>
@@ -636,7 +636,7 @@ export default function AdminPage({onBack,onDashboard,theme,onThemeToggle}:Props
                           <span style={{fontSize:20}}>{a.platform==="naver"?"🟢":"🟠"}</span>
                           <div style={{flex:1}}><div style={{fontSize:13,fontWeight:700}}>{a.username}</div><div style={{fontSize:10,color:"var(--m)"}}>{a.platform}</div></div>
                           <span style={{fontSize:9,padding:"3px 9px",borderRadius:99,fontWeight:800,background:a.is_connected?"rgba(0,200,117,.12)":"var(--ib)",color:a.is_connected?"var(--s)":"var(--m)"}}>{a.is_connected?"✅ 연결됨":"미연결"}</span>
-                          <button className="abp" style={{padding:"6px 12px",fontSize:11}} onClick={()=>handleConnect(a)} disabled={!!connId||!botOnline}>{connId===a.id?<><span className="asp2"/>연결 중...</>:a.is_connected?"재연결":"연결"}</button>
+                          <button className="abp" style={{padding:"6px 12px",fontSize:11}} onClick={()=>handleConnect(a)} disabled={!!connId||!botOnline}>{connId===a.id?<><span className="asp2"/>연결 중...</>:a.is_connected?"재연결":"연결"}</button><button onClick={async()=>{if(!confirm("삭제할까요?"))return;await supabase.from("publy_accounts").delete().eq("id",a.id);getAccounts(ADM_UID).then(setAdmAccs);}} style={{padding:"6px 10px",fontSize:11,background:"rgba(239,68,68,.1)",border:"1px solid rgba(239,68,68,.3)",borderRadius:8,color:"#ef4444",cursor:"pointer",fontWeight:700}}>🗑</button>
                         </div>
                       </div>
                     ))}
