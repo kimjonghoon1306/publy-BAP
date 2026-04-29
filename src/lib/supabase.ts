@@ -129,7 +129,7 @@ export async function getHistory(userId: string): Promise<PublyHistory[]> {
 export async function getAccounts(userId: string): Promise<PublyAccount[]> {
   const { data } = await supabase
     .from("publy_accounts")
-    .select("id, user_id, platform, username, blog_name, is_connected, connected_at")
+    .select("id, user_id, platform, username, password_encrypted, blog_name, is_connected, connected_at")
     .eq("user_id", userId);
   return data || [];
 }
