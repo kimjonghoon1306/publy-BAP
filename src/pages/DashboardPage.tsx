@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { supabase, PublyUser, getQuota, getHistory, getAccounts, PublyQuota, PublyHistory, PublyAccount, upsertAccount, useQuota, addHistory, signIn } from "../lib/supabase";
+import { PublyUser, getQuota, getHistory, getAccounts, PublyQuota, PublyHistory, PublyAccount, upsertAccount, useQuota, addHistory, signIn } from "../lib/supabase";
 
 type Tab = "publish" | "write" | "accounts" | "history" | "settings";
 
@@ -41,7 +41,7 @@ function AISelectCard({item, selected, onClick}:{item:any,selected:boolean,onCli
       background:selected?`${item.color}15`:"var(--input-bg)",
       transform:selected?"translateY(-4px) scale(1.03)":"translateY(0) scale(1)",
       boxShadow:selected?`0 12px 28px ${item.color}35, 0 0 0 1px ${item.color}30`:"none",
-      transition:"all .25s cubic-bezier(.34,1.56,.64,1)",
+      transition:"all .15s ease",
       position:"relative", overflow:"hidden",
     }}>
       {/* 선택 시 글로우 효과 */}
@@ -384,7 +384,7 @@ select.v2-input{appearance:auto;}.dark select.v2-input{color-scheme:dark;}.light
 .v2-warn-red{background:rgba(255,68,68,.08);border:1px solid rgba(255,68,68,.2);color:#ff8888;}
 .v2-guide-trigger{display:flex;align-items:center;gap:8px;padding:10px 14px;border-radius:12px;cursor:pointer;border:1.5px dashed;font-size:12px;font-weight:700;font-family:'Noto Sans KR',sans-serif;transition:all .22s;animation:v2-float 3s ease-in-out infinite;background:linear-gradient(135deg,rgba(245,158,11,.08),rgba(245,158,11,.04));border-color:rgba(245,158,11,.3);color:#d97706;position:relative;overflow:hidden;}
 .v2-guide-trigger:hover{border-color:rgba(245,158,11,.5);transform:translateY(-2px);}
-.v2-guide-panel{position:fixed;top:56px;right:0;bottom:0;width:min(420px,100vw);border-left:1px solid var(--border);z-index:1000;overflow-y:auto;padding:24px;animation:v2-slide-in .3s ease both;}
+.v2-guide-panel{position:fixed;top:56px;right:0;bottom:0;width:min(420px,100vw);border-left:1px solid var(--border);z-index:1000;overflow-y:auto;padding:24px;animation:v2-slide-in .3s ease both;background:var(--bg);}
 .v2-root.dark .v2-guide-panel{background:#080f18;box-shadow:-20px 0 60px rgba(0,0,0,.6);}
 .v2-root.light .v2-guide-panel{background:#ffffff;box-shadow:-20px 0 40px rgba(0,0,0,.12);border-left:1px solid rgba(0,0,0,.1);}
 @keyframes v2-slide-in{from{transform:translateX(100%);opacity:0}to{transform:translateX(0);opacity:1}}
@@ -445,7 +445,6 @@ export default function DashboardPage({ user, onLogout, onAdminLogin, theme, onT
   const [newPw,       setNewPw]       = useState("");
   const [newBlog,     setNewBlog]     = useState("");
   const [addingAcc,   setAddingAcc]   = useState(false);
-  const [showPw,      setShowPw]      = useState(false);
   const [connectingId,setConnectingId]= useState<string|null>(null);
 
   // Flow
@@ -574,9 +573,7 @@ export default function DashboardPage({ user, onLogout, onAdminLogin, theme, onT
         method:"POST", headers:{"Content-Type":"application/json"},
         body:JSON.stringify({ userId:acc.user_id, id:acc.username, pw:atob((acc as any).password_encrypted||""), blogName:acc.blog_name }),
       });
-      const data = await r.json();
-      if (!r.ok) throw new Error(data.error||"연결 실패");
-      await supabase.from("publy_accounts").update({is_connected:true,connected_at:new Date().toISOString()}).eq("id",acc.id);
+      if (!(await r.json()).success) throw new Error("연결 실패");
       getAccounts(user.id).then(setAccounts);
     } catch(e:any) { alert("연결 실패: "+e.message); }
     finally { setConnectingId(null); }
@@ -873,7 +870,7 @@ export default function DashboardPage({ user, onLogout, onAdminLogin, theme, onT
                       </div>
                       <div>
                         <label style={{fontSize:10,color:"var(--muted)",fontWeight:700,display:"block",marginBottom:5}}>비밀번호</label>
-                        <div style={{position:"relative"}}><input className="v2-input" type={showPw?"text":"password"} placeholder="비밀번호" value={newPw} onChange={e=>setNewPw(e.target.value)} style={{width:"100%",paddingRight:34}}/><button onClick={()=>setShowPw(p=>!p)} style={{position:"absolute",right:8,top:"50%",transform:"translateY(-50%)",background:"none",border:"none",cursor:"pointer",fontSize:14,color:"var(--muted)"}}>{showPw?"🙈":"👁"}</button></div>
+                        <input className="v2-input" type="password" placeholder="비밀번호" value={newPw} onChange={e=>setNewPw(e.target.value)}/>
                       </div>
                     </div>
                     <button className="v2-btn-primary" style={{padding:"9px 16px",fontSize:12}} onClick={handleAddAccount} disabled={addingAcc}>
@@ -896,7 +893,6 @@ export default function DashboardPage({ user, onLogout, onAdminLogin, theme, onT
                         <button className="v2-btn-primary" style={{padding:"7px 14px",fontSize:11}} onClick={()=>handleConnect(a)} disabled={!!connectingId||!botOnline}>
                           {connectingId===a.id?<><span className="v2-spinner"/>연결 중...</>:a.is_connected?"재연결":"연결"}
                         </button>
-                        <button onClick={async()=>{if(!confirm("삭제할까요?"))return;await supabase.from("publy_accounts").delete().eq("id",a.id);getAccounts(user.id).then(setAccounts);}} style={{padding:"7px 11px",fontSize:12,background:"rgba(239,68,68,.1)",border:"1px solid rgba(239,68,68,.3)",borderRadius:8,color:"#ef4444",cursor:"pointer",fontWeight:700}}>🗑</button>
                       </div>
                     </div>
                   ))}
