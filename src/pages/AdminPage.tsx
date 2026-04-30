@@ -574,10 +574,10 @@ export default function AdminPage({onBack,onDashboard,theme,onThemeToggle}:Props
                       <div className="asl2">🔗 계정</div>
                       {connAccs.length===0?<div style={{padding:"14px",textAlign:"center",color:"var(--m)",fontSize:12}}>연결된 계정 없음 → <button style={{background:"none",border:"none",color:"var(--a)",cursor:"pointer",fontWeight:700}} onClick={()=>setPubSub("accounts")}>계정 관리</button></div>
                       :connAccs.map(a=>(
-                        <label key={a.id} style={{display:"flex",alignItems:"center",gap:10,padding:"8px 11px",borderRadius:9,cursor:"pointer",marginBottom:5,background:pubAccId===a.id?"var(--ad)":"var(--ib)",border:`1.5px solid ${pubAccId===a.id?"var(--b2)":"var(--b)"}`}}>
-                          <input type="radio" name="pacc" checked={pubAccId===a.id} onChange={()=>setPubAccId(a.id)} style={{accentColor:"var(--a)"}}/>
+                        <div key={a.id} onClick={()=>setPubAccId(a.id)} style={{display:"flex",alignItems:"center",gap:10,padding:"8px 11px",borderRadius:9,cursor:"pointer",marginBottom:5,background:pubAccId===a.id?"var(--ad)":"var(--ib)",border:`1.5px solid ${pubAccId===a.id?"var(--b2)":"var(--b)"}`}}>
+                          <div style={{width:14,height:14,borderRadius:"50%",border:`2px solid ${pubAccId===a.id?"var(--a)":"var(--m)"}`,background:pubAccId===a.id?"var(--a)":"transparent",flexShrink:0}}/>
                           <span style={{fontSize:12,fontWeight:600}}>{a.username}</span>
-                        </label>
+                        </div>
                       ))}
                     </div>
                     <div className="acd" style={{padding:"16px 18px",marginBottom:11}}>
