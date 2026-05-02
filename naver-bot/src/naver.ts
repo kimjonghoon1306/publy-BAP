@@ -22,7 +22,7 @@ export async function saveNaverSession(userId: string, id: string, pw: string): 
     await page.fill("#id", id);
     await page.fill("#pw", pw);
     await page.click(".btn_login");
-    await page.waitForURL(url => !url.includes("nidlogin"), { timeout: 20000 });
+    await page.waitForURL(url => !url.toString().includes("nidlogin"), { timeout: 20000 });
 
     // 실제 블로그 ID 추출
     await page.goto("https://blog.naver.com/", { waitUntil: "networkidle" });
