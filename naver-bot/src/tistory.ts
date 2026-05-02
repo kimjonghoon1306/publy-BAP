@@ -32,7 +32,7 @@ export async function saveTistorySession(userId: string, id: string, pw: string,
     await page.click("button[type='submit'], .btn_confirm, .btn_g.highlight");
 
     // 로그인 완료 대기
-    await page.waitForURL(url => url.includes("tistory.com") && !url.includes("login"), { timeout: 20000 });
+    await page.waitForURL(url => url.toString().includes("tistory.com") && !url.toString().includes("login"), { timeout: 20000 });
 
     const cookies = await context.cookies();
     fs.writeFileSync(sessionPath(userId), JSON.stringify({ blogName, cookies }, null, 2));
