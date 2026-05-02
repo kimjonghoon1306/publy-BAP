@@ -7,6 +7,15 @@ import { PublyUser } from "./lib/supabase";
 
 type View = "login" | "admin-login" | "admin" | "dashboard";
 
+declare global {
+  interface Window {
+    electron?: {
+      getBotStatus: () => Promise<string>;
+      registerUser: (userId: string) => Promise<boolean>;
+    };
+  }
+}
+
 export default function App() {
   const [view, setView]   = useState<View>("login");
   const [user, setUser]   = useState<PublyUser | null>(null);
@@ -19,11 +28,13 @@ export default function App() {
     const saved = localStorage.getItem("publy_user");
     if (saved) {
       try {
-        setUser(JSON.parse(saved));
+        const u = JSON.parse(saved);
+        setUser(u);
         setView("dashboard");
+        // 자동 로그인 시에도 봇 서버에 유저 등록
+        window.electron?.registerUser(u.id);
       } catch { localStorage.removeItem("publy_user"); }
     }
-    // 관리자 세션 확인
     if (sessionStorage.getItem("publy_admin_auth")) {
       setView("admin");
     }
@@ -38,6 +49,8 @@ export default function App() {
     localStorage.setItem("publy_user", JSON.stringify(u));
     setUser(u);
     setView("dashboard");
+    // 로그인 시 봇 서버에 유저 등록 → Supabase 폴링 시작
+    window.electron?.registerUser(u.id);
   }
 
   function handleLogout() {
