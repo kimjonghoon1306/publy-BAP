@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
-    "electron:dev": "concurrently \"vite\" \"wait-on http://localhost:5173 && electron .\"",
+    "electron:dev": "concurrently \"vite\" \"wait-on http://localhost:5173 && electron .\" \"cd naver-bot && npm start\"",
     "electron:build:win": "vite build && electron-builder --win",
     "electron:build:mac": "vite build && electron-builder --mac",
     "preview": "vite preview"
@@ -35,20 +35,44 @@
     "appId": "com.publy.app",
     "productName": "Publy",
     "copyright": "Copyright © 2024 Publy",
-    "directories": { "output": "release" },
+    "directories": {
+      "output": "release"
+    },
     "files": [
       "dist/**/*",
       "dist-electron/**/*"
     ],
     "extraResources": [
-      { "from": "../naver-bot", "to": "naver-bot", "filter": ["**/*", "!node_modules/**"] }
+      {
+        "from": "../naver-bot",
+        "to": "naver-bot",
+        "filter": [
+          "**/*",
+          "!node_modules/**"
+        ]
+      }
     ],
     "win": {
-      "target": [{ "target": "nsis", "arch": ["x64"] }],
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
       "icon": "public/icon.ico"
     },
     "mac": {
-      "target": [{ "target": "dmg", "arch": ["x64", "arm64"] }],
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        }
+      ],
       "icon": "public/icon.icns"
     },
     "nsis": {
