@@ -53,9 +53,23 @@ app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();
 });
 
+// 봇 서버 상태 확인
 ipcMain.handle("get-bot-status", async () => {
   try {
     const res = await fetch("http://localhost:3333/health", { signal: AbortSignal.timeout(2000) });
     return res.ok ? "online" : "offline";
   } catch { return "offline"; }
+});
+
+// 로그인 후 유저 등록 → 봇 서버에 userId 전달
+ipcMain.handle("register-user", async (_event, userId: string) => {
+  try {
+    const res = await fetch("http://localhost:3333/api/register-user", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ userId }),
+      signal: AbortSignal.timeout(3000),
+    });
+    return res.ok;
+  } catch { return false; }
 });
