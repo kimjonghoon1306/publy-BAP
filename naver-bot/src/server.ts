@@ -1,5 +1,7 @@
 import express from "express";
 import cors from "cors";
+import fs from "fs-extra";
+import path from "path";
 import { saveNaverSession, publishNaver, naverSessionExists } from "./naver";
 import { saveTistorySession, publishTistory, tistorySessionExists } from "./tistory";
 import { fetchPendingJobs, updateJob, addHistory, useQuota } from "./supabase";
@@ -10,18 +12,36 @@ const PORT = 3333;
 app.use(cors());
 app.use(express.json());
 
-// ── 헬스체크 ────────────────────────────────────────────
+/* ── 동시 발행 제한 큐 ── */
+const MAX_CONCURRENT = 3;
+let running = 0;
+const waitQueue: Array<() => void> = [];
+
+async function acquireSlot(): Promise<void> {
+  if (running < MAX_CONCURRENT) { running++; return; }
+  return new Promise((resolve) => {
+    waitQueue.push(() => { running++; resolve(); });
+  });
+}
+
+function releaseSlot() {
+  running--;
+  const next = waitQueue.shift();
+  if (next) next();
+}
+
+/* ── 헬스체크 ── */
 app.get("/health", (_req, res) => {
-  res.json({ ok: true, version: "1.0.0", time: new Date().toISOString() });
+  res.json({ ok: true, version: "2.0.0", running, queued: waitQueue.length });
 });
 
-// ── 세션 저장 (계정 연결) ────────────────────────────────
+/* ── 세션 저장 (계정 연결) ── */
 app.post("/api/naver/save-session", async (req, res) => {
   const { userId, id, pw } = req.body;
   if (!userId || !id || !pw) return res.status(400).json({ success: false, error: "userId, id, pw 필요" });
   try {
-    await saveNaverSession(userId, id, pw);
-    res.json({ success: true });
+    const result = await saveNaverSession(userId, id, pw);
+    res.json({ success: true, blogId: result.blogId });
   } catch (e: any) {
     res.status(500).json({ success: false, error: e.message });
   }
@@ -38,7 +58,7 @@ app.post("/api/tistory/save-session", async (req, res) => {
   }
 });
 
-// ── 세션 상태 확인 ───────────────────────────────────────
+/* ── 세션 상태 확인 ── */
 app.get("/api/session-status/:userId", (req, res) => {
   const { userId } = req.params;
   res.json({
@@ -47,13 +67,14 @@ app.get("/api/session-status/:userId", (req, res) => {
   });
 });
 
-// ── 직접 발행 (앱에서 즉시 발행) ────────────────────────
+/* ── 직접 발행 (앱에서 즉시 발행) ── */
 app.post("/api/publish-full", async (req, res) => {
   const { userId, platform, title, content, tags = [], imagePrompt } = req.body;
   if (!userId || !platform || !title || !content) {
     return res.status(400).json({ error: "userId, platform, title, content 필요" });
   }
 
+  await acquireSlot();
   try {
     let postUrl = "";
     if (platform === "naver") {
@@ -68,11 +89,17 @@ app.post("/api/publish-full", async (req, res) => {
     res.json({ success: true, postUrl });
   } catch (e: any) {
     await addHistory({ user_id: userId, platform, title, status: "fail", error_message: e.message });
+
+    if (e.message?.includes("세션 만료") || e.message?.includes("재연결")) {
+      return res.status(401).json({ error: e.message, code: "SESSION_EXPIRED" });
+    }
     res.status(500).json({ error: e.message });
+  } finally {
+    releaseSlot();
   }
 });
 
-// ── Supabase Job Queue 폴링 ──────────────────────────────
+/* ── Supabase Job Queue 폴링 ── */
 let currentUserId: string | null = null;
 let isProcessing = false;
 
@@ -89,10 +116,9 @@ async function processJobs() {
     const jobs = await fetchPendingJobs(currentUserId);
     for (const job of jobs) {
       console.log(`[bot] 작업 시작: ${job.platform} - ${job.title}`);
-
-      // 상태를 running으로
       await updateJob(job.id, { status: "running" });
 
+      await acquireSlot();
       try {
         const ok = await useQuota(job.user_id);
         if (!ok) {
@@ -114,6 +140,8 @@ async function processJobs() {
         await updateJob(job.id, { status: "fail", error: e.message });
         await addHistory({ user_id: job.user_id, platform: job.platform, title: job.title, status: "fail", error_message: e.message });
         console.error(`[bot] 발행 실패: ${e.message}`);
+      } finally {
+        releaseSlot();
       }
     }
   } finally {
@@ -121,10 +149,9 @@ async function processJobs() {
   }
 }
 
-// 10초마다 폴링
 setInterval(processJobs, 10000);
 
-// ── 유저 등록 엔드포인트 (Electron 앱에서 로그인 시 호출) ─
+/* ── 유저 등록 (Electron에서 로그인 시 호출) ── */
 app.post("/api/register-user", (req, res) => {
   const { userId } = req.body;
   if (!userId) return res.status(400).json({ error: "userId 필요" });
@@ -132,10 +159,9 @@ app.post("/api/register-user", (req, res) => {
   res.json({ success: true });
 });
 
-// ── 서버 시작 ────────────────────────────────────────────
+/* ── 서버 시작 ── */
 app.listen(PORT, () => {
-  console.log(`[bot] 서버 시작 → http://localhost:${PORT}`);
-  console.log(`[bot] Supabase 폴링 시작 (10초 간격)`);
+  console.log(`[bot] Publy 봇 서버 v2.0 → http://localhost:${PORT}`);
 });
 
 export default app;
