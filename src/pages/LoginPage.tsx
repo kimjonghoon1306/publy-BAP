@@ -371,11 +371,7 @@ export default function LoginPage({ onLogin, onAdminLogin, theme, onThemeToggle 
               <div className="logo-ring logo-ring-inner" />
               <div className="logo-pulse" />
               <div className="logo-core">
-                <svg width="28" height="28" viewBox="0 0 32 32" fill="none">
-                  <path d="M16 3L29 26H3L16 3Z" fill="#000" opacity=".85" />
-                  <path d="M16 9L25 24H7L16 9Z" fill="#00ff88" opacity=".6" />
-                  <circle cx="16" cy="20" r="2.5" fill="#000" />
-                </svg>
+                <img src="/icon-192.svg" width="36" height="36" style={{borderRadius:8}} />
               </div>
             </div>
             <div className="logo-name">PUBLY</div>
