@@ -1,6 +1,6 @@
 {
   "name": "publy",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "description": "Publy - 네이버/티스토리 자동발행 앱",
   "main": "dist-electron/main.js",
   "scripts": {
@@ -44,35 +44,21 @@
     ],
     "extraResources": [
       {
-        "from": "../naver-bot",
+        "from": "naver-bot",
         "to": "naver-bot",
         "filter": [
           "**/*",
-          "!node_modules/**"
+          "!node_modules/**",
+          "!src/**"
         ]
       }
     ],
     "win": {
-      "target": [
-        {
-          "target": "nsis",
-          "arch": [
-            "x64"
-          ]
-        }
-      ],
+      "target": [{ "target": "nsis", "arch": ["x64"] }],
       "icon": "public/icon.ico"
     },
     "mac": {
-      "target": [
-        {
-          "target": "dmg",
-          "arch": [
-            "x64",
-            "arm64"
-          ]
-        }
-      ],
+      "target": [{ "target": "dmg", "arch": ["x64", "arm64"] }],
       "icon": "public/icon.icns"
     },
     "nsis": {
