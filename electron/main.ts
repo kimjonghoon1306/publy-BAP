@@ -1,65 +1,127 @@
 import { app, BrowserWindow, ipcMain, shell } from "electron";
 import path from "path";
-import { spawn, ChildProcess } from "child_process";
+import http from "http";
+import express from "express";
+import cors from "cors";
 
 let mainWindow: BrowserWindow | null = null;
-let botProcess: ChildProcess | null = null;
 const isDev = !app.isPackaged;
-
-// 앱 종료 플래그 (봇 재시작 루프 방지)
-declare global { namespace Electron { interface App { isQuitting: boolean; } } }
-app.isQuitting = false;
+let server: http.Server | null = null;
 
 async function startBotServer() {
-  const botPath = isDev
-    ? path.join(__dirname, "../../naver-bot")
-    : path.join(process.resourcesPath, "naver-bot");
-
   try {
-    const fs = await import("fs");
-    if (!fs.existsSync(path.join(botPath, "package.json"))) {
-      console.error("[bot] naver-bot 폴더를 찾을 수 없습니다:", botPath);
-      return;
-    }
-  } catch { return; }
+    // 봇 서버를 Electron 메인 프로세스 안에서 직접 실행
+    const botPath = isDev
+      ? path.join(__dirname, "../../naver-bot/src")
+      : path.join(process.resourcesPath, "naver-bot/dist");
 
-  if (isDev) {
-    // 개발 모드: ts-node-dev 로 직접 실행 (빌드 불필요)
-    console.log("[bot] 개발 모드 - ts-node-dev 로 봇 서버 시작...");
-    botProcess = spawn("npm", ["run", "dev"], {
-      cwd: botPath,
-      stdio: "pipe",
-      shell: true,
-      env: { ...process.env, FORCE_COLOR: "0" },
+    const { publishNaver, saveNaverSession, naverSessionExists } = await import(
+      isDev
+        ? path.join(__dirname, "../../naver-bot/src/naver")
+        : path.join(process.resourcesPath, "naver-bot/dist/naver.js")
+    );
+    const { publishTistory, saveTistorySession, tistorySessionExists } = await import(
+      isDev
+        ? path.join(__dirname, "../../naver-bot/src/tistory")
+        : path.join(process.resourcesPath, "naver-bot/dist/tistory.js")
+    );
+    const { fetchPendingJobs, updateJob, addHistory, useQuota } = await import(
+      isDev
+        ? path.join(__dirname, "../../naver-bot/src/supabase")
+        : path.join(process.resourcesPath, "naver-bot/dist/supabase.js")
+    );
+
+    const app2 = express();
+    app2.use(cors());
+    app2.use(express.json());
+
+    const MAX_CONCURRENT = 3;
+    let running = 0;
+    const waitQueue: Array<() => void> = [];
+    const acquireSlot = (): Promise<void> => {
+      if (running < MAX_CONCURRENT) { running++; return Promise.resolve(); }
+      return new Promise(resolve => waitQueue.push(() => { running++; resolve(); }));
+    };
+    const releaseSlot = () => {
+      running--;
+      const next = waitQueue.shift();
+      if (next) next();
+    };
+
+    app2.get("/health", (_req: any, res: any) => res.json({ ok: true, running, queued: waitQueue.length }));
+
+    app2.post("/api/naver/save-session", async (req: any, res: any) => {
+      const { userId, id, pw } = req.body;
+      if (!userId || !id || !pw) return res.status(400).json({ success: false, error: "userId, id, pw 필요" });
+      try {
+        const result = await saveNaverSession(userId, id, pw);
+        res.json({ success: true, blogId: result.blogId });
+      } catch (e: any) { res.status(500).json({ success: false, error: e.message }); }
     });
-  } else {
-    // 프로덕션 모드: 빌드된 dist/server.js 실행
-    console.log("[bot] 프로덕션 모드 - node dist/server.js 로 봇 서버 시작...");
-    botProcess = spawn("node", ["dist/server.js"], {
-      cwd: botPath,
-      stdio: "pipe",
-      shell: true,
-      env: { ...process.env },
+
+    app2.post("/api/tistory/save-session", async (req: any, res: any) => {
+      const { userId, id, pw, blogName } = req.body;
+      if (!userId || !id || !pw || !blogName) return res.status(400).json({ success: false, error: "파라미터 필요" });
+      try {
+        await saveTistorySession(userId, id, pw, blogName);
+        res.json({ success: true });
+      } catch (e: any) { res.status(500).json({ success: false, error: e.message }); }
     });
+
+    app2.get("/api/session-status/:userId", (req: any, res: any) => {
+      const { userId } = req.params;
+      res.json({ naver: naverSessionExists(userId), tistory: tistorySessionExists(userId) });
+    });
+
+    app2.post("/api/publish-full", async (req: any, res: any) => {
+      const { userId, platform, title, content, tags = [] } = req.body;
+      if (!userId || !platform || !title || !content) return res.status(400).json({ error: "파라미터 필요" });
+      await acquireSlot();
+      try {
+        let postUrl = "";
+        if (platform === "naver") postUrl = await publishNaver({ userId, title, content, tags });
+        else if (platform === "tistory") postUrl = await publishTistory({ userId, title, content, tags });
+        await addHistory({ user_id: userId, platform, title, post_url: postUrl, status: "success" });
+        res.json({ success: true, postUrl });
+      } catch (e: any) {
+        await addHistory({ user_id: userId, platform, title, status: "fail", error_message: e.message });
+        res.status(500).json({ error: e.message });
+      } finally { releaseSlot(); }
+    });
+
+    let currentUserId: string | null = null;
+    app2.post("/api/register-user", (req: any, res: any) => {
+      currentUserId = req.body.userId;
+      res.json({ success: true });
+    });
+
+    // Job Queue 폴링
+    setInterval(async () => {
+      if (!currentUserId) return;
+      const jobs = await fetchPendingJobs(currentUserId);
+      for (const job of jobs) {
+        await updateJob(job.id, { status: "running" });
+        await acquireSlot();
+        try {
+          const ok = await useQuota(job.user_id);
+          if (!ok) { await updateJob(job.id, { status: "fail", error: "쿼터 초과" }); continue; }
+          let postUrl = "";
+          if (job.platform === "naver") postUrl = await publishNaver({ userId: job.user_id, title: job.title, content: job.content, tags: job.tags });
+          else if (job.platform === "tistory") postUrl = await publishTistory({ userId: job.user_id, title: job.title, content: job.content, tags: job.tags });
+          await updateJob(job.id, { status: "success", result_url: postUrl });
+          await addHistory({ user_id: job.user_id, platform: job.platform, title: job.title, post_url: postUrl, status: "success" });
+        } catch (e: any) {
+          await updateJob(job.id, { status: "fail", error: e.message });
+          await addHistory({ user_id: job.user_id, platform: job.platform, title: job.title, status: "fail", error_message: e.message });
+        } finally { releaseSlot(); }
+      }
+    }, 10000);
+
+    server = app2.listen(3333, () => console.log("[bot] 서버 시작 → http://localhost:3333"));
+    console.log("[bot] ✅ 봇 서버 Electron 내장 실행 완료");
+  } catch (e: any) {
+    console.error("[bot] 서버 시작 실패:", e.message);
   }
-
-  botProcess.stdout?.on("data", d => console.log("[bot]", d.toString().trim()));
-  botProcess.stderr?.on("data", d => {
-    const msg = d.toString().trim();
-    // ts-node-dev 컴파일 로그는 필터링
-    if (!msg.includes("[INFO]") && !msg.includes("Compilation")) {
-      console.error("[bot]", msg);
-    }
-  });
-
-  botProcess.on("exit", (code) => {
-    console.warn(`[bot] 서버 종료 (code: ${code}). 3초 후 재시작...`);
-    botProcess = null;
-    // 앱이 살아있으면 자동 재시작
-    if (!app.isQuitting) {
-      setTimeout(() => startBotServer(), 3000);
-    }
-  });
 }
 
 function createWindow() {
@@ -90,12 +152,10 @@ app.whenReady().then(async () => {
 });
 
 app.on("window-all-closed", () => {
-  app.isQuitting = true;
-  botProcess?.kill();
+  server?.close();
   if (process.platform !== "darwin") app.quit();
 });
 
-// 봇 서버 상태 확인
 ipcMain.handle("get-bot-status", async () => {
   try {
     const res = await fetch("http://localhost:3333/health", { signal: AbortSignal.timeout(2000) });
@@ -103,7 +163,6 @@ ipcMain.handle("get-bot-status", async () => {
   } catch { return "offline"; }
 });
 
-// 로그인 후 유저 등록 → 봇 서버에 userId 전달
 ipcMain.handle("register-user", async (_event, userId: string) => {
   try {
     const res = await fetch("http://localhost:3333/api/register-user", {
