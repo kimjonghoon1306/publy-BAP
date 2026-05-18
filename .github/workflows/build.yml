@@ -16,20 +16,18 @@ jobs:
         with:
           node-version: 20
 
-      # 봇 서버 빌드
       - name: Install naver-bot dependencies
         working-directory: naver-bot
         run: npm install
 
-      - name: Build naver-bot
+      - name: Bundle naver-bot (esbuild)
         working-directory: naver-bot
-        run: npx tsc
+        run: npx esbuild src/server.ts --bundle --platform=node --target=node20 --outfile=dist/server.js --external:playwright --external:fs-extra
 
       - name: Install Playwright Chromium
         working-directory: naver-bot
         run: npx playwright install chromium
 
-      # 프론트엔드 + Electron 빌드
       - name: Install app dependencies
         run: npm install
 
@@ -41,7 +39,6 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # .exe 파일 업로드
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
