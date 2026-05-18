@@ -6,19 +6,60 @@ let mainWindow: BrowserWindow | null = null;
 let botProcess: ChildProcess | null = null;
 const isDev = !app.isPackaged;
 
+// 앱 종료 플래그 (봇 재시작 루프 방지)
+declare global { namespace Electron { interface App { isQuitting: boolean; } } }
+app.isQuitting = false;
+
 async function startBotServer() {
   const botPath = isDev
     ? path.join(__dirname, "../../naver-bot")
     : path.join(process.resourcesPath, "naver-bot");
+
   try {
     const fs = await import("fs");
-    if (!fs.existsSync(path.join(botPath, "package.json"))) return;
+    if (!fs.existsSync(path.join(botPath, "package.json"))) {
+      console.error("[bot] naver-bot 폴더를 찾을 수 없습니다:", botPath);
+      return;
+    }
   } catch { return; }
-  botProcess = spawn("node", ["dist/server.js"], {
-    cwd: botPath, stdio: "pipe", shell: true, env: { ...process.env },
-  });
+
+  if (isDev) {
+    // 개발 모드: ts-node-dev 로 직접 실행 (빌드 불필요)
+    console.log("[bot] 개발 모드 - ts-node-dev 로 봇 서버 시작...");
+    botProcess = spawn("npm", ["run", "dev"], {
+      cwd: botPath,
+      stdio: "pipe",
+      shell: true,
+      env: { ...process.env, FORCE_COLOR: "0" },
+    });
+  } else {
+    // 프로덕션 모드: 빌드된 dist/server.js 실행
+    console.log("[bot] 프로덕션 모드 - node dist/server.js 로 봇 서버 시작...");
+    botProcess = spawn("node", ["dist/server.js"], {
+      cwd: botPath,
+      stdio: "pipe",
+      shell: true,
+      env: { ...process.env },
+    });
+  }
+
   botProcess.stdout?.on("data", d => console.log("[bot]", d.toString().trim()));
-  botProcess.stderr?.on("data", d => console.error("[bot]", d.toString().trim()));
+  botProcess.stderr?.on("data", d => {
+    const msg = d.toString().trim();
+    // ts-node-dev 컴파일 로그는 필터링
+    if (!msg.includes("[INFO]") && !msg.includes("Compilation")) {
+      console.error("[bot]", msg);
+    }
+  });
+
+  botProcess.on("exit", (code) => {
+    console.warn(`[bot] 서버 종료 (code: ${code}). 3초 후 재시작...`);
+    botProcess = null;
+    // 앱이 살아있으면 자동 재시작
+    if (!app.isQuitting) {
+      setTimeout(() => startBotServer(), 3000);
+    }
+  });
 }
 
 function createWindow() {
@@ -49,6 +90,7 @@ app.whenReady().then(async () => {
 });
 
 app.on("window-all-closed", () => {
+  app.isQuitting = true;
   botProcess?.kill();
   if (process.platform !== "darwin") app.quit();
 });
