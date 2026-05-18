@@ -160,7 +160,7 @@ export async function publishNaver(params: {
   const page = await context.newPage();
 
   try {
-    // 1. PostWriteForm.naver로 직접 진입 (Redirect=Write 안 씀)
+    // 1. PostWriteForm.naver로 직접 진입
     const writeUrl = `https://blog.naver.com/PostWriteForm.naver?blogId=${blogId}`;
     console.log(`[naver] 글쓰기 진입: ${writeUrl}`);
     await page.goto(writeUrl, { waitUntil: "domcontentloaded", timeout: 60000 });
@@ -170,79 +170,194 @@ export async function publishNaver(params: {
       throw new Error("네이버 세션 만료. 계정 재연결 필요");
     }
 
-    // 2. #mainFrame iframe 찾기
+    // 2. #mainFrame iframe 로드 대기 후 frame 객체 직접 획득
     console.log("[naver] mainFrame 로드 대기...");
     await page.waitForSelector("iframe#mainFrame, frame#mainFrame", { timeout: 30000 });
-    await page.waitForTimeout(3000);
-    const mainFrame = page.frameLocator("#mainFrame");
+    await page.waitForTimeout(4000);
+
+    // frameLocator 대신 frame() 직접 사용 → keyboard 이벤트 정확히 전달
+    const getFrame = () => page.frames().find(f => f.name() === "mainFrame") ?? null;
+    let frame = getFrame();
+    if (!frame) throw new Error("mainFrame을 찾을 수 없습니다");
 
     // 3. "작성 중인 글 복원" 팝업 처리
     try {
-      const popup = mainFrame.locator(".se-popup-button-cancel, button:has-text('취소')").first();
-      await popup.click({ timeout: 3000 });
-      console.log("[naver] 팝업 닫음");
+      await frame.click(".se-popup-button-cancel", { timeout: 3000 });
+      console.log("[naver] 복원 팝업 취소");
+      await page.waitForTimeout(1000);
     } catch {}
 
     // 4. 도움말 레이어 닫기
     try {
-      const help = mainFrame.locator(".se-help-panel-close-button, button[aria-label='닫기']").first();
-      if (await help.isVisible({ timeout: 1500 })) await help.click();
+      const helpVisible = await frame.isVisible(".se-help-panel-close-button");
+      if (helpVisible) await frame.click(".se-help-panel-close-button", { timeout: 2000 });
     } catch {}
 
-    // 5. 에디터 로드 대기
+    // 5. SmartEditor 4.0 로드 완료 대기
     console.log("[naver] SmartEditor 로드 대기...");
-    await mainFrame.locator(".se-section-documentTitle, .se_documentTitle").first().waitFor({ timeout: 30000 });
+    await frame.waitForSelector(".se-section-documentTitle", { timeout: 30000 });
     await page.waitForTimeout(2000);
+
+    // ── clipboard 헬퍼: execCommand 방식으로 텍스트 주입 ──────────────────
+    // SE4는 keyboard.type보다 execCommand('insertText') 가 훨씬 안정적
+    const insertText = async (selector: string, text: string) => {
+      await frame!.click(selector, { timeout: 10000 });
+      await page.waitForTimeout(400);
+      // 전체 선택 후 삽입
+      await frame!.evaluate((t) => {
+        const el = document.activeElement as HTMLElement;
+        if (el) {
+          el.focus();
+          document.execCommand("selectAll", false);
+          document.execCommand("insertText", false, t);
+        }
+      }, text);
+      await page.waitForTimeout(600);
+    };
 
     // 6. 제목 입력
     console.log("[naver] 제목 입력...");
-    const titleEl = mainFrame.locator(".se-section-documentTitle .se-text-paragraph, .se-title-text [contenteditable='true']").first();
-    await titleEl.click({ timeout: 10000 });
-    await page.waitForTimeout(500);
-    await page.keyboard.type(title, { delay: 30 });
-    await page.waitForTimeout(800);
+    // SE4 제목 영역 셀렉터 (여러 버전 대응)
+    const titleSel = [
+      ".se-section-documentTitle .se-text-paragraph span[contenteditable='true']",
+      ".se-section-documentTitle [contenteditable='true']",
+      ".se-section-documentTitle .se-text-paragraph",
+    ];
+    let titleInserted = false;
+    for (const sel of titleSel) {
+      try {
+        const el = await frame.$(sel);
+        if (el) {
+          await frame.click(sel, { timeout: 5000 });
+          await page.waitForTimeout(400);
+          await frame.evaluate((t) => {
+            document.execCommand("selectAll", false);
+            document.execCommand("insertText", false, t);
+          }, title);
+          await page.waitForTimeout(600);
+          titleInserted = true;
+          console.log(`[naver] 제목 입력 완료 (sel: ${sel})`);
+          break;
+        }
+      } catch {}
+    }
+    if (!titleInserted) {
+      // 최후 폴백: keyboard.type
+      await frame.click(".se-section-documentTitle", { timeout: 5000 });
+      await page.waitForTimeout(500);
+      await page.keyboard.type(title, { delay: 40 });
+    }
 
     // 7. 본문 입력
     console.log("[naver] 본문 입력...");
-    const bodyEl = mainFrame.locator(".se-component-content .se-text-paragraph, .se-main-container .se-text-paragraph").first();
-    await bodyEl.click({ timeout: 10000 });
-    await page.waitForTimeout(500);
-    const lines = content.split("\n");
-    for (let i = 0; i < lines.length; i++) {
-      if (lines[i]) await page.keyboard.type(lines[i], { delay: 8 });
-      if (i < lines.length - 1) {
-        await page.keyboard.press("Enter");
-        await page.waitForTimeout(50);
-      }
+    // SE4 본문 첫 단락 셀렉터
+    const bodySel = [
+      ".se-section-text .se-text-paragraph span[contenteditable='true']",
+      ".se-section-text [contenteditable='true']",
+      ".se-main-container .se-section:not(.se-section-documentTitle) [contenteditable='true']",
+      ".se-component-content [contenteditable='true']",
+    ];
+    let bodyInserted = false;
+    for (const sel of bodySel) {
+      try {
+        const el = await frame.$(sel);
+        if (el) {
+          await frame.click(sel, { timeout: 5000 });
+          await page.waitForTimeout(500);
+          // 본문은 줄바꿈 처리 필요 — 단락별로 Enter 입력
+          const lines = content.split("\n");
+          for (let i = 0; i < lines.length; i++) {
+            if (lines[i].trim()) {
+              await frame.evaluate((t) => {
+                document.execCommand("insertText", false, t);
+              }, lines[i]);
+            }
+            if (i < lines.length - 1) {
+              await page.keyboard.press("Enter");
+              await page.waitForTimeout(30);
+            }
+          }
+          bodyInserted = true;
+          console.log(`[naver] 본문 입력 완료 (sel: ${sel})`);
+          break;
+        }
+      } catch {}
     }
-    await page.waitForTimeout(800);
+    if (!bodyInserted) {
+      // 최후 폴백
+      await frame.click(".se-main-container", { timeout: 5000 }).catch(() => {});
+      await page.waitForTimeout(500);
+      await page.keyboard.type(content, { delay: 8 });
+    }
+    await page.waitForTimeout(1000);
 
-    // 8. 발행 1단계
-    console.log("[naver] 발행 버튼...");
-    const publishBtn = mainFrame.locator("button[class*='publish_btn'], button:has-text('발행')").first();
-    await publishBtn.click({ timeout: 10000 });
-    await page.waitForTimeout(2000);
+    // 8. 발행 1단계 버튼
+    console.log("[naver] 발행 버튼 클릭...");
+    const publishSel = [
+      "button.publish_btn__Y8C4q",
+      "button[class*='publish_btn']",
+      "button[data-testid='seOnePublishBtn']",
+      "button:has-text('발행')",
+    ];
+    let published = false;
+    for (const sel of publishSel) {
+      try {
+        const el = await frame.$(sel);
+        if (el) {
+          await frame.click(sel, { timeout: 5000 });
+          published = true;
+          console.log(`[naver] 발행 버튼 클릭 완료 (sel: ${sel})`);
+          break;
+        }
+      } catch {}
+    }
+    if (!published) throw new Error("발행 버튼을 찾을 수 없습니다");
+    await page.waitForTimeout(2500);
 
     // 9. 태그 입력
     if (tags.length > 0) {
       try {
-        const tagInput = mainFrame.locator("input.tag_input, input[placeholder*='태그']").first();
-        await tagInput.click({ timeout: 5000 });
-        for (const tag of tags.slice(0, 30)) {
-          await tagInput.fill(tag);
-          await page.keyboard.press("Enter");
-          await page.waitForTimeout(150);
+        const tagSel = "input.tag_input__YWKIP, input[class*='tag_input'], input[placeholder*='태그']";
+        const tagEl = await frame.$(tagSel);
+        if (tagEl) {
+          await frame.click(tagSel, { timeout: 5000 });
+          for (const tag of tags.slice(0, 30)) {
+            await frame.fill(tagSel, tag);
+            await page.keyboard.press("Enter");
+            await page.waitForTimeout(200);
+          }
+          console.log(`[naver] 태그 ${tags.length}개 입력 완료`);
+        }
+      } catch (e) {
+        console.log("[naver] 태그 입력 실패 (무시):", e);
+      }
+    }
+
+    // 10. 최종 발행 (2단계)
+    console.log("[naver] 최종 발행...");
+    const finalSel = [
+      "button.confirm_btn__xiHQQ",
+      "button[class*='confirm_btn']",
+      "button[data-testid='seOnePublishBtn']",
+    ];
+    let finalPublished = false;
+    for (const sel of finalSel) {
+      try {
+        const el = await frame.$(sel);
+        if (el) {
+          await frame.click(sel, { timeout: 8000 });
+          finalPublished = true;
+          break;
         }
       } catch {}
     }
-
-    // 10. 발행 2단계 (최종)
-    console.log("[naver] 최종 발행...");
-    try {
-      const finalBtn = mainFrame.locator("button[class*='confirm_btn'], button[data-testid='seOnePublishBtn']").first();
-      await finalBtn.click({ timeout: 10000 });
-    } catch {
-      await mainFrame.locator("button:has-text('발행')").last().click({ timeout: 10000 });
+    if (!finalPublished) {
+      // 마지막 '발행' 버튼 클릭
+      const btns = await frame.$$("button");
+      for (const btn of btns.reverse()) {
+        const txt = await btn.textContent();
+        if (txt?.includes("발행")) { await btn.click(); finalPublished = true; break; }
+      }
     }
 
     await page.waitForTimeout(5000);
