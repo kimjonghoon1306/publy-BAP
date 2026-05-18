@@ -22,7 +22,7 @@ jobs:
 
       - name: Bundle naver-bot (esbuild)
         working-directory: naver-bot
-        run: npx esbuild src/server.ts --bundle --platform=node --target=node20 --outfile=dist/server.js --external:playwright --external:fs-extra
+        run: npx esbuild src/server.ts --bundle --platform=node --target=node20 --outfile=dist/server.js --external:playwright
 
       - name: Install Playwright Chromium
         working-directory: naver-bot
