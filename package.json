@@ -48,13 +48,19 @@
         "to": "naver-bot",
         "filter": [
           "**/*",
-          "!node_modules/**",
           "!src/**"
         ]
       }
     ],
     "win": {
-      "target": [{ "target": "nsis", "arch": ["x64"] }],
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
       "icon": "public/icon.ico"
     },
     "nsis": {
