@@ -438,6 +438,8 @@ export default function DashboardPage({ user, onLogout, onAdminLogin, theme, onT
   const [genTitle,   setGenTitle]   = useState("");
   const [genContent, setGenContent] = useState("");
   const [genTags,    setGenTags]    = useState("");
+  const [genImage,   setGenImage]   = useState(""); // 생성된 이미지 URL
+  const [pubImageUrl,setPubImageUrl]= useState(""); // 발행용 이미지 URL
 
   // 계정
   const [newPlatform, setNewPlatform] = useState<"naver"|"tistory">("naver");
@@ -548,11 +550,55 @@ export default function DashboardPage({ user, onLogout, onAdminLogin, theme, onT
       if (tm)  setGenTitle(tm[1].trim());
       if (tgm) setGenTags(tgm[1].trim());
       setGenContent(bm ? bm[1].trim() : text);
+
+      // ── 이미지 생성 ──────────────────────────────────
+      const imgPromptBase = (tm ? tm[1].trim() : keyword) + " 블로그 대표 이미지, 고품질";
+      const selectedImageAI = localStorage.getItem("publy_image_ai") || "openai_img";
+      let imageUrl = "";
+
+      if (selectedImageAI === "openai_img") {
+        const key = localStorage.getItem("publy_openai_key") || "";
+        if (!key) throw new Error("이미지 생성 실패: OpenAI API 키가 없습니다. 설정에서 등록하세요.");
+        const ir = await fetch("https://api.openai.com/v1/images/generations", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "Authorization": `Bearer ${key}` },
+          body: JSON.stringify({ model: "dall-e-3", prompt: imgPromptBase, n: 1, size: "1024x1024" }),
+          signal: AbortSignal.timeout(60000),
+        });
+        if (!ir.ok) { const e = await ir.json(); throw new Error("DALL-E 오류: " + (e.error?.message || ir.status)); }
+        const id = await ir.json();
+        imageUrl = id.data?.[0]?.url || "";
+
+      } else if (selectedImageAI === "replicate") {
+        const key = localStorage.getItem("publy_replicate_key") || "";
+        if (!key) throw new Error("이미지 생성 실패: Replicate API 키가 없습니다. 설정에서 등록하세요.");
+        // 예측 시작
+        const pr = await fetch("https://api.replicate.com/v1/models/black-forest-labs/flux-schnell/predictions", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "Authorization": `Bearer ${key}` },
+          body: JSON.stringify({ input: { prompt: imgPromptBase, num_outputs: 1, aspect_ratio: "16:9" } }),
+          signal: AbortSignal.timeout(30000),
+        });
+        if (!pr.ok) { const e = await pr.json(); throw new Error("Replicate 오류: " + (e.detail || pr.status)); }
+        const pred = await pr.json();
+        // 결과 폴링
+        const pollUrl = pred.urls?.get;
+        if (!pollUrl) throw new Error("Replicate 응답 오류");
+        for (let i = 0; i < 30; i++) {
+          await new Promise(r => setTimeout(r, 2000));
+          const pollRes = await fetch(pollUrl, { headers: { "Authorization": `Bearer ${key}` } });
+          const pollData = await pollRes.json();
+          if (pollData.status === "succeeded") { imageUrl = pollData.output?.[0] || ""; break; }
+          if (pollData.status === "failed") throw new Error("Replicate 이미지 생성 실패");
+        }
+      }
+
+      if (imageUrl) setGenImage(imageUrl);
     } catch(e:any) { alert("생성 실패: " + e.message); }
     finally { setGenerating(false); }
   }
 
-  function sendToPublish() { setPubTitle(genTitle); setPubContent(genContent); setPubTags(genTags); setTab("publish"); }
+  function sendToPublish() { setPubTitle(genTitle); setPubContent(genContent); setPubTags(genTags); setPubImageUrl(genImage); setTab("publish"); }
 
   async function handleAddAccount() {
     if (!newUser||!newPw) return;
@@ -744,6 +790,18 @@ export default function DashboardPage({ user, onLogout, onAdminLogin, theme, onT
                   {/* 발행 내용 */}
                   <div className="v2-card" style={{padding:"20px 22px",marginBottom:14}}>
                     <div className="v2-section-label">📝 발행 내용</div>
+
+                    {/* 이미지 미리보기 */}
+                    {pubImageUrl && (
+                      <div style={{marginBottom:14}}>
+                        <label style={{fontSize:10,color:"var(--muted)",fontWeight:700,display:"block",marginBottom:6}}>🖼️ 발행 이미지</label>
+                        <div style={{position:"relative"}}>
+                          <img src={pubImageUrl} alt="발행 이미지" style={{width:"100%",maxHeight:200,objectFit:"cover",borderRadius:12,border:"1px solid var(--border)"}} onError={e=>{(e.target as HTMLImageElement).style.display="none"}}/>
+                          <button onClick={()=>setPubImageUrl("")} style={{position:"absolute",top:8,right:8,background:"rgba(0,0,0,.6)",border:"none",color:"#fff",borderRadius:99,width:24,height:24,cursor:"pointer",fontSize:12}}>✕</button>
+                        </div>
+                      </div>
+                    )}
+
                     <div style={{display:"flex",flexDirection:"column",gap:11}}>
                       {[
                         {l:"제목",ph:"블로그 제목...",v:pubTitle,s:setPubTitle,type:"text"},
@@ -808,6 +866,15 @@ export default function DashboardPage({ user, onLogout, onAdminLogin, theme, onT
                     <>
                       <div className="v2-card" style={{padding:"20px 22px",marginBottom:14}}>
                         <div className="v2-section-label">📄 생성 결과</div>
+
+                        {/* 이미지 미리보기 */}
+                        {genImage && (
+                          <div style={{marginBottom:14}}>
+                            <label style={{fontSize:10,color:"var(--muted)",fontWeight:700,display:"block",marginBottom:6}}>🖼️ 생성된 이미지</label>
+                            <img src={genImage} alt="생성 이미지" style={{width:"100%",maxHeight:220,objectFit:"cover",borderRadius:12,border:"1px solid var(--border)"}} onError={e=>{(e.target as HTMLImageElement).style.display="none"}}/>
+                          </div>
+                        )}
+
                         <div style={{display:"flex",flexDirection:"column",gap:11}}>
                           {[{l:"제목",v:genTitle,s:setGenTitle},{l:"태그",v:genTags,s:setGenTags}].map(f=>(
                             <div key={f.l}>
