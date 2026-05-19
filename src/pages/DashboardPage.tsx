@@ -1,5 +1,5 @@
-import { useState, useEffect, useCallback, useRef } from "react";
-import { PublyUser, getQuota, getHistory, getAccounts, PublyQuota, PublyHistory, PublyAccount, upsertAccount, useQuota, addHistory, signIn } from "../lib/supabase";
+import { useState, useEffect, useCallback } from "react";
+import { PublyUser, getQuota, getHistory, getAccounts, PublyQuota, PublyHistory, PublyAccount, upsertAccount, useQuota, addHistory } from "../lib/supabase";
 import { supabase } from "../lib/supabase";
 
 type Tab = "publish" | "write" | "accounts" | "history" | "settings";
@@ -18,6 +18,283 @@ const IMAGE_AI_LIST = [
   { id:"replicate",  label:"Flux (Replicate)",sub:"고품질 이미지",    placeholder:"r8_...", storageKey:"publy_replicate_key", link:"https://replicate.com/account/api-tokens",     color:"#8B5CF6", logo:"R" },
 ];
 
+const GEMINI_MODELS_ADM = ["gemini-2.0-flash","gemini-2.0-flash-lite","gemini-2.5-flash","gemini-2.5-flash-lite"];
+
+const TABS = [
+  { key:"publish", icon:"🚀", label:"발행하기" },
+  { key:"write",   icon:"✍️", label:"글 생성"  },
+  { key:"accounts",icon:"🔗", label:"계정 관리"},
+  { key:"history", icon:"📋", label:"발행 기록"},
+  { key:"settings",icon:"⚙️", label:"설정"    },
+] as const;
+
+const PLAN_LABELS: Record<string,string> = { free:"FREE", basic:"BASIC", pro:"PRO" };
+
+const Icons = {
+  sun:     "☀️",
+  moon:    "🌙",
+  refresh: "🔄",
+  settings:"⚙️",
+  send:    "🚀",
+  eye:     "👁️",
+  plus:    "➕",
+  mobile:  "📱",
+};
+
+function AICard({ item, selected, onClick }: { item:any; selected:boolean; onClick:()=>void }) {
+  return (
+    <button onClick={onClick} style={{
+      flex:1, padding:"12px 10px", borderRadius:14, cursor:"pointer",
+      fontFamily:"'Noto Sans KR',sans-serif", textAlign:"left",
+      border:`2px solid ${selected ? item.color : "var(--border)"}`,
+      background: selected ? `${item.color}15` : "var(--input-bg)",
+      transform: selected ? "translateY(-3px) scale(1.03)" : "none",
+      boxShadow: selected ? `0 8px 20px ${item.color}30` : "none",
+      transition:"all .22s cubic-bezier(.34,1.56,.64,1)",
+      position:"relative", overflow:"hidden",
+    }}>
+      {selected && <div style={{position:"absolute",top:0,left:0,right:0,height:2,background:`linear-gradient(90deg,transparent,${item.color},transparent)`}}/>}
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:7}}>
+        <div style={{width:26,height:26,borderRadius:7,background:selected?item.color:`${item.color}25`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,fontWeight:900,color:selected?"#000":item.color}}>{item.logo}</div>
+        {selected
+          ? <span style={{fontSize:9,fontWeight:800,padding:"2px 7px",borderRadius:99,background:item.color,color:"#000"}}>✓ 선택됨</span>
+          : <span style={{fontSize:9,fontWeight:800,padding:"2px 7px",borderRadius:99,background:item.free?"rgba(0,200,117,.12)":"rgba(245,158,11,.12)",color:item.free?"#00c875":"#f59e0b"}}>{item.free?"무료":"유료"}</span>
+        }
+      </div>
+      <div style={{fontSize:11,fontWeight:700,color:selected?item.color:"var(--text)"}}>{item.label}</div>
+      <div style={{fontSize:9,color:"var(--sub)",marginTop:2}}>{item.sub}</div>
+    </button>
+  );
+}
+
+function KeyInput({ k }: { k:any }) {
+  const [val, setVal] = useState(() => localStorage.getItem(k.storageKey) || "");
+  const [show, setShow] = useState(false);
+  const [saved, setSaved] = useState(false);
+
+  function save() {
+    if (!val.trim()) return;
+    localStorage.setItem(k.storageKey, val.trim());
+    setSaved(true);
+    setTimeout(() => setSaved(false), 2500);
+  }
+
+  return (
+    <div style={{marginBottom:10,padding:"11px 13px",borderRadius:11,border:"1px solid var(--border)",background:"var(--input-bg)"}}>
+      <div style={{display:"flex",alignItems:"center",gap:7,marginBottom:7}}>
+        <div style={{width:22,height:22,borderRadius:6,background:`${k.color}20`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:10,fontWeight:900,color:k.color}}>{k.logo}</div>
+        <span style={{fontSize:11,fontWeight:700,color:"var(--text)"}}>{k.label}</span>
+        <a href={k.link} target="_blank" rel="noopener noreferrer" style={{marginLeft:"auto",fontSize:10,color:"var(--accent)",textDecoration:"none"}}>키 발급 →</a>
+      </div>
+      <div style={{display:"flex",gap:6}}>
+        <input
+          className="inp" type={show?"text":"password"} placeholder={k.placeholder}
+          value={val} onChange={e=>setVal(e.target.value)}
+          style={{flex:1,padding:"8px 11px",fontSize:12}}
+        />
+        <button onClick={()=>setShow(s=>!s)} style={{padding:"8px 10px",borderRadius:9,border:"1px solid var(--border)",background:"var(--card)",cursor:"pointer",fontSize:11,color:"var(--sub)"}}>
+          {show?"숨김":"표시"}
+        </button>
+        <button onClick={save} style={{padding:"8px 14px",borderRadius:9,border:"none",background:saved?"#00c875":"var(--accent)",color:"#000",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:"inherit",transition:"background .2s"}}>
+          {saved?"✓":"저장"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+const CSS = `
+@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
+*{box-sizing:border-box;margin:0;padding:0;}
+@keyframes fadeUp{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
+@keyframes popIn{from{opacity:0;transform:translateX(-50%) scale(.92)}to{opacity:1;transform:translateX(-50%) scale(1)}}
+@keyframes float{0%,100%{transform:translateY(0)}50%{transform:translateY(-8px)}}
+@keyframes as{to{transform:rotate(360deg)}}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+.dash.dark{
+  --bg:#0a0e0a;--card:#111511;--card2:#181e18;--text:#e8f5e8;--sub:rgba(232,245,232,.45);
+  --border:rgba(0,255,136,.1);--border2:rgba(0,255,136,.28);--b2:rgba(0,255,136,.28);
+  --accent:#00ff88;--accent-dim:rgba(0,255,136,.08);--input-bg:rgba(0,255,136,.04);
+  --err:#ef4444;--sidebar-bg:#080c08;--header-bg:rgba(8,12,8,.94);
+}
+.dash.light{
+  --bg:#f0faf0;--card:#ffffff;--card2:#f5fbf5;--text:#0d1f0d;--sub:rgba(13,31,13,.5);
+  --border:rgba(0,150,70,.12);--border2:rgba(0,150,70,.3);--b2:rgba(0,150,70,.3);
+  --accent:#00a854;--accent-dim:rgba(0,168,84,.1);--input-bg:rgba(0,150,70,.04);
+  --err:#dc2626;--sidebar-bg:#e8f5e8;--header-bg:rgba(240,250,240,.95);
+}
+.dash{width:100vw;height:100vh;overflow:hidden;display:flex;flex-direction:column;font-family:'Noto Sans KR',sans-serif;color:var(--text);background:var(--bg);transition:background .3s,color .3s;}
+*::-webkit-scrollbar{width:4px;}*::-webkit-scrollbar-thumb{background:rgba(0,255,136,.15);border-radius:99px;}
+
+.hd{height:56px;flex-shrink:0;display:flex;align-items:center;padding:0 20px;gap:14px;background:var(--header-bg);border-bottom:1px solid var(--border);backdrop-filter:blur(20px);position:relative;z-index:30;}
+.hd-logo{display:flex;align-items:center;gap:8px;text-decoration:none;}
+.hd-logo-ico{width:30px;height:30px;border-radius:8px;background:linear-gradient(135deg,#00ff88,#00cc66);display:flex;align-items:center;justify-content:center;flex-shrink:0;}
+.hd-logo-text{font-size:16px;font-weight:900;letter-spacing:.2em;color:var(--accent);}
+.hd-center{display:flex;align-items:center;gap:10px;flex:1;justify-content:center;}
+.hd-right{margin-left:auto;display:flex;align-items:center;gap:8px;}
+
+.status-chip{display:flex;align-items:center;gap:6px;padding:5px 11px;border-radius:99px;font-size:11px;font-weight:600;border:1px solid;}
+.status-on{background:rgba(0,200,117,.1);color:#00c875;border-color:rgba(0,200,117,.3);}
+.status-off{background:rgba(120,120,120,.08);color:#888;border-color:rgba(120,120,120,.2);}
+.dot{width:7px;height:7px;border-radius:50%;flex-shrink:0;}
+.dot-on{background:#00c875;box-shadow:0 0 6px #00c875;}
+.dot-off{background:#555;}
+.quota-bar-bg{width:80px;height:5px;background:var(--border);border-radius:99px;overflow:hidden;}
+.quota-bar{height:100%;background:var(--accent);border-radius:99px;transition:width .4s;}
+.plan-chip{font-size:9px;font-weight:800;padding:3px 9px;border-radius:99px;letter-spacing:.1em;}
+.plan-free{background:rgba(120,120,120,.1);color:#888;border:1px solid rgba(120,120,120,.2);}
+.plan-basic{background:rgba(66,133,244,.1);color:#4285F4;border:1px solid rgba(66,133,244,.2);}
+.plan-pro{background:rgba(0,200,117,.1);color:#00c875;border:1px solid rgba(0,200,117,.25);}
+.ico-btn{width:34px;height:34px;border-radius:9px;cursor:pointer;font-size:14px;display:flex;align-items:center;justify-content:center;border:1px solid var(--border);background:transparent;transition:all .2s;color:var(--sub);}
+.ico-btn:hover{border-color:var(--border2);color:var(--text);background:var(--card);}
+.logout-btn{padding:7px 14px;border-radius:9px;border:1px solid var(--border);background:transparent;color:var(--sub);cursor:pointer;font-size:12px;font-weight:600;font-family:'Noto Sans KR',sans-serif;transition:all .2s;}
+.logout-btn:hover{border-color:rgba(239,68,68,.4);color:#ef4444;background:rgba(239,68,68,.06);}
+.user-chip{display:flex;align-items:center;gap:7px;padding:5px 11px;border-radius:99px;background:var(--card);border:1px solid var(--border);}
+.avatar{width:22px;height:22px;border-radius:6px;background:var(--accent-dim);border:1px solid var(--border2);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:800;color:var(--accent);}
+.user-chip>span{font-size:12px;font-weight:600;max-width:100px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+
+.body{flex:1;display:flex;overflow:hidden;}
+.sidebar{width:190px;flex-shrink:0;background:var(--sidebar-bg);border-right:1px solid var(--border);display:flex;flex-direction:column;padding:12px 9px;gap:3px;overflow-y:auto;}
+.nav-label{font-size:9px;font-weight:800;letter-spacing:.14em;text-transform:uppercase;color:var(--sub);padding:4px 8px 8px;margin-bottom:2px;}
+.nav-btn{display:flex;align-items:center;gap:9px;padding:10px 11px;border-radius:10px;border:none;cursor:pointer;width:100%;font-size:12px;font-weight:500;font-family:'Noto Sans KR',sans-serif;color:var(--sub);background:transparent;transition:all .18s;text-align:left;position:relative;}
+.nav-btn:hover{background:var(--card);color:var(--text);}
+.nav-btn.active{background:var(--accent-dim);color:var(--accent);font-weight:700;border:1px solid var(--border2);}
+.nav-btn.active::before{content:'';position:absolute;left:0;top:20%;bottom:20%;width:3px;border-radius:99px;background:var(--accent);box-shadow:0 0 8px var(--accent);}
+.nav-ico{font-size:15px;flex-shrink:0;}
+.nav-badge{margin-left:auto;font-size:9px;font-weight:800;padding:2px 6px;border-radius:99px;background:var(--accent-dim);color:var(--accent);border:1px solid var(--border2);}
+.sidebar-footer{margin-top:auto;padding-top:12px;border-top:1px solid var(--border);display:flex;flex-direction:column;gap:8px;}
+.today-card{padding:10px 13px;border-radius:11px;background:var(--card);border:1px solid var(--border);}
+.today-num{font-size:28px;font-weight:900;color:var(--text);line-height:1;}
+.today-label{font-size:9px;color:var(--sub);margin-top:3px;font-weight:600;}
+
+.main{flex:1;display:flex;overflow:hidden;}
+.center{flex:1;overflow-y:auto;padding:20px;min-width:0;}
+.right-panel{width:260px;flex-shrink:0;overflow-y:auto;padding:16px;border-left:1px solid var(--border);display:flex;flex-direction:column;gap:14px;}
+.rp-section{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:14px 15px;}
+.rp-title{font-size:10px;font-weight:800;letter-spacing:.12em;text-transform:uppercase;color:var(--sub);margin-bottom:10px;}
+
+.card{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:20px 22px;margin-bottom:14px;transition:border-color .2s;}
+.card:hover{border-color:var(--border2);}
+.section-label{font-size:10px;font-weight:800;letter-spacing:.13em;text-transform:uppercase;color:var(--sub);margin-bottom:12px;display:flex;align-items:center;gap:6px;}
+.btn-main{display:inline-flex;align-items:center;gap:7px;padding:10px 18px;border-radius:10px;border:none;background:var(--accent);color:#000;cursor:pointer;font-size:12px;font-weight:800;font-family:'Noto Sans KR',sans-serif;transition:all .2s;}
+.btn-main:hover{transform:translateY(-1px);box-shadow:0 6px 18px rgba(0,255,136,.25);}
+.btn-main:disabled{opacity:.4;cursor:not-allowed;transform:none;box-shadow:none;}
+.inp{width:100%;padding:10px 13px;border-radius:10px;border:1px solid var(--border);background:var(--input-bg);color:var(--text);font-size:13px;font-family:'Noto Sans KR',sans-serif;outline:none;transition:all .2s;}
+.inp:focus{border-color:var(--border2);box-shadow:0 0 0 3px var(--accent-dim);}
+.inp::placeholder{color:var(--sub);}
+select.inp{appearance:auto;cursor:pointer;}.dark select.inp{color-scheme:dark;}.light select.inp{color-scheme:light;}
+textarea.inp{resize:vertical;}
+.spinner{width:13px;height:13px;border-radius:50%;border:2px solid rgba(0,0,0,.15);border-top-color:#000;animation:as 1s linear infinite;display:inline-block;vertical-align:middle;}
+
+.badge{font-size:10px;font-weight:700;padding:3px 8px;border-radius:99px;}
+.badge-ok{background:rgba(0,200,117,.1);color:#00c875;border:1px solid rgba(0,200,117,.25);}
+.badge-pend{background:rgba(245,158,11,.1);color:#f59e0b;border:1px solid rgba(245,158,11,.25);}
+.badge-fail{background:rgba(239,68,68,.1);color:#ef4444;border:1px solid rgba(239,68,68,.2);}
+.plat-btn{flex:1;padding:"16px 14px";border-radius:13px;border:2px solid;cursor:pointer;text-align:left;font-family:'Noto Sans KR',sans-serif;transition:all .2s;}
+.plat-naver{border-color:#03C75A;background:rgba(3,199,90,.08);}
+.plat-tistory{border-color:#FF6B35;background:rgba(255,107,53,.08);}
+.acc-card{display:flex;align-items:center;gap:12px;padding:14px 16px;border-radius:13px;border:1.5px solid var(--border);background:var(--card);animation:fadeUp .3s ease both;transition:border-color .2s;}
+.hist-item{display:flex;align-items:center;gap:10px;padding:12px 0;border-bottom:1px solid var(--border);animation:fadeUp .3s ease both;}
+.warn-box{padding:11px 14px;border-radius:11px;font-size:12px;margin-bottom:12px;display:flex;align-items:center;gap:8px;line-height:1.5;}
+.warn-yellow{background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.2);color:#f59e0b;}
+.warn-blue{background:rgba(66,133,244,.08);border:1px solid rgba(66,133,244,.2);color:#4285F4;}
+
+.mob-bar{display:none;position:fixed;bottom:0;left:0;right:0;z-index:100;padding:8px 8px 18px;gap:3px;background:var(--header-bg);border-top:1px solid var(--border);backdrop-filter:blur(20px);}
+.mob-btn{flex:1;display:flex;flex-direction:column;align-items:center;gap:2px;padding:6px 3px;border-radius:9px;border:none;cursor:pointer;background:transparent;font-family:'Noto Sans KR',sans-serif;transition:all .18s;}
+.mob-btn.active{background:var(--accent-dim);}
+.mob-icon{font-size:19px;}
+.mob-label{font-size:9px;font-weight:600;color:var(--sub);}
+.mob-btn.active .mob-label{color:var(--accent);}
+
+@media(max-width:768px){
+  .sidebar{display:none;}
+  .right-panel{display:none;}
+  .mob-bar{display:flex;}
+  .center{padding:14px 12px 80px;}
+  .hd-center .quota-bar-bg{display:none;}
+}
+`;
+
+interface Props {
+  user: PublyUser;
+  onLogout: () => void;
+  onAdminLogin: () => void;
+  onThemeToggle: () => void;
+  theme: string;
+}
+
+export default function DashboardPage({ user, onLogout, onAdminLogin, onThemeToggle, theme }: Props) {
+  const [tab, setTab] = useState<Tab>("publish");
+  const [botOnline, setBotOnline] = useState(false);
+  const [platform, setPlatform] = useState<"naver"|"tistory">("naver");
+  const [accounts, setAccounts] = useState<PublyAccount[]>([]);
+  const [history, setHistory] = useState<PublyHistory[]>([]);
+  const [quota, setQuota] = useState<PublyQuota | null>(null);
+  const [error, setError] = useState("");
+
+  // 발행
+  const [pubTitle, setPubTitle] = useState("");
+  const [pubContent, setPubContent] = useState("");
+  const [pubTags, setPubTags] = useState("");
+  const [pubImageUrl, setPubImageUrl] = useState("");
+  const [pubAccId, setPubAccId] = useState("");
+  const [publishing, setPublishing] = useState(false);
+  const [pubMsg, setPubMsg] = useState("");
+  const [pubSub, setPubSub] = useState<"publish"|"write"|"accounts">("publish");
+
+  // 글 생성
+  const [adType, setAdType] = useState<"adpost"|"adsense">("adpost");
+  const [targetChars, setTargetChars] = useState(1350);
+  const [imgSource, setImgSource] = useState<"ai"|"upload"|"none">("ai");
+  const [imgCountManual, setImgCountManual] = useState<number|null>(null);
+  const [generatedImages, setGeneratedImages] = useState<string[]>([]);
+  const [uploadedImages, setUploadedImages] = useState<string[]>([]);
+  const [showPreview, setShowPreview] = useState(false);
+  const [keyword, setKeyword] = useState("");
+  const [generating, setGenerating] = useState(false);
+  const [genTitle, setGenTitle] = useState("");
+  const [genContent, setGenContent] = useState("");
+  const [genTags, setGenTags] = useState("");
+  const [genImage, setGenImage] = useState("");
+  const [genImgLoading, setGenImgLoading] = useState(false);
+  const [titles, setTitles] = useState<string[]>(() => {
+    try { return JSON.parse(localStorage.getItem("publy_adm_titles") || "[]"); } catch { return []; }
+  });
+  const [selectedTitle, setSelectedTitle] = useState("");
+  const [loadingTitles, setLoadingTitles] = useState(false);
+
+  // 계정 추가
+  const [newPlatform, setNewPlatform] = useState<"naver"|"tistory">("naver");
+  const [newUser, setNewUser] = useState("");
+  const [newPw, setNewPw] = useState("");
+  const [newBlog, setNewBlog] = useState("");
+  const [addingAcc, setAddingAcc] = useState(false);
+  const [connectingId, setConnectingId] = useState<string|null>(null);
+
+  // 설정
+  const [writeAI, setWriteAI] = useState(() => localStorage.getItem("publy_write_ai") || "gemini");
+  const [imageAI, setImageAI] = useState(() => localStorage.getItem("publy_image_ai") || "openai_img");
+
+  const checkBot = useCallback(async () => {
+    try {
+      const r = await fetch(`${BOT}/health`, { signal: AbortSignal.timeout(3000) });
+      setBotOnline(r.ok);
+    } catch { setBotOnline(false); }
+  }, []);
+
+  useEffect(() => {
+    checkBot();
+    getAccounts(user.id).then(setAccounts);
+    getHistory(user.id).then(setHistory);
+    getQuota(user.id).then(q => q && setQuota(q));
+    const interval = setInterval(checkBot, 30000);
+    return () => clearInterval(interval);
+  }, [checkBot, user.id]);
+
+  const quotaPct = quota ? Math.min(100, (quota.used_quota / quota.total_quota) * 100) : 0;
+  const connAccs = accounts.filter(a => a.is_connected && a.platform === platform);
+  const todayPub = history.filter(h => new Date(h.published_at).toDateString() === new Date().toDateString()).length;
 
   // ── 200+ 카테고리 한국어→영어 이미지 프롬프트 ──────────
   const KO_EN_MAP:Record<string,string>={
