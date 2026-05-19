@@ -282,6 +282,12 @@ export default function AdminPage({onBack,onDashboard,theme,onThemeToggle}:Props
   const [admAccs,setAdmAccs]=useState<PublyAccount[]>([]);
   const [pubTitle,setPubTitle]=useState("");const [pubContent,setPubContent]=useState("");const [pubTags,setPubTags]=useState("");const [pubImg,setPubImg]=useState("");const [pubAccId,setPubAccId]=useState("");const [publishing,setPublishing]=useState(false);const [pubMsg,setPubMsg]=useState("");
   const [keyword,setKeyword]=useState("");const [generating,setGenerating]=useState(false);const [genTitle,setGenTitle]=useState("");const [genContent,setGenContent]=useState("");const [genTags,setGenTags]=useState("");
+  const [titles,setTitles]=useState<string[]>(()=>{try{return JSON.parse(localStorage.getItem("publy_adm_titles")||"[]");}catch{return[];}});
+  const [selectedTitle,setSelectedTitle]=useState("");
+  const [genImage,setGenImage]=useState("");
+  const [genImgLoading,setGenImgLoading]=useState(false);
+  const [loadingTitles,setLoadingTitles]=useState(false);
+  const [pubImageUrl,setPubImageUrl]=useState("");
   const [pubSub,setPubSub]=useState<"publish"|"write"|"accounts">("publish");
   const [newPlat,setNewPlat]=useState<"naver"|"tistory">("naver");const [newUser,setNewUser]=useState("");const [newPw,setNewPw]=useState("");const [newBlog,setNewBlog]=useState("");const [addingAcc,setAddingAcc]=useState(false);const [showPw,setShowPw]=useState(false);const [connId,setConnId]=useState<string|null>(null);
   const [users,setUsers]=useState<UserFull[]>([]);const [loading,setLoading]=useState(true);const [search,setSearch]=useState("");const [selUser,setSelUser]=useState<UserFull|null>(null);
@@ -318,42 +324,108 @@ export default function AdminPage({onBack,onDashboard,theme,onThemeToggle}:Props
     catch(e:any){setPubMsg("❌ "+e.message);}finally{setPublishing(false);}
   }
 
-  async function handleGenerate(){
-    if(!keyword)return;setGenerating(true);
+  async function handleGenerateTitles(reset=false){
+    if(!keyword.trim()){alert("키워드를 입력하세요");return;}
+    if(reset)setTitles([]);
+    setLoadingTitles(true);
+    const prompt=`당신은 대한민국 최고의 네이버 블로그 SEO 제목 전문가입니다.\n키워드: "${keyword.trim()}"\n목적: 네이버 애드포스트 클릭률 극대화\n\n반드시 제목 30개를 JSON 배열로만 반환하세요.\n- 키워드 자연스럽게 포함\n- 25~45자 내외\n- 숫자 필수 (BEST 7, TOP 5 등)\n- 호기심 유발, 2026 트렌드\n\n예: ["2026년 ${keyword.trim()} BEST 7", ...]\nJSON 배열만 반환하세요.`;
     try{
-      const selectedAI=localStorage.getItem("publy_write_ai")||"gemini";
-      const prompt=`"${keyword}" 키워드로 ${platform==="naver"?"네이버 블로그":"티스토리"} 스타일 한국어 블로그 글 1500자 이상.\n형식:\n제목: (제목)\n태그: (태그1, 태그2)\n본문: (본문)`;
-      let text="";
-      if(selectedAI==="gemini"){
-        const key=localStorage.getItem("publy_gemini_key")||"";
-        if(!key)throw new Error("Gemini API 키가 없습니다");
-        const MODELS=["gemini-2.0-flash","gemini-2.0-flash-lite","gemini-2.5-flash","gemini-2.5-flash-lite"];
-        let lastErr="";
-        for(const model of MODELS){
-          try{
-            const r=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({contents:[{parts:[{text:prompt}]}],generationConfig:{maxOutputTokens:2000}}),signal:AbortSignal.timeout(30000)});
-            if(!r.ok){lastErr=`${model} 오류(${r.status})`;continue;}
-            const d=await r.json();text=d.candidates?.[0]?.content?.parts?.[0]?.text||"";
-            if(text)break;lastErr=`${model} 빈 응답`;
-          }catch(e:any){lastErr=e.message;continue;}
-        }
-        if(!text)throw new Error("Gemini 생성 실패: "+lastErr);
-      } else if(selectedAI==="groq"){
-        const key=localStorage.getItem("publy_groq_key")||"";
-        if(!key)throw new Error("Groq API 키가 없습니다");
-        const r=await fetch("https://api.groq.com/openai/v1/chat/completions",{method:"POST",headers:{"Content-Type":"application/json","Authorization":`Bearer ${key}`},body:JSON.stringify({model:"llama-3.1-70b-versatile",max_tokens:2000,messages:[{role:"user",content:prompt}]}),signal:AbortSignal.timeout(30000)});
-        if(!r.ok){const e=await r.json();throw new Error(e.error?.message||"Groq 오류");}
-        const d=await r.json();text=d.choices?.[0]?.message?.content||"";
-      } else if(selectedAI==="openai"){
-        const key=localStorage.getItem("publy_openai_key")||"";
-        if(!key)throw new Error("OpenAI API 키가 없습니다");
-        const r=await fetch("https://api.openai.com/v1/chat/completions",{method:"POST",headers:{"Content-Type":"application/json","Authorization":`Bearer ${key}`},body:JSON.stringify({model:"gpt-4o-mini",max_tokens:2000,messages:[{role:"user",content:prompt}]}),signal:AbortSignal.timeout(30000)});
-        if(!r.ok){const e=await r.json();throw new Error(e.error?.message||"OpenAI 오류");}
-        const d=await r.json();text=d.choices?.[0]?.message?.content||"";
+      const text=await callAI(prompt);
+      const parsed=parseArr(text);
+      if(!parsed.length)throw new Error("제목 파싱 실패");
+      setTitles(prev=>{
+        const combined=[...parsed,...prev];
+        if(combined.length>=90)return parsed;
+        localStorage.setItem("publy_adm_titles",JSON.stringify(combined));
+        return combined;
+      });
+    }catch(e:any){alert("제목 생성 실패: "+e.message);}
+    finally{setLoadingTitles(false);}
+  }
+
+  function parseArr(text:string):string[]{
+    const clean=text.replace(/```json|```/gi,"").trim();
+    try{const m=clean.match(/\[[\s\S]*\]/);if(m){const p=JSON.parse(m[0]);if(Array.isArray(p))return p.map(String).filter((t:string)=>t.length>3);}}catch{}
+    try{const p=JSON.parse(clean);if(Array.isArray(p))return p.map(String).filter((t:string)=>t.length>3);}catch{}
+    return clean.split("\n").map((l:string)=>l.replace(/^[\d]+[).\s]+|^[-*•\s]+/,"").replace(/^[\s"']+|[\s"']+$/g,"").trim()).filter((l:string)=>l.length>4&&l.length<100);
+  }
+
+  async function callAI(prompt:string):Promise<string>{
+    const ai=localStorage.getItem("publy_write_ai")||"gemini";
+    if(ai==="gemini"){
+      const key=localStorage.getItem("publy_gemini_key")||"";
+      if(!key)throw new Error("Gemini API 키 없음");
+      for(const model of GEMINI_MODELS_ADM){
+        try{const r=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({contents:[{parts:[{text:prompt}]}],generationConfig:{maxOutputTokens:4000}}),signal:AbortSignal.timeout(30000)});if(!r.ok)continue;const d=await r.json();const t=d.candidates?.[0]?.content?.parts?.[0]?.text||"";if(t)return t;}catch{continue;}
       }
-      const tm=text.match(/제목[:\s]*([^\n]+)/);const tgm=text.match(/태그[:\s]*([^\n]+)/);const bm=text.match(/본문[:\s]*([\s\S]+)/);
-      if(tm)setGenTitle(tm[1].trim());if(tgm)setGenTags(tgm[1].trim());setGenContent(bm?bm[1].trim():text);
-    }catch(e:any){alert("생성 실패: "+e.message);}finally{setGenerating(false);}
+      throw new Error("Gemini 실패");
+    }
+    if(ai==="groq"){
+      const key=localStorage.getItem("publy_groq_key")||"";
+      if(!key)throw new Error("Groq API 키 없음");
+      const r=await fetch("https://api.groq.com/openai/v1/chat/completions",{method:"POST",headers:{"Content-Type":"application/json","Authorization":`Bearer ${key}`},body:JSON.stringify({model:"llama-3.1-70b-versatile",max_tokens:4000,messages:[{role:"user",content:prompt}]}),signal:AbortSignal.timeout(30000)});
+      if(!r.ok){const e=await r.json();throw new Error(e.error?.message||"Groq 오류");}
+      const d=await r.json();return d.choices?.[0]?.message?.content||"";
+    }
+    if(ai==="openai"){
+      const key=localStorage.getItem("publy_openai_key")||"";
+      if(!key)throw new Error("OpenAI API 키 없음");
+      const r=await fetch("https://api.openai.com/v1/chat/completions",{method:"POST",headers:{"Content-Type":"application/json","Authorization":`Bearer ${key}`},body:JSON.stringify({model:"gpt-4o-mini",max_tokens:4000,messages:[{role:"user",content:prompt}]}),signal:AbortSignal.timeout(30000)});
+      if(!r.ok){const e=await r.json();throw new Error(e.error?.message||"OpenAI 오류");}
+      const d=await r.json();return d.choices?.[0]?.message?.content||"";
+    }
+    throw new Error("AI 미선택");
+  }
+
+  async function generateImage(prompt:string):Promise<string>{
+    const ai=localStorage.getItem("publy_image_ai")||"openai_img";
+    if(ai==="openai_img"){
+      const key=localStorage.getItem("publy_openai_key")||"";
+      if(!key)throw new Error("OpenAI 키 없음");
+      const r=await fetch("https://api.openai.com/v1/images/generations",{method:"POST",headers:{"Content-Type":"application/json","Authorization":`Bearer ${key}`},body:JSON.stringify({model:"dall-e-3",prompt,n:1,size:"1024x1024"}),signal:AbortSignal.timeout(60000)});
+      if(!r.ok){const e=await r.json();throw new Error("DALL-E: "+(e.error?.message||r.status));}
+      const d=await r.json();return d.data?.[0]?.url||"";
+    }
+    if(ai==="replicate"){
+      const key=localStorage.getItem("publy_replicate_key")||"";
+      if(!key)throw new Error("Replicate 키 없음");
+      const pr=await fetch("https://api.replicate.com/v1/models/black-forest-labs/flux-schnell/predictions",{method:"POST",headers:{"Content-Type":"application/json","Authorization":`Bearer ${key}`},body:JSON.stringify({input:{prompt,num_outputs:1,aspect_ratio:"16:9"}}),signal:AbortSignal.timeout(30000)});
+      if(!pr.ok){const e=await pr.json();throw new Error("Replicate: "+(e.detail||pr.status));}
+      const pred=await pr.json();
+      const pollUrl=pred.urls?.get;
+      if(!pollUrl)throw new Error("Replicate 응답 오류");
+      for(let i=0;i<30;i++){
+        await new Promise(r=>setTimeout(r,2000));
+        const res=await fetch(pollUrl,{headers:{"Authorization":`Bearer ${key}`}});
+        const data=await res.json();
+        if(data.status==="succeeded")return data.output?.[0]||"";
+        if(data.status==="failed")throw new Error("Replicate 실패");
+      }
+      throw new Error("Replicate 타임아웃");
+    }
+    throw new Error("이미지 AI 미선택");
+  }
+
+  async function handleGenerate(){
+    if(!selectedTitle&&!keyword)return;
+    const title=selectedTitle||keyword;
+    setGenerating(true);setGenImage("");
+    try{
+      const contentPrompt=`당신은 대한민국 최고의 네이버 블로그 작가입니다.\n키워드: "${keyword}"\n제목: "${title}"\n목적: 네이버 애드포스트 클릭률 극대화\n\n형식:\n태그: (태그1, 태그2, 태그3, 태그4, 태그5)\n본문: (2000자 이상, 소제목 포함, 실용적 정보 위주)`;
+      const text=await callAI(contentPrompt);
+      const tgm=text.match(/태그[:\s]*([^\n]+)/);const bm=text.match(/본문[:\s]*([\s\S]+)/);
+      setGenTitle(title);
+      if(tgm)setGenTags(tgm[1].trim());
+      setGenContent(bm?bm[1].trim():text);
+    }catch(e:any){alert("본문 생성 실패: "+e.message);setGenerating(false);return;}
+    finally{setGenerating(false);}
+    // 이미지 생성
+    setGenImgLoading(true);
+    try{
+      const url=await generateImage(`${title} 블로그 대표 이미지, 고품질, 깔끔한 디자인`);
+      setGenImage(url);
+    }catch(e:any){alert("이미지 생성 실패: "+e.message);}
+    finally{setGenImgLoading(false);}
   }
 
   async function handleAddAcc(){if(!newUser||!newPw)return;setAddingAcc(true);try{await upsertAccount({user_id:ADM_UID,platform:newPlat,username:newUser,password_encrypted:btoa(newPw),blog_name:newBlog||undefined,is_connected:false});getAccounts(ADM_UID).then(setAdmAccs);setNewUser("");setNewPw("");setNewBlog("");}catch(e:any){alert(e.message);}finally{setAddingAcc(false);}}
@@ -582,8 +654,17 @@ export default function AdminPage({onBack,onDashboard,theme,onThemeToggle}:Props
                     </div>
                     <div className="acd" style={{padding:"16px 18px",marginBottom:11}}>
                       <div className="asl2">📝 발행 내용</div>
+                      {pubImageUrl&&(
+                        <div style={{marginBottom:12}}>
+                          <label style={{fontSize:9,color:"var(--m)",fontWeight:700,display:"block",marginBottom:5,textTransform:"uppercase"}}>🖼️ 발행 이미지</label>
+                          <div style={{position:"relative"}}>
+                            <img src={pubImageUrl} alt="" style={{width:"100%",maxHeight:180,objectFit:"cover",borderRadius:10,border:"1px solid var(--b)"}} onError={e=>{(e.target as HTMLImageElement).style.display="none";}}/>
+                            <button onClick={()=>setPubImageUrl("")} style={{position:"absolute",top:6,right:6,background:"rgba(0,0,0,.6)",border:"none",color:"#fff",borderRadius:99,width:24,height:24,cursor:"pointer",fontSize:13}}>✕</button>
+                          </div>
+                        </div>
+                      )}
                       <div style={{display:"flex",flexDirection:"column",gap:9}}>
-                        {[{l:"제목",v:pubTitle,s:setPubTitle,ph:"제목..."},{l:"이미지 프롬프트(선택)",v:pubImg,s:setPubImg,ph:"예: 맛있는 한식"},{l:"태그",v:pubTags,s:setPubTags,ph:"태그1, 태그2"}].map(f=>(
+                        {[{l:"제목",v:pubTitle,s:setPubTitle,ph:"제목..."},{l:"태그",v:pubTags,s:setPubTags,ph:"태그1, 태그2"}].map(f=>(
                           <div key={f.l}><label style={{fontSize:9,color:"var(--m)",fontWeight:700,display:"block",marginBottom:3,textTransform:"uppercase"}}>{f.l}</label><input className="ainp" style={{width:"100%",padding:"10px 12px",fontSize:13}} placeholder={f.ph} value={f.v} onChange={e=>f.s(e.target.value)}/></div>
                         ))}
                         <div><label style={{fontSize:9,color:"var(--m)",fontWeight:700,display:"block",marginBottom:3,textTransform:"uppercase"}}>본문</label><textarea className="ainp" rows={7} style={{width:"100%",padding:"10px 12px",fontSize:13,resize:"vertical"}} value={pubContent} onChange={e=>setPubContent(e.target.value)}/></div>
@@ -598,23 +679,68 @@ export default function AdminPage({onBack,onDashboard,theme,onThemeToggle}:Props
 
                 {pubSub==="write"&&(
                   <div>
+                    {/* 키워드 + 제목 추천 */}
                     <div className="acd" style={{padding:"16px 18px",marginBottom:11}}>
-                      <div className="asl2">✨ AI 글 생성</div>
+                      <div className="asl2">🔍 키워드 입력</div>
                       <div style={{display:"grid",gridTemplateColumns:"1fr 100px",gap:9,marginBottom:10}}>
-                        <div><label style={{fontSize:9,color:"var(--m)",fontWeight:700,display:"block",marginBottom:3}}>키워드</label><input className="ainp" style={{width:"100%",padding:"10px 12px",fontSize:13}} placeholder="예: 강남 맛집" value={keyword} onChange={e=>setKeyword(e.target.value)} onKeyDown={e=>e.key==="Enter"&&handleGenerate()}/></div>
+                        <div><label style={{fontSize:9,color:"var(--m)",fontWeight:700,display:"block",marginBottom:3}}>키워드</label><input className="ainp" style={{width:"100%",padding:"10px 12px",fontSize:13}} placeholder="예: 강남 맛집" value={keyword} onChange={e=>setKeyword(e.target.value)} onKeyDown={e=>e.key==="Enter"&&handleGenerateTitles(true)}/></div>
                         <div><label style={{fontSize:9,color:"var(--m)",fontWeight:700,display:"block",marginBottom:3}}>플랫폼</label><select className="ainp" style={{width:"100%",padding:"10px 12px"}} value={platform} onChange={e=>setPlatform(e.target.value as any)}><option value="naver">네이버</option><option value="tistory">티스토리</option></select></div>
                       </div>
-                      <button className="abp" onClick={handleGenerate} disabled={generating||!keyword}>{generating?<><span className="asp2"/>생성 중...</>:<>✨ 글 생성</>}</button>
+                      <div style={{display:"flex",gap:8}}>
+                        <button className="abp" onClick={()=>handleGenerateTitles(true)} disabled={loadingTitles||!keyword}>{loadingTitles?<><span className="asp2"/>생성 중...</>:<>⭐ 제목 30개 추천</>}</button>
+                        {titles.length>0&&<button className="abp" style={{background:"rgba(99,102,241,.15)",color:"#6366f1",border:"1px solid rgba(99,102,241,.3)"}} onClick={()=>handleGenerateTitles(false)} disabled={loadingTitles}>{titles.length>=90?"초기화 후 재생성":"30개 추가"}</button>}
+                        {titles.length>0&&<button onClick={()=>{setTitles([]);setSelectedTitle("");localStorage.removeItem("publy_adm_titles");}} style={{padding:"8px 12px",borderRadius:9,border:"1px solid rgba(239,68,68,.3)",background:"rgba(239,68,68,.08)",color:"#ef4444",cursor:"pointer",fontSize:11,fontWeight:700}}>초기화</button>}
+                      </div>
+                      {titles.length>0&&<div style={{marginTop:8,fontSize:10,color:"var(--m)",display:"flex",alignItems:"center",gap:6}}><div style={{flex:1,height:4,background:"var(--b)",borderRadius:99,overflow:"hidden"}}><div style={{height:"100%",width:`${(titles.length/90)*100}%`,background:titles.length>=90?"#ef4444":"var(--a)",borderRadius:99}}/></div>{titles.length}/90{titles.length>=90?" — 초기화 후 재생성":""}</div>}
                     </div>
-                    {genContent&&(<>
+
+                    {/* 제목 목록 */}
+                    {titles.length>0&&(
                       <div className="acd" style={{padding:"16px 18px",marginBottom:11}}>
-                        <div className="asl2">📄 생성 결과</div>
-                        <div style={{display:"flex",flexDirection:"column",gap:9}}>
-                          {[{l:"제목",v:genTitle,s:setGenTitle},{l:"태그",v:genTags,s:setGenTags}].map(f=>(<div key={f.l}><label style={{fontSize:9,color:"var(--m)",fontWeight:700,display:"block",marginBottom:3}}>{f.l}</label><input className="ainp" style={{width:"100%",padding:"10px 12px",fontSize:13}} value={f.v} onChange={e=>f.s(e.target.value)}/></div>))}
-                          <div><label style={{fontSize:9,color:"var(--m)",fontWeight:700,display:"block",marginBottom:3}}>본문</label><textarea className="ainp" rows={10} style={{width:"100%",padding:"10px 12px",fontSize:13,resize:"vertical"}} value={genContent} onChange={e=>setGenContent(e.target.value)}/></div>
+                        <div className="asl2">✨ 제목 선택 (클릭하세요)</div>
+                        {selectedTitle&&<div style={{padding:"9px 12px",borderRadius:9,background:"var(--ad)",border:"1px solid var(--b2)",marginBottom:10,fontSize:12,fontWeight:700,color:"var(--a)"}}>✅ {selectedTitle}</div>}
+                        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(260px,1fr))",gap:8,maxHeight:360,overflowY:"auto"}}>
+                          {titles.map((t,i)=>(
+                            <button key={`${t}-${i}`} onClick={()=>setSelectedTitle(t)} style={{padding:"11px 13px",borderRadius:11,border:`1.5px solid ${selectedTitle===t?"var(--a)":"var(--b)"}`,background:selectedTitle===t?"var(--ad)":"var(--ib)",cursor:"pointer",textAlign:"left",fontFamily:"inherit",transition:"all .15s",position:"relative"}}>
+                              <div style={{fontSize:9,color:"var(--m)",marginBottom:4,fontFamily:"monospace"}}>#{titles.length-i}</div>
+                              <div style={{fontSize:12,fontWeight:600,color:selectedTitle===t?"var(--a)":"var(--tx)",lineHeight:1.5}}>{t}</div>
+                              {selectedTitle===t&&<div style={{position:"absolute",top:8,right:8,width:18,height:18,borderRadius:"50%",background:"var(--a)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:10,color:"#000",fontWeight:900}}>✓</div>}
+                            </button>
+                          ))}
                         </div>
                       </div>
-                      <button className="abp" style={{width:"100%",justifyContent:"center",padding:"12px"}} onClick={()=>{setPubTitle(genTitle);setPubContent(genContent);setPubTags(genTags);setPubSub("publish");}}>🚀 발행하기로 넘기기</button>
+                    )}
+
+                    {/* 본문 생성 버튼 */}
+                    {(selectedTitle||keyword)&&(
+                      <div className="acd" style={{padding:"16px 18px",marginBottom:11}}>
+                        <div className="asl2">📝 본문 + 이미지 생성</div>
+                        {selectedTitle&&<div style={{padding:"9px 12px",borderRadius:9,background:"var(--ib)",marginBottom:10,fontSize:12,color:"var(--m)"}}>선택된 제목: <strong style={{color:"var(--tx)"}}>{selectedTitle}</strong></div>}
+                        <button className="abp" onClick={handleGenerate} disabled={generating}>{generating?<><span className="asp2"/>AI 작성 중...</>:<>✍️ 본문 + 이미지 생성</>}</button>
+                      </div>
+                    )}
+
+                    {/* 생성 결과 */}
+                    {genContent&&(<>
+                      <div className="acd" style={{padding:"16px 18px",marginBottom:11}}>
+                        <div className="asl2">🎨 생성 결과</div>
+                        {/* 이미지 */}
+                        <div style={{marginBottom:12}}>
+                          <label style={{fontSize:9,color:"var(--m)",fontWeight:700,display:"block",marginBottom:6,textTransform:"uppercase"}}>🖼️ 생성된 이미지</label>
+                          {genImgLoading?(
+                            <div style={{width:"100%",height:180,borderRadius:10,background:"linear-gradient(90deg,var(--ib) 25%,var(--b) 50%,var(--ib) 75%)",backgroundSize:"200% 100%",animation:"as 1.5s infinite"}}/>
+                          ):genImage?(
+                            <img src={genImage} alt="" style={{width:"100%",maxHeight:200,objectFit:"cover",borderRadius:10,border:"1px solid var(--b)"}} onError={e=>{(e.target as HTMLImageElement).style.display="none";}}/>
+                          ):(
+                            <div style={{padding:"16px",textAlign:"center",border:"1px dashed var(--b)",borderRadius:10,color:"var(--m)",fontSize:11}}>이미지 AI 키를 설정에서 등록하면 자동 생성됩니다</div>
+                          )}
+                        </div>
+                        <div style={{display:"flex",flexDirection:"column",gap:9}}>
+                          {[{l:"제목",v:genTitle,s:setGenTitle},{l:"태그",v:genTags,s:setGenTags}].map(f=>(<div key={f.l}><label style={{fontSize:9,color:"var(--m)",fontWeight:700,display:"block",marginBottom:3}}>{f.l}</label><input className="ainp" style={{width:"100%",padding:"10px 12px",fontSize:13}} value={f.v} onChange={e=>f.s(e.target.value)}/></div>))}
+                          <div><label style={{fontSize:9,color:"var(--m)",fontWeight:700,display:"block",marginBottom:3}}>본문 ({genContent.length.toLocaleString()}자)</label><textarea className="ainp" rows={10} style={{width:"100%",padding:"10px 12px",fontSize:13,resize:"vertical"}} value={genContent} onChange={e=>setGenContent(e.target.value)}/></div>
+                        </div>
+                      </div>
+                      <button className="abp" style={{width:"100%",justifyContent:"center",padding:"12px"}} onClick={()=>{setPubTitle(genTitle);setPubContent(genContent);setPubTags(genTags);setPubImageUrl(genImage);setPubSub("publish");}}>🚀 발행하기로 넘기기</button>
                     </>)}
                   </div>
                 )}
