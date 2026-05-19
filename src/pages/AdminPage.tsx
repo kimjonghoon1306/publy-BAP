@@ -281,6 +281,14 @@ export default function AdminPage({onBack,onDashboard,theme,onThemeToggle}:Props
   const [platform,setPlatform]=useState<"naver"|"tistory">("naver");
   const [admAccs,setAdmAccs]=useState<PublyAccount[]>([]);
   const [pubTitle,setPubTitle]=useState("");const [pubContent,setPubContent]=useState("");const [pubTags,setPubTags]=useState("");const [pubImg,setPubImg]=useState("");const [pubAccId,setPubAccId]=useState("");const [publishing,setPublishing]=useState(false);const [pubMsg,setPubMsg]=useState("");
+  const [adType,setAdType]=useState<"adpost"|"adsense">("adpost");
+  const [targetChars,setTargetChars]=useState(1350);
+  const [imgSource,setImgSource]=useState<"ai"|"upload"|"none">("ai"); // 이미지 소스
+  const [imgCountManual,setImgCountManual]=useState<number|null>(null); // null=자동
+  const [generatedImages,setGeneratedImages]=useState<string[]>([]); // AI 생성 이미지들
+  const [uploadedImages,setUploadedImages]=useState<string[]>([]); // 업로드 이미지들
+  const [showPreview,setShowPreview]=useState(false); // 미리보기 모달
+  const [pubImageUrl,setPubImageUrl]=useState("");
   const [keyword,setKeyword]=useState("");const [generating,setGenerating]=useState(false);const [genTitle,setGenTitle]=useState("");const [genContent,setGenContent]=useState("");const [genTags,setGenTags]=useState("");
   const [titles,setTitles]=useState<string[]>(()=>{try{return JSON.parse(localStorage.getItem("publy_adm_titles")||"[]");}catch{return[];}});
   const [selectedTitle,setSelectedTitle]=useState("");
@@ -324,23 +332,56 @@ export default function AdminPage({onBack,onDashboard,theme,onThemeToggle}:Props
     catch(e:any){setPubMsg("❌ "+e.message);}finally{setPublishing(false);}
   }
 
-  async function handleGenerateTitles(reset=false){
-    if(!keyword.trim()){alert("키워드를 입력하세요");return;}
-    if(reset)setTitles([]);
-    setLoadingTitles(true);
-    const prompt=`당신은 대한민국 최고의 네이버 블로그 SEO 제목 전문가입니다.\n키워드: "${keyword.trim()}"\n목적: 네이버 애드포스트 클릭률 극대화\n\n반드시 제목 30개를 JSON 배열로만 반환하세요.\n- 키워드 자연스럽게 포함\n- 25~45자 내외\n- 숫자 필수 (BEST 7, TOP 5 등)\n- 호기심 유발, 2026 트렌드\n\n예: ["2026년 ${keyword.trim()} BEST 7", ...]\nJSON 배열만 반환하세요.`;
-    try{
-      const text=await callAI(prompt);
-      const parsed=parseArr(text);
-      if(!parsed.length)throw new Error("제목 파싱 실패");
-      setTitles(prev=>{
-        const combined=[...parsed,...prev];
-        if(combined.length>=90)return parsed;
-        localStorage.setItem("publy_adm_titles",JSON.stringify(combined));
-        return combined;
-      });
-    }catch(e:any){alert("제목 생성 실패: "+e.message);}
-    finally{setLoadingTitles(false);}
+  // ── 200+ 카테고리 한국어→영어 이미지 프롬프트 ──────────
+  const KO_EN_MAP:Record<string,string>={
+    맛집:"delicious gourmet food beautiful plating restaurant warm lighting",음식:"delicious food dish beautiful presentation",요리:"cooking fresh ingredients cutting board kitchen herbs",카페:"cozy cafe coffee interior warm ambient pastry",커피:"coffee latte art ceramic cup morning steam",치킨:"crispy golden fried chicken korean food plate",피자:"pizza melted cheese fresh toppings italian",라면:"ramen noodle bowl hot steam broth toppings",삼겹살:"korean bbq pork belly grill sizzling smoke",회:"fresh sashimi seafood colorful plate ice",초밥:"sushi japanese fresh fish rice plate",파스타:"pasta italian tomato sauce herbs",브런치:"brunch cafe food table morning avocado eggs",스테이크:"steak beef grill plate fine dining",햄버거:"burger gourmet bun vegetables sauce",샐러드:"healthy salad fresh colorful vegetables bowl",케이크:"celebration cake dessert beautiful cream",빵:"fresh artisan bread bakery golden",디저트:"dessert sweet pastry cream fruit plate",마카롱:"macarons colorful french pastry",타르트:"tart pastry fruit cream elegant",아이스크림:"ice cream scoop colorful cone summer",도넛:"donuts glazed colorful sweet bakery",떡볶이:"tteokbokki korean street food red spicy rice cake",김밥:"kimbap seaweed rice roll colorful cross section",비빔밥:"bibimbap korean mixed rice bowl vegetables egg",냉면:"naengmyeon korean cold noodle bowl ice",갈비:"kalbi korean grilled ribs bbq",불고기:"bulgogi korean marinated beef grill sesame",된장찌개:"doenjang jjigae soybean paste stew clay pot",김치찌개:"kimchi jjigae stew pork red broth",해물:"seafood fresh shellfish shrimp crab",와인:"wine glass elegant bottle vineyard",맥주:"beer mug cold refreshing foam glass",막걸리:"korean rice wine makgeolli bottle cup",소주:"korean soju drink glass bottle",칵테일:"cocktail bar colorful garnish glass",초콜릿:"chocolate dark sweet confectionery",
+    여행:"scenic travel destination beautiful landscape golden hour",관광:"tourism famous landmark architecture",해외여행:"international travel airplane passport suitcase",국내여행:"domestic korea scenic nature mountains",제주도:"jeju island volcanic landscape ocean cliffs",서울:"seoul city skyline namsan night view",부산:"busan haeundae beach ocean cliff bridge",강원도:"gangwon mountains forest nature snow",경주:"gyeongju historic temple bulguksa pagoda",전주:"jeonju hanok village traditional architecture",여수:"yeosu ocean night view bridge seafood",속초:"sokcho beach seoraksan mountains",춘천:"chuncheon lake mountain nature",강릉:"gangneung east sea beach coffee",통영:"tongyeong ocean cable car island",거제:"geoje island ocean cliff",남해:"namhae ocean blue village",담양:"damyang bamboo forest green",순천:"suncheon bay wetland sunset",일본:"tokyo japan shibuya neon cherry blossom",태국:"thailand bangkok temple tropical",베트남:"vietnam hoi an lanterns traditional street",발리:"bali indonesia temple rice terrace sunset",유럽:"europe historic architecture cobblestone",파리:"paris eiffel tower seine river sunset",호텔:"luxury hotel room interior elegant bed",숙소:"cozy accommodation room interior",펜션:"pension guesthouse countryside cozy",캠핑:"camping tent campfire stars nature",글램핑:"glamping luxury tent outdoor fairy lights",리조트:"resort pool tropical luxury",
+    건강:"health wellness vitamins natural herbs",다이어트:"diet healthy food vegetables scale",운동:"exercise gym equipment weights fitness",헬스:"gym fitness dumbbells machines",요가:"yoga mat meditation calm nature",필라테스:"pilates reformer equipment studio",수영:"swimming pool water lane",달리기:"running shoes road park sunrise",등산:"hiking trail mountain forest backpack",뷰티:"beauty cosmetics makeup products palette",피부:"skincare serum cream bottle routine",헤어:"hair care shampoo salon tools",메이크업:"makeup brush palette foundation lipstick",스킨케어:"skincare products bottles cream serum",탈모:"hair treatment scalp care natural",영양제:"supplements vitamins capsules bottles",프로틴:"protein powder shaker gym",콜라겐:"collagen supplement beauty skin",비타민:"vitamin supplements colorful capsule",의료:"medical healthcare equipment sterile",병원:"hospital building professional clean",치과:"dental clinic teeth care",피부과:"dermatology clinic skincare treatment",
+    재테크:"investment finance coins growth chart piggy bank",주식:"stock market chart trading graph trend",코인:"cryptocurrency bitcoin gold coin digital",비트코인:"bitcoin gold digital network circuit",ETF:"etf investment fund chart portfolio",부업:"side job laptop home office freelance",N잡:"multiple income laptop freelance gig",절약:"saving money coins jar budget planner",대출:"loan bank document contract pen",보험:"insurance document umbrella protection",청약:"apartment application document form",세금:"tax document calculator accounting",연말정산:"tax return document form calculator",
+    부동산:"real estate property house document keys",아파트:"apartment building modern exterior",빌라:"villa house residential exterior garden",오피스텔:"officetel modern apartment interior",원룸:"studio apartment interior minimal",전세:"lease contract document keys",월세:"rental apartment document keys",분양:"new apartment construction modern",인테리어:"interior design modern minimalist furniture",리모델링:"home renovation interior before after",이사:"moving boxes cardboard tape packing",청소:"cleaning supplies spray bottle mop",정리:"organizing storage shelf neat minimal",
+    IT:"technology digital computer code screen",AI:"artificial intelligence circuit board network",인공지능:"ai robot technology digital future",챗GPT:"chatgpt ai interface laptop",앱:"mobile app smartphone screen",스마트폰:"smartphone modern screen technology",노트북:"laptop computer desk workspace",코딩:"coding programming dark screen code",개발:"software development laptop code monitor",유튜브:"youtube studio camera ring light equipment",인스타그램:"instagram phone screen social media",블로그:"blog writing laptop cafe keyboard",게임:"gaming setup controller rgb monitor",드론:"drone aerial photography sky",스마트홈:"smart home device speaker automation",
+    교육:"education books desk study knowledge",공부:"study books notebook pencil desk lamp",수능:"exam books pencil study desk",영어:"english learning books dictionary study",자격증:"certificate diploma achievement document",취업:"job resume briefcase professional laptop",이직:"career change resume laptop",면접:"interview professional suit document",독서:"reading book cozy armchair lamp",자기계발:"self development books journal planner",
+    육아:"baby toys nursery soft colors stroller",아이:"children toys colorful playground",임신:"maternity baby items nursery soft",결혼:"wedding flowers venue decoration setup",웨딩:"wedding dress flowers bouquet ceremony",가족:"family gathering home table food",
+    자동차:"car automobile road modern exterior",중고차:"used car dealership lot",전기차:"electric vehicle charging station modern",오토바이:"motorcycle bike road exterior",
+    강아지:"cute puppy dog playing toy home",고양이:"cute cat kitten indoor cozy",반려동물:"pet companion home toys food bowl",토끼:"rabbit bunny cute fluffy indoor",
+    패션:"fashion clothing outfit display stylish",쇼핑:"shopping retail store display bags",명품:"luxury brand handbag elegant display",신발:"shoes sneakers display clean",가방:"bag handbag leather elegant display",
+    창업:"startup business office desk strategy",사업:"business meeting office professional",마케팅:"marketing strategy digital chart",프리랜서:"freelancer laptop home office coffee",유튜버:"youtube creator studio camera equipment",
+    정부지원:"government document official stamp desk",지원금:"financial support money document",복지:"welfare care service document",
+    자연:"nature landscape mountains forest scenic",꽃:"flowers colorful bloom garden spring",바다:"ocean sea waves sunset landscape",숲:"forest trees green peaceful path",산:"mountain peak scenic trail",봄:"spring cherry blossom bloom",여름:"summer beach ocean sunshine",가을:"autumn fall leaves colorful",겨울:"winter snow cold white landscape",
+    골프:"golf course green club equipment",낚시:"fishing rod lake nature water",음악:"music instrument guitar piano",그림:"painting canvas brush art studio",사진:"photography camera lens equipment dslr",영화:"cinema popcorn screen ticket",
+    명상:"meditation candle calm peaceful nature",힐링:"healing spa nature calm peaceful",스트레스:"stress relief tea candle calm",크리스마스:"christmas tree lights snow decoration",
+    주방용품:"kitchen utensils cookware modern",가전제품:"home appliances refrigerator",생활용품:"household daily products containers",침구:"bedding pillow blanket cozy bedroom",가구:"furniture modern sofa desk chair",
+    한우:"korean wagyu beef premium",굴비:"dried fish korean traditional",농산물:"farm produce vegetables harvest",수산물:"seafood fresh fish market",유기농:"organic farm natural produce",
+    쿠팡:"ecommerce online shopping laptop",스마트스토어:"smart store ecommerce product",도매:"wholesale warehouse products boxes",
+    법률:"law books gavel document professional",세무:"tax accounting calculator document",노무:"labor law document office",
+    환경:"environment green nature eco",친환경:"eco friendly green natural organic",태양광:"solar panels rooftop renewable energy",
+  };
+
+  function buildImagePrompt(kw:string):string{
+    const k=kw.trim();
+    const NP="no people, no person, no face, no portrait, no human";
+    const adB=adType==="adpost"
+      ?"Korean lifestyle blog warm emotional photography, natural lighting, authentic"
+      :"ultra realistic DSLR, editorial blog photo, 8K, magazine quality, natural lighting";
+    const sorted=Object.keys(KO_EN_MAP).sort((a,b)=>b.length-a.length);
+    for(const ko of sorted){if(k.includes(ko))return `${KO_EN_MAP[ko]}, ${NP}, ${adB}`;}
+    if(/맛집|음식|카페|식당|요리|먹/.test(k))return `delicious korean food restaurant beautiful, ${NP}, ${adB}`;
+    if(/여행|관광|호텔|숙소|비행기/.test(k))return `scenic travel destination golden hour, ${NP}, ${adB}`;
+    if(/건강|운동|다이어트|헬스|요가/.test(k))return `health fitness wellness natural, ${NP}, ${adB}`;
+    if(/주식|코인|재테크|투자|금융/.test(k))return `investment finance growth chart, ${NP}, ${adB}`;
+    if(/부동산|아파트|전세|인테리어/.test(k))return `modern apartment real estate interior, ${NP}, ${adB}`;
+    if(/뷰티|피부|메이크업|스킨케어/.test(k))return `skincare beauty cosmetics elegant, ${NP}, ${adB}`;
+    if(/강아지|고양이|반려/.test(k))return `cute pet dog cat home cozy`;
+    if(/육아|아기|임신|아이/.test(k))return `baby nursery toys soft pastel, ${NP}, ${adB}`;
+    if(/취업|이직|직장|커리어/.test(k))return `career professional office laptop, ${NP}, ${adB}`;
+    if(/창업|사업|마케팅/.test(k))return `startup business office strategy, ${NP}, ${adB}`;
+    if(/IT|AI|코딩|기술/.test(k))return `technology digital AI circuit modern, ${NP}, ${adB}`;
+    if(/정부|지원금|복지|혜택/.test(k))return `government document official professional, ${NP}, ${adB}`;
+    if(/꽃|자연|바다|산|봄|여름|가을|겨울/.test(k))return `beautiful nature landscape seasonal, ${NP}, ${adB}`;
+    if(/공부|교육|자격증/.test(k))return `study books desk lamp learning, ${NP}, ${adB}`;
+    if(/패션|쇼핑|옷/.test(k))return `fashion clothing display stylish, ${NP}, ${adB}`;
+    if(/명상|힐링|마음|스트레스/.test(k))return `meditation calm peaceful nature candle, ${NP}, ${adB}`;
+    return `lifestyle blog concept natural editorial photo, ${NP}, ${adB}`;
   }
 
   function parseArr(text:string):string[]{
@@ -353,23 +394,18 @@ export default function AdminPage({onBack,onDashboard,theme,onThemeToggle}:Props
   async function callAI(prompt:string):Promise<string>{
     const ai=localStorage.getItem("publy_write_ai")||"gemini";
     if(ai==="gemini"){
-      const key=localStorage.getItem("publy_gemini_key")||"";
-      if(!key)throw new Error("Gemini API 키 없음");
-      for(const model of GEMINI_MODELS_ADM){
-        try{const r=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({contents:[{parts:[{text:prompt}]}],generationConfig:{maxOutputTokens:4000}}),signal:AbortSignal.timeout(30000)});if(!r.ok)continue;const d=await r.json();const t=d.candidates?.[0]?.content?.parts?.[0]?.text||"";if(t)return t;}catch{continue;}
-      }
+      const key=localStorage.getItem("publy_gemini_key")||"";if(!key)throw new Error("Gemini API 키 없음");
+      for(const model of GEMINI_MODELS_ADM){try{const r=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({contents:[{parts:[{text:prompt}]}],generationConfig:{maxOutputTokens:4000}}),signal:AbortSignal.timeout(30000)});if(!r.ok)continue;const d=await r.json();const t=d.candidates?.[0]?.content?.parts?.[0]?.text||"";if(t)return t;}catch{continue;}}
       throw new Error("Gemini 실패");
     }
     if(ai==="groq"){
-      const key=localStorage.getItem("publy_groq_key")||"";
-      if(!key)throw new Error("Groq API 키 없음");
+      const key=localStorage.getItem("publy_groq_key")||"";if(!key)throw new Error("Groq API 키 없음");
       const r=await fetch("https://api.groq.com/openai/v1/chat/completions",{method:"POST",headers:{"Content-Type":"application/json","Authorization":`Bearer ${key}`},body:JSON.stringify({model:"llama-3.1-70b-versatile",max_tokens:4000,messages:[{role:"user",content:prompt}]}),signal:AbortSignal.timeout(30000)});
       if(!r.ok){const e=await r.json();throw new Error(e.error?.message||"Groq 오류");}
       const d=await r.json();return d.choices?.[0]?.message?.content||"";
     }
     if(ai==="openai"){
-      const key=localStorage.getItem("publy_openai_key")||"";
-      if(!key)throw new Error("OpenAI API 키 없음");
+      const key=localStorage.getItem("publy_openai_key")||"";if(!key)throw new Error("OpenAI API 키 없음");
       const r=await fetch("https://api.openai.com/v1/chat/completions",{method:"POST",headers:{"Content-Type":"application/json","Authorization":`Bearer ${key}`},body:JSON.stringify({model:"gpt-4o-mini",max_tokens:4000,messages:[{role:"user",content:prompt}]}),signal:AbortSignal.timeout(30000)});
       if(!r.ok){const e=await r.json();throw new Error(e.error?.message||"OpenAI 오류");}
       const d=await r.json();return d.choices?.[0]?.message?.content||"";
@@ -377,55 +413,164 @@ export default function AdminPage({onBack,onDashboard,theme,onThemeToggle}:Props
     throw new Error("AI 미선택");
   }
 
-  async function generateImage(prompt:string):Promise<string>{
+  async function generateImage(kw:string):Promise<string>{
+    const imgPrompt=buildImagePrompt(kw);
     const ai=localStorage.getItem("publy_image_ai")||"openai_img";
     if(ai==="openai_img"){
-      const key=localStorage.getItem("publy_openai_key")||"";
-      if(!key)throw new Error("OpenAI 키 없음");
-      const r=await fetch("https://api.openai.com/v1/images/generations",{method:"POST",headers:{"Content-Type":"application/json","Authorization":`Bearer ${key}`},body:JSON.stringify({model:"dall-e-3",prompt,n:1,size:"1024x1024"}),signal:AbortSignal.timeout(60000)});
+      const key=localStorage.getItem("publy_openai_key")||"";if(!key)throw new Error("OpenAI 키 없음");
+      const r=await fetch("https://api.openai.com/v1/images/generations",{method:"POST",headers:{"Content-Type":"application/json","Authorization":`Bearer ${key}`},body:JSON.stringify({model:"dall-e-3",prompt:imgPrompt,n:1,size:"1024x1024"}),signal:AbortSignal.timeout(60000)});
       if(!r.ok){const e=await r.json();throw new Error("DALL-E: "+(e.error?.message||r.status));}
       const d=await r.json();return d.data?.[0]?.url||"";
     }
     if(ai==="replicate"){
-      const key=localStorage.getItem("publy_replicate_key")||"";
-      if(!key)throw new Error("Replicate 키 없음");
-      const pr=await fetch("https://api.replicate.com/v1/models/black-forest-labs/flux-schnell/predictions",{method:"POST",headers:{"Content-Type":"application/json","Authorization":`Bearer ${key}`},body:JSON.stringify({input:{prompt,num_outputs:1,aspect_ratio:"16:9"}}),signal:AbortSignal.timeout(30000)});
+      const key=localStorage.getItem("publy_replicate_key")||"";if(!key)throw new Error("Replicate 키 없음");
+      const pr=await fetch("https://api.replicate.com/v1/models/black-forest-labs/flux-schnell/predictions",{method:"POST",headers:{"Content-Type":"application/json","Authorization":`Bearer ${key}`},body:JSON.stringify({input:{prompt:imgPrompt,num_outputs:1,aspect_ratio:"16:9"}}),signal:AbortSignal.timeout(30000)});
       if(!pr.ok){const e=await pr.json();throw new Error("Replicate: "+(e.detail||pr.status));}
-      const pred=await pr.json();
-      const pollUrl=pred.urls?.get;
-      if(!pollUrl)throw new Error("Replicate 응답 오류");
-      for(let i=0;i<30;i++){
-        await new Promise(r=>setTimeout(r,2000));
-        const res=await fetch(pollUrl,{headers:{"Authorization":`Bearer ${key}`}});
-        const data=await res.json();
-        if(data.status==="succeeded")return data.output?.[0]||"";
-        if(data.status==="failed")throw new Error("Replicate 실패");
-      }
+      const pred=await pr.json();const pollUrl=pred.urls?.get;if(!pollUrl)throw new Error("Replicate 응답 오류");
+      for(let i=0;i<30;i++){await new Promise(r=>setTimeout(r,2000));const res=await fetch(pollUrl,{headers:{"Authorization":`Bearer ${key}`}});const data=await res.json();if(data.status==="succeeded")return data.output?.[0]||"";if(data.status==="failed")throw new Error("Replicate 실패");}
       throw new Error("Replicate 타임아웃");
     }
     throw new Error("이미지 AI 미선택");
+  }
+
+  // 글자수 기반 이미지 추천 수량
+  function recommendImageCount(content:string):number{
+    return Math.max(1, Math.floor(content.length/200));
+  }
+
+  function getActiveImages():string[]{
+    if(imgSource==="upload")return uploadedImages;
+    return generatedImages;
+  }
+
+  // 본문을 이미지 수에 맞게 섹션으로 분할
+  function splitContentWithImages(content:string, images:string[]):{text:string,img?:string}[]{
+    if(!images.length||imgSource==="none")return [{text:content}];
+    const charsPerSection=Math.floor(content.length/(images.length+1));
+    const sections:{text:string,img?:string}[]=[];
+    let pos=0;
+    for(let i=0;i<images.length;i++){
+      const end=Math.min(pos+charsPerSection, content.length);
+      // 문단 경계 찾기
+      const breakAt=content.lastIndexOf("\n",end)||end;
+      sections.push({text:content.slice(pos,breakAt>pos?breakAt:end).trim()});
+      sections.push({img:images[i]});
+      pos=breakAt>pos?breakAt:end;
+    }
+    if(pos<content.length)sections.push({text:content.slice(pos).trim()});
+    return sections;
+  }
+
+  async function handleGenerateImages(count:number){
+    if(imgSource==="none"||imgSource==="upload")return;
+    setGenImgLoading(true);
+    const imgs:string[]=[];
+    try{
+      for(let i=0;i<count;i++){
+        const url=await generateImage(keyword||selectedTitle);
+        imgs.push(url);
+        setGeneratedImages([...imgs]);
+      }
+    }catch(e:any){alert("이미지 생성 실패: "+e.message);}
+    finally{setGenImgLoading(false);}
+  }
+
+  function handleImageUpload(e:React.ChangeEvent<HTMLInputElement>){
+    const files=e.target.files;
+    if(!files)return;
+    Array.from(files).forEach(file=>{
+      const reader=new FileReader();
+      reader.onload=ev=>{
+        if(ev.target?.result)setUploadedImages(prev=>[...prev,ev.target!.result as string]);
+      };
+      reader.readAsDataURL(file);
+    });
+  }
+
+  async function handleGenerateTitles(reset=false){
+    if(!keyword.trim()){alert("키워드를 입력하세요");return;}
+    if(reset)setTitles([]);
+    setLoadingTitles(true);
+    const isAdpost=adType==="adpost";
+    const prompt=isAdpost
+      ?`당신은 대한민국 최고의 네이버 블로그 SEO 제목 전문가입니다.\n키워드: "${keyword.trim()}"\n목적: 네이버 애드포스트 클릭률 극대화\n\n반드시 제목 30개를 JSON 배열로만 반환하세요.\n- 키워드를 자연스럽게 포함\n- 25~40자, 친근하고 감성적\n- 숫자 필수 (BEST 7, TOP 5 등)\n- "솔직히", "이것만", "나만 알던" 등 클릭 유발\n- 경험 공유형, 2026 트렌드\n\nJSON 배열만 반환.`
+      :`당신은 구글 애드센스 최적화 SEO 전문가입니다.\n키워드: "${keyword.trim()}"\n목적: 구글 검색 상위노출 + 애드센스 클릭률 극대화\n\n반드시 제목 30개를 JSON 배열로만 반환하세요.\n- 키워드를 자연스럽게 포함\n- 30~50자, 정보성·전문적 톤\n- 검색의도 반영 (방법, 가이드, 총정리)\n- "완벽 가이드", "총정리", "이유 5가지" 등\n- 영어 혼용 자연스럽게 가능\n\nJSON 배열만 반환.`;
+    try{
+      const text=await callAI(prompt);
+      const parsed=parseArr(text);
+      if(!parsed.length)throw new Error("제목 파싱 실패");
+      setTitles(prev=>{
+        const combined=[...parsed,...prev];
+        if(combined.length>=90){localStorage.setItem("publy_adm_titles",JSON.stringify(parsed));return parsed;}
+        localStorage.setItem("publy_adm_titles",JSON.stringify(combined));
+        return combined;
+      });
+    }catch(e:any){alert("제목 생성 실패: "+e.message);}
+    finally{setLoadingTitles(false);}
   }
 
   async function handleGenerate(){
     if(!selectedTitle&&!keyword)return;
     const title=selectedTitle||keyword;
     setGenerating(true);setGenImage("");
+    const isAdpost=adType==="adpost";
+    const contentPrompt=isAdpost
+      ?`당신은 대한민국 최고의 네이버 블로그 작가입니다.\n키워드: "${keyword}"\n제목: "${title}"\n목적: 네이버 애드포스트 클릭률 + 체류시간 극대화\n\n형식:\n태그: (태그1, 태그2, 태그3, 태그4, 태그5)\n본문: (정확히 ${targetChars}자 내외, 친근한 말투, 경험 공유형, 소제목 포함, 독자 공감 유도, 자연스러운 단락 구분)`
+      :`당신은 구글 애드센스 최적화 전문 블로그 작가입니다.\n키워드: "${keyword}"\n제목: "${title}"\n목적: 구글 SEO 상위노출 + 애드센스 수익 극대화\n\n형식:\n태그: (태그1, 태그2, 태그3, 태그4, 태그5)\n본문: (정확히 ${targetChars}자 내외, 전문적 정보성 톤, H2/H3 소제목 다수 포함, 리스트 활용, 구체적 정보 중심, 자연스러운 단락 구분)`;
     try{
-      const contentPrompt=`당신은 대한민국 최고의 네이버 블로그 작가입니다.\n키워드: "${keyword}"\n제목: "${title}"\n목적: 네이버 애드포스트 클릭률 극대화\n\n형식:\n태그: (태그1, 태그2, 태그3, 태그4, 태그5)\n본문: (2000자 이상, 소제목 포함, 실용적 정보 위주)`;
       const text=await callAI(contentPrompt);
       const tgm=text.match(/태그[:\s]*([^\n]+)/);const bm=text.match(/본문[:\s]*([\s\S]+)/);
       setGenTitle(title);
       if(tgm)setGenTags(tgm[1].trim());
-      setGenContent(bm?bm[1].trim():text);
-    }catch(e:any){alert("본문 생성 실패: "+e.message);setGenerating(false);return;}
+      const body=bm?bm[1].trim():text;
+      setGenContent(body);
+      // 이미지 수량 계산
+      const recCount=imgCountManual??recommendImageCount(body);
+      if(imgSource==="ai"&&recCount>0){
+        setGenImgLoading(true);setGeneratedImages([]);
+        const imgs:string[]=[];
+        try{
+          for(let i=0;i<recCount;i++){
+            const url=await generateImage(keyword||selectedTitle);
+            imgs.push(url);setGeneratedImages([...imgs]);
+          }
+        }catch(e:any){alert("이미지 생성 실패: "+e.message);}
+        finally{setGenImgLoading(false);}
+      }
+    }catch(e:any){alert("본문 생성 실패: "+e.message);}
     finally{setGenerating(false);}
-    // 이미지 생성
-    setGenImgLoading(true);
-    try{
-      const url=await generateImage(`${title} 블로그 대표 이미지, 고품질, 깔끔한 디자인`);
-      setGenImage(url);
-    }catch(e:any){alert("이미지 생성 실패: "+e.message);}
-    finally{setGenImgLoading(false);}
+      const prompt=`"${keyword}" 키워드로 ${platform==="naver"?"네이버 블로그":"티스토리"} 스타일 한국어 블로그 글 1500자 이상.\n형식:\n제목: (제목)\n태그: (태그1, 태그2)\n본문: (본문)`;
+      let text="";
+      if(selectedAI==="gemini"){
+        const key=localStorage.getItem("publy_gemini_key")||"";
+        if(!key)throw new Error("Gemini API 키가 없습니다");
+        const MODELS=["gemini-2.0-flash","gemini-2.0-flash-lite","gemini-2.5-flash","gemini-2.5-flash-lite"];
+        let lastErr="";
+        for(const model of MODELS){
+          try{
+            const r=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({contents:[{parts:[{text:prompt}]}],generationConfig:{maxOutputTokens:2000}}),signal:AbortSignal.timeout(30000)});
+            if(!r.ok){lastErr=`${model} 오류(${r.status})`;continue;}
+            const d=await r.json();text=d.candidates?.[0]?.content?.parts?.[0]?.text||"";
+            if(text)break;lastErr=`${model} 빈 응답`;
+          }catch(e:any){lastErr=e.message;continue;}
+        }
+        if(!text)throw new Error("Gemini 생성 실패: "+lastErr);
+      } else if(selectedAI==="groq"){
+        const key=localStorage.getItem("publy_groq_key")||"";
+        if(!key)throw new Error("Groq API 키가 없습니다");
+        const r=await fetch("https://api.groq.com/openai/v1/chat/completions",{method:"POST",headers:{"Content-Type":"application/json","Authorization":`Bearer ${key}`},body:JSON.stringify({model:"llama-3.1-70b-versatile",max_tokens:2000,messages:[{role:"user",content:prompt}]}),signal:AbortSignal.timeout(30000)});
+        if(!r.ok){const e=await r.json();throw new Error(e.error?.message||"Groq 오류");}
+        const d=await r.json();text=d.choices?.[0]?.message?.content||"";
+      } else if(selectedAI==="openai"){
+        const key=localStorage.getItem("publy_openai_key")||"";
+        if(!key)throw new Error("OpenAI API 키가 없습니다");
+        const r=await fetch("https://api.openai.com/v1/chat/completions",{method:"POST",headers:{"Content-Type":"application/json","Authorization":`Bearer ${key}`},body:JSON.stringify({model:"gpt-4o-mini",max_tokens:2000,messages:[{role:"user",content:prompt}]}),signal:AbortSignal.timeout(30000)});
+        if(!r.ok){const e=await r.json();throw new Error(e.error?.message||"OpenAI 오류");}
+        const d=await r.json();text=d.choices?.[0]?.message?.content||"";
+      }
+      const tm=text.match(/제목[:\s]*([^\n]+)/);const tgm=text.match(/태그[:\s]*([^\n]+)/);const bm=text.match(/본문[:\s]*([\s\S]+)/);
+      if(tm)setGenTitle(tm[1].trim());if(tgm)setGenTags(tgm[1].trim());setGenContent(bm?bm[1].trim():text);
+    }catch(e:any){alert("생성 실패: "+e.message);}finally{setGenerating(false);}
   }
 
   async function handleAddAcc(){if(!newUser||!newPw)return;setAddingAcc(true);try{await upsertAccount({user_id:ADM_UID,platform:newPlat,username:newUser,password_encrypted:btoa(newPw),blog_name:newBlog||undefined,is_connected:false});getAccounts(ADM_UID).then(setAdmAccs);setNewUser("");setNewPw("");setNewBlog("");}catch(e:any){alert(e.message);}finally{setAddingAcc(false);}}
@@ -659,7 +804,7 @@ export default function AdminPage({onBack,onDashboard,theme,onThemeToggle}:Props
                           <label style={{fontSize:9,color:"var(--m)",fontWeight:700,display:"block",marginBottom:5,textTransform:"uppercase"}}>🖼️ 발행 이미지</label>
                           <div style={{position:"relative"}}>
                             <img src={pubImageUrl} alt="" style={{width:"100%",maxHeight:180,objectFit:"cover",borderRadius:10,border:"1px solid var(--b)"}} onError={e=>{(e.target as HTMLImageElement).style.display="none";}}/>
-                            <button onClick={()=>setPubImageUrl("")} style={{position:"absolute",top:6,right:6,background:"rgba(0,0,0,.6)",border:"none",color:"#fff",borderRadius:99,width:24,height:24,cursor:"pointer",fontSize:13}}>✕</button>
+                            <button onClick={()=>setPubImageUrl("")} style={{position:"absolute",top:6,right:6,background:"rgba(0,0,0,.6)",border:"none",color:"#fff",borderRadius:99,width:24,height:24,cursor:"pointer",fontSize:13,display:"flex",alignItems:"center",justifyContent:"center"}}>✕</button>
                           </div>
                         </div>
                       )}
@@ -679,69 +824,235 @@ export default function AdminPage({onBack,onDashboard,theme,onThemeToggle}:Props
 
                 {pubSub==="write"&&(
                   <div>
-                    {/* 키워드 + 제목 추천 */}
+                    {/* 애드타입 선택 */}
+                    <div className="acd" style={{padding:"14px 18px",marginBottom:11}}>
+                      <div className="asl2">🎯 수익화 목적 선택</div>
+                      <div style={{display:"flex",gap:10}}>
+                        {([
+                          {id:"adpost",label:"📰 네이버 애드포스트",sub:"감성적·경험 공유형, 1200~1500자",color:"#03C75A"},
+                          {id:"adsense",label:"🔍 구글 애드센스",sub:"정보성·SEO 최적화, 1500자+",color:"#4285F4"},
+                        ] as const).map(t=>(
+                          <button key={t.id} onClick={()=>setAdType(t.id)} style={{flex:1,padding:"12px 14px",borderRadius:13,border:`2px solid ${adType===t.id?t.color:"var(--b)"}`,background:adType===t.id?`${t.color}15`:"var(--ib)",cursor:"pointer",textAlign:"left",fontFamily:"inherit",transition:"all .18s"}}>
+                            <div style={{fontSize:13,fontWeight:700,color:adType===t.id?t.color:"var(--tx)",marginBottom:3}}>{t.label}</div>
+                            <div style={{fontSize:10,color:"var(--m)"}}>{t.sub}</div>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* 키워드 입력 */}
                     <div className="acd" style={{padding:"16px 18px",marginBottom:11}}>
                       <div className="asl2">🔍 키워드 입력</div>
                       <div style={{display:"grid",gridTemplateColumns:"1fr 100px",gap:9,marginBottom:10}}>
-                        <div><label style={{fontSize:9,color:"var(--m)",fontWeight:700,display:"block",marginBottom:3}}>키워드</label><input className="ainp" style={{width:"100%",padding:"10px 12px",fontSize:13}} placeholder="예: 강남 맛집" value={keyword} onChange={e=>setKeyword(e.target.value)} onKeyDown={e=>e.key==="Enter"&&handleGenerateTitles(true)}/></div>
-                        <div><label style={{fontSize:9,color:"var(--m)",fontWeight:700,display:"block",marginBottom:3}}>플랫폼</label><select className="ainp" style={{width:"100%",padding:"10px 12px"}} value={platform} onChange={e=>setPlatform(e.target.value as any)}><option value="naver">네이버</option><option value="tistory">티스토리</option></select></div>
+                        <div>
+                          <label style={{fontSize:9,color:"var(--m)",fontWeight:700,display:"block",marginBottom:3}}>키워드</label>
+                          <input className="ainp" style={{width:"100%",padding:"11px 13px",fontSize:14}} placeholder="예: 강남 맛집, 다이어트 방법, 제주도 여행..." value={keyword} onChange={e=>setKeyword(e.target.value)} onKeyDown={e=>e.key==="Enter"&&handleGenerateTitles(true)}/>
+                        </div>
+                        <div>
+                          <label style={{fontSize:9,color:"var(--m)",fontWeight:700,display:"block",marginBottom:3}}>플랫폼</label>
+                          <select className="ainp" style={{width:"100%",padding:"11px 12px"}} value={platform} onChange={e=>setPlatform(e.target.value as any)}>
+                            <option value="naver">네이버</option><option value="tistory">티스토리</option>
+                          </select>
+                        </div>
                       </div>
-                      <div style={{display:"flex",gap:8}}>
-                        <button className="abp" onClick={()=>handleGenerateTitles(true)} disabled={loadingTitles||!keyword}>{loadingTitles?<><span className="asp2"/>생성 중...</>:<>⭐ 제목 30개 추천</>}</button>
-                        {titles.length>0&&<button className="abp" style={{background:"rgba(99,102,241,.15)",color:"#6366f1",border:"1px solid rgba(99,102,241,.3)"}} onClick={()=>handleGenerateTitles(false)} disabled={loadingTitles}>{titles.length>=90?"초기화 후 재생성":"30개 추가"}</button>}
-                        {titles.length>0&&<button onClick={()=>{setTitles([]);setSelectedTitle("");localStorage.removeItem("publy_adm_titles");}} style={{padding:"8px 12px",borderRadius:9,border:"1px solid rgba(239,68,68,.3)",background:"rgba(239,68,68,.08)",color:"#ef4444",cursor:"pointer",fontSize:11,fontWeight:700}}>초기화</button>}
+                      <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                        <button className="abp" onClick={()=>handleGenerateTitles(true)} disabled={loadingTitles||!keyword}>
+                          {loadingTitles?<><span className="asp2"/>생성 중...</>:<>⭐ 제목 30개 추천</>}
+                        </button>
+                        {titles.length>0&&<button className="abp" style={{background:"rgba(99,102,241,.15)",color:"#818cf8",border:"1px solid rgba(99,102,241,.3)"}} onClick={()=>handleGenerateTitles(false)} disabled={loadingTitles}>
+                          {titles.length>=90?"🔄 초기화 후 재생성":"➕ 30개 추가"}
+                        </button>}
+                        {titles.length>0&&<button onClick={()=>{setTitles([]);setSelectedTitle("");localStorage.removeItem("publy_adm_titles");}} style={{padding:"8px 12px",borderRadius:9,border:"1px solid rgba(239,68,68,.3)",background:"rgba(239,68,68,.08)",color:"#ef4444",cursor:"pointer",fontSize:11,fontWeight:700}}>🗑 초기화</button>}
                       </div>
-                      {titles.length>0&&<div style={{marginTop:8,fontSize:10,color:"var(--m)",display:"flex",alignItems:"center",gap:6}}><div style={{flex:1,height:4,background:"var(--b)",borderRadius:99,overflow:"hidden"}}><div style={{height:"100%",width:`${(titles.length/90)*100}%`,background:titles.length>=90?"#ef4444":"var(--a)",borderRadius:99}}/></div>{titles.length}/90{titles.length>=90?" — 초기화 후 재생성":""}</div>}
+                      {titles.length>0&&(
+                        <div style={{marginTop:9,display:"flex",alignItems:"center",gap:8}}>
+                          <div style={{flex:1,height:5,background:"var(--b)",borderRadius:99,overflow:"hidden"}}>
+                            <div style={{height:"100%",width:`${(titles.length/90)*100}%`,background:titles.length>=90?"#ef4444":"var(--a)",borderRadius:99,transition:"width .4s"}}/>
+                          </div>
+                          <span style={{fontSize:10,color:titles.length>=90?"#ef4444":"var(--m)",fontFamily:"monospace",flexShrink:0}}>{titles.length}/90{titles.length>=90?" — 초기화 후 재생성":""}</span>
+                        </div>
+                      )}
                     </div>
 
                     {/* 제목 목록 */}
                     {titles.length>0&&(
                       <div className="acd" style={{padding:"16px 18px",marginBottom:11}}>
                         <div className="asl2">✨ 제목 선택 (클릭하세요)</div>
-                        {selectedTitle&&<div style={{padding:"9px 12px",borderRadius:9,background:"var(--ad)",border:"1px solid var(--b2)",marginBottom:10,fontSize:12,fontWeight:700,color:"var(--a)"}}>✅ {selectedTitle}</div>}
-                        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(260px,1fr))",gap:8,maxHeight:360,overflowY:"auto"}}>
+                        {selectedTitle&&(
+                          <div style={{padding:"9px 13px",borderRadius:10,background:"var(--ad)",border:"1px solid var(--b2)",marginBottom:11,fontSize:13,fontWeight:700,color:"var(--a)"}}>
+                            ✅ 선택됨: {selectedTitle}
+                          </div>
+                        )}
+                        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(260px,1fr))",gap:8,maxHeight:380,overflowY:"auto"}}>
                           {titles.map((t,i)=>(
                             <button key={`${t}-${i}`} onClick={()=>setSelectedTitle(t)} style={{padding:"11px 13px",borderRadius:11,border:`1.5px solid ${selectedTitle===t?"var(--a)":"var(--b)"}`,background:selectedTitle===t?"var(--ad)":"var(--ib)",cursor:"pointer",textAlign:"left",fontFamily:"inherit",transition:"all .15s",position:"relative"}}>
-                              <div style={{fontSize:9,color:"var(--m)",marginBottom:4,fontFamily:"monospace"}}>#{titles.length-i}</div>
-                              <div style={{fontSize:12,fontWeight:600,color:selectedTitle===t?"var(--a)":"var(--tx)",lineHeight:1.5}}>{t}</div>
-                              {selectedTitle===t&&<div style={{position:"absolute",top:8,right:8,width:18,height:18,borderRadius:"50%",background:"var(--a)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:10,color:"#000",fontWeight:900}}>✓</div>}
+                              <div style={{fontSize:9,color:selectedTitle===t?"var(--a)":"var(--m)",marginBottom:4,fontFamily:"monospace"}}>#{titles.length-i}</div>
+                              <div style={{fontSize:12,fontWeight:600,color:selectedTitle===t?"var(--a)":"#e2e8f0",lineHeight:1.5}}>{t}</div>
+                              {selectedTitle===t&&<div style={{position:"absolute",top:8,right:8,width:18,height:18,borderRadius:"50%",background:"var(--a)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:9,color:"#000",fontWeight:900}}>✓</div>}
                             </button>
                           ))}
                         </div>
                       </div>
                     )}
 
-                    {/* 본문 생성 버튼 */}
+                    {/* 본문+이미지 생성 */}
                     {(selectedTitle||keyword)&&(
                       <div className="acd" style={{padding:"16px 18px",marginBottom:11}}>
-                        <div className="asl2">📝 본문 + 이미지 생성</div>
-                        {selectedTitle&&<div style={{padding:"9px 12px",borderRadius:9,background:"var(--ib)",marginBottom:10,fontSize:12,color:"var(--m)"}}>선택된 제목: <strong style={{color:"var(--tx)"}}>{selectedTitle}</strong></div>}
-                        <button className="abp" onClick={handleGenerate} disabled={generating}>{generating?<><span className="asp2"/>AI 작성 중...</>:<>✍️ 본문 + 이미지 생성</>}</button>
+                        <div className="asl2">⚙️ 생성 설정</div>
+
+                        {/* 목표 글자수 */}
+                        <div style={{marginBottom:12}}>
+                          <div style={{display:"flex",justifyContent:"space-between",marginBottom:5}}>
+                            <label style={{fontSize:9,color:"var(--m)",fontWeight:700,textTransform:"uppercase"}}>목표 글자수</label>
+                            <span style={{fontSize:11,fontWeight:700,color:"var(--a)"}}>{targetChars.toLocaleString()}자</span>
+                          </div>
+                          <input type="range" min={1200} max={1500} step={50} value={targetChars} onChange={e=>setTargetChars(Number(e.target.value))} style={{width:"100%",accentColor:"var(--a)"}}/>
+                          <div style={{display:"flex",justifyContent:"space-between",fontSize:9,color:"var(--m)",marginTop:3}}>
+                            <span>1200자</span><span>1350자</span><span>1500자</span>
+                          </div>
+                        </div>
+
+                        {/* 이미지 소스 */}
+                        <div style={{marginBottom:12}}>
+                          <label style={{fontSize:9,color:"var(--m)",fontWeight:700,display:"block",marginBottom:6,textTransform:"uppercase"}}>이미지 소스</label>
+                          <div style={{display:"flex",gap:8}}>
+                            {([{id:"ai",label:"🤖 AI 생성"},{id:"upload",label:"📁 내 이미지"},{id:"none",label:"🚫 없음"}] as const).map(s=>(
+                              <button key={s.id} onClick={()=>setImgSource(s.id)} style={{flex:1,padding:"8px 10px",borderRadius:10,border:`1.5px solid ${imgSource===s.id?"var(--a)":"var(--b)"}`,background:imgSource===s.id?"var(--ad)":"var(--ib)",cursor:"pointer",fontSize:11,fontWeight:600,color:imgSource===s.id?"var(--a)":"var(--m)",fontFamily:"inherit",transition:"all .15s"}}>
+                                {s.label}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+
+                        {/* 업로드 */}
+                        {imgSource==="upload"&&(
+                          <div style={{marginBottom:12}}>
+                            <label style={{display:"flex",alignItems:"center",gap:8,padding:"10px 14px",borderRadius:10,border:"1.5px dashed var(--b2)",background:"var(--ad)",cursor:"pointer"}}>
+                              <span style={{fontSize:18}}>📁</span>
+                              <span style={{fontSize:12,color:"var(--a)",fontWeight:600}}>클릭해서 이미지 선택 (여러장 가능)</span>
+                              <input type="file" accept="image/*" multiple onChange={handleImageUpload} style={{display:"none"}}/>
+                            </label>
+                            {uploadedImages.length>0&&(
+                              <div style={{marginTop:8,display:"flex",gap:6,flexWrap:"wrap"}}>
+                                {uploadedImages.map((img,i)=>(
+                                  <div key={i} style={{position:"relative"}}>
+                                    <img src={img} alt="" style={{width:60,height:60,objectFit:"cover",borderRadius:8,border:"1px solid var(--b)"}}/>
+                                    <button onClick={()=>setUploadedImages(prev=>prev.filter((_,j)=>j!==i))} style={{position:"absolute",top:-4,right:-4,width:16,height:16,borderRadius:"50%",background:"#ef4444",border:"none",color:"#fff",cursor:"pointer",fontSize:9,display:"flex",alignItems:"center",justifyContent:"center"}}>✕</button>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        )}
+
+                        {selectedTitle&&<div style={{padding:"9px 12px",borderRadius:9,background:"var(--ib)",marginBottom:10,fontSize:12}}>선택 제목: <strong style={{color:"var(--a)"}}>{selectedTitle}</strong></div>}
+                        <button className="abp" onClick={handleGenerate} disabled={generating}>
+                          {generating?<><span className="asp2"/>AI 작성 중...</>:<>✍️ 본문 + 이미지 생성</>}
+                        </button>
                       </div>
                     )}
 
                     {/* 생성 결과 */}
-                    {genContent&&(<>
-                      <div className="acd" style={{padding:"16px 18px",marginBottom:11}}>
-                        <div className="asl2">🎨 생성 결과</div>
-                        {/* 이미지 */}
-                        <div style={{marginBottom:12}}>
-                          <label style={{fontSize:9,color:"var(--m)",fontWeight:700,display:"block",marginBottom:6,textTransform:"uppercase"}}>🖼️ 생성된 이미지</label>
-                          {genImgLoading?(
-                            <div style={{width:"100%",height:180,borderRadius:10,background:"linear-gradient(90deg,var(--ib) 25%,var(--b) 50%,var(--ib) 75%)",backgroundSize:"200% 100%",animation:"as 1.5s infinite"}}/>
-                          ):genImage?(
-                            <img src={genImage} alt="" style={{width:"100%",maxHeight:200,objectFit:"cover",borderRadius:10,border:"1px solid var(--b)"}} onError={e=>{(e.target as HTMLImageElement).style.display="none";}}/>
-                          ):(
-                            <div style={{padding:"16px",textAlign:"center",border:"1px dashed var(--b)",borderRadius:10,color:"var(--m)",fontSize:11}}>이미지 AI 키를 설정에서 등록하면 자동 생성됩니다</div>
+                    {genContent&&(
+                      <>
+                        {/* 미리보기 모달 */}
+                        {showPreview&&(
+                          <div style={{position:"fixed",inset:0,zIndex:999,background:"rgba(0,0,0,.85)",display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onClick={()=>setShowPreview(false)}>
+                            <div style={{width:"100%",maxWidth:680,maxHeight:"90vh",overflowY:"auto",background:"#fff",borderRadius:16,padding:"32px 24px"}} onClick={e=>e.stopPropagation()}>
+                              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}>
+                                <div style={{fontSize:12,color:"#888",fontWeight:600}}>📱 구독자 미리보기</div>
+                                <button onClick={()=>setShowPreview(false)} style={{background:"none",border:"none",cursor:"pointer",fontSize:22,color:"#888"}}>✕</button>
+                              </div>
+                              <div style={{fontFamily:"'Apple SD Gothic Neo','Malgun Gothic',sans-serif"}}>
+                                <h1 style={{fontSize:22,fontWeight:700,color:"#191919",lineHeight:1.4,marginBottom:16}}>{genTitle}</h1>
+                                {genTags&&<div style={{marginBottom:16,display:"flex",flexWrap:"wrap",gap:6}}>
+                                  {genTags.split(",").map((t,i)=><span key={i} style={{fontSize:12,padding:"3px 10px",borderRadius:99,background:"#f1f3f5",color:"#495057"}}>#{t.trim()}</span>)}
+                                </div>}
+                                {getActiveImages()[0]&&<img src={getActiveImages()[0]} alt="" style={{width:"100%",maxHeight:300,objectFit:"cover",borderRadius:8,marginBottom:20}} onError={e=>{(e.target as HTMLImageElement).style.display="none";}}/>}
+                                {splitContentWithImages(genContent,getActiveImages().slice(1)).map((section,i)=>(
+                                  <div key={i}>
+                                    {section.img
+                                      ?<img src={section.img} alt="" style={{width:"100%",maxHeight:260,objectFit:"cover",borderRadius:8,margin:"16px 0"}} onError={e=>{(e.target as HTMLImageElement).style.display="none";}}/>
+                                      :<div style={{fontSize:15,color:"#333",lineHeight:1.9,whiteSpace:"pre-wrap",marginBottom:8}}>{section.text}</div>
+                                    }
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          </div>
+                        )}
+
+                        <div className="acd" style={{padding:"16px 18px",marginBottom:11}}>
+                          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:11,flexWrap:"wrap",gap:7}}>
+                            <div className="asl2" style={{marginBottom:0}}>🎨 생성 결과</div>
+                            <div style={{display:"flex",gap:7,alignItems:"center",flexWrap:"wrap"}}>
+                              <span style={{fontSize:10,padding:"3px 9px",borderRadius:99,background:"var(--ad)",color:"var(--a)",fontWeight:700}}>
+                                {genContent.length.toLocaleString()}자 · 추천 {recommendImageCount(genContent)}장
+                              </span>
+                              <button onClick={()=>setShowPreview(true)} style={{padding:"5px 12px",borderRadius:9,border:"1px solid var(--b2)",background:"var(--ad)",color:"var(--a)",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:"inherit"}}>
+                                👁️ 미리보기
+                              </button>
+                            </div>
+                          </div>
+
+                          {/* 이미지 수량 조절 */}
+                          {imgSource!=="none"&&(
+                            <div style={{marginBottom:12,padding:"10px 14px",borderRadius:10,background:"var(--ib)",border:"1px solid var(--b)"}}>
+                              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:7}}>
+                                <label style={{fontSize:10,color:"var(--m)",fontWeight:700}}>🖼️ 이미지 수량 (200자당 1장 기준)</label>
+                                <div style={{display:"flex",alignItems:"center",gap:7}}>
+                                  <span style={{fontSize:11,fontWeight:700,color:"var(--a)"}}>{imgCountManual??recommendImageCount(genContent)}장</span>
+                                  {imgCountManual!==null&&<button onClick={()=>setImgCountManual(null)} style={{fontSize:9,padding:"2px 7px",borderRadius:6,border:"1px solid var(--b)",background:"transparent",color:"var(--m)",cursor:"pointer",fontFamily:"inherit"}}>자동</button>}
+                                </div>
+                              </div>
+                              <input type="range" min={0} max={20} step={1} value={imgCountManual??recommendImageCount(genContent)} onChange={e=>setImgCountManual(Number(e.target.value))} style={{width:"100%",accentColor:"var(--a)"}}/>
+                              {imgSource==="ai"&&(
+                                <button onClick={()=>handleGenerateImages(imgCountManual??recommendImageCount(genContent))} disabled={genImgLoading}
+                                  style={{marginTop:8,padding:"6px 14px",borderRadius:9,border:"none",background:"var(--a)",color:"#000",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:"inherit",display:"inline-flex",alignItems:"center",gap:5}}>
+                                  {genImgLoading?<><span className="asp2" style={{borderTopColor:"#000",borderColor:"rgba(0,0,0,.2)"}}/>생성 중...</>:"🔄 이미지 재생성"}
+                                </button>
+                              )}
+                            </div>
                           )}
+
+                          {/* 이미지 갤러리 */}
+                          {getActiveImages().length>0&&(
+                            <div style={{marginBottom:12}}>
+                              <label style={{fontSize:9,color:"var(--m)",fontWeight:700,display:"block",marginBottom:6,textTransform:"uppercase"}}>
+                                🖼️ 이미지 {getActiveImages().length}장 — 첫번째=썸네일
+                              </label>
+                              {genImgLoading&&<div style={{fontSize:11,color:"var(--a)",marginBottom:6,animation:"as 1s infinite"}}>⏳ 이미지 생성 중...</div>}
+                              <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                                {getActiveImages().map((img,i)=>(
+                                  <div key={i} style={{position:"relative"}}>
+                                    <img src={img} alt="" style={{width:80,height:80,objectFit:"cover",borderRadius:8,border:`2px solid ${i===0?"var(--a)":"var(--b)"}`}} onError={e=>{(e.target as HTMLImageElement).style.display="none";}}/>
+                                    {i===0&&<span style={{position:"absolute",top:-7,left:-5,fontSize:8,fontWeight:800,padding:"2px 5px",borderRadius:99,background:"var(--a)",color:"#000"}}>썸네일</span>}
+                                    <button onClick={()=>{if(imgSource==="ai")setGeneratedImages(prev=>prev.filter((_,j)=>j!==i));else setUploadedImages(prev=>prev.filter((_,j)=>j!==i));}}
+                                      style={{position:"absolute",top:-5,right:-5,width:17,height:17,borderRadius:"50%",background:"#ef4444",border:"none",color:"#fff",cursor:"pointer",fontSize:9,display:"flex",alignItems:"center",justifyContent:"center"}}>✕</button>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+
+                          <div style={{display:"flex",flexDirection:"column",gap:9}}>
+                            {[{l:"제목",v:genTitle,s:setGenTitle},{l:"태그",v:genTags,s:setGenTags}].map(f=>(
+                              <div key={f.l}>
+                                <label style={{fontSize:9,color:"var(--m)",fontWeight:700,display:"block",marginBottom:3}}>{f.l}</label>
+                                <input className="ainp" style={{width:"100%",padding:"10px 12px",fontSize:13}} value={f.v} onChange={e=>f.s(e.target.value)}/>
+                              </div>
+                            ))}
+                            <div>
+                              <label style={{fontSize:9,color:"var(--m)",fontWeight:700,display:"block",marginBottom:3}}>본문 ({genContent.length.toLocaleString()}자)</label>
+                              <textarea className="ainp" rows={10} style={{width:"100%",padding:"10px 12px",fontSize:13,resize:"vertical"}} value={genContent} onChange={e=>setGenContent(e.target.value)}/>
+                            </div>
+                          </div>
                         </div>
-                        <div style={{display:"flex",flexDirection:"column",gap:9}}>
-                          {[{l:"제목",v:genTitle,s:setGenTitle},{l:"태그",v:genTags,s:setGenTags}].map(f=>(<div key={f.l}><label style={{fontSize:9,color:"var(--m)",fontWeight:700,display:"block",marginBottom:3}}>{f.l}</label><input className="ainp" style={{width:"100%",padding:"10px 12px",fontSize:13}} value={f.v} onChange={e=>f.s(e.target.value)}/></div>))}
-                          <div><label style={{fontSize:9,color:"var(--m)",fontWeight:700,display:"block",marginBottom:3}}>본문 ({genContent.length.toLocaleString()}자)</label><textarea className="ainp" rows={10} style={{width:"100%",padding:"10px 12px",fontSize:13,resize:"vertical"}} value={genContent} onChange={e=>setGenContent(e.target.value)}/></div>
-                        </div>
-                      </div>
-                      <button className="abp" style={{width:"100%",justifyContent:"center",padding:"12px"}} onClick={()=>{setPubTitle(genTitle);setPubContent(genContent);setPubTags(genTags);setPubImageUrl(genImage);setPubSub("publish");}}>🚀 발행하기로 넘기기</button>
-                    </>)}
+                        <button className="abp" style={{width:"100%",justifyContent:"center",padding:"12px"}} onClick={()=>{setPubTitle(genTitle);setPubContent(genContent);setPubTags(genTags);setPubImageUrl(getActiveImages()[0]||"");setPubSub("publish");}}>
+                          🚀 발행하기로 넘기기
+                        </button>
+                      </>
+                    )}
                   </div>
                 )}
 
