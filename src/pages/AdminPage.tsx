@@ -295,7 +295,6 @@ export default function AdminPage({onBack,onDashboard,theme,onThemeToggle}:Props
   const [genImage,setGenImage]=useState("");
   const [genImgLoading,setGenImgLoading]=useState(false);
   const [loadingTitles,setLoadingTitles]=useState(false);
-  const [pubImageUrl,setPubImageUrl]=useState("");
   const [pubSub,setPubSub]=useState<"publish"|"write"|"accounts">("publish");
   const [newPlat,setNewPlat]=useState<"naver"|"tistory">("naver");const [newUser,setNewUser]=useState("");const [newPw,setNewPw]=useState("");const [newBlog,setNewBlog]=useState("");const [addingAcc,setAddingAcc]=useState(false);const [showPw,setShowPw]=useState(false);const [connId,setConnId]=useState<string|null>(null);
   const [users,setUsers]=useState<UserFull[]>([]);const [loading,setLoading]=useState(true);const [search,setSearch]=useState("");const [selUser,setSelUser]=useState<UserFull|null>(null);
@@ -454,7 +453,7 @@ export default function AdminPage({onBack,onDashboard,theme,onThemeToggle}:Props
       // 문단 경계 찾기
       const breakAt=content.lastIndexOf("\n",end)||end;
       sections.push({text:content.slice(pos,breakAt>pos?breakAt:end).trim()});
-      sections.push({img:images[i]});
+      sections.push({text:"", img:images[i]});
       pos=breakAt>pos?breakAt:end;
     }
     if(pos<content.length)sections.push({text:content.slice(pos).trim()});
