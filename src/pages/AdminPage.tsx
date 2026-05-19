@@ -539,38 +539,6 @@ export default function AdminPage({onBack,onDashboard,theme,onThemeToggle}:Props
       }
     }catch(e:any){alert("본문 생성 실패: "+e.message);}
     finally{setGenerating(false);}
-      const prompt=`"${keyword}" 키워드로 ${platform==="naver"?"네이버 블로그":"티스토리"} 스타일 한국어 블로그 글 1500자 이상.\n형식:\n제목: (제목)\n태그: (태그1, 태그2)\n본문: (본문)`;
-      let text="";
-      if(selectedAI==="gemini"){
-        const key=localStorage.getItem("publy_gemini_key")||"";
-        if(!key)throw new Error("Gemini API 키가 없습니다");
-        const MODELS=["gemini-2.0-flash","gemini-2.0-flash-lite","gemini-2.5-flash","gemini-2.5-flash-lite"];
-        let lastErr="";
-        for(const model of MODELS){
-          try{
-            const r=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({contents:[{parts:[{text:prompt}]}],generationConfig:{maxOutputTokens:2000}}),signal:AbortSignal.timeout(30000)});
-            if(!r.ok){lastErr=`${model} 오류(${r.status})`;continue;}
-            const d=await r.json();text=d.candidates?.[0]?.content?.parts?.[0]?.text||"";
-            if(text)break;lastErr=`${model} 빈 응답`;
-          }catch(e:any){lastErr=e.message;continue;}
-        }
-        if(!text)throw new Error("Gemini 생성 실패: "+lastErr);
-      } else if(selectedAI==="groq"){
-        const key=localStorage.getItem("publy_groq_key")||"";
-        if(!key)throw new Error("Groq API 키가 없습니다");
-        const r=await fetch("https://api.groq.com/openai/v1/chat/completions",{method:"POST",headers:{"Content-Type":"application/json","Authorization":`Bearer ${key}`},body:JSON.stringify({model:"llama-3.1-70b-versatile",max_tokens:2000,messages:[{role:"user",content:prompt}]}),signal:AbortSignal.timeout(30000)});
-        if(!r.ok){const e=await r.json();throw new Error(e.error?.message||"Groq 오류");}
-        const d=await r.json();text=d.choices?.[0]?.message?.content||"";
-      } else if(selectedAI==="openai"){
-        const key=localStorage.getItem("publy_openai_key")||"";
-        if(!key)throw new Error("OpenAI API 키가 없습니다");
-        const r=await fetch("https://api.openai.com/v1/chat/completions",{method:"POST",headers:{"Content-Type":"application/json","Authorization":`Bearer ${key}`},body:JSON.stringify({model:"gpt-4o-mini",max_tokens:2000,messages:[{role:"user",content:prompt}]}),signal:AbortSignal.timeout(30000)});
-        if(!r.ok){const e=await r.json();throw new Error(e.error?.message||"OpenAI 오류");}
-        const d=await r.json();text=d.choices?.[0]?.message?.content||"";
-      }
-      const tm=text.match(/제목[:\s]*([^\n]+)/);const tgm=text.match(/태그[:\s]*([^\n]+)/);const bm=text.match(/본문[:\s]*([\s\S]+)/);
-      if(tm)setGenTitle(tm[1].trim());if(tgm)setGenTags(tgm[1].trim());setGenContent(bm?bm[1].trim():text);
-    }catch(e:any){alert("생성 실패: "+e.message);}finally{setGenerating(false);}
   }
 
   async function handleAddAcc(){if(!newUser||!newPw)return;setAddingAcc(true);try{await upsertAccount({user_id:ADM_UID,platform:newPlat,username:newUser,password_encrypted:btoa(newPw),blog_name:newBlog||undefined,is_connected:false});getAccounts(ADM_UID).then(setAdmAccs);setNewUser("");setNewPw("");setNewBlog("");}catch(e:any){alert(e.message);}finally{setAddingAcc(false);}}
