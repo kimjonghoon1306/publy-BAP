@@ -292,10 +292,6 @@ export default function DashboardPage({ user, onLogout, onAdminLogin, onThemeTog
     return () => clearInterval(interval);
   }, [checkBot, user.id]);
 
-  const quotaPct = quota ? Math.min(100, (quota.used_quota / quota.total_quota) * 100) : 0;
-  const connAccs = accounts.filter(a => a.is_connected && a.platform === platform);
-  const todayPub = history.filter(h => new Date(h.published_at).toDateString() === new Date().toDateString()).length;
-
   // ── 200+ 카테고리 한국어→영어 이미지 프롬프트 ──────────
   const KO_EN_MAP:Record<string,string>={
     맛집:"delicious gourmet food beautiful plating restaurant warm lighting",음식:"delicious food dish beautiful presentation",요리:"cooking fresh ingredients cutting board kitchen herbs",카페:"cozy cafe coffee interior warm ambient pastry",커피:"coffee latte art ceramic cup morning steam",치킨:"crispy golden fried chicken korean food plate",피자:"pizza melted cheese fresh toppings italian",라면:"ramen noodle bowl hot steam broth toppings",삼겹살:"korean bbq pork belly grill sizzling smoke",회:"fresh sashimi seafood colorful plate ice",초밥:"sushi japanese fresh fish rice plate",파스타:"pasta italian tomato sauce herbs",브런치:"brunch cafe food table morning avocado eggs",스테이크:"steak beef grill plate fine dining",햄버거:"burger gourmet bun vegetables sauce",샐러드:"healthy salad fresh colorful vegetables bowl",케이크:"celebration cake dessert beautiful cream",빵:"fresh artisan bread bakery golden",디저트:"dessert sweet pastry cream fruit plate",마카롱:"macarons colorful french pastry",타르트:"tart pastry fruit cream elegant",아이스크림:"ice cream scoop colorful cone summer",도넛:"donuts glazed colorful sweet bakery",떡볶이:"tteokbokki korean street food red spicy rice cake",김밥:"kimbap seaweed rice roll colorful cross section",비빔밥:"bibimbap korean mixed rice bowl vegetables egg",냉면:"naengmyeon korean cold noodle bowl ice",갈비:"kalbi korean grilled ribs bbq",불고기:"bulgogi korean marinated beef grill sesame",된장찌개:"doenjang jjigae soybean paste stew clay pot",김치찌개:"kimchi jjigae stew pork red broth",해물:"seafood fresh shellfish shrimp crab",와인:"wine glass elegant bottle vineyard",맥주:"beer mug cold refreshing foam glass",막걸리:"korean rice wine makgeolli bottle cup",소주:"korean soju drink glass bottle",칵테일:"cocktail bar colorful garnish glass",초콜릿:"chocolate dark sweet confectionery",
@@ -418,7 +414,7 @@ export default function DashboardPage({ user, onLogout, onAdminLogin, onThemeTog
       // 문단 경계 찾기
       const breakAt=content.lastIndexOf("\n",end)||end;
       sections.push({text:content.slice(pos,breakAt>pos?breakAt:end).trim()});
-      sections.push({img:images[i]});
+      sections.push({text:"", img:images[i]});
       pos=breakAt>pos?breakAt:end;
     }
     if(pos<content.length)sections.push({text:content.slice(pos).trim()});
@@ -914,7 +910,7 @@ export default function DashboardPage({ user, onLogout, onAdminLogin, onThemeTog
 
                         <div className="card" style={{padding:"20px 22px",marginBottom:14}}>
                           <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:11,flexWrap:"wrap",gap:7}}>
-                            <div style={{fontSize:10,fontWeight:700,letterSpacing:".14em",textTransform:"uppercase",color:"var(--sub)",marginBottom:10}} style={{marginBottom:0}}>🎨 생성 결과</div>
+                            <div style={{fontSize:10,fontWeight:700,letterSpacing:".14em",textTransform:"uppercase",color:"var(--sub)",marginBottom:0}}>🎨 생성 결과</div>
                             <div style={{display:"flex",gap:7,alignItems:"center",flexWrap:"wrap"}}>
                               <span style={{fontSize:10,padding:"3px 9px",borderRadius:99,background:"var(--accent-dim)",color:"var(--accent)",fontWeight:700}}>
                                 {genContent.length.toLocaleString()}자 · 추천 {recommendImageCount(genContent)}장
