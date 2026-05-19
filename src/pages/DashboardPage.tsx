@@ -4,6 +4,7 @@ import { supabase } from "../lib/supabase";
 
 type Tab = "write" | "publish" | "accounts" | "history" | "settings";
 const BOT = "http://localhost:3333";
+const EXE_DOWNLOAD_URL = "https://github.com/kimjonghoon13/publy-BAP/releases/latest/download/Publy-Setup.exe";
 
 const WRITE_AI_LIST = [
   { id:"gemini",  label:"Gemini Flash", sub:"무료", placeholder:"AIza...", storageKey:"publy_gemini_key", link:"https://aistudio.google.com/app/apikey", color:"#4285F4", logo:"G", free:true },
@@ -65,6 +66,21 @@ const CSS = `
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.5}}
 @keyframes float{0%,100%{transform:translateY(0)}50%{transform:translateY(-6px)}}
 @keyframes slideIn{from{opacity:0;transform:translateX(-10px)}to{opacity:1;transform:translateX(0)}}
+@keyframes floatBadge{0%,100%{transform:translateY(0) scale(1)}50%{transform:translateY(-5px) scale(1.03)}}
+@keyframes glowPulse{0%,100%{box-shadow:0 4px 20px rgba(0,255,136,.3),0 0 0 0 rgba(0,255,136,.4)}50%{box-shadow:0 8px 32px rgba(0,255,136,.6),0 0 0 8px rgba(0,255,136,.0)}}
+.dl-btn{
+  display:inline-flex;align-items:center;gap:8px;
+  padding:9px 18px;border-radius:99px;border:none;
+  background:linear-gradient(135deg,#00ff88,#00cc66);
+  color:#000;font-size:13px;font-weight:800;
+  font-family:'Noto Sans KR',sans-serif;
+  cursor:pointer;text-decoration:none;
+  animation:floatBadge 2.5s ease-in-out infinite, glowPulse 2.5s ease-in-out infinite;
+  white-space:nowrap;flex-shrink:0;
+  letter-spacing:.02em;
+}
+.dl-btn:hover{filter:brightness(1.1);}
+.dl-btn-ico{font-size:15px;}
 
 /* ── 다크 모드 ─────────────────────────────── */
 .app.dark{
@@ -119,11 +135,12 @@ const CSS = `
 
 /* ── 기본 레이아웃 ──────────────────────────── */
 .app{
-  width:100vw;min-height:100vh;
+  width:100vw;height:100vh;
   font-family:'Noto Sans KR',sans-serif;
   color:var(--text);background:var(--bg);
   display:flex;flex-direction:column;
   transition:background .2s,color .2s;
+  overflow:hidden;
 }
 *::-webkit-scrollbar{width:5px;height:5px;}
 *::-webkit-scrollbar-thumb{background:var(--border);border-radius:99px;}
@@ -624,38 +641,82 @@ textarea.inp{resize:vertical;min-height:80px;line-height:1.7;}
   position:fixed;bottom:0;left:0;right:0;z-index:200;
   background:var(--header-bg);border-top:1px solid var(--border);
   backdrop-filter:blur(20px);
-  padding:6px 0 max(10px,env(safe-area-inset-bottom));
+  padding:8px 4px max(14px,env(safe-area-inset-bottom));
 }
 .mob-tab{
-  flex:1;display:flex;flex-direction:column;align-items:center;gap:2px;
-  padding:5px 2px;border:none;background:transparent;cursor:pointer;
+  flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;
+  padding:6px 4px;border:none;background:transparent;cursor:pointer;
   font-family:'Noto Sans KR',sans-serif;transition:all .15s;
+  min-height:52px;
 }
-.mob-tab-ico{font-size:20px;}
-.mob-tab-lbl{font-size:9px;font-weight:600;color:var(--text2);}
+.mob-tab-ico{font-size:22px;}
+.mob-tab-lbl{font-size:11px;font-weight:600;color:var(--text2);}
 .mob-tab.active .mob-tab-lbl{color:var(--accent-text);}
-.mob-tab.active{background:var(--accent-bg);border-radius:8px;}
+.mob-tab.active{background:var(--accent-bg);border-radius:10px;}
 
 /* ── 반응형 ─────────────────────────────────── */
-@media(max-width:768px){
+@media(max-width:900px){
   .sidebar{display:none;}
   .mob-tabs{display:flex;}
+}
+@media(max-width:768px){
   .header-mid{display:none;}
   .logo-text{font-size:15px;}
-  .main{padding:14px 12px 80px;}
+  .main{padding:14px 12px 90px;}
   .plat-grid{grid-template-columns:1fr 1fr;}
   .title-grid{grid-template-columns:1fr;}
-  .adtype-grid{grid-template-columns:1fr 1fr;}
+  .adtype-grid{grid-template-columns:1fr;}
   .ai-grid{flex-direction:column;}
   .steps .step-num{display:none;}
-  .card{padding:16px 16px;}
+  .card{padding:16px 14px;}
+  .btn{font-size:15px;padding:13px 20px;}
+  .btn-xl{padding:17px 24px;font-size:17px;}
+  .btn-sm{font-size:13px;padding:10px 16px;}
+  .inp{font-size:16px;padding:14px 14px;}
+  .inp.lg{font-size:17px;padding:16px 14px;}
+  .nav-item{font-size:15px;padding:14px 14px;}
+  .mob-tab-lbl{font-size:12px;}
+  .mob-tab-ico{font-size:24px;}
+  .mob-tab{padding:7px 2px;}
+  .title-card{padding:16px 16px;}
+  .title-text{font-size:15px;line-height:1.6;}
+  .title-num{font-size:12px;}
+  .plat-name{font-size:15px;}
+  .plat-btn{padding:18px 14px;}
+  .adtype-label{font-size:15px;}
+  .adtype-sub{font-size:13px;}
+  .card-title{font-size:13px;}
+  .inp-label{font-size:14px;}
+  .acc-name{font-size:16px;}
+  .acc-meta{font-size:13px;}
+  .acc-status{font-size:13px;padding:6px 14px;}
+  .hist-title{font-size:15px;}
+  .hist-meta{font-size:12px;}
+  .status-badge{font-size:13px;padding:6px 12px;}
+  .stat-num{font-size:28px;}
+  .stat-lbl{font-size:11px;}
+  .char-badge{font-size:14px;padding:6px 14px;}
+  .toggle-btn{font-size:14px;padding:11px 18px;}
+  .selected-banner-text{font-size:16px;}
+  .selected-banner-label{font-size:13px;}
+  .info-key{font-size:15px;}
+  .info-val{font-size:16px;}
+  .steps{margin-bottom:16px;}
+  .step{font-size:13px;padding:13px 8px;}
+  .alert{font-size:14px;padding:14px 16px;}
 }
 @media(max-width:480px){
-  .header{padding:0 12px;gap:8px;}
+  .header{padding:0 10px;gap:6px;}
   .user-name{display:none;}
-  .quota-info span:not(.quota-bar-wrap):not(.quota-bar-fill){display:none;}
+  .logout-btn{display:none;}
+  .quota-info{display:none;}
+  .dl-btn span:last-child{display:none;}
+  .dl-btn{padding:9px 13px;}
   .plat-grid{grid-template-columns:1fr;}
   .adtype-grid{grid-template-columns:1fr;}
+  .title-grid{grid-template-columns:1fr;}
+  .key-row-input{flex-wrap:wrap;}
+  .key-row-input .inp{width:100%;}
 }
 `;
 
@@ -1128,6 +1189,9 @@ POST3: (연관 주제 제목)|(이유)
           </div>
 
           <div className="header-right">
+            <a href={EXE_DOWNLOAD_URL} className="dl-btn" download>
+              <span className="dl-btn-ico">⬇️</span> PC앱 다운로드
+            </a>
             <button className="icon-btn" onClick={onThemeToggle} title="테마 변경">
               {theme === "dark" ? "☀️" : "🌙"}
             </button>
