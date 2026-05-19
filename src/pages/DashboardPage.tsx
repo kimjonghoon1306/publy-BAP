@@ -18,523 +18,248 @@ const IMAGE_AI_LIST = [
   { id:"replicate",  label:"Flux (Replicate)",sub:"고품질 이미지",    placeholder:"r8_...", storageKey:"publy_replicate_key", link:"https://replicate.com/account/api-tokens",     color:"#8B5CF6", logo:"R" },
 ];
 
-// ── AI 호출 ──────────────────────────────────────────────
-async function callWriteAI(prompt: string): Promise<string> {
-  const ai = localStorage.getItem("publy_write_ai") || "gemini";
-  if (ai === "gemini") {
-    const key = localStorage.getItem("publy_gemini_key") || "";
-    if (!key) throw new Error("Gemini API 키가 없습니다. 설정에서 등록하세요.");
-    for (const model of ["gemini-2.0-flash","gemini-2.0-flash-lite","gemini-2.5-flash"]) {
-      const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({contents:[{parts:[{text:prompt}]}],generationConfig:{maxOutputTokens:4000}}),signal:AbortSignal.timeout(30000)});
-      if (!r.ok) continue;
-      const d = await r.json();
-      const t = d.candidates?.[0]?.content?.parts?.[0]?.text || "";
-      if (t) return t;
+
+  // ── 200+ 카테고리 한국어→영어 이미지 프롬프트 ──────────
+  const KO_EN_MAP:Record<string,string>={
+    맛집:"delicious gourmet food beautiful plating restaurant warm lighting",음식:"delicious food dish beautiful presentation",요리:"cooking fresh ingredients cutting board kitchen herbs",카페:"cozy cafe coffee interior warm ambient pastry",커피:"coffee latte art ceramic cup morning steam",치킨:"crispy golden fried chicken korean food plate",피자:"pizza melted cheese fresh toppings italian",라면:"ramen noodle bowl hot steam broth toppings",삼겹살:"korean bbq pork belly grill sizzling smoke",회:"fresh sashimi seafood colorful plate ice",초밥:"sushi japanese fresh fish rice plate",파스타:"pasta italian tomato sauce herbs",브런치:"brunch cafe food table morning avocado eggs",스테이크:"steak beef grill plate fine dining",햄버거:"burger gourmet bun vegetables sauce",샐러드:"healthy salad fresh colorful vegetables bowl",케이크:"celebration cake dessert beautiful cream",빵:"fresh artisan bread bakery golden",디저트:"dessert sweet pastry cream fruit plate",마카롱:"macarons colorful french pastry",타르트:"tart pastry fruit cream elegant",아이스크림:"ice cream scoop colorful cone summer",도넛:"donuts glazed colorful sweet bakery",떡볶이:"tteokbokki korean street food red spicy rice cake",김밥:"kimbap seaweed rice roll colorful cross section",비빔밥:"bibimbap korean mixed rice bowl vegetables egg",냉면:"naengmyeon korean cold noodle bowl ice",갈비:"kalbi korean grilled ribs bbq",불고기:"bulgogi korean marinated beef grill sesame",된장찌개:"doenjang jjigae soybean paste stew clay pot",김치찌개:"kimchi jjigae stew pork red broth",해물:"seafood fresh shellfish shrimp crab",와인:"wine glass elegant bottle vineyard",맥주:"beer mug cold refreshing foam glass",막걸리:"korean rice wine makgeolli bottle cup",소주:"korean soju drink glass bottle",칵테일:"cocktail bar colorful garnish glass",초콜릿:"chocolate dark sweet confectionery",
+    여행:"scenic travel destination beautiful landscape golden hour",관광:"tourism famous landmark architecture",해외여행:"international travel airplane passport suitcase",국내여행:"domestic korea scenic nature mountains",제주도:"jeju island volcanic landscape ocean cliffs",서울:"seoul city skyline namsan night view",부산:"busan haeundae beach ocean cliff bridge",강원도:"gangwon mountains forest nature snow",경주:"gyeongju historic temple bulguksa pagoda",전주:"jeonju hanok village traditional architecture",여수:"yeosu ocean night view bridge seafood",속초:"sokcho beach seoraksan mountains",춘천:"chuncheon lake mountain nature",강릉:"gangneung east sea beach coffee",통영:"tongyeong ocean cable car island",거제:"geoje island ocean cliff",남해:"namhae ocean blue village",담양:"damyang bamboo forest green",순천:"suncheon bay wetland sunset",일본:"tokyo japan shibuya neon cherry blossom",태국:"thailand bangkok temple tropical",베트남:"vietnam hoi an lanterns traditional street",발리:"bali indonesia temple rice terrace sunset",유럽:"europe historic architecture cobblestone",파리:"paris eiffel tower seine river sunset",호텔:"luxury hotel room interior elegant bed",숙소:"cozy accommodation room interior",펜션:"pension guesthouse countryside cozy",캠핑:"camping tent campfire stars nature",글램핑:"glamping luxury tent outdoor fairy lights",리조트:"resort pool tropical luxury",
+    건강:"health wellness vitamins natural herbs",다이어트:"diet healthy food vegetables scale",운동:"exercise gym equipment weights fitness",헬스:"gym fitness dumbbells machines",요가:"yoga mat meditation calm nature",필라테스:"pilates reformer equipment studio",수영:"swimming pool water lane",달리기:"running shoes road park sunrise",등산:"hiking trail mountain forest backpack",뷰티:"beauty cosmetics makeup products palette",피부:"skincare serum cream bottle routine",헤어:"hair care shampoo salon tools",메이크업:"makeup brush palette foundation lipstick",스킨케어:"skincare products bottles cream serum",탈모:"hair treatment scalp care natural",영양제:"supplements vitamins capsules bottles",프로틴:"protein powder shaker gym",콜라겐:"collagen supplement beauty skin",비타민:"vitamin supplements colorful capsule",의료:"medical healthcare equipment sterile",병원:"hospital building professional clean",치과:"dental clinic teeth care",피부과:"dermatology clinic skincare treatment",
+    재테크:"investment finance coins growth chart piggy bank",주식:"stock market chart trading graph trend",코인:"cryptocurrency bitcoin gold coin digital",비트코인:"bitcoin gold digital network circuit",ETF:"etf investment fund chart portfolio",부업:"side job laptop home office freelance",N잡:"multiple income laptop freelance gig",절약:"saving money coins jar budget planner",대출:"loan bank document contract pen",보험:"insurance document umbrella protection",청약:"apartment application document form",세금:"tax document calculator accounting",연말정산:"tax return document form calculator",
+    부동산:"real estate property house document keys",아파트:"apartment building modern exterior",빌라:"villa house residential exterior garden",오피스텔:"officetel modern apartment interior",원룸:"studio apartment interior minimal",전세:"lease contract document keys",월세:"rental apartment document keys",분양:"new apartment construction modern",인테리어:"interior design modern minimalist furniture",리모델링:"home renovation interior before after",이사:"moving boxes cardboard tape packing",청소:"cleaning supplies spray bottle mop",정리:"organizing storage shelf neat minimal",
+    IT:"technology digital computer code screen",AI:"artificial intelligence circuit board network",인공지능:"ai robot technology digital future",챗GPT:"chatgpt ai interface laptop",앱:"mobile app smartphone screen",스마트폰:"smartphone modern screen technology",노트북:"laptop computer desk workspace",코딩:"coding programming dark screen code",개발:"software development laptop code monitor",유튜브:"youtube studio camera ring light equipment",인스타그램:"instagram phone screen social media",블로그:"blog writing laptop cafe keyboard",게임:"gaming setup controller rgb monitor",드론:"drone aerial photography sky",스마트홈:"smart home device speaker automation",
+    교육:"education books desk study knowledge",공부:"study books notebook pencil desk lamp",수능:"exam books pencil study desk",영어:"english learning books dictionary study",자격증:"certificate diploma achievement document",취업:"job resume briefcase professional laptop",이직:"career change resume laptop",면접:"interview professional suit document",독서:"reading book cozy armchair lamp",자기계발:"self development books journal planner",
+    육아:"baby toys nursery soft colors stroller",아이:"children toys colorful playground",임신:"maternity baby items nursery soft",결혼:"wedding flowers venue decoration setup",웨딩:"wedding dress flowers bouquet ceremony",가족:"family gathering home table food",
+    자동차:"car automobile road modern exterior",중고차:"used car dealership lot",전기차:"electric vehicle charging station modern",오토바이:"motorcycle bike road exterior",
+    강아지:"cute puppy dog playing toy home",고양이:"cute cat kitten indoor cozy",반려동물:"pet companion home toys food bowl",토끼:"rabbit bunny cute fluffy indoor",
+    패션:"fashion clothing outfit display stylish",쇼핑:"shopping retail store display bags",명품:"luxury brand handbag elegant display",신발:"shoes sneakers display clean",가방:"bag handbag leather elegant display",
+    창업:"startup business office desk strategy",사업:"business meeting office professional",마케팅:"marketing strategy digital chart",프리랜서:"freelancer laptop home office coffee",유튜버:"youtube creator studio camera equipment",
+    정부지원:"government document official stamp desk",지원금:"financial support money document",복지:"welfare care service document",
+    자연:"nature landscape mountains forest scenic",꽃:"flowers colorful bloom garden spring",바다:"ocean sea waves sunset landscape",숲:"forest trees green peaceful path",산:"mountain peak scenic trail",봄:"spring cherry blossom bloom",여름:"summer beach ocean sunshine",가을:"autumn fall leaves colorful",겨울:"winter snow cold white landscape",
+    골프:"golf course green club equipment",낚시:"fishing rod lake nature water",음악:"music instrument guitar piano",그림:"painting canvas brush art studio",사진:"photography camera lens equipment dslr",영화:"cinema popcorn screen ticket",
+    명상:"meditation candle calm peaceful nature",힐링:"healing spa nature calm peaceful",스트레스:"stress relief tea candle calm",크리스마스:"christmas tree lights snow decoration",
+    주방용품:"kitchen utensils cookware modern",가전제품:"home appliances refrigerator",생활용품:"household daily products containers",침구:"bedding pillow blanket cozy bedroom",가구:"furniture modern sofa desk chair",
+    한우:"korean wagyu beef premium",굴비:"dried fish korean traditional",농산물:"farm produce vegetables harvest",수산물:"seafood fresh fish market",유기농:"organic farm natural produce",
+    쿠팡:"ecommerce online shopping laptop",스마트스토어:"smart store ecommerce product",도매:"wholesale warehouse products boxes",
+    법률:"law books gavel document professional",세무:"tax accounting calculator document",노무:"labor law document office",
+    환경:"environment green nature eco",친환경:"eco friendly green natural organic",태양광:"solar panels rooftop renewable energy",
+  };
+
+  function buildImagePrompt(kw:string):string{
+    const k=kw.trim();
+    const NP="no people, no person, no face, no portrait, no human";
+    const adB=adType==="adpost"
+      ?"Korean lifestyle blog warm emotional photography, natural lighting, authentic"
+      :"ultra realistic DSLR, editorial blog photo, 8K, magazine quality, natural lighting";
+    const sorted=Object.keys(KO_EN_MAP).sort((a,b)=>b.length-a.length);
+    for(const ko of sorted){if(k.includes(ko))return `${KO_EN_MAP[ko]}, ${NP}, ${adB}`;}
+    if(/맛집|음식|카페|식당|요리|먹/.test(k))return `delicious korean food restaurant beautiful, ${NP}, ${adB}`;
+    if(/여행|관광|호텔|숙소|비행기/.test(k))return `scenic travel destination golden hour, ${NP}, ${adB}`;
+    if(/건강|운동|다이어트|헬스|요가/.test(k))return `health fitness wellness natural, ${NP}, ${adB}`;
+    if(/주식|코인|재테크|투자|금융/.test(k))return `investment finance growth chart, ${NP}, ${adB}`;
+    if(/부동산|아파트|전세|인테리어/.test(k))return `modern apartment real estate interior, ${NP}, ${adB}`;
+    if(/뷰티|피부|메이크업|스킨케어/.test(k))return `skincare beauty cosmetics elegant, ${NP}, ${adB}`;
+    if(/강아지|고양이|반려/.test(k))return `cute pet dog cat home cozy`;
+    if(/육아|아기|임신|아이/.test(k))return `baby nursery toys soft pastel, ${NP}, ${adB}`;
+    if(/취업|이직|직장|커리어/.test(k))return `career professional office laptop, ${NP}, ${adB}`;
+    if(/창업|사업|마케팅/.test(k))return `startup business office strategy, ${NP}, ${adB}`;
+    if(/IT|AI|코딩|기술/.test(k))return `technology digital AI circuit modern, ${NP}, ${adB}`;
+    if(/정부|지원금|복지|혜택/.test(k))return `government document official professional, ${NP}, ${adB}`;
+    if(/꽃|자연|바다|산|봄|여름|가을|겨울/.test(k))return `beautiful nature landscape seasonal, ${NP}, ${adB}`;
+    if(/공부|교육|자격증/.test(k))return `study books desk lamp learning, ${NP}, ${adB}`;
+    if(/패션|쇼핑|옷/.test(k))return `fashion clothing display stylish, ${NP}, ${adB}`;
+    if(/명상|힐링|마음|스트레스/.test(k))return `meditation calm peaceful nature candle, ${NP}, ${adB}`;
+    return `lifestyle blog concept natural editorial photo, ${NP}, ${adB}`;
+  }
+
+  function parseArr(text:string):string[]{
+    const clean=text.replace(/```json|```/gi,"").trim();
+    try{const m=clean.match(/\[[\s\S]*\]/);if(m){const p=JSON.parse(m[0]);if(Array.isArray(p))return p.map(String).filter((t:string)=>t.length>3);}}catch{}
+    try{const p=JSON.parse(clean);if(Array.isArray(p))return p.map(String).filter((t:string)=>t.length>3);}catch{}
+    return clean.split("\n").map((l:string)=>l.replace(/^[\d]+[).\s]+|^[-*•\s]+/,"").replace(/^[\s"']+|[\s"']+$/g,"").trim()).filter((l:string)=>l.length>4&&l.length<100);
+  }
+
+  async function callAI(prompt:string):Promise<string>{
+    const ai=localStorage.getItem("publy_write_ai")||"gemini";
+    if(ai==="gemini"){
+      const key=localStorage.getItem("publy_gemini_key")||"";if(!key)throw new Error("Gemini API 키 없음");
+      for(const model of GEMINI_MODELS_ADM){try{const r=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({contents:[{parts:[{text:prompt}]}],generationConfig:{maxOutputTokens:4000}}),signal:AbortSignal.timeout(30000)});if(!r.ok)continue;const d=await r.json();const t=d.candidates?.[0]?.content?.parts?.[0]?.text||"";if(t)return t;}catch{continue;}}
+      throw new Error("Gemini 실패");
     }
-    throw new Error("Gemini 생성 실패");
-  }
-  if (ai === "groq") {
-    const key = localStorage.getItem("publy_groq_key") || "";
-    if (!key) throw new Error("Groq API 키가 없습니다. 설정에서 등록하세요.");
-    const r = await fetch("https://api.groq.com/openai/v1/chat/completions",{method:"POST",headers:{"Content-Type":"application/json","Authorization":`Bearer ${key}`},body:JSON.stringify({model:"llama-3.1-70b-versatile",max_tokens:4000,messages:[{role:"user",content:prompt}]}),signal:AbortSignal.timeout(30000)});
-    if (!r.ok) { const e = await r.json(); throw new Error(e.error?.message||"Groq 오류"); }
-    const d = await r.json();
-    return d.choices?.[0]?.message?.content || "";
-  }
-  if (ai === "openai") {
-    const key = localStorage.getItem("publy_openai_key") || "";
-    if (!key) throw new Error("OpenAI API 키가 없습니다. 설정에서 등록하세요.");
-    const r = await fetch("https://api.openai.com/v1/chat/completions",{method:"POST",headers:{"Content-Type":"application/json","Authorization":`Bearer ${key}`},body:JSON.stringify({model:"gpt-4o-mini",max_tokens:4000,messages:[{role:"user",content:prompt}]}),signal:AbortSignal.timeout(30000)});
-    if (!r.ok) { const e = await r.json(); throw new Error(e.error?.message||"OpenAI 오류"); }
-    const d = await r.json();
-    return d.choices?.[0]?.message?.content || "";
-  }
-  throw new Error("AI가 선택되지 않았습니다");
-}
-
-async function callImageAI(prompt: string): Promise<string> {
-  const ai = localStorage.getItem("publy_image_ai") || "openai_img";
-  if (ai === "openai_img") {
-    const key = localStorage.getItem("publy_openai_key") || "";
-    if (!key) throw new Error("OpenAI API 키가 없습니다. 설정에서 등록하세요.");
-    const r = await fetch("https://api.openai.com/v1/images/generations",{method:"POST",headers:{"Content-Type":"application/json","Authorization":`Bearer ${key}`},body:JSON.stringify({model:"dall-e-3",prompt,n:1,size:"1024x1024"}),signal:AbortSignal.timeout(60000)});
-    if (!r.ok) { const e = await r.json(); throw new Error("DALL-E 오류: "+(e.error?.message||r.status)); }
-    const d = await r.json();
-    return d.data?.[0]?.url || "";
-  }
-  if (ai === "replicate") {
-    const key = localStorage.getItem("publy_replicate_key") || "";
-    if (!key) throw new Error("Replicate API 키가 없습니다. 설정에서 등록하세요.");
-    const pr = await fetch("https://api.replicate.com/v1/models/black-forest-labs/flux-schnell/predictions",{method:"POST",headers:{"Content-Type":"application/json","Authorization":`Bearer ${key}`},body:JSON.stringify({input:{prompt,num_outputs:1,aspect_ratio:"16:9"}}),signal:AbortSignal.timeout(30000)});
-    if (!pr.ok) { const e = await pr.json(); throw new Error("Replicate 오류: "+(e.detail||pr.status)); }
-    const pred = await pr.json();
-    const pollUrl = pred.urls?.get;
-    if (!pollUrl) throw new Error("Replicate 응답 오류");
-    for (let i=0;i<30;i++) {
-      await new Promise(r=>setTimeout(r,2000));
-      const res = await fetch(pollUrl,{headers:{"Authorization":`Bearer ${key}`}});
-      const data = await res.json();
-      if (data.status==="succeeded") return data.output?.[0]||"";
-      if (data.status==="failed") throw new Error("Replicate 이미지 생성 실패");
+    if(ai==="groq"){
+      const key=localStorage.getItem("publy_groq_key")||"";if(!key)throw new Error("Groq API 키 없음");
+      const r=await fetch("https://api.groq.com/openai/v1/chat/completions",{method:"POST",headers:{"Content-Type":"application/json","Authorization":`Bearer ${key}`},body:JSON.stringify({model:"llama-3.1-70b-versatile",max_tokens:4000,messages:[{role:"user",content:prompt}]}),signal:AbortSignal.timeout(30000)});
+      if(!r.ok){const e=await r.json();throw new Error(e.error?.message||"Groq 오류");}
+      const d=await r.json();return d.choices?.[0]?.message?.content||"";
     }
-    throw new Error("Replicate 타임아웃");
-  }
-  throw new Error("이미지 AI가 선택되지 않았습니다");
-}
-
-function parseTitles(text: string): string[] {
-  const clean = text.replace(/```json|```/gi,"").trim();
-  try { const m = clean.match(/\[[\s\S]*\]/); if(m){const p=JSON.parse(m[0]);if(Array.isArray(p))return p.map(String).filter(t=>t.length>3);} } catch {}
-  try { const p=JSON.parse(clean); if(Array.isArray(p))return p.map(String).filter(t=>t.length>3); } catch {}
-  return clean.split("\n").map(l=>l.replace(/^[\d]+[).\s]+|^[-*•\s]+/,"").replace(/^[\s"']+|[\s"']+$/g,"").trim()).filter(l=>l.length>4&&l.length<100);
-}
-
-// ── SVG 아이콘들 ─────────────────────────────────────────
-const Icons = {
-  rocket: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09z"/><path d="m12 15-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2z"/><path d="M9 12H4s.55-3.03 2-4c1.62-1.08 5 0 5 0"/><path d="M12 15v5s3.03-.55 4-2c1.08-1.62 0-5 0-5"/></svg>,
-  write: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>,
-  link: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>,
-  history: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>,
-  settings: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>,
-  star: <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>,
-  check: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>,
-  plus: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>,
-  refresh: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>,
-  image: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>,
-  send: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>,
-  trash: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>,
-  eye: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>,
-  key: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="7" cy="17" r="4"/><path d="m18 2-9.68 9.68"/><path d="m15 5 4 4"/></svg>,
-  sun: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>,
-  moon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>,
-  mobile: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="5" y="2" width="14" height="20" rx="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg>,
-};
-
-// ── CSS ──────────────────────────────────────────────────
-const CSS = `
-@import url('https://fonts.googleapis.com/css2?family=Pretendard:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500&display=swap');
-*{box-sizing:border-box;margin:0;padding:0;}
-@keyframes fadeUp{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:translateY(0)}}
-@keyframes fadeIn{from{opacity:0}to{opacity:1}}
-@keyframes spin{to{transform:rotate(360deg)}}
-@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
-@keyframes glow{0%,100%{box-shadow:0 0 0 0 rgba(0,255,136,.4)}50%{box-shadow:0 0 0 10px rgba(0,255,136,0)}}
-@keyframes shimmer{0%{background-position:-200% 0}100%{background-position:200% 0}}
-@keyframes popIn{0%{transform:scale(.85);opacity:0}100%{transform:scale(1);opacity:1}}
-@keyframes slideRight{from{transform:translateX(-12px);opacity:0}to{transform:translateX(0);opacity:1}}
-@keyframes barFill{from{width:0}to{width:var(--w)}}
-@keyframes float{0%,100%{transform:translateY(0)}50%{transform:translateY(-5px)}}
-@keyframes titlePop{0%{transform:scale(.9) translateY(8px);opacity:0}60%{transform:scale(1.03)}100%{transform:scale(1) translateY(0);opacity:1}}
-
-.dash.dark{--bg:#01030a;--bg2:#050810;--card:rgba(255,255,255,.04);--card2:rgba(255,255,255,.07);--border:rgba(255,255,255,.08);--border2:rgba(0,255,136,.2);--text:#eef4ff;--sub:#94a3b8;--accent:#00ff88;--accent2:#00cc66;--adim:rgba(0,255,136,.1);--err:#ff6b6b;--warn:#f59e0b;--info:#4285F4;}
-.dash.light{--bg:#f0f9f4;--bg2:#e8f5ee;--card:rgba(255,255,255,.9);--card2:#fff;--border:rgba(0,0,0,.08);--border2:rgba(0,160,70,.25);--text:#09180f;--sub:#64748b;--accent:#00a855;--accent2:#008040;--adim:rgba(0,168,85,.1);--err:#dc2626;--warn:#d97706;--info:#2563eb;}
-
-.dash{width:100vw;height:100vh;overflow:hidden;display:flex;flex-direction:column;font-family:'Pretendard',-apple-system,sans-serif;color:var(--text);background:var(--bg);}
-::-webkit-scrollbar{width:5px;height:5px}::-webkit-scrollbar-thumb{background:var(--border2);border-radius:99px}
-
-/* 헤더 */
-.hd{height:60px;flex-shrink:0;display:flex;align-items:center;padding:0 20px;gap:14px;background:var(--bg);border-bottom:1px solid var(--border);backdrop-filter:blur(20px);position:sticky;top:0;z-index:50;}
-.hd-logo{display:flex;align-items:center;gap:9px;flex-shrink:0;}
-.hd-logo-ico{width:36px;height:36px;border-radius:11px;background:linear-gradient(135deg,var(--accent),var(--accent2));display:flex;align-items:center;justify-content:center;box-shadow:0 0 20px var(--adim);animation:float 4s ease-in-out infinite;}
-.hd-logo-text{font-size:20px;font-weight:900;letter-spacing:.2em;background:linear-gradient(135deg,var(--accent),var(--accent2));-webkit-background-clip:text;-webkit-text-fill-color:transparent;}
-.hd-center{flex:1;display:flex;align-items:center;gap:10px;}
-.status-chip{display:flex;align-items:center;gap:6px;padding:6px 14px;border-radius:99px;font-size:12px;font-weight:600;border:1px solid;}
-.status-on{border-color:rgba(0,255,136,.3);background:rgba(0,255,136,.08);color:var(--accent);}
-.status-off{border-color:var(--border);background:var(--card);color:var(--sub);}
-.dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;}
-.dot-on{background:var(--accent);animation:pulse 2s infinite;}
-.dot-off{background:#555;}
-.quota-bar-bg{width:90px;height:6px;border-radius:99px;background:var(--border);overflow:hidden;}
-.quota-bar{height:100%;border-radius:99px;background:linear-gradient(90deg,var(--accent),var(--accent2));animation:barFill .8s ease both;}
-.plan-chip{font-size:10px;font-weight:800;padding:3px 10px;border-radius:99px;letter-spacing:.1em;}
-.plan-free{background:rgba(120,120,120,.15);color:#999;border:1px solid rgba(120,120,120,.2);}
-.plan-basic{background:rgba(66,133,244,.15);color:#4285F4;border:1px solid rgba(66,133,244,.25);}
-.plan-pro{background:var(--adim);color:var(--accent);border:1px solid rgba(0,255,136,.3);animation:glow 2.5s infinite;}
-.hd-right{display:flex;align-items:center;gap:8px;flex-shrink:0;}
-.ico-btn{width:38px;height:38px;border-radius:12px;border:1px solid var(--border);background:var(--card);display:flex;align-items:center;justify-content:center;cursor:pointer;color:var(--sub);transition:all .18s;}
-.ico-btn:hover{border-color:var(--border2);color:var(--text);transform:scale(1.07);}
-.user-chip{display:flex;align-items:center;gap:8px;padding:5px 13px 5px 6px;border-radius:99px;border:1px solid var(--border);background:var(--card);font-size:12px;font-weight:600;color:var(--text);}
-.avatar{width:26px;height:26px;border-radius:50%;background:linear-gradient(135deg,var(--accent),var(--accent2));display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:900;color:#000;}
-.logout-btn{padding:7px 14px;border-radius:11px;border:1px solid var(--border);background:transparent;color:var(--sub);font-size:12px;font-weight:600;cursor:pointer;font-family:inherit;transition:all .18s;}
-.logout-btn:hover{color:var(--err);border-color:var(--err);}
-
-/* 바디 */
-.body{flex:1;display:flex;overflow:hidden;}
-
-/* 사이드바 */
-.sidebar{width:220px;flex-shrink:0;background:var(--bg2);border-right:1px solid var(--border);display:flex;flex-direction:column;padding:14px 10px;gap:3px;overflow-y:auto;}
-.nav-label{font-size:9px;font-weight:700;letter-spacing:.18em;text-transform:uppercase;color:var(--sub);padding:10px 10px 5px;}
-.nav-btn{display:flex;align-items:center;gap:11px;padding:12px 13px;border-radius:13px;border:none;cursor:pointer;width:100%;font-size:13px;font-weight:500;font-family:inherit;color:var(--sub);background:transparent;transition:all .18s;text-align:left;position:relative;line-height:1;}
-.nav-btn:hover{background:var(--card2);color:var(--text);}
-.nav-btn.active{background:var(--adim);color:var(--accent);font-weight:700;border:1px solid var(--border2);}
-.nav-btn.active::before{content:'';position:absolute;left:0;top:22%;bottom:22%;width:3px;border-radius:99px;background:var(--accent);}
-.nav-ico{flex-shrink:0;opacity:.7;}
-.nav-btn.active .nav-ico{opacity:1;}
-.nav-badge{margin-left:auto;font-size:9px;font-weight:800;padding:2px 7px;border-radius:99px;background:var(--adim);color:var(--accent);}
-.sidebar-footer{margin-top:auto;padding-top:12px;border-top:1px solid var(--border);display:flex;flex-direction:column;gap:8px;}
-.today-card{padding:12px 14px;border-radius:13px;background:var(--card);border:1px solid var(--border);text-align:center;}
-.today-num{font-size:32px;font-weight:900;color:var(--accent);line-height:1;}
-.today-label{font-size:10px;color:var(--sub);margin-top:2px;}
-
-/* 메인 */
-.main{flex:1;display:flex;overflow:hidden;}
-.center{flex:1;overflow-y:auto;padding:22px;display:flex;flex-direction:column;gap:16px;}
-.right-panel{width:280px;flex-shrink:0;border-left:1px solid var(--border);background:var(--bg2);overflow-y:auto;display:flex;flex-direction:column;}
-.rp-section{padding:18px;border-bottom:1px solid var(--border);}
-.rp-title{font-size:10px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--sub);margin-bottom:12px;}
-
-/* 카드 */
-.card{background:var(--card);border:1px solid var(--border);border-radius:18px;position:relative;overflow:hidden;transition:border-color .2s;}
-.card::before{content:'';position:absolute;top:0;left:15%;right:15%;height:1px;background:linear-gradient(90deg,transparent,var(--border2),transparent);}
-.card:hover{border-color:rgba(0,255,136,.15);}
-.section-label{font-size:10px;font-weight:700;letter-spacing:.16em;text-transform:uppercase;color:var(--sub);margin-bottom:12px;display:flex;align-items:center;gap:7px;}
-
-/* 입력 */
-.inp{width:100%;padding:13px 15px;background:var(--bg);border:1.5px solid var(--border);border-radius:13px;color:var(--text);font-size:14px;font-family:inherit;outline:none;transition:all .2s;}
-.inp:focus{border-color:rgba(0,255,136,.5);box-shadow:0 0 0 3px rgba(0,255,136,.07);}
-.inp::placeholder{color:var(--sub);}
-textarea.inp{resize:vertical;line-height:1.7;}
-select.inp{appearance:auto;}
-.dark select.inp{color-scheme:dark;}
-.light select.inp{color-scheme:light;}
-
-/* 버튼 */
-.btn-main{padding:13px 22px;border:none;border-radius:13px;cursor:pointer;font-family:inherit;font-weight:700;font-size:14px;background:linear-gradient(135deg,var(--accent),var(--accent2));color:#000;display:inline-flex;align-items:center;gap:8px;transition:all .22s;position:relative;overflow:hidden;}
-.btn-main:hover{transform:translateY(-2px);box-shadow:0 10px 30px rgba(0,255,136,.3);}
-.btn-main:disabled{opacity:.35;cursor:not-allowed;transform:none;}
-.btn-main::after{content:'';position:absolute;inset:0;background:linear-gradient(90deg,transparent,rgba(255,255,255,.2),transparent);background-size:200% 100%;animation:shimmer 3s ease-in-out infinite;}
-.btn-sec{padding:11px 18px;border:1.5px solid var(--border);border-radius:13px;cursor:pointer;font-family:inherit;font-weight:600;font-size:13px;background:var(--card);color:var(--sub);display:inline-flex;align-items:center;gap:7px;transition:all .18s;}
-.btn-sec:hover{border-color:var(--border2);color:var(--text);}
-.btn-sec:disabled{opacity:.35;cursor:not-allowed;}
-.btn-danger{padding:8px 14px;border:1.5px solid rgba(255,107,107,.25);border-radius:10px;cursor:pointer;font-family:inherit;font-weight:600;font-size:12px;background:rgba(255,107,107,.07);color:var(--err);display:inline-flex;align-items:center;gap:6px;transition:all .18s;}
-.btn-danger:hover{background:rgba(255,107,107,.15);}
-
-/* 스피너 */
-.spinner{width:16px;height:16px;border-radius:50%;border:2.5px solid rgba(0,0,0,.2);border-top-color:#000;animation:spin 1s linear infinite;display:inline-block;flex-shrink:0;}
-.spinner-wh{width:16px;height:16px;border-radius:50%;border:2.5px solid rgba(255,255,255,.2);border-top-color:#fff;animation:spin 1s linear infinite;display:inline-block;flex-shrink:0;}
-.spinner-g{width:18px;height:18px;border-radius:50%;border:2.5px solid var(--adim);border-top-color:var(--accent);animation:spin 1s linear infinite;display:inline-block;flex-shrink:0;}
-
-/* 플랫폼 버튼 */
-.plat-btn{flex:1;padding:16px 14px;border-radius:15px;border:1.5px solid var(--border);cursor:pointer;background:var(--card);display:flex;align-items:center;gap:12px;transition:all .22s;font-family:inherit;}
-.plat-btn:hover{transform:translateY(-2px);}
-.plat-naver{border-color:#03C75A;background:rgba(3,199,90,.07);animation:glow 3s infinite;}
-.plat-tistory{border-color:#FF6B35;background:rgba(255,107,53,.07);}
-
-/* 제목 카드 그리드 */
-.title-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:10px;}
-.title-card{padding:14px 16px;border-radius:14px;border:1.5px solid var(--border);background:var(--card);cursor:pointer;transition:all .2s;text-align:left;font-family:inherit;animation:titlePop .3s ease both;position:relative;overflow:hidden;}
-.title-card:hover{border-color:var(--border2);transform:translateY(-2px);box-shadow:0 8px 24px rgba(0,0,0,.12);}
-.title-card.selected{border-color:var(--accent);background:var(--adim);box-shadow:0 0 0 1px var(--accent),0 8px 24px rgba(0,255,136,.15);}
-.title-card .num{font-size:10px;font-weight:700;color:var(--sub);margin-bottom:5px;font-family:'JetBrains Mono',monospace;}
-.title-card.selected .num{color:var(--accent);}
-.title-card .txt{font-size:13px;font-weight:600;color:var(--text);line-height:1.5;}
-.title-card .check-ico{position:absolute;top:10px;right:10px;width:22px;height:22px;border-radius:50%;background:var(--accent);display:flex;align-items:center;justify-content:center;animation:popIn .25s ease both;}
-
-/* 스텝 인디케이터 */
-.steps{display:flex;align-items:center;gap:0;margin-bottom:20px;}
-.step{display:flex;align-items:center;gap:0;flex:1;}
-.step-circle{width:36px;height:36px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:800;flex-shrink:0;border:2px solid var(--border);background:var(--bg);color:var(--sub);transition:all .3s;}
-.step-circle.done{background:var(--accent);border-color:var(--accent);color:#000;}
-.step-circle.active{border-color:var(--accent);color:var(--accent);box-shadow:0 0 0 4px rgba(0,255,136,.15);}
-.step-line{flex:1;height:2px;background:var(--border);transition:background .3s;}
-.step-line.done{background:var(--accent);}
-.step-label{font-size:10px;font-weight:600;color:var(--sub);margin-top:5px;text-align:center;white-space:nowrap;}
-.step-label.active{color:var(--accent);}
-.step-label.done{color:var(--accent2);}
-
-/* 히스토리 */
-.hist-item{display:flex;align-items:center;gap:10px;padding:13px 15px;border-radius:14px;border:1px solid var(--border);background:var(--card);margin-bottom:8px;transition:all .15s;animation:fadeUp .3s ease both;}
-.hist-item:hover{border-color:var(--border2);}
-.badge{font-size:9px;font-weight:800;padding:3px 9px;border-radius:99px;flex-shrink:0;}
-.badge-ok{background:rgba(0,255,136,.12);color:var(--accent);}
-.badge-fail{background:rgba(255,107,107,.12);color:var(--err);}
-.badge-pend{background:rgba(245,158,11,.12);color:var(--warn);}
-
-/* 경고 박스 */
-.warn-box{padding:12px 15px;border-radius:13px;font-size:13px;display:flex;align-items:center;gap:9px;margin-bottom:12px;}
-.warn-yellow{background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.2);color:var(--warn);}
-.warn-red{background:rgba(255,107,107,.08);border:1px solid rgba(255,107,107,.2);color:var(--err);}
-.warn-blue{background:rgba(66,133,244,.08);border:1px solid rgba(66,133,244,.2);color:var(--info);}
-
-/* 이미지 스켈레톤 */
-.img-skeleton{width:100%;height:200px;border-radius:13px;background:linear-gradient(90deg,var(--card) 25%,var(--card2) 50%,var(--card) 75%);background-size:200% 100%;animation:shimmer 1.5s infinite;}
-
-/* 계정 카드 */
-.acc-card{padding:16px 20px;border-radius:16px;border:1.5px solid var(--border);background:var(--card);display:flex;align-items:center;gap:13px;flex-wrap:wrap;transition:all .2s;animation:fadeUp .3s ease both;}
-.acc-card:hover{border-color:var(--border2);}
-
-/* API 키 */
-.key-card{padding:16px;border-radius:14px;border:1px solid var(--border);background:var(--bg);margin-bottom:9px;transition:border-color .2s;}
-.key-card.has-key{border-color:rgba(0,255,136,.2);}
-
-/* 모바일 탭바 */
-.mob-bar{display:none;position:fixed;bottom:0;left:0;right:0;background:var(--bg2);border-top:1px solid var(--border);backdrop-filter:blur(24px);padding:8px 8px 20px;gap:2px;z-index:100;}
-.mob-btn{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;padding:8px 4px;border-radius:12px;border:none;cursor:pointer;background:transparent;transition:all .18s;font-family:inherit;color:var(--sub);}
-.mob-btn.active{background:var(--adim);color:var(--accent);}
-.mob-icon{font-size:20px;}
-.mob-label{font-size:9px;font-weight:600;}
-
-/* 반응형 */
-@media(max-width:900px){.right-panel{display:none;}}
-@media(max-width:700px){
-  .sidebar{display:none;}
-  .mob-bar{display:flex;}
-  .center{padding:16px 14px 90px;}
-  .title-grid{grid-template-columns:1fr;}
-  .hd{padding:0 14px;}
-  .hd-logo-text{font-size:17px;}
-  .status-chip span:last-child{display:none;}
-}
-@media(min-width:701px){.mob-bar{display:none!important;}}
-`;
-
-// ── API 키 입력 컴포넌트 ─────────────────────────────────
-function KeyInput({ k }: { k: any }) {
-  const [val, setVal] = useState(() => localStorage.getItem(k.storageKey) || "");
-  const [show, setShow] = useState(false);
-  const [saved, setSaved] = useState(false);
-  const [testing, setTesting] = useState(false);
-  const [msg, setMsg] = useState("");
-
-  function save() {
-    if (!val.trim()) { setMsg("키를 입력하세요"); return; }
-    localStorage.setItem(k.storageKey, val.trim());
-    setSaved(true); setMsg("✅ 저장됨");
-    setTimeout(() => { setSaved(false); setMsg(""); }, 3000);
+    if(ai==="openai"){
+      const key=localStorage.getItem("publy_openai_key")||"";if(!key)throw new Error("OpenAI API 키 없음");
+      const r=await fetch("https://api.openai.com/v1/chat/completions",{method:"POST",headers:{"Content-Type":"application/json","Authorization":`Bearer ${key}`},body:JSON.stringify({model:"gpt-4o-mini",max_tokens:4000,messages:[{role:"user",content:prompt}]}),signal:AbortSignal.timeout(30000)});
+      if(!r.ok){const e=await r.json();throw new Error(e.error?.message||"OpenAI 오류");}
+      const d=await r.json();return d.choices?.[0]?.message?.content||"";
+    }
+    throw new Error("AI 미선택");
   }
 
-  async function test() {
-    if (!val.trim()) { setMsg("키 입력 필요"); return; }
-    setTesting(true); setMsg("");
-    try {
-      if (k.id === "gemini") {
-        const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${val.trim()}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ contents: [{ parts: [{ text: "hi" }] }], generationConfig: { maxOutputTokens: 5 } }), signal: AbortSignal.timeout(8000) });
-        setMsg(r.ok ? "✅ 연결 성공" : "❌ 키 오류");
-      } else if (k.id === "groq") {
-        const r = await fetch("https://api.groq.com/openai/v1/models", { headers: { Authorization: `Bearer ${val.trim()}` }, signal: AbortSignal.timeout(8000) });
-        setMsg(r.ok ? "✅ 연결 성공" : "❌ 연결 실패");
-      } else if (k.id === "openai" || k.id === "openai_img") {
-        const r = await fetch("https://api.openai.com/v1/models", { headers: { Authorization: `Bearer ${val.trim()}` }, signal: AbortSignal.timeout(8000) });
-        setMsg(r.ok ? "✅ 연결 성공" : "❌ 연결 실패");
-      } else { setMsg("저장 후 실제 생성으로 테스트"); }
-    } catch (e: any) { setMsg("❌ " + e.message); }
-    finally { setTesting(false); }
+  async function generateImage(kw:string):Promise<string>{
+    const imgPrompt=buildImagePrompt(kw);
+    const ai=localStorage.getItem("publy_image_ai")||"openai_img";
+    if(ai==="openai_img"){
+      const key=localStorage.getItem("publy_openai_key")||"";if(!key)throw new Error("OpenAI 키 없음");
+      const r=await fetch("https://api.openai.com/v1/images/generations",{method:"POST",headers:{"Content-Type":"application/json","Authorization":`Bearer ${key}`},body:JSON.stringify({model:"dall-e-3",prompt:imgPrompt,n:1,size:"1024x1024"}),signal:AbortSignal.timeout(60000)});
+      if(!r.ok){const e=await r.json();throw new Error("DALL-E: "+(e.error?.message||r.status));}
+      const d=await r.json();return d.data?.[0]?.url||"";
+    }
+    if(ai==="replicate"){
+      const key=localStorage.getItem("publy_replicate_key")||"";if(!key)throw new Error("Replicate 키 없음");
+      const pr=await fetch("https://api.replicate.com/v1/models/black-forest-labs/flux-schnell/predictions",{method:"POST",headers:{"Content-Type":"application/json","Authorization":`Bearer ${key}`},body:JSON.stringify({input:{prompt:imgPrompt,num_outputs:1,aspect_ratio:"16:9"}}),signal:AbortSignal.timeout(30000)});
+      if(!pr.ok){const e=await pr.json();throw new Error("Replicate: "+(e.detail||pr.status));}
+      const pred=await pr.json();const pollUrl=pred.urls?.get;if(!pollUrl)throw new Error("Replicate 응답 오류");
+      for(let i=0;i<30;i++){await new Promise(r=>setTimeout(r,2000));const res=await fetch(pollUrl,{headers:{"Authorization":`Bearer ${key}`}});const data=await res.json();if(data.status==="succeeded")return data.output?.[0]||"";if(data.status==="failed")throw new Error("Replicate 실패");}
+      throw new Error("Replicate 타임아웃");
+    }
+    throw new Error("이미지 AI 미선택");
   }
 
-  return (
-    <div className={`key-card ${val ? "has-key" : ""}`}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
-          <div style={{ width: 30, height: 30, borderRadius: 9, background: k.color, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 900, color: "#000" }}>{k.logo}</div>
-          <div>
-            <div style={{ fontSize: 13, fontWeight: 700, color: "var(--text)" }}>{k.label}</div>
-            <div style={{ fontSize: 10, color: "var(--sub)" }}>{k.sub}</div>
-          </div>
-          {val && <span style={{ fontSize: 9, fontWeight: 800, padding: "2px 8px", borderRadius: 99, background: "var(--adim)", color: "var(--accent)" }}>✓ 입력됨</span>}
-        </div>
-        <a href={k.link} target="_blank" rel="noopener noreferrer" style={{ fontSize: 10, fontWeight: 700, color: k.color, textDecoration: "none", padding: "4px 10px", borderRadius: 8, border: `1px solid ${k.color}30`, background: `${k.color}10` }}>🔗 발급</a>
-      </div>
-      <div style={{ display: "flex", gap: 8, marginBottom: 7 }}>
-        <div style={{ flex: 1, position: "relative" }}>
-          <input type={show ? "text" : "password"} placeholder={k.placeholder} value={val} onChange={e => setVal(e.target.value)} onKeyDown={e => e.key === "Enter" && save()}
-            style={{ width: "100%", padding: "10px 36px 10px 12px", borderRadius: 10, border: `1.5px solid ${val ? "rgba(0,255,136,.3)" : "var(--border)"}`, background: "var(--bg)", color: "var(--text)", fontSize: 12, fontFamily: "'JetBrains Mono',monospace", outline: "none" }} />
-          <button onClick={() => setShow(v => !v)} style={{ position: "absolute", right: 10, top: "50%", transform: "translateY(-50%)", background: "none", border: "none", cursor: "pointer", color: "var(--sub)", fontSize: 14 }}>{show ? "🙈" : "👁️"}</button>
-        </div>
-        <button onClick={save} style={{ padding: "10px 16px", borderRadius: 10, border: "none", cursor: "pointer", fontWeight: 800, fontSize: 11, fontFamily: "inherit", background: saved ? "var(--accent)" : "var(--adim)", color: saved ? "#000" : "var(--accent)", flexShrink: 0 }}>
-          {saved ? "✅" : "저장"}
-        </button>
-      </div>
-      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-        <button onClick={test} disabled={testing} className="btn-sec" style={{ padding: "5px 12px", fontSize: 11 }}>
-          {testing && <span className="spinner-g" />} 🔌 테스트
-        </button>
-        {msg && <span style={{ fontSize: 11, color: msg.includes("✅") ? "var(--accent)" : "var(--err)" }}>{msg}</span>}
-      </div>
-    </div>
-  );
-}
+  // 글자수 기반 이미지 추천 수량
+  function recommendImageCount(content:string):number{
+    return Math.max(1, Math.floor(content.length/200));
+  }
 
-// ── AI 선택 카드 ─────────────────────────────────────────
-function AICard({ item, selected, onClick }: { item: any; selected: boolean; onClick: () => void }) {
-  return (
-    <button onClick={onClick} style={{ flex: 1, padding: "14px 12px", borderRadius: 15, cursor: "pointer", fontFamily: "inherit", textAlign: "left", border: `2px solid ${selected ? item.color : "var(--border)"}`, background: selected ? `${item.color}12` : "var(--card)", transform: selected ? "translateY(-3px) scale(1.02)" : "none", boxShadow: selected ? `0 10px 28px ${item.color}25` : "none", transition: "all .18s", position: "relative", overflow: "hidden" }}>
-      {selected && <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 2, background: `linear-gradient(90deg,transparent,${item.color},transparent)` }} />}
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
-        <div style={{ width: 30, height: 30, borderRadius: 9, background: selected ? item.color : `${item.color}25`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 900, color: selected ? "#000" : item.color }}>{item.logo}</div>
-        {selected ? <span style={{ fontSize: 9, fontWeight: 800, padding: "2px 8px", borderRadius: 99, background: item.color, color: "#000" }}>✓ 선택됨</span>
-          : <span style={{ fontSize: 9, fontWeight: 700, padding: "2px 7px", borderRadius: 99, background: item.free ? "rgba(0,200,117,.15)" : "rgba(245,158,11,.15)", color: item.free ? "#00c875" : "#f59e0b" }}>{item.free ? "무료" : "유료"}</span>}
-      </div>
-      <div style={{ fontSize: 12, fontWeight: 700, color: selected ? item.color : "var(--text)" }}>{item.label}</div>
-      <div style={{ fontSize: 10, color: "var(--sub)", marginTop: 2 }}>{item.sub}</div>
-    </button>
-  );
-}
+  function getActiveImages():string[]{
+    if(imgSource==="upload")return uploadedImages;
+    return generatedImages;
+  }
 
-// ── 메인 컴포넌트 ────────────────────────────────────────
-interface Props { user: PublyUser; onLogout: () => void; onAdminLogin: () => void; theme: "dark" | "light"; onThemeToggle: () => void; }
-const TABS = [
-  { key: "publish", label: "발행하기", icon: Icons.rocket },
-  { key: "write",   label: "글 생성",  icon: Icons.write  },
-  { key: "accounts",label: "계정 관리",icon: Icons.link   },
-  { key: "history", label: "발행 기록",icon: Icons.history },
-  { key: "settings",label: "설정",     icon: Icons.settings},
-] as const;
-const PLAN_LABELS: Record<string, string> = { free: "FREE", basic: "BASIC", pro: "PRO" };
+  // 본문을 이미지 수에 맞게 섹션으로 분할
+  function splitContentWithImages(content:string, images:string[]):{text:string,img?:string}[]{
+    if(!images.length||imgSource==="none")return [{text:content}];
+    const charsPerSection=Math.floor(content.length/(images.length+1));
+    const sections:{text:string,img?:string}[]=[];
+    let pos=0;
+    for(let i=0;i<images.length;i++){
+      const end=Math.min(pos+charsPerSection, content.length);
+      // 문단 경계 찾기
+      const breakAt=content.lastIndexOf("\n",end)||end;
+      sections.push({text:content.slice(pos,breakAt>pos?breakAt:end).trim()});
+      sections.push({img:images[i]});
+      pos=breakAt>pos?breakAt:end;
+    }
+    if(pos<content.length)sections.push({text:content.slice(pos).trim()});
+    return sections;
+  }
 
-export default function DashboardPage({ user, onLogout, onAdminLogin, theme, onThemeToggle }: Props) {
-  const [tab, setTab] = useState<Tab>("publish");
-  const [botOnline, setBotOnline] = useState(false);
-  const [quota, setQuota] = useState<PublyQuota | null>(null);
-  const [history, setHistory] = useState<PublyHistory[]>([]);
-  const [accounts, setAccounts] = useState<PublyAccount[]>([]);
-  const [platform, setPlatform] = useState<"naver" | "tistory">("naver");
-  const isMobile = typeof window !== "undefined" && window.innerWidth <= 700;
+  async function handleGenerateImages(count:number){
+    if(imgSource==="none"||imgSource==="upload")return;
+    setGenImgLoading(true);
+    const imgs:string[]=[];
+    try{
+      for(let i=0;i<count;i++){
+        const url=await generateImage(keyword||selectedTitle);
+        imgs.push(url);
+        setGeneratedImages([...imgs]);
+      }
+    }catch(e:any){alert("이미지 생성 실패: "+e.message);}
+    finally{setGenImgLoading(false);}
+  }
 
-  // 발행 폼
-  const [pubTitle, setPubTitle] = useState("");
-  const [pubContent, setPubContent] = useState("");
-  const [pubTags, setPubTags] = useState("");
-  const [pubImageUrl, setPubImageUrl] = useState("");
-  const [pubAccId, setPubAccId] = useState("");
-  const [publishing, setPublishing] = useState(false);
-  const [pubMsg, setPubMsg] = useState("");
+  function handleImageUpload(e:React.ChangeEvent<HTMLInputElement>){
+    const files=e.target.files;
+    if(!files)return;
+    Array.from(files).forEach(file=>{
+      const reader=new FileReader();
+      reader.onload=ev=>{
+        if(ev.target?.result)setUploadedImages(prev=>[...prev,ev.target!.result as string]);
+      };
+      reader.readAsDataURL(file);
+    });
+  }
 
-  // 글 생성 - 단계별
-  const [writeStep, setWriteStep] = useState<1|2|3|4>(1);
-  const [keyword, setKeyword] = useState("");
-  const [titles, setTitles] = useState<string[]>(() => {
-    try { return JSON.parse(localStorage.getItem("publy_titles") || "[]"); } catch { return []; }
-  });
-  const [selectedTitle, setSelectedTitle] = useState("");
-  const [genTitle, setGenTitle] = useState("");
-  const [genContent, setGenContent] = useState("");
-  const [genTags, setGenTags] = useState("");
-  const [genImage, setGenImage] = useState("");
-  const [genImgLoading, setGenImgLoading] = useState(false);
-  const [loadingTitles, setLoadingTitles] = useState(false);
-  const [loadingContent, setLoadingContent] = useState(false);
-  const [error, setError] = useState("");
-
-  // 계정
-  const [newPlatform, setNewPlatform] = useState<"naver" | "tistory">("naver");
-  const [newUser, setNewUser] = useState("");
-  const [newPw, setNewPw] = useState("");
-  const [newBlog, setNewBlog] = useState("");
-  const [addingAcc, setAddingAcc] = useState(false);
-  const [connectingId, setConnectingId] = useState<string | null>(null);
-
-  // 설정
-  const [writeAI, setWriteAI] = useState(() => localStorage.getItem("publy_write_ai") || "gemini");
-  const [imageAI, setImageAI] = useState(() => localStorage.getItem("publy_image_ai") || "openai_img");
-
-  // 제목 localStorage 저장
-  useEffect(() => {
-    try { localStorage.setItem("publy_titles", JSON.stringify(titles)); } catch {}
-  }, [titles]);
-
-  const checkBot = useCallback(async () => {
-    try { const r = await fetch(`${BOT}/health`, { signal: AbortSignal.timeout(3000) }); setBotOnline(r.ok); }
-    catch { setBotOnline(false); }
-  }, []);
-
-  useEffect(() => {
-    checkBot();
-    const t = setInterval(checkBot, 10000);
-    getQuota(user.id).then(q => q && setQuota(q));
-    getHistory(user.id).then(setHistory);
-    getAccounts(user.id).then(setAccounts);
-    return () => clearInterval(t);
-  }, [user.id, checkBot]);
-
-  // ── 제목 30개 생성 ──────────────────────────────────────
-  async function handleGenerateTitles(reset = false) {
-    if (!keyword.trim()) { setError("키워드를 입력하세요!"); return; }
-    setError("");
-    if (reset) setTitles([]);
+  async function handleGenerateTitles(reset=false){
+    if(!keyword.trim()){alert("키워드를 입력하세요");return;}
+    if(reset)setTitles([]);
     setLoadingTitles(true);
-
-    const prompt = `당신은 대한민국 최고의 네이버 블로그 SEO 제목 전문가입니다.
-키워드: "${keyword.trim()}"
-목적: 네이버 애드포스트 클릭률 극대화
-
-조건:
-- 반드시 30개 제목을 JSON 배열로만 반환 (다른 텍스트 없이)
-- 키워드 "${keyword.trim()}"을 자연스럽게 포함
-- 각 제목 25~45자 내외
-- 호기심·궁금증 유발 (BEST N, TOP N, 실제 후기, 솔직 후기, 꿀팁 등)
-- 2026년 최신 트렌드 반영
-- 숫자 포함 필수 (BEST 7, TOP 5, 3가지 등)
-- 클릭하고 싶게 만들기
-- 광고 수익 극대화
-
-예시: ["2026년 ${keyword.trim()} BEST 7 완벽 정리", "솔직히 ${keyword.trim()} 이것만 알면 됩니다", ...]
-
-반드시 JSON 배열만 반환하세요.`;
-
-    try {
-      const text = await callWriteAI(prompt);
-      const newTitles = parseTitles(text);
-      if (!newTitles.length) throw new Error("제목을 파싱할 수 없습니다. 다시 시도해보세요.");
-
-      setTitles(prev => {
-        const combined = [...newTitles, ...prev];
-        if (combined.length >= MAX_TITLES) return newTitles; // 90개 초과시 초기화
+    const isAdpost=adType==="adpost";
+    const prompt=isAdpost
+      ?`당신은 대한민국 최고의 네이버 블로그 SEO 제목 전문가입니다.\n키워드: "${keyword.trim()}"\n목적: 네이버 애드포스트 클릭률 극대화\n\n반드시 제목 30개를 JSON 배열로만 반환하세요.\n- 키워드를 자연스럽게 포함\n- 25~40자, 친근하고 감성적\n- 숫자 필수 (BEST 7, TOP 5 등)\n- "솔직히", "이것만", "나만 알던" 등 클릭 유발\n- 경험 공유형, 2026 트렌드\n\nJSON 배열만 반환.`
+      :`당신은 구글 애드센스 최적화 SEO 전문가입니다.\n키워드: "${keyword.trim()}"\n목적: 구글 검색 상위노출 + 애드센스 클릭률 극대화\n\n반드시 제목 30개를 JSON 배열로만 반환하세요.\n- 키워드를 자연스럽게 포함\n- 30~50자, 정보성·전문적 톤\n- 검색의도 반영 (방법, 가이드, 총정리)\n- "완벽 가이드", "총정리", "이유 5가지" 등\n- 영어 혼용 자연스럽게 가능\n\nJSON 배열만 반환.`;
+    try{
+      const text=await callAI(prompt);
+      const parsed=parseArr(text);
+      if(!parsed.length)throw new Error("제목 파싱 실패");
+      setTitles(prev=>{
+        const combined=[...parsed,...prev];
+        if(combined.length>=90){localStorage.setItem("publy_adm_titles",JSON.stringify(parsed));return parsed;}
+        localStorage.setItem("publy_adm_titles",JSON.stringify(combined));
         return combined;
       });
-      setWriteStep(2);
-    } catch (e: any) {
-      setError("제목 생성 실패: " + e.message);
-    } finally {
-      setLoadingTitles(false);
-    }
+    }catch(e:any){alert("제목 생성 실패: "+e.message);}
+    finally{setLoadingTitles(false);}
   }
 
-  // ── 본문 + 이미지 생성 ──────────────────────────────────
-  async function handleGenerateContent() {
-    if (!selectedTitle) { setError("제목을 선택하세요!"); return; }
-    setError(""); setLoadingContent(true); setWriteStep(3);
-
-    const contentPrompt = `당신은 대한민국 최고의 네이버 블로그 작가입니다.
-키워드: "${keyword.trim()}"
-제목: "${selectedTitle}"
-목적: 네이버 애드포스트 클릭률 극대화, 체류시간 증가
-
-다음 형식으로 작성하세요:
-태그: (태그1, 태그2, 태그3, 태그4, 태그5)
-본문: (2000자 이상의 완성된 본문. 소제목 포함, 읽기 쉽게 문단 나누기, 실생활 도움이 되는 정보 중심)
-
-본문 구성:
-- 도입부: 독자의 공감 유도
-- 핵심 내용 3~5개 (소제목 포함)
-- 실용적인 팁
-- 마무리 및 정리`;
-
-    try {
-      const text = await callWriteAI(contentPrompt);
-      const tm = text.match(/태그[:\s]*([^\n]+)/);
-      const bm = text.match(/본문[:\s]*([\s\S]+)/);
-      setGenTitle(selectedTitle);
-      setGenTags(tm ? tm[1].trim() : keyword.trim());
-      setGenContent(bm ? bm[1].trim() : text);
-    } catch (e: any) {
-      setError("본문 생성 실패: " + e.message);
-      setWriteStep(2); setLoadingContent(false); return;
-    } finally { setLoadingContent(false); }
-
-    // 이미지 생성
-    setGenImgLoading(true);
-    try {
-      const imgPrompt = `${selectedTitle} 블로그 대표 이미지, 고품질, 깔끔한 디자인, 한국 스타일`;
-      const url = await callImageAI(imgPrompt);
-      setGenImage(url);
-    } catch (e: any) {
-      setError("이미지 생성 실패: " + e.message);
-    } finally { setGenImgLoading(false); }
-
-    setWriteStep(4);
+  async function handleGenerate(){
+    if(!selectedTitle&&!keyword)return;
+    const title=selectedTitle||keyword;
+    setGenerating(true);setGenImage("");
+    const isAdpost=adType==="adpost";
+    const contentPrompt=isAdpost
+      ?`당신은 대한민국 최고의 네이버 블로그 작가입니다.\n키워드: "${keyword}"\n제목: "${title}"\n목적: 네이버 애드포스트 클릭률 + 체류시간 극대화\n\n형식:\n태그: (태그1, 태그2, 태그3, 태그4, 태그5)\n본문: (정확히 ${targetChars}자 내외, 친근한 말투, 경험 공유형, 소제목 포함, 독자 공감 유도, 자연스러운 단락 구분)`
+      :`당신은 구글 애드센스 최적화 전문 블로그 작가입니다.\n키워드: "${keyword}"\n제목: "${title}"\n목적: 구글 SEO 상위노출 + 애드센스 수익 극대화\n\n형식:\n태그: (태그1, 태그2, 태그3, 태그4, 태그5)\n본문: (정확히 ${targetChars}자 내외, 전문적 정보성 톤, H2/H3 소제목 다수 포함, 리스트 활용, 구체적 정보 중심, 자연스러운 단락 구분)`;
+    try{
+      const text=await callAI(contentPrompt);
+      const tgm=text.match(/태그[:\s]*([^\n]+)/);const bm=text.match(/본문[:\s]*([\s\S]+)/);
+      setGenTitle(title);
+      if(tgm)setGenTags(tgm[1].trim());
+      const body=bm?bm[1].trim():text;
+      setGenContent(body);
+      // 이미지 수량 계산
+      const recCount=imgCountManual??recommendImageCount(body);
+      if(imgSource==="ai"&&recCount>0){
+        setGenImgLoading(true);setGeneratedImages([]);
+        const imgs:string[]=[];
+        try{
+          for(let i=0;i<recCount;i++){
+            const url=await generateImage(keyword||selectedTitle);
+            imgs.push(url);setGeneratedImages([...imgs]);
+          }
+        }catch(e:any){alert("이미지 생성 실패: "+e.message);}
+        finally{setGenImgLoading(false);}
+      }
+    }catch(e:any){alert("본문 생성 실패: "+e.message);}
+    finally{setGenerating(false);}
+      const prompt=`"${keyword}" 키워드로 ${platform==="naver"?"네이버 블로그":"티스토리"} 스타일 한국어 블로그 글 1500자 이상.\n형식:\n제목: (제목)\n태그: (태그1, 태그2)\n본문: (본문)`;
+      let text="";
+      if(selectedAI==="gemini"){
+        const key=localStorage.getItem("publy_gemini_key")||"";
+        if(!key)throw new Error("Gemini API 키가 없습니다");
+        const MODELS=["gemini-2.0-flash","gemini-2.0-flash-lite","gemini-2.5-flash","gemini-2.5-flash-lite"];
+        let lastErr="";
+        for(const model of MODELS){
+          try{
+            const r=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({contents:[{parts:[{text:prompt}]}],generationConfig:{maxOutputTokens:2000}}),signal:AbortSignal.timeout(30000)});
+            if(!r.ok){lastErr=`${model} 오류(${r.status})`;continue;}
+            const d=await r.json();text=d.candidates?.[0]?.content?.parts?.[0]?.text||"";
+            if(text)break;lastErr=`${model} 빈 응답`;
+          }catch(e:any){lastErr=e.message;continue;}
+        }
+        if(!text)throw new Error("Gemini 생성 실패: "+lastErr);
+      } else if(selectedAI==="groq"){
+        const key=localStorage.getItem("publy_groq_key")||"";
+        if(!key)throw new Error("Groq API 키가 없습니다");
+        const r=await fetch("https://api.groq.com/openai/v1/chat/completions",{method:"POST",headers:{"Content-Type":"application/json","Authorization":`Bearer ${key}`},body:JSON.stringify({model:"llama-3.1-70b-versatile",max_tokens:2000,messages:[{role:"user",content:prompt}]}),signal:AbortSignal.timeout(30000)});
+        if(!r.ok){const e=await r.json();throw new Error(e.error?.message||"Groq 오류");}
+        const d=await r.json();text=d.choices?.[0]?.message?.content||"";
+      } else if(selectedAI==="openai"){
+        const key=localStorage.getItem("publy_openai_key")||"";
+        if(!key)throw new Error("OpenAI API 키가 없습니다");
+        const r=await fetch("https://api.openai.com/v1/chat/completions",{method:"POST",headers:{"Content-Type":"application/json","Authorization":`Bearer ${key}`},body:JSON.stringify({model:"gpt-4o-mini",max_tokens:2000,messages:[{role:"user",content:prompt}]}),signal:AbortSignal.timeout(30000)});
+        if(!r.ok){const e=await r.json();throw new Error(e.error?.message||"OpenAI 오류");}
+        const d=await r.json();text=d.choices?.[0]?.message?.content||"";
+      }
+      const tm=text.match(/제목[:\s]*([^\n]+)/);const tgm=text.match(/태그[:\s]*([^\n]+)/);const bm=text.match(/본문[:\s]*([\s\S]+)/);
+      if(tm)setGenTitle(tm[1].trim());if(tgm)setGenTags(tgm[1].trim());setGenContent(bm?bm[1].trim():text);
+    }catch(e:any){alert("생성 실패: "+e.message);}finally{setGenerating(false);}
   }
 
-  // ── 발행하기로 넘기기 ────────────────────────────────────
   function sendToPublish() {
     setPubTitle(genTitle);
     setPubContent(genContent);
@@ -680,7 +405,7 @@ export default function DashboardPage({ user, onLogout, onAdminLogin, theme, onT
                 <div className="today-num">{todayPub}</div>
                 <div className="today-label">오늘 발행</div>
               </div>
-              <div className="today-card" style={{ background: "var(--adim)", borderColor: "var(--border2)" }}>
+              <div className="today-card" style={{ background: "var(--accent-dim)", borderColor: "var(--border2)" }}>
                 <div className="today-num" style={{ fontSize: 22 }}>{quota?.remaining_quota ?? "-"}</div>
                 <div className="today-label">잔여 건수</div>
               </div>
@@ -729,11 +454,11 @@ export default function DashboardPage({ user, onLogout, onAdminLogin, theme, onT
                         <button className="btn-main" style={{ margin: "0 auto", fontSize: 13 }} onClick={() => setTab("accounts")}>계정 관리로 이동 →</button>
                       </div>
                     ) : connAccs.map(a => (
-                      <label key={a.id} style={{ display: "flex", alignItems: "center", gap: 11, padding: "12px 15px", borderRadius: 13, cursor: "pointer", marginBottom: 8, background: pubAccId === a.id ? "var(--adim)" : "var(--bg)", border: `1.5px solid ${pubAccId === a.id ? "var(--accent)" : "var(--border)"}`, transition: "all .2s" }}>
+                      <label key={a.id} style={{ display: "flex", alignItems: "center", gap: 11, padding: "12px 15px", borderRadius: 13, cursor: "pointer", marginBottom: 8, background: pubAccId === a.id ? "var(--accent-dim)" : "var(--bg)", border: `1.5px solid ${pubAccId === a.id ? "var(--accent)" : "var(--border)"}`, transition: "all .2s" }}>
                         <input type="radio" name="pacc" checked={pubAccId === a.id} onChange={() => setPubAccId(a.id)} style={{ accentColor: "var(--accent)", width: 16, height: 16 }} />
                         <span style={{ fontSize: 14, fontWeight: 600 }}>{a.username}</span>
                         {a.blog_name && <span style={{ fontSize: 11, color: "var(--sub)" }}>({a.blog_name})</span>}
-                        <span style={{ marginLeft: "auto", fontSize: 10, padding: "2px 9px", borderRadius: 99, background: "var(--adim)", color: "var(--accent)", fontWeight: 800 }}>✅ 연결됨</span>
+                        <span style={{ marginLeft: "auto", fontSize: 10, padding: "2px 9px", borderRadius: 99, background: "var(--accent-dim)", color: "var(--accent)", fontWeight: 800 }}>✅ 연결됨</span>
                       </label>
                     ))}
                   </div>
@@ -773,7 +498,7 @@ export default function DashboardPage({ user, onLogout, onAdminLogin, theme, onT
                     {publishing ? <><span className="spinner" /> 발행 중...</> : <>{Icons.send} 자동 발행</>}
                   </button>
                   {pubMsg && (
-                    <div style={{ marginTop: 10, padding: "13px 16px", borderRadius: 13, background: pubMsg.includes("✅") ? "var(--adim)" : "rgba(255,107,107,.08)", border: `1px solid ${pubMsg.includes("✅") ? "var(--border2)" : "rgba(255,107,107,.2)"}`, fontSize: 13, fontWeight: 600, color: pubMsg.includes("✅") ? "var(--accent)" : "var(--err)" }}>
+                    <div style={{ marginTop: 10, padding: "13px 16px", borderRadius: 13, background: pubMsg.includes("✅") ? "var(--accent-dim)" : "rgba(255,107,107,.08)", border: `1px solid ${pubMsg.includes("✅") ? "var(--border2)" : "rgba(255,107,107,.2)"}`, fontSize: 13, fontWeight: 600, color: pubMsg.includes("✅") ? "var(--accent)" : "var(--err)" }}>
                       {pubMsg}
                     </div>
                   )}
@@ -783,147 +508,243 @@ export default function DashboardPage({ user, onLogout, onAdminLogin, theme, onT
               {/* ───── 글 생성 ───── */}
               {tab === "write" && (
                 <div style={{ animation: "fadeUp .3s ease both" }}>
-
-                  {/* 스텝 인디케이터 */}
-                  <div style={{ marginBottom: 24 }}>
-                    <div className="steps">
-                      {[
-                        { n: 1, label: "키워드" },
-                        { n: 2, label: "제목 선택" },
-                        { n: 3, label: "본문 생성" },
-                        { n: 4, label: "발행하기" },
-                      ].map((s, i) => (
-                        <div key={s.n} className="step">
-                          <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
-                            <div className={`step-circle ${writeStep > s.n ? "done" : writeStep === s.n ? "active" : ""}`}>
-                              {writeStep > s.n ? Icons.check : s.n}
-                            </div>
-                            <div className={`step-label ${writeStep === s.n ? "active" : writeStep > s.n ? "done" : ""}`}>{s.label}</div>
-                          </div>
-                          {i < 3 && <div className={`step-line ${writeStep > s.n ? "done" : ""}`} style={{ margin: "0 4px", marginBottom: 20 }} />}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* STEP 1: 키워드 입력 */}
-                  <div className="card" style={{ padding: "22px 24px", marginBottom: 14 }}>
-                    <div className="section-label">🔍 STEP 1 — 키워드 입력</div>
-                    <div style={{ display: "flex", gap: 10, marginBottom: 12 }}>
-                      <input className="inp" placeholder="예: 강남 맛집 추천, 다이어트 방법, 제주도 여행..." value={keyword} onChange={e => setKeyword(e.target.value)} onKeyDown={e => e.key === "Enter" && handleGenerateTitles(true)} style={{ flex: 1, fontSize: 15 }} />
-                      <select className="inp" value={platform} onChange={e => setPlatform(e.target.value as any)} style={{ width: 100 }}>
-                        <option value="naver">네이버</option>
-                        <option value="tistory">티스토리</option>
-                      </select>
-                    </div>
-                    <div style={{ display: "flex", gap: 10 }}>
-                      <button className="btn-main" style={{ flex: 1, justifyContent: "center", padding: "13px" }} onClick={() => handleGenerateTitles(true)} disabled={loadingTitles || !keyword.trim()}>
-                        {loadingTitles ? <><span className="spinner" /> 생성 중...</> : <>{Icons.star} 애드포스트 제목 30개 생성</>}
-                      </button>
-                      {titles.length > 0 && (
-                        <button className="btn-sec" onClick={() => handleGenerateTitles(false)} disabled={loadingTitles}>
-                          {Icons.plus} {titles.length >= MAX_TITLES ? "초기화 후 재생성" : "30개 추가"}
-                        </button>
-                      )}
-                    </div>
-                    {titles.length > 0 && (
-                      <div style={{ marginTop: 10, display: "flex", alignItems: "center", gap: 10 }}>
-                        <div style={{ flex: 1, height: 6, background: "var(--border)", borderRadius: 99, overflow: "hidden" }}>
-                          <div style={{ height: "100%", width: `${(titles.length / MAX_TITLES) * 100}%`, background: titles.length >= MAX_TITLES ? "var(--err)" : "var(--accent)", borderRadius: 99, transition: "width .4s ease" }} />
-                        </div>
-                        <span style={{ fontSize: 11, color: titles.length >= MAX_TITLES ? "var(--err)" : "var(--sub)", fontFamily: "'JetBrains Mono',monospace", flexShrink: 0 }}>
-                          {titles.length}/{MAX_TITLES}
-                          {titles.length >= MAX_TITLES && " — 다음 생성 시 초기화"}
-                        </span>
-                        <button className="btn-danger" onClick={() => { setTitles([]); setSelectedTitle(""); setWriteStep(1); }} style={{ padding: "4px 10px", fontSize: 11 }}>
-                          {Icons.trash} 초기화
-                        </button>
-                      </div>
-                    )}
-                  </div>
-
-                  {/* STEP 2: 제목 선택 */}
-                  {titles.length > 0 && (
-                    <div className="card" style={{ padding: "22px 24px", marginBottom: 14 }}>
-                      <div className="section-label">✨ STEP 2 — 제목 클릭해서 선택하세요</div>
-                      {selectedTitle && (
-                        <div style={{ padding: "11px 15px", borderRadius: 12, background: "var(--adim)", border: "1px solid var(--border2)", marginBottom: 14, display: "flex", alignItems: "center", gap: 10 }}>
-                          <span style={{ fontSize: 16 }}>✅</span>
-                          <span style={{ fontSize: 13, fontWeight: 600, color: "var(--accent)" }}>{selectedTitle}</span>
-                        </div>
-                      )}
-                      <div className="title-grid">
-                        {titles.map((title, i) => (
-                          <button key={`${title}-${i}`} className={`title-card ${selectedTitle === title ? "selected" : ""}`}
-                            style={{ animationDelay: `${Math.min(i, 15) * 0.03}s` }}
-                            onClick={() => { setSelectedTitle(title); setWriteStep(Math.max(writeStep, 2) as 1|2|3|4); }}>
-                            <div className="num">#{titles.length - i}</div>
-                            <div className="txt">{title}</div>
-                            {selectedTitle === title && <div className="check-ico">{Icons.check}</div>}
+                  <div>
+                    {/* 애드타입 선택 */}
+                    <div className="card" style={{padding:"18px 22px",marginBottom:14}}>
+                      <div style={{fontSize:10,fontWeight:700,letterSpacing:".14em",textTransform:"uppercase",color:"var(--sub)",marginBottom:10}}>🎯 수익화 목적 선택</div>
+                      <div style={{display:"flex",gap:10}}>
+                        {([
+                          {id:"adpost",label:"📰 네이버 애드포스트",sub:"감성적·경험 공유형, 1200~1500자",color:"#03C75A"},
+                          {id:"adsense",label:"🔍 구글 애드센스",sub:"정보성·SEO 최적화, 1500자+",color:"#4285F4"},
+                        ] as const).map(t=>(
+                          <button key={t.id} onClick={()=>setAdType(t.id)} style={{flex:1,padding:"12px 14px",borderRadius:13,border:`2px solid ${adType===t.id?t.color:"var(--border)"}`,background:adType===t.id?`${t.color}15`:"var(--input-bg)",cursor:"pointer",textAlign:"left",fontFamily:"inherit",transition:"all .18s"}}>
+                            <div style={{fontSize:13,fontWeight:700,color:adType===t.id?t.color:"var(--text)",marginBottom:3}}>{t.label}</div>
+                            <div style={{fontSize:10,color:"var(--sub)"}}>{t.sub}</div>
                           </button>
                         ))}
                       </div>
                     </div>
-                  )}
 
-                  {/* STEP 3: 본문 생성 */}
-                  {selectedTitle && (
-                    <div className="card" style={{ padding: "22px 24px", marginBottom: 14 }}>
-                      <div className="section-label">📝 STEP 3 — 본문 + 이미지 생성</div>
-                      <div style={{ padding: "13px 16px", borderRadius: 12, background: "var(--bg)", border: "1px solid var(--border)", marginBottom: 14 }}>
-                        <div style={{ fontSize: 11, color: "var(--sub)", marginBottom: 4 }}>선택된 제목</div>
-                        <div style={{ fontSize: 14, fontWeight: 700, color: "var(--text)" }}>{selectedTitle}</div>
+                    {/* 키워드 입력 */}
+                    <div className="card" style={{padding:"20px 22px",marginBottom:14}}>
+                      <div style={{fontSize:10,fontWeight:700,letterSpacing:".14em",textTransform:"uppercase",color:"var(--sub)",marginBottom:10}}>🔍 키워드 입력</div>
+                      <div style={{display:"grid",gridTemplateColumns:"1fr 100px",gap:9,marginBottom:10}}>
+                        <div>
+                          <label style={{fontSize:9,color:"var(--sub)",fontWeight:700,display:"block",marginBottom:3}}>키워드</label>
+                          <input className="inp" style={{width:"100%",padding:"11px 13px",fontSize:14}} placeholder="예: 강남 맛집, 다이어트 방법, 제주도 여행..." value={keyword} onChange={e=>setKeyword(e.target.value)} onKeyDown={e=>e.key==="Enter"&&handleGenerateTitles(true)}/>
+                        </div>
+                        <div>
+                          <label style={{fontSize:9,color:"var(--sub)",fontWeight:700,display:"block",marginBottom:3}}>플랫폼</label>
+                          <select className="inp" style={{width:"100%",padding:"11px 12px"}} value={platform} onChange={e=>setPlatform(e.target.value as any)}>
+                            <option value="naver">네이버</option><option value="tistory">티스토리</option>
+                          </select>
+                        </div>
                       </div>
-                      <button className="btn-main" style={{ width: "100%", justifyContent: "center", padding: "14px", fontSize: 14 }}
-                        onClick={handleGenerateContent} disabled={loadingContent}>
-                        {loadingContent ? <><span className="spinner" /> AI가 본문 작성 중...</> : <>{Icons.write} 본문 + 이미지 자동 생성</>}
-                      </button>
+                      <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                        <button className="btn-main" onClick={()=>handleGenerateTitles(true)} disabled={loadingTitles||!keyword}>
+                          {loadingTitles?<><span className="spinner"/>생성 중...</>:<>⭐ 제목 30개 추천</>}
+                        </button>
+                        {titles.length>0&&<button className="btn-main" style={{background:"rgba(99,102,241,.15)",color:"#818cf8",border:"1px solid rgba(99,102,241,.3)"}} onClick={()=>handleGenerateTitles(false)} disabled={loadingTitles}>
+                          {titles.length>=90?"🔄 초기화 후 재생성":"➕ 30개 추가"}
+                        </button>}
+                        {titles.length>0&&<button onClick={()=>{setTitles([]);setSelectedTitle("");localStorage.removeItem("publy_adm_titles");}} style={{padding:"8px 12px",borderRadius:9,border:"1px solid rgba(239,68,68,.3)",background:"rgba(239,68,68,.08)",color:"#ef4444",cursor:"pointer",fontSize:11,fontWeight:700}}>🗑 초기화</button>}
+                      </div>
+                      {titles.length>0&&(
+                        <div style={{marginTop:9,display:"flex",alignItems:"center",gap:8}}>
+                          <div style={{flex:1,height:5,background:"var(--border)",borderRadius:99,overflow:"hidden"}}>
+                            <div style={{height:"100%",width:`${(titles.length/90)*100}%`,background:titles.length>=90?"#ef4444":"var(--accent)",borderRadius:99,transition:"width .4s"}}/>
+                          </div>
+                          <span style={{fontSize:10,color:titles.length>=90?"#ef4444":"var(--sub)",fontFamily:"monospace",flexShrink:0}}>{titles.length}/90{titles.length>=90?" — 초기화 후 재생성":""}</span>
+                        </div>
+                      )}
                     </div>
-                  )}
 
-                  {/* STEP 4: 결과 확인 */}
-                  {genContent && (
-                    <div className="card" style={{ padding: "22px 24px", marginBottom: 14, animation: "fadeUp .4s ease both" }}>
-                      <div className="section-label">🎨 STEP 4 — 결과 확인 & 수정</div>
-
-                      {/* 이미지 */}
-                      <div style={{ marginBottom: 16 }}>
-                        <div style={{ fontSize: 11, fontWeight: 700, color: "var(--sub)", marginBottom: 8 }}>🖼️ 생성된 이미지</div>
-                        {genImgLoading ? (
-                          <div className="img-skeleton" />
-                        ) : genImage ? (
-                          <img src={genImage} alt="" style={{ width: "100%", maxHeight: 240, objectFit: "cover", borderRadius: 13, border: "1px solid var(--border)", animation: "fadeIn .5s ease both" }} onError={e => { (e.target as HTMLImageElement).style.display = "none"; }} />
-                        ) : (
-                          <div style={{ padding: "20px", textAlign: "center", border: "1px dashed var(--border)", borderRadius: 13, color: "var(--sub)", fontSize: 12 }}>이미지 설정에서 API 키를 등록하면 자동 생성됩니다</div>
+                    {/* 제목 목록 */}
+                    {titles.length>0&&(
+                      <div className="card" style={{padding:"20px 22px",marginBottom:14}}>
+                        <div style={{fontSize:10,fontWeight:700,letterSpacing:".14em",textTransform:"uppercase",color:"var(--sub)",marginBottom:10}}>✨ 제목 선택 (클릭하세요)</div>
+                        {selectedTitle&&(
+                          <div style={{padding:"9px 13px",borderRadius:10,background:"var(--accent-dim)",border:"1px solid var(--b2)",marginBottom:11,fontSize:13,fontWeight:700,color:"var(--accent)"}}>
+                            ✅ 선택됨: {selectedTitle}
+                          </div>
                         )}
+                        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(260px,1fr))",gap:8,maxHeight:380,overflowY:"auto"}}>
+                          {titles.map((t,i)=>(
+                            <button key={`${t}-${i}`} onClick={()=>setSelectedTitle(t)} style={{padding:"11px 13px",borderRadius:11,border:`1.5px solid ${selectedTitle===t?"var(--accent)":"var(--border)"}`,background:selectedTitle===t?"var(--accent-dim)":"var(--input-bg)",cursor:"pointer",textAlign:"left",fontFamily:"inherit",transition:"all .15s",position:"relative"}}>
+                              <div style={{fontSize:9,color:selectedTitle===t?"var(--accent)":"var(--sub)",marginBottom:4,fontFamily:"monospace"}}>#{titles.length-i}</div>
+                              <div style={{fontSize:12,fontWeight:600,color:selectedTitle===t?"var(--accent)":"#e2e8f0",lineHeight:1.5}}>{t}</div>
+                              {selectedTitle===t&&<div style={{position:"absolute",top:8,right:8,width:18,height:18,borderRadius:"50%",background:"var(--accent)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:9,color:"#000",fontWeight:900}}>✓</div>}
+                            </button>
+                          ))}
+                        </div>
                       </div>
+                    )}
 
-                      {/* 제목 */}
-                      <div style={{ marginBottom: 12 }}>
-                        <div style={{ fontSize: 11, fontWeight: 700, color: "var(--sub)", marginBottom: 6 }}>제목</div>
-                        <input className="inp" value={genTitle} onChange={e => setGenTitle(e.target.value)} style={{ fontSize: 15, fontWeight: 600 }} />
-                      </div>
-                      {/* 태그 */}
-                      <div style={{ marginBottom: 12 }}>
-                        <div style={{ fontSize: 11, fontWeight: 700, color: "var(--sub)", marginBottom: 6 }}>태그</div>
-                        <input className="inp" value={genTags} onChange={e => setGenTags(e.target.value)} />
-                      </div>
-                      {/* 본문 */}
-                      <div style={{ marginBottom: 16 }}>
-                        <div style={{ fontSize: 11, fontWeight: 700, color: "var(--sub)", marginBottom: 6 }}>본문 ({genContent.length.toLocaleString()}자)</div>
-                        <textarea className="inp" rows={14} value={genContent} onChange={e => setGenContent(e.target.value)} />
-                      </div>
+                    {/* 본문+이미지 생성 */}
+                    {(selectedTitle||keyword)&&(
+                      <div className="card" style={{padding:"20px 22px",marginBottom:14}}>
+                        <div style={{fontSize:10,fontWeight:700,letterSpacing:".14em",textTransform:"uppercase",color:"var(--sub)",marginBottom:10}}>⚙️ 생성 설정</div>
 
-                      <button className="btn-main" style={{ width: "100%", justifyContent: "center", padding: "15px", fontSize: 15 }} onClick={sendToPublish}>
-                        {Icons.rocket} 발행하기로 넘기기
-                      </button>
-                    </div>
-                  )}
+                        {/* 목표 글자수 */}
+                        <div style={{marginBottom:12}}>
+                          <div style={{display:"flex",justifyContent:"space-between",marginBottom:5}}>
+                            <label style={{fontSize:9,color:"var(--sub)",fontWeight:700,textTransform:"uppercase"}}>목표 글자수</label>
+                            <span style={{fontSize:11,fontWeight:700,color:"var(--accent)"}}>{targetChars.toLocaleString()}자</span>
+                          </div>
+                          <input type="range" min={1200} max={1500} step={50} value={targetChars} onChange={e=>setTargetChars(Number(e.target.value))} style={{width:"100%",accentColor:"var(--accent)"}}/>
+                          <div style={{display:"flex",justifyContent:"space-between",fontSize:9,color:"var(--sub)",marginTop:3}}>
+                            <span>1200자</span><span>1350자</span><span>1500자</span>
+                          </div>
+                        </div>
+
+                        {/* 이미지 소스 */}
+                        <div style={{marginBottom:12}}>
+                          <label style={{fontSize:9,color:"var(--sub)",fontWeight:700,display:"block",marginBottom:6,textTransform:"uppercase"}}>이미지 소스</label>
+                          <div style={{display:"flex",gap:8}}>
+                            {([{id:"ai",label:"🤖 AI 생성"},{id:"upload",label:"📁 내 이미지"},{id:"none",label:"🚫 없음"}] as const).map(s=>(
+                              <button key={s.id} onClick={()=>setImgSource(s.id)} style={{flex:1,padding:"8px 10px",borderRadius:10,border:`1.5px solid ${imgSource===s.id?"var(--accent)":"var(--border)"}`,background:imgSource===s.id?"var(--accent-dim)":"var(--input-bg)",cursor:"pointer",fontSize:11,fontWeight:600,color:imgSource===s.id?"var(--accent)":"var(--sub)",fontFamily:"inherit",transition:"all .15s"}}>
+                                {s.label}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+
+                        {/* 업로드 */}
+                        {imgSource==="upload"&&(
+                          <div style={{marginBottom:12}}>
+                            <label style={{display:"flex",alignItems:"center",gap:8,padding:"10px 14px",borderRadius:10,border:"1.5px dashed var(--b2)",background:"var(--accent-dim)",cursor:"pointer"}}>
+                              <span style={{fontSize:18}}>📁</span>
+                              <span style={{fontSize:12,color:"var(--accent)",fontWeight:600}}>클릭해서 이미지 선택 (여러장 가능)</span>
+                              <input type="file" accept="image/*" multiple onChange={handleImageUpload} style={{display:"none"}}/>
+                            </label>
+                            {uploadedImages.length>0&&(
+                              <div style={{marginTop:8,display:"flex",gap:6,flexWrap:"wrap"}}>
+                                {uploadedImages.map((img,i)=>(
+                                  <div key={i} style={{position:"relative"}}>
+                                    <img src={img} alt="" style={{width:60,height:60,objectFit:"cover",borderRadius:8,border:"1px solid var(--b)"}}/>
+                                    <button onClick={()=>setUploadedImages(prev=>prev.filter((_,j)=>j!==i))} style={{position:"absolute",top:-4,right:-4,width:16,height:16,borderRadius:"50%",background:"#ef4444",border:"none",color:"#fff",cursor:"pointer",fontSize:9,display:"flex",alignItems:"center",justifyContent:"center"}}>✕</button>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        )}
+
+                        {selectedTitle&&<div style={{padding:"9px 12px",borderRadius:9,background:"var(--input-bg)",marginBottom:10,fontSize:12}}>선택 제목: <strong style={{color:"var(--accent)"}}>{selectedTitle}</strong></div>}
+                        <button className="btn-main" onClick={handleGenerate} disabled={generating}>
+                          {generating?<><span className="spinner"/>AI 작성 중...</>:<>✍️ 본문 + 이미지 생성</>}
+                        </button>
+                      </div>
+                    )}
+
+                    {/* 생성 결과 */}
+                    {genContent&&(
+                      <>
+                        {/* 미리보기 모달 */}
+                        {showPreview&&(
+                          <div style={{position:"fixed",inset:0,zIndex:999,background:"rgba(0,0,0,.85)",display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onClick={()=>setShowPreview(false)}>
+                            <div style={{width:"100%",maxWidth:680,maxHeight:"90vh",overflowY:"auto",background:"#fff",borderRadius:16,padding:"32px 24px"}} onClick={e=>e.stopPropagation()}>
+                              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}>
+                                <div style={{fontSize:12,color:"#888",fontWeight:600}}>📱 구독자 미리보기</div>
+                                <button onClick={()=>setShowPreview(false)} style={{background:"none",border:"none",cursor:"pointer",fontSize:22,color:"#888"}}>✕</button>
+                              </div>
+                              <div style={{fontFamily:"'Apple SD Gothic Neo','Malgun Gothic',sans-serif"}}>
+                                <h1 style={{fontSize:22,fontWeight:700,color:"#191919",lineHeight:1.4,marginBottom:16}}>{genTitle}</h1>
+                                {genTags&&<div style={{marginBottom:16,display:"flex",flexWrap:"wrap",gap:6}}>
+                                  {genTags.split(",").map((t,i)=><span key={i} style={{fontSize:12,padding:"3px 10px",borderRadius:99,background:"#f1f3f5",color:"#495057"}}>#{t.trim()}</span>)}
+                                </div>}
+                                {getActiveImages()[0]&&<img src={getActiveImages()[0]} alt="" style={{width:"100%",maxHeight:300,objectFit:"cover",borderRadius:8,marginBottom:20}} onError={e=>{(e.target as HTMLImageElement).style.display="none";}}/>}
+                                {splitContentWithImages(genContent,getActiveImages().slice(1)).map((section,i)=>(
+                                  <div key={i}>
+                                    {section.img
+                                      ?<img src={section.img} alt="" style={{width:"100%",maxHeight:260,objectFit:"cover",borderRadius:8,margin:"16px 0"}} onError={e=>{(e.target as HTMLImageElement).style.display="none";}}/>
+                                      :<div style={{fontSize:15,color:"#333",lineHeight:1.9,whiteSpace:"pre-wrap",marginBottom:8}}>{section.text}</div>
+                                    }
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          </div>
+                        )}
+
+                        <div className="card" style={{padding:"20px 22px",marginBottom:14}}>
+                          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:11,flexWrap:"wrap",gap:7}}>
+                            <div style={{fontSize:10,fontWeight:700,letterSpacing:".14em",textTransform:"uppercase",color:"var(--sub)",marginBottom:10}} style={{marginBottom:0}}>🎨 생성 결과</div>
+                            <div style={{display:"flex",gap:7,alignItems:"center",flexWrap:"wrap"}}>
+                              <span style={{fontSize:10,padding:"3px 9px",borderRadius:99,background:"var(--accent-dim)",color:"var(--accent)",fontWeight:700}}>
+                                {genContent.length.toLocaleString()}자 · 추천 {recommendImageCount(genContent)}장
+                              </span>
+                              <button onClick={()=>setShowPreview(true)} style={{padding:"5px 12px",borderRadius:9,border:"1px solid var(--b2)",background:"var(--accent-dim)",color:"var(--accent)",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:"inherit"}}>
+                                👁️ 미리보기
+                              </button>
+                            </div>
+                          </div>
+
+                          {/* 이미지 수량 조절 */}
+                          {imgSource!=="none"&&(
+                            <div style={{marginBottom:12,padding:"10px 14px",borderRadius:10,background:"var(--input-bg)",border:"1px solid var(--b)"}}>
+                              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:7}}>
+                                <label style={{fontSize:10,color:"var(--sub)",fontWeight:700}}>🖼️ 이미지 수량 (200자당 1장 기준)</label>
+                                <div style={{display:"flex",alignItems:"center",gap:7}}>
+                                  <span style={{fontSize:11,fontWeight:700,color:"var(--accent)"}}>{imgCountManual??recommendImageCount(genContent)}장</span>
+                                  {imgCountManual!==null&&<button onClick={()=>setImgCountManual(null)} style={{fontSize:9,padding:"2px 7px",borderRadius:6,border:"1px solid var(--b)",background:"transparent",color:"var(--sub)",cursor:"pointer",fontFamily:"inherit"}}>자동</button>}
+                                </div>
+                              </div>
+                              <input type="range" min={0} max={20} step={1} value={imgCountManual??recommendImageCount(genContent)} onChange={e=>setImgCountManual(Number(e.target.value))} style={{width:"100%",accentColor:"var(--accent)"}}/>
+                              {imgSource==="ai"&&(
+                                <button onClick={()=>handleGenerateImages(imgCountManual??recommendImageCount(genContent))} disabled={genImgLoading}
+                                  style={{marginTop:8,padding:"6px 14px",borderRadius:9,border:"none",background:"var(--accent)",color:"#000",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:"inherit",display:"inline-flex",alignItems:"center",gap:5}}>
+                                  {genImgLoading?<><span className="spinner" style={{borderTopColor:"#000",borderColor:"rgba(0,0,0,.2)"}}/>생성 중...</>:"🔄 이미지 재생성"}
+                                </button>
+                              )}
+                            </div>
+                          )}
+
+                          {/* 이미지 갤러리 */}
+                          {getActiveImages().length>0&&(
+                            <div style={{marginBottom:12}}>
+                              <label style={{fontSize:9,color:"var(--sub)",fontWeight:700,display:"block",marginBottom:6,textTransform:"uppercase"}}>
+                                🖼️ 이미지 {getActiveImages().length}장 — 첫번째=썸네일
+                              </label>
+                              {genImgLoading&&<div style={{fontSize:11,color:"var(--accent)",marginBottom:6,animation:"as 1s infinite"}}>⏳ 이미지 생성 중...</div>}
+                              <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                                {getActiveImages().map((img,i)=>(
+                                  <div key={i} style={{position:"relative"}}>
+                                    <img src={img} alt="" style={{width:80,height:80,objectFit:"cover",borderRadius:8,border:`2px solid ${i===0?"var(--accent)":"var(--border)"}`}} onError={e=>{(e.target as HTMLImageElement).style.display="none";}}/>
+                                    {i===0&&<span style={{position:"absolute",top:-7,left:-5,fontSize:8,fontWeight:800,padding:"2px 5px",borderRadius:99,background:"var(--accent)",color:"#000"}}>썸네일</span>}
+                                    <button onClick={()=>{if(imgSource==="ai")setGeneratedImages(prev=>prev.filter((_,j)=>j!==i));else setUploadedImages(prev=>prev.filter((_,j)=>j!==i));}}
+                                      style={{position:"absolute",top:-5,right:-5,width:17,height:17,borderRadius:"50%",background:"#ef4444",border:"none",color:"#fff",cursor:"pointer",fontSize:9,display:"flex",alignItems:"center",justifyContent:"center"}}>✕</button>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+
+                          <div style={{display:"flex",flexDirection:"column",gap:9}}>
+                            {[{l:"제목",v:genTitle,s:setGenTitle},{l:"태그",v:genTags,s:setGenTags}].map(f=>(
+                              <div key={f.l}>
+                                <label style={{fontSize:9,color:"var(--sub)",fontWeight:700,display:"block",marginBottom:3}}>{f.l}</label>
+                                <input className="inp" style={{width:"100%",padding:"10px 12px",fontSize:13}} value={f.v} onChange={e=>f.s(e.target.value)}/>
+                              </div>
+                            ))}
+                            <div>
+                              <label style={{fontSize:9,color:"var(--sub)",fontWeight:700,display:"block",marginBottom:3}}>본문 ({genContent.length.toLocaleString()}자)</label>
+                              <textarea className="inp" rows={10} style={{width:"100%",padding:"10px 12px",fontSize:13,resize:"vertical"}} value={genContent} onChange={e=>setGenContent(e.target.value)}/>
+                            </div>
+                          </div>
+                        </div>
+                        <button className="btn-main" style={{width:"100%",justifyContent:"center",padding:"12px"}} onClick={()=>{setPubTitle(genTitle);setPubContent(genContent);setPubTags(genTags);setPubImageUrl(getActiveImages()[0]||"");setPubSub("publish");}}>
+                          🚀 발행하기로 넘기기
+                        </button>
+                      </>
+                    )}
+                  </div>
+                )}
+
                 </div>
               )}
 
-              {/* ───── 계정 관리 ───── */}
-              {tab === "accounts" && (
+                            {tab === "accounts" && (
                 <div style={{ animation: "fadeUp .3s ease both" }}>
 
                   {/* 계정 추가 */}
@@ -964,7 +785,7 @@ export default function DashboardPage({ user, onLogout, onAdminLogin, theme, onT
                         <div style={{ fontSize: 15, fontWeight: 700 }}>{a.username}</div>
                         <div style={{ fontSize: 11, color: "var(--sub)" }}>{a.platform}{a.blog_name && ` · ${a.blog_name}`}</div>
                       </div>
-                      <span style={{ fontSize: 10, padding: "3px 10px", borderRadius: 99, fontWeight: 800, background: a.is_connected ? "var(--adim)" : "var(--card2)", color: a.is_connected ? "var(--accent)" : "var(--sub)" }}>
+                      <span style={{ fontSize: 10, padding: "3px 10px", borderRadius: 99, fontWeight: 800, background: a.is_connected ? "var(--accent-dim)" : "var(--card2)", color: a.is_connected ? "var(--accent)" : "var(--sub)" }}>
                         {a.is_connected ? "✅ 연결됨" : "미연결"}
                       </span>
                       <button className="btn-main" style={{ padding: "8px 16px", fontSize: 12 }} onClick={() => handleConnect(a)} disabled={!!connectingId || !botOnline}>
@@ -998,7 +819,7 @@ export default function DashboardPage({ user, onLogout, onAdminLogin, theme, onT
                         {h.error_message && <div style={{ fontSize: 10, color: "var(--err)", marginTop: 2 }}>❌ {h.error_message}</div>}
                       </div>
                       <span className={`badge ${h.status === "success" ? "badge-ok" : h.status === "fail" ? "badge-fail" : "badge-pend"}`}>{h.status === "success" ? "✅ 성공" : h.status === "fail" ? "❌ 실패" : "⏳ 대기"}</span>
-                      {h.post_url && <a href={h.post_url} target="_blank" rel="noopener noreferrer" style={{ fontSize: 11, color: "var(--accent)", textDecoration: "none", padding: "5px 11px", borderRadius: 9, background: "var(--adim)", border: "1px solid var(--border2)", flexShrink: 0 }}>{Icons.eye} 보기</a>}
+                      {h.post_url && <a href={h.post_url} target="_blank" rel="noopener noreferrer" style={{ fontSize: 11, color: "var(--accent)", textDecoration: "none", padding: "5px 11px", borderRadius: 9, background: "var(--accent-dim)", border: "1px solid var(--border2)", flexShrink: 0 }}>{Icons.eye} 보기</a>}
                     </div>
                   ))}
                 </div>
@@ -1024,7 +845,7 @@ export default function DashboardPage({ user, onLogout, onAdminLogin, theme, onT
                       💡 OpenAI 키는 글쓰기(GPT-4o mini) + 이미지(DALL-E 3) 모두 하나의 키로 사용 가능합니다
                     </div>
 
-                    <div style={{ padding: "14px 16px", borderRadius: 14, background: "var(--adim)", border: "1px solid var(--border2)", marginBottom: 14 }}>
+                    <div style={{ padding: "14px 16px", borderRadius: 14, background: "var(--accent-dim)", border: "1px solid var(--border2)", marginBottom: 14 }}>
                       <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: ".14em", textTransform: "uppercase", color: "var(--accent)", marginBottom: 10 }}>📝 글쓰기 API 키</div>
                       {WRITE_AI_LIST.map(k => <KeyInput key={k.id} k={k} />)}
                     </div>
@@ -1060,7 +881,7 @@ export default function DashboardPage({ user, onLogout, onAdminLogin, theme, onT
                 <div className="rp-title">⚡ 빠른 이동</div>
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
                   {TABS.map(t => (
-                    <button key={t.key} onClick={() => setTab(t.key as Tab)} style={{ padding: "14px 10px", borderRadius: 13, border: `1px solid ${tab === t.key ? "var(--border2)" : "var(--border)"}`, background: tab === t.key ? "var(--adim)" : "var(--card)", cursor: "pointer", textAlign: "center", transition: "all .2s", fontFamily: "inherit" }}>
+                    <button key={t.key} onClick={() => setTab(t.key as Tab)} style={{ padding: "14px 10px", borderRadius: 13, border: `1px solid ${tab === t.key ? "var(--border2)" : "var(--border)"}`, background: tab === t.key ? "var(--accent-dim)" : "var(--card)", cursor: "pointer", textAlign: "center", transition: "all .2s", fontFamily: "inherit" }}>
                       <div style={{ marginBottom: 5, color: tab === t.key ? "var(--accent)" : "var(--sub)" }}>{t.icon}</div>
                       <div style={{ fontSize: 11, fontWeight: 600, color: tab === t.key ? "var(--accent)" : "var(--sub)" }}>{t.label}</div>
                     </button>
