@@ -159,8 +159,17 @@ app.post("/api/register-user", (req, res) => {
     res.json({ success: true });
 });
 /* ── 서버 시작 ── */
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
     console.log(`[bot] Publy 봇 서버 v2.0 → http://localhost:${PORT}`);
+});
+server.on("error", (err) => {
+    if (err.code === "EADDRINUSE") {
+        console.log(`[bot] 포트 ${PORT} 이미 사용 중 → 기존 서버 재사용`);
+        // 이미 실행 중이므로 정상 상태, 종료하지 않음
+    } else {
+        console.error("[bot] 서버 오류:", err.message);
+        process.exit(1);
+    }
 });
 exports.default = app;
 //# sourceMappingURL=server.js.map
