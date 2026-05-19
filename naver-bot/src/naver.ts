@@ -192,6 +192,7 @@ export async function publishNaver(params: {
     }
     
     if (!frame) throw new Error("mainFrame을 찾을 수 없습니다");
+    console.log("[naver] mainFrame 획득 성공!");
 
     // 3. "작성 중인 글 복원" 팝업 처리
     try {
@@ -208,8 +209,13 @@ export async function publishNaver(params: {
 
     // 5. SmartEditor 4.0 로드 완료 대기
     console.log("[naver] SmartEditor 로드 대기...");
-    await frame.waitForSelector(".se-section-documentTitle", { timeout: 30000 });
-    await page.waitForTimeout(2000);
+    try {
+      await frame.waitForSelector(".se-section-documentTitle, .se-editor, .se-container", { timeout: 40000 });
+      console.log("[naver] SmartEditor 로드 완료!");
+    } catch (e) {
+      console.log("[naver] SmartEditor 셀렉터 못 찾음, 계속 진행...");
+    }
+    await page.waitForTimeout(3000);
 
     // ── clipboard 헬퍼: execCommand 방식으로 텍스트 주입 ──────────────────
     // SE4는 keyboard.type보다 execCommand('insertText') 가 훨씬 안정적
