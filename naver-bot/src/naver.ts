@@ -173,11 +173,22 @@ export async function publishNaver(params: {
     // 2. #mainFrame iframe 로드 대기 후 frame 객체 직접 획득
     console.log("[naver] mainFrame 로드 대기...");
     await page.waitForSelector("iframe#mainFrame, frame#mainFrame", { timeout: 30000 });
-    await page.waitForTimeout(4000);
+    await page.waitForTimeout(6000);
 
-    // frameLocator 대신 frame() 직접 사용 → keyboard 이벤트 정확히 전달
+    // frame 로드 완료 대기
     const getFrame = () => page.frames().find(f => f.name() === "mainFrame") ?? null;
     let frame = getFrame();
+    
+    // frame이 없으면 최대 10초 대기
+    if (!frame) {
+      for (let i = 0; i < 10; i++) {
+        await page.waitForTimeout(1000);
+        frame = getFrame();
+        if (frame) break;
+        console.log(`[naver] mainFrame 재시도 ${i+1}/10...`);
+      }
+    }
+    
     if (!frame) throw new Error("mainFrame을 찾을 수 없습니다");
 
     // 3. "작성 중인 글 복원" 팝업 처리
