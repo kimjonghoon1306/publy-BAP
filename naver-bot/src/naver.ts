@@ -146,7 +146,7 @@ export async function publishNaver(params: {
   const { blogId, cookies } = JSON.parse(fs.readFileSync(sp, "utf-8"));
 
   const browser = await chromium.launch({
-    headless: true,
+    headless: false,
     args: LAUNCH_ARGS,
   });
   const context = await browser.newContext({
