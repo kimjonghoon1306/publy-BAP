@@ -20,13 +20,13 @@ const GEMINI_MODELS_ADM = ["gemini-2.0-flash","gemini-2.0-flash-lite","gemini-2.
 const BATCH = 30;
 
 const ADM_WRITE_AI = [
-  {id:"gemini",label:"Gemini Flash",sub:"무료",placeholder:"AIza...",storageKey:"publy_gemini_key",link:"https://aistudio.google.com/app/apikey",color:"#4285F4",logo:"G",free:true},
-  {id:"groq",label:"Groq Llama 3",sub:"무료",placeholder:"gsk_...",storageKey:"publy_groq_key",link:"https://console.groq.com/keys",color:"#F55036",logo:"L",free:true},
-  {id:"openai",label:"GPT-4o",sub:"유료",placeholder:"sk-...",storageKey:"publy_openai_key",link:"https://platform.openai.com/api-keys",color:"#10A37F",logo:"O",free:false},
+  {id:"gemini",label:"Gemini Flash",sub:"무료",placeholder:"AIza...",storageKey:"publy_adm_gemini_key",link:"https://aistudio.google.com/app/apikey",color:"#4285F4",logo:"G",free:true},
+  {id:"groq",label:"Groq Llama 3",sub:"무료",placeholder:"gsk_...",storageKey:"publy_adm_groq_key",link:"https://console.groq.com/keys",color:"#F55036",logo:"L",free:true},
+  {id:"openai",label:"GPT-4o",sub:"유료",placeholder:"sk-...",storageKey:"publy_adm_openai_key",link:"https://platform.openai.com/api-keys",color:"#10A37F",logo:"O",free:false},
 ];
 const ADM_IMAGE_AI = [
-  {id:"openai_img",label:"DALL-E 3",sub:"유료",placeholder:"sk-...",storageKey:"publy_openai_key",link:"https://platform.openai.com/api-keys",color:"#10A37F",logo:"O"},
-  {id:"replicate",label:"Flux (Replicate)",sub:"유료",placeholder:"r8_...",storageKey:"publy_replicate_key",link:"https://replicate.com/account/api-tokens",color:"#8B5CF6",logo:"R"},
+  {id:"openai_img",label:"DALL-E 3",sub:"유료",placeholder:"sk-...",storageKey:"publy_adm_openai_key",link:"https://platform.openai.com/api-keys",color:"#10A37F",logo:"O"},
+  {id:"replicate",label:"Flux (Replicate)",sub:"유료",placeholder:"r8_...",storageKey:"publy_adm_replicate_key",link:"https://replicate.com/account/api-tokens",color:"#8B5CF6",logo:"R"},
 ];
 const PLAN_QUOTA: Record<string,number> = {free:10, basic:50, pro:999999};
 const PLAN_LABELS: Record<string,string> = {free:"FREE", basic:"BASIC", pro:"PRO"};
@@ -121,7 +121,7 @@ const CSS = `
   --header-bg:rgba(246,248,250,.95);--shadow:0 4px 16px rgba(0,0,0,.1);
 }
 
-.app{width:100vw;min-height:100vh;font-family:'Noto Sans KR',sans-serif;color:var(--text);background:var(--bg);display:flex;flex-direction:column;transition:background .2s,color .2s;}
+.app{width:100vw;height:100vh;font-family:'Noto Sans KR',sans-serif;color:var(--text);background:var(--bg);display:flex;flex-direction:column;transition:background .2s,color .2s;overflow:hidden;}
 *::-webkit-scrollbar{width:5px;}*::-webkit-scrollbar-thumb{background:var(--border);border-radius:99px;}
 
 .header{height:60px;flex-shrink:0;display:flex;align-items:center;padding:0 16px;gap:12px;background:var(--header-bg);border-bottom:1px solid var(--border);backdrop-filter:blur(20px);position:sticky;top:0;z-index:100;}
@@ -326,23 +326,51 @@ select.field-inp{cursor:pointer;appearance:auto;}
 .empty-title{font-size:18px;font-weight:800;color:var(--text);margin-bottom:8px;}
 .empty-sub{font-size:14px;color:var(--text2);margin-bottom:24px;line-height:1.6;}
 
-.mob-tabs{display:none;position:fixed;bottom:0;left:0;right:0;z-index:200;background:var(--header-bg);border-top:1px solid var(--border);backdrop-filter:blur(20px);padding:6px 0 max(10px,env(safe-area-inset-bottom));}
-.mob-tab{flex:1;display:flex;flex-direction:column;align-items:center;gap:2px;padding:5px 2px;border:none;background:transparent;cursor:pointer;font-family:'Noto Sans KR',sans-serif;transition:all .15s;}
-.mob-tab-ico{font-size:20px;}
-.mob-tab-lbl{font-size:9px;font-weight:600;color:var(--text2);}
-.mob-tab.active{background:rgba(248,81,73,.08);border-radius:8px;}
+.mob-tabs{display:none;position:fixed;bottom:0;left:0;right:0;z-index:200;background:var(--header-bg);border-top:1px solid var(--border);backdrop-filter:blur(20px);padding:8px 4px max(14px,env(safe-area-inset-bottom));}
+.mob-tab{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;padding:6px 4px;border:none;background:transparent;cursor:pointer;font-family:'Noto Sans KR',sans-serif;transition:all .15s;min-height:52px;}
+.mob-tab-ico{font-size:22px;}
+.mob-tab-lbl{font-size:11px;font-weight:600;color:var(--text2);}
+.mob-tab.active{background:rgba(248,81,73,.08);border-radius:10px;}
 .mob-tab.active .mob-tab-lbl{color:var(--danger);}
 
-@media(max-width:768px){
+@media(max-width:900px){
   .sidebar{display:none;}
   .mob-tabs{display:flex;}
+}
+@media(max-width:768px){
   .header-mid{display:none;}
-  .main{padding:14px 12px 80px;}
+  .main{padding:14px 12px 90px;}
   .plat-grid{grid-template-columns:1fr 1fr;}
   .title-grid{grid-template-columns:1fr;}
   .adtype-grid{grid-template-columns:1fr;}
   .detail-grid{grid-template-columns:1fr;}
   .stats-grid{grid-template-columns:1fr 1fr;}
+  .card{padding:16px 14px;}
+  .btn{font-size:15px;padding:13px 20px;}
+  .btn-xl{padding:17px 24px;font-size:17px;}
+  .btn-sm{font-size:13px;padding:10px 16px;}
+  .inp{font-size:16px;padding:14px 14px;}
+  .inp-label{font-size:14px;}
+  .card-title{font-size:13px;}
+  .title-card{padding:16px;}
+  .title-text{font-size:15px;}
+  .title-num{font-size:12px;}
+  .adtype-label{font-size:15px;}
+  .adtype-sub{font-size:13px;}
+  .toggle-btn{font-size:14px;padding:11px 18px;}
+  .step{font-size:13px;padding:13px 8px;}
+  .stat-num{font-size:26px;}
+  .mob-tab-lbl{font-size:12px;}
+  .mob-tab-ico{font-size:24px;}
+  .user-row{padding:14px 12px;}
+  .acc-card{flex-wrap:wrap;}
+}
+@media(max-width:480px){
+  .header{padding:0 10px;gap:6px;}
+  .plat-grid{grid-template-columns:1fr;}
+  .adtype-grid{grid-template-columns:1fr;}
+  .key-row-input{flex-wrap:wrap;}
+  .key-row-input .inp{width:100%;}
 }
 `;
 
@@ -386,8 +414,8 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
   const [newNote, setNewNote] = useState(""); const [newPayAmt, setNewPayAmt] = useState(""); const [newPayNote, setNewPayNote] = useState(""); const [addingPay, setAddingPay] = useState(false);
 
   // 설정
-  const [writeAI, setWriteAI] = useState(()=>localStorage.getItem("publy_write_ai")||"gemini");
-  const [imageAI, setImageAI] = useState(()=>localStorage.getItem("publy_image_ai")||"openai_img");
+  const [writeAI, setWriteAI] = useState(()=>localStorage.getItem("publy_adm_write_ai")||"gemini");
+  const [imageAI, setImageAI] = useState(()=>localStorage.getItem("publy_adm_image_ai")||"openai_img");
   const [newPw1, setNewPw1] = useState(""); const [newPw2, setNewPw2] = useState(""); const [pwMsg, setPwMsg] = useState("");
 
   const checkBot = useCallback(async () => {
@@ -471,9 +499,9 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
   }
 
   async function callAI(prompt: string): Promise<string> {
-    const ai = localStorage.getItem("publy_write_ai") || "gemini";
+    const ai = localStorage.getItem("publy_adm_write_ai") || "gemini";
     if (ai === "gemini") {
-      const key = localStorage.getItem("publy_gemini_key") || ""; if (!key) throw new Error("Gemini API 키 없음");
+      const key = localStorage.getItem("publy_adm_gemini_key") || ""; if (!key) throw new Error("Gemini API 키 없음 (관리자 설정에서 입력하세요)");
       for (const model of GEMINI_MODELS_ADM) {
         try {
           const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`,
@@ -485,13 +513,13 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
       throw new Error("Gemini 실패");
     }
     if (ai === "groq") {
-      const key = localStorage.getItem("publy_groq_key") || ""; if (!key) throw new Error("Groq API 키 없음");
+      const key = localStorage.getItem("publy_adm_groq_key") || ""; if (!key) throw new Error("Groq API 키 없음 (관리자 설정에서 입력하세요)");
       const r = await fetch("https://api.groq.com/openai/v1/chat/completions",{method:"POST",headers:{"Content-Type":"application/json","Authorization":`Bearer ${key}`},body:JSON.stringify({model:"llama-3.1-70b-versatile",max_tokens:8000,messages:[{role:"user",content:prompt}]}),signal:AbortSignal.timeout(60000)});
       if (!r.ok) { const e = await r.json(); throw new Error(e.error?.message||"Groq 오류"); }
       const d = await r.json(); return d.choices?.[0]?.message?.content||"";
     }
     if (ai === "openai") {
-      const key = localStorage.getItem("publy_openai_key") || ""; if (!key) throw new Error("OpenAI API 키 없음");
+      const key = localStorage.getItem("publy_adm_openai_key") || ""; if (!key) throw new Error("OpenAI API 키 없음 (관리자 설정에서 입력하세요)");
       const r = await fetch("https://api.openai.com/v1/chat/completions",{method:"POST",headers:{"Content-Type":"application/json","Authorization":`Bearer ${key}`},body:JSON.stringify({model:"gpt-4o",max_tokens:8000,messages:[{role:"user",content:prompt}]}),signal:AbortSignal.timeout(60000)});
       if (!r.ok) { const e = await r.json(); throw new Error(e.error?.message||"OpenAI 오류"); }
       const d = await r.json(); return d.choices?.[0]?.message?.content||"";
@@ -501,15 +529,15 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
 
   async function generateImage(kw: string): Promise<string> {
     const imgPrompt = buildImagePrompt(kw);
-    const ai = localStorage.getItem("publy_image_ai") || "openai_img";
+    const ai = localStorage.getItem("publy_adm_image_ai") || "openai_img";
     if (ai === "openai_img") {
-      const key = localStorage.getItem("publy_openai_key") || ""; if (!key) throw new Error("OpenAI 키 없음");
+      const key = localStorage.getItem("publy_adm_openai_key") || ""; if (!key) throw new Error("OpenAI 키 없음");
       const r = await fetch("https://api.openai.com/v1/images/generations",{method:"POST",headers:{"Content-Type":"application/json","Authorization":`Bearer ${key}`},body:JSON.stringify({model:"dall-e-3",prompt:imgPrompt,n:1,size:"1024x1024"}),signal:AbortSignal.timeout(60000)});
       if (!r.ok) { const e = await r.json(); throw new Error("DALL-E: "+(e.error?.message||r.status)); }
       const d = await r.json(); return d.data?.[0]?.url||"";
     }
     if (ai === "replicate") {
-      const key = localStorage.getItem("publy_replicate_key") || ""; if (!key) throw new Error("Replicate 키 없음");
+      const key = localStorage.getItem("publy_adm_replicate_key") || ""; if (!key) throw new Error("Replicate 키 없음");
       const pr = await fetch("https://api.replicate.com/v1/models/black-forest-labs/flux-schnell/predictions",{method:"POST",headers:{"Content-Type":"application/json","Authorization":`Bearer ${key}`},body:JSON.stringify({input:{prompt:imgPrompt,num_outputs:1,aspect_ratio:"16:9"}}),signal:AbortSignal.timeout(30000)});
       if (!pr.ok) { const e = await pr.json(); throw new Error("Replicate: "+(e.detail||pr.status)); }
       const pred = await pr.json(); const pollUrl = pred.urls?.get; if (!pollUrl) throw new Error("Replicate 응답 오류");
@@ -1211,7 +1239,7 @@ POST3: (제목)|(이유)
                     {ADM_WRITE_AI.map(item=>(
                       <button key={item.id} className={`ai-card ${writeAI===item.id?"selected":""}`}
                         style={{borderColor:writeAI===item.id?item.color:"var(--border)",background:writeAI===item.id?`${item.color}12`:"var(--bg)"}}
-                        onClick={()=>{setWriteAI(item.id);localStorage.setItem("publy_write_ai",item.id);}}>
+                        onClick={()=>{setWriteAI(item.id);localStorage.setItem("publy_adm_write_ai",item.id);}}>
                         <div className="ai-card-top">
                           <div className="ai-logo" style={{background:writeAI===item.id?item.color:`${item.color}20`,color:writeAI===item.id?"#000":item.color}}>{item.logo}</div>
                           {writeAI===item.id?<span className="ai-sel-badge" style={{background:item.color}}>✓ 선택됨</span>:item.free?<span className="ai-free-badge">무료</span>:<span className="ai-paid-badge">유료</span>}
@@ -1225,7 +1253,7 @@ POST3: (제목)|(이유)
                     {ADM_IMAGE_AI.map(item=>(
                       <button key={item.id} className={`ai-card ${imageAI===item.id?"selected":""}`}
                         style={{borderColor:imageAI===item.id?item.color:"var(--border)",background:imageAI===item.id?`${item.color}12`:"var(--bg)"}}
-                        onClick={()=>{setImageAI(item.id);localStorage.setItem("publy_image_ai",item.id);}}>
+                        onClick={()=>{setImageAI(item.id);localStorage.setItem("publy_adm_image_ai",item.id);}}>
                         <div className="ai-card-top">
                           <div className="ai-logo" style={{background:imageAI===item.id?item.color:`${item.color}20`,color:imageAI===item.id?"#000":item.color}}>{item.logo}</div>
                           {imageAI===item.id?<span className="ai-sel-badge" style={{background:item.color}}>✓ 선택됨</span>:<span className="ai-paid-badge">유료</span>}
