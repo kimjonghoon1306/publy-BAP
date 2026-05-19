@@ -707,7 +707,6 @@ const IMAGE_AI_LIST = [
                       </>
                     )}
                   </div>
-                )}
 
                 </div>
               )}
