@@ -396,11 +396,13 @@ export async function publishNaver(params: {
     console.log(`[naver] ✅ 발행 완료: ${postUrl}`);
     return postUrl;
   } catch (e: any) {
+    console.error("[naver] ❌ 에러 발생:", e.message);
     // 디버그 스크린샷
     try {
       const debugDir = path.join(__dirname, "../debug");
       if (!fs.existsSync(debugDir)) fs.mkdirSync(debugDir, { recursive: true });
       await page.screenshot({ path: path.join(debugDir, `naver_error_${Date.now()}.png`), fullPage: true });
+      console.log("[naver] 스크린샷 저장됨");
     } catch {}
     await browser.close().catch(() => {});
     throw e;
