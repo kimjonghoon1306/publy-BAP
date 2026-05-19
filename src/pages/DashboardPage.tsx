@@ -15,6 +15,7 @@ const IMAGE_AI_LIST = [
   { id:"replicate",  label:"Flux (Replicate)", sub:"유료", placeholder:"r8_...", storageKey:"publy_replicate_key", link:"https://replicate.com/account/api-tokens", color:"#8B5CF6", logo:"R" },
 ];
 const GEMINI_MODELS = ["gemini-2.0-flash","gemini-2.0-flash-lite","gemini-2.5-flash","gemini-2.5-flash-lite"];
+const BATCH = 30;
 const PLAN_LABELS: Record<string,string> = { free:"FREE", basic:"BASIC", pro:"PRO" };
 
 const TABS = [
