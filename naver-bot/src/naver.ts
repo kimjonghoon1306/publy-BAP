@@ -100,25 +100,27 @@ export async function saveNaverSession(userId: string, id: string, pw: string): 
     // blogId 추출 - GoBlogWrite.naver 리다이렉트 방식 (100% 안정)
     console.log("[naver] blogId 추출 중...");
     let blogId: string | null = null;
+    const INVALID_IDS = ["PostList", "BlogHome", "FeedList", "neighborPostList", "TagList", "GoBlogWrite"];
 
     try {
       await page.goto("https://blog.naver.com/GoBlogWrite.naver", { waitUntil: "domcontentloaded", timeout: 30000 });
       await page.waitForTimeout(3000);
       const finalUrl = page.url();
       const m = finalUrl.match(/[?&]blogId=([a-zA-Z0-9_-]+)/);
-      if (m && m[1]) blogId = m[1];
+      if (m && m[1] && !INVALID_IDS.includes(m[1])) blogId = m[1];
     } catch {}
 
-    // 폴백
+    // 폴백 1: 모바일 블로그
     if (!blogId) {
       try {
         await page.goto("https://m.blog.naver.com", { waitUntil: "domcontentloaded", timeout: 20000 });
         await page.waitForTimeout(2000);
         const m = page.url().match(/blog\.naver\.com\/([a-zA-Z0-9_-]+)/);
-        if (m && m[1] && !["PostList", "BlogHome"].includes(m[1])) blogId = m[1];
+        if (m && m[1] && !INVALID_IDS.includes(m[1])) blogId = m[1];
       } catch {}
     }
 
+    // 폴백 2: 로그인 ID 직접 사용
     if (!blogId) blogId = id;
     console.log(`[naver] ✅ blogId: ${blogId}`);
 
