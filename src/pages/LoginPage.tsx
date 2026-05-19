@@ -371,7 +371,28 @@ export default function LoginPage({ onLogin, onAdminLogin, theme, onThemeToggle 
               <div className="logo-ring logo-ring-inner" />
               <div className="logo-pulse" />
               <div className="logo-core">
-                <img src="/icon-192.svg" width="36" height="36" style={{borderRadius:8}} />
+                <svg width="36" height="36" viewBox="0 0 192 192" xmlns="http://www.w3.org/2000/svg" style={{borderRadius:8}}>
+                  <defs>
+                    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+                      <stop offset="0%" stopColor="#0a1628"/>
+                      <stop offset="100%" stopColor="#050a12"/>
+                    </linearGradient>
+                    <linearGradient id="g1" x1="0%" y1="0%" x2="100%" y2="100%">
+                      <stop offset="0%" stopColor="#00ff88"/>
+                      <stop offset="100%" stopColor="#00cc66"/>
+                    </linearGradient>
+                    <filter id="glow">
+                      <feGaussianBlur stdDeviation="3" result="blur"/>
+                      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+                    </filter>
+                  </defs>
+                  <rect width="192" height="192" rx="36" fill="url(#bg)"/>
+                  <circle cx="96" cy="96" r="72" fill="none" stroke="#00ff88" strokeWidth="1" opacity="0.12"/>
+                  <circle cx="96" cy="96" r="55" fill="none" stroke="#00ff88" strokeWidth="1" opacity="0.08"/>
+                  <text x="96" y="126" fontFamily="Arial Black, sans-serif" fontSize="108" fontWeight="900" fill="url(#g1)" textAnchor="middle" filter="url(#glow)" letterSpacing="-4">P</text>
+                  <rect x="44" y="148" width="104" height="20" rx="10" fill="#00ff88" opacity="0.12"/>
+                  <text x="96" y="163" fontFamily="Arial, sans-serif" fontSize="11" fontWeight="700" fill="#00ff88" textAnchor="middle" letterSpacing="4">PUBLY</text>
+                </svg>
               </div>
             </div>
             <div className="logo-name">PUBLY</div>
