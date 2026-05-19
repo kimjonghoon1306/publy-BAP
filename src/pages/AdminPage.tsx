@@ -295,6 +295,9 @@ export default function AdminPage({onBack,onDashboard,theme,onThemeToggle}:Props
   const [genImage,setGenImage]=useState("");
   const [genImgLoading,setGenImgLoading]=useState(false);
   const [loadingTitles,setLoadingTitles]=useState(false);
+  const [selectedStyle,setSelectedStyle]=useState(()=>localStorage.getItem("publy_write_style")||"blog");
+  const [selectedPersona,setSelectedPersona]=useState(()=>localStorage.getItem("publy_write_persona")||"none");
+  const [customStylePrompt,setCustomStylePrompt]=useState(()=>localStorage.getItem("publy_custom_style")||"");
   const [pubSub,setPubSub]=useState<"publish"|"write"|"accounts">("publish");
   const [newPlat,setNewPlat]=useState<"naver"|"tistory">("naver");const [newUser,setNewUser]=useState("");const [newPw,setNewPw]=useState("");const [newBlog,setNewBlog]=useState("");const [addingAcc,setAddingAcc]=useState(false);const [showPw,setShowPw]=useState(false);const [connId,setConnId]=useState<string|null>(null);
   const [users,setUsers]=useState<UserFull[]>([]);const [loading,setLoading]=useState(true);const [search,setSearch]=useState("");const [selUser,setSelUser]=useState<UserFull|null>(null);
@@ -390,22 +393,55 @@ export default function AdminPage({onBack,onDashboard,theme,onThemeToggle}:Props
     return clean.split("\n").map((l:string)=>l.replace(/^[\d]+[).\s]+|^[-*•\s]+/,"").replace(/^[\s"']+|[\s"']+$/g,"").trim()).filter((l:string)=>l.length>4&&l.length<100);
   }
 
+  function stripMarkdown(text:string):string{
+    const markers=["[FAQ시작]","[FAQ끝]","[참고자료시작]","[참고자료끝]","[관련글시작]","[관련글끝]"];
+    const ph:[string,string][]=markers.map((m,i)=>[`XSECMARK${i}X`,m]);
+    ph.forEach(([k,v])=>{text=text.split(v).join(k);});
+    const h2Lines:string[]=[];
+    text=text.replace(/^## .+$/gm,match=>{const idx=h2Lines.length;h2Lines.push(match);return'XH2LINE'+idx+'X';});
+    text=text
+      .replace(/[一-鿿㐀-䶿]/g,"").replace(/[\u3040-\u30FF]/g,"")
+      .replace(/[^\uAC00-\uD7A3a-zA-Z0-9\s.,!?;:()\-\'".\[\]%@#&+=/\\~`|<>{}^_$\n]/g,"")
+      .replace(/\*{2,}/g,"").replace(/^#{3,}\s+/gm,"").replace(/^[-*]\s+/gm,"")
+      .replace(/^\d+\.\s+/gm,"").replace(/_{2,}/g,"").replace(/ {2,}/g," ").replace(/\n{3,}/g,"\n\n").trim();
+    h2Lines.forEach((line,idx)=>{text=text.split('XH2LINE'+idx+'X').join(line);});
+    ph.forEach(([k,v])=>{text=text.split(k).join(v);});
+    return text;
+  }
+
+  function getCategoryGuide(kw:string,title:string):string{
+    const k=(kw+" "+(title||"")).toLowerCase();
+    if(/맛집|음식|카페|식당|요리|레스토랑|빵|디저트|커피|치킨|피자|라면/.test(k))
+      return `[맛집/음식]\n- 직접 방문한 것처럼: 분위기, 서비스, 웨이팅\n- 메뉴 맛 생생하게: 식감, 향, 간의 세기, 첫 한 입 느낌\n- 가격, 주차, 영업시간, 재방문 의향\n- 단점도 솔직하게`;
+    if(/it|앱|ai|테크|스마트폰|노트북|컴퓨터|챗gpt/.test(k))
+      return `[IT/테크]\n- 전문 용어 쉬운 말로 풀이\n- 실제 사용 시나리오와 단계별 설명\n- 장단점 비교\n- 초보자도 따라할 수 있게`;
+    if(/리뷰|후기|사용기|체험|써봤|먹어봤|구매/.test(k))
+      return `[리뷰/후기]\n- 사용 전 기대 → 실제 경험 구조\n- 장점 3개 이상, 단점 2개 이상\n- 구체적 수치로 효과 표현\n- "이런 분 사세요/사지 마세요"`;
+    if(/여행|관광|호텔|숙소|제주|부산|해외/.test(k))
+      return `[여행]\n- 교통편, 비용, 소요시간\n- 꼭 가야 할 명소 TOP5\n- 현지 맛집, 숨은 명소\n- 예산 총정리`;
+    if(/건강|다이어트|운동|헬스|피부|탈모/.test(k))
+      return `[건강/의료]\n- 전문 용어 쉽게 풀이\n- 집에서 가능 vs 병원 필요 구분\n- 잘못된 상식 바로잡기\n- 연령/성별 접근법`;
+    if(/재테크|투자|주식|부동산|절약|금융/.test(k))
+      return `[재테크/금융]\n- 초보자도 이해하는 쉬운 설명\n- 실제 숫자 예시 포함\n- 리스크와 수익률 균형\n- 연령대별 전략`;
+    return `[정보/일상]\n- 독자가 몰랐던 새로운 정보\n- 일상에서 바로 써먹는 실용 팁\n- 연령/상황별 활용법`;
+  }
+
   async function callAI(prompt:string):Promise<string>{
     const ai=localStorage.getItem("publy_write_ai")||"gemini";
     if(ai==="gemini"){
       const key=localStorage.getItem("publy_gemini_key")||"";if(!key)throw new Error("Gemini API 키 없음");
-      for(const model of GEMINI_MODELS_ADM){try{const r=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({contents:[{parts:[{text:prompt}]}],generationConfig:{maxOutputTokens:4000}}),signal:AbortSignal.timeout(30000)});if(!r.ok)continue;const d=await r.json();const t=d.candidates?.[0]?.content?.parts?.[0]?.text||"";if(t)return t;}catch{continue;}}
+      for(const model of GEMINI_MODELS_ADM){try{const r=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({contents:[{parts:[{text:prompt}]}],generationConfig:{maxOutputTokens:8000}}),signal:AbortSignal.timeout(60000)});if(!r.ok)continue;const d=await r.json();const t=d.candidates?.[0]?.content?.parts?.[0]?.text||"";if(t)return t;}catch{continue;}}
       throw new Error("Gemini 실패");
     }
     if(ai==="groq"){
       const key=localStorage.getItem("publy_groq_key")||"";if(!key)throw new Error("Groq API 키 없음");
-      const r=await fetch("https://api.groq.com/openai/v1/chat/completions",{method:"POST",headers:{"Content-Type":"application/json","Authorization":`Bearer ${key}`},body:JSON.stringify({model:"llama-3.1-70b-versatile",max_tokens:4000,messages:[{role:"user",content:prompt}]}),signal:AbortSignal.timeout(30000)});
+      const r=await fetch("https://api.groq.com/openai/v1/chat/completions",{method:"POST",headers:{"Content-Type":"application/json","Authorization":`Bearer ${key}`},body:JSON.stringify({model:"llama-3.1-70b-versatile",max_tokens:8000,messages:[{role:"user",content:prompt}]}),signal:AbortSignal.timeout(60000)});
       if(!r.ok){const e=await r.json();throw new Error(e.error?.message||"Groq 오류");}
       const d=await r.json();return d.choices?.[0]?.message?.content||"";
     }
     if(ai==="openai"){
       const key=localStorage.getItem("publy_openai_key")||"";if(!key)throw new Error("OpenAI API 키 없음");
-      const r=await fetch("https://api.openai.com/v1/chat/completions",{method:"POST",headers:{"Content-Type":"application/json","Authorization":`Bearer ${key}`},body:JSON.stringify({model:"gpt-4o-mini",max_tokens:4000,messages:[{role:"user",content:prompt}]}),signal:AbortSignal.timeout(30000)});
+      const r=await fetch("https://api.openai.com/v1/chat/completions",{method:"POST",headers:{"Content-Type":"application/json","Authorization":`Bearer ${key}`},body:JSON.stringify({model:"gpt-4o",max_tokens:8000,messages:[{role:"user",content:prompt}]}),signal:AbortSignal.timeout(60000)});
       if(!r.ok){const e=await r.json();throw new Error(e.error?.message||"OpenAI 오류");}
       const d=await r.json();return d.choices?.[0]?.message?.content||"";
     }
@@ -513,17 +549,86 @@ export default function AdminPage({onBack,onDashboard,theme,onThemeToggle}:Props
     const title=selectedTitle||keyword;
     setGenerating(true);setGenImage("");
     const isAdpost=adType==="adpost";
-    const contentPrompt=isAdpost
-      ?`당신은 대한민국 최고의 네이버 블로그 작가입니다.\n키워드: "${keyword}"\n제목: "${title}"\n목적: 네이버 애드포스트 클릭률 + 체류시간 극대화\n\n형식:\n태그: (태그1, 태그2, 태그3, 태그4, 태그5)\n본문: (정확히 ${targetChars}자 내외, 친근한 말투, 경험 공유형, 소제목 포함, 독자 공감 유도, 자연스러운 단락 구분)`
-      :`당신은 구글 애드센스 최적화 전문 블로그 작가입니다.\n키워드: "${keyword}"\n제목: "${title}"\n목적: 구글 SEO 상위노출 + 애드센스 수익 극대화\n\n형식:\n태그: (태그1, 태그2, 태그3, 태그4, 태그5)\n본문: (정확히 ${targetChars}자 내외, 전문적 정보성 톤, H2/H3 소제목 다수 포함, 리스트 활용, 구체적 정보 중심, 자연스러운 단락 구분)`;
+    const categoryGuide=getCategoryGuide(keyword,title);
+    const styleMap:Record<string,string>={
+      blog:"친근하고 자연스러운 블로그 말투로 작성해줘. 독자에게 말을 거는 듯한 느낌으로, 공감대를 형성해줘.",
+      formal:"신뢰감 있고 전문적인 정보 전달 문체로 작성해줘. 객관적인 사실을 바탕으로 유용한 정보를 제공해줘.",
+      sns:"짧고 감각적인 SNS 스타일로 작성해줘. 이모지를 적절히 활용하고 공감과 감성을 자극하는 문체로.",
+      news:"뉴스 기사처럼 객관적이고 사실적으로 작성해줘. 핵심 정보를 앞에 배치(역피라미드), 인용과 수치 적극 활용.",
+      story:"흥미진진한 스토리텔링 형식으로 작성해줘. 독자가 몰입할 수 있도록 서사 구조와 구체적인 사례를 들어줘.",
+      custom:customStylePrompt,
+    };
+    const personaMap:Record<string,string>={
+      none:"",
+      young_woman:"20대 여성이 친한 친구에게 카톡 보내듯 친근하고 감성적으로. '~했어요', '~더라고요' 말투로.",
+      young_man:"20대 남성이 친구에게 솔직하게 말하듯. 직접적이고 핵심만 짚는 문체로.",
+      middle_woman:"40대 주부가 또래 친구에게 진심으로 알려주듯 따뜻하고 실용적으로.",
+      middle_man:"40대 직장인 남성이 후배에게 조언해주듯 신뢰감 있고 경험 기반으로.",
+      reporter:"신문 기자가 심층 취재 기사 쓰듯 객관적이고 사실 기반으로. 역피라미드 구조.",
+      teacher:"친절한 선생님이 학생에게 설명해주듯 차근차근, 이해하기 쉽게.",
+      expert:"해당 분야 전문가가 신뢰감 있게. 전문 지식을 쉬운 말로 풀어서.",
+    };
+    const styleInstruction=[styleMap[selectedStyle]||styleMap.blog, personaMap[selectedPersona]||""].filter(Boolean).join("\n");
+    const adGuide=isAdpost
+      ?"[수익 최적화] 네이버 애드포스트 CPM 최적화: 체류 시간 늘리는 스토리 구성, 감성적 공감 유도"
+      :"[수익 최적화] 구글 애드센스 CPC 최적화: 클릭 유도 문구, 정보성 키워드 밀도 높게";
+    const contentPrompt=`당신은 대한민국 최고의 블로그 작가입니다. 친구한테 카톡 보내듯, 기자가 르포 기사 쓰듯 — 가장 자연스럽고 생생한 글을 씁니다.
+
+키워드: "${keyword}"
+글 제목: "${title}"
+목표 글자수: ${targetChars}자 이상
+
+${categoryGuide}
+
+[공통 원칙]
+- AI 티 절대 금지: "저도 처음엔 몰랐는데요", "솔직히 말하면", "이거 써보니까"
+- 독자에게 말 걸기: "혹시 이런 거 고민해보셨나요?", "아마 많이들 궁금하셨을 텐데"
+- 막연한 표현 금지 → 구체적 수치, 가격, 기간으로
+- 문장 끝 다양하게: "~해요", "~거든요", "~더라고요", "~잖아요"
+- 반드시 ${targetChars}자 이상 작성
+- ⚠️ 별표(*) 절대 금지 — **강조** 전부 금지
+- 소제목은 반드시 ## 소제목 형식으로 작성 (4~6개)
+- ⚠️ 대시(-) 목록 절대 금지
+- ⚠️ 언더바(_) 절대 금지
+- SEO: 키워드 자연스럽게 7회 이상
+- 한자/중국어/일본어 절대 금지
+
+[글쓰기 스타일]
+${styleInstruction}
+
+${adGuide}
+
+[태그 형식]
+본문 작성 후 맨 앞에 반드시 아래 형식으로 태그를 먼저 써줘:
+태그: 태그1, 태그2, 태그3, 태그4, 태그5
+
+[필수 섹션 - 본문 끝에 반드시 추가]
+[FAQ시작]
+Q1: (독자가 가장 많이 궁금해하는 질문)
+A1: (구체적이고 실용적인 답변)
+Q2: (질문 2)
+A2: (답변)
+Q3: (질문 3)
+A3: (답변)
+[FAQ끝]
+
+[관련글시작]
+POST1: (연관 주제 블로그 제목 1)|(이 글을 읽으면 좋은 이유)
+POST2: (연관 주제 블로그 제목 2)|(이유)
+POST3: (연관 주제 블로그 제목 3)|(이유)
+[관련글끝]`;
     try{
       const text=await callAI(contentPrompt);
-      const tgm=text.match(/태그[:\s]*([^\n]+)/);const bm=text.match(/본문[:\s]*([\s\S]+)/);
+      const cleaned=stripMarkdown(text);
+      const tgm=cleaned.match(/태그[:\s]*([^\n]+)/);
+      const bm=cleaned.match(/태그[^\n]*\n([\s\S]+)/);
       setGenTitle(title);
       if(tgm)setGenTags(tgm[1].trim());
-      const body=bm?bm[1].trim():text;
+      const body=bm?bm[1].trim():cleaned;
       setGenContent(body);
-      // 이미지 수량 계산
+      localStorage.setItem("publy_write_style",selectedStyle);
+      localStorage.setItem("publy_write_persona",selectedPersona);
+      if(customStylePrompt)localStorage.setItem("publy_custom_style",customStylePrompt);
       const recCount=imgCountManual??recommendImageCount(body);
       if(imgSource==="ai"&&recCount>0){
         setGenImgLoading(true);setGeneratedImages([]);
@@ -913,6 +1018,47 @@ export default function AdminPage({onBack,onDashboard,theme,onThemeToggle}:Props
                         )}
 
                         {selectedTitle&&<div style={{padding:"9px 12px",borderRadius:9,background:"var(--ib)",marginBottom:10,fontSize:12}}>선택 제목: <strong style={{color:"var(--a)"}}>{selectedTitle}</strong></div>}
+
+                        {/* 글쓰기 스타일 */}
+                        <div style={{marginBottom:12}}>
+                          <label style={{fontSize:9,color:"var(--m)",fontWeight:700,display:"block",marginBottom:7,textTransform:"uppercase"}}>✍️ 글쓰기 스타일</label>
+                          <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:6}}>
+                            {([
+                              {id:"blog",label:"📝 블로그 친근체"},{id:"formal",label:"📰 정보성 격식체"},
+                              {id:"sns",label:"📱 SNS 감성체"},{id:"news",label:"🗞️ 뉴스 기사체"},
+                              {id:"story",label:"✨ 스토리텔링체"},{id:"custom",label:"✏️ 직접 입력"},
+                            ] as const).map(s=>(
+                              <button key={s.id} onClick={()=>setSelectedStyle(s.id)}
+                                style={{padding:"7px 8px",borderRadius:9,border:`1.5px solid ${selectedStyle===s.id?"var(--a)":"var(--b)"}`,background:selectedStyle===s.id?"var(--ad)":"var(--ib)",cursor:"pointer",fontSize:10,fontWeight:600,color:selectedStyle===s.id?"var(--a)":"var(--m)",fontFamily:"'Noto Sans KR',sans-serif",transition:"all .15s",textAlign:"left"}}>
+                                {s.label}
+                              </button>
+                            ))}
+                          </div>
+                          {selectedStyle==="custom"&&(
+                            <textarea value={customStylePrompt} onChange={e=>setCustomStylePrompt(e.target.value)}
+                              placeholder="예: 20대 직장인에게 친근하게, 유머를 섞어서..."
+                              className="ainp" rows={2} style={{marginTop:7,fontSize:11,resize:"none",width:"100%"}}/>
+                          )}
+                        </div>
+
+                        {/* 페르소나 */}
+                        <div style={{marginBottom:12}}>
+                          <label style={{fontSize:9,color:"var(--m)",fontWeight:700,display:"block",marginBottom:7,textTransform:"uppercase"}}>🎭 화자 페르소나</label>
+                          <div style={{display:"flex",flexWrap:"wrap",gap:5}}>
+                            {([
+                              {id:"none",label:"🙂 기본"},{id:"young_woman",label:"👩 20대 여성"},
+                              {id:"young_man",label:"👨 20대 남성"},{id:"middle_woman",label:"👩‍🦳 40대 여성"},
+                              {id:"middle_man",label:"👨‍🦳 40대 남성"},{id:"reporter",label:"📰 기자"},
+                              {id:"teacher",label:"👨‍🏫 선생님"},{id:"expert",label:"🎓 전문가"},
+                            ] as const).map(p=>(
+                              <button key={p.id} onClick={()=>setSelectedPersona(p.id)}
+                                style={{padding:"5px 10px",borderRadius:99,border:`1.5px solid ${selectedPersona===p.id?"var(--a)":"var(--b)"}`,background:selectedPersona===p.id?"var(--ad)":"transparent",cursor:"pointer",fontSize:10,fontWeight:600,color:selectedPersona===p.id?"var(--a)":"var(--m)",fontFamily:"'Noto Sans KR',sans-serif",transition:"all .15s"}}>
+                                {p.label}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+
                         <button className="abp" onClick={handleGenerate} disabled={generating}>
                           {generating?<><span className="asp2"/>AI 작성 중...</>:<>✍️ 본문 + 이미지 생성</>}
                         </button>
