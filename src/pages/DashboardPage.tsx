@@ -374,25 +374,182 @@ export default function DashboardPage({user, onLogout, onAdminLogin, onThemeTogg
 
   function recommendImgCount(content:string):number{return Math.max(1,Math.min(10,Math.floor(content.length/200)));}
 
-  const KO_EN_MAP:Record<string,string>={
-    맛집:"delicious gourmet food beautiful plating restaurant warm lighting",음식:"delicious food dish beautiful presentation",카페:"cozy cafe coffee interior warm ambient",커피:"coffee latte art ceramic cup steam",치킨:"crispy golden fried chicken korean food",피자:"pizza melted cheese fresh toppings",라면:"ramen noodle bowl hot steam broth",빵:"fresh artisan bread bakery golden",디저트:"dessert sweet pastry cream plate",
-    여행:"scenic travel destination beautiful landscape golden hour",제주도:"jeju island volcanic landscape ocean cliffs",서울:"seoul city skyline night view",부산:"busan haeundae beach ocean",호텔:"luxury hotel room interior elegant",캠핑:"camping tent campfire stars nature",
-    건강:"health wellness vitamins natural herbs",다이어트:"diet healthy food vegetables",운동:"exercise gym equipment fitness",피부:"skincare serum cream bottle",뷰티:"beauty cosmetics makeup products",
-    재테크:"investment finance coins growth chart",주식:"stock market chart trading",코인:"cryptocurrency bitcoin gold coin",부동산:"real estate property house",
-    IT:"technology digital computer code screen",AI:"artificial intelligence circuit board",코딩:"coding programming dark screen",
-    강아지:"cute puppy dog playing home",고양이:"cute cat kitten indoor cozy",육아:"baby toys nursery soft colors",
-    패션:"fashion clothing outfit display",쇼핑:"shopping retail store display",
-  };
+  // ─── 300+ 키워드 이미지 프롬프트 시스템 ────────────────────
+  const NP_TAG = "no people, no person, no face, no human, no text, no watermark";
+  const PROMPT_DB: {keywords:string[];prompt:string}[] = [
+    // 음식/맛집
+    {keywords:["한식","한정식","백반","집밥","가정식"],prompt:"Korean home-style meal spread, banchan side dishes, stone pot bibimbap, wooden table, steam rising, cozy restaurant interior, warm natural lighting"},
+    {keywords:["맛집","식당","레스토랑","음식점","맛"],prompt:"cozy Korean restaurant interior, beautifully plated dishes on wooden table, ambient warm lighting, inviting atmosphere, bokeh background"},
+    {keywords:["삼겹살","고기","구이","바베큐","BBQ","갈비"],prompt:"Korean BBQ pork belly sizzling on grill, smoke rising, lettuce wraps, sesame oil, glowing charcoal, dark dramatic lighting"},
+    {keywords:["회","횟집","사시미","해산물","해물","횟감"],prompt:"fresh Korean sashimi platter, colorful fish slices on ice, glistening presentation, premium seafood restaurant, cinematic lighting"},
+    {keywords:["초밥","스시","오마카세","일식"],prompt:"premium omakase sushi assortment, chef-crafted nigiri on wooden platter, minimalist Japanese restaurant, soft dramatic lighting"},
+    {keywords:["스테이크","소고기","등심","ribeye","안심"],prompt:"perfectly seared ribeye steak, medium-rare interior, herb butter melting, fine dining plating, dramatic dark background"},
+    {keywords:["파스타","이탈리안","피자","양식","스파게티"],prompt:"rustic Italian pasta dish, spaghetti with rich tomato sauce, fresh basil, parmesan, warm restaurant ambiance"},
+    {keywords:["라면","라멘","국수","우동","소바"],prompt:"steaming bowl of Korean ramen, rich broth, soft egg, noodles, steam wisps, dark moody background, cinematic"},
+    {keywords:["치킨","통닭","후라이드","양념치킨"],prompt:"crispy golden Korean fried chicken on wooden board, sauce cups, casual dining atmosphere, warm lighting"},
+    {keywords:["피자","도우","화덕피자"],prompt:"artisan wood-fired pizza bubbling cheese, fresh toppings, rustic wooden table, Italian atmosphere"},
+    {keywords:["버거","햄버거","샌드위치"],prompt:"gourmet burger juicy patty, fresh vegetables, sauce dripping, brioche bun, craft paper, casual dining"},
+    {keywords:["카페","커피","아메리카노","라떼","에스프레소","카페인"],prompt:"cozy Korean cafe interior, latte art in ceramic cup, morning light through window, wooden table, minimalist aesthetic"},
+    {keywords:["빵","베이커리","크루아상","소금빵"],prompt:"artisan bakery display, golden croissants, fresh-baked bread, pastries, warm bakery interior, flour dusted surface"},
+    {keywords:["케이크","디저트","마카롱","초콜릿","아이스크림","단것"],prompt:"elegant dessert plating, layered chocolate cake, fresh berry garnish, marble surface, soft studio lighting"},
+    {keywords:["빙수","팥빙수","설빙","여름간식"],prompt:"Korean shaved ice bingsu, fluffy snow texture, red bean paste, condensed milk drizzle, pastel tones"},
+    {keywords:["떡볶이","분식","순대","어묵","포장마차"],prompt:"Korean street food tteokbokki in red sauce, fish cakes, steam, pojangmacha night market atmosphere"},
+    {keywords:["편의점","컵라면","야식","간식"],prompt:"Korean convenience store interior, colorful snack displays, late night warm glow, modern retail"},
+    {keywords:["도시락","간편식","밀키트"],prompt:"beautifully arranged Korean lunch box bento, colorful vegetables, rice, clean minimal presentation"},
+    {keywords:["채식","비건","샐러드","건강식"],prompt:"vibrant vegan grain bowl, colorful vegetables, quinoa, avocado, hummus, white ceramic bowl, editorial"},
+    {keywords:["브런치","아보카도","팬케이크","와플"],prompt:"weekend brunch spread, avocado toast, stacked pancakes with maple syrup, fresh fruit, white marble, morning light"},
+    {keywords:["맥주","와인","술","주류","칵테일"],prompt:"artisan craft beer glass, golden bubbles, bar setting, warm amber lighting, premium beverage"},
+    {keywords:["국","찌개","탕","설렁탕","감자탕"],prompt:"steaming Korean soup pot, rich broth, ingredients visible, ceramic bowl, restaurant wooden table, comfort food"},
+    {keywords:["김밥","주먹밥","쌈밥"],prompt:"colorful Korean gimbap rolls sliced, sesame seeds, bamboo mat, traditional presentation, warm lighting"},
+    // 여행
+    {keywords:["제주도","제주","한라산","성산일출봉","우도"],prompt:"Jeju island volcanic coastline, dramatic black lava rocks, turquoise ocean waves, Hallasan mountain backdrop, golden hour"},
+    {keywords:["부산","해운대","광안리","남포동","감천"],prompt:"Busan Gwangalli beach at sunset, Gwangan Bridge illuminated, warm golden reflection on water, cinematic"},
+    {keywords:["서울","경복궁","남산","한강","명동"],prompt:"Seoul cityscape at dusk, Namsan tower glowing, Han River reflection, modern skyscrapers meets traditional palace"},
+    {keywords:["경주","불국사","첨성대","신라"],prompt:"ancient Gyeongju Bulguksa temple, cherry blossoms, stone lanterns, misty morning atmosphere, UNESCO heritage"},
+    {keywords:["전주","한옥마을","비빔밥"],prompt:"Jeonju Hanok village, traditional Korean architecture, tile roofs, stone paths, warm golden afternoon light"},
+    {keywords:["강원","강릉","속초","설악산","동해"],prompt:"Seoraksan mountain peaks with autumn foliage, dramatic rocky cliffs, crisp mountain air, editorial"},
+    {keywords:["일본","도쿄","오사카","교토","후쿠오카"],prompt:"Kyoto traditional street at twilight, lantern-lit cobblestone alley, cherry blossom petals, cinematic"},
+    {keywords:["유럽","파리","로마","스페인","런던","프랑스"],prompt:"Paris street at golden hour, Eiffel Tower in distance, café tables, warm European ambiance, cobblestone"},
+    {keywords:["동남아","베트남","태국","발리","싱가포르"],prompt:"Bali tropical infinity pool overlooking lush jungle, lotus flowers, temple offerings, golden sunset"},
+    {keywords:["미국","뉴욕","LA","하와이","라스베가스"],prompt:"Manhattan skyline at blue hour, skyscrapers reflected in Hudson River, city lights, dramatic urban"},
+    {keywords:["캠핑","글램핑","텐트","야외","아웃도어"],prompt:"luxury glamping tent in forest clearing, warm lantern glow, campfire embers, starry night sky, misty morning"},
+    {keywords:["호텔","리조트","숙소","펜션","풀빌라"],prompt:"luxury hotel suite interior, king bed with crisp white linens, floor-to-ceiling window with city view, elegant"},
+    {keywords:["여행준비","패킹","캐리어","배낭여행"],prompt:"open suitcase with neatly packed clothes, travel accessories, passport, camera, clean flat lay on white bed"},
+    {keywords:["국내여행","드라이브","도로여행","차박"],prompt:"scenic Korean coastal highway, road trip, mountain pass, autumn foliage, blue sky, freedom"},
+    {keywords:["인천","강화도","을왕리","수원"],prompt:"Korean coastal scenery, calm bay water, traditional fishing village, golden morning light"},
+    {keywords:["남해","통영","거제","한려수도"],prompt:"Southern Korean sea landscape, islands scattered in blue water, fishing boats, pristine coastal scenery"},
+    // 건강/운동/의료
+    {keywords:["다이어트","체중감량","살빼기","체중조절"],prompt:"clean healthy meal prep bowls, colorful vegetables, measuring tape, fresh ingredients, bright kitchen, weight loss"},
+    {keywords:["운동","헬스","헬스장","피트니스","gym"],prompt:"modern gym interior, barbell rack, dumbbells, exercise equipment, motivating atmosphere, early morning light"},
+    {keywords:["요가","필라테스","스트레칭"],prompt:"yoga studio with morning light, warrior pose on mat, peaceful atmosphere, plants, minimal decor"},
+    {keywords:["러닝","마라톤","조깅","달리기"],prompt:"runner silhouette at sunrise on empty road, morning mist, dynamic motion, motivational editorial"},
+    {keywords:["피부","스킨케어","화장품","로션","에센스"],prompt:"luxury skincare product flat lay, serum bottles, jade roller, white marble, morning light, K-beauty aesthetic"},
+    {keywords:["탈모","모발","두피","샴푸"],prompt:"healthy thick hair close-up, shampoo foam, bathroom natural lighting, clean fresh aesthetic"},
+    {keywords:["성형","시술","피부과","의원","클리닉"],prompt:"modern medical clinic interior, clean white aesthetic, professional equipment, trust and care atmosphere"},
+    {keywords:["영양제","비타민","건강기능식품","보충제"],prompt:"supplement capsules and vitamins on white surface, green plant, morning light, health wellness aesthetic"},
+    {keywords:["수면","불면증","숙면","수면습관"],prompt:"cozy bedroom at night, soft bedside lamp, fluffy white pillows, peaceful sleep environment, blue hour"},
+    {keywords:["스트레스","번아웃","힐링","멘탈"],prompt:"serene nature meditation spot, calm lake, misty morning, tranquility, mental wellness atmosphere"},
+    {keywords:["당뇨","혈당","혈압","심장","혈관"],prompt:"fresh healthy foods for diabetes management, whole grains, vegetables, fruit, blood glucose monitor"},
+    {keywords:["치아","치과","구강","칫솔","치실"],prompt:"dental care flat lay, toothbrush, floss, mouthwash, white background, clean clinical aesthetic"},
+    {keywords:["병원","진료","의료","건강검진"],prompt:"modern hospital corridor, clean professional healthcare, trust and expertise, bright clinical lighting"},
+    {keywords:["한의원","한방","침","뜸","한약"],prompt:"traditional Korean medicine clinic, herbal medicine, acupuncture needles, wooden aesthetic, healing atmosphere"},
+    // 재테크/금융
+    {keywords:["주식","주식투자","증권","코스피","코스닥"],prompt:"stock market candlestick chart on monitor, trading platform, financial data visualization, dark professional"},
+    {keywords:["코인","비트코인","가상화폐","NFT","블록체인"],prompt:"golden bitcoin coins, blockchain network visualization, digital currency concept, blue neon tech aesthetic"},
+    {keywords:["부동산","아파트","투자","분양","청약"],prompt:"modern Korean apartment complex aerial view, urban cityscape, real estate development, sunset reflection"},
+    {keywords:["재테크","돈","저축","절약","금융"],prompt:"Korean won bills and coins arranged neatly, piggy bank, growth chart, financial planning, clean white background"},
+    {keywords:["ETF","펀드","적금","예금","금리","이자"],prompt:"financial investment growth concept, ascending bar chart, coins stacking, plant growing from money, prosperity"},
+    {keywords:["경제","금리","환율","인플레이션","뉴스경제"],prompt:"financial newspaper with market data, coffee cup, modern desk, economic analysis aesthetic"},
+    {keywords:["사업","창업","스타트업","사업자","CEO"],prompt:"modern startup office, whiteboard with business plan, team collaboration energy, contemporary workspace"},
+    {keywords:["프리랜서","부업","N잡러","재택근무","사이드잡"],prompt:"home office setup, laptop on clean desk, plants, natural window light, productive remote work"},
+    {keywords:["보험","연금","노후","은퇴"],prompt:"secure family financial planning, warm home setting, documents, trust and stability concept"},
+    {keywords:["쇼핑몰","온라인쇼핑몰","판매","셀러","위탁판매"],prompt:"e-commerce product photography setup, clean white background, professional product display, modern"},
+    // IT/테크/AI
+    {keywords:["AI","인공지능","ChatGPT","GPT","클로드"],prompt:"artificial intelligence neural network visualization, futuristic blue light, data streams, tech concept"},
+    {keywords:["스마트폰","아이폰","갤럭시","핸드폰"],prompt:"premium smartphone on minimal surface, app interface glow, clean tech product photography"},
+    {keywords:["노트북","맥북","컴퓨터","PC","맥북"],prompt:"MacBook Pro on clean minimal desk, code on screen, soft ambient lighting, developer workspace"},
+    {keywords:["앱","어플","앱개발","소프트웨어"],prompt:"smartphone screen with app icons, UI design mockup, colorful interface, mobile development concept"},
+    {keywords:["코딩","프로그래밍","개발","개발자","웹개발"],prompt:"dark mode code editor screen, colorful syntax highlighting, developer keyboard, multiple monitors"},
+    {keywords:["유튜브","유튜버","영상","콘텐츠","크리에이터"],prompt:"YouTube creator studio setup, ring light, camera, microphone, content creation workspace, professional"},
+    {keywords:["인스타","SNS","소셜미디어","틱톡","릴스"],prompt:"social media content creation, smartphone photography setup, aesthetic flat lay, influencer lifestyle"},
+    {keywords:["게임","게이밍","PC방","플스","닌텐도","스팀"],prompt:"gaming setup with RGB lighting, multiple monitors, mechanical keyboard, competitive esports atmosphere"},
+    {keywords:["드론","항공사진","촬영"],prompt:"aerial drone photography, bird's eye view of Korean landscape, golden hour, dramatic perspective"},
+    {keywords:["태블릿","iPad","갤탭","아이패드"],prompt:"tablet device on clean desk with stylus, digital creation, minimal aesthetic, creative workspace"},
+    {keywords:["VR","AR","메타버스","가상현실"],prompt:"virtual reality headset, immersive digital world visualization, futuristic tech concept, glowing"},
+    {keywords:["보안","해킹","사이버","정보보안"],prompt:"cybersecurity concept, digital lock, data protection visualization, blue code matrix, secure"},
+    // 육아/임신/교육
+    {keywords:["임신","출산","태교","임산부","만삭"],prompt:"soft nursery room preparation, baby items, gentle morning light, pastel colors, tender atmosphere"},
+    {keywords:["육아","아기","신생아","돌잔치"],prompt:"adorable baby toys on soft pastel blanket, tiny shoes, teddy bear, warm nursery, gentle light"},
+    {keywords:["유아","어린이","아이","어린이교육","유치원"],prompt:"colorful children learning environment, educational toys, ABC blocks, watercolor paintings, bright playful space"},
+    {keywords:["초등","중등","고등","학교","공부","수능","입시"],prompt:"student study desk with books, stationery, planner, focused learning, warm desk lamp"},
+    {keywords:["영어","영어공부","어학","토익","토플","회화"],prompt:"language learning setup, English textbooks, headphones, notebook with vocabulary, coffee, productive study"},
+    {keywords:["학원","과외","교육","강사","선생님","교사"],prompt:"modern tutoring session, whiteboard with concepts, bright classroom, engaging education atmosphere"},
+    // 라이프스타일/인테리어
+    {keywords:["인테리어","인테리어디자인","집꾸미기","홈데코"],prompt:"beautifully designed Korean apartment interior, minimalist Scandinavian style, plants, warm natural tones"},
+    {keywords:["청소","정리","수납","정돈","미니멀","정리수납"],prompt:"perfectly organized closet with coordinated items, minimalist Korean home, clean aesthetic"},
+    {keywords:["이사","새집","아파트","원룸","집구하기"],prompt:"bright modern Korean apartment living room, floor-to-ceiling windows, city view, contemporary furniture"},
+    {keywords:["강아지","댕댕이","멍멍이","dog","puppy"],prompt:"fluffy golden retriever puppy in Korean home garden, playful expression, soft natural light, adorable"},
+    {keywords:["고양이","냥이","cat","kitty","고냥이"],prompt:"elegant cat lounging on window sill, soft afternoon sunbeam, bokeh background, peaceful domestic"},
+    {keywords:["반려동물","펫","애완","동물병원"],prompt:"loving pet care scene, cozy home with happy pet, warm domestic life, lifestyle photography"},
+    {keywords:["독서","책","서재","도서관","북카페","독서법"],prompt:"cozy reading nook with books, warm lamp light, coffee cup, wooden shelves, peaceful literary atmosphere"},
+    {keywords:["취미","DIY","만들기","핸드메이드","공예"],prompt:"creative craft workspace, artistic materials, handmade projects, organized tools, creative energy"},
+    {keywords:["가드닝","정원","식물","화분","홈가드닝"],prompt:"lush indoor plant collection, botanical home aesthetic, morning light through leaves, terra cotta pots"},
+    {keywords:["요리","쿠킹","홈쿠킹","레시피","만드는법"],prompt:"home cooking preparation, fresh ingredients on wooden cutting board, kitchen lifestyle, warm cooking"},
+    // 패션/뷰티/쇼핑
+    {keywords:["패션","옷","코디","스타일링","OOTD","옷잘입는"],prompt:"Korean fashion street style flat lay, seasonal outfit coordination, accessories, clean white background"},
+    {keywords:["명품","가방","지갑","액세서리","주얼리","럭셔리"],prompt:"luxury handbag editorial, leather texture, branded accessories, marble surface, premium lifestyle"},
+    {keywords:["화장","메이크업","립스틱","파운데이션","뷰티"],prompt:"K-beauty makeup flat lay, cosmetic products arranged artfully, rose gold accents, mirror, beauty editorial"},
+    {keywords:["향수","perfume","프래그런스","향"],prompt:"luxury perfume bottle on marble surface, light refraction, soft bokeh, elegant fragrance photography"},
+    {keywords:["네일","네일아트","네일샵"],prompt:"artistic nail art close-up, intricate designs, gel polish, hands on marble, beauty editorial"},
+    {keywords:["헤어","헤어스타일","미용실","염색","펌","헤어케어"],prompt:"Korean hair salon interior, glossy healthy hair, professional care, bright modern salon"},
+    {keywords:["다이어트","바디","몸매","체형"],prompt:"healthy fit lifestyle concept, athletic body care, nutritious food, wellness motivation, inspiring"},
+    // 자동차
+    {keywords:["자동차","신차","차","자동차구매","차량"],prompt:"sleek modern sedan on mountain road, dramatic landscape, automotive photography, golden hour"},
+    {keywords:["전기차","EV","테슬라","아이오닉","전기자동차"],prompt:"electric vehicle charging station, clean energy concept, modern EV design, sustainable future"},
+    {keywords:["SUV","4WD","오프로드","크로스오버"],prompt:"powerful SUV on mountain trail, rugged terrain, adventure lifestyle, dramatic sky"},
+    {keywords:["중고차","중고자동차","차량거래","중고"],prompt:"used car lot at dusk, selective focus on hood, polished exterior, automotive detail"},
+    {keywords:["오토바이","바이크","모터사이클"],prompt:"motorcycle on scenic coastal road, freedom concept, dramatic landscape, lifestyle editorial"},
+    // 스포츠/레저
+    {keywords:["골프","골프장","골프채","필드","골프연습"],prompt:"golf course at sunrise, morning mist over fairway, lush green grass, dramatic landscape, premium sport"},
+    {keywords:["등산","트레킹","산행","백패킹","산악"],prompt:"hiker on Korean mountain summit, vast panoramic view, autumn foliage, achievement, dramatic sky"},
+    {keywords:["수영","수영장","수영복","수영강습"],prompt:"outdoor swimming pool with turquoise water, summer sun reflection, tropical resort atmosphere"},
+    {keywords:["테니스","배드민턴","스쿼시"],prompt:"tennis court at golden hour, sport photography, athletic energy, dramatic sunlight"},
+    {keywords:["자전거","사이클","MTB","자전거여행"],prompt:"cyclist on scenic riverside path at sunrise, motion and speed, Korean landscape, freedom"},
+    {keywords:["서핑","수상스포츠","웨이크보드"],prompt:"surfer riding large wave at golden hour, dramatic ocean spray, athletic adventure"},
+    {keywords:["축구","농구","야구","배구","스포츠"],prompt:"sports field at golden hour, athletic energy, dramatic stadium lighting, competitive spirit"},
+    {keywords:["헬스","PT","퍼스널트레이닝","근육"],prompt:"modern gym barbell training, strong physique concept, motivating gym atmosphere, fitness lifestyle"},
+    // 직업/커리어
+    {keywords:["취업","구직","이력서","자소서","면접"],prompt:"professional Korean job interview setting, confident candidate, modern office, career opportunity"},
+    {keywords:["직장","회사","사무실","직장인","오피스"],prompt:"modern Korean office interior, collaborative workspace, professionals working, clean contemporary"},
+    {keywords:["이직","커리어","커리어개발","경력관리"],prompt:"career growth concept, ascending staircase, professional development, business success, ambition"},
+    {keywords:["간호사","의사","의료진"],prompt:"professional healthcare setting, doctor in white coat, modern hospital, trust and care"},
+    {keywords:["공무원","공직","공시"],prompt:"government office building, professional Korean administrative aesthetic, stability and trust"},
+    {keywords:["디자이너","그래픽","UX","UI","디자인"],prompt:"creative designer workspace, color palette, sketches, tablet, Macbook, design studio aesthetic"},
+    {keywords:["마케터","마케팅","광고","브랜딩"],prompt:"marketing creative workspace, campaign materials, laptop with analytics, colorful brand elements"},
+    // 계절/자연
+    {keywords:["봄","벚꽃","봄꽃","개나리","튤립"],prompt:"Korean spring cherry blossom path, soft pink petals falling, warm sunlight through branches, dreamy"},
+    {keywords:["여름","바다","해수욕장","여름휴가"],prompt:"Korean summer beach, crystal clear water, white sand, golden hour sunlight, vacation mood"},
+    {keywords:["가을","단풍","추석","가을여행","단풍여행"],prompt:"Korean autumn forest, vibrant red and orange foliage, misty mountain morning, fallen leaves path"},
+    {keywords:["겨울","눈","스키장","크리스마스","연말","설경"],prompt:"winter wonderland snowscape, frost on pine trees, soft blue twilight, peaceful Korean winter"},
+    // 자기계발/심리
+    {keywords:["자기계발","성장","동기부여","목표","습관"],prompt:"morning routine motivation, sunrise through window, journal and coffee, goal setting, fresh productive start"},
+    {keywords:["명상","마음챙김","힐링","치유","회복"],prompt:"peaceful meditation space, serene pose, soft morning light, minimalist zen atmosphere, calm"},
+    {keywords:["심리","상담","멘탈헬스","우울","불안"],prompt:"warm therapy room, comfortable couch, soft lighting, safe healing space, professional care"},
+    // 문화/엔터
+    {keywords:["영화","OTT","넷플릭스","드라마","영화추천"],prompt:"cozy home cinema setup, dark room with large screen glow, popcorn, blanket, movie night"},
+    {keywords:["음악","콘서트","공연","아이돌","K-pop"],prompt:"concert stage with dramatic lighting, spotlights, smoke effects, electric atmosphere, performance energy"},
+    {keywords:["독립영화","단편영화","영화제"],prompt:"film festival aesthetic, vintage cinema, reel strips, artistic movie poster concept, dramatic"},
+    // 환경/사회
+    {keywords:["환경","친환경","제로웨이스트","지속가능","ESG"],prompt:"eco-friendly lifestyle flat lay, reusable items, green plants, sustainable products, earth-tone"},
+    {keywords:["반려식물","식물키우기","다육이","관엽식물"],prompt:"lush indoor plant collection, botanical shelf arrangement, morning sunlight through leaves, cozy green aesthetic"},
+  ];
 
-  function buildImgPrompt(kw:string):string{
-    const k=kw.trim();const NP="no people, no person, no face, no human";
-    const style=adType==="adpost"?"Korean lifestyle blog warm emotional photography":"ultra realistic DSLR editorial 8K magazine";
-    for(const ko of Object.keys(KO_EN_MAP).sort((a,b)=>b.length-a.length)){if(k.includes(ko))return`${KO_EN_MAP[ko]}, ${NP}, ${style}`;}
-    if(/맛집|음식|카페|요리/.test(k))return`delicious korean food beautiful, ${NP}, ${style}`;
-    if(/여행|관광|호텔/.test(k))return`scenic travel destination golden hour, ${NP}, ${style}`;
-    if(/건강|운동|다이어트/.test(k))return`health fitness wellness natural, ${NP}, ${style}`;
-    if(/재테크|투자|주식/.test(k))return`investment finance growth chart, ${NP}, ${style}`;
-    return`lifestyle blog concept natural editorial, ${NP}, ${style}`;
+  function buildImgPrompt(kw: string, title: string = "", idx: number = 0): string {
+    const k = (kw + " " + title).toLowerCase();
+    const st = adType === "adpost"
+      ? "Korean lifestyle photography, warm emotional, soft natural light"
+      : "ultra realistic DSLR 8K magazine editorial photography";
+    // 긴 키워드 먼저 매칭
+    const sorted = [...PROMPT_DB].sort((a,b) => b.keywords.join("").length - a.keywords.join("").length);
+    for (const entry of sorted) {
+      if (entry.keywords.some(kw2 => k.includes(kw2))) {
+        // idx에 따라 조명 변주 (기계적 반복 방지)
+        let p = entry.prompt;
+        if (idx === 1) p = p.replace(/warm natural lighting|morning light|warm lighting/g, "golden hour afternoon light");
+        if (idx === 2) p = p.replace(/warm natural lighting|morning light|warm lighting/g, "dramatic blue hour lighting");
+        if (idx === 3) p = p.replace(/warm natural lighting|morning light|warm lighting/g, "soft overcast diffused light");
+        return `${p}, ${NP_TAG}, ${st}`;
+      }
+    }
+    // fallback: 장르 감지
+    if (/먹|맛|식|음|요리|카페|커피/.test(k)) return `beautiful Korean food dining experience, warm restaurant, delicious presentation, ${NP_TAG}, ${st}`;
+    if (/여행|travel|관광|투어|trip/.test(k)) return `breathtaking Korean travel destination, scenic landscape, golden hour, ${NP_TAG}, ${st}`;
+    if (/돈|금|재|투자|경제|수익|부자/.test(k)) return `financial success growth concept, modern professional aesthetic, ${NP_TAG}, ${st}`;
+    if (/건강|운동|몸|fitness|diet|다이어트/.test(k)) return `healthy lifestyle motivation, nutritious food, wellness atmosphere, ${NP_TAG}, ${st}`;
+    if (/집|방|인테리어|home|house|아파트/.test(k)) return `beautiful modern Korean home interior, warm cozy atmosphere, ${NP_TAG}, ${st}`;
+    if (/기술|tech|AI|컴퓨터|폰|앱/.test(k)) return `modern technology concept, clean digital aesthetic, innovation, ${NP_TAG}, ${st}`;
+    if (/봄|여름|가을|겨울|자연|꽃/.test(k)) return `beautiful Korean seasonal landscape, nature photography, golden light, ${NP_TAG}, ${st}`;
+    return `beautiful Korean lifestyle blog editorial photography, professional, perfect composition, ${NP_TAG}, ${st}`;
   }
 
   function stripMarkdown(text:string):string{
@@ -456,8 +613,8 @@ export default function DashboardPage({user, onLogout, onAdminLogin, onThemeTogg
     throw new Error("AI 미선택");
   }
 
-  async function generateOneImage(kw:string,signal:AbortSignal):Promise<string>{
-    const prompt=buildImgPrompt(kw);
+  async function generateOneImage(kw:string,signal:AbortSignal,idx:number=0):Promise<string>{
+    const prompt=buildImgPrompt(kw, genTitle||selectedTitle||"", idx);
     const ai=localStorage.getItem("publy_image_ai")||"openai_img";
     if(ai==="openai_img"){
       const key=localStorage.getItem("publy_openai_key")||"";if(!key)throw new Error("OpenAI 키 없음");
@@ -575,7 +732,7 @@ POST3: (제목)|(이유)
       for(let i=0;i<imgCount;i++){
         if(imgAbortRef.current.signal.aborted)break;
         setGenImgCurrent(i+1);
-        const url=await generateOneImage(keyword||genTitle,imgAbortRef.current.signal);
+        const url=await generateOneImage(keyword||genTitle,imgAbortRef.current.signal,i);
         imgs.push(url);setGeneratedImages([...imgs]);setGenImgProgress(Math.round(((i+1)/imgCount)*100));
       }
     }catch(e:any){if(e.name!=="AbortError")alert("이미지 생성 실패: "+e.message);}
