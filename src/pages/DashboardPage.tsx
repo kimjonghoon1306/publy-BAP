@@ -1,725 +1,309 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { PublyUser, getQuota, getHistory, getAccounts, PublyQuota, PublyHistory, PublyAccount, upsertAccount, useQuota, addHistory } from "../lib/supabase";
 import { supabase } from "../lib/supabase";
 
-type Tab = "write" | "publish" | "accounts" | "history" | "settings";
+type MainTab = "write" | "image" | "publish" | "history" | "accounts" | "settings";
+type PublishConcept = "full" | "body_faq" | "body_only";
+
 const BOT = "http://localhost:3333";
 const EXE_DOWNLOAD_URL = "https://github.com/kimjonghoon13/publy-BAP/releases/latest/download/Publy-Setup.exe";
+const BATCH = 30;
+const MAX_TITLES = 90;
+const GEMINI_MODELS = ["gemini-2.0-flash","gemini-2.0-flash-lite","gemini-2.5-flash","gemini-2.5-flash-lite"];
+const PLAN_LABELS: Record<string,string> = {free:"FREE",basic:"BASIC",pro:"PRO"};
 
 const WRITE_AI_LIST = [
-  { id:"gemini",  label:"Gemini Flash", sub:"무료", placeholder:"AIza...", storageKey:"publy_gemini_key", link:"https://aistudio.google.com/app/apikey", color:"#4285F4", logo:"G", free:true },
-  { id:"groq",    label:"Groq Llama 3", sub:"무료", placeholder:"gsk_...", storageKey:"publy_groq_key",   link:"https://console.groq.com/keys",          color:"#F55036", logo:"L", free:true },
-  { id:"openai",  label:"GPT-4o",       sub:"유료", placeholder:"sk-...",  storageKey:"publy_openai_key", link:"https://platform.openai.com/api-keys",   color:"#10A37F", logo:"O", free:false },
+  {id:"gemini",label:"Gemini Flash",sub:"무료",placeholder:"AIza...",storageKey:"publy_gemini_key",link:"https://aistudio.google.com/app/apikey",color:"#4285F4",logo:"G",free:true},
+  {id:"groq",  label:"Groq Llama 3",sub:"무료",placeholder:"gsk_...",storageKey:"publy_groq_key",  link:"https://console.groq.com/keys",          color:"#F55036",logo:"L",free:true},
+  {id:"openai",label:"GPT-4o",       sub:"유료",placeholder:"sk-...", storageKey:"publy_openai_key",link:"https://platform.openai.com/api-keys",   color:"#10A37F",logo:"O",free:false},
 ];
 const IMAGE_AI_LIST = [
-  { id:"openai_img", label:"DALL-E 3",        sub:"유료", placeholder:"sk-...", storageKey:"publy_openai_key",   link:"https://platform.openai.com/api-keys",     color:"#10A37F", logo:"O" },
-  { id:"replicate",  label:"Flux (Replicate)", sub:"유료", placeholder:"r8_...", storageKey:"publy_replicate_key", link:"https://replicate.com/account/api-tokens", color:"#8B5CF6", logo:"R" },
+  {id:"openai_img",label:"DALL-E 3",         sub:"유료",placeholder:"sk-...", storageKey:"publy_openai_key",   link:"https://platform.openai.com/api-keys",     color:"#10A37F",logo:"O"},
+  {id:"replicate", label:"Flux (Replicate)", sub:"유료",placeholder:"r8_...", storageKey:"publy_replicate_key",link:"https://replicate.com/account/api-tokens", color:"#8B5CF6",logo:"R"},
 ];
-const GEMINI_MODELS = ["gemini-2.0-flash","gemini-2.0-flash-lite","gemini-2.5-flash","gemini-2.5-flash-lite"];
-const BATCH = 30;
-const PLAN_LABELS: Record<string,string> = { free:"FREE", basic:"BASIC", pro:"PRO" };
-
-const TABS = [
-  { key:"write",    icon:"✍️", label:"글 생성"  },
-  { key:"publish",  icon:"🚀", label:"발행하기" },
-  { key:"accounts", icon:"🔗", label:"계정 관리"},
-  { key:"history",  icon:"📋", label:"발행 기록"},
-  { key:"settings", icon:"⚙️", label:"설정"    },
+const MAIN_TABS = [
+  {k:"write",   i:"✍️",l:"글 생성"},
+  {k:"image",   i:"🖼️",l:"이미지"},
+  {k:"publish", i:"🚀",l:"발행하기"},
+  {k:"history", i:"📋",l:"발행 기록"},
+  {k:"accounts",i:"🔗",l:"계정 관리"},
+  {k:"settings",i:"⚙️",l:"설정"},
 ] as const;
 
-// ── KeyInput 컴포넌트 (건드리지 않음) ──────────────────
-function KeyInput({ k }: { k:any }) {
-  const [val, setVal] = useState(() => localStorage.getItem(k.storageKey) || "");
-  const [show, setShow] = useState(false);
-  const [saved, setSaved] = useState(false);
-  function save() {
-    if (!val.trim()) return;
-    localStorage.setItem(k.storageKey, val.trim());
-    setSaved(true);
-    setTimeout(() => setSaved(false), 2500);
-  }
+function KeyInput({k}:{k:any}) {
+  const [val,setVal]=useState(()=>localStorage.getItem(k.storageKey)||"");
+  const [show,setShow]=useState(false);
+  const [saved,setSaved]=useState(false);
+  function save(){if(!val.trim())return;localStorage.setItem(k.storageKey,val.trim());setSaved(true);setTimeout(()=>setSaved(false),2500);}
   return (
-    <div className="key-row">
-      <div className="key-row-header">
-        <div className="key-logo" style={{background:`${k.color}20`,color:k.color}}>{k.logo}</div>
-        <span className="key-label">{k.label}</span>
-        <span className="key-tag">{k.sub}</span>
-        <a href={k.link} target="_blank" rel="noopener noreferrer" className="key-link">키 발급 →</a>
+    <div style={{marginBottom:10,padding:"12px 14px",borderRadius:12,border:"1px solid var(--border)",background:"var(--bg)"}}>
+      <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
+        <div style={{width:24,height:24,borderRadius:7,background:`${k.color}20`,color:k.color,display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,fontWeight:900,flexShrink:0}}>{k.logo}</div>
+        <span style={{fontSize:13,fontWeight:700,color:"var(--text)"}}>{k.label}</span>
+        <span style={{fontSize:10,color:"var(--text2)"}}>{k.sub}</span>
+        <a href={k.link} target="_blank" rel="noopener noreferrer" style={{marginLeft:"auto",fontSize:11,color:"var(--accent-text)",textDecoration:"none",fontWeight:600}}>키 발급 →</a>
       </div>
-      <div className="key-row-input">
-        <input className="inp" type={show?"text":"password"} placeholder={k.placeholder}
-          value={val} onChange={e=>setVal(e.target.value)} />
+      <div style={{display:"flex",gap:6}}>
+        <input className="inp" type={show?"text":"password"} placeholder={k.placeholder} value={val} onChange={e=>setVal(e.target.value)} style={{flex:1,fontSize:13,padding:"9px 12px"}}/>
         <button className="btn-ghost" onClick={()=>setShow(s=>!s)}>{show?"숨김":"표시"}</button>
-        <button className="btn-save" onClick={save} style={{background:saved?"#00c875":undefined}}>
-          {saved?"✓ 저장됨":"저장"}
-        </button>
+        <button style={{padding:"9px 16px",borderRadius:8,border:"none",background:saved?"#00c875":"var(--accent)",color:"#000",cursor:"pointer",fontSize:12,fontWeight:800,fontFamily:"inherit",transition:"all .2s"}} onClick={save}>{saved?"✓":"저장"}</button>
       </div>
     </div>
   );
 }
-
 const CSS = `
-@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;600;700;800;900&family=Space+Grotesk:wght@500;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;}
-@keyframes fadeUp{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:translateY(0)}}
+@keyframes fadeUp{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:translateY(0)}}
 @keyframes spin{to{transform:rotate(360deg)}}
-@keyframes pulse{0%,100%{opacity:1}50%{opacity:.5}}
-@keyframes float{0%,100%{transform:translateY(0)}50%{transform:translateY(-6px)}}
-@keyframes slideIn{from{opacity:0;transform:translateX(-10px)}to{opacity:1;transform:translateX(0)}}
-@keyframes floatBadge{0%,100%{transform:translateY(0) scale(1)}50%{transform:translateY(-5px) scale(1.03)}}
-@keyframes glowPulse{0%,100%{box-shadow:0 4px 20px rgba(0,255,136,.3),0 0 0 0 rgba(0,255,136,.4)}50%{box-shadow:0 8px 32px rgba(0,255,136,.6),0 0 0 8px rgba(0,255,136,.0)}}
-.dl-btn{
-  display:inline-flex;align-items:center;gap:8px;
-  padding:9px 18px;border-radius:99px;border:none;
-  background:linear-gradient(135deg,#00ff88,#00cc66);
-  color:#000;font-size:13px;font-weight:800;
-  font-family:'Noto Sans KR',sans-serif;
-  cursor:pointer;text-decoration:none;
-  animation:floatBadge 2.5s ease-in-out infinite, glowPulse 2.5s ease-in-out infinite;
-  white-space:nowrap;flex-shrink:0;
-  letter-spacing:.02em;
-}
-.dl-btn:hover{filter:brightness(1.1);}
-.dl-btn-ico{font-size:15px;}
-
-/* ── 다크 모드 ─────────────────────────────── */
+@keyframes float{0%,100%{transform:translateY(0)}50%{transform:translateY(-7px)}}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+@keyframes dlFloat{0%,100%{transform:translateY(0) scale(1)}50%{transform:translateY(-5px) scale(1.02)}}
+@keyframes guideFloat{0%,100%{transform:translateY(0)}50%{transform:translateY(-4px)}}
+@keyframes guideIn{from{opacity:0;transform:scale(.92) translateY(20px)}to{opacity:1;transform:scale(1) translateY(0)}}
+@keyframes imgIn{from{opacity:0;transform:scale(.88)}to{opacity:1;transform:scale(1)}}
 .app.dark{
-  --bg:#0d1117;
-  --bg2:#161b22;
-  --card:#1c2128;
-  --card-hover:#21262d;
-  --border:#30363d;
-  --border-focus:#58a6ff;
-  --text:#e6edf3;
-  --text2:#8b949e;
-  --text3:#6e7681;
-  --accent:#00ff88;
-  --accent-bg:rgba(0,255,136,.1);
-  --accent-border:rgba(0,255,136,.3);
-  --accent-text:#00ff88;
-  --naver:#03C75A;
-  --tistory:#FF6B35;
-  --danger:#f85149;
-  --warn:#f0883e;
-  --info:#58a6ff;
-  --success:#3fb950;
-  --header-bg:rgba(13,17,23,.95);
-  --shadow:0 8px 32px rgba(0,0,0,.4);
-  --shadow-sm:0 2px 8px rgba(0,0,0,.3);
+  --bg:#080c10;--bg2:#0d1117;--card:#111820;--card2:#161d27;--card-hover:#1a2230;
+  --border:#1e2836;--border2:#2a3a4f;--border-focus:#4da6ff;
+  --text:#e8f4ff;--text2:#7a9ab5;--text3:#4a6478;
+  --accent:#00ff9d;--accent-dim:rgba(0,255,157,.08);--accent-30:rgba(0,255,157,.3);
+  --accent-text:#00ff9d;--accent-bg:rgba(0,255,157,.08);--accent-border:rgba(0,255,157,.25);
+  --pink:#FF6B9D;--pink-bg:rgba(255,107,157,.08);--pink-border:rgba(255,107,157,.25);
+  --yellow:#FFD93D;--yellow-bg:rgba(255,217,61,.08);--yellow-border:rgba(255,217,61,.25);
+  --purple:#9B7DFF;--purple-bg:rgba(155,125,255,.08);
+  --naver:#03C75A;--tistory:#FF6B35;
+  --danger:#ff5363;--warn:#ff9f3f;--info:#4da6ff;--success:#00d68f;
+  --header-bg:rgba(8,12,16,.94);--shadow:0 4px 24px rgba(0,0,0,.4);
 }
-/* ── 라이트 모드 ────────────────────────────── */
 .app.light{
-  --bg:#f6f8fa;
-  --bg2:#ffffff;
-  --card:#ffffff;
-  --card-hover:#f6f8fa;
-  --border:#d0d7de;
-  --border-focus:#0969da;
-  --text:#24292f;
-  --text2:#57606a;
-  --text3:#8c959f;
-  --accent:#1a7f37;
-  --accent-bg:rgba(26,127,55,.08);
-  --accent-border:rgba(26,127,55,.3);
-  --accent-text:#1a7f37;
-  --naver:#03C75A;
-  --tistory:#FF6B35;
-  --danger:#cf222e;
-  --warn:#9a6700;
-  --info:#0969da;
-  --success:#1a7f37;
-  --header-bg:rgba(246,248,250,.95);
-  --shadow:0 4px 16px rgba(0,0,0,.1);
-  --shadow-sm:0 1px 4px rgba(0,0,0,.08);
+  --bg:#f0f4f8;--bg2:#ffffff;--card:#ffffff;--card2:#f8fafc;--card-hover:#f0f4f8;
+  --border:#d4e0ec;--border2:#b8cfe0;--border-focus:#0969da;
+  --text:#0d1f2d;--text2:#4a6478;--text3:#8a9fb5;
+  --accent:#0066cc;--accent-dim:rgba(0,102,204,.08);--accent-30:rgba(0,102,204,.3);
+  --accent-text:#0066cc;--accent-bg:rgba(0,102,204,.08);--accent-border:rgba(0,102,204,.25);
+  --pink:#e0396d;--pink-bg:rgba(224,57,109,.07);--pink-border:rgba(224,57,109,.25);
+  --yellow:#cc8800;--yellow-bg:rgba(204,136,0,.08);--yellow-border:rgba(204,136,0,.25);
+  --purple:#6d4fcc;--purple-bg:rgba(109,79,204,.07);
+  --naver:#03C75A;--tistory:#FF6B35;
+  --danger:#cf222e;--warn:#9a6700;--info:#0969da;--success:#1a7f37;
+  --header-bg:rgba(240,244,248,.95);--shadow:0 2px 12px rgba(0,0,0,.08);
 }
-
-/* ── 기본 레이아웃 ──────────────────────────── */
-.app{
-  width:100vw;height:100vh;
-  font-family:'Noto Sans KR',sans-serif;
-  color:var(--text);background:var(--bg);
-  display:flex;flex-direction:column;
-  transition:background .2s,color .2s;
-  overflow:hidden;
-}
-*::-webkit-scrollbar{width:5px;height:5px;}
-*::-webkit-scrollbar-thumb{background:var(--border);border-radius:99px;}
-
-/* ── 헤더 ───────────────────────────────────── */
-.header{
-  height:60px;flex-shrink:0;
-  display:flex;align-items:center;padding:0 16px;gap:12px;
-  background:var(--header-bg);
-  border-bottom:1px solid var(--border);
-  backdrop-filter:blur(20px);
-  position:sticky;top:0;z-index:100;
-}
-.logo{display:flex;align-items:center;gap:8px;text-decoration:none;}
-.logo-ico{
-  width:32px;height:32px;border-radius:8px;
-  background:linear-gradient(135deg,#00ff88,#00cc66);
-  display:flex;align-items:center;justify-content:center;flex-shrink:0;
-}
-.logo-text{font-size:17px;font-weight:900;letter-spacing:.15em;color:var(--accent-text);}
+.app{width:100vw;height:100vh;font-family:'Noto Sans KR',sans-serif;color:var(--text);background:var(--bg);display:flex;flex-direction:column;overflow:hidden;transition:background .2s,color .2s;}
+*::-webkit-scrollbar{width:5px;}*::-webkit-scrollbar-thumb{background:var(--border2);border-radius:99px;}
+.header{height:58px;flex-shrink:0;display:flex;align-items:center;padding:0 16px;gap:10px;background:var(--header-bg);border-bottom:1px solid var(--border);backdrop-filter:blur(24px);position:sticky;top:0;z-index:100;}
+.logo{display:flex;align-items:center;gap:9px;text-decoration:none;flex-shrink:0;}
+.logo-ico{width:34px;height:34px;border-radius:10px;background:linear-gradient(135deg,#00ff9d,#00c870);display:flex;align-items:center;justify-content:center;flex-shrink:0;box-shadow:0 2px 12px rgba(0,255,157,.35);}
+.logo-text{font-size:17px;font-weight:900;letter-spacing:.18em;color:var(--accent-text);font-family:'Space Grotesk',sans-serif;}
 .header-mid{display:flex;align-items:center;gap:8px;flex:1;justify-content:center;flex-wrap:wrap;}
 .header-right{display:flex;align-items:center;gap:6px;margin-left:auto;}
-.server-badge{
-  display:flex;align-items:center;gap:5px;
-  padding:5px 12px;border-radius:99px;
-  font-size:12px;font-weight:700;border:1px solid;
-  white-space:nowrap;
-}
-.server-on{background:rgba(0,200,117,.1);color:var(--success);border-color:rgba(0,200,117,.3);}
-.server-off{background:rgba(120,120,120,.08);color:var(--text2);border-color:var(--border);}
-.dot{width:7px;height:7px;border-radius:50%;flex-shrink:0;}
+.server-chip{display:flex;align-items:center;gap:5px;padding:5px 12px;border-radius:99px;font-size:11px;font-weight:700;border:1px solid;white-space:nowrap;}
+.server-on{background:rgba(0,214,143,.1);color:var(--success);border-color:rgba(0,214,143,.3);}
+.server-off{background:rgba(120,120,120,.06);color:var(--text2);border-color:var(--border);}
+.dot{width:6px;height:6px;border-radius:50%;flex-shrink:0;}
 .dot-on{background:var(--success);box-shadow:0 0 6px var(--success);}
 .dot-off{background:var(--text3);}
-.quota-info{
-  display:flex;align-items:center;gap:7px;
-  padding:5px 12px;border-radius:99px;
-  background:var(--card);border:1px solid var(--border);
-  font-size:12px;font-weight:600;color:var(--text2);
-  white-space:nowrap;
-}
-.quota-bar-wrap{width:60px;height:4px;background:var(--border);border-radius:99px;overflow:hidden;}
+.quota-chip{display:flex;align-items:center;gap:7px;padding:5px 12px;border-radius:99px;background:var(--card);border:1px solid var(--border);font-size:12px;font-weight:600;color:var(--text2);white-space:nowrap;}
+.quota-bar-bg{width:56px;height:4px;background:var(--border);border-radius:99px;overflow:hidden;}
 .quota-bar-fill{height:100%;background:var(--accent);border-radius:99px;transition:width .4s;}
-.plan-badge{
-  font-size:10px;font-weight:800;padding:3px 10px;
-  border-radius:99px;letter-spacing:.1em;
-}
-.plan-free{background:rgba(120,120,120,.12);color:var(--text2);border:1px solid var(--border);}
-.plan-basic{background:rgba(88,166,255,.12);color:var(--info);border:1px solid rgba(88,166,255,.3);}
-.plan-pro{background:rgba(0,200,117,.12);color:var(--success);border:1px solid rgba(0,200,117,.3);}
-.icon-btn{
-  width:36px;height:36px;border-radius:8px;
-  display:flex;align-items:center;justify-content:center;
-  border:1px solid var(--border);background:transparent;
-  color:var(--text2);cursor:pointer;font-size:15px;
-  transition:all .15s;
-}
+.plan-badge{font-size:10px;font-weight:800;padding:3px 10px;border-radius:99px;letter-spacing:.08em;}
+.plan-free{background:rgba(120,120,120,.1);color:var(--text2);border:1px solid var(--border);}
+.plan-basic{background:rgba(77,166,255,.1);color:var(--info);border:1px solid rgba(77,166,255,.25);}
+.plan-pro{background:rgba(0,214,143,.1);color:var(--success);border:1px solid rgba(0,214,143,.25);}
+.icon-btn{width:36px;height:36px;border-radius:9px;display:flex;align-items:center;justify-content:center;border:1px solid var(--border);background:transparent;color:var(--text2);cursor:pointer;font-size:15px;transition:all .15s;}
 .icon-btn:hover{background:var(--card-hover);color:var(--text);border-color:var(--border-focus);}
-.user-btn{
-  display:flex;align-items:center;gap:7px;
-  padding:5px 12px;border-radius:99px;
-  background:var(--card);border:1px solid var(--border);
-  cursor:pointer;font-size:12px;font-weight:600;color:var(--text);
-  transition:all .15s;white-space:nowrap;max-width:140px;
-}
-.user-btn:hover{border-color:var(--border-focus);}
-.user-avatar{
-  width:22px;height:22px;border-radius:6px;flex-shrink:0;
-  background:var(--accent-bg);border:1px solid var(--accent-border);
-  display:flex;align-items:center;justify-content:center;
-  font-size:11px;font-weight:800;color:var(--accent-text);
-}
+.user-chip{display:flex;align-items:center;gap:7px;padding:5px 12px;border-radius:99px;background:var(--card);border:1px solid var(--border);cursor:pointer;font-size:12px;font-weight:600;color:var(--text);transition:all .15s;max-width:140px;}
+.user-chip:hover{border-color:var(--border-focus);}
+.user-avatar{width:22px;height:22px;border-radius:7px;background:var(--accent-bg);border:1px solid var(--accent-border);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:800;color:var(--accent-text);flex-shrink:0;}
 .user-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-.logout-btn{
-  padding:6px 14px;border-radius:8px;
-  border:1px solid var(--border);background:transparent;
-  color:var(--text2);cursor:pointer;font-size:12px;font-weight:600;
-  font-family:'Noto Sans KR',sans-serif;transition:all .15s;white-space:nowrap;
-}
-.logout-btn:hover{border-color:var(--danger);color:var(--danger);background:rgba(248,81,73,.06);}
-
-/* ── 메인 레이아웃 ──────────────────────────── */
+.logout-btn{padding:6px 13px;border-radius:8px;border:1px solid var(--border);background:transparent;color:var(--text2);cursor:pointer;font-size:12px;font-weight:600;font-family:'Noto Sans KR',sans-serif;transition:all .15s;}
+.logout-btn:hover{border-color:var(--danger);color:var(--danger);}
+.dl-btn{display:inline-flex;align-items:center;gap:7px;padding:8px 16px;border-radius:99px;border:none;background:linear-gradient(135deg,#00ff9d,#00c870);color:#000;font-size:12px;font-weight:800;font-family:'Noto Sans KR',sans-serif;cursor:pointer;text-decoration:none;animation:dlFloat 2.5s ease-in-out infinite;white-space:nowrap;flex-shrink:0;box-shadow:0 3px 14px rgba(0,255,157,.35);}
+.guide-open-btn{display:inline-flex;align-items:center;gap:6px;padding:8px 15px;border-radius:99px;border:none;background:linear-gradient(135deg,#FF6B9D,#FF3D7F);color:#fff;font-size:12px;font-weight:800;font-family:'Noto Sans KR',sans-serif;cursor:pointer;animation:guideFloat 2.8s ease-in-out infinite;white-space:nowrap;flex-shrink:0;box-shadow:0 3px 14px rgba(255,61,127,.35);}
 .layout{flex:1;display:flex;overflow:hidden;min-height:0;}
-.sidebar{
-  width:200px;flex-shrink:0;
-  background:var(--bg2);border-right:1px solid var(--border);
-  display:flex;flex-direction:column;padding:12px 8px;gap:2px;
-  overflow-y:auto;
-}
-.nav-section{font-size:10px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;
-  color:var(--text3);padding:4px 10px 6px;margin-top:4px;}
-.nav-item{
-  display:flex;align-items:center;gap:10px;
-  padding:11px 12px;border-radius:8px;border:none;
-  cursor:pointer;width:100%;font-size:13px;font-weight:500;
-  font-family:'Noto Sans KR',sans-serif;
-  color:var(--text2);background:transparent;
-  transition:all .15s;text-align:left;position:relative;
-}
+.sidebar{width:196px;flex-shrink:0;background:var(--bg2);border-right:1px solid var(--border);display:flex;flex-direction:column;padding:12px 8px;gap:2px;overflow-y:auto;}
+.nav-lbl{font-size:9px;font-weight:800;letter-spacing:.13em;text-transform:uppercase;color:var(--text3);padding:5px 11px 7px;margin-top:4px;}
+.nav-item{display:flex;align-items:center;gap:10px;padding:11px 12px;border-radius:9px;border:none;cursor:pointer;width:100%;font-size:13px;font-weight:500;font-family:'Noto Sans KR',sans-serif;color:var(--text2);background:transparent;transition:all .15s;text-align:left;position:relative;}
 .nav-item:hover{background:var(--card-hover);color:var(--text);}
-.nav-item.active{background:var(--accent-bg);color:var(--accent-text);font-weight:700;}
-.nav-item.active::before{
-  content:'';position:absolute;left:0;top:25%;bottom:25%;
-  width:3px;border-radius:99px;background:var(--accent);
-}
+.nav-item.active{background:var(--accent-bg);color:var(--accent-text);font-weight:700;border:1px solid var(--accent-border);}
+.nav-item.active::before{content:'';position:absolute;left:0;top:22%;bottom:22%;width:3px;border-radius:99px;background:var(--accent);}
 .nav-ico{font-size:16px;flex-shrink:0;}
-.nav-badge{
-  margin-left:auto;font-size:10px;font-weight:800;
-  padding:2px 7px;border-radius:99px;
-  background:var(--accent-bg);color:var(--accent-text);
-  border:1px solid var(--accent-border);
-}
-.sidebar-stats{
-  margin-top:auto;padding:12px 8px 4px;
-  border-top:1px solid var(--border);
-  display:grid;grid-template-columns:1fr 1fr;gap:6px;
-}
-.stat-box{
-  padding:10px 12px;border-radius:10px;
-  background:var(--card);border:1px solid var(--border);
-}
-.stat-num{font-size:24px;font-weight:900;color:var(--text);line-height:1;}
+.nav-badge{margin-left:auto;font-size:10px;font-weight:800;padding:2px 7px;border-radius:99px;background:var(--accent-bg);color:var(--accent-text);border:1px solid var(--accent-border);}
+.sidebar-foot{margin-top:auto;padding:12px 6px 4px;border-top:1px solid var(--border);display:grid;grid-template-columns:1fr 1fr;gap:6px;}
+.stat-card{padding:10px 12px;border-radius:11px;background:var(--card);border:1px solid var(--border);}
+.stat-num{font-size:22px;font-weight:900;color:var(--text);line-height:1;font-family:'Space Grotesk',sans-serif;}
 .stat-lbl{font-size:9px;color:var(--text2);margin-top:3px;font-weight:600;}
-
-/* ── 메인 컨텐츠 ────────────────────────────── */
 .main{flex:1;overflow-y:auto;padding:20px;min-width:0;}
-@media(max-width:900px){.main{padding:16px 14px 90px;}}
-
-/* ── 카드 ───────────────────────────────────── */
-.card{
-  background:var(--card);border:1px solid var(--border);
-  border-radius:14px;padding:20px 22px;margin-bottom:14px;
-  transition:border-color .15s;
-}
-.card:hover{border-color:var(--border-focus);}
-.card-title{
-  font-size:12px;font-weight:800;letter-spacing:.1em;
-  text-transform:uppercase;color:var(--text2);
-  margin-bottom:14px;display:flex;align-items:center;gap:7px;
-}
-
-/* ── 버튼 ───────────────────────────────────── */
-.btn{
-  display:inline-flex;align-items:center;justify-content:center;gap:8px;
-  padding:11px 20px;border-radius:8px;border:none;
-  font-size:14px;font-weight:700;font-family:'Noto Sans KR',sans-serif;
-  cursor:pointer;transition:all .15s;white-space:nowrap;
-}
-.btn:disabled{opacity:.45;cursor:not-allowed;}
-.btn-primary{background:var(--accent);color:#000;}
-.btn-primary:hover:not(:disabled){filter:brightness(1.1);box-shadow:0 4px 16px var(--accent-bg);}
-.btn-secondary{background:var(--card);color:var(--text);border:1px solid var(--border);}
-.btn-secondary:hover:not(:disabled){background:var(--card-hover);border-color:var(--border-focus);}
-.btn-danger{background:rgba(248,81,73,.1);color:var(--danger);border:1px solid rgba(248,81,73,.3);}
-.btn-danger:hover:not(:disabled){background:rgba(248,81,73,.18);}
+.card{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:20px 22px;margin-bottom:14px;transition:border-color .15s;box-shadow:var(--shadow);}
+.card:hover{border-color:var(--border2);}
+.card-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:8px;}
+.card-title{font-size:12px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;color:var(--text2);display:flex;align-items:center;gap:7px;}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:12px 22px;border-radius:10px;border:none;font-size:14px;font-weight:700;font-family:'Noto Sans KR',sans-serif;cursor:pointer;transition:all .15s;white-space:nowrap;}
+.btn:disabled{opacity:.42;cursor:not-allowed;}
+.btn-primary{background:linear-gradient(135deg,var(--accent),#00cc80);color:#000;box-shadow:0 3px 14px var(--accent-30);}
+.btn-primary:hover:not(:disabled){filter:brightness(1.08);transform:translateY(-1px);}
+.btn-secondary{background:var(--card2);color:var(--text);border:1px solid var(--border);}
+.btn-secondary:hover:not(:disabled){background:var(--card-hover);border-color:var(--border2);}
+.btn-danger{background:rgba(255,83,99,.1);color:var(--danger);border:1px solid rgba(255,83,99,.3);}
+.btn-danger:hover:not(:disabled){background:rgba(255,83,99,.18);}
 .btn-full{width:100%;}
 .btn-xl{padding:16px 28px;font-size:16px;border-radius:12px;}
-.btn-sm{padding:7px 14px;font-size:12px;}
-.btn-ghost{
-  padding:8px 12px;border-radius:7px;
-  border:1px solid var(--border);background:transparent;
-  color:var(--text2);cursor:pointer;font-size:12px;
-  font-family:'Noto Sans KR',sans-serif;transition:all .15s;
-}
+.btn-sm{padding:8px 16px;font-size:12px;border-radius:8px;}
+.btn-ghost{padding:8px 13px;border-radius:8px;border:1px solid var(--border);background:transparent;color:var(--text2);cursor:pointer;font-size:12px;font-family:'Noto Sans KR',sans-serif;transition:all .15s;}
 .btn-ghost:hover{background:var(--card-hover);color:var(--text);}
-.btn-save{
-  padding:8px 16px;border-radius:7px;border:none;
-  background:var(--accent);color:#000;
-  cursor:pointer;font-size:12px;font-weight:700;
-  font-family:'Noto Sans KR',sans-serif;transition:all .2s;
-  white-space:nowrap;
-}
-
-/* ── 입력 ───────────────────────────────────── */
-.inp{
-  width:100%;padding:12px 14px;border-radius:8px;
-  border:1.5px solid var(--border);
-  background:var(--bg);color:var(--text);
-  font-size:14px;font-family:'Noto Sans KR',sans-serif;
-  outline:none;transition:all .15s;
-}
-.inp:focus{border-color:var(--border-focus);box-shadow:0 0 0 3px rgba(88,166,255,.15);}
+.btn-stop{background:rgba(255,83,99,.1);color:var(--danger);border:1.5px solid rgba(255,83,99,.35);padding:9px 18px;border-radius:99px;font-size:13px;font-weight:800;font-family:'Noto Sans KR',sans-serif;cursor:pointer;display:inline-flex;align-items:center;gap:7px;transition:all .15s;}
+.btn-stop:hover{background:rgba(255,83,99,.2);}
+.flow-nav{display:flex;align-items:center;justify-content:center;gap:10px;margin:20px 0 4px;flex-wrap:wrap;}
+.flow-btn{display:inline-flex;align-items:center;gap:8px;padding:14px 26px;border-radius:99px;border:none;font-size:15px;font-weight:800;font-family:'Noto Sans KR',sans-serif;cursor:pointer;transition:all .18s;}
+.flow-btn:hover:not(:disabled){transform:translateY(-2px);}
+.flow-btn:disabled{opacity:.4;cursor:not-allowed;}
+.flow-btn-g{background:linear-gradient(135deg,var(--accent),#00cc80);color:#000;box-shadow:0 4px 20px var(--accent-30);}
+.flow-btn-skip{background:var(--card2);color:var(--text2);border:1px solid var(--border);}
+.inp{width:100%;padding:12px 14px;border-radius:9px;border:1.5px solid var(--border);background:var(--bg);color:var(--text);font-size:14px;font-family:'Noto Sans KR',sans-serif;outline:none;transition:all .15s;}
+.inp:focus{border-color:var(--border-focus);box-shadow:0 0 0 3px rgba(77,166,255,.12);}
 .inp::placeholder{color:var(--text3);}
-.inp.lg{font-size:16px;padding:14px 16px;}
+.inp.lg{font-size:17px;padding:15px 16px;}
+.inp-label{font-size:12px;font-weight:700;color:var(--text2);display:block;margin-bottom:6px;}
 select.inp{cursor:pointer;appearance:auto;}
-.dark select.inp{color-scheme:dark;}
-.light select.inp{color-scheme:light;}
-textarea.inp{resize:vertical;min-height:80px;line-height:1.7;}
-.inp-label{
-  font-size:12px;font-weight:700;color:var(--text2);
-  display:block;margin-bottom:6px;
-}
-
-/* ── 스피너 ─────────────────────────────────── */
-.spinner{
-  width:16px;height:16px;border-radius:50%;
-  border:2.5px solid rgba(0,0,0,.15);border-top-color:#000;
-  animation:spin .8s linear infinite;display:inline-block;flex-shrink:0;
-}
-.spinner-white{border-color:rgba(255,255,255,.2);border-top-color:#fff;}
-
-/* ── 알림 박스 ──────────────────────────────── */
-.alert{
-  padding:13px 16px;border-radius:10px;font-size:13px;
-  margin-bottom:14px;display:flex;align-items:flex-start;gap:10px;
-  line-height:1.6;font-weight:500;
-}
-.alert-warn{background:rgba(240,136,62,.08);border:1px solid rgba(240,136,62,.25);color:var(--warn);}
-.alert-danger{background:rgba(248,81,73,.08);border:1px solid rgba(248,81,73,.25);color:var(--danger);}
-.alert-info{background:rgba(88,166,255,.08);border:1px solid rgba(88,166,255,.25);color:var(--info);}
-.alert-success{background:rgba(63,185,80,.08);border:1px solid rgba(63,185,80,.25);color:var(--success);}
-
-/* ── 플랫폼 버튼 ────────────────────────────── */
-.plat-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
-.plat-btn{
-  padding:16px;border-radius:12px;border:2px solid var(--border);
-  background:var(--bg);cursor:pointer;text-align:left;
-  font-family:'Noto Sans KR',sans-serif;transition:all .2s;
-  display:flex;align-items:center;gap:12px;
-}
-.plat-btn.naver-sel{border-color:var(--naver);background:rgba(3,199,90,.07);}
-.plat-btn.tistory-sel{border-color:var(--tistory);background:rgba(255,107,53,.07);}
-.plat-ico{font-size:28px;flex-shrink:0;}
-.plat-name{font-size:14px;font-weight:700;color:var(--text);}
-.plat-sub{font-size:11px;color:var(--text2);margin-top:2px;}
-.plat-check{margin-left:auto;font-size:18px;}
-
-/* ── 제목 그리드 ────────────────────────────── */
-.title-grid{
-  display:grid;gap:8px;
-  grid-template-columns:repeat(auto-fill,minmax(280px,1fr));
-  max-height:420px;overflow-y:auto;
-  padding-right:4px;
-}
-.title-card{
-  padding:14px 16px;border-radius:10px;
-  border:1.5px solid var(--border);background:var(--bg);
-  cursor:pointer;text-align:left;font-family:'Noto Sans KR',sans-serif;
-  transition:all .15s;position:relative;
-}
+.dark select.inp{color-scheme:dark;}.light select.inp{color-scheme:light;}
+textarea.inp{resize:vertical;line-height:1.75;min-height:80px;}
+.spinner{width:16px;height:16px;border-radius:50%;border:2.5px solid rgba(0,0,0,.15);border-top-color:#000;animation:spin .7s linear infinite;display:inline-block;flex-shrink:0;}
+.sp-w{border-color:rgba(255,255,255,.2);border-top-color:#fff;}
+.steps{display:flex;border-radius:13px;overflow:hidden;border:1px solid var(--border);margin-bottom:20px;background:var(--bg2);}
+.step-item{flex:1;padding:11px 8px;text-align:center;font-size:12px;font-weight:600;color:var(--text3);background:transparent;border-right:1px solid var(--border);transition:all .2s;}
+.step-item:last-child{border-right:none;}
+.step-item.done{background:rgba(0,214,143,.06);color:var(--success);}
+.step-item.active{background:var(--accent-bg);color:var(--accent-text);font-weight:800;}
+.step-n{font-size:9px;display:block;margin-bottom:2px;opacity:.7;font-family:'Space Grotesk',sans-serif;font-weight:700;}
+.adtype-row{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px;}
+.adtype-btn{padding:15px 16px;border-radius:13px;border:2px solid var(--border);background:var(--bg);cursor:pointer;text-align:left;font-family:'Noto Sans KR',sans-serif;transition:all .18s;position:relative;}
+.adtype-btn.sel-adpost{border-color:var(--naver);background:rgba(3,199,90,.07);}
+.adtype-btn.sel-adsense{border-color:var(--info);background:rgba(77,166,255,.07);}
+.adtype-lbl{font-size:14px;font-weight:800;color:var(--text);margin-bottom:3px;}
+.adtype-sub{font-size:11px;color:var(--text2);line-height:1.55;}
+.title-grid{display:grid;gap:8px;grid-template-columns:repeat(auto-fill,minmax(270px,1fr));max-height:420px;overflow-y:auto;padding-right:3px;}
+.title-card{padding:14px 15px;border-radius:11px;border:1.5px solid var(--border);background:var(--bg);cursor:pointer;text-align:left;font-family:'Noto Sans KR',sans-serif;transition:all .15s;position:relative;}
 .title-card:hover{border-color:var(--border-focus);background:var(--card-hover);}
-.title-card.selected{
-  border-color:var(--accent);background:var(--accent-bg);
-}
-.title-num{
-  font-size:10px;color:var(--text3);margin-bottom:5px;
-  font-family:'JetBrains Mono',monospace;font-weight:500;
-}
-.title-card.selected .title-num{color:var(--accent-text);}
-.title-text{
-  font-size:13px;font-weight:600;
-  color:var(--text);
-  line-height:1.55;
-}
-.title-card.selected .title-text{color:var(--accent-text);}
-.title-check{
-  position:absolute;top:10px;right:10px;
-  width:20px;height:20px;border-radius:50%;
-  background:var(--accent);
-  display:flex;align-items:center;justify-content:center;
-  font-size:10px;color:#000;font-weight:900;
-}
-
-/* ── 선택된 제목 배너 ───────────────────────── */
-.selected-banner{
-  padding:13px 16px;border-radius:10px;
-  background:var(--accent-bg);border:1.5px solid var(--accent-border);
-  margin-bottom:14px;
-}
-.selected-banner-label{font-size:11px;color:var(--accent-text);font-weight:700;margin-bottom:3px;}
-.selected-banner-text{font-size:14px;font-weight:800;color:var(--text);}
-
-/* ── 진행 단계 표시 ─────────────────────────── */
-.steps{display:flex;align-items:center;gap:0;margin-bottom:20px;overflow:hidden;border-radius:12px;border:1px solid var(--border);}
-.step{
-  flex:1;padding:11px 8px;text-align:center;
-  font-size:12px;font-weight:600;color:var(--text2);
-  background:var(--card);border-right:1px solid var(--border);
-  transition:all .2s;cursor:default;
-}
-.step:last-child{border-right:none;}
-.step.active{background:var(--accent-bg);color:var(--accent-text);font-weight:800;}
-.step.done{background:rgba(63,185,80,.06);color:var(--success);}
-.step-num{font-size:10px;display:block;margin-bottom:1px;opacity:.7;}
-
-/* ── 수익화 선택 ────────────────────────────── */
-.adtype-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px;}
-.adtype-btn{
-  padding:14px 16px;border-radius:12px;border:2px solid var(--border);
-  background:var(--bg);cursor:pointer;text-align:left;
-  font-family:'Noto Sans KR',sans-serif;transition:all .2s;
-}
-.adtype-btn.adpost-sel{border-color:var(--naver);background:rgba(3,199,90,.07);}
-.adtype-btn.adsense-sel{border-color:var(--info);background:rgba(88,166,255,.07);}
-.adtype-label{font-size:13px;font-weight:700;color:var(--text);margin-bottom:3px;}
-.adtype-sub{font-size:11px;color:var(--text2);}
-
-/* ── 토글 옵션 ──────────────────────────────── */
-.toggle-group{display:flex;gap:6px;flex-wrap:wrap;}
-.toggle-btn{
-  padding:8px 16px;border-radius:99px;
-  border:1.5px solid var(--border);background:transparent;
-  color:var(--text2);cursor:pointer;font-size:12px;font-weight:600;
-  font-family:'Noto Sans KR',sans-serif;transition:all .15s;
-}
-.toggle-btn.active{
-  border-color:var(--accent);background:var(--accent-bg);color:var(--accent-text);
-}
-
-/* ── 이미지 갤러리 ──────────────────────────── */
-.img-grid{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;}
-.img-thumb-wrap{position:relative;}
-.img-thumb{
-  width:90px;height:90px;object-fit:cover;
-  border-radius:10px;border:2px solid var(--border);
-  display:block;
-}
-.img-thumb.thumb-first{border-color:var(--accent);}
-.img-thumb-badge{
-  position:absolute;top:-7px;left:-4px;
-  font-size:9px;font-weight:800;padding:2px 6px;
-  border-radius:99px;background:var(--accent);color:#000;
-}
-.img-thumb-del{
-  position:absolute;top:-6px;right:-6px;
-  width:18px;height:18px;border-radius:50%;
-  background:var(--danger);border:none;color:#fff;
-  cursor:pointer;font-size:10px;
-  display:flex;align-items:center;justify-content:center;
-}
-
-/* ── 결과 편집 영역 ─────────────────────────── */
-.result-header{
-  display:flex;align-items:center;justify-content:space-between;
-  margin-bottom:14px;flex-wrap:wrap;gap:8px;
-}
-.char-badge{
-  padding:4px 12px;border-radius:99px;font-size:12px;font-weight:700;
-  background:var(--accent-bg);color:var(--accent-text);
-  border:1px solid var(--accent-border);
-}
-.preview-btn{
-  padding:7px 14px;border-radius:8px;
-  border:1px solid var(--accent-border);background:var(--accent-bg);
-  color:var(--accent-text);cursor:pointer;font-size:12px;font-weight:700;
-  font-family:'Noto Sans KR',sans-serif;transition:all .15s;
-}
-.preview-btn:hover{filter:brightness(1.1);}
-
-/* ── 계정 카드 ──────────────────────────────── */
-.acc-card{
-  display:flex;align-items:center;gap:12px;
-  padding:14px 16px;border-radius:12px;
-  border:1.5px solid var(--border);background:var(--card);
-  margin-bottom:10px;animation:fadeUp .25s ease both;
-  transition:border-color .2s;
-}
-.acc-card.connected-naver{border-color:rgba(3,199,90,.3);}
-.acc-card.connected-tistory{border-color:rgba(255,107,53,.3);}
-.acc-info{flex:1;min-width:0;}
-.acc-name{font-size:15px;font-weight:700;color:var(--text);}
-.acc-meta{font-size:11px;color:var(--text2);margin-top:2px;}
-.acc-status{
-  font-size:11px;font-weight:700;padding:4px 11px;
-  border-radius:99px;white-space:nowrap;
-}
-.acc-status.connected{background:var(--accent-bg);color:var(--accent-text);border:1px solid var(--accent-border);}
-.acc-status.disconnected{background:var(--card-hover);color:var(--text2);border:1px solid var(--border);}
-
-/* ── 발행 기록 ──────────────────────────────── */
-.hist-item{
-  display:flex;align-items:center;gap:12px;
-  padding:14px 0;border-bottom:1px solid var(--border);
-  animation:fadeUp .25s ease both;
-}
+.title-card.sel{border-color:var(--accent);background:var(--accent-bg);}
+.title-n{font-size:9px;color:var(--text3);margin-bottom:5px;font-family:'Space Grotesk',sans-serif;font-weight:600;}
+.title-card.sel .title-n{color:var(--accent-text);}
+.title-t{font-size:13px;font-weight:600;color:var(--text);line-height:1.55;}
+.title-card.sel .title-t{color:var(--accent-text);font-weight:700;}
+.title-chk{position:absolute;top:9px;right:9px;width:19px;height:19px;border-radius:50%;background:var(--accent);display:flex;align-items:center;justify-content:center;font-size:9px;color:#000;font-weight:900;}
+.sel-banner{padding:12px 15px;border-radius:11px;background:var(--accent-bg);border:1.5px solid var(--accent-border);margin-bottom:14px;animation:fadeUp .2s ease both;}
+.sel-banner-lbl{font-size:10px;color:var(--accent-text);font-weight:700;margin-bottom:3px;}
+.sel-banner-txt{font-size:14px;font-weight:800;color:var(--text);}
+.img-gallery{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;}
+.img-tw{position:relative;}
+.img-th{width:88px;height:88px;object-fit:cover;border-radius:11px;border:2px solid var(--border);display:block;animation:imgIn .25s ease both;}
+.img-th.first{border-color:var(--accent);box-shadow:0 0 10px var(--accent-30);}
+.img-tb{position:absolute;top:-7px;left:-4px;font-size:9px;font-weight:800;padding:2px 7px;border-radius:99px;background:var(--accent);color:#000;}
+.img-td{position:absolute;top:-6px;right:-6px;width:19px;height:19px;border-radius:50%;background:var(--danger);border:none;color:#fff;cursor:pointer;font-size:10px;display:flex;align-items:center;justify-content:center;}
+.img-td:hover{transform:scale(1.15);}
+.img-prog{height:5px;background:var(--border);border-radius:99px;overflow:hidden;margin:10px 0 6px;}
+.img-prog-fill{height:100%;background:linear-gradient(90deg,var(--accent),#00cc80);border-radius:99px;transition:width .4s;}
+.concept-grid{display:grid;gap:10px;}
+.concept-btn{padding:16px 18px;border-radius:13px;border:2px solid var(--border);background:var(--bg);cursor:pointer;text-align:left;font-family:'Noto Sans KR',sans-serif;transition:all .18s;}
+.concept-btn.sel-full{border-color:var(--accent);background:var(--accent-bg);}
+.concept-btn.sel-faq{border-color:var(--pink);background:var(--pink-bg);}
+.concept-btn.sel-body{border-color:var(--yellow);background:var(--yellow-bg);}
+.concept-ico{font-size:22px;margin-bottom:7px;}
+.concept-name{font-size:15px;font-weight:800;color:var(--text);margin-bottom:4px;}
+.concept-sub{font-size:12px;color:var(--text2);line-height:1.6;white-space:pre-line;}
+.acc-card{display:flex;align-items:center;gap:10px;padding:14px 16px;border-radius:13px;border:1.5px solid var(--border);background:var(--card);margin-bottom:10px;animation:fadeUp .25s ease both;transition:all .18s;flex-wrap:wrap;}
+.acc-card.conn-naver{border-color:rgba(3,199,90,.35);}
+.acc-card.conn-tistory{border-color:rgba(255,107,53,.35);}
+.hist-item{display:flex;align-items:center;gap:12px;padding:14px 0;border-bottom:1px solid var(--border);animation:fadeUp .25s ease both;}
 .hist-info{flex:1;min-width:0;}
-.hist-title{font-size:14px;font-weight:600;color:var(--text);
-  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-.hist-meta{font-size:11px;color:var(--text2);margin-top:3px;font-family:'JetBrains Mono',monospace;}
-.hist-err{font-size:11px;color:var(--danger);margin-top:2px;}
-.status-badge{font-size:11px;font-weight:700;padding:4px 10px;border-radius:99px;white-space:nowrap;}
-.status-ok{background:rgba(63,185,80,.1);color:var(--success);border:1px solid rgba(63,185,80,.25);}
-.status-fail{background:rgba(248,81,73,.1);color:var(--danger);border:1px solid rgba(248,81,73,.2);}
-.status-pend{background:rgba(240,136,62,.1);color:var(--warn);border:1px solid rgba(240,136,62,.25);}
-.view-link{
-  font-size:12px;color:var(--accent-text);text-decoration:none;
-  padding:5px 12px;border-radius:7px;
-  background:var(--accent-bg);border:1px solid var(--accent-border);
-  flex-shrink:0;font-weight:600;transition:all .15s;
-}
-.view-link:hover{filter:brightness(1.1);}
-
-/* ── AI 카드 (설정) ─────────────────────────── */
-.ai-grid{display:flex;gap:10px;margin-bottom:18px;flex-wrap:wrap;}
-.ai-card{
-  flex:1;min-width:120px;padding:14px 12px;border-radius:12px;
-  border:2px solid var(--border);background:var(--bg);
-  cursor:pointer;text-align:left;font-family:'Noto Sans KR',sans-serif;
-  transition:all .2s;position:relative;overflow:hidden;
-}
-.ai-card.selected{transform:translateY(-2px);}
+.hist-title{font-size:14px;font-weight:600;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.hist-meta{font-size:11px;color:var(--text2);margin-top:2px;font-family:'JetBrains Mono',monospace;}
+.sbadge{font-size:11px;font-weight:700;padding:4px 11px;border-radius:99px;white-space:nowrap;}
+.sbadge-ok{background:rgba(0,214,143,.1);color:var(--success);border:1px solid rgba(0,214,143,.25);}
+.sbadge-fail{background:rgba(255,83,99,.1);color:var(--danger);border:1px solid rgba(255,83,99,.2);}
+.sbadge-pend{background:rgba(255,159,63,.1);color:var(--warn);border:1px solid rgba(255,159,63,.25);}
+.view-link{font-size:12px;color:var(--accent-text);text-decoration:none;padding:5px 12px;border-radius:8px;background:var(--accent-bg);border:1px solid var(--accent-border);flex-shrink:0;font-weight:600;}
+.ai-grid{display:flex;gap:9px;flex-wrap:wrap;margin-bottom:16px;}
+.ai-card{flex:1;min-width:120px;padding:13px 12px;border-radius:12px;border:2px solid var(--border);background:var(--bg);cursor:pointer;text-align:left;font-family:'Noto Sans KR',sans-serif;transition:all .2s;}
+.ai-card.sel-ai{transform:translateY(-2px);}
 .ai-card-top{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;}
-.ai-logo{
-  width:28px;height:28px;border-radius:7px;
-  display:flex;align-items:center;justify-content:center;
-  font-size:12px;font-weight:900;
-}
-.ai-sel-badge{font-size:9px;font-weight:800;padding:2px 7px;border-radius:99px;color:#000;}
-.ai-free-badge{
-  font-size:9px;font-weight:800;padding:2px 7px;border-radius:99px;
-  background:rgba(63,185,80,.12);color:var(--success);
-}
-.ai-paid-badge{
-  font-size:9px;font-weight:800;padding:2px 7px;border-radius:99px;
-  background:rgba(240,136,62,.12);color:var(--warn);
-}
+.ai-logo{width:27px;height:27px;border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:900;}
 .ai-name{font-size:12px;font-weight:700;color:var(--text);}
 .ai-sub{font-size:10px;color:var(--text2);margin-top:2px;}
-
-/* ── 설정 키 영역 ───────────────────────────── */
-.key-section{
-  padding:16px 18px;border-radius:12px;
-  border:1px solid var(--border);margin-bottom:12px;
-}
-.key-section-title{
-  font-size:11px;font-weight:800;letter-spacing:.1em;
-  text-transform:uppercase;color:var(--text2);margin-bottom:12px;
-  display:flex;align-items:center;gap:7px;
-}
-.key-row{margin-bottom:10px;}
-.key-row:last-child{margin-bottom:0;}
-.key-row-header{display:flex;align-items:center;gap:7px;margin-bottom:7px;}
-.key-logo{
-  width:22px;height:22px;border-radius:5px;
-  display:flex;align-items:center;justify-content:center;
-  font-size:10px;font-weight:900;flex-shrink:0;
-}
-.key-label{font-size:12px;font-weight:700;color:var(--text);}
-.key-tag{font-size:10px;color:var(--text2);}
-.key-link{margin-left:auto;font-size:11px;color:var(--accent-text);text-decoration:none;font-weight:600;}
-.key-link:hover{text-decoration:underline;}
-.key-row-input{display:flex;gap:6px;}
-.key-row-input .inp{flex:1;font-size:13px;padding:9px 12px;}
-
-/* ── 계정 정보 ──────────────────────────────── */
-.info-table{border:1px solid var(--border);border-radius:10px;overflow:hidden;}
-.info-row{
-  display:flex;align-items:center;justify-content:space-between;
-  padding:13px 16px;border-bottom:1px solid var(--border);
-}
+.ai-sel-badge{font-size:9px;font-weight:800;padding:2px 7px;border-radius:99px;color:#000;}
+.ai-free{font-size:9px;font-weight:800;padding:2px 7px;border-radius:99px;background:rgba(0,214,143,.12);color:var(--success);}
+.ai-paid{font-size:9px;font-weight:800;padding:2px 7px;border-radius:99px;background:rgba(255,159,63,.12);color:var(--warn);}
+.alert-box{padding:13px 16px;border-radius:11px;font-size:13px;margin-bottom:14px;display:flex;align-items:flex-start;gap:10px;line-height:1.6;font-weight:500;}
+.alert-warn{background:rgba(255,159,63,.07);border:1px solid rgba(255,159,63,.25);color:var(--warn);}
+.alert-info{background:rgba(77,166,255,.07);border:1px solid rgba(77,166,255,.25);color:var(--info);}
+.alert-success{background:rgba(0,214,143,.07);border:1px solid rgba(0,214,143,.25);color:var(--success);}
+.alert-danger{background:rgba(255,83,99,.07);border:1px solid rgba(255,83,99,.25);color:var(--danger);}
+.empty-state{text-align:center;padding:56px 24px;animation:fadeUp .3s ease both;}
+.empty-ico{font-size:52px;margin-bottom:14px;display:block;animation:float 3s ease-in-out infinite;}
+.empty-title{font-size:18px;font-weight:800;color:var(--text);margin-bottom:8px;}
+.empty-sub{font-size:14px;color:var(--text2);margin-bottom:22px;line-height:1.65;}
+.key-section{padding:15px 17px;border-radius:12px;border:1px solid var(--border);margin-bottom:12px;}
+.key-section-title{font-size:11px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;color:var(--text2);margin-bottom:12px;display:flex;align-items:center;gap:6px;}
+.info-table{border:1px solid var(--border);border-radius:11px;overflow:hidden;}
+.info-row{display:flex;align-items:center;justify-content:space-between;padding:13px 16px;border-bottom:1px solid var(--border);}
 .info-row:last-child{border-bottom:none;}
 .info-row:hover{background:var(--card-hover);}
 .info-key{font-size:13px;color:var(--text2);}
 .info-val{font-size:14px;font-weight:700;color:var(--text);}
-
-/* ── 빈 상태 ────────────────────────────────── */
-.empty{
-  text-align:center;padding:60px 24px;
-  animation:fadeUp .3s ease both;
-}
-.empty-ico{font-size:56px;margin-bottom:16px;animation:float 3s ease-in-out infinite;}
-.empty-title{font-size:18px;font-weight:800;color:var(--text);margin-bottom:8px;}
-.empty-sub{font-size:14px;color:var(--text2);margin-bottom:24px;line-height:1.6;}
-
-/* ── 미리보기 모달 ──────────────────────────── */
-.preview-modal{
-  position:fixed;inset:0;z-index:500;
-  background:rgba(0,0,0,.85);
-  display:flex;align-items:center;justify-content:center;padding:16px;
-}
-.preview-inner{
-  width:100%;max-width:700px;max-height:90vh;overflow-y:auto;
-  background:#fff;border-radius:16px;padding:32px 28px;
-}
-.preview-header{
-  display:flex;justify-content:space-between;align-items:center;
-  margin-bottom:20px;
-}
-.preview-close{
-  background:none;border:none;cursor:pointer;
-  font-size:22px;color:#888;padding:4px;
-}
-
-/* ── 에러 팝업 ──────────────────────────────── */
-.error-popup{
-  position:fixed;top:20px;left:50%;transform:translateX(-50%);
-  z-index:999;max-width:90vw;width:400px;
-  background:#1a0a0a;border:1px solid var(--danger);
-  border-radius:12px;padding:14px 18px;
-  display:flex;align-items:center;gap:12px;
-  box-shadow:0 20px 60px rgba(0,0,0,.5);
-  animation:fadeUp .2s ease both;
-}
-.error-close{background:none;border:none;color:var(--danger);cursor:pointer;font-size:18px;margin-left:auto;}
-
-/* ── 모바일 하단 탭바 ───────────────────────── */
-.mob-tabs{
-  display:none;
-  position:fixed;bottom:0;left:0;right:0;z-index:200;
-  background:var(--header-bg);border-top:1px solid var(--border);
-  backdrop-filter:blur(20px);
-  padding:8px 4px max(14px,env(safe-area-inset-bottom));
-}
-.mob-tab{
-  flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;
-  padding:6px 4px;border:none;background:transparent;cursor:pointer;
-  font-family:'Noto Sans KR',sans-serif;transition:all .15s;
-  min-height:52px;
-}
-.mob-tab-ico{font-size:22px;}
-.mob-tab-lbl{font-size:11px;font-weight:600;color:var(--text2);}
-.mob-tab.active .mob-tab-lbl{color:var(--accent-text);}
-.mob-tab.active{background:var(--accent-bg);border-radius:10px;}
-
-/* ── 반응형 ─────────────────────────────────── */
-@media(max-width:900px){
-  .sidebar{display:none;}
-  .mob-tabs{display:flex;}
-}
+.preview-overlay{position:fixed;inset:0;z-index:500;background:rgba(0,0,0,.85);display:flex;align-items:center;justify-content:center;padding:16px;}
+.preview-inner{width:100%;max-width:720px;max-height:92vh;overflow-y:auto;background:#fff;border-radius:18px;padding:32px 28px;animation:guideIn .3s ease both;}
+.guide-overlay{position:fixed;inset:0;z-index:999;background:rgba(0,0,0,.78);backdrop-filter:blur(8px);display:flex;align-items:center;justify-content:center;padding:12px;}
+.guide-modal{width:100%;max-width:560px;max-height:92vh;border-radius:24px;overflow:hidden;display:flex;flex-direction:column;animation:guideIn .32s cubic-bezier(.34,1.56,.64,1) both;box-shadow:0 32px 80px rgba(0,0,0,.6);position:relative;}
+.guide-header{padding:22px 22px 0;background:linear-gradient(135deg,#1a2e1a,#0d1a0d);flex-shrink:0;border-bottom:1px solid rgba(255,255,255,.06);}
+.guide-logo-row{display:flex;align-items:center;gap:10px;margin-bottom:14px;}
+.guide-logo-ico{width:40px;height:40px;border-radius:12px;background:linear-gradient(135deg,#00ff9d,#00c870);display:flex;align-items:center;justify-content:center;font-size:20px;flex-shrink:0;}
+.guide-title{font-size:20px;font-weight:900;color:#fff;}
+.guide-subtitle{font-size:12px;color:rgba(255,255,255,.5);margin-top:3px;}
+.guide-tabs{display:flex;overflow-x:auto;scrollbar-width:none;}
+.guide-tabs::-webkit-scrollbar{display:none;}
+.guide-tab{padding:11px 16px;border:none;background:transparent;font-size:12px;font-weight:700;color:rgba(255,255,255,.4);cursor:pointer;font-family:'Noto Sans KR',sans-serif;white-space:nowrap;border-bottom:3px solid transparent;transition:all .15s;flex-shrink:0;}
+.guide-tab.active{color:#FFD93D;border-bottom-color:#FFD93D;}
+.guide-body{flex:1;overflow-y:auto;background:#0d1a0d;padding:18px 18px 22px;min-height:0;}
+.guide-body::-webkit-scrollbar{width:4px;}
+.guide-body::-webkit-scrollbar-thumb{background:rgba(255,255,255,.1);border-radius:99px;}
+.guide-close{position:absolute;top:14px;right:16px;width:32px;height:32px;border-radius:99px;background:rgba(255,255,255,.12);border:none;color:#fff;cursor:pointer;font-size:15px;display:flex;align-items:center;justify-content:center;z-index:10;}
+.guide-close:hover{background:rgba(255,255,255,.22);}
+.g-step{border-radius:15px;padding:15px 15px;margin-bottom:10px;border:1.5px solid;}
+.g-step-num{font-size:10px;font-weight:900;letter-spacing:.1em;text-transform:uppercase;margin-bottom:5px;display:flex;align-items:center;gap:6px;}
+.g-step-title{font-size:15px;font-weight:900;margin-bottom:5px;line-height:1.3;}
+.g-step-desc{font-size:13px;line-height:1.85;color:rgba(255,255,255,.82);}
+.g-step-desc b{font-weight:900;color:#fff;}
+.g-tip{margin-top:9px;padding:9px 12px;border-radius:9px;background:rgba(255,255,255,.05);font-size:12px;line-height:1.75;color:rgba(255,255,255,.7);}
+.g-tip b{font-weight:800;color:#FFD93D;}
+.g-btn{display:inline-flex;align-items:center;gap:7px;padding:10px 18px;border-radius:99px;border:none;font-size:13px;font-weight:800;font-family:'Noto Sans KR',sans-serif;cursor:pointer;margin-top:11px;transition:all .15s;}
+.g-btn:hover{filter:brightness(1.1);transform:translateY(-1px);}
+.guide-footer{padding:12px 18px;background:#0a150a;border-top:1px solid rgba(255,255,255,.07);display:flex;align-items:center;justify-content:space-between;flex-shrink:0;gap:10px;flex-wrap:wrap;}
+.guide-nav-btn{padding:9px 20px;border-radius:99px;border:1.5px solid;font-size:13px;font-weight:700;font-family:'Noto Sans KR',sans-serif;cursor:pointer;transition:all .15s;}
+.guide-page{font-size:12px;color:rgba(255,255,255,.35);font-weight:600;}
+.mob-bar{display:none;position:fixed;bottom:0;left:0;right:0;z-index:200;background:var(--header-bg);border-top:1px solid var(--border);backdrop-filter:blur(24px);padding:7px 4px max(12px,env(safe-area-inset-bottom));}
+.mob-btn{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;padding:5px 2px;border:none;background:transparent;cursor:pointer;font-family:'Noto Sans KR',sans-serif;transition:all .15s;min-height:50px;border-radius:9px;}
+.mob-btn-ico{font-size:21px;}
+.mob-btn-lbl{font-size:11px;font-weight:600;color:var(--text2);}
+.mob-btn.active{background:var(--accent-bg);}
+.mob-btn.active .mob-btn-lbl{color:var(--accent-text);}
+@media(max-width:900px){.sidebar{display:none;}.mob-bar{display:flex;}}
 @media(max-width:768px){
-  .header-mid{display:none;}
-  .logo-text{font-size:15px;}
-  .main{padding:14px 12px 90px;}
-  .plat-grid{grid-template-columns:1fr 1fr;}
-  .title-grid{grid-template-columns:1fr;}
-  .adtype-grid{grid-template-columns:1fr;}
-  .ai-grid{flex-direction:column;}
-  .steps .step-num{display:none;}
-  .card{padding:16px 14px;}
-  .btn{font-size:15px;padding:13px 20px;}
-  .btn-xl{padding:17px 24px;font-size:17px;}
-  .btn-sm{font-size:13px;padding:10px 16px;}
-  .inp{font-size:16px;padding:14px 14px;}
-  .inp.lg{font-size:17px;padding:16px 14px;}
-  .nav-item{font-size:15px;padding:14px 14px;}
-  .mob-tab-lbl{font-size:12px;}
-  .mob-tab-ico{font-size:24px;}
-  .mob-tab{padding:7px 2px;}
-  .title-card{padding:16px 16px;}
-  .title-text{font-size:15px;line-height:1.6;}
-  .title-num{font-size:12px;}
-  .plat-name{font-size:15px;}
-  .plat-btn{padding:18px 14px;}
-  .adtype-label{font-size:15px;}
-  .adtype-sub{font-size:13px;}
-  .card-title{font-size:13px;}
-  .inp-label{font-size:14px;}
-  .acc-name{font-size:16px;}
-  .acc-meta{font-size:13px;}
-  .acc-status{font-size:13px;padding:6px 14px;}
-  .hist-title{font-size:15px;}
-  .hist-meta{font-size:12px;}
-  .status-badge{font-size:13px;padding:6px 12px;}
-  .stat-num{font-size:28px;}
-  .stat-lbl{font-size:11px;}
-  .char-badge{font-size:14px;padding:6px 14px;}
-  .toggle-btn{font-size:14px;padding:11px 18px;}
-  .selected-banner-text{font-size:16px;}
-  .selected-banner-label{font-size:13px;}
-  .info-key{font-size:15px;}
-  .info-val{font-size:16px;}
-  .steps{margin-bottom:16px;}
-  .step{font-size:13px;padding:13px 8px;}
-  .alert{font-size:14px;padding:14px 16px;}
+  .header-mid{display:none;}.main{padding:14px 12px 84px;}.card{padding:16px 14px;}
+  .adtype-row{grid-template-columns:1fr 1fr;}.title-grid{grid-template-columns:1fr;}.ai-grid{flex-direction:column;}
+  .btn-xl{padding:16px 22px;font-size:16px;}.btn{font-size:14px;padding:12px 18px;}.inp{font-size:16px;}.inp.lg{font-size:18px;}
+  .concept-grid{grid-template-columns:1fr;}.steps .step-n{display:none;}.step-item{font-size:12px;padding:12px 6px;}
+  .guide-modal{max-width:100%;max-height:90vh;border-radius:20px;}.guide-header{padding:16px 16px 0;}
+  .guide-body{padding:14px 14px 18px;}.guide-footer{padding:10px 14px;}.preview-inner{padding:20px 14px;}
+  .flow-nav{flex-direction:column;align-items:stretch;}.flow-btn{justify-content:center;}
+  .img-split{grid-template-columns:1fr !important;}
 }
 @media(max-width:480px){
-  .header{padding:0 10px;gap:6px;}
-  .user-name{display:none;}
-  .logout-btn{display:none;}
-  .quota-info{display:none;}
-  .dl-btn span:last-child{display:none;}
-  .dl-btn{padding:9px 13px;}
-  .plat-grid{grid-template-columns:1fr;}
-  .adtype-grid{grid-template-columns:1fr;}
-  .title-grid{grid-template-columns:1fr;}
-  .key-row-input{flex-wrap:wrap;}
-  .key-row-input .inp{width:100%;}
+  .header{padding:0 10px;gap:6px;}.user-name{display:none;}.logout-btn{display:none;}.quota-chip{display:none;}
+  .dl-btn span:last-child{display:none;}.dl-btn{padding:9px 12px;}
+  .adtype-row{grid-template-columns:1fr;}.guide-overlay{padding:6px;}
+  .guide-modal{max-height:94vh;border-radius:16px;}.guide-tab{font-size:11px;padding:9px 11px;}
+  .acc-form-grid{grid-template-columns:1fr !important;}
+  .pub-plat-grid{grid-template-columns:1fr !important;}
 }
 `;
-
 interface Props {
   user: PublyUser;
   onLogout: () => void;
@@ -728,318 +312,237 @@ interface Props {
   theme: string;
 }
 
-export default function DashboardPage({ user, onLogout, onAdminLogin, onThemeToggle, theme }: Props) {
-  const [tab, setTab] = useState<Tab>("write");
+export default function DashboardPage({user, onLogout, onAdminLogin, onThemeToggle, theme}: Props) {
+  const [tab, setTab] = useState<MainTab>("write");
+  const [showGuide, setShowGuide] = useState(false);
+  const [guideTab, setGuideTab] = useState(0);
   const [botOnline, setBotOnline] = useState(false);
-  const [platform, setPlatform] = useState<"naver"|"tistory">("naver");
+  const [quota, setQuota] = useState<PublyQuota|null>(null);
   const [accounts, setAccounts] = useState<PublyAccount[]>([]);
   const [history, setHistory] = useState<PublyHistory[]>([]);
-  const [quota, setQuota] = useState<PublyQuota | null>(null);
-  const [error, setError] = useState("");
-
-  // 발행
-  const [pubTitle, setPubTitle] = useState("");
-  const [pubContent, setPubContent] = useState("");
-  const [pubTags, setPubTags] = useState("");
-  const [pubImageUrl, setPubImageUrl] = useState("");
-  const [pubAccId, setPubAccId] = useState("");
-  const [publishing, setPublishing] = useState(false);
-  const [pubMsg, setPubMsg] = useState("");
-
-  // 글 생성
   const [adType, setAdType] = useState<"adpost"|"adsense">("adpost");
-  const [targetChars, setTargetChars] = useState(1350);
-  const [imgSource, setImgSource] = useState<"ai"|"upload"|"none">("ai");
-  const [imgCountManual, setImgCountManual] = useState<number|null>(null);
-  const [generatedImages, setGeneratedImages] = useState<string[]>([]);
-  const [uploadedImages, setUploadedImages] = useState<string[]>([]);
-  const [showPreview, setShowPreview] = useState(false);
+  const [platform, setPlatform] = useState<"naver"|"tistory">("naver");
   const [keyword, setKeyword] = useState("");
-  const [generating, setGenerating] = useState(false);
-  const [genTitle, setGenTitle] = useState("");
-  const [genContent, setGenContent] = useState("");
-  const [genTags, setGenTags] = useState("");
-  const [genImage, setGenImage] = useState("");
-  const [genImgLoading, setGenImgLoading] = useState(false);
-  const [titles, setTitles] = useState<string[]>(() => {
-    try { return JSON.parse(localStorage.getItem("publy_adm_titles") || "[]"); } catch { return []; }
-  });
+  const [targetChars, setTargetChars] = useState(1350);
+  const [titles, setTitles] = useState<string[]>(()=>{try{return JSON.parse(localStorage.getItem("publy_titles")||"[]");}catch{return[];}});
   const [selectedTitle, setSelectedTitle] = useState("");
   const [loadingTitles, setLoadingTitles] = useState(false);
-
-  // 계정 추가
-  const [newPlatform, setNewPlatform] = useState<"naver"|"tistory">("naver");
+  const [genContent, setGenContent] = useState("");
+  const [genTitle, setGenTitle] = useState("");
+  const [genTags, setGenTags] = useState("");
+  const [generating, setGenerating] = useState(false);
+  const abortRef = useRef<AbortController|null>(null);
+  const [imgSource, setImgSource] = useState<"ai"|"upload"|"none">("ai");
+  const [imgCount, setImgCount] = useState(3);
+  const [imgCountAuto, setImgCountAuto] = useState(true);
+  const [generatedImages, setGeneratedImages] = useState<string[]>([]);
+  const [uploadedImages, setUploadedImages] = useState<string[]>([]);
+  const [genImgLoading, setGenImgLoading] = useState(false);
+  const [genImgProgress, setGenImgProgress] = useState(0);
+  const [genImgCurrent, setGenImgCurrent] = useState(0);
+  const imgAbortRef = useRef<AbortController|null>(null);
+  const [pubConcept, setPubConcept] = useState<PublishConcept>("full");
+  const [pubAccId, setPubAccId] = useState("");
+  const [pubTitle, setPubTitle] = useState("");
+  const [pubTags, setPubTags] = useState("");
+  const [publishing, setPublishing] = useState(false);
+  const [pubMsg, setPubMsg] = useState("");
+  const [newPlat, setNewPlat] = useState<"naver"|"tistory">("naver");
   const [newUser, setNewUser] = useState("");
   const [newPw, setNewPw] = useState("");
   const [newBlog, setNewBlog] = useState("");
   const [addingAcc, setAddingAcc] = useState(false);
-  const [connectingId, setConnectingId] = useState<string|null>(null);
+  const [connId, setConnId] = useState<string|null>(null);
+  const [showPreview, setShowPreview] = useState(false);
+  const [writeAI, setWriteAI] = useState(()=>localStorage.getItem("publy_write_ai")||"gemini");
+  const [imageAI, setImageAI] = useState(()=>localStorage.getItem("publy_image_ai")||"openai_img");
 
-  // 설정
-  const [writeAI, setWriteAI] = useState(() => localStorage.getItem("publy_write_ai") || "gemini");
-  const [imageAI, setImageAI] = useState(() => localStorage.getItem("publy_image_ai") || "openai_img");
+  const checkBot = useCallback(async()=>{
+    try{const r=await fetch(`${BOT}/health`,{signal:AbortSignal.timeout(3000)});setBotOnline(r.ok);}
+    catch{setBotOnline(false);}
+  },[]);
 
-  const checkBot = useCallback(async () => {
-    try {
-      const r = await fetch(`${BOT}/health`, { signal: AbortSignal.timeout(3000) });
-      setBotOnline(r.ok);
-    } catch { setBotOnline(false); }
-  }, []);
-
-  useEffect(() => {
+  useEffect(()=>{
     checkBot();
     getAccounts(user.id).then(setAccounts);
     getHistory(user.id).then(setHistory);
-    getQuota(user.id).then(q => q && setQuota(q));
-    const iv = setInterval(checkBot, 30000);
-    return () => clearInterval(iv);
-  }, [checkBot, user.id]);
+    getQuota(user.id).then(q=>q&&setQuota(q));
+    const iv=setInterval(checkBot,30000);
+    if(!localStorage.getItem("publy_guide_seen")){setTimeout(()=>setShowGuide(true),900);}
+    return()=>clearInterval(iv);
+  },[checkBot,user.id]);
 
-  // ── 이미지 프롬프트 ─────────────────────────────────────────
-  const KO_EN_MAP: Record<string,string> = {
-    맛집:"delicious gourmet food beautiful plating restaurant warm lighting",음식:"delicious food dish beautiful presentation",요리:"cooking fresh ingredients cutting board kitchen herbs",카페:"cozy cafe coffee interior warm ambient pastry",커피:"coffee latte art ceramic cup morning steam",치킨:"crispy golden fried chicken korean food plate",피자:"pizza melted cheese fresh toppings italian",라면:"ramen noodle bowl hot steam broth toppings",삼겹살:"korean bbq pork belly grill sizzling smoke",회:"fresh sashimi seafood colorful plate ice",초밥:"sushi japanese fresh fish rice plate",파스타:"pasta italian tomato sauce herbs",브런치:"brunch cafe food table morning avocado eggs",스테이크:"steak beef grill plate fine dining",햄버거:"burger gourmet bun vegetables sauce",샐러드:"healthy salad fresh colorful vegetables bowl",케이크:"celebration cake dessert beautiful cream",빵:"fresh artisan bread bakery golden",디저트:"dessert sweet pastry cream fruit plate",
-    여행:"scenic travel destination beautiful landscape golden hour",관광:"tourism famous landmark architecture",해외여행:"international travel airplane passport suitcase",국내여행:"domestic korea scenic nature mountains",제주도:"jeju island volcanic landscape ocean cliffs",서울:"seoul city skyline namsan night view",부산:"busan haeundae beach ocean cliff bridge",강원도:"gangwon mountains forest nature snow",호텔:"luxury hotel room interior elegant bed",캠핑:"camping tent campfire stars nature",
-    건강:"health wellness vitamins natural herbs",다이어트:"diet healthy food vegetables scale",운동:"exercise gym equipment weights fitness",헬스:"gym fitness dumbbells machines",요가:"yoga mat meditation calm nature",피부:"skincare serum cream bottle routine",뷰티:"beauty cosmetics makeup products palette",
-    재테크:"investment finance coins growth chart piggy bank",주식:"stock market chart trading graph trend",코인:"cryptocurrency bitcoin gold coin digital",부동산:"real estate property house document keys",아파트:"apartment building modern exterior",
-    IT:"technology digital computer code screen",AI:"artificial intelligence circuit board network",코딩:"coding programming dark screen code",
-    육아:"baby toys nursery soft colors stroller",아이:"children toys colorful playground",강아지:"cute puppy dog playing toy home",고양이:"cute cat kitten indoor cozy",
-    패션:"fashion clothing outfit display stylish",쇼핑:"shopping retail store display bags",
+  function recommendImgCount(content:string):number{return Math.max(1,Math.min(10,Math.floor(content.length/200)));}
+
+  const KO_EN_MAP:Record<string,string>={
+    맛집:"delicious gourmet food beautiful plating restaurant warm lighting",음식:"delicious food dish beautiful presentation",카페:"cozy cafe coffee interior warm ambient",커피:"coffee latte art ceramic cup steam",치킨:"crispy golden fried chicken korean food",피자:"pizza melted cheese fresh toppings",라면:"ramen noodle bowl hot steam broth",빵:"fresh artisan bread bakery golden",디저트:"dessert sweet pastry cream plate",
+    여행:"scenic travel destination beautiful landscape golden hour",제주도:"jeju island volcanic landscape ocean cliffs",서울:"seoul city skyline night view",부산:"busan haeundae beach ocean",호텔:"luxury hotel room interior elegant",캠핑:"camping tent campfire stars nature",
+    건강:"health wellness vitamins natural herbs",다이어트:"diet healthy food vegetables",운동:"exercise gym equipment fitness",피부:"skincare serum cream bottle",뷰티:"beauty cosmetics makeup products",
+    재테크:"investment finance coins growth chart",주식:"stock market chart trading",코인:"cryptocurrency bitcoin gold coin",부동산:"real estate property house",
+    IT:"technology digital computer code screen",AI:"artificial intelligence circuit board",코딩:"coding programming dark screen",
+    강아지:"cute puppy dog playing home",고양이:"cute cat kitten indoor cozy",육아:"baby toys nursery soft colors",
+    패션:"fashion clothing outfit display",쇼핑:"shopping retail store display",
   };
 
-  function buildImagePrompt(kw: string): string {
-    const k = kw.trim();
-    const NP = "no people, no person, no face, no human";
-    const adB = adType === "adpost"
-      ? "Korean lifestyle blog warm emotional photography, natural lighting"
-      : "ultra realistic DSLR editorial blog photo 8K magazine quality";
-    const sorted = Object.keys(KO_EN_MAP).sort((a,b) => b.length - a.length);
-    for (const ko of sorted) { if (k.includes(ko)) return `${KO_EN_MAP[ko]}, ${NP}, ${adB}`; }
-    if (/맛집|음식|카페|요리|먹/.test(k)) return `delicious korean food beautiful, ${NP}, ${adB}`;
-    if (/여행|관광|호텔|숙소/.test(k)) return `scenic travel destination golden hour, ${NP}, ${adB}`;
-    if (/건강|운동|다이어트/.test(k)) return `health fitness wellness natural, ${NP}, ${adB}`;
-    if (/재테크|투자|주식|금융/.test(k)) return `investment finance growth chart, ${NP}, ${adB}`;
-    if (/강아지|고양이|반려/.test(k)) return `cute pet dog cat home cozy, ${NP}`;
-    return `lifestyle blog concept natural editorial photo, ${NP}, ${adB}`;
+  function buildImgPrompt(kw:string):string{
+    const k=kw.trim();const NP="no people, no person, no face, no human";
+    const style=adType==="adpost"?"Korean lifestyle blog warm emotional photography":"ultra realistic DSLR editorial 8K magazine";
+    for(const ko of Object.keys(KO_EN_MAP).sort((a,b)=>b.length-a.length)){if(k.includes(ko))return`${KO_EN_MAP[ko]}, ${NP}, ${style}`;}
+    if(/맛집|음식|카페|요리/.test(k))return`delicious korean food beautiful, ${NP}, ${style}`;
+    if(/여행|관광|호텔/.test(k))return`scenic travel destination golden hour, ${NP}, ${style}`;
+    if(/건강|운동|다이어트/.test(k))return`health fitness wellness natural, ${NP}, ${style}`;
+    if(/재테크|투자|주식/.test(k))return`investment finance growth chart, ${NP}, ${style}`;
+    return`lifestyle blog concept natural editorial, ${NP}, ${style}`;
   }
 
-  function parseArr(text: string): string[] {
-    const clean = text.replace(/```json|```/gi, "").trim();
-    try { const m = clean.match(/\[[\s\S]*\]/); if (m) { const p = JSON.parse(m[0]); if (Array.isArray(p)) return p.map(String).filter(t => t.length > 3); } } catch {}
-    try { const p = JSON.parse(clean); if (Array.isArray(p)) return p.map(String).filter(t => t.length > 3); } catch {}
-    return clean.split("\n").map(l => l.replace(/^[\d]+[).\s]+|^[-*•\s]+/, "").replace(/^[\s"']+|[\s"']+$/g, "").trim()).filter(l => l.length > 4 && l.length < 100);
+  function stripMarkdown(text:string):string{
+    return text
+      .replace(/^#{1,6}\s+/gm,"")
+      .replace(/\*{2,3}(.*?)\*{2,3}/g,"$1")
+      .replace(/\*(.*?)\*/g,"$1")
+      .replace(/_{2,}(.*?)_{2,}/g,"$1")
+      .replace(/_(.*?)_/g,"$1")
+      .replace(/^[-*+]\s+/gm,"")
+      .replace(/^\d+\.\s+/gm,"")
+      .replace(/^>\s*/gm,"")
+      .replace(/`{3}[\s\S]*?`{3}/g,"")
+      .replace(/`([^`]+)`/g,"$1")
+      .replace(/\[([^\]]+)\]\([^)]+\)/g,"$1")
+      .replace(/^---+$/gm,"")
+      .replace(/^\s*\|.*\|.*$/gm,"")
+      .replace(/[一-鿿㐀-䶿]/g,"")
+      .replace(/[\u3040-\u30FF]/g,"")
+      .replace(/ {2,}/g," ")
+      .replace(/\n{3,}/g,"\n\n")
+      .trim();
   }
 
-  // ── 마크다운 제거 ────────────────────────────────────────────
-  function stripMarkdown(text: string): string {
-    const markers = ["[FAQ시작]","[FAQ끝]","[관련글시작]","[관련글끝]"];
-    const ph: [string,string][] = markers.map((m,i) => [`XMARK${i}X`, m]);
-    ph.forEach(([k,v]) => { text = text.split(v).join(k); });
-    const h2s: string[] = [];
-    text = text.replace(/^## .+$/gm, m => { const i = h2s.length; h2s.push(m); return `XH2${i}X`; });
-    text = text
-      .replace(/[一-鿿㐀-䶿]/g, "").replace(/[\u3040-\u30FF]/g, "")
-      .replace(/[^\uAC00-\uD7A3a-zA-Z0-9\s.,!?;:()\-\'".\[\]%@#&+=/\\~`|<>{}^_$\n]/g, "")
-      .replace(/\*{2,}/g, "").replace(/^#{3,}\s+/gm, "").replace(/^[-*]\s+/gm, "")
-      .replace(/^\d+\.\s+/gm, "").replace(/_{2,}/g, "").replace(/ {2,}/g, " ").replace(/\n{3,}/g, "\n\n").trim();
-    h2s.forEach((line, i) => { text = text.split(`XH2${i}X`).join(line); });
-    ph.forEach(([k,v]) => { text = text.split(k).join(v); });
-    return text;
+  function getCatGuide(kw:string,title:string):string{
+    const k=(kw+" "+title).toLowerCase();
+    if(/맛집|음식|카페|식당|요리|커피/.test(k))return"[맛집/음식] 직접 방문한 것처럼: 분위기, 맛, 가격. 단점도 솔직하게.";
+    if(/여행|관광|호텔|숙소|제주|부산/.test(k))return"[여행] 교통편, 비용, 소요시간, 명소, 현지 맛집, 예산.";
+    if(/건강|다이어트|운동|피부/.test(k))return"[건강] 전문 용어 쉽게, 집 vs 병원 구분.";
+    if(/재테크|투자|주식|금융/.test(k))return"[재테크] 초보자용 설명, 실제 숫자 예시.";
+    if(/it|앱|ai|테크|스마트폰/.test(k))return"[IT/테크] 쉬운 설명, 실제 사용 시나리오, 장단점.";
+    return"[정보/일상] 독자가 몰랐던 새 정보, 실용 팁.";
   }
 
-  function getCategoryGuide(kw: string, title: string): string {
-    const k = (kw + " " + title).toLowerCase();
-    if (/맛집|음식|카페|식당|요리|레스토랑|커피|치킨|피자/.test(k))
-      return "[맛집/음식]\n- 직접 방문한 것처럼: 분위기, 서비스, 웨이팅\n- 맛 생생하게: 식감, 향, 첫 한 입 느낌\n- 가격, 주차, 영업시간, 재방문 의향\n- 단점도 솔직하게";
-    if (/it|앱|ai|테크|스마트폰|노트북|챗gpt/.test(k))
-      return "[IT/테크]\n- 전문 용어 쉬운 말로 풀이\n- 실제 사용 시나리오와 단계별 설명\n- 장단점 비교\n- 초보자도 따라할 수 있게";
-    if (/리뷰|후기|사용기|체험|써봤/.test(k))
-      return "[리뷰/후기]\n- 사용 전 기대 → 실제 경험\n- 장점 3개 이상, 단점 2개 이상\n- 구체적 수치로 효과 표현";
-    if (/여행|관광|호텔|숙소|제주|부산|해외/.test(k))
-      return "[여행]\n- 교통편, 비용, 소요시간\n- 꼭 가야 할 명소 TOP5\n- 현지 맛집, 숨은 명소\n- 예산 총정리";
-    if (/건강|다이어트|운동|헬스|피부|탈모/.test(k))
-      return "[건강]\n- 전문 용어 쉽게 풀이\n- 집에서 가능 vs 병원 필요 구분\n- 잘못된 상식 바로잡기";
-    if (/재테크|투자|주식|부동산|절약|금융/.test(k))
-      return "[재테크]\n- 초보자도 이해하는 쉬운 설명\n- 실제 숫자 예시 포함\n- 리스크와 수익률 균형";
-    return "[정보/일상]\n- 독자가 몰랐던 새로운 정보\n- 일상에서 바로 써먹는 실용 팁";
-  }
-
-  // ── callAI ───────────────────────────────────────────────────
-  async function callAI(prompt: string): Promise<string> {
-    const ai = localStorage.getItem("publy_write_ai") || "gemini";
-    if (ai === "gemini") {
-      const key = localStorage.getItem("publy_gemini_key") || ""; if (!key) throw new Error("Gemini API 키 없음");
-      for (const model of GEMINI_MODELS) {
-        try {
-          const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`, {
-            method:"POST", headers:{"Content-Type":"application/json"},
-            body:JSON.stringify({contents:[{parts:[{text:prompt}]}], generationConfig:{maxOutputTokens:8000}}),
-            signal:AbortSignal.timeout(60000),
-          });
-          if (!r.ok) continue;
-          const d = await r.json(); const t = d.candidates?.[0]?.content?.parts?.[0]?.text || "";
-          if (t) return t;
-        } catch { continue; }
+  async function callAI(prompt:string,signal?:AbortSignal):Promise<string>{
+    const ai=localStorage.getItem("publy_write_ai")||"gemini";
+    if(ai==="gemini"){
+      const key=localStorage.getItem("publy_gemini_key")||"";
+      if(!key)throw new Error("Gemini API 키 없음 — 설정 탭에서 입력해주세요");
+      for(const model of GEMINI_MODELS){
+        try{
+          const r=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({contents:[{parts:[{text:prompt}]}],generationConfig:{maxOutputTokens:8000}}),signal:signal||AbortSignal.timeout(90000)});
+          if(!r.ok)continue;
+          const d=await r.json();const t=d.candidates?.[0]?.content?.parts?.[0]?.text||"";if(t)return t;
+        }catch(e:any){if(e.name==="AbortError")throw e;continue;}
       }
-      throw new Error("Gemini 실패");
+      throw new Error("Gemini 모든 모델 실패");
     }
-    if (ai === "groq") {
-      const key = localStorage.getItem("publy_groq_key") || ""; if (!key) throw new Error("Groq API 키 없음");
-      const r = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-        method:"POST", headers:{"Content-Type":"application/json","Authorization":`Bearer ${key}`},
-        body:JSON.stringify({model:"llama-3.1-70b-versatile", max_tokens:8000, messages:[{role:"user",content:prompt}]}),
-        signal:AbortSignal.timeout(60000),
-      });
-      if (!r.ok) { const e = await r.json(); throw new Error(e.error?.message || "Groq 오류"); }
-      const d = await r.json(); return d.choices?.[0]?.message?.content || "";
+    if(ai==="groq"){
+      const key=localStorage.getItem("publy_groq_key")||"";if(!key)throw new Error("Groq API 키 없음");
+      const r=await fetch("https://api.groq.com/openai/v1/chat/completions",{method:"POST",headers:{"Content-Type":"application/json","Authorization":`Bearer ${key}`},body:JSON.stringify({model:"llama-3.1-70b-versatile",max_tokens:8000,messages:[{role:"user",content:prompt}]}),signal:signal||AbortSignal.timeout(90000)});
+      if(!r.ok){const e=await r.json();throw new Error(e.error?.message||"Groq 오류");}
+      const d=await r.json();return d.choices?.[0]?.message?.content||"";
     }
-    if (ai === "openai") {
-      const key = localStorage.getItem("publy_openai_key") || ""; if (!key) throw new Error("OpenAI API 키 없음");
-      const r = await fetch("https://api.openai.com/v1/chat/completions", {
-        method:"POST", headers:{"Content-Type":"application/json","Authorization":`Bearer ${key}`},
-        body:JSON.stringify({model:"gpt-4o", max_tokens:8000, messages:[{role:"user",content:prompt}]}),
-        signal:AbortSignal.timeout(60000),
-      });
-      if (!r.ok) { const e = await r.json(); throw new Error(e.error?.message || "OpenAI 오류"); }
-      const d = await r.json(); return d.choices?.[0]?.message?.content || "";
+    if(ai==="openai"){
+      const key=localStorage.getItem("publy_openai_key")||"";if(!key)throw new Error("OpenAI API 키 없음");
+      const r=await fetch("https://api.openai.com/v1/chat/completions",{method:"POST",headers:{"Content-Type":"application/json","Authorization":`Bearer ${key}`},body:JSON.stringify({model:"gpt-4o",max_tokens:8000,messages:[{role:"user",content:prompt}]}),signal:signal||AbortSignal.timeout(90000)});
+      if(!r.ok){const e=await r.json();throw new Error(e.error?.message||"OpenAI 오류");}
+      const d=await r.json();return d.choices?.[0]?.message?.content||"";
     }
     throw new Error("AI 미선택");
   }
 
-  async function generateImage(kw: string): Promise<string> {
-    const imgPrompt = buildImagePrompt(kw);
-    const ai = localStorage.getItem("publy_image_ai") || "openai_img";
-    if (ai === "openai_img") {
-      const key = localStorage.getItem("publy_openai_key") || ""; if (!key) throw new Error("OpenAI 키 없음");
-      const r = await fetch("https://api.openai.com/v1/images/generations", {
-        method:"POST", headers:{"Content-Type":"application/json","Authorization":`Bearer ${key}`},
-        body:JSON.stringify({model:"dall-e-3", prompt:imgPrompt, n:1, size:"1024x1024"}),
-        signal:AbortSignal.timeout(60000),
-      });
-      if (!r.ok) { const e = await r.json(); throw new Error("DALL-E: " + (e.error?.message || r.status)); }
-      const d = await r.json(); return d.data?.[0]?.url || "";
+  async function generateOneImage(kw:string,signal:AbortSignal):Promise<string>{
+    const prompt=buildImgPrompt(kw);
+    const ai=localStorage.getItem("publy_image_ai")||"openai_img";
+    if(ai==="openai_img"){
+      const key=localStorage.getItem("publy_openai_key")||"";if(!key)throw new Error("OpenAI 키 없음");
+      const r=await fetch("https://api.openai.com/v1/images/generations",{method:"POST",headers:{"Content-Type":"application/json","Authorization":`Bearer ${key}`},body:JSON.stringify({model:"dall-e-3",prompt,n:1,size:"1024x1024"}),signal});
+      if(!r.ok){const e=await r.json();throw new Error("DALL-E: "+(e.error?.message||r.status));}
+      const d=await r.json();return d.data?.[0]?.url||"";
     }
-    if (ai === "replicate") {
-      const key = localStorage.getItem("publy_replicate_key") || ""; if (!key) throw new Error("Replicate 키 없음");
-      const pr = await fetch("https://api.replicate.com/v1/models/black-forest-labs/flux-schnell/predictions", {
-        method:"POST", headers:{"Content-Type":"application/json","Authorization":`Bearer ${key}`},
-        body:JSON.stringify({input:{prompt:imgPrompt, num_outputs:1, aspect_ratio:"16:9"}}),
-        signal:AbortSignal.timeout(30000),
-      });
-      if (!pr.ok) { const e = await pr.json(); throw new Error("Replicate: " + (e.detail || pr.status)); }
-      const pred = await pr.json(); const pollUrl = pred.urls?.get; if (!pollUrl) throw new Error("Replicate 응답 오류");
-      for (let i = 0; i < 30; i++) {
-        await new Promise(r => setTimeout(r, 2000));
-        const res = await fetch(pollUrl, {headers:{"Authorization":`Bearer ${key}`}});
-        const data = await res.json();
-        if (data.status === "succeeded") return data.output?.[0] || "";
-        if (data.status === "failed") throw new Error("Replicate 실패");
+    if(ai==="replicate"){
+      const key=localStorage.getItem("publy_replicate_key")||"";if(!key)throw new Error("Replicate 키 없음");
+      const pr=await fetch("https://api.replicate.com/v1/models/black-forest-labs/flux-schnell/predictions",{method:"POST",headers:{"Content-Type":"application/json","Authorization":`Bearer ${key}`},body:JSON.stringify({input:{prompt,num_outputs:1,aspect_ratio:"16:9"}}),signal});
+      if(!pr.ok){const e=await pr.json();throw new Error("Replicate: "+(e.detail||pr.status));}
+      const pred=await pr.json();const pollUrl=pred.urls?.get;if(!pollUrl)throw new Error("Replicate 응답 오류");
+      for(let i=0;i<30;i++){
+        await new Promise(r=>setTimeout(r,2000));
+        if(signal.aborted)throw new DOMException("AbortError","AbortError");
+        const res=await fetch(pollUrl,{headers:{"Authorization":`Bearer ${key}`}});
+        const data=await res.json();
+        if(data.status==="succeeded")return data.output?.[0]||"";
+        if(data.status==="failed")throw new Error("Replicate 실패");
       }
       throw new Error("Replicate 타임아웃");
     }
     throw new Error("이미지 AI 미선택");
   }
 
-  function recommendImageCount(content: string): number { return Math.max(1, Math.floor(content.length / 200)); }
-  function getActiveImages(): string[] { return imgSource === "upload" ? uploadedImages : generatedImages; }
-
-  function splitContentWithImages(content: string, images: string[]): {text:string;img?:string}[] {
-    if (!images.length || imgSource === "none") return [{text:content}];
-    const cps = Math.floor(content.length / (images.length + 1));
-    const sections: {text:string;img?:string}[] = [];
-    let pos = 0;
-    for (let i = 0; i < images.length; i++) {
-      const end = Math.min(pos + cps, content.length);
-      const brk = content.lastIndexOf("\n", end) || end;
-      sections.push({text:content.slice(pos, brk > pos ? brk : end).trim()});
-      sections.push({text:"", img:images[i]});
-      pos = brk > pos ? brk : end;
-    }
-    if (pos < content.length) sections.push({text:content.slice(pos).trim()});
-    return sections;
+  function parseArr(text:string):string[]{
+    const clean=text.replace(/```json|```/gi,"").trim();
+    try{const m=clean.match(/\[[\s\S]*\]/);if(m){const p=JSON.parse(m[0]);if(Array.isArray(p))return p.map(String).filter(t=>t.length>3);}}catch{}
+    try{const p=JSON.parse(clean);if(Array.isArray(p))return p.map(String).filter(t=>t.length>3);}catch{}
+    return clean.split("\n").map(l=>l.replace(/^[\d]+[).\s]+|^[-*•\s]+/,"").replace(/^[\s"']+|[\s"']+$/g,"").trim()).filter(l=>l.length>4&&l.length<100);
   }
 
-  async function handleGenerateImages(count: number) {
-    if (imgSource === "none" || imgSource === "upload") return;
-    setGenImgLoading(true);
-    const imgs: string[] = [];
-    try {
-      for (let i = 0; i < count; i++) {
-        const url = await generateImage(keyword || selectedTitle);
-        imgs.push(url); setGeneratedImages([...imgs]);
-      }
-    } catch(e: any) { alert("이미지 생성 실패: " + e.message); }
-    finally { setGenImgLoading(false); }
-  }
-
-  function handleImageUpload(e: React.ChangeEvent<HTMLInputElement>) {
-    const files = e.target.files; if (!files) return;
-    Array.from(files).forEach(file => {
-      const reader = new FileReader();
-      reader.onload = ev => { if (ev.target?.result) setUploadedImages(prev => [...prev, ev.target!.result as string]); };
-      reader.readAsDataURL(file);
-    });
-  }
-
-  async function handleGenerateTitles(reset=false) {
-    if (!keyword.trim()) { alert("키워드를 입력하세요"); return; }
-    if (reset) setTitles([]);
-    setLoadingTitles(true);
-    const isAdpost = adType === "adpost";
-    const prompt = isAdpost
-      ? `당신은 대한민국 최고의 네이버 블로그 SEO 제목 전문가입니다.\n키워드: "${keyword.trim()}"\n목적: 네이버 애드포스트 클릭률 극대화\n\n반드시 제목 30개를 JSON 배열로만 반환하세요.\n- 키워드를 자연스럽게 포함\n- 25~40자, 친근하고 감성적\n- 숫자 필수 (BEST 7, TOP 5 등)\n- "솔직히", "이것만", "나만 알던" 등 클릭 유발\n- 경험 공유형, 2026 트렌드\n\nJSON 배열만 반환.`
-      : `당신은 구글 애드센스 최적화 SEO 전문가입니다.\n키워드: "${keyword.trim()}"\n목적: 구글 검색 상위노출 + 애드센스 클릭률 극대화\n\n반드시 제목 30개를 JSON 배열로만 반환하세요.\n- 키워드를 자연스럽게 포함\n- 30~50자, 정보성·전문적 톤\n- 검색의도 반영 (방법, 가이드, 총정리)\n- "완벽 가이드", "총정리", "이유 5가지" 등\n\nJSON 배열만 반환.`;
-    try {
-      const text = await callAI(prompt);
-      const parsed = parseArr(text);
-      if (!parsed.length) throw new Error("제목 파싱 실패");
-      setTitles(prev => {
-        const combined = [...parsed, ...prev];
-        if (combined.length >= 90) { localStorage.setItem("publy_adm_titles", JSON.stringify(parsed)); return parsed; }
-        localStorage.setItem("publy_adm_titles", JSON.stringify(combined));
-        return combined;
+  async function handleGenerateTitles(reset=false){
+    if(!keyword.trim()){alert("키워드를 입력해주세요");return;}
+    if(reset)setTitles([]);
+    setLoadingTitles(true);abortRef.current=new AbortController();
+    const prompt=adType==="adpost"
+      ?`당신은 대한민국 최고의 네이버 블로그 SEO 제목 전문가입니다.\n키워드: "${keyword.trim()}"\n\n제목 30개를 JSON 배열로만 반환하세요.\n- 키워드 자연스럽게 포함\n- 25~40자, 숫자 필수 (BEST 7, TOP 5 등)\n- 클릭 유발 ("솔직히","이것만","나만 알던")\n- 경험 공유형 ("써봤어요","해봤더니")\n\nJSON 배열만 반환.`
+      :`당신은 구글 애드센스 SEO 전문가입니다.\n키워드: "${keyword.trim()}"\n\n제목 30개를 JSON 배열로만 반환하세요.\n- 키워드 자연스럽게 포함\n- 30~50자, 정보성 톤\n- "완벽 가이드","총정리","이유 5가지"\n\nJSON 배열만 반환.`;
+    try{
+      const text=await callAI(prompt,abortRef.current.signal);
+      const parsed=parseArr(text);
+      if(!parsed.length)throw new Error("제목 생성 실패. 다시 시도해주세요.");
+      setTitles(prev=>{
+        const combined=[...parsed,...prev];
+        if(combined.length>=MAX_TITLES){localStorage.setItem("publy_titles",JSON.stringify(parsed));return parsed;}
+        localStorage.setItem("publy_titles",JSON.stringify(combined));return combined;
       });
-    } catch(e: any) { alert("제목 생성 실패: " + e.message); }
-    finally { setLoadingTitles(false); }
+    }catch(e:any){if(e.name!=="AbortError")alert("제목 생성 실패: "+e.message);}
+    finally{setLoadingTitles(false);}
   }
 
-  async function handleGenerate() {
-    if (!selectedTitle && !keyword) return;
-    const title = selectedTitle || keyword;
-    setGenerating(true); setGenImage("");
-    const isAdpost = adType === "adpost";
-    const catGuide = getCategoryGuide(keyword, title);
-    const adGuide = isAdpost
-      ? "[수익 최적화] 네이버 애드포스트 CPM: 체류 시간 늘리는 스토리 구성, 감성적 공감 유도"
-      : "[수익 최적화] 구글 애드센스 CPC: 클릭 유도 문구, 정보성 키워드 밀도 높게";
-    const prompt = `당신은 대한민국 최고의 블로그 작가입니다. 친구한테 카톡 보내듯, 기자가 르포 기사 쓰듯 — 가장 자연스럽고 생생한 글을 씁니다.
+  async function handleGenerate(){
+    if(!selectedTitle&&!keyword){alert("키워드와 제목을 먼저 선택해주세요");return;}
+    const title=selectedTitle||keyword;
+    setGenerating(true);abortRef.current=new AbortController();
+    const catGuide=getCatGuide(keyword,title);
+    const adGuide=adType==="adpost"?"[수익] 애드포스트: 체류시간 늘리는 감성 스토리.":"[수익] 애드센스: 클릭 유도, 키워드 밀도 높게.";
+    const prompt=`당신은 대한민국 최고의 블로그 작가입니다.
 
-키워드: "${keyword}"
-글 제목: "${title}"
-목표 글자수: ${targetChars}자 이상
+키워드: "${keyword}"  제목: "${title}"
+목표 글자수: ${targetChars}자 내외 (±50자, 반드시 이 범위 안에서 작성)
 
 ${catGuide}
 
-[공통 원칙]
-- AI 티 절대 금지: "저도 처음엔 몰랐는데요", "솔직히 말하면"
-- 독자에게 말 걸기: "혹시 이런 거 고민해보셨나요?"
-- 막연한 표현 금지 → 구체적 수치, 가격, 기간으로
-- 문장 끝 다양하게: "~해요", "~거든요", "~더라고요", "~잖아요"
-- 반드시 ${targetChars}자 이상 작성
-- ⚠️ 별표(*) 절대 금지
-- 소제목은 반드시 ## 소제목 형식으로 (4~6개)
-- ⚠️ 대시(-) 목록 절대 금지
-- SEO: 키워드 자연스럽게 7회 이상
-- 한자/중국어/일본어 절대 금지
+=== 절대 규칙 ===
+⛔ ## 기호 완전 금지 (소제목은 그냥 텍스트로)
+⛔ ** * - + 마크다운 기호 전부 금지
+⛔ 한자,중국어,일본어 금지
+⛔ AI 티 나는 표현 금지
+✅ 독자에게 직접 말 걸기
+✅ 구체적 수치, 가격, 기간
+✅ 문장 끝: ~해요, ~거든요, ~더라고요, ~잖아요 다양하게
+✅ 키워드 7회 이상 자연스럽게
+✅ 반드시 ${targetChars-50}~${targetChars+50}자 사이로 작성
 
 ${adGuide}
 
-[형식 - 반드시 이 순서로]
+=== 출력 형식 ===
 태그: 태그1, 태그2, 태그3, 태그4, 태그5
 
-(본문 내용)
+(본문 ${targetChars}자 내외 - 순수 텍스트)
 
 [FAQ시작]
-Q1: (자주 묻는 질문)
+Q1: (질문)
 A1: (답변)
 Q2: (질문)
 A2: (답변)
@@ -1048,751 +551,723 @@ A3: (답변)
 [FAQ끝]
 
 [관련글시작]
-POST1: (연관 주제 제목)|(이유)
-POST2: (연관 주제 제목)|(이유)
-POST3: (연관 주제 제목)|(이유)
+POST1: (제목)|(이유)
+POST2: (제목)|(이유)
+POST3: (제목)|(이유)
 [관련글끝]`;
-    try {
-      const text = await callAI(prompt);
-      const cleaned = stripMarkdown(text);
-      const tgm = cleaned.match(/태그[:\s]*([^\n]+)/);
-      const bm = cleaned.match(/태그[^\n]*\n([\s\S]+)/);
-      setGenTitle(title);
-      if (tgm) setGenTags(tgm[1].trim());
-      const body = bm ? bm[1].trim() : cleaned;
-      setGenContent(body);
-      const recCount = imgCountManual ?? recommendImageCount(body);
-      if (imgSource === "ai" && recCount > 0) {
-        setGenImgLoading(true); setGeneratedImages([]);
-        const imgs: string[] = [];
-        try {
-          for (let i = 0; i < recCount; i++) {
-            const url = await generateImage(keyword || selectedTitle);
-            imgs.push(url); setGeneratedImages([...imgs]);
-          }
-        } catch(e: any) { alert("이미지 생성 실패: " + e.message); }
-        finally { setGenImgLoading(false); }
-      }
-    } catch(e: any) { alert("본문 생성 실패: " + e.message); }
-    finally { setGenerating(false); }
+    try{
+      const text=await callAI(prompt,abortRef.current.signal);
+      const cleaned=stripMarkdown(text);
+      const tgm=cleaned.match(/태그[:\s]*([^\n]+)/);
+      const bm=cleaned.match(/태그[^\n]*\n([\s\S]+)/);
+      setGenTitle(title);if(tgm)setGenTags(tgm[1].trim());
+      const body=bm?bm[1].trim():cleaned;setGenContent(body);
+      if(imgCountAuto)setImgCount(recommendImgCount(body));
+    }catch(e:any){if(e.name!=="AbortError")alert("글 생성 실패: "+e.message);}
+    finally{setGenerating(false);}
   }
 
-  async function handlePublish() {
-    if (!pubTitle || !pubContent || !pubAccId) return;
-    setPublishing(true); setPubMsg("발행 중...");
-    try {
-      const ok = await useQuota(user.id);
-      if (!ok) { setPubMsg("❌ 발행 건수 초과"); return; }
-      if (!botOnline) {
-        await supabase.from("publy_jobs").insert({
-          user_id:user.id, platform, title:pubTitle, content:pubContent,
-          tags:pubTags.split(",").map(t=>t.trim()).filter(Boolean),
-          image_url:pubImageUrl||undefined, status:"pending",
-        });
-        setPubMsg("✅ PC 봇 서버에 발행 예약됨! PC에서 자동으로 발행됩니다.");
-        await addHistory({user_id:user.id, platform, title:pubTitle, status:"pending"});
-      } else {
-        const r = await fetch(`${BOT}/api/publish-full`, {
-          method:"POST", headers:{"Content-Type":"application/json"},
-          body:JSON.stringify({userId:user.id, platform, title:pubTitle, content:pubContent,
-            tags:pubTags.split(",").map(t=>t.trim()).filter(Boolean), imageUrl:pubImageUrl||undefined}),
-        });
-        const d = await r.json();
-        if (!r.ok) throw new Error(d.error);
-        await addHistory({user_id:user.id, platform, title:pubTitle, post_url:d.postUrl, status:"success"});
+  async function handleGenerateImages(){
+    if(!keyword&&!genTitle){alert("먼저 글을 생성해주세요");return;}
+    setGenImgLoading(true);setGenImgProgress(0);setGenImgCurrent(0);
+    imgAbortRef.current=new AbortController();const imgs:string[]=[];
+    try{
+      for(let i=0;i<imgCount;i++){
+        if(imgAbortRef.current.signal.aborted)break;
+        setGenImgCurrent(i+1);
+        const url=await generateOneImage(keyword||genTitle,imgAbortRef.current.signal);
+        imgs.push(url);setGeneratedImages([...imgs]);setGenImgProgress(Math.round(((i+1)/imgCount)*100));
+      }
+    }catch(e:any){if(e.name!=="AbortError")alert("이미지 생성 실패: "+e.message);}
+    finally{setGenImgLoading(false);imgAbortRef.current=null;}
+  }
+
+  function stopImageGen(){imgAbortRef.current?.abort();setGenImgLoading(false);}
+
+  function handleImageUpload(e:React.ChangeEvent<HTMLInputElement>){
+    const files=e.target.files;if(!files)return;
+    Array.from(files).forEach(file=>{const reader=new FileReader();reader.onload=ev=>{if(ev.target?.result)setUploadedImages(prev=>[...prev,ev.target!.result as string]);};reader.readAsDataURL(file);});
+  }
+
+  function getActiveImages():string[]{return imgSource==="upload"?uploadedImages:generatedImages;}
+
+  function buildPublishContent():string{
+    if(!genContent)return "";
+    if(pubConcept==="full")return genContent;
+    if(pubConcept==="body_faq"){const i=genContent.indexOf("[관련글시작]");return i>0?genContent.slice(0,i).trim():genContent;}
+    const i=genContent.indexOf("[FAQ시작]");return i>0?genContent.slice(0,i).trim():genContent;
+  }
+
+  async function handlePublish(){
+    if(!pubAccId||!pubTitle){alert("계정과 제목을 확인해주세요");return;}
+    const content=buildPublishContent();if(!content){alert("발행할 내용이 없어요");return;}
+    setPublishing(true);setPubMsg("발행 중...");
+    try{
+      const ok=await useQuota(user.id);if(!ok){setPubMsg("❌ 발행 건수 초과");setPublishing(false);return;}
+      if(!botOnline){
+        await supabase.from("publy_jobs").insert({user_id:user.id,platform,title:pubTitle,content,tags:pubTags.split(",").map((t:string)=>t.trim()).filter(Boolean),image_url:getActiveImages()[0]||undefined,status:"pending"});
+        setPubMsg("✅ PC 봇에 예약됐어요! Publy 앱 실행 시 자동 발행돼요.");
+        await addHistory({user_id:user.id,platform,title:pubTitle,status:"pending"});
+      }else{
+        const r=await fetch(`${BOT}/api/publish-full`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({userId:user.id,platform,title:pubTitle,content,tags:pubTags.split(",").map((t:string)=>t.trim()).filter(Boolean),imageUrl:getActiveImages()[0]||undefined})});
+        const d=await r.json();if(!r.ok)throw new Error(d.error);
+        await addHistory({user_id:user.id,platform,title:pubTitle,post_url:d.postUrl,status:"success"});
         setPubMsg("✅ 발행 완료!");
-        setPubTitle(""); setPubContent(""); setPubTags(""); setPubImageUrl("");
       }
-      getHistory(user.id).then(setHistory);
-      getQuota(user.id).then(q => q && setQuota(q));
-    } catch(e: any) {
-      await addHistory({user_id:user.id, platform, title:pubTitle, status:"fail", error_message:e.message});
-      setPubMsg("❌ " + e.message);
-    } finally { setPublishing(false); }
+      getHistory(user.id).then(setHistory);getQuota(user.id).then(q=>q&&setQuota(q));
+    }catch(e:any){await addHistory({user_id:user.id,platform,title:pubTitle,status:"fail",error_message:e.message});setPubMsg("❌ "+e.message);}
+    finally{setPublishing(false);}
   }
 
-  async function handleAddAccount() {
-    if (!newUser || !newPw) return;
-    setAddingAcc(true);
-    try {
-      await upsertAccount({user_id:user.id, platform:newPlatform, username:newUser, password_encrypted:btoa(newPw), blog_name:newBlog||undefined, is_connected:false});
+  async function handleAddAccount(){
+    if(!newUser||!newPw)return;setAddingAcc(true);
+    try{await upsertAccount({user_id:user.id,platform:newPlat,username:newUser,password_encrypted:btoa(newPw),blog_name:newBlog||undefined,is_connected:false});getAccounts(user.id).then(setAccounts);setNewUser("");setNewPw("");setNewBlog("");}
+    catch(e:any){alert(e.message);}finally{setAddingAcc(false);}
+  }
+  async function handleConnect(acc:PublyAccount){
+    if(!botOnline){alert("PC에서 Publy 앱을 먼저 실행해주세요");return;}setConnId(acc.id);
+    try{
+      const r=await fetch(`${BOT}/api/${acc.platform}/save-session`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({userId:acc.user_id,id:acc.username,pw:atob((acc as any).password_encrypted||""),blogName:acc.blog_name})});
+      const d=await r.json();if(!d.success)throw new Error(d.error||"연결 실패");
       getAccounts(user.id).then(setAccounts);
-      setNewUser(""); setNewPw(""); setNewBlog("");
-    } catch(e: any) { alert(e.message); }
-    finally { setAddingAcc(false); }
+    }catch(e:any){alert("연결 실패: "+e.message);}finally{setConnId(null);}
+  }
+  async function handleDeleteAccount(id:string){
+    if(!confirm("이 계정을 삭제할까요?"))return;
+    await supabase.from("publy_accounts").delete().eq("id",id);getAccounts(user.id).then(setAccounts);
   }
 
-  async function handleConnect(acc: PublyAccount) {
-    if (!botOnline) { alert("봇 서버를 먼저 실행하세요 (PC에서 Publy 앱 실행)"); return; }
-    setConnectingId(acc.id);
-    try {
-      const r = await fetch(`${BOT}/api/${acc.platform}/save-session`, {
-        method:"POST", headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({userId:acc.user_id, id:acc.username, pw:atob((acc as any).password_encrypted||""), blogName:acc.blog_name}),
-      });
-      const d = await r.json();
-      if (!d.success) throw new Error(d.error || "연결 실패");
-      getAccounts(user.id).then(setAccounts);
-    } catch(e: any) { alert("연결 실패: " + e.message); }
-    finally { setConnectingId(null); }
-  }
-
-  const quotaPct = quota ? Math.min(100, (quota.used_quota / quota.total_quota) * 100) : 0;
-  const connAccs = accounts.filter(a => a.is_connected && a.platform === platform);
-  const todayPub = history.filter(h => new Date(h.published_at).toDateString() === new Date().toDateString()).length;
-
-  // 현재 단계 계산
-  const writeStep = genContent ? 3 : selectedTitle ? 2 : titles.length > 0 ? 1 : 0;
+  const quotaPct=quota?Math.min(100,(quota.used_quota/quota.total_quota)*100):0;
+  const connAccs=accounts.filter(a=>a.is_connected&&a.platform===platform);
+  const todayPub=history.filter(h=>new Date(h.published_at).toDateString()===new Date().toDateString()).length;
+  const activeImages=getActiveImages();
+  useEffect(()=>{if(genTitle)setPubTitle(genTitle);},[genTitle]);
+  useEffect(()=>{if(genTags)setPubTags(genTags);},[genTags]);
+  const P="#FF6B9D",Y="#FFD93D",G="#00ff9d";
+  const guideTabs=["🏠 시작","🔑 API 키","✍️ 글 생성","🖼️ 이미지","🚀 발행","❓ FAQ"];
+  const guidePages=[
+    <div key="0">
+      <div className="g-step" style={{borderColor:`${G}40`,background:`${G}08`}}>
+        <div className="g-step-num" style={{color:G}}>🎉 PUBLY에 오신 걸 환영해요!</div>
+        <div className="g-step-title" style={{color:"#fff"}}>AI가 블로그 글을 대신 써줘요</div>
+        <div className="g-step-desc">키워드 하나만 입력하면 <b>제목 → 글 → 이미지 → 자동 발행</b>까지 전부 자동이에요!</div>
+      </div>
+      <div className="g-step" style={{borderColor:`${Y}40`,background:`${Y}08`}}>
+        <div className="g-step-num" style={{color:Y}}>📋 4단계 전체 흐름</div>
+        <div className="g-step-title" style={{color:"#fff"}}>이 순서대로만 하면 끝!</div>
+        <div className="g-step-desc">
+          {[["✍️","글 생성 탭","키워드 → 제목 → 글 작성"],["🖼️","이미지 탭","AI 이미지 자동 생성 + 중단 가능"],["🚀","발행하기 탭","발행 방식 선택 → 자동 발행"],["📋","발행 기록","발행된 글 전체 확인"]].map(([ico,t,d],idx)=>(
+            <div key={idx} style={{display:"flex",gap:10,padding:"8px 0",borderBottom:idx<3?"1px solid rgba(255,255,255,.06)":"none"}}>
+              <span style={{fontSize:20,flexShrink:0}}>{ico}</span>
+              <div><div style={{fontWeight:800,color:"#fff",fontSize:14}}>{t}</div><div style={{fontSize:12,color:"rgba(255,255,255,.5)",marginTop:2}}>{d}</div></div>
+            </div>
+          ))}
+        </div>
+      </div>
+      <div className="g-step" style={{borderColor:`${P}40`,background:`${P}08`}}>
+        <div className="g-step-num" style={{color:P}}>💰 수익화 2가지</div>
+        <div className="g-step-title" style={{color:"#fff"}}>무엇을 선택할까요?</div>
+        <div className="g-step-desc">
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginTop:4}}>
+            <div style={{padding:12,borderRadius:12,background:"rgba(3,199,90,.1)",border:"1.5px solid rgba(3,199,90,.3)"}}>
+              <div style={{fontSize:14,fontWeight:900,color:"#03C75A",marginBottom:4}}>📰 애드포스트</div>
+              <div style={{fontSize:12,color:"rgba(255,255,255,.7)",lineHeight:1.6}}>네이버 블로그. 친근하고 감성적. 처음 시작에 추천!</div>
+            </div>
+            <div style={{padding:12,borderRadius:12,background:"rgba(77,166,255,.1)",border:"1.5px solid rgba(77,166,255,.3)"}}>
+              <div style={{fontSize:14,fontWeight:900,color:"#4da6ff",marginBottom:4}}>🔍 애드센스</div>
+              <div style={{fontSize:12,color:"rgba(255,255,255,.7)",lineHeight:1.6}}>구글 검색 노출. 정보성 글. 글자 수 더 많아요.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>,
+    <div key="1">
+      <div className="g-step" style={{borderColor:`${Y}40`,background:`${Y}08`}}>
+        <div className="g-step-num" style={{color:Y}}>⚠️ 이것부터 해야 해요!</div>
+        <div className="g-step-title" style={{color:"#fff"}}>API 키 없으면 글을 쓸 수 없어요</div>
+        <div className="g-step-desc">API 키는 AI 서비스 이용권이에요. 아래 중 하나만 있으면 돼요!</div>
+        <button className="g-btn" style={{background:`linear-gradient(135deg,${Y},#e0a500)`,color:"#000"}} onClick={()=>{setShowGuide(false);setTab("settings");}}>⚙️ 지금 API 키 설정하기</button>
+      </div>
+      {[{logo:"G",color:"#4285F4",name:"Gemini Flash",free:true,desc:"구글 AI. 완전 무료! 처음 시작하는 분께 강력 추천.",link:"https://aistudio.google.com/app/apikey"},{logo:"L",color:"#F55036",name:"Groq Llama 3",free:true,desc:"초고속 AI. 역시 무료!",link:"https://console.groq.com/keys"},{logo:"O",color:"#10A37F",name:"GPT-4o",free:false,desc:"가장 강력한 AI. 유료지만 최고 품질.",link:"https://platform.openai.com/api-keys"}].map((ai,i)=>(
+        <div key={i} className="g-step" style={{borderColor:`${ai.color}35`,background:`${ai.color}08`}}>
+          <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:7}}>
+            <div style={{width:30,height:30,borderRadius:8,background:ai.color,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:900,color:"#000",fontSize:13,flexShrink:0}}>{ai.logo}</div>
+            <div><div style={{fontSize:14,fontWeight:800,color:"#fff"}}>{ai.name}</div><span style={{fontSize:10,fontWeight:800,padding:"2px 7px",borderRadius:99,background:ai.free?"rgba(0,200,117,.15)":"rgba(245,158,11,.15)",color:ai.free?"#00c875":"#f59e0b"}}>{ai.free?"✅ 무료":"💳 유료"}</span></div>
+          </div>
+          <div className="g-step-desc">{ai.desc}</div>
+          <div className="g-tip">🔑 <a href={ai.link} target="_blank" rel="noopener noreferrer" style={{color:Y,fontWeight:700,textDecoration:"underline"}}>여기서 키 발급</a> → 로그인 → API 키 생성 → 복사 → 설정 탭 붙여넣기</div>
+        </div>
+      ))}
+    </div>,
+    <div key="2">
+      {[{n:"STEP 1",i:"🎯",t:"수익화 목적 선택",c:G,d:<>글 생성 탭에서 <b>애드포스트</b> 또는 <b>애드센스</b> 선택!</>},{n:"STEP 2",i:"🔍",t:"키워드 입력",c:Y,d:<>예: "강남 맛집" 입력 후 Enter 또는 버튼 클릭!</>},{n:"STEP 3",i:"⭐",t:"제목 클릭해서 선택",c:P,d:<>AI가 제목 <b>30개</b> 추천. 마음에 드는 거 클릭!</>},{n:"STEP 4",i:"🤖",t:"글 생성",c:"#8B5CF6",d:<><b>본문 생성 시작</b> 버튼! 이미지는 다음 탭에서 따로!</>}].map((s,i)=>(
+        <div key={i} className="g-step" style={{borderColor:`${s.c}40`,background:`${s.c}08`}}>
+          <div className="g-step-num" style={{color:s.c}}>{s.i} {s.n}</div>
+          <div className="g-step-title" style={{color:"#fff"}}>{s.t}</div>
+          <div className="g-step-desc">{s.d}</div>
+        </div>
+      ))}
+    </div>,
+    <div key="3">
+      <div className="g-step" style={{borderColor:`${G}40`,background:`${G}08`}}>
+        <div className="g-step-num" style={{color:G}}>🖼️ 이미지 탭 사용법</div>
+        <div className="g-step-title" style={{color:"#fff"}}>글과 이미지는 따로따로!</div>
+        <div className="g-step-desc">글 생성 완료 후 이미지 탭으로 이동해요. 수량 조절 후 생성 버튼! 중간에 멈추고 싶으면 <b>⏹ 중단</b> 버튼!</div>
+      </div>
+      {[{t:"🤖 AI 자동 생성",d:"OpenAI 또는 Replicate 키 필요"},{t:"📁 내 이미지 업로드",d:"직접 찍은 사진이나 저장한 이미지"},{t:"🚫 이미지 없이",d:"텍스트만 발행"}].map((item,i)=>(
+        <div key={i} style={{padding:"11px 13px",borderRadius:10,background:"rgba(255,255,255,.04)",border:"1px solid rgba(255,255,255,.06)",marginBottom:8}}>
+          <div style={{fontSize:14,fontWeight:800,color:"#fff",marginBottom:3}}>{item.t}</div>
+          <div style={{fontSize:12,color:"rgba(255,255,255,.65)"}}>{item.d}</div>
+        </div>
+      ))}
+    </div>,
+    <div key="4">
+      <div className="g-step" style={{borderColor:`${P}40`,background:`${P}08`}}>
+        <div className="g-step-num" style={{color:P}}>🚨 발행 전 필수 확인!</div>
+        <div className="g-step-title" style={{color:"#fff"}}>PC에서 Publy 앱이 실행 중이어야 해요</div>
+        <div className="g-step-desc">상단에 <b style={{color:G}}>● 서버 온라인</b>이 보여야 즉시 발행! 오프라인이면 예약 발행으로 처리돼요.</div>
+      </div>
+      <div className="g-step" style={{borderColor:`${Y}40`,background:`${Y}08`}}>
+        <div className="g-step-num" style={{color:Y}}>📝 발행 방식 3가지</div>
+        <div className="g-step-title" style={{color:"#fff"}}>어떤 내용을 발행할까요?</div>
+        <div className="g-step-desc">
+          {[["① 전체 발행","본문 + FAQ + 관련글 모두"],["② 본문+FAQ","FAQ까지만. 관련글 제외"],["③ 본문만","핵심만 깔끔하게"]].map(([t,d],i)=>(
+            <div key={i} style={{display:"flex",gap:8,padding:"7px 0",borderBottom:i<2?"1px solid rgba(255,255,255,.06)":"none"}}>
+              <div><div style={{fontSize:13,fontWeight:800,color:"#fff"}}>{t}</div><div style={{fontSize:12,color:"rgba(255,255,255,.6)",marginTop:2}}>{d}</div></div>
+            </div>
+          ))}
+        </div>
+        <button className="g-btn" style={{background:`linear-gradient(135deg,${G},#00c870)`,color:"#000"}} onClick={()=>{setShowGuide(false);setTab("accounts");}}>🔗 계정 연결하러 가기</button>
+      </div>
+    </div>,
+    <div key="5">
+      {[{q:"API 키가 뭐예요?",a:"AI 서비스 비밀번호예요. 처음 한 번만 설정! Gemini는 구글 계정만 있으면 무료 발급!",c:G},{q:"글이 얼마나 걸려요?",a:"보통 30초~1분이요. AI가 글을 쓰는 중이라 잠깐 기다려주세요 ☕",c:Y},{q:"블로그에 ## 기호가 들어가요",a:"이미 수정됐어요! 마크다운 기호 완전 제거 기능이 적용돼 있어요.",c:P},{q:"이미지 생성이 안 돼요",a:"OpenAI 또는 Replicate 키가 필요해요. 없으면 '내 이미지' 또는 '이미지 없이'로 선택하세요.",c:"#8B5CF6"},{q:"발행 건수가 부족해요",a:"FREE 10건, BASIC 50건, PRO 무제한. 업그레이드는 관리자에게 문의하세요.",c:"#F55036"}].map((item,i)=>(
+        <div key={i} className="g-step" style={{borderColor:`${item.c}30`,background:`${item.c}06`}}>
+          <div style={{fontSize:14,fontWeight:800,color:item.c,marginBottom:6}}>Q. {item.q}</div>
+          <div style={{fontSize:13,color:"rgba(255,255,255,.8)",lineHeight:1.8}}>A. {item.a}</div>
+        </div>
+      ))}
+    </div>,
+  ];
 
   return (
     <>
       <style>{CSS}</style>
       <div className={`app ${theme}`}>
 
-        {/* 에러 팝업 */}
-        {error && (
-          <div className="error-popup">
-            <span style={{fontSize:20}}>⚠️</span>
-            <span style={{fontSize:13,color:"#fca5a5",fontWeight:600,flex:1}}>{error}</span>
-            <button className="error-close" onClick={() => setError("")}>✕</button>
+        {/* 가이드 모달 */}
+        {showGuide&&(
+          <div className="guide-overlay" onClick={()=>{localStorage.setItem("publy_guide_seen","1");setShowGuide(false);}}>
+            <div className="guide-modal" onClick={e=>e.stopPropagation()}>
+              <div className="guide-header" style={{position:"relative"}}>
+                <div className="guide-logo-row"><div className="guide-logo-ico">📖</div><div><div className="guide-title">PUBLY 사용설명서</div><div className="guide-subtitle">처음이세요? 이것만 읽으면 바로 시작!</div></div></div>
+                <button className="guide-close" onClick={()=>{localStorage.setItem("publy_guide_seen","1");setShowGuide(false);}}>✕</button>
+                <div className="guide-tabs">{guideTabs.map((t,i)=><button key={i} className={`guide-tab ${guideTab===i?"active":""}`} onClick={()=>setGuideTab(i)}>{t}</button>)}</div>
+              </div>
+              <div className="guide-body">{guidePages[guideTab]}</div>
+              <div className="guide-footer">
+                <button className="guide-nav-btn" style={{borderColor:"rgba(255,255,255,.15)",background:"transparent",color:"rgba(255,255,255,.6)"}} onClick={()=>setGuideTab(Math.max(0,guideTab-1))} disabled={guideTab===0}>← 이전</button>
+                <span className="guide-page">{guideTab+1} / {guideTabs.length}</span>
+                {guideTab<guideTabs.length-1?<button className="guide-nav-btn" style={{borderColor:Y,background:`${Y}15`,color:Y}} onClick={()=>setGuideTab(guideTab+1)}>다음 →</button>:<button className="guide-nav-btn" style={{borderColor:G,background:`${G}15`,color:G}} onClick={()=>{localStorage.setItem("publy_guide_seen","1");setShowGuide(false);}}>✅ 시작하기!</button>}
+              </div>
+            </div>
           </div>
         )}
 
-        {/* ── 헤더 ── */}
+        {/* 미리보기 모달 */}
+        {showPreview&&(
+          <div className="preview-overlay" onClick={()=>setShowPreview(false)}>
+            <div className="preview-inner" onClick={e=>e.stopPropagation()}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:18}}>
+                <span style={{fontSize:13,color:"#888",fontWeight:700}}>📱 구독자 미리보기</span>
+                <button style={{background:"none",border:"none",cursor:"pointer",fontSize:22,color:"#aaa"}} onClick={()=>setShowPreview(false)}>✕</button>
+              </div>
+              <div style={{fontFamily:"'Apple SD Gothic Neo','Malgun Gothic',sans-serif"}}>
+                <h1 style={{fontSize:24,fontWeight:700,color:"#191919",lineHeight:1.4,marginBottom:14}}>{genTitle||pubTitle}</h1>
+                {genTags&&<div style={{marginBottom:16,display:"flex",flexWrap:"wrap",gap:5}}>{genTags.split(",").map((t:string,i:number)=><span key={i} style={{fontSize:12,padding:"3px 10px",borderRadius:99,background:"#f1f3f5",color:"#495057"}}>#{t.trim()}</span>)}</div>}
+                {activeImages[0]&&<img src={activeImages[0]} alt="" style={{width:"100%",maxHeight:300,objectFit:"cover",borderRadius:12,marginBottom:18}} onError={e=>{(e.target as HTMLImageElement).style.display="none";}}/>}
+                <div style={{fontSize:16,color:"#333",lineHeight:2,whiteSpace:"pre-wrap"}}>{buildPublishContent()}</div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* 헤더 */}
         <div className="header">
           <div className="logo">
-            <div className="logo-ico">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
-                <path d="M12 2L22 20H2L12 2Z" fill="#000" opacity=".8"/>
-                <path d="M12 7L19 19H5L12 7Z" fill="#00ff88" opacity=".6"/>
-              </svg>
-            </div>
+            <div className="logo-ico"><svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M12 2L22 20H2L12 2Z" fill="#000" opacity=".7"/><path d="M12 7L19 19H5L12 7Z" fill="#00ff9d" opacity=".65"/></svg></div>
             <span className="logo-text">PUBLY</span>
           </div>
-
           <div className="header-mid">
-            <div className={`server-badge ${botOnline ? "server-on" : "server-off"}`}>
-              <span className={`dot ${botOnline ? "dot-on" : "dot-off"}`} />
-              {botOnline ? "서버 온라인" : "서버 오프라인"}
-            </div>
-            {quota && (
-              <div className="quota-info">
-                <span>{quota.remaining_quota}</span>
-                <span style={{color:"var(--text3)"}}>/</span>
-                <span>{quota.total_quota}건</span>
-                <div className="quota-bar-wrap">
-                  <div className="quota-bar-fill" style={{width:`${100-quotaPct}%`}} />
-                </div>
-              </div>
-            )}
+            <div className={`server-chip ${botOnline?"server-on":"server-off"}`}><span className={`dot ${botOnline?"dot-on":"dot-off"}`}/>{botOnline?"서버 온라인":"서버 오프라인"}</div>
+            {quota&&(<div className="quota-chip"><span>{quota.remaining_quota}</span><span style={{color:"var(--text3)"}}>/</span><span>{quota.total_quota}건</span><div className="quota-bar-bg"><div className="quota-bar-fill" style={{width:`${100-quotaPct}%`}}/></div></div>)}
             <span className={`plan-badge plan-${user.plan}`}>{PLAN_LABELS[user.plan]}</span>
           </div>
-
           <div className="header-right">
-            <a href={EXE_DOWNLOAD_URL} className="dl-btn" download>
-              <span className="dl-btn-ico">⬇️</span> PC앱 다운로드
-            </a>
-            <button className="icon-btn" onClick={onThemeToggle} title="테마 변경">
-              {theme === "dark" ? "☀️" : "🌙"}
-            </button>
-            <button className="icon-btn" onClick={checkBot} title="서버 새로고침">🔄</button>
-            <div className="user-btn" onClick={onAdminLogin} title="관리자" style={{cursor:"pointer"}}>
-              <div className="user-avatar">{(user.name || user.email)[0].toUpperCase()}</div>
-              <span className="user-name">{user.name || user.email.split("@")[0]}</span>
-            </div>
+            <a href={EXE_DOWNLOAD_URL} className="dl-btn" download><span>⬇️</span><span> PC앱 다운로드</span></a>
+            <button className="guide-open-btn" onClick={()=>{setShowGuide(true);setGuideTab(0);}}>📖 사용설명서</button>
+            <button className="icon-btn" onClick={onThemeToggle}>{theme==="dark"?"☀️":"🌙"}</button>
+            <button className="icon-btn" onClick={checkBot}>🔄</button>
+            <div className="user-chip" onClick={onAdminLogin}><div className="user-avatar">{(user.name||user.email)[0].toUpperCase()}</div><span className="user-name">{user.name||user.email.split("@")[0]}</span></div>
             <button className="logout-btn" onClick={onLogout}>로그아웃</button>
           </div>
         </div>
 
-        {/* ── 레이아웃 ── */}
+        {/* 레이아웃 */}
         <div className="layout">
-
-          {/* 사이드바 */}
           <div className="sidebar">
-            <div className="nav-section">메뉴</div>
-            {TABS.map(t => (
-              <button key={t.key} className={`nav-item ${tab === t.key ? "active" : ""}`} onClick={() => setTab(t.key as Tab)}>
-                <span className="nav-ico">{t.icon}</span>
-                {t.label}
-                {t.key === "history" && history.length > 0 && <span className="nav-badge">{history.length}</span>}
-                {t.key === "write" && titles.length > 0 && <span className="nav-badge">{titles.length}</span>}
+            <div className="nav-lbl">메뉴</div>
+            {MAIN_TABS.map(t=>(
+              <button key={t.k} className={`nav-item ${tab===t.k?"active":""}`} onClick={()=>setTab(t.k as MainTab)}>
+                <span className="nav-ico">{t.i}</span>{t.l}
+                {t.k==="history"&&history.length>0&&<span className="nav-badge">{history.length}</span>}
+                {t.k==="write"&&titles.length>0&&<span className="nav-badge">{titles.length}</span>}
               </button>
             ))}
-            <div className="sidebar-stats">
-              <div className="stat-box">
-                <div className="stat-num">{todayPub}</div>
-                <div className="stat-lbl">오늘 발행</div>
-              </div>
-              <div className="stat-box" style={{background:"var(--accent-bg)",borderColor:"var(--accent-border)"}}>
-                <div className="stat-num" style={{fontSize:20,color:"var(--accent-text)"}}>{quota?.remaining_quota ?? "—"}</div>
-                <div className="stat-lbl">잔여 건수</div>
-              </div>
+            <div className="sidebar-foot">
+              <div className="stat-card"><div className="stat-num">{todayPub}</div><div className="stat-lbl">오늘 발행</div></div>
+              <div className="stat-card" style={{background:"var(--accent-bg)",borderColor:"var(--accent-border)"}}><div className="stat-num" style={{fontSize:18,color:"var(--accent-text)"}}>{quota?.remaining_quota??"—"}</div><div className="stat-lbl">잔여 건수</div></div>
             </div>
           </div>
 
-          {/* 메인 */}
           <div className="main">
 
-            {/* ───── ✍️ 글 생성 ───── */}
-            {tab === "write" && (
+            {/* ===== 글 생성 ===== */}
+            {tab==="write"&&(
               <div style={{animation:"fadeUp .25s ease both"}}>
-
-                {/* 진행 단계 */}
                 <div className="steps">
-                  {[
-                    {n:"1",t:"키워드"},
-                    {n:"2",t:"제목 선택"},
-                    {n:"3",t:"글 생성"},
-                    {n:"4",t:"발행"},
-                  ].map((s,i) => (
-                    <div key={i} className={`step ${writeStep > i ? "done" : writeStep === i ? "active" : ""}`}>
-                      <span className="step-num">STEP {s.n}</span>
-                      {writeStep > i ? "✓ " : ""}{s.t}
-                    </div>
-                  ))}
+                  {[{n:"1",t:"목적+키워드"},{n:"2",t:"제목 선택"},{n:"3",t:"글 생성"}].map((s,i)=>{
+                    const done=(i===0&&titles.length>0)||(i===1&&!!selectedTitle)||(i===2&&!!genContent);
+                    const active=(i===0&&!titles.length)||(i===1&&titles.length>0&&!selectedTitle)||(i===2&&!!selectedTitle&&!genContent);
+                    return(<div key={i} className={`step-item ${done?"done":active?"active":""}`}><span className="step-n">STEP {s.n}</span>{done?"✓ ":""}{s.t}</div>);
+                  })}
                 </div>
 
-                {/* STEP 1: 수익화 목적 + 키워드 */}
                 <div className="card">
-                  <div className="card-title">🎯 수익화 목적 선택</div>
-                  <div className="adtype-grid">
-                    {([
-                      {id:"adpost",  label:"📰 네이버 애드포스트", sub:"감성적·경험 공유형, 1200~1500자", cls:"adpost-sel"},
-                      {id:"adsense", label:"🔍 구글 애드센스",     sub:"정보성·SEO 최적화, 1500자+",    cls:"adsense-sel"},
-                    ] as const).map(t => (
-                      <button key={t.id} className={`adtype-btn ${adType===t.id ? t.cls : ""}`} onClick={() => setAdType(t.id)}>
-                        <div className="adtype-label">{t.label}</div>
-                        <div className="adtype-sub">{t.sub}</div>
+                  <div className="card-header">
+                    <div className="card-title">🎯 수익화 목적</div>
+                    <select className="inp" style={{width:110,padding:"7px 10px",fontSize:12}} value={platform} onChange={e=>setPlatform(e.target.value as any)}>
+                      <option value="naver">네이버</option><option value="tistory">티스토리</option>
+                    </select>
+                  </div>
+                  <div className="adtype-row">
+                    {([{id:"adpost",label:"📰 네이버 애드포스트",sub:"감성적·경험 공유형\n1200~1500자 최적",cls:"sel-adpost"},{id:"adsense",label:"🔍 구글 애드센스",sub:"정보성·SEO 최적화\n1500자+ 최적",cls:"sel-adsense"}] as const).map(t=>(
+                      <button key={t.id} className={`adtype-btn ${adType===t.id?t.cls:""}`} onClick={()=>setAdType(t.id)}>
+                        <div className="adtype-lbl">{t.label}</div>
+                        <div className="adtype-sub" style={{whiteSpace:"pre-line"}}>{t.sub}</div>
+                        {adType===t.id&&<div style={{position:"absolute",top:10,right:12,fontSize:14,color:t.id==="adpost"?"var(--naver)":"var(--info)"}}>✓</div>}
                       </button>
                     ))}
                   </div>
-
-                  <label className="inp-label">🔍 키워드 입력</label>
-                  <div style={{display:"flex",gap:8}}>
-                    <input
-                      className="inp lg" style={{flex:1}}
-                      placeholder="예: 강남 맛집, 다이어트 방법, 제주도 여행..."
-                      value={keyword}
-                      onChange={e => setKeyword(e.target.value)}
-                      onKeyDown={e => e.key === "Enter" && handleGenerateTitles(true)}
-                    />
-                    <select className="inp" style={{width:100}} value={platform} onChange={e => setPlatform(e.target.value as any)}>
-                      <option value="naver">네이버</option>
-                      <option value="tistory">티스토리</option>
-                    </select>
-                  </div>
-
+                  <label className="inp-label" style={{marginTop:4}}>🔍 키워드 입력</label>
+                  <input className="inp lg" placeholder="예: 강남 맛집, 다이어트 방법, 제주도 여행..." value={keyword} onChange={e=>setKeyword(e.target.value)} onKeyDown={e=>e.key==="Enter"&&handleGenerateTitles(true)}/>
                   <div style={{display:"flex",gap:8,marginTop:12,flexWrap:"wrap"}}>
-                    <button className="btn btn-primary" onClick={() => handleGenerateTitles(true)} disabled={loadingTitles || !keyword}>
-                      {loadingTitles ? <><span className="spinner"/>제목 추천 중...</> : <>⭐ 제목 {BATCH}개 추천받기</>}
-                    </button>
-                    {titles.length > 0 && (
-                      <button className="btn btn-secondary" onClick={() => handleGenerateTitles(false)} disabled={loadingTitles}>
-                        {titles.length >= 90 ? "🔄 초기화 후 재생성" : `➕ ${BATCH}개 추가`}
-                      </button>
-                    )}
-                    {titles.length > 0 && (
-                      <button className="btn btn-danger btn-sm" onClick={() => { setTitles([]); setSelectedTitle(""); localStorage.removeItem("publy_adm_titles"); }}>
-                        🗑 초기화
-                      </button>
-                    )}
+                    <button className="btn btn-primary" onClick={()=>handleGenerateTitles(true)} disabled={loadingTitles||!keyword}>{loadingTitles?<><span className="spinner"/>추천 중...</>:<>⭐ 제목 {BATCH}개 추천받기</>}</button>
+                    {titles.length>0&&<button className="btn btn-secondary" onClick={()=>handleGenerateTitles(false)} disabled={loadingTitles}>{titles.length>=MAX_TITLES?"🔄 초기화 후 재생성":"➕ 30개 추가"}</button>}
+                    {titles.length>0&&<button className="btn btn-danger btn-sm" onClick={()=>{setTitles([]);setSelectedTitle("");localStorage.removeItem("publy_titles");}}>🗑 초기화</button>}
                   </div>
-
-                  {/* 진행바 */}
-                  {titles.length > 0 && (
+                  {titles.length>0&&(
                     <div style={{marginTop:10,display:"flex",alignItems:"center",gap:8}}>
                       <div style={{flex:1,height:4,background:"var(--border)",borderRadius:99,overflow:"hidden"}}>
-                        <div style={{height:"100%",width:`${(titles.length/90)*100}%`,background:titles.length>=90?"var(--danger)":"var(--accent)",borderRadius:99,transition:"width .4s"}}/>
+                        <div style={{height:"100%",width:`${(titles.length/MAX_TITLES)*100}%`,background:titles.length>=MAX_TITLES?"var(--danger)":"var(--accent)",borderRadius:99,transition:"width .4s"}}/>
                       </div>
-                      <span style={{fontSize:11,color:titles.length>=90?"var(--danger)":"var(--text2)",fontFamily:"'JetBrains Mono',monospace",flexShrink:0}}>{titles.length}/90</span>
+                      <span style={{fontSize:11,color:titles.length>=MAX_TITLES?"var(--danger)":"var(--text2)",fontFamily:"monospace",flexShrink:0}}>{titles.length}/{MAX_TITLES}</span>
                     </div>
                   )}
                 </div>
 
-                {/* STEP 2: 제목 목록 */}
-                {titles.length > 0 && (
-                  <div className="card">
-                    <div className="card-title">
-                      ✨ 제목 선택
-                      <span style={{marginLeft:"auto",fontSize:11,fontWeight:500,color:"var(--text2)",textTransform:"none",letterSpacing:0}}>클릭해서 선택하세요</span>
+                {titles.length>0&&(
+                  <div className="card" style={{animation:"fadeUp .2s ease both"}}>
+                    <div className="card-header">
+                      <div className="card-title">✨ 제목 선택</div>
+                      <span style={{fontSize:11,color:"var(--text3)"}}>클릭해서 선택</span>
                     </div>
-                    {selectedTitle && (
-                      <div className="selected-banner" style={{marginBottom:14}}>
-                        <div className="selected-banner-label">✅ 선택된 제목</div>
-                        <div className="selected-banner-text">{selectedTitle}</div>
-                      </div>
-                    )}
+                    {selectedTitle&&(<div className="sel-banner"><div className="sel-banner-lbl">✅ 선택된 제목</div><div className="sel-banner-txt">{selectedTitle}</div></div>)}
                     <div className="title-grid">
-                      {titles.map((t, i) => (
-                        <button key={`${t}-${i}`} className={`title-card ${selectedTitle===t ? "selected" : ""}`} onClick={() => setSelectedTitle(t)}>
-                          <div className="title-num">#{titles.length - i}</div>
-                          <div className="title-text">{t}</div>
-                          {selectedTitle === t && <div className="title-check">✓</div>}
+                      {titles.map((t,i)=>(
+                        <button key={`${t}-${i}`} className={`title-card ${selectedTitle===t?"sel":""}`} onClick={()=>setSelectedTitle(t)}>
+                          <div className="title-n">#{titles.length-i}</div>
+                          <div className="title-t">{t}</div>
+                          {selectedTitle===t&&<div className="title-chk">✓</div>}
                         </button>
                       ))}
                     </div>
                   </div>
                 )}
 
-                {/* STEP 3: 생성 설정 */}
-                {(selectedTitle || keyword) && (
-                  <div className="card">
-                    <div className="card-title">⚙️ 생성 설정</div>
-
-                    {/* 목표 글자수 */}
+                {(selectedTitle||titles.length>0)&&(
+                  <div className="card" style={{animation:"fadeUp .2s ease both"}}>
+                    <div className="card-title" style={{marginBottom:14}}>⚙️ 글 생성 설정</div>
                     <div style={{marginBottom:16}}>
                       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
                         <label className="inp-label" style={{margin:0}}>📏 목표 글자수</label>
-                        <span style={{fontSize:15,fontWeight:800,color:"var(--accent-text)"}}>{targetChars.toLocaleString()}자</span>
+                        <span style={{fontSize:18,fontWeight:900,color:"var(--accent-text)",fontFamily:"'Space Grotesk',sans-serif"}}>{targetChars.toLocaleString()}자</span>
                       </div>
-                      <input type="range" min={1200} max={2000} step={100} value={targetChars}
-                        onChange={e => setTargetChars(Number(e.target.value))}
-                        style={{width:"100%",accentColor:"var(--accent)",height:6,cursor:"pointer"}}/>
-                      <div style={{display:"flex",justifyContent:"space-between",fontSize:11,color:"var(--text3)",marginTop:4}}>
-                        <span>1,200자</span><span>1,600자</span><span>2,000자</span>
-                      </div>
+                      <input type="range" min={1200} max={2000} step={50} value={targetChars} onChange={e=>setTargetChars(Number(e.target.value))} style={{width:"100%",accentColor:"var(--accent)",height:6,cursor:"pointer"}}/>
+                      <div style={{display:"flex",justifyContent:"space-between",fontSize:11,color:"var(--text3)",marginTop:4}}><span>1,200자</span><span>1,500자</span><span>2,000자</span></div>
                     </div>
-
-                    {/* 이미지 소스 */}
-                    <div style={{marginBottom:16}}>
-                      <label className="inp-label">🖼️ 이미지</label>
-                      <div className="toggle-group">
-                        {([{id:"ai",label:"🤖 AI 자동 생성"},{id:"upload",label:"📁 내 이미지"},{id:"none",label:"🚫 이미지 없음"}] as const).map(s => (
-                          <button key={s.id} className={`toggle-btn ${imgSource===s.id?"active":""}`} onClick={() => setImgSource(s.id)}>{s.label}</button>
-                        ))}
-                      </div>
-                    </div>
-
-                    {/* 이미지 업로드 */}
-                    {imgSource === "upload" && (
-                      <div style={{marginBottom:16}}>
-                        <label style={{display:"flex",alignItems:"center",gap:10,padding:"14px 18px",borderRadius:10,border:"2px dashed var(--accent-border)",background:"var(--accent-bg)",cursor:"pointer"}}>
-                          <span style={{fontSize:22}}>📁</span>
-                          <div>
-                            <div style={{fontSize:13,fontWeight:700,color:"var(--accent-text)"}}>이미지 파일 선택</div>
-                            <div style={{fontSize:11,color:"var(--text2)"}}>여러 장 동시 선택 가능</div>
-                          </div>
-                          <input type="file" accept="image/*" multiple onChange={handleImageUpload} style={{display:"none"}}/>
-                        </label>
-                        {uploadedImages.length > 0 && (
-                          <div className="img-grid" style={{marginTop:10}}>
-                            {uploadedImages.map((img,i) => (
-                              <div key={i} className="img-thumb-wrap">
-                                <img src={img} alt="" className={`img-thumb ${i===0?"thumb-first":""}`}/>
-                                <button className="img-thumb-del" onClick={() => setUploadedImages(prev=>prev.filter((_,j)=>j!==i))}>✕</button>
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    )}
-
-                    {selectedTitle && (
-                      <div style={{padding:"12px 15px",borderRadius:10,background:"var(--bg)",border:"1px solid var(--border)",marginBottom:14,fontSize:14,color:"var(--text)"}}>
-                        📌 선택된 제목: <strong style={{color:"var(--accent-text)"}}>{selectedTitle}</strong>
-                      </div>
-                    )}
-
-                    <button className="btn btn-primary btn-full btn-xl" onClick={handleGenerate} disabled={generating}>
-                      {generating ? <><span className="spinner"/>AI가 글을 쓰고 있어요...</> : <>✍️ 본문 + 이미지 생성 시작</>}
-                    </button>
+                    {selectedTitle&&<div style={{padding:"11px 14px",borderRadius:10,background:"var(--bg)",border:"1px solid var(--border)",marginBottom:14,fontSize:14}}>📌 선택 제목: <strong style={{color:"var(--accent-text)"}}>{selectedTitle}</strong></div>}
+                    <button className="btn btn-primary btn-full btn-xl" onClick={handleGenerate} disabled={generating}>{generating?<><span className="spinner"/>AI가 글을 쓰고 있어요...</>:<>✍️ 본문 생성 시작</>}</button>
+                    {generating&&<div style={{textAlign:"center",marginTop:8}}><button className="btn-stop" onClick={()=>abortRef.current?.abort()}>⏹ 생성 중단</button></div>}
                   </div>
                 )}
 
-                {/* 생성 결과 */}
-                {genContent && (
-                  <>
-                    {/* 미리보기 모달 */}
-                    {showPreview && (
-                      <div className="preview-modal" onClick={() => setShowPreview(false)}>
-                        <div className="preview-inner" onClick={e => e.stopPropagation()}>
-                          <div className="preview-header">
-                            <span style={{fontSize:13,color:"#888",fontWeight:700}}>📱 구독자 미리보기</span>
-                            <button className="preview-close" onClick={() => setShowPreview(false)}>✕</button>
-                          </div>
-                          <div style={{fontFamily:"'Apple SD Gothic Neo','Malgun Gothic',sans-serif"}}>
-                            <h1 style={{fontSize:22,fontWeight:700,color:"#191919",lineHeight:1.4,marginBottom:14}}>{genTitle}</h1>
-                            {genTags && (
-                              <div style={{marginBottom:16,display:"flex",flexWrap:"wrap",gap:5}}>
-                                {genTags.split(",").map((t,i) => <span key={i} style={{fontSize:12,padding:"3px 10px",borderRadius:99,background:"#f1f3f5",color:"#495057"}}>#{t.trim()}</span>)}
+                {genContent&&(
+                  <div className="card" style={{animation:"fadeUp .2s ease both"}}>
+                    <div className="card-header">
+                      <div className="card-title">🎉 글 생성 완료!</div>
+                      <div style={{display:"flex",gap:7,alignItems:"center"}}>
+                        <span style={{padding:"4px 12px",borderRadius:99,fontSize:12,fontWeight:800,background:"var(--accent-bg)",color:"var(--accent-text)",border:"1px solid var(--accent-border)"}}>{genContent.length.toLocaleString()}자</span>
+                        <button style={{padding:"7px 14px",borderRadius:9,border:"1px solid var(--accent-border)",background:"var(--accent-bg)",color:"var(--accent-text)",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:"inherit"}} onClick={()=>setShowPreview(true)}>👁️ 미리보기</button>
+                      </div>
+                    </div>
+                    <div style={{display:"flex",flexDirection:"column",gap:12,marginBottom:14}}>
+                      <div><label className="inp-label">제목</label><input className="inp" value={genTitle} onChange={e=>setGenTitle(e.target.value)}/></div>
+                      <div><label className="inp-label">태그 (쉼표 구분)</label><input className="inp" value={genTags} onChange={e=>setGenTags(e.target.value)}/></div>
+                      <div>
+                        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}><label className="inp-label" style={{margin:0}}>본문</label><span style={{fontSize:12,color:"var(--text2)"}}>{genContent.length.toLocaleString()}자</span></div>
+                        <textarea className="inp" rows={10} style={{fontSize:13,lineHeight:1.8}} value={genContent} onChange={e=>setGenContent(e.target.value)}/>
+                      </div>
+                    </div>
+                    <div className="flow-nav">
+                      <button className="flow-btn flow-btn-g" onClick={()=>setTab("image")}>🖼️ 이미지 생성하기 →</button>
+                      <button className="flow-btn flow-btn-skip" onClick={()=>setTab("publish")}>🚀 이미지 없이 발행</button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* ===== 이미지 생성 ===== */}
+            {tab==="image"&&(
+              <div style={{animation:"fadeUp .25s ease both"}}>
+                {!genContent&&(<div className="alert-box alert-warn">⚠️ 먼저 글 생성 탭에서 글을 생성해주세요!<button className="btn btn-sm btn-secondary" style={{marginLeft:"auto",flexShrink:0}} onClick={()=>setTab("write")}>글 생성하러 가기</button></div>)}
+
+                {/* ── 좌우 분할 레이아웃 ── */}
+                <div className="img-split" style={{display:"grid",gridTemplateColumns:"300px 1fr",gap:14,alignItems:"start"}}>
+
+                  {/* 왼쪽: 설정 패널 */}
+                  <div>
+                    <div className="card" style={{position:"sticky",top:8}}>
+                      <div className="card-title" style={{marginBottom:14}}>⚙️ 이미지 설정</div>
+
+                      {/* 소스 선택 */}
+                      <div style={{marginBottom:16}}>
+                        <label className="inp-label">이미지 소스</label>
+                        <div style={{display:"flex",flexDirection:"column",gap:6}}>
+                          {([{id:"ai",ico:"🤖",label:"AI 자동 생성"},{id:"upload",ico:"📁",label:"내 이미지 업로드"},{id:"none",ico:"🚫",label:"이미지 없이 발행"}] as const).map(s=>(
+                            <button key={s.id} onClick={()=>setImgSource(s.id)} style={{padding:"10px 14px",borderRadius:10,border:`1.5px solid ${imgSource===s.id?"var(--accent)":"var(--border)"}`,background:imgSource===s.id?"var(--accent-bg)":"var(--bg)",cursor:"pointer",fontFamily:"inherit",transition:"all .15s",display:"flex",alignItems:"center",gap:9,textAlign:"left"}}>
+                              <span style={{fontSize:18}}>{s.ico}</span>
+                              <span style={{fontSize:13,fontWeight:600,color:imgSource===s.id?"var(--accent-text)":"var(--text2)"}}>{s.label}</span>
+                              {imgSource===s.id&&<span style={{marginLeft:"auto",fontSize:12,color:"var(--accent-text)"}}>✓</span>}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* AI 설정 */}
+                      {imgSource==="ai"&&(
+                        <>
+                          <div style={{marginBottom:16}}>
+                            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+                              <label className="inp-label" style={{margin:0}}>생성 수량</label>
+                              <div style={{display:"flex",alignItems:"center",gap:7}}>
+                                <span style={{fontSize:28,fontWeight:900,color:"var(--accent-text)",fontFamily:"'Space Grotesk',sans-serif",lineHeight:1}}>{imgCount}</span>
+                                <span style={{fontSize:12,color:"var(--text2)"}}>장</span>
+                                {!imgCountAuto&&(
+                                  <button style={{padding:"3px 9px",borderRadius:7,border:"1px solid var(--border)",background:"transparent",color:"var(--accent-text)",cursor:"pointer",fontSize:10,fontFamily:"inherit",fontWeight:700}} onClick={()=>{setImgCountAuto(true);if(genContent)setImgCount(recommendImgCount(genContent));}}>자동</button>
+                                )}
+                              </div>
+                            </div>
+                            <input type="range" min={1} max={20} step={1} value={imgCount} onChange={e=>{setImgCountAuto(false);setImgCount(Number(e.target.value));}} style={{width:"100%",accentColor:"var(--accent)",height:6,cursor:"pointer"}}/>
+                            <div style={{display:"flex",justifyContent:"space-between",fontSize:10,color:"var(--text3)",marginTop:4}}>
+                              <span>1장</span><span>10장</span><span>20장</span>
+                            </div>
+                            {imgCountAuto&&genContent&&(
+                              <div style={{marginTop:6,padding:"7px 10px",borderRadius:8,background:"var(--accent-bg)",border:"1px solid var(--accent-border)",fontSize:11,color:"var(--accent-text)",fontWeight:600}}>
+                                💡 글자 수 기반 추천: {imgCount}장
                               </div>
                             )}
-                            {getActiveImages()[0] && <img src={getActiveImages()[0]} alt="" style={{width:"100%",maxHeight:280,objectFit:"cover",borderRadius:10,marginBottom:18}} onError={e=>{(e.target as HTMLImageElement).style.display="none";}}/>}
-                            {splitContentWithImages(genContent, getActiveImages().slice(1)).map((s,i) => (
-                              <div key={i}>
-                                {s.img
-                                  ? <img src={s.img} alt="" style={{width:"100%",maxHeight:240,objectFit:"cover",borderRadius:8,margin:"14px 0"}} onError={e=>{(e.target as HTMLImageElement).style.display="none";}}/>
-                                  : <div style={{fontSize:15,color:"#333",lineHeight:1.9,whiteSpace:"pre-wrap",marginBottom:8}}>{s.text}</div>
-                                }
+                          </div>
+
+                          {/* 진행률 게이지 */}
+                          {genImgLoading&&(
+                            <div style={{marginBottom:16,padding:"12px 14px",borderRadius:10,background:"var(--bg)",border:"1px solid var(--border)"}}>
+                              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+                                <span style={{fontSize:12,fontWeight:700,color:"var(--accent-text)",animation:"pulse 1.2s infinite"}}>⏳ {genImgCurrent} / {imgCount}장</span>
+                                <span style={{fontSize:14,fontWeight:900,color:"var(--accent-text)",fontFamily:"'Space Grotesk',sans-serif"}}>{genImgProgress}%</span>
                               </div>
-                            ))}
-                          </div>
-                        </div>
-                      </div>
-                    )}
-
-                    <div className="card">
-                      <div className="result-header">
-                        <div className="card-title" style={{marginBottom:0}}>🎨 생성 결과</div>
-                        <div style={{display:"flex",gap:7,alignItems:"center"}}>
-                          <span className="char-badge">{genContent.length.toLocaleString()}자</span>
-                          <button className="preview-btn" onClick={() => setShowPreview(true)}>👁️ 미리보기</button>
-                        </div>
-                      </div>
-
-                      {/* 이미지 수량 조절 */}
-                      {imgSource !== "none" && (
-                        <div style={{marginBottom:14,padding:"12px 16px",borderRadius:10,background:"var(--bg)",border:"1px solid var(--border)"}}>
-                          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
-                            <label style={{fontSize:13,fontWeight:700,color:"var(--text)"}}>🖼️ 이미지 수량</label>
-                            <div style={{display:"flex",alignItems:"center",gap:8}}>
-                              <span style={{fontSize:14,fontWeight:800,color:"var(--accent-text)"}}>{imgCountManual ?? recommendImageCount(genContent)}장</span>
-                              {imgCountManual !== null && (
-                                <button className="btn-ghost btn-sm" style={{padding:"3px 9px",fontSize:11}} onClick={() => setImgCountManual(null)}>자동</button>
-                              )}
+                              <div style={{height:8,background:"var(--border)",borderRadius:99,overflow:"hidden"}}>
+                                <div style={{height:"100%",width:`${genImgProgress}%`,background:"linear-gradient(90deg,var(--accent),#00cc80)",borderRadius:99,transition:"width .4s"}}/>
+                              </div>
+                              <div style={{display:"flex",gap:4,marginTop:8}}>
+                                {Array.from({length:imgCount}).map((_,i)=>(
+                                  <div key={i} style={{flex:1,height:4,borderRadius:99,background:i<genImgCurrent?"var(--accent)":i===genImgCurrent&&genImgLoading?"rgba(0,255,157,.3)":"var(--border)",transition:"background .3s"}}/>
+                                ))}
+                              </div>
                             </div>
-                          </div>
-                          <input type="range" min={0} max={20} step={1}
-                            value={imgCountManual ?? recommendImageCount(genContent)}
-                            onChange={e => setImgCountManual(Number(e.target.value))}
-                            style={{width:"100%",accentColor:"var(--accent)",height:6,cursor:"pointer"}}/>
-                          {imgSource === "ai" && (
-                            <button className="btn btn-secondary btn-sm" style={{marginTop:8}} onClick={() => handleGenerateImages(imgCountManual ?? recommendImageCount(genContent))} disabled={genImgLoading}>
-                              {genImgLoading ? <><span className="spinner spinner-white"/>생성 중...</> : "🔄 이미지 재생성"}
+                          )}
+
+                          {/* 생성 버튼들 */}
+                          <div style={{display:"flex",flexDirection:"column",gap:8}}>
+                            <button className="btn btn-primary btn-full" onClick={handleGenerateImages} disabled={genImgLoading||!genContent}>
+                              {genImgLoading?<><span className="spinner"/>생성 중...</>:<>🎨 이미지 생성 시작</>}
                             </button>
+                            {genImgLoading&&(
+                              <button className="btn-stop" style={{width:"100%",justifyContent:"center"}} onClick={stopImageGen}>⏹ 생성 중단</button>
+                            )}
+                            {generatedImages.length>0&&!genImgLoading&&(
+                              <button className="btn btn-danger btn-full btn-sm" onClick={()=>{setGeneratedImages([]);setGenImgProgress(0);setGenImgCurrent(0);}}>🗑 이미지 초기화</button>
+                            )}
+                          </div>
+                        </>
+                      )}
+
+                      {/* 업로드 */}
+                      {imgSource==="upload"&&(
+                        <div>
+                          <label style={{display:"flex",alignItems:"center",gap:10,padding:"16px 14px",borderRadius:10,border:"2px dashed var(--accent-border)",background:"var(--accent-bg)",cursor:"pointer"}}>
+                            <span style={{fontSize:24}}>📁</span>
+                            <div><div style={{fontSize:13,fontWeight:700,color:"var(--accent-text)"}}>파일 선택</div><div style={{fontSize:11,color:"var(--text2)",marginTop:2}}>여러 장 동시 가능</div></div>
+                            <input type="file" accept="image/*" multiple onChange={handleImageUpload} style={{display:"none"}}/>
+                          </label>
+                          {uploadedImages.length>0&&(
+                            <button className="btn btn-danger btn-full btn-sm" style={{marginTop:10}} onClick={()=>setUploadedImages([])}>🗑 업로드 초기화</button>
                           )}
                         </div>
                       )}
 
-                      {/* 이미지 갤러리 */}
-                      {getActiveImages().length > 0 && (
-                        <div style={{marginBottom:14}}>
-                          <div style={{fontSize:12,fontWeight:700,color:"var(--text2)",marginBottom:8}}>
-                            🖼️ 이미지 {getActiveImages().length}장 <span style={{fontWeight:400,color:"var(--text3)"}}>— 첫 번째가 썸네일</span>
-                          </div>
-                          {genImgLoading && <div style={{fontSize:12,color:"var(--accent-text)",marginBottom:8,animation:"pulse 1s infinite"}}>⏳ 이미지 생성 중...</div>}
-                          <div className="img-grid">
-                            {getActiveImages().map((img,i) => (
-                              <div key={i} className="img-thumb-wrap">
-                                <img src={img} alt="" className={`img-thumb ${i===0?"thumb-first":""}`} onError={e=>{(e.target as HTMLImageElement).style.display="none";}}/>
-                                {i === 0 && <span className="img-thumb-badge">썸네일</span>}
-                                <button className="img-thumb-del" onClick={() => {
-                                  if (imgSource === "ai") setGeneratedImages(prev=>prev.filter((_,j)=>j!==i));
-                                  else setUploadedImages(prev=>prev.filter((_,j)=>j!==i));
-                                }}>✕</button>
-                              </div>
-                            ))}
-                          </div>
+                      {imgSource==="none"&&(
+                        <div style={{padding:"14px",borderRadius:10,background:"rgba(255,83,99,.06)",border:"1px solid rgba(255,83,99,.2)",fontSize:13,color:"var(--text2)",lineHeight:1.7}}>
+                          이미지 없이 텍스트만 발행해요.<br/>발행하기 탭으로 바로 이동하세요.
                         </div>
                       )}
+                    </div>
+                  </div>
 
-                      {/* 편집 필드 */}
-                      <div style={{display:"flex",flexDirection:"column",gap:12}}>
-                        {([
-                          {l:"제목",v:genTitle,s:setGenTitle,type:"input"},
-                          {l:"태그 (쉼표 구분)",v:genTags,s:setGenTags,type:"input"},
-                        ] as const).map(f => (
-                          <div key={f.l}>
-                            <label className="inp-label">{f.l}</label>
-                            <input className="inp" value={f.v} onChange={e=>f.s(e.target.value)}/>
-                          </div>
-                        ))}
-                        <div>
-                          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
-                            <label className="inp-label" style={{margin:0}}>본문</label>
-                            <span style={{fontSize:12,color:"var(--text2)"}}>{genContent.length.toLocaleString()}자</span>
-                          </div>
-                          <textarea className="inp" rows={12} style={{fontSize:13,lineHeight:1.8}} value={genContent} onChange={e=>setGenContent(e.target.value)}/>
+                  {/* 오른쪽: 이미지 갤러리 */}
+                  <div>
+                    <div className="card" style={{minHeight:300}}>
+                      <div className="card-header" style={{marginBottom:14}}>
+                        <div className="card-title">
+                          🖼️ 생성된 이미지
+                          {activeImages.length>0&&<span style={{fontWeight:500,color:"var(--text3)",textTransform:"none",letterSpacing:0}}> — {activeImages.length}장 · 첫 번째가 썸네일</span>}
                         </div>
+                        {activeImages.length>0&&(
+                          <span style={{fontSize:11,color:"var(--text3)"}}>클릭해서 크게 보기</span>
+                        )}
                       </div>
+
+                      {activeImages.length===0&&!genImgLoading?(
+                        <div style={{textAlign:"center",padding:"48px 24px",color:"var(--text3)"}}>
+                          <div style={{fontSize:48,marginBottom:12,animation:"float 3s ease-in-out infinite"}}>🖼️</div>
+                          <div style={{fontSize:15,fontWeight:700,color:"var(--text2)",marginBottom:6}}>아직 이미지가 없어요</div>
+                          <div style={{fontSize:13,color:"var(--text3)"}}>왼쪽에서 수량 설정 후<br/>생성 버튼을 눌러주세요</div>
+                        </div>
+                      ):(
+                        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(140px,1fr))",gap:10}}>
+                          {/* 생성 중 플레이스홀더 */}
+                          {genImgLoading&&Array.from({length:imgCount-generatedImages.length}).map((_,i)=>(
+                            <div key={`ph-${i}`} style={{aspectRatio:"1",borderRadius:12,background:"var(--bg)",border:"2px dashed var(--border)",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:8}}>
+                              {i===0?(
+                                <>
+                                  <span className="spinner sp-g" style={{width:24,height:24}}/>
+                                  <span style={{fontSize:10,color:"var(--accent-text)",fontWeight:700}}>생성 중...</span>
+                                </>
+                              ):(
+                                <span style={{fontSize:22,opacity:.3}}>🖼️</span>
+                              )}
+                            </div>
+                          ))}
+                          {/* 생성된 이미지들 */}
+                          {activeImages.map((img,i)=>(
+                            <div key={i} style={{position:"relative",aspectRatio:"1"}}>
+                              <img src={img} alt="" style={{width:"100%",height:"100%",objectFit:"cover",borderRadius:12,border:i===0?"2px solid var(--accent)":"2px solid var(--border)",display:"block",boxShadow:i===0?"0 0 12px var(--accent-30)":"none",animation:"imgIn .3s ease both",cursor:"pointer"}}
+                                onClick={()=>window.open(img,"_blank")}
+                                onError={e=>{(e.target as HTMLImageElement).style.display="none";}}/>
+                              {i===0&&<span style={{position:"absolute",top:-7,left:-4,fontSize:9,fontWeight:800,padding:"2px 7px",borderRadius:99,background:"var(--accent)",color:"#000",whiteSpace:"nowrap"}}>썸네일</span>}
+                              <button style={{position:"absolute",top:-6,right:-6,width:20,height:20,borderRadius:"50%",background:"var(--danger)",border:"none",color:"#fff",cursor:"pointer",fontSize:10,display:"flex",alignItems:"center",justifyContent:"center",transition:"all .15s"}}
+                                onClick={()=>{if(imgSource==="ai")setGeneratedImages(p=>p.filter((_,j)=>j!==i));else setUploadedImages(p=>p.filter((_,j)=>j!==i));}}>✕</button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </div>
 
-                    <button className="btn btn-primary btn-full btn-xl" style={{marginBottom:20}}
-                      onClick={() => {
-                        setPubTitle(genTitle); setPubContent(genContent); setPubTags(genTags);
-                        setPubImageUrl(getActiveImages()[0] || ""); setTab("publish");
-                      }}>
-                      🚀 발행하기로 이동
-                    </button>
-                  </>
-                )}
+                    <div className="flow-nav">
+                      <button className="flow-btn flow-btn-g" onClick={()=>setTab("publish")} disabled={!genContent}>🚀 발행하기로 이동 →</button>
+                      <button className="flow-btn flow-btn-skip" onClick={()=>setTab("write")}>← 글 생성으로</button>
+                    </div>
+                  </div>
+                </div>
               </div>
             )}
 
-            {/* ───── 🚀 발행하기 ───── */}
-            {tab === "publish" && (
-              <div style={{animation:"fadeUp .25s ease both"}}>
-                {!botOnline && (
-                  <div className="alert alert-warn">
-                    ⚠️ 봇 서버 오프라인 — 발행하면 PC 봇 서버에 예약됩니다. 나중에 PC에서 자동 처리돼요.
-                  </div>
-                )}
-                {quota && quota.remaining_quota <= 0 && (
-                  <div className="alert alert-danger">⚠️ 발행 건수를 모두 사용했습니다. 플랜을 업그레이드해주세요.</div>
-                )}
 
-                {/* 플랫폼 선택 */}
+            {/* ===== 발행하기 ===== */}
+            {tab==="publish"&&(
+              <div style={{animation:"fadeUp .25s ease both"}}>
+                {!botOnline&&<div className="alert-box alert-warn">⚠️ 봇 서버 오프라인 — PC에서 Publy 앱을 실행하면 즉시 발행, 아니면 예약 발행으로 처리돼요.</div>}
+                {quota&&quota.remaining_quota<=0&&<div className="alert-box alert-danger">⚠️ 발행 건수를 모두 사용했어요. 플랜을 업그레이드해주세요.</div>}
+
                 <div className="card">
-                  <div className="card-title">🌐 플랫폼 선택</div>
-                  <div className="plat-grid">
-                    {([
-                      {p:"naver",   ico:"🟢", name:"네이버 블로그", sub:"Playwright 자동화", cls:"naver-sel"},
-                      {p:"tistory", ico:"🟠", name:"티스토리",      sub:"Playwright 자동화", cls:"tistory-sel"},
-                    ] as const).map(({p,ico,name,sub,cls}) => (
-                      <button key={p} className={`plat-btn ${platform===p?cls:""}`} onClick={() => setPlatform(p)}>
-                        <span className="plat-ico">{ico}</span>
-                        <div>
-                          <div className="plat-name">{name}</div>
-                          <div className="plat-sub">{sub}</div>
-                        </div>
-                        {platform === p && <span className="plat-check" style={{color:p==="naver"?"var(--naver)":"var(--tistory)"}}>✓</span>}
+                  <div className="card-title" style={{marginBottom:14}}>📝 발행 방식 선택</div>
+                  <div className="concept-grid">
+                    {([{id:"full",ico:"📄",name:"① 전체 발행",sub:"본문 + FAQ + 관련글 모두\n가장 풍부한 내용",cls:"sel-full"},{id:"body_faq",ico:"💬",name:"② 본문 + FAQ",sub:"본문과 자주 묻는 질문까지\n관련글 섹션 제외",cls:"sel-faq"},{id:"body_only",ico:"✏️",name:"③ 본문만",sub:"핵심 내용만 깔끔하게\n가장 간결한 형태",cls:"sel-body"}] as const).map(c=>(
+                      <button key={c.id} className={`concept-btn ${pubConcept===c.id?c.cls:""}`} onClick={()=>setPubConcept(c.id)}>
+                        <div className="concept-ico">{c.ico}</div>
+                        <div className="concept-name">{c.name}</div>
+                        <div className="concept-sub">{c.sub}</div>
+                        {pubConcept===c.id&&<div style={{marginTop:8,fontSize:12,fontWeight:700,color:c.id==="full"?"var(--accent-text)":c.id==="body_faq"?"var(--pink)":"var(--yellow)"}}>✓ 선택됨</div>}
                       </button>
                     ))}
                   </div>
                 </div>
 
-                {/* 계정 선택 */}
                 <div className="card">
-                  <div className="card-title">🔗 발행 계정</div>
-                  {connAccs.length === 0 ? (
-                    <div className="empty" style={{padding:"30px 20px"}}>
-                      <div style={{fontSize:40,marginBottom:10,animation:"float 3s ease-in-out infinite"}}>🔗</div>
+                  <div className="card-title" style={{marginBottom:12}}>🌐 플랫폼 선택</div>
+                  <div className="pub-plat-grid" style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+                    {([{p:"naver",ico:"🟢",name:"네이버 블로그",c:"var(--naver)"},{p:"tistory",ico:"🟠",name:"티스토리",c:"var(--tistory)"}] as const).map(({p,ico,name,c})=>(
+                      <button key={p} style={{padding:"15px 16px",borderRadius:13,border:`2px solid ${platform===p?c:"var(--border)"}`,background:platform===p?`${c}12`:"var(--bg)",cursor:"pointer",textAlign:"left",fontFamily:"inherit",transition:"all .18s",display:"flex",alignItems:"center",gap:11}} onClick={()=>setPlatform(p)}>
+                        <span style={{fontSize:26}}>{ico}</span>
+                        <div style={{flex:1}}><div style={{fontSize:14,fontWeight:700,color:"var(--text)"}}>{name}</div></div>
+                        {platform===p&&<span style={{fontSize:16,color:c}}>✓</span>}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="card">
+                  <div className="card-title" style={{marginBottom:12}}>🔗 발행 계정 선택</div>
+                  {connAccs.length===0?(
+                    <div style={{textAlign:"center",padding:"24px 16px"}}>
+                      <div style={{fontSize:36,marginBottom:10}}>🔗</div>
                       <div style={{fontSize:15,fontWeight:700,color:"var(--text)",marginBottom:6}}>연결된 계정이 없어요</div>
-                      <div style={{fontSize:13,color:"var(--text2)",marginBottom:16}}>계정 관리에서 블로그 계정을 추가하세요</div>
-                      <button className="btn btn-primary" onClick={() => setTab("accounts")}>계정 관리로 이동 →</button>
+                      <div style={{fontSize:13,color:"var(--text2)",marginBottom:14}}>계정 관리 탭에서 블로그 계정을 추가해주세요</div>
+                      <button className="btn btn-primary btn-sm" onClick={()=>setTab("accounts")}>계정 관리로 이동 →</button>
                     </div>
-                  ) : connAccs.map(a => (
-                    <label key={a.id} style={{
-                      display:"flex",alignItems:"center",gap:12,padding:"14px 16px",
-                      borderRadius:12,cursor:"pointer",marginBottom:8,
-                      background:pubAccId===a.id?"var(--accent-bg)":"var(--bg)",
-                      border:`2px solid ${pubAccId===a.id?"var(--accent)":"var(--border)"}`,
-                      transition:"all .15s",
-                    }}>
-                      <input type="radio" name="pacc" checked={pubAccId===a.id} onChange={() => setPubAccId(a.id)} style={{accentColor:"var(--accent)",width:18,height:18,flexShrink:0}}/>
-                      <div style={{flex:1,minWidth:0}}>
-                        <div style={{fontSize:15,fontWeight:700,color:"var(--text)"}}>{a.username}</div>
-                        {a.blog_name && <div style={{fontSize:12,color:"var(--text2)"}}>{a.blog_name}</div>}
-                      </div>
-                      <span style={{fontSize:12,fontWeight:700,padding:"4px 11px",borderRadius:99,background:"var(--accent-bg)",color:"var(--accent-text)",border:"1px solid var(--accent-border)"}}>✅ 연결됨</span>
+                  ):connAccs.map(a=>(
+                    <label key={a.id} style={{display:"flex",alignItems:"center",gap:12,padding:"14px 16px",borderRadius:12,cursor:"pointer",marginBottom:8,background:pubAccId===a.id?"var(--accent-bg)":"var(--bg)",border:`2px solid ${pubAccId===a.id?"var(--accent)":"var(--border)"}`,transition:"all .15s"}}>
+                      <input type="radio" name="pacc" checked={pubAccId===a.id} onChange={()=>setPubAccId(a.id)} style={{accentColor:"var(--accent)",width:18,height:18,flexShrink:0}}/>
+                      <div style={{flex:1}}><div style={{fontSize:15,fontWeight:700,color:"var(--text)"}}>{a.username}</div>{a.blog_name&&<div style={{fontSize:12,color:"var(--text2)"}}>{a.blog_name}</div>}</div>
+                      <span style={{fontSize:11,fontWeight:700,padding:"4px 11px",borderRadius:99,background:"var(--accent-bg)",color:"var(--accent-text)",border:"1px solid var(--accent-border)"}}>✅ 연결됨</span>
                     </label>
                   ))}
                 </div>
 
-                {/* 발행 내용 */}
                 <div className="card">
-                  <div className="card-title">📝 발행 내용</div>
-
-                  {pubImageUrl && (
-                    <div style={{marginBottom:16}}>
+                  <div className="card-header">
+                    <div className="card-title">📝 발행 내용</div>
+                    <button style={{padding:"7px 14px",borderRadius:9,border:"1px solid var(--accent-border)",background:"var(--accent-bg)",color:"var(--accent-text)",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:"inherit"}} onClick={()=>setShowPreview(true)}>👁️ 미리보기</button>
+                  </div>
+                  {activeImages[0]&&(
+                    <div style={{marginBottom:14}}>
                       <label className="inp-label">🖼️ 썸네일 이미지</label>
                       <div style={{position:"relative",display:"inline-block",width:"100%"}}>
-                        <img src={pubImageUrl} alt="" style={{width:"100%",maxHeight:220,objectFit:"cover",borderRadius:12,border:"1px solid var(--border)"}} onError={e=>{(e.target as HTMLImageElement).style.display="none";}}/>
-                        <button onClick={() => setPubImageUrl("")} style={{position:"absolute",top:10,right:10,background:"rgba(0,0,0,.7)",border:"none",color:"#fff",borderRadius:99,width:30,height:30,cursor:"pointer",fontSize:15,display:"flex",alignItems:"center",justifyContent:"center"}}>✕</button>
+                        <img src={activeImages[0]} alt="" style={{width:"100%",maxHeight:200,objectFit:"cover",borderRadius:12,border:"1px solid var(--border)"}} onError={e=>{(e.target as HTMLImageElement).style.display="none";}}/>
+                        <button onClick={()=>{if(imgSource==="ai")setGeneratedImages(p=>p.filter((_,j)=>j!==0));else setUploadedImages(p=>p.filter((_,j)=>j!==0));}} style={{position:"absolute",top:9,right:9,background:"rgba(0,0,0,.7)",border:"none",color:"#fff",borderRadius:99,width:28,height:28,cursor:"pointer",fontSize:14,display:"flex",alignItems:"center",justifyContent:"center"}}>✕</button>
                       </div>
                     </div>
                   )}
-
-                  <div style={{display:"flex",flexDirection:"column",gap:14}}>
+                  <div style={{display:"flex",flexDirection:"column",gap:12}}>
+                    <div><label className="inp-label">제목 *</label><input className="inp lg" placeholder="블로그 글 제목..." value={pubTitle} onChange={e=>setPubTitle(e.target.value)}/></div>
+                    <div><label className="inp-label">태그 (쉼표 구분)</label><input className="inp" placeholder="태그1, 태그2, 태그3" value={pubTags} onChange={e=>setPubTags(e.target.value)}/></div>
                     <div>
-                      <label className="inp-label">제목 *</label>
-                      <input className="inp lg" placeholder="블로그 글 제목..." value={pubTitle} onChange={e=>setPubTitle(e.target.value)}/>
-                    </div>
-                    <div>
-                      <label className="inp-label">태그 (쉼표로 구분)</label>
-                      <input className="inp" placeholder="태그1, 태그2, 태그3" value={pubTags} onChange={e=>setPubTags(e.target.value)}/>
-                    </div>
-                    <div>
-                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
-                        <label className="inp-label" style={{margin:0}}>본문 *</label>
-                        <span style={{fontSize:12,color:"var(--text2)"}}>{pubContent.length.toLocaleString()}자</span>
-                      </div>
-                      <textarea className="inp" rows={10} placeholder="발행할 내용을 입력하세요..." value={pubContent} onChange={e=>setPubContent(e.target.value)}/>
+                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}><label className="inp-label" style={{margin:0}}>본문 ({pubConcept==="full"?"전체":pubConcept==="body_faq"?"본문+FAQ":"본문만"})</label><span style={{fontSize:12,color:"var(--text2)"}}>{buildPublishContent().length.toLocaleString()}자</span></div>
+                      <textarea className="inp" rows={6} style={{fontSize:13,lineHeight:1.8}} readOnly value={buildPublishContent()}/>
                     </div>
                   </div>
                 </div>
 
-                <button className="btn btn-primary btn-full btn-xl" style={{marginBottom:14}}
-                  onClick={handlePublish}
-                  disabled={publishing || !pubAccId || !pubTitle || !pubContent || (quota?.remaining_quota||0)<=0}>
-                  {publishing ? <><span className="spinner"/>발행 중...</> : <>🚀 블로그 자동 발행</>}
+                <button className="btn btn-primary btn-full btn-xl" style={{marginBottom:14}} onClick={handlePublish} disabled={publishing||!pubAccId||!pubTitle||!buildPublishContent()||(quota?.remaining_quota||0)<=0}>
+                  {publishing?<><span className="spinner"/>발행 중...</>:<>🚀 블로그 자동 발행</>}
                 </button>
-
-                {pubMsg && (
-                  <div className={`alert ${pubMsg.includes("✅")?"alert-success":"alert-danger"}`}>
-                    {pubMsg}
-                  </div>
-                )}
+                {pubMsg&&<div className={`alert-box ${pubMsg.includes("✅")?"alert-success":"alert-danger"}`}>{pubMsg}</div>}
               </div>
             )}
 
-            {/* ───── 🔗 계정 관리 ───── */}
-            {tab === "accounts" && (
+            {/* ===== 발행 기록 ===== */}
+            {tab==="history"&&(
               <div style={{animation:"fadeUp .25s ease both"}}>
-                {!botOnline && (
-                  <div className="alert alert-warn">⚠️ PC에서 Publy 앱을 실행해야 계정 연결이 가능합니다</div>
-                )}
-
-                <div className="card">
-                  <div className="card-title">➕ 계정 추가</div>
-                  <div style={{display:"grid",gridTemplateColumns:"100px 1fr 1fr",gap:10,marginBottom:12}}>
-                    <div>
-                      <label className="inp-label">플랫폼</label>
-                      <select className="inp" value={newPlatform} onChange={e=>setNewPlatform(e.target.value as any)}>
-                        <option value="naver">네이버</option>
-                        <option value="tistory">티스토리</option>
-                      </select>
-                    </div>
-                    <div>
-                      <label className="inp-label">아이디</label>
-                      <input className="inp" placeholder="블로그 아이디" value={newUser} onChange={e=>setNewUser(e.target.value)}/>
-                    </div>
-                    <div>
-                      <label className="inp-label">비밀번호</label>
-                      <input className="inp" type="password" placeholder="비밀번호" value={newPw} onChange={e=>setNewPw(e.target.value)}/>
-                    </div>
-                  </div>
-                  <div style={{marginBottom:14}}>
-                    <label className="inp-label">블로그명 <span style={{color:"var(--text3)",fontWeight:400}}>(티스토리만 입력)</span></label>
-                    <input className="inp" placeholder="예: myblog.tistory.com의 myblog" value={newBlog} onChange={e=>setNewBlog(e.target.value)}/>
-                  </div>
-                  <button className="btn btn-primary" onClick={handleAddAccount} disabled={addingAcc||!newUser||!newPw}>
-                    {addingAcc ? <><span className="spinner"/>추가 중...</> : <>➕ 계정 추가</>}
-                  </button>
-                </div>
-
-                {accounts.filter(a=>a.platform!=="google").length === 0 ? (
-                  <div className="empty">
-                    <div className="empty-ico">🔗</div>
-                    <div className="empty-title">등록된 계정이 없어요</div>
-                    <div className="empty-sub">위에서 블로그 계정을 추가해주세요</div>
-                  </div>
-                ) : accounts.filter(a=>a.platform!=="google").map((a,i) => (
-                  <div key={a.id} className={`acc-card ${a.is_connected?(a.platform==="naver"?"connected-naver":"connected-tistory"):""}`}
-                    style={{animationDelay:`${i*.06}s`}}>
-                    <span style={{fontSize:28}}>{a.platform==="naver"?"🟢":"🟠"}</span>
-                    <div className="acc-info">
-                      <div className="acc-name">{a.username}</div>
-                      <div className="acc-meta">{a.platform}{a.blog_name&&` · ${a.blog_name}`}</div>
-                    </div>
-                    <span className={`acc-status ${a.is_connected?"connected":"disconnected"}`}>
-                      {a.is_connected?"✅ 연결됨":"미연결"}
-                    </span>
-                    <button className="btn btn-secondary btn-sm" onClick={()=>handleConnect(a)} disabled={!!connectingId||!botOnline}>
-                      {connectingId===a.id?<><span className="spinner spinner-white"/>연결 중...</>:a.is_connected?"재연결":"연결"}
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {/* ───── 📋 발행 기록 ───── */}
-            {tab === "history" && (
-              <div style={{animation:"fadeUp .25s ease both"}}>
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16,flexWrap:"wrap",gap:8}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14,flexWrap:"wrap",gap:8}}>
                   <span style={{fontSize:14,color:"var(--text2)"}}>총 {history.length}건 · 오늘 {todayPub}건</span>
                   <span style={{fontSize:14,fontWeight:800,color:"var(--accent-text)"}}>잔여 {quota?.remaining_quota??0}건</span>
                 </div>
-
-                {history.length === 0 ? (
-                  <div className="empty">
-                    <div className="empty-ico">🚀</div>
-                    <div className="empty-title">아직 발행 기록이 없어요</div>
-                    <div className="empty-sub">글 생성 탭에서 키워드를 입력하고<br/>첫 번째 글을 발행해보세요!</div>
-                    <button className="btn btn-primary" onClick={()=>setTab("write")}>글 생성 시작하기 →</button>
-                  </div>
-                ) : history.map((h,i) => (
+                {history.length===0?(
+                  <div className="empty-state"><span className="empty-ico">🚀</span><div className="empty-title">아직 발행 기록이 없어요</div><div className="empty-sub">글 생성 탭에서 첫 번째 글을 발행해보세요!</div><button className="btn btn-primary" onClick={()=>setTab("write")}>글 생성 시작하기 →</button></div>
+                ):history.map((h,i)=>(
                   <div key={h.id} className="hist-item" style={{animationDelay:`${i*.04}s`}}>
-                    <span style={{fontSize:24,flexShrink:0}}>{h.platform==="naver"?"🟢":"🟠"}</span>
-                    <div className="hist-info">
-                      <div className="hist-title">{h.title}</div>
-                      <div className="hist-meta">{new Date(h.published_at).toLocaleString("ko-KR")}</div>
-                      {h.error_message && <div className="hist-err">❌ {h.error_message}</div>}
-                    </div>
-                    <span className={`status-badge ${h.status==="success"?"status-ok":h.status==="fail"?"status-fail":"status-pend"}`}>
-                      {h.status==="success"?"✅ 성공":h.status==="fail"?"❌ 실패":"⏳ 대기"}
-                    </span>
-                    {h.post_url && <a href={h.post_url} target="_blank" rel="noopener noreferrer" className="view-link">보기</a>}
+                    <span style={{fontSize:22,flexShrink:0}}>{h.platform==="naver"?"🟢":"🟠"}</span>
+                    <div className="hist-info"><div className="hist-title">{h.title}</div><div className="hist-meta">{new Date(h.published_at).toLocaleString("ko-KR")}</div>{h.error_message&&<div style={{fontSize:11,color:"var(--danger)",marginTop:2}}>❌ {h.error_message}</div>}</div>
+                    <span className={`sbadge ${h.status==="success"?"sbadge-ok":h.status==="fail"?"sbadge-fail":"sbadge-pend"}`}>{h.status==="success"?"✅ 성공":h.status==="fail"?"❌ 실패":"⏳ 대기"}</span>
+                    {h.post_url&&<a href={h.post_url} target="_blank" rel="noopener noreferrer" className="view-link">보기</a>}
                   </div>
                 ))}
               </div>
             )}
 
-            {/* ───── ⚙️ 설정 ───── */}
-            {tab === "settings" && (
+            {/* ===== 계정 관리 ===== */}
+            {tab==="accounts"&&(
               <div style={{animation:"fadeUp .25s ease both"}}>
-
-                {/* 글쓰기 AI 선택 */}
+                {!botOnline&&<div className="alert-box alert-warn">⚠️ PC에서 Publy 앱을 실행해야 계정 연결이 가능해요</div>}
                 <div className="card">
-                  <div className="card-title">🤖 글쓰기 AI 선택</div>
+                  <div className="card-title" style={{marginBottom:14}}>➕ 계정 추가</div>
+                  <div className="acc-form-grid" style={{display:"grid",gridTemplateColumns:"100px 1fr 1fr",gap:10,marginBottom:12}}>
+                    <div><label className="inp-label">플랫폼</label><select className="inp" value={newPlat} onChange={e=>setNewPlat(e.target.value as any)}><option value="naver">네이버</option><option value="tistory">티스토리</option></select></div>
+                    <div><label className="inp-label">아이디</label><input className="inp" placeholder="블로그 아이디" value={newUser} onChange={e=>setNewUser(e.target.value)}/></div>
+                    <div><label className="inp-label">비밀번호</label><input className="inp" type="password" placeholder="비밀번호" value={newPw} onChange={e=>setNewPw(e.target.value)}/></div>
+                  </div>
+                  <div style={{marginBottom:14}}><label className="inp-label">블로그명 <span style={{color:"var(--text3)",fontWeight:400}}>(티스토리만)</span></label><input className="inp" placeholder="예: myblog" value={newBlog} onChange={e=>setNewBlog(e.target.value)}/></div>
+                  <button className="btn btn-primary" onClick={handleAddAccount} disabled={addingAcc||!newUser||!newPw}>{addingAcc?<><span className="spinner"/>추가 중...</>:<>➕ 계정 추가</>}</button>
+                </div>
+                {accounts.filter(a=>a.platform!=="google").length===0?(
+                  <div className="empty-state"><span className="empty-ico">🔗</span><div className="empty-title">등록된 계정이 없어요</div><div className="empty-sub">위에서 블로그 계정을 추가해주세요</div></div>
+                ):accounts.filter(a=>a.platform!=="google").map((a,i)=>(
+                  <div key={a.id} className={`acc-card ${a.is_connected?(a.platform==="naver"?"conn-naver":"conn-tistory"):""}`} style={{animationDelay:`${i*.06}s`}}>
+                    <span style={{fontSize:26}}>{a.platform==="naver"?"🟢":"🟠"}</span>
+                    <div style={{flex:1,minWidth:0}}><div style={{fontSize:15,fontWeight:700,color:"var(--text)"}}>{a.username}</div><div style={{fontSize:11,color:"var(--text2)",marginTop:2}}>{a.platform}{a.blog_name&&` · ${a.blog_name}`}</div></div>
+                    <span style={{fontSize:11,fontWeight:700,padding:"4px 11px",borderRadius:99,background:a.is_connected?"var(--accent-bg)":"var(--card-hover)",color:a.is_connected?"var(--accent-text)":"var(--text2)",border:"1px solid",borderColor:a.is_connected?"var(--accent-border)":"var(--border)"}}>{a.is_connected?"✅ 연결됨":"미연결"}</span>
+                    <button className="btn btn-secondary btn-sm" onClick={()=>handleConnect(a)} disabled={!!connId||!botOnline}>{connId===a.id?<><span className="sp-w spinner"/>연결 중...</>:a.is_connected?"재연결":"연결"}</button>
+                    <button className="btn btn-danger btn-sm" onClick={()=>handleDeleteAccount(a.id)}>🗑 삭제</button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* ===== 설정 ===== */}
+            {tab==="settings"&&(
+              <div style={{animation:"fadeUp .25s ease both"}}>
+                <div className="card">
+                  <div className="card-title" style={{marginBottom:14}}>🤖 글쓰기 AI 선택</div>
                   <div className="ai-grid">
-                    {WRITE_AI_LIST.map(item => (
-                      <button key={item.id} className={`ai-card ${writeAI===item.id?"selected":""}`}
-                        style={{borderColor:writeAI===item.id?item.color:"var(--border)", background:writeAI===item.id?`${item.color}12`:"var(--bg)"}}
-                        onClick={() => { setWriteAI(item.id); localStorage.setItem("publy_write_ai", item.id); }}>
-                        <div className="ai-card-top">
-                          <div className="ai-logo" style={{background:writeAI===item.id?item.color:`${item.color}20`,color:writeAI===item.id?"#000":item.color}}>{item.logo}</div>
-                          {writeAI===item.id
-                            ? <span className="ai-sel-badge" style={{background:item.color}}>✓ 선택됨</span>
-                            : item.free ? <span className="ai-free-badge">무료</span> : <span className="ai-paid-badge">유료</span>
-                          }
-                        </div>
-                        <div className="ai-name">{item.label}</div>
-                        <div className="ai-sub">{item.sub}</div>
+                    {WRITE_AI_LIST.map(item=>(
+                      <button key={item.id} className={`ai-card ${writeAI===item.id?"sel-ai":""}`} style={{borderColor:writeAI===item.id?item.color:"var(--border)",background:writeAI===item.id?`${item.color}12`:"var(--bg)"}} onClick={()=>{setWriteAI(item.id);localStorage.setItem("publy_write_ai",item.id);}}>
+                        <div className="ai-card-top"><div className="ai-logo" style={{background:writeAI===item.id?item.color:`${item.color}20`,color:writeAI===item.id?"#000":item.color}}>{item.logo}</div>{writeAI===item.id?<span className="ai-sel-badge" style={{background:item.color}}>✓ 선택됨</span>:item.free?<span className="ai-free">무료</span>:<span className="ai-paid">유료</span>}</div>
+                        <div className="ai-name">{item.label}</div><div className="ai-sub">{item.sub}</div>
                       </button>
                     ))}
                   </div>
-                  <div className="card-title">🖼️ 이미지 AI 선택</div>
+                  <div className="card-title" style={{marginBottom:14,marginTop:8}}>🖼️ 이미지 AI 선택</div>
                   <div className="ai-grid">
-                    {IMAGE_AI_LIST.map(item => (
-                      <button key={item.id} className={`ai-card ${imageAI===item.id?"selected":""}`}
-                        style={{borderColor:imageAI===item.id?item.color:"var(--border)", background:imageAI===item.id?`${item.color}12`:"var(--bg)"}}
-                        onClick={() => { setImageAI(item.id); localStorage.setItem("publy_image_ai", item.id); }}>
-                        <div className="ai-card-top">
-                          <div className="ai-logo" style={{background:imageAI===item.id?item.color:`${item.color}20`,color:imageAI===item.id?"#000":item.color}}>{item.logo}</div>
-                          {imageAI===item.id
-                            ? <span className="ai-sel-badge" style={{background:item.color}}>✓ 선택됨</span>
-                            : <span className="ai-paid-badge">유료</span>
-                          }
-                        </div>
-                        <div className="ai-name">{item.label}</div>
-                        <div className="ai-sub">{item.sub}</div>
+                    {IMAGE_AI_LIST.map(item=>(
+                      <button key={item.id} className={`ai-card ${imageAI===item.id?"sel-ai":""}`} style={{borderColor:imageAI===item.id?item.color:"var(--border)",background:imageAI===item.id?`${item.color}12`:"var(--bg)"}} onClick={()=>{setImageAI(item.id);localStorage.setItem("publy_image_ai",item.id);}}>
+                        <div className="ai-card-top"><div className="ai-logo" style={{background:imageAI===item.id?item.color:`${item.color}20`,color:imageAI===item.id?"#000":item.color}}>{item.logo}</div>{imageAI===item.id?<span className="ai-sel-badge" style={{background:item.color}}>✓ 선택됨</span>:<span className="ai-paid">유료</span>}</div>
+                        <div className="ai-name">{item.label}</div><div className="ai-sub">{item.sub}</div>
                       </button>
                     ))}
                   </div>
-                  <div className="alert alert-info" style={{margin:"4px 0 0"}}>
-                    💡 OpenAI 키 하나로 GPT-4o(글쓰기) + DALL-E 3(이미지) 모두 사용 가능합니다
-                  </div>
+                  <div className="alert-box alert-info" style={{margin:"4px 0 0"}}>💡 OpenAI 키 하나로 GPT-4o(글쓰기) + DALL-E 3(이미지) 모두 사용 가능해요</div>
                 </div>
-
-                {/* API 키 관리 */}
                 <div className="card">
-                  <div className="card-title">🔑 API 키 관리</div>
-                  <div className="key-section" style={{background:"var(--accent-bg)",borderColor:"var(--accent-border)"}}>
-                    <div className="key-section-title" style={{color:"var(--accent-text)"}}>📝 글쓰기 API 키</div>
-                    {WRITE_AI_LIST.map(k => <KeyInput key={k.id} k={k} />)}
-                  </div>
-                  <div className="key-section" style={{background:"rgba(139,92,246,.07)",borderColor:"rgba(139,92,246,.2)"}}>
-                    <div className="key-section-title" style={{color:"#8b5cf6"}}>🖼️ 이미지 API 키</div>
-                    {IMAGE_AI_LIST.map(k => <KeyInput key={k.id} k={k} />)}
-                  </div>
+                  <div className="card-title" style={{marginBottom:14}}>🔑 API 키 관리</div>
+                  <div className="key-section" style={{background:"var(--accent-bg)",borderColor:"var(--accent-border)"}}><div className="key-section-title" style={{color:"var(--accent-text)"}}>📝 글쓰기 API 키</div>{WRITE_AI_LIST.map(k=><KeyInput key={k.id} k={k}/>)}</div>
+                  <div className="key-section" style={{background:"rgba(155,125,255,.07)",borderColor:"rgba(155,125,255,.2)"}}><div className="key-section-title" style={{color:"var(--purple)"}}>🖼️ 이미지 API 키</div>{IMAGE_AI_LIST.map(k=><KeyInput key={k.id} k={k}/>)}</div>
                 </div>
-
-                {/* 내 계정 정보 */}
                 <div className="card">
-                  <div className="card-title">👤 내 계정 정보</div>
+                  <div className="card-title" style={{marginBottom:14}}>👤 내 계정 정보</div>
                   <div className="info-table">
-                    {[
-                      {k:"이름",        v:user.name||"-"},
-                      {k:"이메일",      v:user.email},
-                      {k:"플랜",        v:PLAN_LABELS[user.plan]},
-                      {k:"잔여 건수",   v:`${quota?.remaining_quota??"-"}건`},
-                      {k:"만료일",      v:quota?new Date(quota.reset_date).toLocaleDateString("ko-KR"):"-"},
-                    ].map(row => (
-                      <div key={row.k} className="info-row">
-                        <span className="info-key">{row.k}</span>
-                        <span className="info-val">{row.v}</span>
-                      </div>
+                    {[{k:"이름",v:user.name||"-"},{k:"이메일",v:user.email},{k:"플랜",v:PLAN_LABELS[user.plan]},{k:"잔여 건수",v:`${quota?.remaining_quota??"-"}건`},{k:"만료일",v:quota?new Date(quota.reset_date).toLocaleDateString("ko-KR"):"-"}].map(row=>(
+                      <div key={row.k} className="info-row"><span className="info-key">{row.k}</span><span className="info-val">{row.v}</span></div>
                     ))}
                   </div>
                 </div>
@@ -1801,16 +1276,14 @@ POST3: (연관 주제 제목)|(이유)
           </div>
         </div>
 
-        {/* 모바일 하단 탭바 */}
-        <div className="mob-tabs">
-          {TABS.map(t => (
-            <button key={t.key} className={`mob-tab ${tab===t.key?"active":""}`} onClick={() => setTab(t.key as Tab)}>
-              <span className="mob-tab-ico">{t.icon}</span>
-              <span className="mob-tab-lbl">{t.label}</span>
+        {/* 모바일 탭바 */}
+        <div className="mob-bar">
+          {MAIN_TABS.map(t=>(
+            <button key={t.k} className={`mob-btn ${tab===t.k?"active":""}`} onClick={()=>setTab(t.k as MainTab)}>
+              <span className="mob-btn-ico">{t.i}</span><span className="mob-btn-lbl">{t.l}</span>
             </button>
           ))}
         </div>
-
       </div>
     </>
   );
