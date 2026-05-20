@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { PublyUser, getQuota, getHistory, getAccounts, PublyQuota, PublyHistory, PublyAccount, upsertAccount, useQuota, addHistory } from "../lib/supabase";
 import { supabase } from "../lib/supabase";
 
-type MainTab = "write" | "image" | "publish" | "history" | "accounts" | "settings";
+type MainTab = "write" | "image" | "publish" | "manage" | "accounts" | "settings";
 type PublishConcept = "full" | "body_faq" | "body_only";
 
 const BOT = "http://localhost:3333";
@@ -22,12 +22,12 @@ const IMAGE_AI_LIST = [
   {id:"replicate", label:"Flux (Replicate)", sub:"유료",placeholder:"r8_...", storageKey:"publy_replicate_key",link:"https://replicate.com/account/api-tokens", color:"#8B5CF6",logo:"R"},
 ];
 const MAIN_TABS = [
-  {k:"write",   i:"✍️",l:"글 생성"},
-  {k:"image",   i:"🖼️",l:"이미지"},
-  {k:"publish", i:"🚀",l:"발행하기"},
-  {k:"history", i:"📋",l:"발행 기록"},
-  {k:"accounts",i:"🔗",l:"계정 관리"},
-  {k:"settings",i:"⚙️",l:"설정"},
+  {k:"write",   i:"✍️", l:"글 생성"},
+  {k:"image",   i:"🖼️", l:"이미지 생성"},
+  {k:"publish", i:"🚀", l:"발행하기"},
+  {k:"manage",  i:"📋", l:"발행 관리"},
+  {k:"accounts",i:"🔗", l:"계정 관리"},
+  {k:"settings",i:"⚙️", l:"설정"},
 ] as const;
 
 function KeyInput({k}:{k:any}) {
@@ -977,7 +977,7 @@ POST3: (제목)|(이유)
             {MAIN_TABS.map(t=>(
               <button key={t.k} className={`nav-item ${tab===t.k?"active":""}`} onClick={()=>setTab(t.k as MainTab)}>
                 <span className="nav-ico">{t.i}</span>{t.l}
-                {t.k==="history"&&history.length>0&&<span className="nav-badge">{history.length}</span>}
+                {t.k==="manage"&&history.length>0&&<span className="nav-badge">{history.length}</span>}
                 {t.k==="write"&&titles.length>0&&<span className="nav-badge">{titles.length}</span>}
               </button>
             ))}
@@ -1344,22 +1344,64 @@ POST3: (제목)|(이유)
             )}
 
             {/* ===== 발행 기록 ===== */}
-            {tab==="history"&&(
+            {tab==="manage"&&(
               <div style={{animation:"fadeUp .25s ease both"}}>
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14,flexWrap:"wrap",gap:8}}>
-                  <span style={{fontSize:14,color:"var(--text2)"}}>총 {history.length}건 · 오늘 {todayPub}건</span>
-                  <span style={{fontSize:14,fontWeight:800,color:"var(--accent-text)"}}>잔여 {quota?.remaining_quota??0}건</span>
-                </div>
-                {history.length===0?(
-                  <div className="empty-state"><span className="empty-ico">🚀</span><div className="empty-title">아직 발행 기록이 없어요</div><div className="empty-sub">글 생성 탭에서 첫 번째 글을 발행해보세요!</div><button className="btn btn-primary" onClick={()=>setTab("write")}>글 생성 시작하기 →</button></div>
-                ):history.map((h,i)=>(
-                  <div key={h.id} className="hist-item" style={{animationDelay:`${i*.04}s`}}>
-                    <span style={{fontSize:22,flexShrink:0}}>{h.platform==="naver"?"🟢":"🟠"}</span>
-                    <div className="hist-info"><div className="hist-title">{h.title}</div><div className="hist-meta">{new Date(h.published_at).toLocaleString("ko-KR")}</div>{h.error_message&&<div style={{fontSize:11,color:"var(--danger)",marginTop:2}}>❌ {h.error_message}</div>}</div>
-                    <span className={`sbadge ${h.status==="success"?"sbadge-ok":h.status==="fail"?"sbadge-fail":"sbadge-pend"}`}>{h.status==="success"?"✅ 성공":h.status==="fail"?"❌ 실패":"⏳ 대기"}</span>
-                    {h.post_url&&<a href={h.post_url} target="_blank" rel="noopener noreferrer" className="view-link">보기</a>}
+
+                {/* 발행 방식 선택 */}
+                <div className="card">
+                  <div className="card-title" style={{marginBottom:14}}>📝 발행 방식 선택</div>
+                  <div className="concept-grid">
+                    {([
+                      {id:"full",     ico:"📄", name:"① 전체 발행",   sub:"본문 + FAQ + 관련글 모두\n가장 풍부한 내용", cls:"sel-full"},
+                      {id:"body_faq", ico:"💬", name:"② 본문 + FAQ",  sub:"본문과 자주 묻는 질문까지\n관련글 섹션 제외", cls:"sel-faq"},
+                      {id:"body_only",ico:"✏️", name:"③ 본문만",      sub:"핵심 내용만 깔끔하게\n가장 간결한 형태", cls:"sel-body"},
+                    ] as const).map(c=>(
+                      <button key={c.id} className={`concept-btn ${pubConcept===c.id?c.cls:""}`} onClick={()=>setPubConcept(c.id)}>
+                        <div className="concept-ico">{c.ico}</div>
+                        <div className="concept-name">{c.name}</div>
+                        <div className="concept-sub">{c.sub}</div>
+                        {pubConcept===c.id&&<div style={{marginTop:8,fontSize:12,fontWeight:700,color:c.id==="full"?"var(--accent-text)":c.id==="body_faq"?"var(--pink)":"var(--yellow)"}}>✓ 선택됨</div>}
+                      </button>
+                    ))}
                   </div>
-                ))}
+                  {genContent&&(
+                    <button className="btn btn-primary btn-full" style={{marginTop:4}} onClick={()=>setTab("publish")}>
+                      🚀 이 방식으로 발행하기 →
+                    </button>
+                  )}
+                </div>
+
+                {/* 발행 기록 */}
+                <div className="card">
+                  <div className="card-header">
+                    <div className="card-title">📋 발행 기록</div>
+                    <div style={{display:"flex",gap:12,alignItems:"center"}}>
+                      <span style={{fontSize:13,color:"var(--text2)"}}>총 {history.length}건 · 오늘 {todayPub}건</span>
+                      <span style={{fontSize:13,fontWeight:800,color:"var(--accent-text)"}}>잔여 {quota?.remaining_quota??0}건</span>
+                    </div>
+                  </div>
+                  {history.length===0?(
+                    <div className="empty-state" style={{padding:"32px 24px"}}>
+                      <span className="empty-ico">🚀</span>
+                      <div className="empty-title">아직 발행 기록이 없어요</div>
+                      <div className="empty-sub">글 생성 탭에서 첫 번째 글을 발행해보세요!</div>
+                      <button className="btn btn-primary" onClick={()=>setTab("write")}>글 생성 시작하기 →</button>
+                    </div>
+                  ):history.map((h,i)=>(
+                    <div key={h.id} className="hist-item" style={{animationDelay:`${i*.04}s`}}>
+                      <span style={{fontSize:22,flexShrink:0}}>{h.platform==="naver"?"🟢":"🟠"}</span>
+                      <div className="hist-info">
+                        <div className="hist-title">{h.title}</div>
+                        <div className="hist-meta">{new Date(h.published_at).toLocaleString("ko-KR")}</div>
+                        {h.error_message&&<div style={{fontSize:11,color:"var(--danger)",marginTop:2}}>❌ {h.error_message}</div>}
+                      </div>
+                      <span className={`sbadge ${h.status==="success"?"sbadge-ok":h.status==="fail"?"sbadge-fail":"sbadge-pend"}`}>
+                        {h.status==="success"?"✅ 성공":h.status==="fail"?"❌ 실패":"⏳ 대기"}
+                      </span>
+                      {h.post_url&&<a href={h.post_url} target="_blank" rel="noopener noreferrer" className="view-link">보기</a>}
+                    </div>
+                  ))}
+                </div>
               </div>
             )}
 
