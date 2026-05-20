@@ -462,7 +462,7 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
   const imgAbortRef = useRef<AbortController|null>(null);
   const [showPreview, setShowPreview] = useState(false);
   const [keyword, setKeyword] = useState(""); const [generating, setGenerating] = useState(false);
-  const [genTitle, setGenTitle] = useState(""); const [genContent, setGenContent] = useState(""); const [genTags, setGenTags] = useState(""); const [genImage, setGenImage] = useState(""); const [genImgLoading, setGenImgLoading] = useState(false);
+  const [genTitle, setGenTitle] = useState(""); const [genContent, setGenContent] = useState(""); const [genTags, setGenTags] = useState(""); const [genImage, setGenImage] = useState("");
   const [titles, setTitles] = useState<string[]>(()=>{try{return JSON.parse(localStorage.getItem("publy_adm_titles")||"[]");}catch{return[];}});
   const [selectedTitle, setSelectedTitle] = useState(""); const [loadingTitles, setLoadingTitles] = useState(false);
 
@@ -1276,7 +1276,7 @@ POST3: (제목)|(이유)
                             </div>
                           </div>
                           <input type="range" min={0} max={20} step={1} value={imgCountManual??recommendImageCount(genContent)} onChange={e=>setImgCountManual(Number(e.target.value))} style={{width:"100%",accentColor:"var(--accent)",height:6,cursor:"pointer"}}/>
-                          {imgSource==="ai"&&<button className="btn btn-secondary btn-sm" style={{marginTop:8}} onClick={()=>handleGenerateImages(imgCountManual??recommendImageCount(genContent))} disabled={genImgLoading}>{genImgLoading?<><span className="spinner spinner-white"/>생성 중...</>:"🔄 이미지 재생성"}</button>}
+                          {imgSource==="ai"&&<button className="btn btn-secondary btn-sm" style={{marginTop:8}} onClick={()=>handleGenerateImages()} disabled={genImgLoading}>{genImgLoading?<><span className="spinner spinner-white"/>생성 중...</>:"🔄 이미지 재생성"}</button>}
                         </div>
                       )}
                       {getActiveImages().length>0&&(
