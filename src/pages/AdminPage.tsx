@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { supabase, getAccounts, upsertAccount, PublyAccount } from "../lib/supabase";
 
 interface Props {
@@ -372,11 +372,64 @@ select.field-inp{cursor:pointer;appearance:auto;}
   .key-row-input{flex-wrap:wrap;}
   .key-row-input .inp{width:100%;}
 }
+
+/* ── 관리자 사용설명서 ───────────────────────── */
+@keyframes guideIn{from{opacity:0;transform:scale(.93) translateY(18px)}to{opacity:1;transform:scale(1) translateY(0)}}
+@keyframes admGuideFloat{0%,100%{transform:translateY(0)}50%{transform:translateY(-4px)}}
+.guide-overlay{position:fixed;inset:0;z-index:999;background:rgba(0,0,0,.78);backdrop-filter:blur(8px);display:flex;align-items:center;justify-content:center;padding:12px;}
+.guide-modal{width:100%;max-width:580px;max-height:92vh;border-radius:24px;overflow:hidden;display:flex;flex-direction:column;animation:guideIn .32s cubic-bezier(.34,1.56,.64,1) both;box-shadow:0 32px 80px rgba(0,0,0,.6);position:relative;}
+.guide-header{padding:22px 22px 0;background:linear-gradient(135deg,#2a0a0a 0%,#1a0505 100%);flex-shrink:0;border-bottom:1px solid rgba(255,255,255,.06);}
+.guide-logo-row{display:flex;align-items:center;gap:10px;margin-bottom:14px;}
+.guide-logo-ico{width:40px;height:40px;border-radius:12px;background:linear-gradient(135deg,#ff6b6b,#ff3333);display:flex;align-items:center;justify-content:center;font-size:20px;flex-shrink:0;}
+.guide-title{font-size:21px;font-weight:900;color:#fff;line-height:1.2;}
+.guide-subtitle{font-size:12px;color:rgba(255,255,255,.5);margin-top:3px;}
+.guide-tabs{display:flex;gap:0;overflow-x:auto;scrollbar-width:none;}
+.guide-tabs::-webkit-scrollbar{display:none;}
+.guide-tab{padding:11px 16px;border:none;background:transparent;font-size:12px;font-weight:700;color:rgba(255,255,255,.4);cursor:pointer;font-family:'Noto Sans KR',sans-serif;white-space:nowrap;border-bottom:3px solid transparent;transition:all .15s;flex-shrink:0;}
+.guide-tab.active{color:#FFD93D;border-bottom-color:#FFD93D;}
+.guide-tab:hover:not(.active){color:rgba(255,255,255,.7);}
+.guide-body{flex:1;overflow-y:auto;background:#150505;padding:18px 18px 22px;min-height:0;}
+.guide-body::-webkit-scrollbar{width:4px;}
+.guide-body::-webkit-scrollbar-thumb{background:rgba(255,255,255,.1);border-radius:99px;}
+.guide-close{position:absolute;top:14px;right:16px;width:32px;height:32px;border-radius:99px;background:rgba(255,255,255,.12);border:none;color:#fff;cursor:pointer;font-size:15px;display:flex;align-items:center;justify-content:center;transition:background .15s;z-index:10;}
+.guide-close:hover{background:rgba(255,255,255,.22);}
+.g-step{border-radius:16px;padding:16px 16px;margin-bottom:10px;border:1.5px solid;position:relative;}
+.g-step-num{font-size:10px;font-weight:900;letter-spacing:.1em;text-transform:uppercase;margin-bottom:5px;display:flex;align-items:center;gap:6px;}
+.g-step-title{font-size:16px;font-weight:900;margin-bottom:6px;line-height:1.3;}
+.g-step-desc{font-size:14px;line-height:1.85;color:rgba(255,255,255,.82);}
+.g-step-desc b{font-weight:900;color:#fff;}
+.g-tip{margin-top:10px;padding:10px 13px;border-radius:10px;background:rgba(255,255,255,.06);font-size:13px;line-height:1.75;color:rgba(255,255,255,.75);}
+.g-tip b{font-weight:800;color:#FFD93D;}
+.g-btn{display:inline-flex;align-items:center;gap:7px;padding:11px 20px;border-radius:99px;border:none;font-size:13px;font-weight:800;font-family:'Noto Sans KR',sans-serif;cursor:pointer;margin-top:12px;transition:all .15s;}
+.g-btn:hover{filter:brightness(1.1);transform:translateY(-1px);}
+.guide-footer{padding:12px 18px;background:#100303;border-top:1px solid rgba(255,255,255,.07);display:flex;align-items:center;justify-content:space-between;flex-shrink:0;gap:10px;flex-wrap:wrap;}
+.guide-nav-btn{padding:9px 20px;border-radius:99px;border:1.5px solid;font-size:13px;font-weight:700;font-family:'Noto Sans KR',sans-serif;cursor:pointer;transition:all .15s;}
+.guide-page{font-size:12px;color:rgba(255,255,255,.35);font-weight:600;}
+.adm-guide-btn{display:inline-flex;align-items:center;gap:6px;padding:8px 15px;border-radius:99px;border:none;background:linear-gradient(135deg,#FFD93D,#FFA500);color:#000;font-size:12px;font-weight:800;font-family:'Noto Sans KR',sans-serif;cursor:pointer;animation:admGuideFloat 2.8s ease-in-out infinite;white-space:nowrap;flex-shrink:0;box-shadow:0 4px 16px rgba(255,165,0,.4);transition:filter .15s;}
+.adm-guide-btn:hover{filter:brightness(1.1);}
+
+@media(max-width:768px){
+  .guide-modal{max-width:100%;max-height:90vh;border-radius:20px;}
+  .guide-header{padding:16px 16px 0;}
+  .guide-title{font-size:17px;}
+  .guide-body{padding:14px 14px 18px;}
+  .g-step{padding:13px 13px;}
+  .g-step-title{font-size:15px;}
+  .g-step-desc{font-size:13px;}
+  .guide-footer{padding:10px 14px;}
+}
+@media(max-width:480px){
+  .guide-overlay{padding:6px;}
+  .guide-modal{max-height:94vh;border-radius:16px;}
+  .guide-tab{font-size:11px;padding:9px 11px;}
+}
 `;
 
 const TABS = [
   {k:"write",    i:"✍️", l:"글 생성"},
-  {k:"publish",  i:"🚀", l:"자동발행"},
+  {k:"image",    i:"🖼️", l:"이미지 생성"},
+  {k:"publish",  i:"🚀", l:"발행하기"},
+  {k:"manage",   i:"📋", l:"발행 관리"},
   {k:"accounts", i:"🔗", l:"계정관리"},
   {k:"users",    i:"👥", l:"회원관리"},
   {k:"stats",    i:"📊", l:"통계"},
@@ -384,7 +437,9 @@ const TABS = [
 ] as const;
 
 export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: Props) {
-  const [tab, setTab] = useState<"write"|"publish"|"accounts"|"users"|"stats"|"settings">("write");
+  const [tab, setTab] = useState<"write"|"image"|"publish"|"manage"|"accounts"|"users"|"stats"|"settings">("write");
+  const [showGuide, setShowGuide] = useState(false);
+  const [guideTab, setGuideTab] = useState(0);
   const [botOnline, setBotOnline] = useState(false);
   const [platform, setPlatform] = useState<"naver"|"tistory">("naver");
   const [admAccs, setAdmAccs] = useState<PublyAccount[]>([]);
@@ -397,8 +452,14 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
   const [targetChars, setTargetChars] = useState(1350);
   const [imgSource, setImgSource] = useState<"ai"|"upload"|"none">("ai");
   const [imgCountManual, setImgCountManual] = useState<number|null>(null);
+  const [imgCount, setImgCount] = useState(3);
+  const [imgCountAuto, setImgCountAuto] = useState(true);
   const [generatedImages, setGeneratedImages] = useState<string[]>([]);
   const [uploadedImages, setUploadedImages] = useState<string[]>([]);
+  const [genImgLoading, setGenImgLoading] = useState(false);
+  const [genImgProgress, setGenImgProgress] = useState(0);
+  const [genImgCurrent, setGenImgCurrent] = useState(0);
+  const imgAbortRef = useRef<AbortController|null>(null);
   const [showPreview, setShowPreview] = useState(false);
   const [keyword, setKeyword] = useState(""); const [generating, setGenerating] = useState(false);
   const [genTitle, setGenTitle] = useState(""); const [genContent, setGenContent] = useState(""); const [genTags, setGenTags] = useState(""); const [genImage, setGenImage] = useState(""); const [genImgLoading, setGenImgLoading] = useState(false);
@@ -412,6 +473,7 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
   const [users, setUsers] = useState<UserFull[]>([]); const [loading, setLoading] = useState(true); const [search, setSearch] = useState(""); const [selUser, setSelUser] = useState<UserFull|null>(null);
   const [editMap, setEditMap] = useState<Record<string,any>>({}); const [saving, setSaving] = useState<string|null>(null);
   const [newNote, setNewNote] = useState(""); const [newPayAmt, setNewPayAmt] = useState(""); const [newPayNote, setNewPayNote] = useState(""); const [addingPay, setAddingPay] = useState(false);
+  const [pubSub, setPubSub] = useState<"full"|"body_faq"|"body_only">("full");
 
   // 설정
   const [writeAI, setWriteAI] = useState(()=>localStorage.getItem("publy_adm_write_ai")||"gemini");
@@ -445,26 +507,136 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
   }
 
   // 이미지 프롬프트 (KO_EN_MAP 축약 버전)
-  const KO_EN_MAP: Record<string,string> = {
-    맛집:"delicious gourmet food beautiful plating restaurant warm lighting",음식:"delicious food dish beautiful presentation",카페:"cozy cafe coffee interior warm ambient pastry",커피:"coffee latte art ceramic cup morning steam",치킨:"crispy golden fried chicken korean food plate",피자:"pizza melted cheese fresh toppings",라면:"ramen noodle bowl hot steam broth",빵:"fresh artisan bread bakery golden",디저트:"dessert sweet pastry cream fruit",
-    여행:"scenic travel destination beautiful landscape golden hour",제주도:"jeju island volcanic landscape ocean cliffs",서울:"seoul city skyline namsan night view",부산:"busan haeundae beach ocean cliff",호텔:"luxury hotel room interior elegant bed",캠핑:"camping tent campfire stars nature",
-    건강:"health wellness vitamins natural herbs",다이어트:"diet healthy food vegetables scale",운동:"exercise gym equipment weights fitness",피부:"skincare serum cream bottle routine",뷰티:"beauty cosmetics makeup products palette",
-    재테크:"investment finance coins growth chart",주식:"stock market chart trading graph trend",코인:"cryptocurrency bitcoin gold coin digital",부동산:"real estate property house document keys",아파트:"apartment building modern exterior",
-    IT:"technology digital computer code screen",AI:"artificial intelligence circuit board network",코딩:"coding programming dark screen code",
-    강아지:"cute puppy dog playing toy home",고양이:"cute cat kitten indoor cozy",육아:"baby toys nursery soft colors stroller",
-    패션:"fashion clothing outfit display stylish",쇼핑:"shopping retail store display bags",
-  };
+  // ─── 300+ 키워드 이미지 프롬프트 시스템 ────────────────────
+  const NP_TAG = "no people, no person, no face, no human, no text, no watermark";
+  const PROMPT_DB: {keywords:string[];prompt:string}[] = [
+    {keywords:["한식","한정식","백반","집밥","가정식"],prompt:"Korean home-style meal spread, banchan side dishes, stone pot bibimbap, wooden table, steam rising, cozy restaurant, warm natural lighting"},
+    {keywords:["맛집","식당","레스토랑","음식점","맛"],prompt:"cozy Korean restaurant interior, beautifully plated dishes on wooden table, ambient warm lighting, inviting atmosphere, bokeh"},
+    {keywords:["삼겹살","고기","구이","바베큐","BBQ","갈비"],prompt:"Korean BBQ pork belly sizzling on grill, smoke rising, lettuce wraps, sesame oil, glowing charcoal, dark dramatic lighting"},
+    {keywords:["회","횟집","사시미","해산물","해물"],prompt:"fresh Korean sashimi platter, colorful fish slices on ice, glistening presentation, premium seafood restaurant, cinematic"},
+    {keywords:["초밥","스시","오마카세","일식"],prompt:"premium omakase sushi assortment, chef-crafted nigiri on wooden platter, minimalist Japanese restaurant, soft dramatic lighting"},
+    {keywords:["스테이크","소고기","등심","ribeye","안심"],prompt:"perfectly seared ribeye steak, medium-rare interior, herb butter melting, fine dining plating, dramatic dark background"},
+    {keywords:["파스타","이탈리안","피자","양식","스파게티"],prompt:"rustic Italian pasta dish, spaghetti with rich tomato sauce, fresh basil, parmesan, warm restaurant ambiance"},
+    {keywords:["라면","라멘","국수","우동","소바"],prompt:"steaming bowl of Korean ramen, rich broth, soft egg, noodles, steam wisps, dark moody background, cinematic"},
+    {keywords:["치킨","통닭","후라이드","양념치킨"],prompt:"crispy golden Korean fried chicken on wooden board, sauce cups, casual dining atmosphere, warm lighting"},
+    {keywords:["피자","도우","화덕피자"],prompt:"artisan wood-fired pizza bubbling cheese, fresh toppings, rustic wooden table, Italian atmosphere"},
+    {keywords:["버거","햄버거","샌드위치"],prompt:"gourmet burger juicy patty, fresh vegetables, sauce dripping, brioche bun, craft paper, casual dining"},
+    {keywords:["카페","커피","아메리카노","라떼","에스프레소","카페인"],prompt:"cozy Korean cafe interior, latte art in ceramic cup, morning light through window, wooden table, minimalist"},
+    {keywords:["빵","베이커리","크루아상","소금빵"],prompt:"artisan bakery display, golden croissants, fresh-baked bread, pastries, warm bakery interior, flour dusted"},
+    {keywords:["케이크","디저트","마카롱","초콜릿","아이스크림"],prompt:"elegant dessert plating, layered chocolate cake, fresh berry garnish, marble surface, soft studio lighting"},
+    {keywords:["빙수","팥빙수","설빙"],prompt:"Korean shaved ice bingsu, fluffy snow texture, red bean paste, condensed milk drizzle, pastel tones"},
+    {keywords:["떡볶이","분식","순대","어묵","포장마차"],prompt:"Korean street food tteokbokki in red sauce, fish cakes, steam, night market atmosphere"},
+    {keywords:["편의점","컵라면","야식","간식"],prompt:"Korean convenience store interior, colorful snack displays, late night warm glow, modern retail"},
+    {keywords:["채식","비건","샐러드","건강식"],prompt:"vibrant vegan grain bowl, colorful vegetables, quinoa, avocado, hummus, white ceramic bowl, editorial"},
+    {keywords:["브런치","아보카도","팬케이크","와플"],prompt:"weekend brunch spread, avocado toast, stacked pancakes with maple syrup, fresh fruit, white marble, morning light"},
+    {keywords:["맥주","와인","술","주류","칵테일"],prompt:"artisan craft beer glass, golden bubbles, bar setting, warm amber lighting, premium beverage"},
+    {keywords:["국","찌개","탕","설렁탕","감자탕"],prompt:"steaming Korean soup pot, rich broth, ingredients visible, ceramic bowl, restaurant wooden table, comfort food"},
+    {keywords:["도시락","간편식","밀키트"],prompt:"beautifully arranged Korean lunch box bento, colorful vegetables, rice, clean minimal presentation"},
+    {keywords:["제주도","제주","한라산","성산일출봉","우도"],prompt:"Jeju island volcanic coastline, dramatic black lava rocks, turquoise ocean waves, Hallasan mountain backdrop, golden hour"},
+    {keywords:["부산","해운대","광안리","남포동","감천"],prompt:"Busan Gwangalli beach at sunset, Gwangan Bridge illuminated, warm golden reflection on water, cinematic"},
+    {keywords:["서울","경복궁","남산","한강","명동"],prompt:"Seoul cityscape at dusk, Namsan tower glowing, Han River reflection, modern skyscrapers meets traditional palace"},
+    {keywords:["경주","불국사","첨성대","신라"],prompt:"ancient Gyeongju Bulguksa temple, cherry blossoms, stone lanterns, misty morning atmosphere, UNESCO heritage"},
+    {keywords:["전주","한옥마을"],prompt:"Jeonju Hanok village, traditional Korean architecture, tile roofs, stone paths, warm golden afternoon light"},
+    {keywords:["강원","강릉","속초","설악산","동해"],prompt:"Seoraksan mountain peaks with autumn foliage, dramatic rocky cliffs, crisp mountain air, editorial"},
+    {keywords:["일본","도쿄","오사카","교토","후쿠오카"],prompt:"Kyoto traditional street at twilight, lantern-lit cobblestone alley, cherry blossom petals, cinematic"},
+    {keywords:["유럽","파리","로마","스페인","런던","프랑스"],prompt:"Paris street at golden hour, Eiffel Tower in distance, café tables, warm European ambiance, cobblestone"},
+    {keywords:["동남아","베트남","태국","발리","싱가포르"],prompt:"Bali tropical infinity pool overlooking lush jungle, lotus flowers, temple offerings, golden sunset"},
+    {keywords:["미국","뉴욕","LA","하와이"],prompt:"Manhattan skyline at blue hour, skyscrapers reflected in Hudson River, city lights, dramatic urban"},
+    {keywords:["캠핑","글램핑","텐트","야외","아웃도어"],prompt:"luxury glamping tent in forest clearing, warm lantern glow, campfire embers, starry night sky, misty morning"},
+    {keywords:["호텔","리조트","숙소","펜션","풀빌라"],prompt:"luxury hotel suite interior, king bed with crisp white linens, floor-to-ceiling window with city view, elegant"},
+    {keywords:["여행준비","패킹","캐리어","배낭여행"],prompt:"open suitcase with neatly packed clothes, travel accessories, passport, camera, clean flat lay on white bed"},
+    {keywords:["국내여행","드라이브","도로여행","차박"],prompt:"scenic Korean coastal highway, road trip, mountain pass, autumn foliage, blue sky, freedom"},
+    {keywords:["다이어트","체중감량","살빼기","체중조절"],prompt:"clean healthy meal prep bowls, colorful vegetables, measuring tape, fresh ingredients, bright kitchen, weight loss"},
+    {keywords:["운동","헬스","헬스장","피트니스","gym"],prompt:"modern gym interior, barbell rack, dumbbells, exercise equipment, motivating atmosphere, early morning light"},
+    {keywords:["요가","필라테스","스트레칭"],prompt:"yoga studio with morning light, warrior pose on mat, peaceful atmosphere, plants, minimal decor"},
+    {keywords:["러닝","마라톤","조깅","달리기"],prompt:"runner silhouette at sunrise on empty road, morning mist, dynamic motion, motivational editorial"},
+    {keywords:["피부","스킨케어","화장품","로션","에센스"],prompt:"luxury skincare product flat lay, serum bottles, jade roller, white marble, morning light, K-beauty aesthetic"},
+    {keywords:["탈모","모발","두피","샴푸"],prompt:"healthy thick hair close-up, shampoo foam, bathroom natural lighting, clean fresh aesthetic"},
+    {keywords:["성형","시술","피부과","의원","클리닉"],prompt:"modern medical clinic interior, clean white aesthetic, professional equipment, trust and care atmosphere"},
+    {keywords:["영양제","비타민","건강기능식품","보충제"],prompt:"supplement capsules and vitamins on white surface, green plant, morning light, health wellness aesthetic"},
+    {keywords:["수면","불면증","숙면","수면습관"],prompt:"cozy bedroom at night, soft bedside lamp, fluffy white pillows, peaceful sleep environment, blue hour"},
+    {keywords:["스트레스","번아웃","힐링","멘탈"],prompt:"serene nature meditation spot, calm lake, misty morning, tranquility, mental wellness atmosphere"},
+    {keywords:["당뇨","혈당","혈압","심장","혈관"],prompt:"fresh healthy foods for diabetes management, whole grains, vegetables, fruit, blood glucose monitor"},
+    {keywords:["치아","치과","구강","칫솔"],prompt:"dental care flat lay, toothbrush, floss, mouthwash, white background, clean clinical aesthetic"},
+    {keywords:["병원","진료","의료","건강검진"],prompt:"modern hospital corridor, clean professional healthcare, trust and expertise, bright clinical lighting"},
+    {keywords:["주식","주식투자","증권","코스피","코스닥"],prompt:"stock market candlestick chart on monitor, trading platform, financial data visualization, dark professional"},
+    {keywords:["코인","비트코인","가상화폐","NFT","블록체인"],prompt:"golden bitcoin coins, blockchain network visualization, digital currency concept, blue neon tech aesthetic"},
+    {keywords:["부동산","아파트","투자","분양","청약"],prompt:"modern Korean apartment complex aerial view, urban cityscape, real estate development, sunset reflection"},
+    {keywords:["재테크","돈","저축","절약","금융"],prompt:"Korean won bills and coins arranged neatly, piggy bank, growth chart, financial planning, clean white background"},
+    {keywords:["ETF","펀드","적금","예금","금리"],prompt:"financial investment growth concept, ascending bar chart, coins stacking, plant growing from money, prosperity"},
+    {keywords:["사업","창업","스타트업","사업자","CEO"],prompt:"modern startup office, whiteboard with business plan, team collaboration energy, contemporary workspace"},
+    {keywords:["프리랜서","부업","N잡러","재택근무"],prompt:"home office setup, laptop on clean desk, plants, natural window light, productive remote work"},
+    {keywords:["AI","인공지능","ChatGPT","GPT","클로드"],prompt:"artificial intelligence neural network visualization, futuristic blue light, data streams, tech concept"},
+    {keywords:["스마트폰","아이폰","갤럭시","핸드폰"],prompt:"premium smartphone on minimal surface, app interface glow, clean tech product photography"},
+    {keywords:["노트북","맥북","컴퓨터","PC"],prompt:"MacBook Pro on clean minimal desk, code on screen, soft ambient lighting, developer workspace"},
+    {keywords:["코딩","프로그래밍","개발","개발자"],prompt:"dark mode code editor screen, colorful syntax highlighting, developer keyboard, multiple monitors"},
+    {keywords:["유튜브","유튜버","영상","콘텐츠","크리에이터"],prompt:"YouTube creator studio setup, ring light, camera, microphone, content creation workspace, professional"},
+    {keywords:["인스타","SNS","소셜미디어","틱톡"],prompt:"social media content creation, smartphone photography setup, aesthetic flat lay, influencer lifestyle"},
+    {keywords:["게임","게이밍","PC방","플스","닌텐도"],prompt:"gaming setup with RGB lighting, multiple monitors, mechanical keyboard, competitive esports atmosphere"},
+    {keywords:["임신","출산","태교","임산부"],prompt:"soft nursery room preparation, baby items, gentle morning light, pastel colors, tender atmosphere"},
+    {keywords:["육아","아기","신생아","돌잔치"],prompt:"adorable baby toys on soft pastel blanket, tiny shoes, teddy bear, warm nursery, gentle light"},
+    {keywords:["유아","어린이","아이","유치원"],prompt:"colorful children learning environment, educational toys, ABC blocks, watercolor paintings, bright playful space"},
+    {keywords:["공부","수능","입시","학원","과외"],prompt:"student study desk with books, stationery, planner, focused learning, warm desk lamp"},
+    {keywords:["영어","영어공부","어학","토익","토플"],prompt:"language learning setup, English textbooks, headphones, notebook with vocabulary, coffee, productive study"},
+    {keywords:["인테리어","인테리어디자인","집꾸미기","홈데코"],prompt:"beautifully designed Korean apartment interior, minimalist Scandinavian style, plants, warm natural tones"},
+    {keywords:["청소","정리","수납","정돈","미니멀"],prompt:"perfectly organized closet with coordinated items, minimalist Korean home, clean aesthetic"},
+    {keywords:["강아지","댕댕이","dog","puppy"],prompt:"fluffy golden retriever puppy in Korean home garden, playful expression, soft natural light, adorable"},
+    {keywords:["고양이","냥이","cat","kitty"],prompt:"elegant cat lounging on window sill, soft afternoon sunbeam, bokeh background, peaceful domestic"},
+    {keywords:["반려동물","펫","애완"],prompt:"loving pet care scene, cozy home with happy pet, warm domestic life, lifestyle photography"},
+    {keywords:["독서","책","서재","도서관"],prompt:"cozy reading nook with books, warm lamp light, coffee cup, wooden shelves, peaceful literary atmosphere"},
+    {keywords:["가드닝","정원","식물","화분","홈가드닝"],prompt:"lush indoor plant collection, botanical home aesthetic, morning light through leaves, terra cotta pots"},
+    {keywords:["요리","쿠킹","홈쿠킹","레시피"],prompt:"home cooking preparation, fresh ingredients on wooden cutting board, kitchen lifestyle, warm"},
+    {keywords:["패션","옷","코디","스타일링","OOTD"],prompt:"Korean fashion street style flat lay, seasonal outfit coordination, accessories, clean white background"},
+    {keywords:["명품","가방","지갑","액세서리","주얼리"],prompt:"luxury handbag editorial, leather texture, branded accessories, marble surface, premium lifestyle"},
+    {keywords:["화장","메이크업","립스틱","뷰티"],prompt:"K-beauty makeup flat lay, cosmetic products arranged artfully, rose gold accents, mirror, beauty editorial"},
+    {keywords:["향수","perfume","프래그런스"],prompt:"luxury perfume bottle on marble surface, light refraction, soft bokeh, elegant fragrance photography"},
+    {keywords:["네일","네일아트","네일샵"],prompt:"artistic nail art close-up, intricate designs, gel polish, hands on marble, beauty editorial"},
+    {keywords:["헤어","헤어스타일","미용실","염색","펌"],prompt:"Korean hair salon interior, glossy healthy hair, professional care, bright modern salon"},
+    {keywords:["자동차","신차","차","차량"],prompt:"sleek modern sedan on mountain road, dramatic landscape, automotive photography, golden hour"},
+    {keywords:["전기차","EV","테슬라","아이오닉"],prompt:"electric vehicle charging station, clean energy concept, modern EV design, sustainable future"},
+    {keywords:["SUV","4WD","오프로드"],prompt:"powerful SUV on mountain trail, rugged terrain, adventure lifestyle, dramatic sky"},
+    {keywords:["골프","골프장","골프채","필드"],prompt:"golf course at sunrise, morning mist over fairway, lush green grass, dramatic landscape, premium sport"},
+    {keywords:["등산","트레킹","산행","백패킹"],prompt:"hiker on Korean mountain summit, vast panoramic view, autumn foliage, achievement, dramatic sky"},
+    {keywords:["자전거","사이클","MTB"],prompt:"cyclist on scenic riverside path at sunrise, motion and speed, Korean landscape, freedom"},
+    {keywords:["취업","구직","이력서","면접"],prompt:"professional Korean job interview setting, confident candidate, modern office, career opportunity"},
+    {keywords:["직장","회사","사무실","직장인"],prompt:"modern Korean office interior, collaborative workspace, professionals working, clean contemporary"},
+    {keywords:["이직","커리어","경력"],prompt:"career growth concept, ascending staircase, professional development, business success, ambition"},
+    {keywords:["봄","벚꽃","봄꽃","개나리","튤립"],prompt:"Korean spring cherry blossom path, soft pink petals falling, warm sunlight through branches, dreamy"},
+    {keywords:["여름","바다","해수욕장","여름휴가"],prompt:"Korean summer beach, crystal clear water, white sand, golden hour sunlight, vacation mood"},
+    {keywords:["가을","단풍","추석","단풍여행"],prompt:"Korean autumn forest, vibrant red and orange foliage, misty mountain morning, fallen leaves path"},
+    {keywords:["겨울","눈","스키장","크리스마스"],prompt:"winter wonderland snowscape, frost on pine trees, soft blue twilight, peaceful Korean winter"},
+    {keywords:["자기계발","성장","동기부여","목표","습관"],prompt:"morning routine motivation, sunrise through window, journal and coffee, goal setting, fresh productive start"},
+    {keywords:["명상","마음챙김","힐링","치유"],prompt:"peaceful meditation space, serene pose, soft morning light, minimalist zen atmosphere, calm"},
+    {keywords:["영화","OTT","넷플릭스","드라마"],prompt:"cozy home cinema setup, dark room with large screen glow, popcorn, blanket, movie night"},
+    {keywords:["음악","콘서트","공연","아이돌","K-pop"],prompt:"concert stage with dramatic lighting, spotlights, smoke effects, electric atmosphere, performance energy"},
+    {keywords:["환경","친환경","제로웨이스트","지속가능"],prompt:"eco-friendly lifestyle flat lay, reusable items, green plants, sustainable products, earth-tone"},
+    {keywords:["애드포스트","블로그수익","네이버블로그","수익화"],prompt:"blogger workspace with laptop showing analytics, coffee, notebook, Korean lifestyle content creator setup, warm"},
+    {keywords:["애드센스","구글","SEO","검색노출"],prompt:"SEO analytics dashboard on monitor, digital marketing workspace, growth charts, professional setup"},
+  ];
 
-  function buildImagePrompt(kw: string): string {
-    const k = kw.trim();
-    const NP = "no people, no person, no face, no human";
-    const adB = adType === "adpost" ? "Korean lifestyle blog warm emotional photography" : "ultra realistic DSLR editorial 8K magazine quality";
-    const sorted = Object.keys(KO_EN_MAP).sort((a,b) => b.length - a.length);
-    for (const ko of sorted) { if (k.includes(ko)) return `${KO_EN_MAP[ko]}, ${NP}, ${adB}`; }
-    if (/맛집|음식|카페|요리/.test(k)) return `delicious korean food beautiful, ${NP}, ${adB}`;
-    if (/여행|관광|호텔/.test(k)) return `scenic travel destination golden hour, ${NP}, ${adB}`;
-    if (/건강|운동|다이어트/.test(k)) return `health fitness wellness natural, ${NP}, ${adB}`;
-    return `lifestyle blog concept natural editorial photo, ${NP}, ${adB}`;
+  function buildImagePrompt(kw: string, title: string = "", idx: number = 0): string {
+    const k = (kw + " " + title).toLowerCase();
+    const st = adType === "adpost"
+      ? "Korean lifestyle photography, warm emotional, soft natural light"
+      : "ultra realistic DSLR 8K magazine editorial photography";
+    const sorted = [...PROMPT_DB].sort((a,b) => b.keywords.join("").length - a.keywords.join("").length);
+    for (const entry of sorted) {
+      if (entry.keywords.some(kw2 => k.includes(kw2))) {
+        let p = entry.prompt;
+        if (idx === 1) p = p.replace(/warm natural lighting|morning light|warm lighting|warm/g, "golden hour afternoon light");
+        if (idx === 2) p = p.replace(/warm natural lighting|morning light|warm lighting|warm/g, "dramatic blue hour lighting");
+        if (idx === 3) p = p.replace(/warm natural lighting|morning light|warm lighting|warm/g, "soft overcast diffused light");
+        return `${p}, ${NP_TAG}, ${st}`;
+      }
+    }
+    if (/먹|맛|식|음|요리|카페|커피/.test(k)) return `beautiful Korean food dining experience, warm restaurant, delicious presentation, ${NP_TAG}, ${st}`;
+    if (/여행|travel|관광|투어|trip/.test(k)) return `breathtaking Korean travel destination, scenic landscape, golden hour, ${NP_TAG}, ${st}`;
+    if (/돈|금|재|투자|경제|수익|부자/.test(k)) return `financial success growth concept, modern professional aesthetic, ${NP_TAG}, ${st}`;
+    if (/건강|운동|몸|fitness|diet|다이어트/.test(k)) return `healthy lifestyle motivation, nutritious food, wellness atmosphere, ${NP_TAG}, ${st}`;
+    if (/집|방|인테리어|home|house|아파트/.test(k)) return `beautiful modern Korean home interior, warm cozy atmosphere, ${NP_TAG}, ${st}`;
+    if (/기술|tech|AI|컴퓨터|폰|앱/.test(k)) return `modern technology concept, clean digital aesthetic, innovation, ${NP_TAG}, ${st}`;
+    if (/봄|여름|가을|겨울|자연|꽃/.test(k)) return `beautiful Korean seasonal landscape, nature photography, golden light, ${NP_TAG}, ${st}`;
+    return `beautiful Korean lifestyle blog editorial photography, professional, perfect composition, ${NP_TAG}, ${st}`;
   }
 
   function parseArr(text: string): string[] {
@@ -527,8 +699,8 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
     throw new Error("AI 미선택");
   }
 
-  async function generateImage(kw: string): Promise<string> {
-    const imgPrompt = buildImagePrompt(kw);
+  async function generateImage(kw: string, title: string = "", idx: number = 0): Promise<string> {
+    const imgPrompt = buildImagePrompt(kw, title, idx);
     const ai = localStorage.getItem("publy_adm_image_ai") || "openai_img";
     if (ai === "openai_img") {
       const key = localStorage.getItem("publy_adm_openai_key") || ""; if (!key) throw new Error("OpenAI 키 없음");
@@ -566,14 +738,24 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
     return sections;
   }
 
-  async function handleGenerateImages(count: number) {
-    if (imgSource==="none"||imgSource==="upload") return;
-    setGenImgLoading(true);
+  async function handleGenerateImages() {
+    if (!keyword&&!genTitle) { alert("먼저 글을 생성해주세요"); return; }
+    setGenImgLoading(true); setGenImgProgress(0); setGenImgCurrent(0);
+    imgAbortRef.current = new AbortController();
     const imgs: string[] = [];
-    try { for (let i=0;i<count;i++) { const url=await generateImage(keyword||selectedTitle); imgs.push(url); setGeneratedImages([...imgs]); } }
-    catch(e:any) { alert("이미지 생성 실패: "+e.message); }
-    finally { setGenImgLoading(false); }
+    try {
+      for (let i=0;i<imgCount;i++) {
+        if (imgAbortRef.current.signal.aborted) break;
+        setGenImgCurrent(i+1);
+        const url = await generateImage(keyword||selectedTitle, genTitle||selectedTitle||"", i);
+        imgs.push(url); setGeneratedImages([...imgs]);
+        setGenImgProgress(Math.round(((i+1)/imgCount)*100));
+      }
+    } catch(e:any) { if (e.name!=="AbortError") alert("이미지 생성 실패: "+e.message); }
+    finally { setGenImgLoading(false); imgAbortRef.current=null; }
   }
+
+  function stopImageGen() { imgAbortRef.current?.abort(); setGenImgLoading(false); }
 
   function handleImageUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const files = e.target.files; if (!files) return;
@@ -666,7 +848,7 @@ POST3: (제목)|(이유)
       if (imgSource === "ai" && recCount > 0) {
         setGenImgLoading(true); setGeneratedImages([]);
         const imgs: string[] = [];
-        try { for (let i=0;i<recCount;i++) { const url=await generateImage(keyword||selectedTitle); imgs.push(url); setGeneratedImages([...imgs]); } }
+        try { for (let i=0;i<recCount;i++) { const url=await generateImage(keyword||selectedTitle, genTitle||selectedTitle||"", i); imgs.push(url); setGeneratedImages([...imgs]); } }
         catch(e:any) { alert("이미지 생성 실패: "+e.message); }
         finally { setGenImgLoading(false); }
       }
@@ -740,6 +922,170 @@ POST3: (제목)|(이유)
       <style>{CSS}</style>
       <div className={`app ${theme}`}>
 
+        {/* ── 관리자 사용설명서 모달 ── */}
+        {showGuide && (() => {
+          const PINK = "#FF6B9D"; const YELLOW = "#FFD93D"; const GREEN = "#00C875"; const RED = "#f85149";
+          const tabs = ["📋 개요","✍️ 글 생성","👥 회원관리","📊 통계","🔐 설정"];
+          const pages = [
+            // 0 - 개요
+            <div key="0">
+              <div className="g-step" style={{borderColor:`${RED}40`,background:`${RED}08`}}>
+                <div className="g-step-num" style={{color:RED}}>🔐 관리자 전용 페이지</div>
+                <div className="g-step-title" style={{color:"#fff"}}>Publy 관리자 대시보드</div>
+                <div className="g-step-desc">
+                  이 페이지는 <b>관리자만 접근</b>할 수 있어요.<br/>
+                  회원 관리, 글 생성, 자동 발행, 통계 조회 등 모든 기능을 사용할 수 있어요.
+                </div>
+              </div>
+              {[
+                {ico:"✍️",title:"글 생성",desc:"키워드 입력 → 제목 추천 → 글+이미지 자동 생성",color:GREEN},
+                {ico:"🚀",title:"자동 발행",desc:"네이버/티스토리 블로그에 자동으로 글을 올려요",color:YELLOW},
+                {ico:"🔗",title:"계정 관리",desc:"발행에 사용할 블로그 계정을 추가하고 연결해요",color:PINK},
+                {ico:"👥",title:"회원 관리",desc:"회원 플랜 변경, 결제 등록, 메모 관리",color:"#8B5CF6"},
+                {ico:"📊",title:"통계",desc:"전체 회원 현황, 플랜 분포, 발행 TOP 10 확인",color:"#58a6ff"},
+                {ico:"🔐",title:"설정",desc:"AI 선택, API 키 관리, 관리자 비밀번호 변경",color:RED},
+              ].map((item,i) => (
+                <div key={i} className="g-step" style={{borderColor:`${item.color}35`,background:`${item.color}07`,padding:"12px 14px"}}>
+                  <div style={{display:"flex",alignItems:"center",gap:10}}>
+                    <span style={{fontSize:22,flexShrink:0}}>{item.ico}</span>
+                    <div>
+                      <div style={{fontSize:15,fontWeight:800,color:item.color}}>{item.title}</div>
+                      <div style={{fontSize:13,color:"rgba(255,255,255,.7)",marginTop:2}}>{item.desc}</div>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>,
+
+            // 1 - 글 생성
+            <div key="1">
+              {[
+                {num:"STEP 1",ico:"🎯",title:"수익화 목적 선택",color:GREEN,desc:<>글 생성 탭에서 <b>애드포스트</b>(네이버) 또는 <b>애드센스</b>(구글) 중 선택해요. 목적에 따라 AI가 다른 스타일로 글을 써요.</>},
+                {num:"STEP 2",ico:"🔍",title:"키워드 + 플랫폼 선택",color:YELLOW,desc:<>글 주제 키워드와 발행할 플랫폼(네이버/티스토리)을 선택해요. <b>Enter</b> 또는 버튼으로 제목 30개를 추천받아요.</>},
+                {num:"STEP 3",ico:"⭐",title:"제목 선택",color:PINK,desc:<>AI가 만든 제목 중 하나를 클릭해 선택해요. <b>30개 추가</b>로 최대 90개까지 볼 수 있어요.</>},
+                {num:"STEP 4",ico:"🤖",title:"글+이미지 생성",color:"#8B5CF6",desc:<>글자 수와 이미지 옵션을 설정하고 <b>생성 시작</b> 버튼을 눌러요. AI가 완성된 블로그 글을 만들어줘요.</>},
+                {num:"STEP 5",ico:"🚀",title:"발행하기로 이동",color:RED,desc:<>생성 완료 후 <b>발행하기로 이동</b> 버튼을 누르면 자동으로 발행 탭으로 이동해요.</>},
+              ].map((s,i) => (
+                <div key={i} className="g-step" style={{borderColor:`${s.color}40`,background:`${s.color}08`}}>
+                  <div className="g-step-num" style={{color:s.color}}>{s.ico} {s.num}</div>
+                  <div className="g-step-title" style={{color:"#fff"}}>{s.title}</div>
+                  <div className="g-step-desc">{s.desc}</div>
+                </div>
+              ))}
+              <div className="g-tip">💡 <b>API 키 설정 필수!</b> 설정 탭에서 관리자 전용 API 키를 입력해야 해요. 회원 키와 <b>완전히 분리</b>되어 있어요.</div>
+            </div>,
+
+            // 2 - 회원관리
+            <div key="2">
+              <div className="g-step" style={{borderColor:`${GREEN}40`,background:`${GREEN}08`}}>
+                <div className="g-step-num" style={{color:GREEN}}>👥 회원 목록</div>
+                <div className="g-step-title" style={{color:"#fff"}}>회원을 클릭하면 상세 정보가 펼쳐져요</div>
+                <div className="g-step-desc">
+                  이름, 이메일로 검색 가능하고, 클릭 한 번으로 회원 상세를 바로 볼 수 있어요.
+                </div>
+              </div>
+              {[
+                {ico:"💳",title:"플랜 변경",desc:"FREE → BASIC → PRO로 플랜을 바꾸면 발행 건수가 자동으로 업데이트돼요.",color:YELLOW},
+                {ico:"🔢",title:"건수 조정",desc:"총 발행 건수를 직접 입력해서 조정할 수 있어요. 특별 혜택 제공 시 사용해요.",color:PINK},
+                {ico:"📅",title:"만료일 연장",desc:"날짜(일수)를 입력하면 현재 만료일에서 그만큼 연장돼요.",color:"#8B5CF6"},
+                {ico:"💰",title:"결제 등록",desc:"금액과 플랜을 선택하면 결제 내역이 기록되고 플랜이 자동 업그레이드돼요.",color:GREEN},
+                {ico:"📝",title:"메모",desc:"회원별 관리 메모를 남길 수 있어요. 상담 내역, 요청 사항 등 기록해요.",color:RED},
+                {ico:"🔒",title:"비활성화",desc:"문제가 있는 회원은 비활성화해서 사용을 막을 수 있어요.",color:"#f0883e"},
+              ].map((item,i) => (
+                <div key={i} className="g-step" style={{borderColor:`${item.color}35`,background:`${item.color}07`,padding:"12px 14px"}}>
+                  <div style={{display:"flex",alignItems:"center",gap:10}}>
+                    <span style={{fontSize:20,flexShrink:0}}>{item.ico}</span>
+                    <div>
+                      <div style={{fontSize:14,fontWeight:800,color:item.color}}>{item.title}</div>
+                      <div style={{fontSize:13,color:"rgba(255,255,255,.7)",marginTop:2}}>{item.desc}</div>
+                    </div>
+                  </div>
+                </div>
+              ))}
+              <div className="g-tip">⚠️ <b>저장 버튼</b>을 꼭 눌러야 변경사항이 반영돼요!</div>
+            </div>,
+
+            // 3 - 통계
+            <div key="3">
+              <div className="g-step" style={{borderColor:`${YELLOW}40`,background:`${YELLOW}08`}}>
+                <div className="g-step-num" style={{color:YELLOW}}>📊 통계 탭에서 볼 수 있는 것들</div>
+                <div className="g-step-title" style={{color:"#fff"}}>한눈에 보는 서비스 현황</div>
+                <div className="g-step-desc">
+                  {[["전체 회원","가입된 회원 수 총합"],["활성 회원","현재 이용 중인 회원 수"],["PRO/BASIC 회원","플랜별 회원 수"],["총 발행 건수","모든 회원 발행 합산"],["플랜 분포 바","FREE/BASIC/PRO 비율 한눈에"],["발행 TOP 10","가장 많이 발행한 회원 순위"]].map(([t,d],i) => (
+                    <div key={i} style={{display:"flex",justifyContent:"space-between",padding:"7px 0",borderBottom:i<5?"1px solid rgba(255,255,255,.06)":"none",fontSize:13}}>
+                      <b style={{color:"#fff"}}>{t}</b>
+                      <span style={{color:"rgba(255,255,255,.55)"}}>{d}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>,
+
+            // 4 - 설정
+            <div key="4">
+              <div className="g-step" style={{borderColor:`${RED}40`,background:`${RED}08`}}>
+                <div className="g-step-num" style={{color:RED}}>⚠️ 관리자 전용 API 키</div>
+                <div className="g-step-title" style={{color:"#fff"}}>회원 키와 완전히 분리되어 있어요!</div>
+                <div className="g-step-desc">
+                  관리자 API 키는 <b>회원들의 키와 절대 섞이지 않아요.</b><br/>
+                  관리자가 직접 글을 생성할 때 사용하는 별도의 키예요.
+                </div>
+                <button className="g-btn" style={{background:`linear-gradient(135deg,${YELLOW},#FFA500)`,color:"#000"}}
+                  onClick={() => { setShowGuide(false); setTab("settings"); }}>
+                  🔐 지금 API 키 설정하러 가기
+                </button>
+              </div>
+              {[
+                {ico:"🤖",title:"글쓰기 AI 선택",desc:`Gemini(무료), Groq(무료), GPT-4o(유료) 중 선택해요. 처음엔 Gemini를 추천해요.`,color:GREEN},
+                {ico:"🖼️",title:"이미지 AI 선택",desc:"DALL-E 3 또는 Flux(Replicate) 중 선택해요. 둘 다 유료예요.",color:"#8B5CF6"},
+                {ico:"🔑",title:"API 키 입력 + 테스트",desc:"키를 입력하고 '테스트' 버튼으로 연결을 확인한 후 '저장'을 눌러요.",color:YELLOW},
+                {ico:"🔐",title:"관리자 비밀번호 변경",desc:"최초 비밀번호는 앱 설정에서 확인하세요. 주기적으로 변경을 권장해요.",color:RED},
+              ].map((item,i) => (
+                <div key={i} className="g-step" style={{borderColor:`${item.color}35`,background:`${item.color}07`,padding:"12px 14px"}}>
+                  <div style={{display:"flex",alignItems:"center",gap:10}}>
+                    <span style={{fontSize:20,flexShrink:0}}>{item.ico}</span>
+                    <div>
+                      <div style={{fontSize:14,fontWeight:800,color:item.color}}>{item.title}</div>
+                      <div style={{fontSize:13,color:"rgba(255,255,255,.7)",marginTop:2}}>{item.desc}</div>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>,
+          ];
+
+          return (
+            <div className="guide-overlay" onClick={() => setShowGuide(false)}>
+              <div className="guide-modal" onClick={e => e.stopPropagation()}>
+                <div className="guide-header" style={{position:"relative"}}>
+                  <div className="guide-logo-row">
+                    <div className="guide-logo-ico">📋</div>
+                    <div>
+                      <div className="guide-title">관리자 사용설명서</div>
+                      <div className="guide-subtitle">Publy 관리자 페이지 완전 가이드</div>
+                    </div>
+                  </div>
+                  <button className="guide-close" onClick={() => setShowGuide(false)}>✕</button>
+                  <div className="guide-tabs">
+                    {tabs.map((t,i) => (
+                      <button key={i} className={`guide-tab ${guideTab===i?"active":""}`} onClick={() => setGuideTab(i)}>{t}</button>
+                    ))}
+                  </div>
+                </div>
+                <div className="guide-body">{pages[guideTab]}</div>
+                <div className="guide-footer">
+                  <button className="guide-nav-btn" style={{borderColor:"rgba(255,255,255,.15)",background:"transparent",color:"rgba(255,255,255,.6)"}} onClick={() => setGuideTab(Math.max(0,guideTab-1))} disabled={guideTab===0}>← 이전</button>
+                  <span className="guide-page">{guideTab+1} / {tabs.length}</span>
+                  {guideTab < tabs.length-1
+                    ? <button className="guide-nav-btn" style={{borderColor:YELLOW,background:`${YELLOW}15`,color:YELLOW}} onClick={() => setGuideTab(guideTab+1)}>다음 →</button>
+                    : <button className="guide-nav-btn" style={{borderColor:GREEN,background:`${GREEN}15`,color:GREEN}} onClick={() => setShowGuide(false)}>✅ 확인!</button>
+                  }
+                </div>
+              </div>
+            </div>
+          );
+        })()}
+
         {/* 헤더 */}
         <div className="header">
           <div className="logo">
@@ -761,6 +1107,9 @@ POST3: (제목)|(이유)
           <div className="header-right">
             <button className="icon-btn" onClick={onThemeToggle}>{theme==="dark"?"☀️":"🌙"}</button>
             <button className="icon-btn" onClick={checkBot}>🔄</button>
+            <button className="adm-guide-btn" onClick={() => { setShowGuide(true); setGuideTab(0); }}>
+              📋 관리자 가이드
+            </button>
             <button className="back-btn" onClick={onDashboard}>← 회원 화면</button>
             <button className="back-btn" style={{borderColor:"rgba(248,81,73,.3)",color:"var(--danger)"}} onClick={onBack}>로그아웃</button>
           </div>
@@ -956,6 +1305,145 @@ POST3: (제목)|(이유)
                     </button>
                   </>
                 )}
+              </div>
+            )}
+
+            {/* ───── 🖼️ 이미지 생성 ───── */}
+            {tab === "image" && (
+              <div style={{animation:"fadeUp .25s ease both"}}>
+                {!genContent&&<div className="alert alert-warn">⚠️ 먼저 글 생성 탭에서 글을 생성해주세요!<button className="abp" style={{marginLeft:"auto",padding:"7px 14px",fontSize:12}} onClick={()=>setTab("write")}>글 생성하러 가기</button></div>}
+                <div style={{display:"grid",gridTemplateColumns:"280px 1fr",gap:14,alignItems:"start"}}>
+                  {/* 왼쪽 설정 */}
+                  <div className="card" style={{position:"sticky",top:8}}>
+                    <div className="card-title" style={{marginBottom:14}}>⚙️ 이미지 설정</div>
+                    <div style={{marginBottom:14}}>
+                      <label className="inp-label">이미지 소스</label>
+                      <div style={{display:"flex",flexDirection:"column",gap:6}}>
+                        {([{id:"ai",ico:"🤖",label:"AI 자동 생성"},{id:"upload",ico:"📁",label:"내 이미지 업로드"},{id:"none",ico:"🚫",label:"이미지 없이 발행"}] as const).map(s=>(
+                          <button key={s.id} onClick={()=>setImgSource(s.id)} style={{padding:"10px 12px",borderRadius:9,border:`1.5px solid ${imgSource===s.id?"var(--a)":"var(--b)"}`,background:imgSource===s.id?"var(--ad)":"var(--ib)",cursor:"pointer",fontFamily:"inherit",display:"flex",alignItems:"center",gap:8,textAlign:"left"}}>
+                            <span style={{fontSize:17}}>{s.ico}</span>
+                            <span style={{fontSize:13,fontWeight:600,color:imgSource===s.id?"var(--a)":"var(--m)"}}>{s.label}</span>
+                            {imgSource===s.id&&<span style={{marginLeft:"auto",color:"var(--a)",fontSize:13}}>✓</span>}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    {imgSource==="ai"&&(
+                      <>
+                        <div style={{marginBottom:14}}>
+                          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+                            <label className="inp-label" style={{margin:0}}>생성 수량</label>
+                            <div style={{display:"flex",alignItems:"center",gap:7}}>
+                              <span style={{fontSize:26,fontWeight:900,color:"var(--a)"}}>{imgCount}</span>
+                              <span style={{fontSize:12,color:"var(--m)"}}>장</span>
+                              {!imgCountAuto&&<button style={{padding:"3px 8px",borderRadius:6,border:"1px solid var(--b)",background:"transparent",color:"var(--a)",cursor:"pointer",fontSize:10,fontFamily:"inherit",fontWeight:700}} onClick={()=>{setImgCountAuto(true);if(genContent)setImgCount(Math.max(1,Math.min(10,Math.floor(genContent.length/200))));}}>자동</button>}
+                            </div>
+                          </div>
+                          <input type="range" min={1} max={20} step={1} value={imgCount} onChange={e=>{setImgCountAuto(false);setImgCount(Number(e.target.value));}} style={{width:"100%",accentColor:"var(--a)",height:6,cursor:"pointer"}}/>
+                          {imgCountAuto&&genContent&&<div style={{marginTop:6,padding:"6px 10px",borderRadius:7,background:"var(--ad)",border:"1px solid",borderColor:"var(--a)30",fontSize:11,color:"var(--a)",fontWeight:600}}>💡 자동 추천: {imgCount}장</div>}
+                        </div>
+                        {genImgLoading&&(
+                          <div style={{marginBottom:14,padding:"12px",borderRadius:9,background:"var(--ib)",border:"1px solid var(--b)"}}>
+                            <div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}>
+                              <span style={{fontSize:12,fontWeight:700,color:"var(--a)"}}>⏳ {genImgCurrent}/{imgCount}장</span>
+                              <span style={{fontSize:13,fontWeight:900,color:"var(--a)"}}>{genImgProgress}%</span>
+                            </div>
+                            <div style={{height:7,background:"var(--b)",borderRadius:99,overflow:"hidden"}}>
+                              <div style={{height:"100%",width:`${genImgProgress}%`,background:"linear-gradient(90deg,var(--a),#00cc80)",borderRadius:99,transition:"width .4s"}}/>
+                            </div>
+                            <div style={{display:"flex",gap:3,marginTop:7}}>
+                              {Array.from({length:imgCount}).map((_,i)=>(
+                                <div key={i} style={{flex:1,height:4,borderRadius:99,background:i<genImgCurrent?"var(--a)":"var(--b)",transition:"background .3s"}}/>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                        <div style={{display:"flex",flexDirection:"column",gap:7}}>
+                          <button className="abp" onClick={handleGenerateImages} disabled={genImgLoading||!genContent}>{genImgLoading?<><span className="asp2"/>생성 중...</>:<>🎨 이미지 {imgCount}장 생성</>}</button>
+                          {genImgLoading&&<button onClick={stopImageGen} style={{padding:"9px",borderRadius:99,border:"1.5px solid rgba(248,81,73,.35)",background:"rgba(248,81,73,.1)",color:"var(--err)",cursor:"pointer",fontFamily:"inherit",fontSize:13,fontWeight:800,display:"flex",alignItems:"center",justifyContent:"center",gap:7}}>⏹ 생성 중단</button>}
+                          {generatedImages.length>0&&!genImgLoading&&<button onClick={()=>{setGeneratedImages([]);setGenImgProgress(0);setGenImgCurrent(0);}} style={{padding:"8px",borderRadius:8,border:"1px solid rgba(248,81,73,.3)",background:"rgba(248,81,73,.08)",color:"var(--err)",cursor:"pointer",fontFamily:"inherit",fontSize:12,fontWeight:700}}>🗑 이미지 초기화</button>}
+                        </div>
+                      </>
+                    )}
+                    {imgSource==="upload"&&(
+                      <div>
+                        <label style={{display:"flex",alignItems:"center",gap:10,padding:"14px",borderRadius:10,border:"2px dashed var(--a)40",background:"var(--ad)",cursor:"pointer"}}>
+                          <span style={{fontSize:22}}>📁</span>
+                          <div><div style={{fontSize:13,fontWeight:700,color:"var(--a)"}}>파일 선택</div><div style={{fontSize:11,color:"var(--m)",marginTop:2}}>여러 장 동시 가능</div></div>
+                          <input type="file" accept="image/*" multiple onChange={handleImageUpload} style={{display:"none"}}/>
+                        </label>
+                        {uploadedImages.length>0&&<button onClick={()=>setUploadedImages([])} style={{marginTop:8,width:"100%",padding:"7px",borderRadius:7,border:"1px solid rgba(248,81,73,.3)",background:"rgba(248,81,73,.08)",color:"var(--err)",cursor:"pointer",fontFamily:"inherit",fontSize:12,fontWeight:700}}>🗑 업로드 초기화</button>}
+                      </div>
+                    )}
+                  </div>
+                  {/* 오른쪽 갤러리 */}
+                  <div>
+                    <div className="card" style={{minHeight:280}}>
+                      <div className="card-title" style={{marginBottom:14}}>🖼️ 생성된 이미지{getActiveImages().length>0&&<span style={{fontWeight:400,color:"var(--m)",textTransform:"none",letterSpacing:0}}> — {getActiveImages().length}장 · 첫 번째 썸네일</span>}</div>
+                      {getActiveImages().length===0&&!genImgLoading?(
+                        <div style={{textAlign:"center",padding:"36px 20px",color:"var(--m)"}}>
+                          <div style={{fontSize:44,marginBottom:10}}>🖼️</div>
+                          <div style={{fontSize:14,fontWeight:700,marginBottom:5}}>아직 이미지가 없어요</div>
+                          <div style={{fontSize:12,color:"var(--m)"}}>왼쪽에서 수량 설정 후 생성 버튼!</div>
+                        </div>
+                      ):(
+                        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(130px,1fr))",gap:9}}>
+                          {genImgLoading&&Array.from({length:imgCount-generatedImages.length}).map((_,i)=>(
+                            <div key={`ph-${i}`} style={{aspectRatio:"1",borderRadius:11,background:"var(--ib)",border:"2px dashed var(--b)",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:7}}>
+                              {i===0?<><span className="asp2"/><span style={{fontSize:10,color:"var(--a)",fontWeight:700}}>생성 중...</span></>:<span style={{fontSize:20,opacity:.3}}>🖼️</span>}
+                            </div>
+                          ))}
+                          {getActiveImages().map((img,i)=>(
+                            <div key={i} style={{position:"relative",aspectRatio:"1"}}>
+                              <img src={img} alt="" style={{width:"100%",height:"100%",objectFit:"cover",borderRadius:11,border:i===0?"2px solid var(--a)":"2px solid var(--b)",display:"block",cursor:"pointer"}} onClick={()=>window.open(img,"_blank")} onError={e=>{(e.target as HTMLImageElement).style.display="none";}}/>
+                              {i===0&&<span style={{position:"absolute",top:-7,left:-4,fontSize:9,fontWeight:800,padding:"2px 7px",borderRadius:99,background:"var(--a)",color:"#000"}}>썸네일</span>}
+                              <button style={{position:"absolute",top:-6,right:-6,width:19,height:19,borderRadius:"50%",background:"var(--err)",border:"none",color:"#fff",cursor:"pointer",fontSize:10,display:"flex",alignItems:"center",justifyContent:"center"}} onClick={()=>{if(imgSource==="ai")setGeneratedImages(p=>p.filter((_,j)=>j!==i));else setUploadedImages(p=>p.filter((_,j)=>j!==i));}}>✕</button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                    <div style={{display:"flex",gap:10,marginTop:14,flexWrap:"wrap"}}>
+                      <button className="abp" style={{flex:1}} onClick={()=>setTab("publish")} disabled={!genContent}>🚀 발행하기로 이동 →</button>
+                      <button style={{flex:1,padding:"13px",borderRadius:99,border:"1px solid var(--b)",background:"var(--ib)",color:"var(--m)",cursor:"pointer",fontFamily:"inherit",fontSize:14,fontWeight:700}} onClick={()=>setTab("write")}>← 글 생성으로</button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* ───── 📋 발행 관리 ───── */}
+            {tab === "manage" && (
+              <div style={{animation:"fadeUp .25s ease both"}}>
+                <div className="card">
+                  <div className="card-title" style={{marginBottom:14}}>📝 발행 방식 선택</div>
+                  <div style={{display:"grid",gap:10}}>
+                    {([
+                      {id:"full",     ico:"📄", name:"① 전체 발행",  sub:"본문 + FAQ + 관련글 모두"},
+                      {id:"body_faq", ico:"💬", name:"② 본문 + FAQ", sub:"본문과 자주 묻는 질문까지"},
+                      {id:"body_only",ico:"✏️", name:"③ 본문만",     sub:"핵심 내용만 깔끔하게"},
+                    ] as const).map(c=>(
+                      <button key={c.id} onClick={()=>setPubSub(c.id as any)} style={{padding:"15px 17px",borderRadius:12,border:`2px solid ${(pubSub||"full")===c.id?(c.id==="full"?"var(--a)":c.id==="body_faq"?"var(--pink,#FF6B9D)":"var(--yellow,#FFD93D)"):"var(--b)"}`,background:(pubSub||"full")===c.id?(c.id==="full"?"var(--ad)":c.id==="body_faq"?"rgba(255,107,157,.08)":"rgba(255,217,61,.08)"):"var(--ib)",cursor:"pointer",textAlign:"left",fontFamily:"inherit"}}>
+                        <div style={{fontSize:22,marginBottom:6}}>{c.ico}</div>
+                        <div style={{fontSize:15,fontWeight:800,color:"var(--text,#e8f4ff)",marginBottom:3}}>{c.name}</div>
+                        <div style={{fontSize:12,color:"var(--m)"}}>{c.sub}</div>
+                      </button>
+                    ))}
+                  </div>
+                  {genContent&&<button className="abp" style={{width:"100%",marginTop:10}} onClick={()=>setTab("publish")}>🚀 이 방식으로 발행하기 →</button>}
+                </div>
+                {/* 발행 기록 생략 - 관리자는 회원관리 탭에서 확인 */}
+                <div className="card">
+                  <div className="card-title">📋 발행 현황</div>
+                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10}}>
+                    {[{l:"전체 회원",v:String(users.length)},{l:"오늘 발행",v:"—"},{l:"잔여 건수",v:"—"}].map((s,i)=>(
+                      <div key={i} style={{padding:"14px 12px",borderRadius:11,background:"var(--ib)",border:"1px solid var(--b)",textAlign:"center"}}>
+                        <div style={{fontSize:22,fontWeight:900,color:i===0?"var(--a)":"var(--text,#e8f4ff)"}}>{s.v}</div>
+                        <div style={{fontSize:10,color:"var(--m)",marginTop:3}}>{s.l}</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
               </div>
             )}
 
