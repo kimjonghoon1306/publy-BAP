@@ -577,14 +577,41 @@ export default function DashboardPage({user, onLogout, onAdminLogin, onThemeTogg
       .trim();
   }
 
-  function getCatGuide(kw:string,title:string):string{
+  // 경험 시나리오 뱅크 (AI 냄새 차단용)
+  const EXP_BANK: Record<string,string[]> = {
+    food:["지난 주말 친구랑 우연히 들어갔다가 완전 반해버렸어요.","줄 서서 기다리면서 반신반의했는데 막상 먹어보니 기다린 보람이 있더라고요.","동네 단골 맛집을 찾다가 블로그 보고 방문했는데 기대 이상이었어요."],
+    tech:["한 달 넘게 직접 써보고 나서야 확실히 판단이 섰어요.","처음엔 익숙해지는 데 2주 정도 걸렸는데 지금은 없으면 안 될 것 같아요.","무료 버전 2주 쓰다가 결국 유료 결제했습니다."],
+    review:["실제로 3개월 써본 솔직한 후기예요. 광고 아닙니다.","온라인에서 좋은 리뷰만 보고 샀다가 실망한 적이 있어서 최대한 균형 잡으려 했어요.","구매 전에 이런 글 없어서 직접 써봤어요."],
+    travel:["2박 3일 일정 짜면서 정말 많이 찾아봤는데 도움 되는 글이 없어서 다녀와서 직접 씁니다.","성수기에 다녀왔는데 사람 많아도 충분히 가볼 만했어요.","처음 가는 곳이라 긴장했는데 막상 가보니 생각보다 훨씬 좋았어요."],
+    health:["3개월 직접 해보고 달라진 점 솔직하게 정리해봤어요.","병원 두 군데 돌아다니고 나서 내린 결론이에요.","저도 똑같은 고민 하다가 이것저것 해봤는데 이게 제일 효과 있었어요."],
+    money:["실제로 1년 해본 결과물이에요. 수익률 숫자도 그대로 공개할게요.","재테크 시작할 때 이런 글 있었으면 시행착오 줄였을 텐데 싶어서 씁니다.","처음엔 소액으로 시작했다가 지금은 금액을 올렸어요."],
+    info:["찾아봤는데 정리된 글이 없어서 직접 알아보고 정리했어요.","저도 이거 몰라서 한참 헤맸는데 이제서야 알게 됐어요.","주변에서 많이 물어봐서 한 번에 정리해봤습니다."],
+  };
+  function pickExp(arr:string[]):string{ return arr[Math.floor(Math.random()*arr.length)]; }
+
+  function getCatGuide(kw:string,title:string):{guide:string;exp:string}{
     const k=(kw+" "+title).toLowerCase();
-    if(/맛집|음식|카페|식당|요리|커피/.test(k))return"[맛집/음식] 직접 방문한 것처럼: 분위기, 맛, 가격. 단점도 솔직하게.";
-    if(/여행|관광|호텔|숙소|제주|부산/.test(k))return"[여행] 교통편, 비용, 소요시간, 명소, 현지 맛집, 예산.";
-    if(/건강|다이어트|운동|피부/.test(k))return"[건강] 전문 용어 쉽게, 집 vs 병원 구분.";
-    if(/재테크|투자|주식|금융/.test(k))return"[재테크] 초보자용 설명, 실제 숫자 예시.";
-    if(/it|앱|ai|테크|스마트폰/.test(k))return"[IT/테크] 쉬운 설명, 실제 사용 시나리오, 장단점.";
-    return"[정보/일상] 독자가 몰랐던 새 정보, 실용 팁.";
+    if(/맛집|음식|카페|식당|요리|커피|치킨|피자|빵|디저트/.test(k))return{
+      guide:"[맛집/음식] 가게 분위기, 메뉴 맛 상세 묘사(시각·후각·미각·식감), 가격/웨이팅 현실 정보, 솔직한 단점, 재방문 의향\n소제목 예시(질문형 텍스트): \"왜 여기가 웨이팅이 생겼을까?\", \"직접 먹어본 시그니처 메뉴 솔직 후기\", \"이 가격이면 가볼 만할까?\"",
+      exp:pickExp(EXP_BANK.food)};
+    if(/여행|관광|호텔|숙소|제주|부산|서울|강원|해외/.test(k))return{
+      guide:"[여행] 교통+실제 비용(구체적 금액), 명소 현실 정보, 현지 맛집, 예산 총정리, 아무도 안 알려주는 정보\n소제목 예시(질문형 텍스트): \"여기 진짜 가볼 만한가요?\", \"얼마 있으면 2박 3일 가능할까요?\", \"처음 가는 분들이 꼭 알아야 할 것\"",
+      exp:pickExp(EXP_BANK.travel)};
+    if(/건강|다이어트|운동|헬스|피부|탈모|병원|약|증상/.test(k))return{
+      guide:"[건강] 용어 쉽게 풀이, 집에서 할 수 있는 방법 vs 병원 필요 경우, 잘못된 상식 바로잡기, 실제 경험 기간+결과\n소제목 예시(질문형 텍스트): \"정말 효과가 있을까요?\", \"언제 병원에 가야 할까요?\", \"이렇게 하면 안 됩니다\"",
+      exp:pickExp(EXP_BANK.health)};
+    if(/재테크|투자|주식|부동산|코인|적금|보험|카드|절약|돈/.test(k))return{
+      guide:"[재테크] 초보자 눈높이, 실제 수치 예시(금액 명시), 리스크+수익률 균형, 내가 직접 해본 결과\n소제목 예시(질문형 텍스트): \"진짜 수익이 날까요?\", \"초보가 처음 시작하려면?\", \"이것만은 조심하세요\"",
+      exp:pickExp(EXP_BANK.money)};
+    if(/it|앱|어플|ai|테크|스마트폰|노트북|프로그램|소프트웨어/.test(k))return{
+      guide:"[IT/테크] 전문용어 쉽게 풀이, 실제 사용 후기(기간 명시), 무료/유료 차이, 초보자 단계별 가이드\n소제목 예시(질문형 텍스트): \"실제로 써보니 어떤가요?\", \"무료로 써도 충분할까요?\", \"이런 분들께 추천합니다\"",
+      exp:pickExp(EXP_BANK.tech)};
+    if(/리뷰|후기|사용기|체험|써봤|구매|샀|직접/.test(k))return{
+      guide:"[리뷰] 사용 전 기대 vs 실제 평가, 사용 기간 명시, 장단점 균형, 수치로 표현, 다시 살 의향\n소제목 예시(질문형 텍스트): \"사기 전에 이것만 확인하세요\", \"실제로 써보니 달랐던 점은?\", \"이런 분들께는 비추합니다\"",
+      exp:pickExp(EXP_BANK.review)};
+    return{
+      guide:"[정보성] 독자가 몰랐던 새 정보, 바로 써먹는 실용 팁, 구체적 사례와 수치, 내가 직접 알아본 과정\n소제목 예시(질문형 텍스트): \"왜 이게 중요한가요?\", \"실제로 어떻게 하면 되나요?\", \"이런 실수 하지 마세요\"",
+      exp:pickExp(EXP_BANK.info)};
   }
 
   async function callAI(prompt:string,signal?:AbortSignal):Promise<string>{
@@ -603,7 +630,7 @@ export default function DashboardPage({user, onLogout, onAdminLogin, onThemeTogg
     }
     if(ai==="groq"){
       const key=localStorage.getItem("publy_groq_key")||"";if(!key)throw new Error("Groq API 키 없음");
-      const r=await fetch("https://api.groq.com/openai/v1/chat/completions",{method:"POST",headers:{"Content-Type":"application/json","Authorization":`Bearer ${key}`},body:JSON.stringify({model:"llama-3.1-70b-versatile",max_tokens:8000,messages:[{role:"user",content:prompt}]}),signal:signal||AbortSignal.timeout(90000)});
+      const r=await fetch("https://api.groq.com/openai/v1/chat/completions",{method:"POST",headers:{"Content-Type":"application/json","Authorization":`Bearer ${key}`},body:JSON.stringify({model:"llama-3.3-70b-versatile",max_tokens:8000,messages:[{role:"user",content:prompt}]}),signal:signal||AbortSignal.timeout(90000)});
       if(!r.ok){const e=await r.json();throw new Error(e.error?.message||"Groq 오류");}
       const d=await r.json();return d.choices?.[0]?.message?.content||"";
     }
@@ -680,36 +707,42 @@ export default function DashboardPage({user, onLogout, onAdminLogin, onThemeTogg
     if(!selectedTitle&&!keyword){alert("키워드와 제목을 먼저 선택해주세요");return;}
     const title=selectedTitle||keyword;
     setGenerating(true);abortRef.current=new AbortController();
-    const catGuide=getCatGuide(keyword,title);
-    const adGuide=adType==="adpost"?"[수익] 애드포스트: 체류시간 늘리는 감성 스토리.":"[수익] 애드센스: 클릭 유도, 키워드 밀도 높게.";
-    const prompt=`당신은 대한민국 최고의 블로그 작가입니다.
+    const {guide:catGuide,exp:expHint}=getCatGuide(keyword,title);
+    const adGuide=adType==="adpost"
+      ?"[수익화] 네이버 애드포스트: 체류 시간 늘리는 스토리 구성, 감성적 공감 유도"
+      :"[수익화] 구글 애드센스: 클릭 유도 문구, 상업적 키워드 자연스럽게 포함";
+    const prompt=`당신은 대한민국 블로그 작가입니다. 실제로 경험한 사람처럼, 독자와 대화하듯 생생하게 씁니다.
 
-키워드: "${keyword}"  제목: "${title}"
+키워드: "${keyword}"
+제목: "${title}"
 목표 글자수: ${targetChars}자 내외 (±50자, 반드시 이 범위 안에서 작성)
+${adGuide}
 
 ${catGuide}
 
-=== 절대 규칙 ===
-⛔ ## 기호 완전 금지 (소제목은 그냥 텍스트로)
-⛔ ** * - + 마크다운 기호 전부 금지
-⛔ 한자,중국어,일본어 금지
-⛔ AI 티 나는 표현 금지
-✅ 독자에게 직접 말 걸기
-✅ 구체적 수치, 가격, 기간
-✅ 문장 끝: ~해요, ~거든요, ~더라고요, ~잖아요 다양하게
-✅ 키워드 7회 이상 자연스럽게
-✅ 반드시 ${targetChars-50}~${targetChars+50}자 사이로 작성
+[경험 시나리오 - 글 앞부분에 이 맥락을 자연스럽게 녹여서 사용]
+"${expHint}"
+(위 문장을 그대로 쓰지 말고 이 감정과 맥락을 변형해서 사용)
 
-${adGuide}
+=== 절대 규칙 ===
+⛔ ## 기호 완전 금지 (소제목은 순수 텍스트로, 빈 줄로 구분)
+⛔ ** * - + 마크다운 기호 전부 금지
+⛔ 한자, 중국어, 일본어 금지
+⛔ "~해보겠습니다", "~에 대해 알아보겠습니다", "결론적으로" 같은 AI 패턴 표현 금지
+✅ 소제목은 텍스트로 질문형: "왜 ~인가요?", "~하면 어떻게 될까요?" 형식
+✅ 구체적 수치, 가격, 기간 반드시 포함 (애매한 표현 금지)
+✅ 문장 끝: ~해요, ~거든요, ~더라고요, ~잖아요 다양하게
+✅ 키워드 3~4회만 자연스럽게. 나머지는 동의어·연관어로 다양하게 표현
+✅ 반드시 ${targetChars-50}~${targetChars+50}자 사이로 작성
 
 === 출력 형식 ===
 태그: 태그1, 태그2, 태그3, 태그4, 태그5
 
-(본문 ${targetChars}자 내외 - 순수 텍스트)
+(본문 ${targetChars}자 내외 - 순수 텍스트, 소제목은 빈 줄로 구분)
 
 [FAQ시작]
-Q1: (질문)
-A1: (답변)
+Q1: (독자가 가장 궁금해하는 질문)
+A1: (구체적 답변)
 Q2: (질문)
 A2: (답변)
 Q3: (질문)
@@ -717,7 +750,7 @@ A3: (답변)
 [FAQ끝]
 
 [관련글시작]
-POST1: (제목)|(이유)
+POST1: (연관 블로그 주제 제목)|(독자가 이 글을 읽으면 좋은 이유)
 POST2: (제목)|(이유)
 POST3: (제목)|(이유)
 [관련글끝]`;
