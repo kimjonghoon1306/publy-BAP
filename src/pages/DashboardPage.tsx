@@ -2,13 +2,14 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { PublyUser, getQuota, getHistory, getAccounts, PublyQuota, PublyHistory, PublyAccount, upsertAccount, useQuota, addHistory } from "../lib/supabase";
 import { supabase } from "../lib/supabase";
 
-type MainTab = "write" | "image" | "publish" | "manage" | "accounts" | "settings";
+type MainTab = "keyword" | "write" | "image" | "publish" | "manage" | "accounts" | "settings";
 type PublishConcept = "full" | "body_faq" | "body_only";
 
 const BOT = "http://localhost:3333";
 const EXE_DOWNLOAD_URL = "https://github.com/kimjonghoon13/publy-BAP/releases/latest/download/Publy-Setup.exe";
 const BATCH = 30;
 const MAX_TITLES = 90;
+const MAX_KW = 90;
 const GEMINI_MODELS = ["gemini-2.0-flash","gemini-2.0-flash-lite","gemini-2.5-flash","gemini-2.5-flash-lite"];
 const PLAN_LABELS: Record<string,string> = {free:"FREE",basic:"BASIC",pro:"PRO"};
 
@@ -22,6 +23,7 @@ const IMAGE_AI_LIST = [
   {id:"replicate", label:"Flux (Replicate)", sub:"유료",placeholder:"r8_...", storageKey:"publy_replicate_key",link:"https://replicate.com/account/api-tokens", color:"#8B5CF6",logo:"R"},
 ];
 const MAIN_TABS = [
+  {k:"keyword", i:"🔍", l:"키워드/제목"},
   {k:"write",   i:"✍️", l:"글 생성"},
   {k:"image",   i:"🖼️", l:"이미지 생성"},
   {k:"publish", i:"🚀", l:"발행하기"},
@@ -313,7 +315,7 @@ interface Props {
 }
 
 export default function DashboardPage({user, onLogout, onAdminLogin, onThemeToggle, theme}: Props) {
-  const [tab, setTab] = useState<MainTab>("write");
+  const [tab, setTab] = useState<MainTab>("keyword");
   const [showGuide, setShowGuide] = useState(false);
   const [guideTab, setGuideTab] = useState(0);
   const [botOnline, setBotOnline] = useState(false);
@@ -323,6 +325,7 @@ export default function DashboardPage({user, onLogout, onAdminLogin, onThemeTogg
   const [adType, setAdType] = useState<"adpost"|"adsense">("adpost");
   const [platform, setPlatform] = useState<"naver"|"tistory">("naver");
   const [keyword, setKeyword] = useState("");
+  const [keywords, setKeywords] = useState<string[]>(()=>{try{return JSON.parse(localStorage.getItem("publy_kws")||"[]");}catch{return [];}});
   const [targetChars, setTargetChars] = useState(1350);
   const [titles, setTitles] = useState<string[]>(()=>{try{return JSON.parse(localStorage.getItem("publy_titles")||"[]");}catch{return[];}});
   const [selectedTitle, setSelectedTitle] = useState("");
@@ -649,6 +652,12 @@ export default function DashboardPage({user, onLogout, onAdminLogin, onThemeTogg
 
   async function handleGenerateTitles(reset=false){
     if(!keyword.trim()){alert("키워드를 입력해주세요");return;}
+    // 키워드 풀에 누적 (중복제거, 90개 제한)
+    if(!keywords.includes(keyword.trim())){
+      const newKws=[...keywords,keyword.trim()].slice(-MAX_KW);
+      setKeywords(newKws);
+      localStorage.setItem("publy_kws",JSON.stringify(newKws));
+    }
     if(reset)setTitles([]);
     setLoadingTitles(true);abortRef.current=new AbortController();
     const prompt=adType==="adpost"
@@ -977,8 +986,8 @@ POST3: (제목)|(이유)
             {MAIN_TABS.map(t=>(
               <button key={t.k} className={`nav-item ${tab===t.k?"active":""}`} onClick={()=>setTab(t.k as MainTab)}>
                 <span className="nav-ico">{t.i}</span>{t.l}
+                {t.k==="keyword"&&titles.length>0&&<span className="nav-badge">{titles.length}</span>}
                 {t.k==="manage"&&history.length>0&&<span className="nav-badge">{history.length}</span>}
-                {t.k==="write"&&titles.length>0&&<span className="nav-badge">{titles.length}</span>}
               </button>
             ))}
             <div className="sidebar-foot">
@@ -990,19 +999,21 @@ POST3: (제목)|(이유)
           <div className="main">
 
             {/* ===== 글 생성 ===== */}
-            {tab==="write"&&(
+            {/* ═══ 🔍 키워드/제목 탭 ═══ */}
+            {tab==="keyword"&&(
               <div style={{animation:"fadeUp .25s ease both"}}>
                 <div className="steps">
-                  {[{n:"1",t:"목적+키워드"},{n:"2",t:"제목 선택"},{n:"3",t:"글 생성"}].map((s,i)=>{
-                    const done=(i===0&&titles.length>0)||(i===1&&!!selectedTitle)||(i===2&&!!genContent);
-                    const active=(i===0&&!titles.length)||(i===1&&titles.length>0&&!selectedTitle)||(i===2&&!!selectedTitle&&!genContent);
+                  {[{n:"1",t:"키워드 입력"},{n:"2",t:"제목 추천"},{n:"3",t:"제목 선택"}].map((s,i)=>{
+                    const done=(i===0&&keywords.length>0)||(i===1&&titles.length>0)||(i===2&&!!selectedTitle);
+                    const active=(i===0&&keywords.length===0)||(i===1&&keywords.length>0&&titles.length===0)||(i===2&&titles.length>0&&!selectedTitle);
                     return(<div key={i} className={`step-item ${done?"done":active?"active":""}`}><span className="step-n">STEP {s.n}</span>{done?"✓ ":""}{s.t}</div>);
                   })}
                 </div>
 
+                {/* 수익화 목적 + 플랫폼 */}
                 <div className="card">
                   <div className="card-header">
-                    <div className="card-title">🎯 수익화 목적</div>
+                    <div className="card-title">🎯 수익화 목적 선택</div>
                     <select className="inp" style={{width:110,padding:"7px 10px",fontSize:12}} value={platform} onChange={e=>setPlatform(e.target.value as any)}>
                       <option value="naver">네이버</option><option value="tistory">티스토리</option>
                     </select>
@@ -1016,13 +1027,35 @@ POST3: (제목)|(이유)
                       </button>
                     ))}
                   </div>
-                  <label className="inp-label" style={{marginTop:4}}>🔍 키워드 입력</label>
-                  <input className="inp lg" placeholder="예: 강남 맛집, 다이어트 방법, 제주도 여행..." value={keyword} onChange={e=>setKeyword(e.target.value)} onKeyDown={e=>e.key==="Enter"&&handleGenerateTitles(true)}/>
+
+                  {/* 누적 키워드 풀 */}
+                  {keywords.length>0&&(
+                    <div style={{marginBottom:14}}>
+                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+                        <label className="inp-label" style={{margin:0}}>🏷️ 누적 키워드 <span style={{color:"var(--text3)",fontWeight:400}}>({keywords.length}/{MAX_KW})</span></label>
+                        <button className="btn btn-danger btn-sm" style={{padding:"4px 10px",fontSize:11}} onClick={()=>{setKeywords([]);localStorage.removeItem("publy_kws");}}>전체 삭제</button>
+                      </div>
+                      <div style={{display:"flex",flexWrap:"wrap",gap:7}}>
+                        {keywords.map((kw,i)=>(
+                          <button key={i} onClick={()=>setKeyword(kw)} style={{padding:"7px 14px",borderRadius:99,fontSize:13,fontWeight:600,cursor:"pointer",border:`1.5px solid ${keyword===kw?"var(--accent)":"var(--border)"}`,background:keyword===kw?"var(--accent-bg)":"var(--bg)",color:keyword===kw?"var(--accent-text)":"var(--text2)",fontFamily:"inherit",transition:"all .15s"}}>{kw}</button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* 키워드 입력 */}
+                  <label className="inp-label">🔍 키워드 입력</label>
+                  <div style={{display:"flex",gap:8}}>
+                    <input className="inp lg" style={{flex:1}} placeholder="예: 강남 맛집, 다이어트 방법, 제주도 여행..." value={keyword} onChange={e=>setKeyword(e.target.value)} onKeyDown={e=>e.key==="Enter"&&handleGenerateTitles(true)}/>
+                  </div>
+
                   <div style={{display:"flex",gap:8,marginTop:12,flexWrap:"wrap"}}>
                     <button className="btn btn-primary" onClick={()=>handleGenerateTitles(true)} disabled={loadingTitles||!keyword}>{loadingTitles?<><span className="spinner"/>추천 중...</>:<>⭐ 제목 {BATCH}개 추천받기</>}</button>
                     {titles.length>0&&<button className="btn btn-secondary" onClick={()=>handleGenerateTitles(false)} disabled={loadingTitles}>{titles.length>=MAX_TITLES?"🔄 초기화 후 재생성":"➕ 30개 추가"}</button>}
-                    {titles.length>0&&<button className="btn btn-danger btn-sm" onClick={()=>{setTitles([]);setSelectedTitle("");localStorage.removeItem("publy_titles");}}>🗑 초기화</button>}
+                    {titles.length>0&&<button className="btn btn-danger btn-sm" onClick={()=>{setTitles([]);setSelectedTitle("");localStorage.removeItem("publy_titles");}}>🗑 제목 초기화</button>}
                   </div>
+
+                  {/* 제목 진행바 */}
                   {titles.length>0&&(
                     <div style={{marginTop:10,display:"flex",alignItems:"center",gap:8}}>
                       <div style={{flex:1,height:4,background:"var(--border)",borderRadius:99,overflow:"hidden"}}>
@@ -1033,6 +1066,7 @@ POST3: (제목)|(이유)
                   )}
                 </div>
 
+                {/* 제목 목록 */}
                 {titles.length>0&&(
                   <div className="card" style={{animation:"fadeUp .2s ease both"}}>
                     <div className="card-header">
@@ -1052,22 +1086,47 @@ POST3: (제목)|(이유)
                   </div>
                 )}
 
-                {(selectedTitle||titles.length>0)&&(
-                  <div className="card" style={{animation:"fadeUp .2s ease both"}}>
-                    <div className="card-title" style={{marginBottom:14}}>⚙️ 글 생성 설정</div>
-                    <div style={{marginBottom:16}}>
-                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
-                        <label className="inp-label" style={{margin:0}}>📏 목표 글자수</label>
-                        <span style={{fontSize:18,fontWeight:900,color:"var(--accent-text)",fontFamily:"'Space Grotesk',sans-serif"}}>{targetChars.toLocaleString()}자</span>
-                      </div>
-                      <input type="range" min={1200} max={2000} step={50} value={targetChars} onChange={e=>setTargetChars(Number(e.target.value))} style={{width:"100%",accentColor:"var(--accent)",height:6,cursor:"pointer"}}/>
-                      <div style={{display:"flex",justifyContent:"space-between",fontSize:11,color:"var(--text3)",marginTop:4}}><span>1,200자</span><span>1,500자</span><span>2,000자</span></div>
-                    </div>
-                    {selectedTitle&&<div style={{padding:"11px 14px",borderRadius:10,background:"var(--bg)",border:"1px solid var(--border)",marginBottom:14,fontSize:14}}>📌 선택 제목: <strong style={{color:"var(--accent-text)"}}>{selectedTitle}</strong></div>}
-                    <button className="btn btn-primary btn-full btn-xl" onClick={handleGenerate} disabled={generating}>{generating?<><span className="spinner"/>AI가 글을 쓰고 있어요...</>:<>✍️ 본문 생성 시작</>}</button>
-                    {generating&&<div style={{textAlign:"center",marginTop:8}}><button className="btn-stop" onClick={()=>abortRef.current?.abort()}>⏹ 생성 중단</button></div>}
+                {/* 다음 단계 버튼 */}
+                {selectedTitle&&(
+                  <div className="flow-nav">
+                    <button className="flow-btn flow-btn-g" onClick={()=>setTab("write")}>✍️ 글 생성하러 가기 →</button>
                   </div>
                 )}
+              </div>
+            )}
+
+            {/* ═══ ✍️ 글 생성 탭 ═══ */}
+            {tab==="write"&&(
+              <div style={{animation:"fadeUp .25s ease both"}}>
+
+                {/* 선택된 제목 표시 - 없으면 경고 */}
+                {selectedTitle?(
+                  <div className="sel-banner" style={{marginBottom:16}}>
+                    <div className="sel-banner-lbl">📌 선택된 제목 — <span style={{fontWeight:400,cursor:"pointer",textDecoration:"underline"}} onClick={()=>setTab("keyword")}>키워드/제목 탭에서 변경</span></div>
+                    <div className="sel-banner-txt">{selectedTitle}</div>
+                  </div>
+                ):(
+                  <div className="alert-box alert-warn" style={{display:"flex",alignItems:"center",gap:10}}>
+                    ⚠️ 먼저 키워드/제목 탭에서 제목을 선택해주세요
+                    <button className="btn btn-secondary btn-sm" style={{marginLeft:"auto",flexShrink:0}} onClick={()=>setTab("keyword")}>키워드/제목 탭으로 →</button>
+                  </div>
+                )}
+
+                <div className="card">
+                  <div className="card-title" style={{marginBottom:16}}>⚙️ 글 생성 설정</div>
+                  <div style={{marginBottom:16}}>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+                      <label className="inp-label" style={{margin:0}}>📏 목표 글자수</label>
+                      <span style={{fontSize:18,fontWeight:900,color:"var(--accent-text)",fontFamily:"'Space Grotesk',sans-serif"}}>{targetChars.toLocaleString()}자</span>
+                    </div>
+                    <input type="range" min={1200} max={2000} step={50} value={targetChars} onChange={e=>setTargetChars(Number(e.target.value))} style={{width:"100%",accentColor:"var(--accent)",height:6,cursor:"pointer"}}/>
+                    <div style={{display:"flex",justifyContent:"space-between",fontSize:11,color:"var(--text3)",marginTop:4}}><span>1,200자</span><span>1,500자</span><span>2,000자</span></div>
+                  </div>
+                  <button className="btn btn-primary btn-full btn-xl" onClick={handleGenerate} disabled={generating||!selectedTitle}>
+                    {generating?<><span className="spinner"/>AI가 글을 쓰고 있어요...</>:<>✍️ 본문 생성 시작</>}
+                  </button>
+                  {generating&&<div style={{textAlign:"center",marginTop:8}}><button className="btn-stop" onClick={()=>abortRef.current?.abort()}>⏹ 생성 중단</button></div>}
+                </div>
 
                 {genContent&&(
                   <div className="card" style={{animation:"fadeUp .2s ease both"}}>
