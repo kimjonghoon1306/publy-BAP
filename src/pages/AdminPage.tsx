@@ -18,6 +18,8 @@ const BOT = "http://localhost:3333";
 const ADM_UID = "admin-publy";
 const GEMINI_MODELS_ADM = ["gemini-2.0-flash","gemini-2.0-flash-lite","gemini-2.5-flash","gemini-2.5-flash-lite"];
 const BATCH = 30;
+const MAX_TITLES = 90;
+const MAX_KW = 90;
 
 const ADM_WRITE_AI = [
   {id:"gemini",label:"Gemini Flash",sub:"무료",placeholder:"AIza...",storageKey:"publy_adm_gemini_key",link:"https://aistudio.google.com/app/apikey",color:"#4285F4",logo:"G",free:true},
@@ -426,6 +428,7 @@ select.field-inp{cursor:pointer;appearance:auto;}
 `;
 
 const TABS = [
+  {k:"keyword",  i:"🔍", l:"키워드/제목"},
   {k:"write",    i:"✍️", l:"글 생성"},
   {k:"image",    i:"🖼️", l:"이미지 생성"},
   {k:"publish",  i:"🚀", l:"발행하기"},
@@ -437,7 +440,7 @@ const TABS = [
 ] as const;
 
 export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: Props) {
-  const [tab, setTab] = useState<"write"|"image"|"publish"|"manage"|"accounts"|"users"|"stats"|"settings">("write");
+  const [tab, setTab] = useState<"keyword"|"write"|"image"|"publish"|"manage"|"accounts"|"users"|"stats"|"settings">("keyword");
   const [showGuide, setShowGuide] = useState(false);
   const [guideTab, setGuideTab] = useState(0);
   const [botOnline, setBotOnline] = useState(false);
@@ -461,7 +464,9 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
   const [genImgCurrent, setGenImgCurrent] = useState(0);
   const imgAbortRef = useRef<AbortController|null>(null);
   const [showPreview, setShowPreview] = useState(false);
-  const [keyword, setKeyword] = useState(""); const [generating, setGenerating] = useState(false);
+  const [keyword, setKeyword] = useState("");
+  const [keywords, setKeywords] = useState<string[]>(()=>{try{return JSON.parse(localStorage.getItem("publy_adm_kws")||"[]");}catch{return [];}});
+  const [generating, setGenerating] = useState(false);
   const [genTitle, setGenTitle] = useState(""); const [genContent, setGenContent] = useState(""); const [genTags, setGenTags] = useState(""); const [genImage, setGenImage] = useState("");
   const [titles, setTitles] = useState<string[]>(()=>{try{return JSON.parse(localStorage.getItem("publy_adm_titles")||"[]");}catch{return[];}});
   const [selectedTitle, setSelectedTitle] = useState(""); const [loadingTitles, setLoadingTitles] = useState(false);
@@ -768,6 +773,12 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
 
   async function handleGenerateTitles(reset=false) {
     if (!keyword.trim()) { alert("키워드를 입력하세요"); return; }
+    // 키워드 풀 누적 (중복제거, 90개 제한)
+    if(!keywords.includes(keyword.trim())){
+      const newKws=[...keywords,keyword.trim()].slice(-MAX_KW);
+      setKeywords(newKws);
+      localStorage.setItem("publy_adm_kws",JSON.stringify(newKws));
+    }
     if (reset) setTitles([]);
     setLoadingTitles(true);
     const isAdpost = adType === "adpost";
@@ -1142,16 +1153,9 @@ POST3: (제목)|(이유)
           <div className="main">
 
             {/* ───── ✍️ 글 생성 ───── */}
-            {tab === "write" && (
+            {/* ───── 🔍 키워드/제목 ───── */}
+            {tab === "keyword" && (
               <div style={{animation:"fadeUp .25s ease both"}}>
-                <div className="steps">
-                  {[{n:"1",t:"키워드"},{n:"2",t:"제목 선택"},{n:"3",t:"글 생성"},{n:"4",t:"발행"}].map((s,i)=>(
-                    <div key={i} className={`step ${writeStep>i?"done":writeStep===i?"active":""}`}>
-                      <span className="step-num">STEP {s.n}</span>{writeStep>i?"✓ ":""}{s.t}
-                    </div>
-                  ))}
-                </div>
-
                 <div className="card">
                   <div className="card-title">🎯 수익화 목적</div>
                   <div className="adtype-grid">
@@ -1161,6 +1165,19 @@ POST3: (제목)|(이유)
                       </button>
                     ))}
                   </div>
+                  {keywords.length>0&&(
+                    <div style={{marginBottom:14}}>
+                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+                        <label className="inp-label" style={{margin:0}}>🏷️ 누적 키워드 ({keywords.length}/{MAX_KW})</label>
+                        <button style={{padding:"4px 10px",borderRadius:7,border:"1px solid rgba(248,81,73,.3)",background:"rgba(248,81,73,.1)",color:"var(--danger)",cursor:"pointer",fontSize:11,fontFamily:"inherit"}} onClick={()=>{setKeywords([]);localStorage.removeItem("publy_adm_kws");}}>전체 삭제</button>
+                      </div>
+                      <div style={{display:"flex",flexWrap:"wrap",gap:7}}>
+                        {keywords.map((kw,i)=>(
+                          <button key={i} onClick={()=>setKeyword(kw)} style={{padding:"8px 15px",borderRadius:99,fontSize:13,fontWeight:600,cursor:"pointer",border:`1.5px solid ${keyword===kw?"var(--accent)":"var(--border)"}`,background:keyword===kw?"var(--accent-bg)":"var(--bg)",color:keyword===kw?"var(--accent-text)":"var(--text2)",fontFamily:"inherit",transition:"all .15s"}}>{kw}</button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                   <label className="inp-label">🔍 키워드 입력</label>
                   <div style={{display:"flex",gap:8}}>
                     <input className="inp lg" style={{flex:1}} placeholder="예: 강남 맛집, 다이어트 방법..."
@@ -1173,19 +1190,18 @@ POST3: (제목)|(이유)
                     <button className="btn btn-primary" onClick={()=>handleGenerateTitles(true)} disabled={loadingTitles||!keyword}>
                       {loadingTitles?<><span className="spinner"/>생성 중...</>:<>⭐ 제목 {BATCH}개 추천</>}
                     </button>
-                    {titles.length>0&&<button className="btn btn-secondary" onClick={()=>handleGenerateTitles(false)} disabled={loadingTitles}>{titles.length>=90?"🔄 초기화 후 재생성":"➕ 30개 추가"}</button>}
+                    {titles.length>0&&<button className="btn btn-secondary" onClick={()=>handleGenerateTitles(false)} disabled={loadingTitles}>{titles.length>=MAX_TITLES?"🔄 초기화 후 재생성":"➕ 30개 추가"}</button>}
                     {titles.length>0&&<button className="btn btn-sm" style={{background:"rgba(248,81,73,.1)",color:"var(--danger)",border:"1px solid rgba(248,81,73,.3)"}} onClick={()=>{setTitles([]);setSelectedTitle("");localStorage.removeItem("publy_adm_titles");}}>🗑 초기화</button>}
                   </div>
                   {titles.length>0&&(
                     <div style={{marginTop:10,display:"flex",alignItems:"center",gap:8}}>
                       <div style={{flex:1,height:4,background:"var(--border)",borderRadius:99,overflow:"hidden"}}>
-                        <div style={{height:"100%",width:`${(titles.length/90)*100}%`,background:titles.length>=90?"var(--danger)":"var(--accent)",borderRadius:99,transition:"width .4s"}}/>
+                        <div style={{height:"100%",width:`${(titles.length/MAX_TITLES)*100}%`,background:titles.length>=MAX_TITLES?"var(--danger)":"var(--accent)",borderRadius:99,transition:"width .4s"}}/>
                       </div>
-                      <span style={{fontSize:11,color:titles.length>=90?"var(--danger)":"var(--text2)",fontFamily:"monospace"}}>{titles.length}/90</span>
+                      <span style={{fontSize:11,color:titles.length>=MAX_TITLES?"var(--danger)":"var(--text2)",fontFamily:"monospace"}}>{titles.length}/{MAX_TITLES}</span>
                     </div>
                   )}
                 </div>
-
                 {titles.length>0&&(
                   <div className="card">
                     <div className="card-title">✨ 제목 선택<span style={{marginLeft:"auto",fontSize:11,fontWeight:500,color:"var(--text2)",textTransform:"none",letterSpacing:0}}>클릭해서 선택</span></div>
@@ -1201,91 +1217,70 @@ POST3: (제목)|(이유)
                     </div>
                   </div>
                 )}
+                {selectedTitle&&(
+                  <button className="btn btn-primary btn-full btn-xl" style={{marginTop:4}} onClick={()=>setTab("write")}>
+                    ✍️ 글 생성하러 가기 →
+                  </button>
+                )}
+              </div>
+            )}
 
-                {(selectedTitle||keyword)&&(
-                  <div className="card">
-                    <div className="card-title">⚙️ 생성 설정</div>
-                    <div style={{marginBottom:16}}>
-                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
-                        <label className="inp-label" style={{margin:0}}>📏 목표 글자수</label>
-                        <span style={{fontSize:15,fontWeight:800,color:"var(--accent-text)"}}>{targetChars.toLocaleString()}자</span>
-                      </div>
-                      <input type="range" min={1200} max={2000} step={100} value={targetChars} onChange={e=>setTargetChars(Number(e.target.value))} style={{width:"100%",accentColor:"var(--accent)",height:6,cursor:"pointer"}}/>
-                      <div style={{display:"flex",justifyContent:"space-between",fontSize:11,color:"var(--text3)",marginTop:4}}><span>1,200자</span><span>1,600자</span><span>2,000자</span></div>
-                    </div>
-                    <div style={{marginBottom:16}}>
-                      <label className="inp-label">🖼️ 이미지</label>
-                      <div className="toggle-group">
-                        {([{id:"ai",label:"🤖 AI 생성"},{id:"upload",label:"📁 내 이미지"},{id:"none",label:"🚫 없음"}] as const).map(s=>(
-                          <button key={s.id} className={`toggle-btn ${imgSource===s.id?"active":""}`} onClick={()=>setImgSource(s.id)}>{s.label}</button>
-                        ))}
-                      </div>
-                    </div>
-                    {imgSource==="upload"&&(
-                      <div style={{marginBottom:16}}>
-                        <label style={{display:"flex",alignItems:"center",gap:10,padding:"14px 18px",borderRadius:10,border:"2px dashed var(--accent-border)",background:"var(--accent-bg)",cursor:"pointer"}}>
-                          <span style={{fontSize:22}}>📁</span>
-                          <div><div style={{fontSize:13,fontWeight:700,color:"var(--accent-text)"}}>이미지 파일 선택</div><div style={{fontSize:11,color:"var(--text2)"}}>여러 장 동시 선택 가능</div></div>
-                          <input type="file" accept="image/*" multiple onChange={handleImageUpload} style={{display:"none"}}/>
-                        </label>
-                        {uploadedImages.length>0&&<div className="img-grid" style={{marginTop:10}}>{uploadedImages.map((img,i)=>(<div key={i} className="img-thumb-wrap"><img src={img} alt="" className={`img-thumb ${i===0?"thumb-first":""}`}/><button className="img-thumb-del" onClick={()=>setUploadedImages(prev=>prev.filter((_,j)=>j!==i))}>✕</button></div>))}</div>}
-                      </div>
-                    )}
-                    {selectedTitle&&<div style={{padding:"12px 15px",borderRadius:10,background:"var(--bg)",border:"1px solid var(--border)",marginBottom:14,fontSize:14}}>📌 선택 제목: <strong style={{color:"var(--accent-text)"}}>{selectedTitle}</strong></div>}
-                    <button className="btn btn-primary btn-full btn-xl" onClick={handleGenerate} disabled={generating}>
-                      {generating?<><span className="spinner"/>AI 작성 중...</>:<>✍️ 본문 + 이미지 생성</>}
-                    </button>
+            {/* ───── ✍️ 글 생성 ───── */}
+            {tab === "write" && (
+              <div style={{animation:"fadeUp .25s ease both"}}>
+                {selectedTitle?(
+                  <div className="selected-banner" style={{marginBottom:14}}>
+                    <div className="selected-banner-label">📌 선택된 제목 — <span style={{fontWeight:400,cursor:"pointer",textDecoration:"underline"}} onClick={()=>setTab("keyword")}>키워드/제목 탭에서 변경</span></div>
+                    <div className="selected-banner-text">{selectedTitle}</div>
+                  </div>
+                ):(
+                  <div className="alert alert-warn" style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
+                    ⚠️ 먼저 키워드/제목 탭에서 제목을 선택해주세요
+                    <button className="btn btn-sm" style={{marginLeft:"auto",flexShrink:0,background:"var(--card)",border:"1px solid var(--border)",color:"var(--text)",fontFamily:"inherit",cursor:"pointer",borderRadius:8,padding:"8px 14px",fontSize:13}} onClick={()=>setTab("keyword")}>키워드/제목 탭으로 →</button>
                   </div>
                 )}
-
+                <div className="card">
+                  <div className="card-title">⚙️ 생성 설정</div>
+                  <div style={{marginBottom:16}}>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+                      <label className="inp-label" style={{margin:0}}>📏 목표 글자수</label>
+                      <span style={{fontSize:15,fontWeight:800,color:"var(--accent-text)"}}>{targetChars.toLocaleString()}자</span>
+                    </div>
+                    <input type="range" min={1200} max={2000} step={100} value={targetChars} onChange={e=>setTargetChars(Number(e.target.value))} style={{width:"100%",accentColor:"var(--accent)",height:6,cursor:"pointer"}}/>
+                    <div style={{display:"flex",justifyContent:"space-between",fontSize:11,color:"var(--text3)",marginTop:4}}><span>1,200자</span><span>1,600자</span><span>2,000자</span></div>
+                  </div>
+                  <div style={{marginBottom:16}}>
+                    <label className="inp-label">🖼️ 이미지</label>
+                    <div className="toggle-group">
+                      {([{id:"ai",label:"🤖 AI 생성"},{id:"upload",label:"📁 내 이미지"},{id:"none",label:"🚫 없음"}] as const).map(s=>(
+                        <button key={s.id} className={`toggle-btn ${imgSource===s.id?"active":""}`} onClick={()=>setImgSource(s.id)}>{s.label}</button>
+                      ))}
+                    </div>
+                  </div>
+                  {imgSource==="upload"&&(
+                    <div style={{marginBottom:16}}>
+                      <label style={{display:"flex",alignItems:"center",gap:10,padding:"14px 18px",borderRadius:10,border:"2px dashed var(--accent-border)",background:"var(--accent-bg)",cursor:"pointer"}}>
+                        <span style={{fontSize:22}}>📁</span>
+                        <div><div style={{fontSize:13,fontWeight:700,color:"var(--accent-text)"}}>이미지 파일 선택</div><div style={{fontSize:11,color:"var(--text2)"}}>여러 장 동시 선택 가능</div></div>
+                        <input type="file" accept="image/*" multiple onChange={handleImageUpload} style={{display:"none"}}/>
+                      </label>
+                      {uploadedImages.length>0&&<div className="img-grid" style={{marginTop:10}}>{uploadedImages.map((img,i)=>(<div key={i} className="img-thumb-wrap"><img src={img} alt="" className={`img-thumb ${i===0?"thumb-first":""}`}/><button className="img-thumb-del" onClick={()=>setUploadedImages(prev=>prev.filter((_,j)=>j!==i))}>✕</button></div>))}</div>}
+                    </div>
+                  )}
+                  <button className="btn btn-primary btn-full btn-xl" onClick={handleGenerate} disabled={generating||!selectedTitle}>
+                    {generating?<><span className="spinner"/>AI 작성 중...</>:<>✍️ 본문 생성 시작</>}
+                  </button>
+                </div>
                 {genContent&&(
                   <>
-                    {showPreview&&(
-                      <div className="preview-modal" onClick={()=>setShowPreview(false)}>
-                        <div className="preview-inner" onClick={e=>e.stopPropagation()}>
-                          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}>
-                            <span style={{fontSize:13,color:"#888",fontWeight:700}}>📱 미리보기</span>
-                            <button style={{background:"none",border:"none",cursor:"pointer",fontSize:22,color:"#888"}} onClick={()=>setShowPreview(false)}>✕</button>
-                          </div>
-                          <div style={{fontFamily:"'Apple SD Gothic Neo','Malgun Gothic',sans-serif"}}>
-                            <h1 style={{fontSize:22,fontWeight:700,color:"#191919",lineHeight:1.4,marginBottom:14}}>{genTitle}</h1>
-                            {genTags&&<div style={{marginBottom:16,display:"flex",flexWrap:"wrap",gap:5}}>{genTags.split(",").map((t,i)=><span key={i} style={{fontSize:12,padding:"3px 10px",borderRadius:99,background:"#f1f3f5",color:"#495057"}}>#{t.trim()}</span>)}</div>}
-                            {getActiveImages()[0]&&<img src={getActiveImages()[0]} alt="" style={{width:"100%",maxHeight:280,objectFit:"cover",borderRadius:10,marginBottom:18}} onError={e=>{(e.target as HTMLImageElement).style.display="none";}}/>}
-                            {splitContentWithImages(genContent,getActiveImages().slice(1)).map((s,i)=>(
-                              <div key={i}>{s.img?<img src={s.img} alt="" style={{width:"100%",maxHeight:240,objectFit:"cover",borderRadius:8,margin:"14px 0"}} onError={e=>{(e.target as HTMLImageElement).style.display="none";}}/>:<div style={{fontSize:15,color:"#333",lineHeight:1.9,whiteSpace:"pre-wrap",marginBottom:8}}>{s.text}</div>}</div>
-                            ))}
-                          </div>
-                        </div>
-                      </div>
-                    )}
                     <div className="card">
                       <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:14,flexWrap:"wrap",gap:8}}>
-                        <div className="card-title" style={{marginBottom:0}}>🎨 생성 결과</div>
+                        <div className="card-title" style={{marginBottom:0}}>🎉 글 생성 완료!</div>
                         <div style={{display:"flex",gap:7,alignItems:"center"}}>
                           <span className="char-badge">{genContent.length.toLocaleString()}자</span>
                           <button className="preview-btn" onClick={()=>setShowPreview(true)}>👁️ 미리보기</button>
                         </div>
                       </div>
-                      {imgSource!=="none"&&(
-                        <div style={{marginBottom:14,padding:"12px 16px",borderRadius:10,background:"var(--bg)",border:"1px solid var(--border)"}}>
-                          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
-                            <label style={{fontSize:13,fontWeight:700,color:"var(--text)"}}>🖼️ 이미지 수량</label>
-                            <div style={{display:"flex",alignItems:"center",gap:8}}>
-                              <span style={{fontSize:14,fontWeight:800,color:"var(--accent-text)"}}>{imgCountManual??recommendImageCount(genContent)}장</span>
-                              {imgCountManual!==null&&<button className="btn-ghost btn-sm" style={{padding:"3px 9px",fontSize:11}} onClick={()=>setImgCountManual(null)}>자동</button>}
-                            </div>
-                          </div>
-                          <input type="range" min={0} max={20} step={1} value={imgCountManual??recommendImageCount(genContent)} onChange={e=>setImgCountManual(Number(e.target.value))} style={{width:"100%",accentColor:"var(--accent)",height:6,cursor:"pointer"}}/>
-                          {imgSource==="ai"&&<button className="btn btn-secondary btn-sm" style={{marginTop:8}} onClick={()=>handleGenerateImages()} disabled={genImgLoading}>{genImgLoading?<><span className="spinner spinner-white"/>생성 중...</>:"🔄 이미지 재생성"}</button>}
-                        </div>
-                      )}
-                      {getActiveImages().length>0&&(
-                        <div style={{marginBottom:14}}>
-                          <div style={{fontSize:12,fontWeight:700,color:"var(--text2)",marginBottom:8}}>🖼️ 이미지 {getActiveImages().length}장 <span style={{fontWeight:400,color:"var(--text3)"}}>— 첫 번째가 썸네일</span></div>
-                          {genImgLoading&&<div style={{fontSize:12,color:"var(--accent-text)",marginBottom:8,animation:"pulse 1s infinite"}}>⏳ 이미지 생성 중...</div>}
-                          <div className="img-grid">{getActiveImages().map((img,i)=>(<div key={i} className="img-thumb-wrap"><img src={img} alt="" className={`img-thumb ${i===0?"thumb-first":""}`} onError={e=>{(e.target as HTMLImageElement).style.display="none";}}/>{i===0&&<span className="img-thumb-badge">썸네일</span>}<button className="img-thumb-del" onClick={()=>{if(imgSource==="ai")setGeneratedImages(prev=>prev.filter((_,j)=>j!==i));else setUploadedImages(prev=>prev.filter((_,j)=>j!==i));}}>✕</button></div>))}</div>
-                        </div>
-                      )}
                       <div style={{display:"flex",flexDirection:"column",gap:12}}>
                         {([{l:"제목",v:genTitle,s:setGenTitle},{l:"태그",v:genTags,s:setGenTags}] as const).map(f=>(
                           <div key={f.l}><label className="inp-label">{f.l}</label><input className="inp" value={f.v} onChange={e=>f.s(e.target.value)}/></div>
@@ -1299,10 +1294,10 @@ POST3: (제목)|(이유)
                         </div>
                       </div>
                     </div>
-                    <button className="btn btn-primary btn-full btn-xl" style={{marginBottom:20}}
-                      onClick={()=>{setPubTitle(genTitle);setPubContent(genContent);setPubTags(genTags);setPubImg(getActiveImages()[0]||"");setTab("publish");}}>
-                      🚀 발행하기로 이동
-                    </button>
+                    <div style={{display:"flex",gap:8,marginBottom:20,flexWrap:"wrap"}}>
+                      <button className="btn btn-primary" style={{flex:1}} onClick={()=>setTab("image")}>🖼️ 이미지 생성하기 →</button>
+                      <button className="btn btn-secondary" style={{flex:1}} onClick={()=>{setPubTitle(genTitle);setPubContent(genContent);setPubTags(genTags);setPubImg(getActiveImages()[0]||"");setTab("publish");}}>🚀 발행하기로 이동</button>
+                    </div>
                   </>
                 )}
               </div>
