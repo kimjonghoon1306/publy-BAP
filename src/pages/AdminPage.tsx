@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
-import { supabase, getAccounts, upsertAccount, PublyAccount } from "../lib/supabase";
+import { supabase, getAccounts, upsertAccount, PublyAccount, getHistory, PublyHistory, addHistory, deleteHistory, deleteAllHistory } from "../lib/supabase";
 
 interface Props {
   onBack: () => void;
@@ -339,12 +339,9 @@ select.field-inp{cursor:pointer;appearance:auto;}
 .mob-tab.active .mob-tab-lbl{color:var(--danger);}
 
 @media(max-width:900px){
-  .app{height:auto;min-height:100dvh;overflow-y:auto;-webkit-overflow-scrolling:touch;display:block;}
-  .header{position:fixed;top:0;left:0;right:0;z-index:200;}
   .sidebar{display:none;}
   .mob-tabs{display:flex;}
-  .layout{display:block;height:auto;overflow:visible;padding-top:60px;}
-  .main{display:block;height:auto;overflow:visible;padding-bottom:130px;}
+  .main{padding-bottom:130px;}
 }
 @media(max-width:768px){
   .header-mid{display:none;}
@@ -502,6 +499,7 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
 
   // 회원
   const [users, setUsers] = useState<UserFull[]>([]); const [loading, setLoading] = useState(true); const [search, setSearch] = useState(""); const [selUser, setSelUser] = useState<UserFull|null>(null);
+  const [history, setHistory] = useState<PublyHistory[]>([]);
   const [editMap, setEditMap] = useState<Record<string,any>>({}); const [saving, setSaving] = useState<string|null>(null);
   const [newNote, setNewNote] = useState(""); const [newPayAmt, setNewPayAmt] = useState(""); const [newPayNote, setNewPayNote] = useState(""); const [addingPay, setAddingPay] = useState(false);
   const [pubSub, setPubSub] = useState<"full"|"body_faq"|"body_only">("full");
@@ -518,6 +516,7 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
 
   useEffect(() => {
     checkBot(); getAccounts(ADM_UID).then(setAdmAccs); loadUsers();
+    getHistory(ADM_UID).then(setHistory);
     const iv = setInterval(checkBot, 30000); return () => clearInterval(iv);
   }, [checkBot]);
 
@@ -1582,17 +1581,35 @@ POST3: (제목)|(이유)
                   </div>
                   {genContent&&<button className="abp" style={{width:"100%",marginTop:10}} onClick={()=>setTab("publish")}>🚀 이 방식으로 발행하기 →</button>}
                 </div>
-                {/* 발행 기록 생략 - 관리자는 회원관리 탭에서 확인 */}
+
+                {/* 발행 기록 */}
                 <div className="card">
-                  <div className="card-title">📋 발행 현황</div>
-                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10}}>
-                    {[{l:"전체 회원",v:String(users.length)},{l:"오늘 발행",v:"—"},{l:"잔여 건수",v:"—"}].map((s,i)=>(
-                      <div key={i} style={{padding:"14px 12px",borderRadius:11,background:"var(--bg2)",border:"1px solid var(--b)",textAlign:"center"}}>
-                        <div style={{fontSize:22,fontWeight:900,color:i===0?"var(--accent-text)":"var(--text,#e8f4ff)"}}>{s.v}</div>
-                        <div style={{fontSize:10,color:"var(--text2)",marginTop:3}}>{s.l}</div>
-                      </div>
-                    ))}
+                  <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:14}}>
+                    <div className="card-title" style={{margin:0}}>📋 발행 기록</div>
+                    <div style={{display:"flex",gap:8,alignItems:"center"}}>
+                      <span style={{fontSize:13,color:"var(--text2)"}}>총 {history.length}건</span>
+                      {history.length>0&&<button className="btn btn-danger btn-sm" onClick={async()=>{if(!confirm("전체 삭제할까요?"))return;await deleteAllHistory(ADM_UID);setHistory([]);}}>🗑 전체삭제</button>}
+                    </div>
                   </div>
+                  {history.length===0?(
+                    <div style={{textAlign:"center",padding:"24px",color:"var(--text2)"}}>
+                      <div style={{fontSize:32,marginBottom:8}}>📋</div>
+                      <div style={{fontSize:14,fontWeight:700}}>아직 발행 기록이 없어요</div>
+                    </div>
+                  ):history.map((h,i)=>(
+                    <div key={h.id} style={{display:"flex",alignItems:"center",gap:10,padding:"12px 0",borderBottom:"1px solid var(--border)",animationDelay:`${i*.04}s`}}>
+                      <span style={{fontSize:20,flexShrink:0}}>{h.platform==="naver"?"🟢":"🟠"}</span>
+                      <div style={{flex:1,minWidth:0}}>
+                        <div style={{fontSize:13,fontWeight:700,color:"var(--text)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{h.title}</div>
+                        <div style={{fontSize:11,color:"var(--text2)",marginTop:2}}>{new Date(h.published_at).toLocaleString("ko-KR")}</div>
+                      </div>
+                      <span style={{fontSize:11,fontWeight:700,padding:"3px 8px",borderRadius:99,background:h.status==="success"?"var(--accent-bg)":h.status==="fail"?"rgba(255,71,87,.1)":"rgba(255,179,71,.1)",color:h.status==="success"?"var(--accent-text)":h.status==="fail"?"var(--danger)":"var(--warn)",flexShrink:0}}>
+                        {h.status==="success"?"✅ 성공":h.status==="fail"?"❌ 실패":"⏳ 대기"}
+                      </span>
+                      {h.post_url&&<a href={h.post_url} target="_blank" rel="noopener noreferrer" style={{fontSize:12,color:"var(--accent-text)",fontWeight:700,flexShrink:0}}>보기</a>}
+                      <button style={{padding:"4px 10px",borderRadius:7,border:"1px solid rgba(255,71,87,.3)",background:"transparent",color:"var(--danger)",cursor:"pointer",fontSize:12,fontWeight:700,flexShrink:0}} onClick={async()=>{await deleteHistory(h.id);setHistory(prev=>prev.filter(x=>x.id!==h.id));}}>삭제</button>
+                    </div>
+                  ))}
                 </div>
               </div>
             )}
