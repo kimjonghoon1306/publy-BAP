@@ -272,6 +272,8 @@ textarea.inp{resize:vertical;min-height:80px;line-height:1.7;}
 .detail-panel{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:20px;margin-top:14px;animation:fadeUp .2s ease both;}
 .detail-header{display:flex;align-items:center;gap:12px;margin-bottom:18px;flex-wrap:wrap;}
 .detail-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px;}
+.adm-img-split{display:grid;grid-template-columns:280px 1fr;gap:14px;align-items:start;}
+.adm-video-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px;}
 .detail-field{display:flex;flex-direction:column;gap:5px;}
 .field-label{font-size:11px;font-weight:700;color:var(--text2);}
 .field-inp{padding:9px 12px;border-radius:8px;border:1.5px solid var(--border);background:var(--bg);color:var(--text);font-size:13px;font-family:'Noto Sans KR',sans-serif;outline:none;transition:border-color .15s;}
@@ -347,6 +349,8 @@ select.field-inp{cursor:pointer;appearance:auto;}
   .adtype-grid{grid-template-columns:1fr;}
   .detail-grid{grid-template-columns:1fr;}
   .stats-grid{grid-template-columns:1fr 1fr;}
+  .adm-img-split{grid-template-columns:1fr !important;}
+  .adm-video-grid{grid-template-columns:1fr !important;}
   .card{padding:16px 14px;}
   .btn{font-size:15px;padding:13px 20px;}
   .btn-xl{padding:17px 24px;font-size:17px;}
@@ -453,6 +457,7 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
   // 글 생성
   const [adType, setAdType] = useState<"adpost"|"adsense">("adpost");
   const [targetChars, setTargetChars] = useState(1350);
+  const [charMode, setCharMode] = useState<"auto"|"manual">("auto");
   const [imgSource, setImgSource] = useState<"ai"|"upload"|"none">("ai");
   const [imgCountManual, setImgCountManual] = useState<number|null>(null);
   const [imgCount, setImgCount] = useState(3);
@@ -460,6 +465,12 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
   const [generatedImages, setGeneratedImages] = useState<string[]>([]);
   const [uploadedImages, setUploadedImages] = useState<string[]>([]);
   const [genImgLoading, setGenImgLoading] = useState(false);
+  const [captions, setCaptions] = useState<string[]>([]);
+  const [videoOn, setVideoOn] = useState(false);
+  const [videoUrl, setVideoUrl] = useState("");
+  const [videoPosition, setVideoPosition] = useState<"top"|"middle"|"bottom">("middle");
+  const [imgPattern, setImgPattern] = useState<"A"|"B"|"C"|"random">("random");
+  const [currentImgPrompt, setCurrentImgPrompt] = useState("");
   const [genImgProgress, setGenImgProgress] = useState(0);
   const [genImgCurrent, setGenImgCurrent] = useState(0);
   const imgAbortRef = useRef<AbortController|null>(null);
@@ -725,6 +736,20 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
   }
 
   function recommendImageCount(content: string): number { return Math.max(1, Math.floor(content.length/200)); }
+
+  function buildCaptions(kw: string, count: number): string[] {
+    const k = kw || "사진";
+    const pool = [`${k} 현장 모습`,`직접 경험한 ${k}`,`${k} 상세 사진`,`${k} 실제 모습`,`${k} 후기 사진`,`${k} 현장 사진`,`${k} 생생 후기`,`${k} 디테일 컷`];
+    return Array.from({length: count}, (_, i) => pool[i % pool.length]);
+  }
+
+  function calcTargetChars(): number {
+    if (charMode === "manual") return targetChars;
+    if (platform === "tistory") return Math.floor(Math.random()*1500)+2500;
+    if (adType === "adpost" && /체험단|맛집|후기|리뷰|방문|다녀/.test(keywords[0]||""))
+      return Math.floor(Math.random()*1000)+2000;
+    return Math.floor(Math.random()*700)+1800;
+  }
   function getActiveImages(): string[] { return imgSource === "upload" ? uploadedImages : generatedImages; }
 
   function splitContentWithImages(content: string, images: string[]): {text:string;img?:string}[] {
@@ -756,6 +781,9 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
         imgs.push(url); setGeneratedImages([...imgs]);
         setGenImgProgress(Math.round(((i+1)/imgCount)*100));
       }
+      // 이미지 완료 시 캡션 자동생성
+      setCaptions(buildCaptions(keyword||selectedTitle, imgs.length));
+      setCurrentImgPrompt(buildImagePrompt(keyword||selectedTitle, genTitle||selectedTitle||"", 0));
     } catch(e:any) { if (e.name!=="AbortError") alert("이미지 생성 실패: "+e.message); }
     finally { setGenImgLoading(false); imgAbortRef.current=null; }
   }
@@ -803,34 +831,79 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
     if (!selectedTitle && !keyword) return;
     const title = selectedTitle || keyword;
     setGenerating(true); setGenImage("");
+
+    // 글자수 자동 랜덤
+    const chars = calcTargetChars();
+    if (charMode === "auto") setTargetChars(chars);
+
+    // AI 패턴 뱅크 - 매번 랜덤
+    const INTRO_BANK = [
+      `오늘은 ${keyword} 직접 경험한 거 솔직하게 써볼게요.`,
+      `솔직히 처음엔 별 기대 안 했어요. 근데 ${keyword} 해보고 나서 생각이 완전히 바뀌었어요.`,
+      `${keyword} 궁금한 분들 많죠? 저도 한참 찾아봤거든요.`,
+      `주변에서 ${keyword} 어디 좋냐고 물어봐서 이참에 정리해봤어요.`,
+      `사실 이거 쓸까 말까 고민했는데... ${keyword} 후기 솔직하게 써볼게요.`,
+      `${keyword} 직접 겪은 거라 자신있게 말할 수 있어요.`,
+      `블로그에 ${keyword} 글 많은데 제 경험이랑 달라서 새로 써봐요.`,
+      `저도 처음엔 막막했는데 ${keyword} 이렇게 하면 됩니다.`,
+    ];
+    const SUBHEAD_BANK = [
+      `왜 {주제}가 이렇게 인기 있는 걸까요?`,
+      `직접 해보니까 이런 점이 달랐어요`,
+      `기대했던 것 vs 실제로 느낀 것`,
+      `꼭 알아야 할 핵심 포인트`,
+      `이런 분들께 특히 추천해요`,
+    ];
+    const OUTRO_BANK = [
+      `다음에 또 기회가 되면 다시 경험해보고 싶어요.`,
+      `이 글이 도움이 됐으면 좋겠습니다.`,
+      `궁금한 거 있으면 댓글로 물어봐요!`,
+      `저처럼 고민하시는 분들한테 도움이 됐으면 해요.`,
+      `오늘도 긴 글 읽어주셔서 감사해요.`,
+      `여러분도 꼭 한번 경험해보시길 추천드려요.`,
+    ];
+    const intro = INTRO_BANK[Math.floor(Math.random()*INTRO_BANK.length)];
+    const subStyle = SUBHEAD_BANK[Math.floor(Math.random()*SUBHEAD_BANK.length)];
+    const outro = OUTRO_BANK[Math.floor(Math.random()*OUTRO_BANK.length)];
+
     const catGuide = getCategoryGuide(keyword, title);
     const adGuide = adType==="adpost"
-      ? "[수익 최적화] 네이버 애드포스트 CPM: 체류 시간 늘리는 스토리 구성"
-      : "[수익 최적화] 구글 애드센스 CPC: 클릭 유도 문구, 정보성 키워드 밀도 높게";
+      ? "[수익] 애드포스트: 체류시간 늘리는 감성 스토리."
+      : "[수익] 애드센스: 클릭 유도, 키워드 밀도 높게.";
+    const platGuide = platform==="naver"
+      ? "[플랫폼] 네이버: ## 기호 절대 금지. 순수 텍스트. 감성적 경험담."
+      : "[플랫폼] 티스토리: 정보성 중심. 내부링크 2개 자연스럽게 포함.";
+
     const prompt = `당신은 대한민국 최고의 블로그 작가입니다.
 
-키워드: "${keyword}"
-글 제목: "${title}"
-목표 글자수: ${targetChars}자 이상
+키워드: "${keyword}"  제목: "${title}"
+목표 글자수: ${chars}자 내외 (±100자, 반드시 이 범위 안에서 작성)
 
 ${catGuide}
 
-[공통 원칙]
-- AI 티 절대 금지
-- 독자에게 말 걸기: "혹시 이런 거 고민해보셨나요?"
-- 막연한 표현 금지 → 구체적 수치, 가격, 기간으로
-- 반드시 ${targetChars}자 이상
-- ⚠️ 별표(*) 절대 금지
-- 소제목은 반드시 ## 소제목 형식으로 (4~6개)
-- ⚠️ 대시(-) 목록 절대 금지
-- SEO: 키워드 자연스럽게 7회 이상
+=== 절대 규칙 ===
+⛔ ## 기호 완전 금지 (소제목은 그냥 텍스트로)
+⛔ ** * - + 마크다운 기호 전부 금지
+⛔ 한자,중국어,일본어 금지
+⛔ AI 티 나는 표현 금지 (중요합니다, 다양한, 효과적인, 필수적으로 등)
+✅ 독자에게 직접 말 걸기
+✅ 구체적 수치, 가격, 기간 포함
+✅ 문장 끝: ~해요, ~거든요, ~더라고요, ~잖아요 다양하게
+✅ 키워드 3~4회 자연스럽게 (동의어 활용)
+✅ 반드시 ${chars-100}~${chars+100}자 사이로 작성
+
+=== 글 패턴 가이드 (매번 다르게) ===
+인트로: "${intro}"
+소제목 스타일: "${subStyle}"
+마무리: "${outro}"
 
 ${adGuide}
+${platGuide}
 
-[형식]
+=== 출력 형식 ===
 태그: 태그1, 태그2, 태그3, 태그4, 태그5
 
-(본문)
+(본문 ${chars}자 내외 - 순수 텍스트)
 
 [FAQ시작]
 Q1: (질문)
@@ -856,13 +929,7 @@ POST3: (제목)|(이유)
       const body = bm ? bm[1].trim() : cleaned;
       setGenContent(body);
       const recCount = imgCountManual ?? recommendImageCount(body);
-      if (imgSource === "ai" && recCount > 0) {
-        setGenImgLoading(true); setGeneratedImages([]);
-        const imgs: string[] = [];
-        try { for (let i=0;i<recCount;i++) { const url=await generateImage(keyword||selectedTitle, genTitle||selectedTitle||"", i); imgs.push(url); setGeneratedImages([...imgs]); } }
-        catch(e:any) { alert("이미지 생성 실패: "+e.message); }
-        finally { setGenImgLoading(false); }
-      }
+      if (imgCountAuto) setImgCount(recCount);
     } catch(e:any) { alert("본문 생성 실패: "+e.message); }
     finally { setGenerating(false); }
   }
@@ -936,33 +1003,31 @@ POST3: (제목)|(이유)
         {/* ── 관리자 사용설명서 모달 ── */}
         {showGuide && (() => {
           const PINK = "#FF6B9D"; const YELLOW = "#FFD93D"; const GREEN = "#00C875"; const RED = "#f85149";
-          const tabs = ["📋 개요","✍️ 글 생성","👥 회원관리","📊 통계","🔐 설정"];
+          const tabs = ["📋 개요","✍️ 글 생성","🖼️ 이미지","👥 회원관리","📊 통계/설정"];
           const pages = [
             // 0 - 개요
             <div key="0">
               <div className="g-step" style={{borderColor:`${RED}40`,background:`${RED}08`}}>
                 <div className="g-step-num" style={{color:RED}}>🔐 관리자 전용 페이지</div>
                 <div className="g-step-title" style={{color:"#fff"}}>Publy 관리자 대시보드</div>
+                <div className="g-step-desc">이 페이지는 <b>관리자만 접근</b>할 수 있어요. 회원들의 일반 페이지와 완전히 분리돼 있어요.</div>
+              </div>
+              <div className="g-step" style={{borderColor:`${YELLOW}40`,background:`${YELLOW}08`}}>
+                <div className="g-step-num" style={{color:YELLOW}}>🔑 API 키 완전 분리</div>
+                <div className="g-step-title" style={{color:"#fff"}}>관리자 키 ≠ 회원 키</div>
                 <div className="g-step-desc">
-                  이 페이지는 <b>관리자만 접근</b>할 수 있어요.<br/>
-                  회원 관리, 글 생성, 자동 발행, 통계 조회 등 모든 기능을 사용할 수 있어요.
+                  관리자 API 키(<b style={{color:YELLOW}}>publy_adm_*</b>)와 회원 API 키(<b style={{color:GREEN}}>publy_*</b>)는 <b>절대 섞이지 않아요.</b><br/>
+                  각 회원도 본인 키만 사용해요. 타인 키를 쓰는 건 구조적으로 불가능해요.
                 </div>
               </div>
               {[
-                {ico:"✍️",title:"글 생성",desc:"키워드 입력 → 제목 추천 → 글+이미지 자동 생성",color:GREEN},
-                {ico:"🚀",title:"자동 발행",desc:"네이버/티스토리 블로그에 자동으로 글을 올려요",color:YELLOW},
-                {ico:"🔗",title:"계정 관리",desc:"발행에 사용할 블로그 계정을 추가하고 연결해요",color:PINK},
-                {ico:"👥",title:"회원 관리",desc:"회원 플랜 변경, 결제 등록, 메모 관리",color:"#8B5CF6"},
-                {ico:"📊",title:"통계",desc:"전체 회원 현황, 플랜 분포, 발행 TOP 10 확인",color:"#58a6ff"},
-                {ico:"🔐",title:"설정",desc:"AI 선택, API 키 관리, 관리자 비밀번호 변경",color:RED},
+                {ico:"✍️ 🖼️",title:"블로그 기능 (사이드바 상단)",desc:"글쓰기 → 이미지 → 발행 → 기록 → 계정. 관리자가 직접 블로그 글을 쓰고 발행할 때 사용",color:GREEN},
+                {ico:"🔐",title:"관리자 전용 (사이드바 하단)",desc:"회원관리 / 통계 / 설정. 일반 회원은 절대 접근 불가",color:RED},
               ].map((item,i) => (
                 <div key={i} className="g-step" style={{borderColor:`${item.color}35`,background:`${item.color}07`,padding:"12px 14px"}}>
                   <div style={{display:"flex",alignItems:"center",gap:10}}>
                     <span style={{fontSize:22,flexShrink:0}}>{item.ico}</span>
-                    <div>
-                      <div style={{fontSize:15,fontWeight:800,color:item.color}}>{item.title}</div>
-                      <div style={{fontSize:13,color:"rgba(255,255,255,.7)",marginTop:2}}>{item.desc}</div>
-                    </div>
+                    <div><div style={{fontSize:14,fontWeight:800,color:item.color}}>{item.title}</div><div style={{fontSize:13,color:"rgba(255,255,255,.7)",marginTop:2}}>{item.desc}</div></div>
                   </div>
                 </div>
               ))}
@@ -971,11 +1036,11 @@ POST3: (제목)|(이유)
             // 1 - 글 생성
             <div key="1">
               {[
-                {num:"STEP 1",ico:"🎯",title:"수익화 목적 선택",color:GREEN,desc:<>글 생성 탭에서 <b>애드포스트</b>(네이버) 또는 <b>애드센스</b>(구글) 중 선택해요. 목적에 따라 AI가 다른 스타일로 글을 써요.</>},
-                {num:"STEP 2",ico:"🔍",title:"키워드 + 플랫폼 선택",color:YELLOW,desc:<>글 주제 키워드와 발행할 플랫폼(네이버/티스토리)을 선택해요. <b>Enter</b> 또는 버튼으로 제목 30개를 추천받아요.</>},
-                {num:"STEP 3",ico:"⭐",title:"제목 선택",color:PINK,desc:<>AI가 만든 제목 중 하나를 클릭해 선택해요. <b>30개 추가</b>로 최대 90개까지 볼 수 있어요.</>},
-                {num:"STEP 4",ico:"🤖",title:"글+이미지 생성",color:"#8B5CF6",desc:<>글자 수와 이미지 옵션을 설정하고 <b>생성 시작</b> 버튼을 눌러요. AI가 완성된 블로그 글을 만들어줘요.</>},
-                {num:"STEP 5",ico:"🚀",title:"발행하기로 이동",color:RED,desc:<>생성 완료 후 <b>발행하기로 이동</b> 버튼을 누르면 자동으로 발행 탭으로 이동해요.</>},
+                {num:"STEP 1",ico:"🎯",title:"플랫폼 + 수익화 선택",color:GREEN,desc:<>헤더에서 <b>🟢 네이버</b> 또는 <b>🟠 티스토리</b> 선택. 글쓰기 탭에서 애드포스트/애드센스 선택!</>},
+                {num:"STEP 2",ico:"🔍",title:"키워드 입력 + 제목 선택",color:YELLOW,desc:<>키워드 입력 후 Enter. 제목 30개 자동 추천. 최대 90개까지 추가 가능!</>},
+                {num:"STEP 3",ico:"📏",title:"글자수 설정 (자동 랜덤 권장)",color:PINK,desc:<><b>🎲 자동 랜덤</b>: 네이버 1800~2500자, 체험단/맛집 2000~3000자, 티스토리 2500~4000자. 매번 달라서 AI 감지 방지!</>},
+                {num:"STEP 4",ico:"🤖",title:"글 생성",color:"#8B5CF6",desc:<>인트로·소제목·마무리가 매번 달라져요. 네이버/티스토리 프롬프트도 자동 분리!</>},
+                {num:"STEP 5",ico:"🚀",title:"이미지 탭으로 이동",color:RED,desc:<>글 완료 후 이미지 탭에서 캡션·영상·패턴 설정 후 발행!</>},
               ].map((s,i) => (
                 <div key={i} className="g-step" style={{borderColor:`${s.color}40`,background:`${s.color}08`}}>
                   <div className="g-step-num" style={{color:s.color}}>{s.ico} {s.num}</div>
@@ -983,85 +1048,75 @@ POST3: (제목)|(이유)
                   <div className="g-step-desc">{s.desc}</div>
                 </div>
               ))}
-              <div className="g-tip">💡 <b>API 키 설정 필수!</b> 설정 탭에서 관리자 전용 API 키를 입력해야 해요. 회원 키와 <b>완전히 분리</b>되어 있어요.</div>
+              <div className="g-tip">💡 설정 탭에서 관리자 API 키를 먼저 입력해야 글 생성이 가능해요!</div>
             </div>,
 
-            // 2 - 회원관리
+            // 2 - 이미지
             <div key="2">
+              <div className="g-step" style={{borderColor:`${GREEN}40`,background:`${GREEN}08`}}>
+                <div className="g-step-num" style={{color:GREEN}}>🖼️ 이미지마다 캡션 필수!</div>
+                <div className="g-step-title" style={{color:"#fff"}}>네이버 상위 노출에 도움이 돼요</div>
+                <div className="g-step-desc">이미지 생성 완료 후 캡션이 자동 생성돼요. 직접 수정도 가능해요.</div>
+              </div>
+              {[
+                {ico:"🎲",title:"이미지 배치 패턴",desc:"랜덤(권장): 매 발행마다 자동 변경 → AI 감지 방지!\nA: 중간 1장 / B: 앞뒤 각 1장 / C: 균등 분산"},
+                {ico:"🎬",title:"영상 삽입",desc:"네이버TV/유튜브 URL 입력 + 위치 선택(상단/중간/하단). 체험단 영상 필수 업체 대응!"},
+                {ico:"✏️",title:"수동 수량 설정",desc:"'직접입력' 선택 후 숫자 입력. 체험단 15장 이상도 가능 (최대 20장)"},
+              ].map((item,i) => (
+                <div key={i} style={{padding:"12px 14px",borderRadius:12,background:"rgba(255,255,255,.04)",border:"1px solid rgba(255,255,255,.08)",marginBottom:8}}>
+                  <div style={{fontSize:15,fontWeight:800,color:"#fff",marginBottom:4}}>{item.ico} {item.title}</div>
+                  <div style={{fontSize:13,color:"rgba(255,255,255,.65)",lineHeight:1.7,whiteSpace:"pre-line"}}>{item.desc}</div>
+                </div>
+              ))}
+            </div>,
+
+            // 3 - 회원관리
+            <div key="3">
               <div className="g-step" style={{borderColor:`${GREEN}40`,background:`${GREEN}08`}}>
                 <div className="g-step-num" style={{color:GREEN}}>👥 회원 목록</div>
                 <div className="g-step-title" style={{color:"#fff"}}>회원을 클릭하면 상세 정보가 펼쳐져요</div>
-                <div className="g-step-desc">
-                  이름, 이메일로 검색 가능하고, 클릭 한 번으로 회원 상세를 바로 볼 수 있어요.
-                </div>
+                <div className="g-step-desc">이름, 이메일로 검색 가능. 클릭 한 번으로 상세 확인!</div>
               </div>
               {[
-                {ico:"💳",title:"플랜 변경",desc:"FREE → BASIC → PRO로 플랜을 바꾸면 발행 건수가 자동으로 업데이트돼요.",color:YELLOW},
-                {ico:"🔢",title:"건수 조정",desc:"총 발행 건수를 직접 입력해서 조정할 수 있어요. 특별 혜택 제공 시 사용해요.",color:PINK},
-                {ico:"📅",title:"만료일 연장",desc:"날짜(일수)를 입력하면 현재 만료일에서 그만큼 연장돼요.",color:"#8B5CF6"},
-                {ico:"💰",title:"결제 등록",desc:"금액과 플랜을 선택하면 결제 내역이 기록되고 플랜이 자동 업그레이드돼요.",color:GREEN},
-                {ico:"📝",title:"메모",desc:"회원별 관리 메모를 남길 수 있어요. 상담 내역, 요청 사항 등 기록해요.",color:RED},
-                {ico:"🔒",title:"비활성화",desc:"문제가 있는 회원은 비활성화해서 사용을 막을 수 있어요.",color:"#f0883e"},
+                {ico:"💳",title:"플랜 변경",desc:"FREE → BASIC → PRO로 변경하면 발행 건수 자동 업데이트.",color:YELLOW},
+                {ico:"🔢",title:"건수 조정",desc:"총 발행 건수 직접 입력. 특별 혜택 제공 시 사용.",color:PINK},
+                {ico:"📅",title:"만료일 연장",desc:"일수 입력 → 현재 만료일에서 자동 연장.",color:"#8B5CF6"},
+                {ico:"💰",title:"결제 등록",desc:"금액 + 플랜 선택 → 결제 내역 기록 + 플랜 자동 업그레이드.",color:GREEN},
+                {ico:"📝",title:"메모",desc:"회원별 관리 메모. 상담 내역, 요청 사항 기록.",color:RED},
               ].map((item,i) => (
                 <div key={i} className="g-step" style={{borderColor:`${item.color}35`,background:`${item.color}07`,padding:"12px 14px"}}>
                   <div style={{display:"flex",alignItems:"center",gap:10}}>
                     <span style={{fontSize:20,flexShrink:0}}>{item.ico}</span>
-                    <div>
-                      <div style={{fontSize:14,fontWeight:800,color:item.color}}>{item.title}</div>
-                      <div style={{fontSize:13,color:"rgba(255,255,255,.7)",marginTop:2}}>{item.desc}</div>
-                    </div>
+                    <div><div style={{fontSize:14,fontWeight:800,color:item.color}}>{item.title}</div><div style={{fontSize:13,color:"rgba(255,255,255,.7)",marginTop:2}}>{item.desc}</div></div>
                   </div>
                 </div>
               ))}
               <div className="g-tip">⚠️ <b>저장 버튼</b>을 꼭 눌러야 변경사항이 반영돼요!</div>
             </div>,
 
-            // 3 - 통계
-            <div key="3">
+            // 4 - 통계/설정
+            <div key="4">
               <div className="g-step" style={{borderColor:`${YELLOW}40`,background:`${YELLOW}08`}}>
-                <div className="g-step-num" style={{color:YELLOW}}>📊 통계 탭에서 볼 수 있는 것들</div>
+                <div className="g-step-num" style={{color:YELLOW}}>📊 통계 탭</div>
                 <div className="g-step-title" style={{color:"#fff"}}>한눈에 보는 서비스 현황</div>
                 <div className="g-step-desc">
-                  {[["전체 회원","가입된 회원 수 총합"],["활성 회원","현재 이용 중인 회원 수"],["PRO/BASIC 회원","플랜별 회원 수"],["총 발행 건수","모든 회원 발행 합산"],["플랜 분포 바","FREE/BASIC/PRO 비율 한눈에"],["발행 TOP 10","가장 많이 발행한 회원 순위"]].map(([t,d],i) => (
+                  {[["전체 회원","가입 회원 수 총합"],["활성 회원","현재 이용 중"],["PRO/BASIC 회원","플랜별 수"],["총 발행 건수","전체 합산"],["플랜 분포 바","FREE/BASIC/PRO 비율"],["발행 TOP 10","가장 많이 발행한 회원 순위"]].map(([t,d],i) => (
                     <div key={i} style={{display:"flex",justifyContent:"space-between",padding:"7px 0",borderBottom:i<5?"1px solid rgba(255,255,255,.06)":"none",fontSize:13}}>
-                      <b style={{color:"#fff"}}>{t}</b>
-                      <span style={{color:"rgba(255,255,255,.55)"}}>{d}</span>
+                      <b style={{color:"#fff"}}>{t}</b><span style={{color:"rgba(255,255,255,.55)"}}>{d}</span>
                     </div>
                   ))}
                 </div>
               </div>
-            </div>,
-
-            // 4 - 설정
-            <div key="4">
               <div className="g-step" style={{borderColor:`${RED}40`,background:`${RED}08`}}>
-                <div className="g-step-num" style={{color:RED}}>⚠️ 관리자 전용 API 키</div>
-                <div className="g-step-title" style={{color:"#fff"}}>회원 키와 완전히 분리되어 있어요!</div>
+                <div className="g-step-num" style={{color:RED}}>🔐 설정 탭 - 관리자 API 키</div>
+                <div className="g-step-title" style={{color:"#fff"}}>회원 키와 완전 분리!</div>
                 <div className="g-step-desc">
-                  관리자 API 키는 <b>회원들의 키와 절대 섞이지 않아요.</b><br/>
-                  관리자가 직접 글을 생성할 때 사용하는 별도의 키예요.
+                  관리자 키는 <b>publy_adm_*</b>로 저장. 회원 키(publy_*)와 절대 섞이지 않아요.<br/>
+                  글쓰기 AI(Gemini/Groq/GPT), 이미지 AI(DALL-E/Flux) 각각 설정!
                 </div>
                 <button className="g-btn" style={{background:`linear-gradient(135deg,${YELLOW},#FFA500)`,color:"#000"}}
-                  onClick={() => { setShowGuide(false); setTab("settings"); }}>
-                  🔐 지금 API 키 설정하러 가기
-                </button>
+                  onClick={() => { setShowGuide(false); setTab("settings"); }}>🔐 API 키 설정하러 가기</button>
               </div>
-              {[
-                {ico:"🤖",title:"글쓰기 AI 선택",desc:`Gemini(무료), Groq(무료), GPT-4o(유료) 중 선택해요. 처음엔 Gemini를 추천해요.`,color:GREEN},
-                {ico:"🖼️",title:"이미지 AI 선택",desc:"DALL-E 3 또는 Flux(Replicate) 중 선택해요. 둘 다 유료예요.",color:"#8B5CF6"},
-                {ico:"🔑",title:"API 키 입력 + 테스트",desc:"키를 입력하고 '테스트' 버튼으로 연결을 확인한 후 '저장'을 눌러요.",color:YELLOW},
-                {ico:"🔐",title:"관리자 비밀번호 변경",desc:"최초 비밀번호는 앱 설정에서 확인하세요. 주기적으로 변경을 권장해요.",color:RED},
-              ].map((item,i) => (
-                <div key={i} className="g-step" style={{borderColor:`${item.color}35`,background:`${item.color}07`,padding:"12px 14px"}}>
-                  <div style={{display:"flex",alignItems:"center",gap:10}}>
-                    <span style={{fontSize:20,flexShrink:0}}>{item.ico}</span>
-                    <div>
-                      <div style={{fontSize:14,fontWeight:800,color:item.color}}>{item.title}</div>
-                      <div style={{fontSize:13,color:"rgba(255,255,255,.7)",marginTop:2}}>{item.desc}</div>
-                    </div>
-                  </div>
-                </div>
-              ))}
             </div>,
           ];
 
@@ -1129,11 +1184,16 @@ POST3: (제목)|(이유)
         <div className="layout">
           {/* 사이드바 */}
           <div className="sidebar">
-            <div className="nav-section">관리자 메뉴</div>
-            {TABS.map(t => (
+            <div className="nav-section" style={{fontSize:10,fontWeight:800,color:"var(--text3)",padding:"8px 12px 4px",letterSpacing:".08em"}}>✍️ 블로그 기능</div>
+            {TABS.filter(t=>["keyword","write","image","publish","manage","accounts"].includes(t.k)).map(t => (
               <button key={t.k} className={`nav-item ${tab===t.k?"active":""}`} onClick={()=>setTab(t.k as any)}>
-                <span className="nav-ico">{t.i}</span>
-                {t.l}
+                <span className="nav-ico">{t.i}</span>{t.l}
+              </button>
+            ))}
+            <div className="nav-section" style={{fontSize:10,fontWeight:800,color:"var(--text3)",padding:"10px 12px 4px",letterSpacing:".08em",borderTop:"1px solid var(--border)",marginTop:6}}>🔐 관리자 전용</div>
+            {TABS.filter(t=>["users","stats","settings"].includes(t.k)).map(t => (
+              <button key={t.k} className={`nav-item ${tab===t.k?"active":""}`} onClick={()=>setTab(t.k as any)}>
+                <span className="nav-ico">{t.i}</span>{t.l}
                 {t.k==="users" && users.length>0 && <span className="nav-badge">{users.length}</span>}
               </button>
             ))}
@@ -1307,7 +1367,7 @@ POST3: (제목)|(이유)
             {tab === "image" && (
               <div style={{animation:"fadeUp .25s ease both"}}>
                 {!genContent&&<div className="alert alert-warn">⚠️ 먼저 글 생성 탭에서 글을 생성해주세요!<button className="abp" style={{marginLeft:"auto",padding:"7px 14px",fontSize:12}} onClick={()=>setTab("write")}>글 생성하러 가기</button></div>}
-                <div style={{display:"grid",gridTemplateColumns:"280px 1fr",gap:14,alignItems:"start"}}>
+                <div className="adm-img-split">
                   {/* 왼쪽 설정 */}
                   <div className="card" style={{position:"sticky",top:8}}>
                     <div className="card-title" style={{marginBottom:14}}>⚙️ 이미지 설정</div>
@@ -1374,7 +1434,12 @@ POST3: (제목)|(이유)
                   {/* 오른쪽 갤러리 */}
                   <div>
                     <div className="card" style={{minHeight:280}}>
-                      <div className="card-title" style={{marginBottom:14}}>🖼️ 생성된 이미지{getActiveImages().length>0&&<span style={{fontWeight:400,color:"var(--m)",textTransform:"none",letterSpacing:0}}> — {getActiveImages().length}장 · 첫 번째 썸네일</span>}</div>
+                      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:14,flexWrap:"wrap",gap:8}}>
+                        <div className="card-title" style={{margin:0}}>🖼️ 생성된 이미지{getActiveImages().length>0&&<span style={{fontWeight:400,color:"var(--m)",textTransform:"none",letterSpacing:0}}> — {getActiveImages().length}장 · 첫 번째 썸네일</span>}</div>
+                        {getActiveImages().length>0&&captions.length===0&&(
+                          <button style={{padding:"5px 12px",borderRadius:8,border:"1px solid var(--b)",background:"var(--ad)",color:"var(--a)",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:"inherit"}} onClick={()=>setCaptions(buildCaptions(keyword||selectedTitle,getActiveImages().length))}>💬 캡션 자동생성</button>
+                        )}
+                      </div>
                       {getActiveImages().length===0&&!genImgLoading?(
                         <div style={{textAlign:"center",padding:"36px 20px",color:"var(--m)"}}>
                           <div style={{fontSize:44,marginBottom:10}}>🖼️</div>
@@ -1382,23 +1447,72 @@ POST3: (제목)|(이유)
                           <div style={{fontSize:12,color:"var(--m)"}}>왼쪽에서 수량 설정 후 생성 버튼!</div>
                         </div>
                       ):(
-                        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(130px,1fr))",gap:9}}>
+                        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(150px,1fr))",gap:12}}>
                           {genImgLoading&&Array.from({length:imgCount-generatedImages.length}).map((_,i)=>(
-                            <div key={`ph-${i}`} style={{aspectRatio:"1",borderRadius:11,background:"var(--ib)",border:"2px dashed var(--b)",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:7}}>
-                              {i===0?<><span className="asp2"/><span style={{fontSize:10,color:"var(--a)",fontWeight:700}}>생성 중...</span></>:<span style={{fontSize:20,opacity:.3}}>🖼️</span>}
+                            <div key={`ph-${i}`} style={{display:"flex",flexDirection:"column",gap:6}}>
+                              <div style={{aspectRatio:"1",borderRadius:11,background:"var(--ib)",border:"2px dashed var(--b)",display:"flex",alignItems:"center",justifyContent:"center"}}>
+                                {i===0?<><span className="asp2"/></>:<span style={{fontSize:20,opacity:.3}}>🖼️</span>}
+                              </div>
                             </div>
                           ))}
                           {getActiveImages().map((img,i)=>(
-                            <div key={i} style={{position:"relative",aspectRatio:"1"}}>
-                              <img src={img} alt="" style={{width:"100%",height:"100%",objectFit:"cover",borderRadius:11,border:i===0?"2px solid var(--a)":"2px solid var(--b)",display:"block",cursor:"pointer"}} onClick={()=>window.open(img,"_blank")} onError={e=>{(e.target as HTMLImageElement).style.display="none";}}/>
-                              {i===0&&<span style={{position:"absolute",top:-7,left:-4,fontSize:9,fontWeight:800,padding:"2px 7px",borderRadius:99,background:"var(--a)",color:"#000"}}>썸네일</span>}
-                              <button style={{position:"absolute",top:-6,right:-6,width:19,height:19,borderRadius:"50%",background:"var(--err)",border:"none",color:"#fff",cursor:"pointer",fontSize:10,display:"flex",alignItems:"center",justifyContent:"center"}} onClick={()=>{if(imgSource==="ai")setGeneratedImages(p=>p.filter((_,j)=>j!==i));else setUploadedImages(p=>p.filter((_,j)=>j!==i));}}>✕</button>
+                            <div key={i} style={{display:"flex",flexDirection:"column",gap:5}}>
+                              <div style={{position:"relative",aspectRatio:"1"}}>
+                                <img src={img} alt="" style={{width:"100%",height:"100%",objectFit:"cover",borderRadius:11,border:i===0?"2px solid var(--a)":"2px solid var(--b)",display:"block",cursor:"pointer"}} onClick={()=>window.open(img,"_blank")} onError={e=>{(e.target as HTMLImageElement).style.display="none";}}/>
+                                {i===0&&<span style={{position:"absolute",top:-7,left:-4,fontSize:9,fontWeight:800,padding:"2px 7px",borderRadius:99,background:"var(--a)",color:"#000"}}>썸네일</span>}
+                                <button style={{position:"absolute",top:-7,right:-7,width:24,height:24,borderRadius:"50%",background:"var(--err)",border:"2px solid var(--ib)",color:"#fff",cursor:"pointer",fontSize:11,display:"flex",alignItems:"center",justifyContent:"center"}}
+                                  onClick={()=>{
+                                    if(imgSource==="ai")setGeneratedImages(p=>p.filter((_,j)=>j!==i));
+                                    else setUploadedImages(p=>p.filter((_,j)=>j!==i));
+                                    setCaptions(p=>p.filter((_,j)=>j!==i));
+                                  }}>✕</button>
+                              </div>
+                              {/* 캡션 입력 - 필수 */}
+                              <input
+                                style={{width:"100%",padding:"5px 8px",borderRadius:7,border:"1px solid var(--b)",background:"var(--ib)",color:"var(--c)",fontSize:11,fontFamily:"inherit",outline:"none"}}
+                                placeholder={`캡션 (예: ${keyword||"사진"} ${i===0?"대표":"현장"} 사진)`}
+                                value={captions[i]||""}
+                                onChange={e=>{const next=[...captions];next[i]=e.target.value;setCaptions(next);}}
+                              />
                             </div>
                           ))}
                         </div>
                       )}
                     </div>
-                    <div style={{display:"flex",gap:10,marginTop:14,flexWrap:"wrap"}}>
+
+                    {/* 영상 + 이미지 패턴 */}
+                    <div className="adm-video-grid">
+                      <div className="card" style={{padding:"13px 14px"}}>
+                        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:videoOn?12:0}}>
+                          <div className="card-title" style={{margin:0,fontSize:11}}>🎬 영상 삽입</div>
+                          <button onClick={()=>setVideoOn(v=>!v)} style={{width:40,height:22,borderRadius:99,background:videoOn?"var(--a)":"var(--b)",border:"none",cursor:"pointer",position:"relative",transition:"background .2s",flexShrink:0}}>
+                            <div style={{position:"absolute",top:3,left:videoOn?21:3,width:16,height:16,borderRadius:"50%",background:"#fff",transition:"left .2s"}}/>
+                          </button>
+                        </div>
+                        {videoOn&&(
+                          <>
+                            <input style={{width:"100%",padding:"7px 10px",borderRadius:8,border:"1px solid var(--b)",background:"var(--ib)",color:"var(--c)",fontSize:12,fontFamily:"inherit",outline:"none",marginBottom:8}} placeholder="영상 URL (네이버TV/유튜브)" value={videoUrl} onChange={e=>setVideoUrl(e.target.value)}/>
+                            <div style={{display:"flex",gap:5}}>
+                              {(["top","middle","bottom"] as const).map(p=>(
+                                <button key={p} onClick={()=>setVideoPosition(p)} style={{flex:1,padding:"5px",borderRadius:7,border:`1.5px solid ${videoPosition===p?"var(--a)":"var(--b)"}`,background:videoPosition===p?"var(--ad)":"transparent",cursor:"pointer",fontSize:11,fontWeight:700,color:videoPosition===p?"var(--a)":"var(--m)",fontFamily:"inherit"}}>{p==="top"?"상단":p==="middle"?"중간":"하단"}</button>
+                              ))}
+                            </div>
+                          </>
+                        )}
+                      </div>
+                      <div className="card" style={{padding:"13px 14px"}}>
+                        <div className="card-title" style={{marginBottom:8,fontSize:11}}>📐 이미지 패턴</div>
+                        <div style={{display:"flex",flexDirection:"column",gap:5}}>
+                          {(["random","A","B","C"] as const).map(p=>(
+                            <button key={p} onClick={()=>setImgPattern(p)} style={{padding:"6px 10px",borderRadius:8,border:`1.5px solid ${imgPattern===p?"var(--a)":"var(--b)"}`,background:imgPattern===p?"var(--ad)":"transparent",cursor:"pointer",fontFamily:"inherit",textAlign:"left",fontSize:11,fontWeight:700,color:imgPattern===p?"var(--a)":"var(--m)"}}>
+                              {p==="random"?"🎲 랜덤(권장)":p==="A"?"A: 중간 1장":p==="B"?"B: 앞뒤 각 1장":"C: 균등 분산"}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div style={{display:"flex",gap:10,marginTop:10,flexWrap:"wrap"}}>
                       <button className="abp" style={{flex:1}} onClick={()=>setTab("publish")} disabled={!genContent}>🚀 발행하기로 이동 →</button>
                       <button style={{flex:1,padding:"13px",borderRadius:99,border:"1px solid var(--b)",background:"var(--ib)",color:"var(--m)",cursor:"pointer",fontFamily:"inherit",fontSize:14,fontWeight:700}} onClick={()=>setTab("write")}>← 글 생성으로</button>
                     </div>
