@@ -330,8 +330,9 @@ select.field-inp{cursor:pointer;appearance:auto;}
 .empty-title{font-size:18px;font-weight:800;color:var(--text);margin-bottom:8px;}
 .empty-sub{font-size:14px;color:var(--text2);margin-bottom:24px;line-height:1.6;}
 
-.mob-tabs{display:none;position:fixed;bottom:0;left:0;right:0;z-index:200;background:var(--header-bg);border-top:1px solid var(--border);backdrop-filter:blur(20px);padding:8px 4px max(14px,env(safe-area-inset-bottom));}
-.mob-tab{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;padding:6px 4px;border:none;background:transparent;cursor:pointer;font-family:'Noto Sans KR',sans-serif;transition:all .15s;min-height:52px;}
+.mob-tabs{display:none;position:fixed;bottom:0;left:0;right:0;z-index:200;background:var(--header-bg);border-top:1px solid var(--border);backdrop-filter:blur(20px);padding:8px 4px max(14px,env(safe-area-inset-bottom));overflow-x:auto;overflow-y:hidden;flex-wrap:nowrap;-webkit-overflow-scrolling:touch;scrollbar-width:none;}
+.mob-tabs::-webkit-scrollbar{display:none;}
+.mob-tab{flex:0 0 auto;min-width:64px;display:flex;flex-direction:column;align-items:center;gap:3px;padding:6px 8px;border:none;background:transparent;cursor:pointer;font-family:'Noto Sans KR',sans-serif;transition:all .15s;min-height:52px;}
 .mob-tab-ico{font-size:22px;}
 .mob-tab-lbl{font-size:11px;font-weight:600;color:var(--text2);}
 .mob-tab.active{background:rgba(248,81,73,.08);border-radius:10px;}
@@ -377,8 +378,9 @@ select.field-inp{cursor:pointer;appearance:auto;}
   .adtype-grid{grid-template-columns:1fr;}
   .key-row-input{flex-wrap:wrap;}
   .key-row-input .inp{width:100%;}
-  /* 모바일: 헤더 가이드 버튼 숨기기 → 탭바로 이동 */
-  .adm-guide-btn{display:none;}
+  /* 모바일 헤더 - 텍스트 숨기고 이모지만 */
+  .adm-guide-text{display:none;}
+  .adm-guide-btn{padding:8px 10px;}
   .back-text{display:none;}
   .back-btn{padding:7px 9px;}
   /* 회원 목록 모바일 짤림 방지 */
@@ -1185,8 +1187,8 @@ POST3: (제목)|(이유)
             <button className="adm-guide-btn" onClick={() => { setShowGuide(true); setGuideTab(0); }}>
               📋 <span className="adm-guide-text">관리자 가이드</span>
             </button>
-            <button className="back-btn" onClick={onDashboard}>← <span className="back-text">회원 화면</span></button>
-            <button className="back-btn" style={{borderColor:"rgba(248,81,73,.3)",color:"var(--danger)"}} onClick={onBack}><span className="back-text">로그아웃</span></button>
+            <button className="back-btn" onClick={onDashboard}>🏠 <span className="back-text">회원 화면</span></button>
+            <button className="back-btn" style={{borderColor:"rgba(248,81,73,.3)",color:"var(--danger)"}} onClick={onBack}>🚪 <span className="back-text">로그아웃</span></button>
           </div>
         </div>
 
@@ -1898,16 +1900,12 @@ POST3: (제목)|(이유)
 
         {/* 모바일 탭바 */}
         <div className="mob-tabs">
-          {TABS.filter(t=>["write","publish","users","stats","settings"].includes(t.k)).map(t=>(
+          {TABS.map(t=>(
             <button key={t.k} className={`mob-tab ${tab===t.k?"active":""}`} onClick={()=>setTab(t.k as any)}>
               <span className="mob-tab-ico">{t.i}</span>
-              <span className="mob-tab-lbl">{t.k==="write"?"글쓰기":t.k==="publish"?"발행":t.k==="users"?"회원":t.k==="stats"?"통계":"설정"}</span>
+              <span className="mob-tab-lbl">{t.l}</span>
             </button>
           ))}
-          <button className="mob-tab" onClick={()=>{setShowGuide(true);setGuideTab(0);}}>
-            <span className="mob-tab-ico">📋</span>
-            <span className="mob-tab-lbl">가이드</span>
-          </button>
         </div>
 
       </div>
