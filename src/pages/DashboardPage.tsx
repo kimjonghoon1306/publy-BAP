@@ -288,17 +288,7 @@ textarea.inp{resize:vertical;line-height:1.75;min-height:80px;}
 .mob-btn.active{background:var(--accent-bg);}
 .mob-btn.active .mob-btn-lbl{color:var(--accent-text);}
 .img-split{display:grid;grid-template-columns:300px 1fr;gap:14px;align-items:start;}
-@media(max-width:900px){
-  .app{height:auto;min-height:100dvh;overflow-y:auto;-webkit-overflow-scrolling:touch;display:block;}
-  .header{position:fixed;top:0;left:0;right:0;z-index:200;}
-  .sidebar{display:none;}
-  .mob-bar{display:flex;}
-  .right-panel{display:none;}
-  .layout{display:block;height:auto;overflow:visible;padding-top:58px;}
-  .main{display:block;height:auto;overflow:visible;padding-bottom:130px;}
-  .guide-overlay{padding:12px 8px 130px;align-items:flex-start;overflow-y:auto;}
-  .guide-modal{max-height:none;width:100%;}
-}
+@media(max-width:900px){.sidebar{display:none;}.mob-bar{display:flex;}.main{padding-bottom:130px;}}
 @media(max-width:768px){
   .header-mid{display:none;}.main{padding:14px 12px 84px;}.card{padding:16px 14px;}
   .adtype-row{grid-template-columns:1fr 1fr;}.title-grid{grid-template-columns:1fr;}.ai-grid{flex-direction:column;}
