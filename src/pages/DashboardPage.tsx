@@ -1765,7 +1765,7 @@ POST3: (제목)|(이유)
         </div>
 
         <div className="mob-bar">
-          {MAIN_TABS.map(t=>(<button key={t.k} className={`mob-btn ${tab===t.k?"active":""}`} onClick={()=>setTab(t.k as MainTab)}><span className="mob-btn-ico">{t.i}</span><span className="mob-btn-lbl">{t.l}</span></button>))}
+          {MAIN_TABS.filter(t=>["keyword","write","image","publish","settings"].includes(t.k)).map(t=>(<button key={t.k} className={`mob-btn ${tab===t.k?"active":""}`} onClick={()=>setTab(t.k as MainTab)}><span className="mob-btn-ico">{t.i}</span><span className="mob-btn-lbl">{t.k==="keyword"?"키워드":t.k==="write"?"글쓰기":t.k==="image"?"이미지":t.k==="publish"?"발행":"설정"}</span></button>))}
           <button className="mob-btn" onClick={()=>{setShowGuide(true);setGuideTab(0);}}><span className="mob-btn-ico">📖</span><span className="mob-btn-lbl">사용방법</span></button>
         </div>
       </div>
