@@ -124,6 +124,14 @@ export async function getHistory(userId: string): Promise<PublyHistory[]> {
   return data || [];
 }
 
+export async function deleteHistory(id: string): Promise<void> {
+  await supabase.from("publy_history").delete().eq("id", id);
+}
+
+export async function deleteAllHistory(userId: string): Promise<void> {
+  await supabase.from("publy_history").delete().eq("user_id", userId);
+}
+
 // ── 계정 ─────────────────────────────────────────────────
 export async function getAccounts(userId: string): Promise<PublyAccount[]> {
   const { data } = await supabase
