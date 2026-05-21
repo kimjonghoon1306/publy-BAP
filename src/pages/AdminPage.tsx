@@ -782,6 +782,17 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
   }
   function getActiveImages(): string[] { return imgSource === "upload" ? uploadedImages : generatedImages; }
 
+  function buildAdmPublishContent(): string {
+    if (!genContent) return pubContent;
+    if (pubSub === "full") return genContent;
+    if (pubSub === "body_faq") {
+      const i = genContent.indexOf("[관련글시작]");
+      return i > 0 ? genContent.slice(0, i).trim() : genContent;
+    }
+    const i = genContent.indexOf("[FAQ시작]");
+    return i > 0 ? genContent.slice(0, i).trim() : genContent;
+  }
+
   function splitContentWithImages(content: string, images: string[]): {text:string;img?:string}[] {
     if (!images.length||imgSource==="none") return [{text:content}];
     const cps = Math.floor(content.length/(images.length+1));
@@ -965,10 +976,11 @@ POST3: (제목)|(이유)
   }
 
   async function handlePublish() {
-    if (!pubTitle||!pubContent||!pubAccId) return;
+    const content = buildAdmPublishContent();
+    if (!pubTitle||!content||!pubAccId) return;
     setPublishing(true); setPubMsg("발행 중...");
     try {
-      const r = await fetch(`${BOT}/api/publish-full`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({userId:ADM_UID,platform,title:pubTitle,content:pubContent,tags:pubTags.split(",").map((t:string)=>t.trim()).filter(Boolean),imageUrl:pubImg||undefined})});
+      const r = await fetch(`${BOT}/api/publish-full`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({userId:ADM_UID,platform,title:pubTitle,content:content,tags:pubTags.split(",").map((t:string)=>t.trim()).filter(Boolean),imageUrl:pubImg||undefined})});
       const d = await r.json(); if (!r.ok) throw new Error(d.error);
       setPubMsg("✅ 발행 완료!"); setPubTitle(""); setPubContent(""); setPubTags(""); setPubImg("");
     } catch(e:any) { setPubMsg("❌ "+e.message); }
@@ -1624,23 +1636,6 @@ POST3: (제목)|(이유)
             {/* ───── 📋 발행 관리 ───── */}
             {tab === "manage" && (
               <div style={{animation:"fadeUp .25s ease both"}}>
-                <div className="card">
-                  <div className="card-title" style={{marginBottom:14}}>📝 발행 방식 선택</div>
-                  <div style={{display:"grid",gap:10}}>
-                    {([
-                      {id:"full",     ico:"📄", name:"① 전체 발행",  sub:"본문 + FAQ + 관련글 모두"},
-                      {id:"body_faq", ico:"💬", name:"② 본문 + FAQ", sub:"본문과 자주 묻는 질문까지"},
-                      {id:"body_only",ico:"✏️", name:"③ 본문만",     sub:"핵심 내용만 깔끔하게"},
-                    ] as const).map(c=>(
-                      <button key={c.id} onClick={()=>setPubSub(c.id as any)} style={{padding:"15px 17px",borderRadius:12,border:`2px solid ${(pubSub||"full")===c.id?(c.id==="full"?"var(--accent-text)":c.id==="body_faq"?"var(--pink,#FF6B9D)":"var(--yellow,#FFD93D)"):"var(--border)"}`,background:(pubSub||"full")===c.id?(c.id==="full"?"var(--accent-bg)":c.id==="body_faq"?"rgba(255,107,157,.08)":"rgba(255,217,61,.08)"):"var(--bg2)",cursor:"pointer",textAlign:"left",fontFamily:"inherit"}}>
-                        <div style={{fontSize:22,marginBottom:6}}>{c.ico}</div>
-                        <div style={{fontSize:15,fontWeight:800,color:"var(--text,#e8f4ff)",marginBottom:3}}>{c.name}</div>
-                        <div style={{fontSize:12,color:"var(--text2)"}}>{c.sub}</div>
-                      </button>
-                    ))}
-                  </div>
-                  {genContent&&<button className="btn btn-primary btn-full" style={{marginTop:10}} onClick={()=>setTab("publish")}>🚀 이 방식으로 발행하기 →</button>}
-                </div>
 
                 {/* 발행 기록 */}
                 <div className="card">
@@ -1678,6 +1673,29 @@ POST3: (제목)|(이유)
             {tab === "publish" && (
               <div style={{animation:"fadeUp .25s ease both"}}>
                 {!botOnline&&<div className="alert alert-danger">⚠️ 봇 서버 오프라인 — PC에서 Publy 앱을 실행하세요</div>}
+
+                {/* 발행 방식 선택 */}
+                <div className="card">
+                  <div className="card-title" style={{marginBottom:14}}>📝 발행 방식 선택</div>
+                  <div style={{display:"grid",gap:10}}>
+                    {([
+                      {id:"full",     ico:"📄", name:"① 전체 발행",  sub:"본문 + FAQ + 관련글 모두",  color:"var(--accent-text)",  bg:"var(--accent-bg)"},
+                      {id:"body_faq", ico:"💬", name:"② 본문 + FAQ", sub:"본문과 자주 묻는 질문까지", color:"#FF6B9D",              bg:"rgba(255,107,157,.08)"},
+                      {id:"body_only",ico:"✏️", name:"③ 본문만",     sub:"핵심 내용만 깔끔하게",      color:"#FFD93D",              bg:"rgba(255,217,61,.08)"},
+                    ] as const).map(c=>(
+                      <button key={c.id} onClick={()=>setPubSub(c.id)} style={{padding:"15px 17px",borderRadius:12,border:`2px solid ${pubSub===c.id?c.color:"var(--border)"}`,background:pubSub===c.id?c.bg:"var(--bg2)",cursor:"pointer",textAlign:"left",fontFamily:"inherit",transition:"all .18s"}}>
+                        <div style={{display:"flex",alignItems:"center",gap:10}}>
+                          <span style={{fontSize:22}}>{c.ico}</span>
+                          <div style={{flex:1}}>
+                            <div style={{fontSize:15,fontWeight:800,color:"var(--text)",marginBottom:3}}>{c.name}</div>
+                            <div style={{fontSize:12,color:"var(--text2)"}}>{c.sub}</div>
+                          </div>
+                          {pubSub===c.id&&<span style={{fontSize:14,color:c.color,fontWeight:800}}>✓</span>}
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
                 <div className="card">
                   <div className="card-title">🌐 플랫폼</div>
                   <div className="plat-grid">
@@ -1721,12 +1739,15 @@ POST3: (제목)|(이유)
                     <div><label className="inp-label">제목 *</label><input className="inp lg" value={pubTitle} onChange={e=>setPubTitle(e.target.value)} placeholder="블로그 글 제목..."/></div>
                     <div><label className="inp-label">태그 (쉼표 구분)</label><input className="inp" value={pubTags} onChange={e=>setPubTags(e.target.value)} placeholder="태그1, 태그2, 태그3"/></div>
                     <div>
-                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}><label className="inp-label" style={{margin:0}}>본문 *</label><span style={{fontSize:12,color:"var(--text2)"}}>{pubContent.length.toLocaleString()}자</span></div>
-                      <textarea className="inp" rows={10} value={pubContent} onChange={e=>setPubContent(e.target.value)} placeholder="발행할 내용을 입력하세요..."/>
+                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+                        <label className="inp-label" style={{margin:0}}>본문 ({pubSub==="full"?"전체":pubSub==="body_faq"?"본문+FAQ":"본문만"})</label>
+                        <span style={{fontSize:12,color:"var(--text2)"}}>{buildAdmPublishContent().length.toLocaleString()}자</span>
+                      </div>
+                      <textarea className="inp" rows={10} readOnly value={buildAdmPublishContent()} style={{fontSize:13,lineHeight:1.8,cursor:"default"}}/>
                     </div>
                   </div>
                 </div>
-                <button className="btn btn-primary btn-full btn-xl" style={{marginBottom:14}} onClick={handlePublish} disabled={publishing||!botOnline||!pubAccId||!pubTitle||!pubContent}>
+                <button className="btn btn-primary btn-full btn-xl" style={{marginBottom:14}} onClick={handlePublish} disabled={publishing||!botOnline||!pubAccId||!pubTitle||!buildAdmPublishContent()}>
                   {publishing?<><span className="spinner"/>발행 중...</>:<>🚀 블로그 자동 발행</>}
                 </button>
                 {pubMsg&&<div className={`alert ${pubMsg.includes("✅")?"alert-success":"alert-danger"}`}>{pubMsg}</div>}
