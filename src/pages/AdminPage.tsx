@@ -123,7 +123,7 @@ const CSS = `
   --header-bg:rgba(246,248,250,.95);--shadow:0 4px 16px rgba(0,0,0,.1);
 }
 
-.app{width:100vw;height:100vh;font-family:'Noto Sans KR',sans-serif;color:var(--text);background:var(--bg);display:flex;flex-direction:column;transition:background .2s,color .2s;overflow:hidden;}
+.app{width:100vw;height:100dvh;font-family:'Noto Sans KR',sans-serif;color:var(--text);background:var(--bg);display:flex;flex-direction:column;transition:background .2s,color .2s;overflow:hidden;}
 *::-webkit-scrollbar{width:5px;}*::-webkit-scrollbar-thumb{background:var(--border);border-radius:99px;}
 
 .header{height:60px;flex-shrink:0;display:flex;align-items:center;padding:0 16px;gap:12px;background:var(--header-bg);border-bottom:1px solid var(--border);backdrop-filter:blur(20px);position:sticky;top:0;z-index:100;}
