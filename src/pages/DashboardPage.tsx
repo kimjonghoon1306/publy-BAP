@@ -432,7 +432,7 @@ export default function DashboardPage({user, onLogout, onAdminLogin, onThemeTogg
     checkBot();
     getAccounts(user.id).then(setAccounts);
     getHistory(user.id).then(setHistory);
-    getQuota(user.id).then(q=>q&&setQuota(q));
+    getQuota(user.id).then((q:PublyQuota|null)=>q&&setQuota(q));
     const iv=setInterval(checkBot,30000);
     if(!localStorage.getItem("publy_guide_seen")){setTimeout(()=>setShowGuide(true),900);}
     return()=>clearInterval(iv);
@@ -913,7 +913,7 @@ POST3: (제목)|(이유)
           schedule_time:scheduleOn?scheduleTime:undefined,
           status:"pending"});
         setPubMsg("✅ PC 봇에 예약됐어요! Publy 앱 실행 시 자동 발행돼요.");
-        await addHistory({user_id:user.id,platform,title:pubTitle,status:"pending"});
+        await addHistory({user_id:user.id,platform,title:pubTitle,status:"pending" as "success"|"fail"});
       }else{
         const r=await fetch(`${BOT}/api/publish-full`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(publishBody)});
         const d=await r.json();
@@ -922,7 +922,7 @@ POST3: (제목)|(이유)
         await addHistory({user_id:user.id,platform,title:pubTitle,post_url:d.postUrl,status:"success"});
         setPubMsg(scheduleOn?"✅ 예약 완료! 설정한 시간에 자동 발행돼요.":"✅ 발행 완료!");
       }
-      getHistory(user.id).then(setHistory);getQuota(user.id).then(q=>q&&setQuota(q));
+      getHistory(user.id).then(setHistory);getQuota(user.id).then((q:PublyQuota|null)=>q&&setQuota(q));
     }catch(e:any){await addHistory({user_id:user.id,platform,title:pubTitle,status:"fail",error_message:e.message});setPubMsg("❌ "+e.message);}
     finally{setPublishing(false);}
   }
