@@ -1423,19 +1423,30 @@ POST3: (제목)|(이유)
 
                     {/* 영상 삽입 설정 */}
                     <div className="card" style={{padding:"14px 16px"}}>
-                      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:videoOn?14:0}}>
-                        <div className="card-title" style={{margin:0}}>🎬 영상 삽입</div>
-                        <button onClick={()=>setVideoOn(v=>!v)} style={{width:44,height:24,borderRadius:99,background:videoOn?"var(--accent)":"var(--border)",border:"none",cursor:"pointer",position:"relative",transition:"background .2s",flexShrink:0}}>
-                          <div style={{position:"absolute",top:3,left:videoOn?23:3,width:18,height:18,borderRadius:"50%",background:"#fff",transition:"left .2s"}}/>
-                        </button>
+                      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:8}}>
+                        <div>
+                          <div className="card-title" style={{margin:0}}>🎬 영상 삽입</div>
+                          <div style={{fontSize:11,color:"var(--text3)",marginTop:3}}>체험단 영상 필수 업체 대응</div>
+                        </div>
+                        <div style={{display:"flex",alignItems:"center",gap:8}}>
+                          <span style={{fontSize:11,fontWeight:700,color:videoOn?"var(--accent-text)":"var(--text3)"}}>{videoOn?"ON":"OFF"}</span>
+                          <button onClick={()=>setVideoOn(v=>!v)} style={{width:48,height:26,borderRadius:99,background:videoOn?"var(--accent)":"var(--border)",border:"none",cursor:"pointer",position:"relative",transition:"background .2s",flexShrink:0}}>
+                            <div style={{position:"absolute",top:3,left:videoOn?25:3,width:20,height:20,borderRadius:"50%",background:"#fff",transition:"left .2s"}}/>
+                          </button>
+                        </div>
                       </div>
+                      {!videoOn&&<div style={{fontSize:12,color:"var(--text3)",padding:"8px 10px",borderRadius:8,background:"var(--bg2)"}}>OFF 상태입니다. 영상을 삽입하려면 위 버튼을 눌러 ON 하세요.</div>}
                       {videoOn&&(
                         <>
-                          <input className="inp" placeholder="영상 URL (네이버TV / 유튜브)" value={videoUrl} onChange={e=>setVideoUrl(e.target.value)} style={{marginBottom:10,fontSize:13}}/>
-                          <label className="inp-label">영상 위치</label>
+                          <div style={{marginBottom:10,padding:"8px 10px",borderRadius:8,background:"var(--accent-bg)",border:"1px solid var(--accent-border)",fontSize:12,color:"var(--accent-text)",fontWeight:600}}>✅ 영상 삽입 ON — URL을 입력해주세요</div>
+                          <input className="inp" placeholder="네이버TV 또는 유튜브 영상 주소 붙여넣기" value={videoUrl} onChange={e=>setVideoUrl(e.target.value)} style={{marginBottom:10,fontSize:13}}/>
+                          <label className="inp-label">📍 영상을 글 어디에 넣을까요?</label>
                           <div style={{display:"flex",gap:6}}>
-                            {([{v:"top",l:"상단"},{v:"middle",l:"중간"},{v:"bottom",l:"하단"}] as const).map(p=>(
-                              <button key={p.v} onClick={()=>setVideoPosition(p.v)} style={{flex:1,padding:"7px",borderRadius:8,border:`1.5px solid ${videoPosition===p.v?"var(--accent)":"var(--border)"}`,background:videoPosition===p.v?"var(--accent-bg)":"transparent",cursor:"pointer",fontSize:12,fontWeight:700,color:videoPosition===p.v?"var(--accent-text)":"var(--text2)",fontFamily:"inherit"}}>{p.l}</button>
+                            {([{v:"top",l:"🔝 글 상단",desc:"글 맨 위"},{v:"middle",l:"🔲 글 중간",desc:"본문 중간"},{v:"bottom",l:"🔽 글 하단",desc:"글 맨 아래"}] as const).map(p=>(
+                              <button key={p.v} onClick={()=>setVideoPosition(p.v)} style={{flex:1,padding:"8px 4px",borderRadius:8,border:`1.5px solid ${videoPosition===p.v?"var(--accent)":"var(--border)"}`,background:videoPosition===p.v?"var(--accent-bg)":"transparent",cursor:"pointer",fontSize:11,fontWeight:700,color:videoPosition===p.v?"var(--accent-text)":"var(--text2)",fontFamily:"inherit",textAlign:"center"}}>
+                                <div>{p.l}</div>
+                                <div style={{fontSize:10,fontWeight:400,marginTop:2,color:"var(--text3)"}}>{p.desc}</div>
+                              </button>
                             ))}
                           </div>
                         </>
@@ -1444,17 +1455,22 @@ POST3: (제목)|(이유)
 
                     {/* 이미지 배치 패턴 */}
                     <div className="card" style={{padding:"14px 16px"}}>
-                      <div className="card-title" style={{marginBottom:12}}>📐 이미지 배치 패턴</div>
-                      <div style={{display:"flex",flexDirection:"column",gap:6}}>
+                      <div className="card-title" style={{marginBottom:4}}>📐 이미지 배치 패턴</div>
+                      <div style={{fontSize:11,color:"var(--text3)",marginBottom:12}}>글 안에 이미지를 어떻게 배치할지 선택해요</div>
+                      <div style={{display:"flex",flexDirection:"column",gap:8}}>
                         {([
-                          {v:"random",l:"🎲 랜덤 (권장)",sub:"매 발행마다 자동 변경 — AI 감지 방지"},
-                          {v:"A",l:"패턴 A",sub:"썸네일 → 중간 1장 (50%)"},
-                          {v:"B",l:"패턴 B",sub:"썸네일 → 앞 1장 + 뒤 1장 (35%)"},
-                          {v:"C",l:"패턴 C",sub:"썸네일 → 균등 분산 (15%)"},
+                          {v:"random",l:"🎲 랜덤",badge:"권장",sub:"매 발행마다 자동으로 패턴 변경",desc:"AI 감지 방지에 가장 효과적이에요",diagram:"🖼️ → 📝 → 🖼️ → 📝"},
+                          {v:"A",l:"패턴 A",badge:"",sub:"썸네일 + 중간 이미지 1장",desc:"글 중간에 이미지 1장 배치",diagram:"🖼️썸네일 → 📝글 → 🖼️중간 → 📝글"},
+                          {v:"B",l:"패턴 B",badge:"",sub:"썸네일 + 앞뒤 이미지 각 1장",desc:"글 앞과 뒤에 각각 1장씩",diagram:"🖼️썸네일 → 🖼️앞 → 📝글 → 🖼️뒤"},
+                          {v:"C",l:"패턴 C",badge:"",sub:"썸네일 + 이미지 균등 분산",desc:"이미지를 글 전체에 고르게 배치",diagram:"🖼️썸네일 → 📝 → 🖼️ → 📝 → 🖼️"},
                         ] as const).map(p=>(
-                          <button key={p.v} onClick={()=>setImgPattern(p.v)} style={{padding:"10px 12px",borderRadius:10,border:`1.5px solid ${imgPattern===p.v?"var(--accent)":"var(--border)"}`,background:imgPattern===p.v?"var(--accent-bg)":"var(--bg)",cursor:"pointer",fontFamily:"inherit",textAlign:"left",transition:"all .15s"}}>
-                            <div style={{fontSize:13,fontWeight:700,color:imgPattern===p.v?"var(--accent-text)":"var(--text)"}}>{p.l}</div>
-                            <div style={{fontSize:11,color:"var(--text3)",marginTop:2}}>{p.sub}</div>
+                          <button key={p.v} onClick={()=>setImgPattern(p.v)} style={{padding:"11px 13px",borderRadius:10,border:`1.5px solid ${imgPattern===p.v?"var(--accent)":"var(--border)"}`,background:imgPattern===p.v?"var(--accent-bg)":"var(--bg)",cursor:"pointer",fontFamily:"inherit",textAlign:"left",transition:"all .15s"}}>
+                            <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:4}}>
+                              <span style={{fontSize:13,fontWeight:800,color:imgPattern===p.v?"var(--accent-text)":"var(--text)"}}>{p.l}</span>
+                              {p.badge&&<span style={{fontSize:10,fontWeight:800,padding:"2px 7px",borderRadius:99,background:"var(--accent)",color:"#000"}}>{p.badge}</span>}
+                            </div>
+                            <div style={{fontSize:12,color:"var(--text2)",marginBottom:4}}>{p.sub}</div>
+                            <div style={{fontSize:11,color:"var(--text3)",fontFamily:"monospace",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{p.diagram}</div>
                           </button>
                         ))}
                       </div>
