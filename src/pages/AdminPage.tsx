@@ -339,10 +339,12 @@ select.field-inp{cursor:pointer;appearance:auto;}
 .mob-tab.active .mob-tab-lbl{color:var(--danger);}
 
 @media(max-width:900px){
+  .app{height:auto;min-height:100dvh;overflow-y:auto;-webkit-overflow-scrolling:touch;display:block;}
+  .header{position:fixed;top:0;left:0;right:0;z-index:200;}
   .sidebar{display:none;}
   .mob-tabs{display:flex;}
-  .layout{overflow:visible;height:auto;}
-  .main{overflow-y:auto;-webkit-overflow-scrolling:touch;padding-bottom:120px;height:auto;}
+  .layout{display:block;height:auto;overflow:visible;padding-top:60px;}
+  .main{display:block;height:auto;overflow:visible;padding-bottom:130px;}
 }
 @media(max-width:768px){
   .header-mid{display:none;}
@@ -1399,37 +1401,42 @@ POST3: (제목)|(이유)
                     {imgSource==="ai"&&(
                       <>
                         <div style={{marginBottom:14}}>
-                          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
-                            <label className="inp-label" style={{margin:0}}>생성 수량</label>
-                            <div style={{display:"flex",alignItems:"center",gap:7}}>
-                              <span style={{fontSize:26,fontWeight:900,color:"var(--accent-text)"}}>{imgCount}</span>
-                              <span style={{fontSize:12,color:"var(--text2)"}}>장</span>
-                              {!imgCountAuto&&<button style={{padding:"3px 8px",borderRadius:6,border:"1px solid var(--b)",background:"transparent",color:"var(--accent-text)",cursor:"pointer",fontSize:10,fontFamily:"inherit",fontWeight:700}} onClick={()=>{setImgCountAuto(true);if(genContent)setImgCount(Math.max(1,Math.min(10,Math.floor(genContent.length/200))));}}>자동</button>}
-                            </div>
+                          <label className="inp-label">생성 수량</label>
+                          <div style={{display:"flex",gap:6,marginBottom:10}}>
+                            <button onClick={()=>{setImgCountAuto(true);if(genContent)setImgCount(recommendImageCount(genContent));}} style={{flex:1,padding:"7px",borderRadius:8,border:`1.5px solid ${imgCountAuto?"var(--accent-text)":"var(--border)"}`,background:imgCountAuto?"var(--accent-bg)":"transparent",cursor:"pointer",fontSize:12,fontWeight:700,color:imgCountAuto?"var(--accent-text)":"var(--text2)",fontFamily:"inherit"}}>🤖 자동추천</button>
+                            <button onClick={()=>setImgCountAuto(false)} style={{flex:1,padding:"7px",borderRadius:8,border:`1.5px solid ${!imgCountAuto?"var(--accent-text)":"var(--border)"}`,background:!imgCountAuto?"var(--accent-bg)":"transparent",cursor:"pointer",fontSize:12,fontWeight:700,color:!imgCountAuto?"var(--accent-text)":"var(--text2)",fontFamily:"inherit"}}>✏️ 직접입력</button>
                           </div>
-                          <input type="range" min={1} max={20} step={1} value={imgCount} onChange={e=>{setImgCountAuto(false);setImgCount(Number(e.target.value));}} style={{width:"100%",accentColor:"var(--accent-text)",height:6,cursor:"pointer"}}/>
-                          {imgCountAuto&&genContent&&<div style={{marginTop:6,padding:"6px 10px",borderRadius:7,background:"var(--accent-bg)",border:"1px solid",borderColor:"var(--accent-border)",fontSize:11,color:"var(--accent-text)",fontWeight:600}}>💡 자동 추천: {imgCount}장</div>}
+                          {imgCountAuto?(
+                            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"10px 14px",borderRadius:10,background:"var(--accent-bg)",border:"1px solid var(--accent-border)"}}>
+                              <span style={{fontSize:12,color:"var(--accent-text)",fontWeight:600}}>💡 글자 수 기반 추천</span>
+                              <span style={{fontSize:24,fontWeight:900,color:"var(--accent-text)"}}>{imgCount}장</span>
+                            </div>
+                          ):(
+                            <div>
+                              <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:6}}>
+                                <button onClick={()=>setImgCount(Math.max(1,imgCount-1))} style={{width:32,height:32,borderRadius:8,border:"1px solid var(--border)",background:"var(--bg2)",cursor:"pointer",fontSize:18,fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center"}}>−</button>
+                                <input type="number" min={1} max={30} value={imgCount} onChange={e=>setImgCount(Math.max(1,Math.min(30,Number(e.target.value))))} style={{flex:1,textAlign:"center",padding:"7px",borderRadius:8,border:"1.5px solid var(--border)",background:"var(--bg2)",color:"var(--text)",fontSize:18,fontWeight:900,fontFamily:"'Space Grotesk',sans-serif"}}/>
+                                <button onClick={()=>setImgCount(Math.min(30,imgCount+1))} style={{width:32,height:32,borderRadius:8,border:"1px solid var(--border)",background:"var(--bg2)",cursor:"pointer",fontSize:18,fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center"}}>+</button>
+                              </div>
+                              <div style={{fontSize:11,color:"var(--text3)",textAlign:"center"}}>체험단 15장 이상도 가능 (최대 30장)</div>
+                            </div>
+                          )}
                         </div>
                         {genImgLoading&&(
-                          <div style={{marginBottom:14,padding:"12px",borderRadius:9,background:"var(--bg2)",border:"1px solid var(--b)"}}>
+                          <div style={{marginBottom:14,padding:"12px",borderRadius:9,background:"var(--bg2)",border:"1px solid var(--border)"}}>
                             <div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}>
                               <span style={{fontSize:12,fontWeight:700,color:"var(--accent-text)"}}>⏳ {genImgCurrent}/{imgCount}장</span>
                               <span style={{fontSize:13,fontWeight:900,color:"var(--accent-text)"}}>{genImgProgress}%</span>
                             </div>
                             <div style={{height:7,background:"var(--border)",borderRadius:99,overflow:"hidden"}}>
-                              <div style={{height:"100%",width:`${genImgProgress}%`,background:"linear-gradient(90deg,var(--a),#00cc80)",borderRadius:99,transition:"width .4s"}}/>
-                            </div>
-                            <div style={{display:"flex",gap:3,marginTop:7}}>
-                              {Array.from({length:imgCount}).map((_,i)=>(
-                                <div key={i} style={{flex:1,height:4,borderRadius:99,background:i<genImgCurrent?"var(--accent-text)":"var(--border)",transition:"background .3s"}}/>
-                              ))}
+                              <div style={{height:"100%",width:`${genImgProgress}%`,background:"linear-gradient(90deg,var(--accent-text),#00cc80)",borderRadius:99,transition:"width .4s"}}/>
                             </div>
                           </div>
                         )}
                         <div style={{display:"flex",flexDirection:"column",gap:7}}>
                           <button className="abp" onClick={handleGenerateImages} disabled={genImgLoading||!genContent}>{genImgLoading?<><span className="asp2"/>생성 중...</>:<>🎨 이미지 {imgCount}장 생성</>}</button>
                           {genImgLoading&&<button onClick={stopImageGen} style={{padding:"9px",borderRadius:99,border:"1.5px solid rgba(248,81,73,.35)",background:"rgba(248,81,73,.1)",color:"var(--danger)",cursor:"pointer",fontFamily:"inherit",fontSize:13,fontWeight:800,display:"flex",alignItems:"center",justifyContent:"center",gap:7}}>⏹ 생성 중단</button>}
-                          {generatedImages.length>0&&!genImgLoading&&<button onClick={()=>{setGeneratedImages([]);setGenImgProgress(0);setGenImgCurrent(0);}} style={{padding:"8px",borderRadius:8,border:"1px solid rgba(248,81,73,.3)",background:"rgba(248,81,73,.08)",color:"var(--danger)",cursor:"pointer",fontFamily:"inherit",fontSize:12,fontWeight:700}}>🗑 이미지 초기화</button>}
+                          {generatedImages.length>0&&!genImgLoading&&<button onClick={()=>{setGeneratedImages([]);setGenImgProgress(0);setGenImgCurrent(0);setCaptions([]);}} style={{padding:"8px",borderRadius:8,border:"1px solid rgba(248,81,73,.3)",background:"rgba(248,81,73,.08)",color:"var(--danger)",cursor:"pointer",fontFamily:"inherit",fontSize:12,fontWeight:700}}>🗑 이미지 초기화</button>}
                         </div>
                       </>
                     )}
