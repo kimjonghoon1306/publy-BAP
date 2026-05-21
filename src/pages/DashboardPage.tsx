@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
-import { PublyUser, getQuota, getHistory, getAccounts, PublyQuota, PublyHistory, PublyAccount, upsertAccount, useQuota, addHistory } from "../lib/supabase";
+import { PublyUser, getQuota, getHistory, getAccounts, PublyQuota, PublyHistory, PublyAccount, upsertAccount, useQuota, addHistory, deleteHistory, deleteAllHistory } from "../lib/supabase";
 import { supabase } from "../lib/supabase";
 
 type MainTab = "keyword" | "write" | "image" | "publish" | "manage" | "accounts" | "settings";
@@ -288,7 +288,7 @@ textarea.inp{resize:vertical;line-height:1.75;min-height:80px;}
 .mob-btn.active{background:var(--accent-bg);}
 .mob-btn.active .mob-btn-lbl{color:var(--accent-text);}
 .img-split{display:grid;grid-template-columns:300px 1fr;gap:14px;align-items:start;}
-@media(max-width:900px){.sidebar{display:none;}.mob-bar{display:flex;}.main{padding-bottom:120px !important;overflow-y:scroll;}.right-panel{display:none;}.guide-overlay{padding:12px 8px 120px;align-items:flex-start;overflow-y:auto;}.guide-modal{max-height:none;width:100%;}}
+@media(max-width:900px){.sidebar{display:none;}.mob-bar{display:flex;}.right-panel{display:none;}.layout{overflow:visible;height:auto;}.main{overflow-y:auto;-webkit-overflow-scrolling:touch;padding-bottom:120px;height:auto;min-height:0;}.guide-overlay{padding:12px 8px 120px;align-items:flex-start;overflow-y:auto;}.guide-modal{max-height:none;width:100%;}}
 @media(max-width:768px){
   .header-mid{display:none;}.main{padding:14px 12px 84px;}.card{padding:16px 14px;}
   .adtype-row{grid-template-columns:1fr 1fr;}.title-grid{grid-template-columns:1fr;}.ai-grid{flex-direction:column;}
@@ -1661,9 +1661,9 @@ POST3: (제목)|(이유)
                 <div className="card">
                   <div className="card-header">
                     <div className="card-title">📋 발행 기록</div>
-                    <div style={{display:"flex",gap:12,alignItems:"center"}}>
-                      <span style={{fontSize:13,color:"var(--text2)"}}>총 {history.length}건 · 오늘 {todayPub}건</span>
-                      <span style={{fontSize:13,fontWeight:800,color:"var(--accent-text)"}}>잔여 {quota?.remaining_quota??0}건</span>
+                    <div style={{display:"flex",gap:8,alignItems:"center"}}>
+                      <span style={{fontSize:13,color:"var(--text2)"}}>총 {history.length}건</span>
+                      {history.length>0&&<button className="btn btn-danger btn-sm" onClick={async()=>{if(!confirm("전체 삭제할까요?"))return;await deleteAllHistory(user.id);setHistory([]);}}>🗑 전체삭제</button>}
                     </div>
                   </div>
                   {history.length===0?(
@@ -1685,6 +1685,7 @@ POST3: (제목)|(이유)
                         {h.status==="success"?"✅ 성공":h.status==="fail"?"❌ 실패":"⏳ 대기"}
                       </span>
                       {h.post_url&&<a href={h.post_url} target="_blank" rel="noopener noreferrer" className="view-link">보기</a>}
+                      <button style={{padding:"4px 10px",borderRadius:7,border:"1px solid rgba(255,71,87,.3)",background:"transparent",color:"var(--danger)",cursor:"pointer",fontSize:12,fontWeight:700,flexShrink:0}} onClick={async()=>{await deleteHistory(h.id);setHistory(prev=>prev.filter(x=>x.id!==h.id));}}>삭제</button>
                     </div>
                   ))}
                 </div>
