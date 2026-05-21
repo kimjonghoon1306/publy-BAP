@@ -341,7 +341,8 @@ select.field-inp{cursor:pointer;appearance:auto;}
 @media(max-width:900px){
   .sidebar{display:none;}
   .mob-tabs{display:flex;}
-  .main{padding-bottom:120px !important;overflow-y:scroll;}
+  .layout{overflow:visible;height:auto;}
+  .main{overflow-y:auto;-webkit-overflow-scrolling:touch;padding-bottom:120px;height:auto;}
 }
 @media(max-width:768px){
   .header-mid{display:none;}
