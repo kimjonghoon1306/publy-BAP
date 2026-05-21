@@ -372,11 +372,21 @@ select.field-inp{cursor:pointer;appearance:auto;}
   .acc-card{flex-wrap:wrap;}
 }
 @media(max-width:480px){
-  .header{padding:0 10px;gap:6px;}
+  .header{padding:0 8px;gap:4px;}
   .plat-grid{grid-template-columns:1fr;}
   .adtype-grid{grid-template-columns:1fr;}
   .key-row-input{flex-wrap:wrap;}
   .key-row-input .inp{width:100%;}
+  /* 헤더 버튼 텍스트 숨기기 - 아이콘만 */
+  .adm-guide-text{display:none;}
+  .adm-guide-btn{padding:8px 10px;}
+  .back-text{display:none;}
+  .back-btn{padding:7px 9px;}
+  /* 회원 목록 모바일 짤림 방지 */
+  .user-row{min-width:0;overflow:hidden;}
+  .user-info{overflow:hidden;}
+  .user-name-row{flex-wrap:wrap;}
+  .user-email-row{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:180px;}
 }
 
 /* ── 관리자 사용설명서 ───────────────────────── */
@@ -1174,10 +1184,10 @@ POST3: (제목)|(이유)
             <button className="icon-btn" onClick={onThemeToggle}>{theme==="dark"?"☀️":"🌙"}</button>
             <button className="icon-btn" onClick={checkBot}>🔄</button>
             <button className="adm-guide-btn" onClick={() => { setShowGuide(true); setGuideTab(0); }}>
-              📋 관리자 가이드
+              📋 <span className="adm-guide-text">관리자 가이드</span>
             </button>
-            <button className="back-btn" onClick={onDashboard}>← 회원 화면</button>
-            <button className="back-btn" style={{borderColor:"rgba(248,81,73,.3)",color:"var(--danger)"}} onClick={onBack}>로그아웃</button>
+            <button className="back-btn" onClick={onDashboard}>← <span className="back-text">회원 화면</span></button>
+            <button className="back-btn" style={{borderColor:"rgba(248,81,73,.3)",color:"var(--danger)"}} onClick={onBack}><span className="back-text">로그아웃</span></button>
           </div>
         </div>
 
