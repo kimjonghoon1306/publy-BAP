@@ -396,6 +396,7 @@ export default function DashboardPage({user, onLogout, onAdminLogin, onThemeTogg
   const [newPlat, setNewPlat] = useState<"naver"|"tistory">("naver");
   const [newUser, setNewUser] = useState("");
   const [newPw, setNewPw] = useState("");
+  const [showPw, setShowPw] = useState(false);
   const [newBlog, setNewBlog] = useState("");
   const [addingAcc, setAddingAcc] = useState(false);
   const [connId, setConnId] = useState<string|null>(null);
@@ -1701,7 +1702,7 @@ POST3: (제목)|(이유)
                   <div className="acc-form-grid" style={{display:"grid",gridTemplateColumns:"100px 1fr 1fr",gap:10,marginBottom:12}}>
                     <div><label className="inp-label">플랫폼</label><select className="inp" value={newPlat} onChange={e=>setNewPlat(e.target.value as any)}><option value="naver">네이버</option><option value="tistory">티스토리</option></select></div>
                     <div><label className="inp-label">아이디</label><input className="inp" placeholder="블로그 아이디" value={newUser} onChange={e=>setNewUser(e.target.value)}/></div>
-                    <div><label className="inp-label">비밀번호</label><input className="inp" type="password" placeholder="비밀번호" value={newPw} onChange={e=>setNewPw(e.target.value)}/></div>
+                    <div><label className="inp-label">비밀번호</label><div style={{position:"relative"}}><input className="inp" type={showPw?"text":"password"} placeholder="비밀번호" value={newPw} onChange={e=>setNewPw(e.target.value)} style={{paddingRight:40}}/><button type="button" onClick={()=>setShowPw(v=>!v)} style={{position:"absolute",right:10,top:"50%",transform:"translateY(-50%)",background:"none",border:"none",cursor:"pointer",fontSize:18,color:"var(--text3)"}}>{showPw?"🙈":"👁️"}</button></div></div>
                   </div>
                   <div style={{marginBottom:14}}><label className="inp-label">블로그명 <span style={{color:"var(--text3)",fontWeight:400}}>(티스토리만)</span></label><input className="inp" placeholder="예: myblog" value={newBlog} onChange={e=>setNewBlog(e.target.value)}/></div>
                   <button className="btn btn-primary" onClick={handleAddAccount} disabled={addingAcc||!newUser||!newPw}>{addingAcc?<><span className="spinner"/>추가 중...</>:<>➕ 계정 추가</>}</button>
