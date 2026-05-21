@@ -960,35 +960,19 @@ POST3: (제목)|(이유)
 
         {/* ── 헤더 ── */}
         <div className="header">
-          <div className="header-logo">PUBLY</div>
-          <div className="header-steps">
-            {([{n:"1"},{n:"2"},{n:"3"},{n:"4"},{n:"5"}] as const).map((s,i)=>{
-              const isDone=[keywords.length>0,!!selectedTitle,!!genContent,generatedImages.length>0||uploadedImages.length>0,todayPub>0][i];
-              return (<React.Fragment key={i}>{i>0&&<div className={`step-line${isDone?" done":""}`}/>}<div className={`step-dot${isDone?" done":""}`}>{isDone?"✓":s.n}</div></React.Fragment>);
-            })}
-          </div>
-          <div className="header-right">
-            <button className={`plat-badge naver${platform==="naver"?" active":""}`} onClick={()=>setPlatform("naver")}>🟢 네이버</button>
-            <button className={`plat-badge tistory${platform==="tistory"?" active":""}`} onClick={()=>setPlatform("tistory")}>🟠 티스토리</button>
-            <button className="icon-btn" onClick={onThemeToggle}>{theme==="dark"?"☀️":"🌙"}</button>
-            <button className="icon-btn" onClick={()=>{setShowGuide(true);setGuideTab(0);}}>📖</button>
-            <div className="user-chip" onClick={onAdminLogin}><span style={{width:22,height:22,borderRadius:"50%",background:"var(--accent-bg)",border:"1px solid var(--accent-border)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,fontWeight:900,color:"var(--accent-text)",flexShrink:0}}>{(user.name||user.email)[0].toUpperCase()}</span><span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:80,fontSize:12,fontWeight:600}}>{user.name||user.email.split("@")[0]}</span></div>
-            <button className="icon-btn" onClick={onLogout}>🚪</button>
-          </div>
-        </div>
-
-        {/* ── 3존 레이아웃 ── */}
-        <div className="main-layout">
-          <div className="left-nav">
-            {MAIN_TABS.map(t=>(<button key={t.k} className={`nav-item ${tab===t.k?"active":""}`} onClick={()=>setTab(t.k as MainTab)}><span className="nav-ico">{t.i}</span>{t.l}{t.k==="keyword"&&titles.length>0&&<span className="nav-badge">{titles.length}</span>}{t.k==="manage"&&history.length>0&&<span className="nav-badge">{history.length}</span>}</button>))}
-            <div className="nav-footer"><div className="quota-mini"><div className="quota-mini-label">발행 건수</div><div className="quota-bar"><div className="quota-fill" style={{width:`${quota?Math.min(100,(quota.used_quota/quota.total_quota)*100):0}%`}}/></div><div style={{display:"flex",justifyContent:"space-between",marginTop:4}}><span className="quota-count">{quota?.remaining_quota??"-"}건</span><span style={{fontSize:10,color:"var(--text3)"}}>{user.plan?.toUpperCase()}</span></div></div></div>
-          </div>
-          <div className="main-content">
-            <span className={`plan-badge plan-${user.plan}`}>{PLAN_LABELS[user.plan]}</span>
-          </div>
-          <div className="header-right">
-            <a href={EXE_DOWNLOAD_URL} className="dl-btn" download><span>⬇️</span><span> PC앱 다운로드</span></a>
+          <a className="logo" href="#" onClick={e=>e.preventDefault()}>
+            <div className="logo-ico" style={{fontSize:17,fontWeight:900,color:"#000"}}>P</div>
+            <span className="logo-text">PUBLY</span>
+          </a>
+          <div className="header-mid">
+            <button style={{padding:"5px 12px",borderRadius:99,border:"1.5px solid",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit",transition:"all .15s",background:platform==="naver"?"rgba(3,199,90,.1)":"transparent",color:platform==="naver"?"var(--naver)":"var(--text2)",borderColor:platform==="naver"?"rgba(3,199,90,.4)":"var(--border)"}} onClick={()=>setPlatform("naver")}>🟢 네이버</button>
+            <button style={{padding:"5px 12px",borderRadius:99,border:"1.5px solid",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit",transition:"all .15s",background:platform==="tistory"?"rgba(255,107,53,.1)":"transparent",color:platform==="tistory"?"var(--tistory)":"var(--text2)",borderColor:platform==="tistory"?"rgba(255,107,53,.4)":"var(--border)"}} onClick={()=>setPlatform("tistory")}>🟠 티스토리</button>
+            <div className={`server-chip ${botOnline?"server-on":"server-off"}`}><div className={`dot ${botOnline?"dot-on":"dot-off"}`}/>{botOnline?"서버 온라인":"서버 오프라인"}</div>
+            <div className="quota-chip"><div className="quota-bar-bg"><div className="quota-bar-fill" style={{width:`${quota?Math.min(100,(quota.used_quota/quota.total_quota)*100):0}%`}}/></div>{quota?.remaining_quota??"-"}건<span className={`plan-badge plan-${user.plan}`}>{PLAN_LABELS[user.plan]}</span></div>
+            <a href={EXE_DOWNLOAD_URL} className="dl-btn" download><span>⬇️</span><span>PC앱 다운로드</span></a>
             <button className="guide-open-btn" onClick={()=>{setShowGuide(true);setGuideTab(0);}}>📖 사용설명서</button>
+          </div>
+          <div className="header-right">
             <button className="icon-btn" onClick={onThemeToggle}>{theme==="dark"?"☀️":"🌙"}</button>
             <button className="icon-btn" onClick={checkBot}>🔄</button>
             <div className="user-chip" onClick={onAdminLogin}><div className="user-avatar">{(user.name||user.email)[0].toUpperCase()}</div><span className="user-name">{user.name||user.email.split("@")[0]}</span></div>
