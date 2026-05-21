@@ -1,4 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
+import bcrypt from "bcryptjs";
 
 const SUPABASE_URL = "https://qhhoyxexxlimbjrbwrgq.supabase.co";
 const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFoaG95eGV4eGxpbWJqcmJ3cmdxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzczMTMzOTQsImV4cCI6MjA5Mjg4OTM5NH0.pw_qUR0oOxgt82S_DA6GTka3WP0JBu2vmWuKZ9VvTKM";
@@ -48,7 +49,6 @@ export interface PublyHistory {
 
 // ── 인증 ─────────────────────────────────────────────────
 export async function signUp(email: string, password: string, name: string) {
-  const bcrypt = await import("bcryptjs");
   const hash = await bcrypt.hash(password, 10);
 
   const { data: user, error } = await supabase
@@ -70,7 +70,6 @@ export async function signUp(email: string, password: string, name: string) {
 }
 
 export async function signIn(email: string, password: string) {
-  const bcrypt = await import("bcryptjs");
 
   const { data: user, error } = await supabase
     .from("publy_users")
