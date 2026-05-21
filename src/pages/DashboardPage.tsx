@@ -305,7 +305,7 @@ textarea.inp{resize:vertical;line-height:1.75;min-height:80px;}
 @media(max-width:480px){
   .header{padding:0 8px;gap:5px;}.user-name{display:none;}.logout-btn{display:none;}.quota-chip{display:none;}
   .dl-btn span:last-child{display:none;}.dl-btn{padding:9px 12px;}
-  .guide-open-btn{display:none;}
+  .guide-open-btn{font-size:11px;padding:6px 10px;}
   .adtype-row{grid-template-columns:1fr;}.guide-overlay{padding:6px;}
   .guide-modal{max-height:94vh;border-radius:16px;}.guide-tab{font-size:11px;padding:9px 11px;}
   .acc-form-grid{grid-template-columns:1fr !important;}
@@ -1765,8 +1765,7 @@ POST3: (제목)|(이유)
         </div>
 
         <div className="mob-bar">
-          {MAIN_TABS.filter(t=>["keyword","write","image","publish","settings"].includes(t.k)).map(t=>(<button key={t.k} className={`mob-btn ${tab===t.k?"active":""}`} onClick={()=>setTab(t.k as MainTab)}><span className="mob-btn-ico">{t.i}</span><span className="mob-btn-lbl">{t.k==="keyword"?"키워드":t.k==="write"?"글쓰기":t.k==="image"?"이미지":t.k==="publish"?"발행":"설정"}</span></button>))}
-          <button className="mob-btn" onClick={()=>{setShowGuide(true);setGuideTab(0);}}><span className="mob-btn-ico">📖</span><span className="mob-btn-lbl">사용방법</span></button>
+          {MAIN_TABS.filter(t=>["keyword","write","image","publish","manage","settings"].includes(t.k)).map(t=>(<button key={t.k} className={`mob-btn ${tab===t.k?"active":""}`} onClick={()=>setTab(t.k as MainTab)}><span className="mob-btn-ico">{t.i}</span><span className="mob-btn-lbl">{t.k==="keyword"?"키워드":t.k==="write"?"글쓰기":t.k==="image"?"이미지":t.k==="publish"?"발행":t.k==="manage"?"발행관리":"설정"}</span></button>))}
         </div>
       </div>
     </>
