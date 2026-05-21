@@ -287,12 +287,16 @@ textarea.inp{resize:vertical;line-height:1.75;min-height:80px;}
 .mob-btn-lbl{font-size:11px;font-weight:600;color:var(--text2);}
 .mob-btn.active{background:var(--accent-bg);}
 .mob-btn.active .mob-btn-lbl{color:var(--accent-text);}
+.img-split{display:grid;grid-template-columns:300px 1fr;gap:14px;align-items:start;}
 @media(max-width:900px){.sidebar{display:none;}.mob-bar{display:flex;}}
 @media(max-width:768px){
   .header-mid{display:none;}.main{padding:14px 12px 84px;}.card{padding:16px 14px;}
   .adtype-row{grid-template-columns:1fr 1fr;}.title-grid{grid-template-columns:1fr;}.ai-grid{flex-direction:column;}
-  .btn-xl{padding:16px 22px;font-size:16px;}.btn{font-size:14px;padding:12px 18px;}.inp{font-size:16px;}.inp.lg{font-size:18px;}
-  .concept-grid{grid-template-columns:1fr;}.steps .step-n{display:none;}.step-item{font-size:12px;padding:12px 6px;}
+  .btn-xl{padding:18px 22px;font-size:17px;}.btn{font-size:15px;padding:13px 18px;}.inp{font-size:16px;}.inp.lg{font-size:18px;}
+  .concept-grid{grid-template-columns:1fr;}.steps .step-n{display:none;}.step-item{font-size:13px;padding:13px 6px;}
+  .g-step-desc{font-size:14px !important;line-height:1.9 !important;}
+  .g-step-title{font-size:16px !important;}
+  .nav-item{padding:13px 12px;font-size:14px;}
   .guide-modal{max-width:100%;max-height:90vh;border-radius:20px;}.guide-header{padding:16px 16px 0;}
   .guide-body{padding:14px 14px 18px;}.guide-footer{padding:10px 14px;}.preview-inner{padding:20px 14px;}
   .flow-nav{flex-direction:column;align-items:stretch;}.flow-btn{justify-content:center;}
@@ -912,6 +916,7 @@ POST3: (제목)|(이유)
   const P="#FF6B9D",Y="#FFD93D",G="#00ff9d";
   const guideTabs=["🏠 시작","🔑 API 키","✍️ 글 생성","🖼️ 이미지","🚀 발행","❓ FAQ"];
   const guidePages=[
+    /* ── 0: 시작 ── */
     <div key="0">
       <div className="g-step" style={{borderColor:`${G}40`,background:`${G}08`}}>
         <div className="g-step-num" style={{color:G}}>🎉 PUBLY에 오신 걸 환영해요!</div>
@@ -919,13 +924,13 @@ POST3: (제목)|(이유)
         <div className="g-step-desc">키워드 하나만 입력하면 <b>제목 → 글 → 이미지 → 자동 발행</b>까지 전부 자동이에요!</div>
       </div>
       <div className="g-step" style={{borderColor:`${Y}40`,background:`${Y}08`}}>
-        <div className="g-step-num" style={{color:Y}}>📋 4단계 전체 흐름</div>
+        <div className="g-step-num" style={{color:Y}}>📋 5단계 전체 흐름</div>
         <div className="g-step-title" style={{color:"#fff"}}>이 순서대로만 하면 끝!</div>
         <div className="g-step-desc">
-          {[["✍️","글 생성 탭","키워드 → 제목 → 글 작성"],["🖼️","이미지 탭","AI 이미지 자동 생성 + 중단 가능"],["🚀","발행하기 탭","발행 방식 선택 → 자동 발행"],["📋","발행 기록","발행된 글 전체 확인"]].map(([ico,t,d],idx)=>(
-            <div key={idx} style={{display:"flex",gap:10,padding:"8px 0",borderBottom:idx<3?"1px solid rgba(255,255,255,.06)":"none"}}>
-              <span style={{fontSize:20,flexShrink:0}}>{ico}</span>
-              <div><div style={{fontWeight:800,color:"#fff",fontSize:14}}>{t}</div><div style={{fontSize:12,color:"rgba(255,255,255,.5)",marginTop:2}}>{d}</div></div>
+          {[["✍️","글쓰기 탭","키워드 입력 → 제목 선택 → 글 자동 생성"],["🖼️","이미지 탭","AI 이미지 생성 + 캡션 입력 + 영상 설정"],["🚀","발행 탭","발행 방식 선택 → 계정 선택 → 자동 발행"],["📋","기록 탭","발행된 글 목록 전체 확인"],["⚙️","설정 탭","API 키 관리 + 블로그 계정 연결"]].map(([ico,t,d],idx)=>(
+            <div key={idx} style={{display:"flex",gap:10,padding:"9px 0",borderBottom:idx<4?"1px solid rgba(255,255,255,.06)":"none"}}>
+              <span style={{fontSize:22,flexShrink:0}}>{ico}</span>
+              <div><div style={{fontWeight:800,color:"#fff",fontSize:15}}>{t}</div><div style={{fontSize:13,color:"rgba(255,255,255,.55)",marginTop:2}}>{d}</div></div>
             </div>
           ))}
         </div>
@@ -935,38 +940,48 @@ POST3: (제목)|(이유)
         <div className="g-step-title" style={{color:"#fff"}}>무엇을 선택할까요?</div>
         <div className="g-step-desc">
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginTop:4}}>
-            <div style={{padding:12,borderRadius:12,background:"rgba(3,199,90,.1)",border:"1.5px solid rgba(3,199,90,.3)"}}>
-              <div style={{fontSize:14,fontWeight:900,color:"#03C75A",marginBottom:4}}>📰 애드포스트</div>
-              <div style={{fontSize:12,color:"rgba(255,255,255,.7)",lineHeight:1.6}}>네이버 블로그. 친근하고 감성적. 처음 시작에 추천!</div>
+            <div style={{padding:14,borderRadius:12,background:"rgba(3,199,90,.1)",border:"1.5px solid rgba(3,199,90,.3)"}}>
+              <div style={{fontSize:15,fontWeight:900,color:"#03C75A",marginBottom:5}}>📰 애드포스트</div>
+              <div style={{fontSize:13,color:"rgba(255,255,255,.7)",lineHeight:1.7}}>네이버 블로그.<br/>친근하고 감성적.<br/>처음 시작에 추천!</div>
             </div>
-            <div style={{padding:12,borderRadius:12,background:"rgba(77,166,255,.1)",border:"1.5px solid rgba(77,166,255,.3)"}}>
-              <div style={{fontSize:14,fontWeight:900,color:"#4da6ff",marginBottom:4}}>🔍 애드센스</div>
-              <div style={{fontSize:12,color:"rgba(255,255,255,.7)",lineHeight:1.6}}>구글 검색 노출. 정보성 글. 글자 수 더 많아요.</div>
+            <div style={{padding:14,borderRadius:12,background:"rgba(77,166,255,.1)",border:"1.5px solid rgba(77,166,255,.3)"}}>
+              <div style={{fontSize:15,fontWeight:900,color:"#4da6ff",marginBottom:5}}>🔍 애드센스</div>
+              <div style={{fontSize:13,color:"rgba(255,255,255,.7)",lineHeight:1.7}}>티스토리.<br/>구글 검색 노출.<br/>글자 수 더 많아요.</div>
             </div>
           </div>
         </div>
       </div>
     </div>,
+
+    /* ── 1: API 키 ── */
     <div key="1">
       <div className="g-step" style={{borderColor:`${Y}40`,background:`${Y}08`}}>
         <div className="g-step-num" style={{color:Y}}>⚠️ 이것부터 해야 해요!</div>
         <div className="g-step-title" style={{color:"#fff"}}>API 키 없으면 글을 쓸 수 없어요</div>
-        <div className="g-step-desc">API 키는 AI 서비스 이용권이에요. 아래 중 하나만 있으면 돼요!</div>
+        <div className="g-step-desc">API 키는 AI 서비스 이용권이에요. 아래 중 <b>하나만</b> 있으면 돼요!</div>
         <button className="g-btn" style={{background:`linear-gradient(135deg,${Y},#e0a500)`,color:"#000"}} onClick={()=>{setShowGuide(false);setTab("settings");}}>⚙️ 지금 API 키 설정하기</button>
       </div>
       {[{logo:"G",color:"#4285F4",name:"Gemini Flash",free:true,desc:"구글 AI. 완전 무료! 처음 시작하는 분께 강력 추천.",link:"https://aistudio.google.com/app/apikey"},{logo:"L",color:"#F55036",name:"Groq Llama 3",free:true,desc:"초고속 AI. 역시 무료!",link:"https://console.groq.com/keys"},{logo:"O",color:"#10A37F",name:"GPT-4o",free:false,desc:"가장 강력한 AI. 유료지만 최고 품질.",link:"https://platform.openai.com/api-keys"}].map((ai,i)=>(
         <div key={i} className="g-step" style={{borderColor:`${ai.color}35`,background:`${ai.color}08`}}>
-          <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:7}}>
-            <div style={{width:30,height:30,borderRadius:8,background:ai.color,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:900,color:"#000",fontSize:13,flexShrink:0}}>{ai.logo}</div>
-            <div><div style={{fontSize:14,fontWeight:800,color:"#fff"}}>{ai.name}</div><span style={{fontSize:10,fontWeight:800,padding:"2px 7px",borderRadius:99,background:ai.free?"rgba(0,200,117,.15)":"rgba(245,158,11,.15)",color:ai.free?"#00c875":"#f59e0b"}}>{ai.free?"✅ 무료":"💳 유료"}</span></div>
+          <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:8}}>
+            <div style={{width:34,height:34,borderRadius:9,background:ai.color,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:900,color:"#000",fontSize:14,flexShrink:0}}>{ai.logo}</div>
+            <div><div style={{fontSize:15,fontWeight:800,color:"#fff"}}>{ai.name}</div><span style={{fontSize:11,fontWeight:800,padding:"2px 8px",borderRadius:99,background:ai.free?"rgba(0,200,117,.15)":"rgba(245,158,11,.15)",color:ai.free?"#00c875":"#f59e0b"}}>{ai.free?"✅ 무료":"💳 유료"}</span></div>
           </div>
           <div className="g-step-desc">{ai.desc}</div>
-          <div className="g-tip">🔑 <a href={ai.link} target="_blank" rel="noopener noreferrer" style={{color:Y,fontWeight:700,textDecoration:"underline"}}>여기서 키 발급</a> → 로그인 → API 키 생성 → 복사 → 설정 탭 붙여넣기</div>
+          <div className="g-tip" style={{marginTop:8,fontSize:13}}>🔑 <a href={ai.link} target="_blank" rel="noopener noreferrer" style={{color:Y,fontWeight:700,textDecoration:"underline"}}>여기서 키 발급</a> → 로그인 → API 키 생성 → 복사 → 설정 탭 붙여넣기</div>
         </div>
       ))}
     </div>,
+
+    /* ── 2: 글 생성 ── */
     <div key="2">
-      {[{n:"STEP 1",i:"🎯",t:"수익화 목적 선택",c:G,d:<>글 생성 탭에서 <b>애드포스트</b> 또는 <b>애드센스</b> 선택!</>},{n:"STEP 2",i:"🔍",t:"키워드 입력",c:Y,d:<>예: "강남 맛집" 입력 후 Enter 또는 버튼 클릭!</>},{n:"STEP 3",i:"⭐",t:"제목 클릭해서 선택",c:P,d:<>AI가 제목 <b>30개</b> 추천. 마음에 드는 거 클릭!</>},{n:"STEP 4",i:"🤖",t:"글 생성",c:"#8B5CF6",d:<><b>본문 생성 시작</b> 버튼! 이미지는 다음 탭에서 따로!</>}].map((s,i)=>(
+      {[
+        {n:"STEP 1",i:"🎯",t:"플랫폼 + 수익화 선택",c:G,d:<>헤더에서 <b>🟢 네이버</b> 또는 <b>🟠 티스토리</b> 선택 후, 글쓰기 탭에서 애드포스트/애드센스 선택!</>},
+        {n:"STEP 2",i:"🔍",t:"키워드 입력",c:Y,d:<>예: <b>"강남 맛집"</b> 입력 후 Enter 또는 버튼 클릭! 제목 30개 자동 추천!</>},
+        {n:"STEP 3",i:"⭐",t:"제목 클릭해서 선택",c:P,d:<>AI가 추천한 제목 중 마음에 드는 거 클릭! 마음에 안 들면 30개 추가도 가능!</>},
+        {n:"STEP 4",i:"📏",t:"글자수 설정",c:"#8B5CF6",d:<><b>🎲 자동 랜덤</b> 추천! 네이버: 1800~2500자, 체험단: 2000~3000자, 티스토리: 2500~4000자. 매번 달라서 AI 감지 방지!</>},
+        {n:"STEP 5",i:"🤖",t:"글 생성 시작",c:"#F55036",d:<><b>본문 생성 시작</b> 버튼! 인트로·소제목·마무리가 매번 달라져요. 이미지는 다음 탭에서 따로!</>},
+      ].map((s,i)=>(
         <div key={i} className="g-step" style={{borderColor:`${s.c}40`,background:`${s.c}08`}}>
           <div className="g-step-num" style={{color:s.c}}>{s.i} {s.n}</div>
           <div className="g-step-title" style={{color:"#fff"}}>{s.t}</div>
@@ -974,43 +989,69 @@ POST3: (제목)|(이유)
         </div>
       ))}
     </div>,
+
+    /* ── 3: 이미지 ── */
     <div key="3">
       <div className="g-step" style={{borderColor:`${G}40`,background:`${G}08`}}>
         <div className="g-step-num" style={{color:G}}>🖼️ 이미지 탭 사용법</div>
-        <div className="g-step-title" style={{color:"#fff"}}>글과 이미지는 따로따로!</div>
-        <div className="g-step-desc">글 생성 완료 후 이미지 탭으로 이동해요. 수량 조절 후 생성 버튼! 중간에 멈추고 싶으면 <b>⏹ 중단</b> 버튼!</div>
+        <div className="g-step-title" style={{color:"#fff"}}>이미지마다 캡션을 꼭 입력해요!</div>
+        <div className="g-step-desc">캡션(이미지 설명)은 네이버 상위 노출에 도움이 돼요. 자동 생성되지만 직접 수정도 가능해요.</div>
       </div>
-      {[{t:"🤖 AI 자동 생성",d:"OpenAI 또는 Replicate 키 필요"},{t:"📁 내 이미지 업로드",d:"직접 찍은 사진이나 저장한 이미지"},{t:"🚫 이미지 없이",d:"텍스트만 발행"}].map((item,i)=>(
-        <div key={i} style={{padding:"11px 13px",borderRadius:10,background:"rgba(255,255,255,.04)",border:"1px solid rgba(255,255,255,.06)",marginBottom:8}}>
-          <div style={{fontSize:14,fontWeight:800,color:"#fff",marginBottom:3}}>{item.t}</div>
-          <div style={{fontSize:12,color:"rgba(255,255,255,.65)"}}>{item.d}</div>
+      {[
+        {t:"🤖 AI 자동 생성",d:"수량 자동추천 또는 직접 입력 (체험단 15장+ 가능). 생성 중 언제든 ⏹ 중단 가능!"},
+        {t:"📁 내 이미지 업로드",d:"직접 찍은 사진이나 저장한 이미지. 여러 장 동시 업로드 가능!"},
+        {t:"🚫 이미지 없이 발행",d:"텍스트만 발행할 때 선택."},
+        {t:"📐 이미지 배치 패턴",d:"🎲 랜덤(권장): 매 발행마다 자동 변경 → AI 감지 방지!\nA: 중간 1장 / B: 앞뒤 각 1장 / C: 균등 분산"},
+        {t:"🎬 영상 삽입",d:"네이버TV/유튜브 URL 입력 후 ON. 체험단 영상 필수 업체 대응! 위치(상단/중간/하단) 선택 가능."},
+      ].map((item,i)=>(
+        <div key={i} style={{padding:"13px 15px",borderRadius:12,background:"rgba(255,255,255,.04)",border:"1px solid rgba(255,255,255,.08)",marginBottom:8}}>
+          <div style={{fontSize:15,fontWeight:800,color:"#fff",marginBottom:4}}>{item.t}</div>
+          <div style={{fontSize:13,color:"rgba(255,255,255,.65)",lineHeight:1.7,whiteSpace:"pre-line"}}>{item.d}</div>
         </div>
       ))}
     </div>,
+
+    /* ── 4: 발행 ── */
     <div key="4">
       <div className="g-step" style={{borderColor:`${P}40`,background:`${P}08`}}>
         <div className="g-step-num" style={{color:P}}>🚨 발행 전 필수 확인!</div>
         <div className="g-step-title" style={{color:"#fff"}}>PC에서 Publy 앱이 실행 중이어야 해요</div>
-        <div className="g-step-desc">상단에 <b style={{color:G}}>● 서버 온라인</b>이 보여야 즉시 발행! 오프라인이면 예약 발행으로 처리돼요.</div>
+        <div className="g-step-desc">우측 패널에 <b style={{color:G}}>● 온라인</b>이 보여야 즉시 발행! 오프라인이면 예약 발행으로 처리돼요.</div>
       </div>
       <div className="g-step" style={{borderColor:`${Y}40`,background:`${Y}08`}}>
         <div className="g-step-num" style={{color:Y}}>📝 발행 방식 3가지</div>
         <div className="g-step-title" style={{color:"#fff"}}>어떤 내용을 발행할까요?</div>
         <div className="g-step-desc">
-          {[["① 전체 발행","본문 + FAQ + 관련글 모두"],["② 본문+FAQ","FAQ까지만. 관련글 제외"],["③ 본문만","핵심만 깔끔하게"]].map(([t,d],i)=>(
-            <div key={i} style={{display:"flex",gap:8,padding:"7px 0",borderBottom:i<2?"1px solid rgba(255,255,255,.06)":"none"}}>
-              <div><div style={{fontSize:13,fontWeight:800,color:"#fff"}}>{t}</div><div style={{fontSize:12,color:"rgba(255,255,255,.6)",marginTop:2}}>{d}</div></div>
+          {[["① 전체 발행","본문 + FAQ + 관련글 모두. 가장 풍부한 내용"],["② 본문+FAQ","FAQ까지만. 관련글 제외"],["③ 본문만","핵심만 깔끔하게. 가장 간결"]].map(([t,d],i)=>(
+            <div key={i} style={{display:"flex",gap:8,padding:"8px 0",borderBottom:i<2?"1px solid rgba(255,255,255,.06)":"none"}}>
+              <div><div style={{fontSize:14,fontWeight:800,color:"#fff"}}>{t}</div><div style={{fontSize:13,color:"rgba(255,255,255,.6)",marginTop:2}}>{d}</div></div>
             </div>
           ))}
         </div>
+      </div>
+      <div className="g-step" style={{borderColor:`${G}40`,background:`${G}08`}}>
+        <div className="g-step-num" style={{color:G}}>✅ 발행 설정 요약 확인</div>
+        <div className="g-step-title" style={{color:"#fff"}}>발행 전 이미지 패턴·캡션 확인하세요</div>
+        <div className="g-step-desc">발행 탭 상단에 <b>이미지 장수, 배치 패턴, 영상 유무, 캡션 개수</b>가 표시돼요. 확인 후 발행!</div>
         <button className="g-btn" style={{background:`linear-gradient(135deg,${G},#00c870)`,color:"#000"}} onClick={()=>{setShowGuide(false);setTab("accounts");}}>🔗 계정 연결하러 가기</button>
       </div>
     </div>,
+
+    /* ── 5: FAQ ── */
     <div key="5">
-      {[{q:"API 키가 뭐예요?",a:"AI 서비스 비밀번호예요. 처음 한 번만 설정! Gemini는 구글 계정만 있으면 무료 발급!",c:G},{q:"글이 얼마나 걸려요?",a:"보통 30초~1분이요. AI가 글을 쓰는 중이라 잠깐 기다려주세요 ☕",c:Y},{q:"블로그에 ## 기호가 들어가요",a:"이미 수정됐어요! 마크다운 기호 완전 제거 기능이 적용돼 있어요.",c:P},{q:"이미지 생성이 안 돼요",a:"OpenAI 또는 Replicate 키가 필요해요. 없으면 '내 이미지' 또는 '이미지 없이'로 선택하세요.",c:"#8B5CF6"},{q:"발행 건수가 부족해요",a:"FREE 10건, BASIC 50건, PRO 무제한. 업그레이드는 관리자에게 문의하세요.",c:"#F55036"}].map((item,i)=>(
-        <div key={i} className="g-step" style={{borderColor:`${item.c}30`,background:`${item.c}06`}}>
-          <div style={{fontSize:14,fontWeight:800,color:item.c,marginBottom:6}}>Q. {item.q}</div>
-          <div style={{fontSize:13,color:"rgba(255,255,255,.8)",lineHeight:1.8}}>A. {item.a}</div>
+      {[
+        {q:"API 키가 뭐예요?",a:"AI 서비스 비밀번호예요. 처음 한 번만 설정하면 돼요! Gemini는 구글 계정만 있으면 무료 발급!",c:G},
+        {q:"글이 얼마나 걸려요?",a:"보통 30초~1분이요. AI가 글을 쓰는 중이라 잠깐 기다려주세요 ☕",c:Y},
+        {q:"글자수는 어떻게 정해요?",a:"🎲 자동 랜덤 추천! 네이버: 1800~2500자, 체험단/맛집: 2000~3000자, 티스토리: 2500~4000자. 직접 설정도 가능해요.",c:P},
+        {q:"체험단 이미지 15장 이상도 되나요?",a:"네! 이미지 탭에서 '✏️ 직접입력' 선택 후 숫자를 입력하면 돼요. 최대 30장까지 가능해요.",c:"#8B5CF6"},
+        {q:"이미지 설명(캡션)이 뭔가요?",a:"이미지 아래 짧은 설명이에요. 네이버 상위 노출에 도움이 돼요. 자동 생성 후 수정 가능해요.",c:"#4ECDC4"},
+        {q:"블로그에 ## 기호가 들어가요",a:"이미 수정됐어요! 마크다운 기호 완전 제거 기능이 적용돼 있어요.",c:P},
+        {q:"이미지 생성이 안 돼요",a:"OpenAI 또는 Replicate 키가 필요해요. 없으면 '내 이미지 업로드' 또는 '이미지 없이 발행'을 선택하세요.",c:"#F55036"},
+        {q:"발행 건수가 부족해요",a:"FREE 10건, BASIC 50건, PRO 무제한. 업그레이드는 관리자에게 문의하세요.",c:Y},
+      ].map((item,i)=>(
+        <div key={i} className="g-step" style={{borderColor:`${item.c}35`,background:`${item.c}08`,marginBottom:8}}>
+          <div className="g-step-title" style={{color:"#fff",fontSize:14}}>Q. {item.q}</div>
+          <div className="g-step-desc" style={{marginTop:6}}>👉 {item.a}</div>
         </div>
       ))}
     </div>,
@@ -1276,7 +1317,7 @@ POST3: (제목)|(이유)
               <div style={{animation:"fadeUp .25s ease both"}}>
                 {!genContent&&(<div className="alert-box alert-warn">⚠️ 먼저 글 생성 탭에서 글을 생성해주세요!<button className="btn btn-sm btn-secondary" style={{marginLeft:"auto",flexShrink:0}} onClick={()=>setTab("write")}>글 생성하러 가기</button></div>)}
 
-                <div style={{display:"grid",gridTemplateColumns:"300px 1fr",gap:14,alignItems:"start"}}>
+                <div className="img-split" style={{display:"grid",gap:14,alignItems:"start"}}>
 
                   {/* ── 왼쪽: 설정 패널 ── */}
                   <div style={{display:"flex",flexDirection:"column",gap:10}}>
@@ -1454,7 +1495,7 @@ POST3: (제목)|(이유)
                                   onClick={()=>window.open(img,"_blank")}
                                   onError={e=>{(e.target as HTMLImageElement).style.display="none";}}/>
                                 {i===0&&<span style={{position:"absolute",top:-7,left:-4,fontSize:9,fontWeight:800,padding:"2px 7px",borderRadius:99,background:"var(--accent)",color:"#000",whiteSpace:"nowrap"}}>썸네일</span>}
-                                <button style={{position:"absolute",top:-6,right:-6,width:20,height:20,borderRadius:"50%",background:"var(--danger)",border:"none",color:"#fff",cursor:"pointer",fontSize:10,display:"flex",alignItems:"center",justifyContent:"center"}}
+                                <button style={{position:"absolute",top:-8,right:-8,width:28,height:28,borderRadius:"50%",background:"var(--danger)",border:"2px solid var(--bg)",color:"#fff",cursor:"pointer",fontSize:12,display:"flex",alignItems:"center",justifyContent:"center",boxShadow:"0 2px 6px rgba(0,0,0,.3)"}}
                                   onClick={()=>{
                                     if(imgSource==="ai")setGeneratedImages(p=>p.filter((_,j)=>j!==i));
                                     else setUploadedImages(p=>p.filter((_,j)=>j!==i));
@@ -1598,30 +1639,6 @@ POST3: (제목)|(이유)
             {/* ===== 발행 기록 ===== */}
             {tab==="manage"&&(
               <div style={{animation:"fadeUp .25s ease both"}}>
-
-                {/* 발행 방식 선택 */}
-                <div className="card">
-                  <div className="card-title" style={{marginBottom:14}}>📝 발행 방식 선택</div>
-                  <div className="concept-grid">
-                    {([
-                      {id:"full",     ico:"📄", name:"① 전체 발행",   sub:"본문 + FAQ + 관련글 모두\n가장 풍부한 내용", cls:"sel-full"},
-                      {id:"body_faq", ico:"💬", name:"② 본문 + FAQ",  sub:"본문과 자주 묻는 질문까지\n관련글 섹션 제외", cls:"sel-faq"},
-                      {id:"body_only",ico:"✏️", name:"③ 본문만",      sub:"핵심 내용만 깔끔하게\n가장 간결한 형태", cls:"sel-body"},
-                    ] as const).map(c=>(
-                      <button key={c.id} className={`concept-btn ${pubConcept===c.id?c.cls:""}`} onClick={()=>setPubConcept(c.id)}>
-                        <div className="concept-ico">{c.ico}</div>
-                        <div className="concept-name">{c.name}</div>
-                        <div className="concept-sub">{c.sub}</div>
-                        {pubConcept===c.id&&<div style={{marginTop:8,fontSize:12,fontWeight:700,color:c.id==="full"?"var(--accent-text)":c.id==="body_faq"?"var(--pink)":"var(--yellow)"}}>✓ 선택됨</div>}
-                      </button>
-                    ))}
-                  </div>
-                  {genContent&&(
-                    <button className="btn btn-primary btn-full" style={{marginTop:4}} onClick={()=>setTab("publish")}>
-                      🚀 이 방식으로 발행하기 →
-                    </button>
-                  )}
-                </div>
 
                 {/* 발행 기록 */}
                 <div className="card">
