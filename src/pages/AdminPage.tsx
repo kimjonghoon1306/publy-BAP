@@ -1494,29 +1494,50 @@ POST3: (제목)|(이유)
                     {/* 영상 + 이미지 패턴 */}
                     <div className="adm-video-grid">
                       <div className="card" style={{padding:"13px 14px"}}>
-                        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:videoOn?12:0}}>
-                          <div className="card-title" style={{margin:0,fontSize:11}}>🎬 영상 삽입</div>
-                          <button onClick={()=>setVideoOn(v=>!v)} style={{width:40,height:22,borderRadius:99,background:videoOn?"var(--accent-text)":"var(--border)",border:"none",cursor:"pointer",position:"relative",transition:"background .2s",flexShrink:0}}>
-                            <div style={{position:"absolute",top:3,left:videoOn?21:3,width:16,height:16,borderRadius:"50%",background:"#fff",transition:"left .2s"}}/>
-                          </button>
+                        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:8}}>
+                          <div>
+                            <div className="card-title" style={{margin:0,fontSize:12}}>🎬 영상 삽입</div>
+                            <div style={{fontSize:10,color:"var(--text3)",marginTop:2}}>체험단 영상 필수 시 사용</div>
+                          </div>
+                          <div style={{display:"flex",alignItems:"center",gap:6}}>
+                            <span style={{fontSize:11,fontWeight:700,color:videoOn?"var(--accent-text)":"var(--text3)"}}>{videoOn?"ON":"OFF"}</span>
+                            <button onClick={()=>setVideoOn(v=>!v)} style={{width:44,height:24,borderRadius:99,background:videoOn?"var(--accent-text)":"var(--border)",border:"none",cursor:"pointer",position:"relative",transition:"background .2s",flexShrink:0}}>
+                              <div style={{position:"absolute",top:3,left:videoOn?23:3,width:18,height:18,borderRadius:"50%",background:"#fff",transition:"left .2s"}}/>
+                            </button>
+                          </div>
                         </div>
+                        {!videoOn&&<div style={{fontSize:11,color:"var(--text3)",padding:"6px 8px",borderRadius:7,background:"var(--bg2)"}}>OFF — 영상 삽입 안 함</div>}
                         {videoOn&&(
                           <>
-                            <input style={{width:"100%",padding:"7px 10px",borderRadius:8,border:"1px solid var(--b)",background:"var(--bg2)",color:"var(--text)",fontSize:12,fontFamily:"inherit",outline:"none",marginBottom:8}} placeholder="영상 URL (네이버TV/유튜브)" value={videoUrl} onChange={e=>setVideoUrl(e.target.value)}/>
+                            <div style={{marginBottom:8,padding:"6px 8px",borderRadius:7,background:"var(--accent-bg)",fontSize:11,color:"var(--accent-text)",fontWeight:600}}>✅ ON — URL 입력하세요</div>
+                            <input style={{width:"100%",padding:"7px 10px",borderRadius:8,border:"1px solid var(--border)",background:"var(--bg2)",color:"var(--text)",fontSize:12,fontFamily:"inherit",outline:"none",marginBottom:8}} placeholder="네이버TV / 유튜브 주소 붙여넣기" value={videoUrl} onChange={e=>setVideoUrl(e.target.value)}/>
+                            <div style={{fontSize:11,fontWeight:700,color:"var(--text2)",marginBottom:5}}>📍 영상 위치</div>
                             <div style={{display:"flex",gap:5}}>
                               {(["top","middle","bottom"] as const).map(p=>(
-                                <button key={p} onClick={()=>setVideoPosition(p)} style={{flex:1,padding:"5px",borderRadius:7,border:`1.5px solid ${videoPosition===p?"var(--accent-text)":"var(--border)"}`,background:videoPosition===p?"var(--accent-bg)":"transparent",cursor:"pointer",fontSize:11,fontWeight:700,color:videoPosition===p?"var(--accent-text)":"var(--text2)",fontFamily:"inherit"}}>{p==="top"?"상단":p==="middle"?"중간":"하단"}</button>
+                                <button key={p} onClick={()=>setVideoPosition(p)} style={{flex:1,padding:"6px 4px",borderRadius:7,border:`1.5px solid ${videoPosition===p?"var(--accent-text)":"var(--border)"}`,background:videoPosition===p?"var(--accent-bg)":"transparent",cursor:"pointer",fontSize:11,fontWeight:700,color:videoPosition===p?"var(--accent-text)":"var(--text2)",fontFamily:"inherit",textAlign:"center"}}>
+                                  <div>{p==="top"?"🔝 상단":p==="middle"?"🔲 중간":"🔽 하단"}</div>
+                                </button>
                               ))}
                             </div>
                           </>
                         )}
                       </div>
                       <div className="card" style={{padding:"13px 14px"}}>
-                        <div className="card-title" style={{marginBottom:8,fontSize:11}}>📐 이미지 패턴</div>
-                        <div style={{display:"flex",flexDirection:"column",gap:5}}>
-                          {(["random","A","B","C"] as const).map(p=>(
-                            <button key={p} onClick={()=>setImgPattern(p)} style={{padding:"6px 10px",borderRadius:8,border:`1.5px solid ${imgPattern===p?"var(--accent-text)":"var(--border)"}`,background:imgPattern===p?"var(--accent-bg)":"transparent",cursor:"pointer",fontFamily:"inherit",textAlign:"left",fontSize:11,fontWeight:700,color:imgPattern===p?"var(--accent-text)":"var(--text2)"}}>
-                              {p==="random"?"🎲 랜덤(권장)":p==="A"?"A: 중간 1장":p==="B"?"B: 앞뒤 각 1장":"C: 균등 분산"}
+                        <div className="card-title" style={{marginBottom:4,fontSize:12}}>📐 이미지 배치</div>
+                        <div style={{fontSize:10,color:"var(--text3)",marginBottom:8}}>글 안 이미지 배치 방식</div>
+                        <div style={{display:"flex",flexDirection:"column",gap:6}}>
+                          {([
+                            {v:"random",l:"🎲 랜덤",badge:"권장",sub:"매번 자동변경 · AI감지 방지"},
+                            {v:"A",l:"패턴 A",badge:"",sub:"썸네일+중간 1장"},
+                            {v:"B",l:"패턴 B",badge:"",sub:"썸네일+앞뒤 각1장"},
+                            {v:"C",l:"패턴 C",badge:"",sub:"썸네일+균등분산"},
+                          ] as const).map(p=>(
+                            <button key={p.v} onClick={()=>setImgPattern(p.v)} style={{padding:"8px 10px",borderRadius:8,border:`1.5px solid ${imgPattern===p.v?"var(--accent-text)":"var(--border)"}`,background:imgPattern===p.v?"var(--accent-bg)":"transparent",cursor:"pointer",fontFamily:"inherit",textAlign:"left",transition:"all .15s"}}>
+                              <div style={{display:"flex",alignItems:"center",gap:5,marginBottom:2}}>
+                                <span style={{fontSize:12,fontWeight:800,color:imgPattern===p.v?"var(--accent-text)":"var(--text)"}}>{p.l}</span>
+                                {p.badge&&<span style={{fontSize:9,fontWeight:800,padding:"1px 6px",borderRadius:99,background:"var(--accent-text)",color:"#000"}}>{p.badge}</span>}
+                              </div>
+                              <div style={{fontSize:10,color:"var(--text3)"}}>{p.sub}</div>
                             </button>
                           ))}
                         </div>
