@@ -170,6 +170,7 @@ select.inp{cursor:pointer;appearance:auto;}
 textarea.inp{resize:vertical;line-height:1.75;min-height:80px;}
 .spinner{width:16px;height:16px;border-radius:50%;border:2.5px solid rgba(0,0,0,.15);border-top-color:#000;animation:spin .7s linear infinite;display:inline-block;flex-shrink:0;}
 .sp-w{border-color:rgba(255,255,255,.2);border-top-color:#fff;}
+.sp-g{border-color:rgba(0,255,157,.2);border-top-color:var(--accent);}
 .steps{display:flex;border-radius:13px;overflow:hidden;border:1px solid var(--border);margin-bottom:20px;background:var(--bg2);}
 .step-item{flex:1;padding:11px 8px;text-align:center;font-size:12px;font-weight:600;color:var(--text3);background:transparent;border-right:1px solid var(--border);transition:all .2s;}
 .step-item:last-child{border-right:none;}
@@ -305,6 +306,23 @@ textarea.inp{resize:vertical;line-height:1.75;min-height:80px;}
   .acc-form-grid{grid-template-columns:1fr !important;}
   .pub-plat-grid{grid-template-columns:1fr !important;}
 }
+.right-panel{width:200px;flex-shrink:0;background:var(--bg2);border-left:1px solid var(--border);display:flex;flex-direction:column;padding:14px 12px;gap:10px;overflow-y:auto;}
+.rp-section{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:12px 13px;}
+.rp-title{font-size:10px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;color:var(--text3);margin-bottom:9px;display:flex;align-items:center;gap:5px;}
+.rp-row{display:flex;align-items:center;justify-content:space-between;padding:4px 0;border-bottom:1px solid var(--border);gap:6px;}
+.rp-row:last-child{border-bottom:none;}
+.rp-key{font-size:11px;color:var(--text3);flex-shrink:0;}
+.rp-val{font-size:11px;font-weight:700;color:var(--text);text-align:right;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:110px;}
+.rp-val.accent{color:var(--accent-text);}
+.rp-val.warn{color:var(--warn);}
+.rp-thumb{width:100%;border-radius:9px;object-fit:cover;max-height:110px;margin-top:6px;border:1px solid var(--border);}
+.rp-btn{width:100%;padding:10px 12px;border-radius:10px;border:none;font-size:12px;font-weight:800;font-family:'Noto Sans KR',sans-serif;cursor:pointer;transition:all .15s;display:flex;align-items:center;justify-content:center;gap:6px;}
+.rp-btn:disabled{opacity:.38;cursor:not-allowed;}
+.rp-btn-primary{background:linear-gradient(135deg,var(--accent),#00cc80);color:#000;box-shadow:0 3px 12px var(--accent-30);}
+.rp-btn-primary:hover:not(:disabled){filter:brightness(1.08);transform:translateY(-1px);}
+.rp-btn-secondary{background:var(--card2);color:var(--text);border:1px solid var(--border);}
+.rp-btn-secondary:hover:not(:disabled){background:var(--card-hover);border-color:var(--border2);}
+@media(max-width:1100px){.right-panel{display:none;}}
 `;
 interface Props {
   user: PublyUser;
@@ -1555,7 +1573,7 @@ POST3: (제목)|(이유)
         </div>
 
         <div className="mob-bar">
-          {MAIN_TABS.map(t=>(<button key={t.k} className={`mob-tab ${tab===t.k?"active":""}`} onClick={()=>setTab(t.k as MainTab)}><span className="mob-tab-ico">{t.i}</span><span className="mob-tab-lbl">{t.l}</span></button>))}
+          {MAIN_TABS.map(t=>(<button key={t.k} className={`mob-btn ${tab===t.k?"active":""}`} onClick={()=>setTab(t.k as MainTab)}><span className="mob-btn-ico">{t.i}</span><span className="mob-btn-lbl">{t.l}</span></button>))}
         </div>
       </div>
     </>
