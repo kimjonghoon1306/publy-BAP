@@ -288,6 +288,16 @@ textarea.inp{resize:vertical;line-height:1.75;min-height:80px;}
 .mob-btn.active{background:var(--accent-bg);}
 .mob-btn.active .mob-btn-lbl{color:var(--accent-text);}
 .img-split{display:grid;grid-template-columns:300px 1fr;gap:14px;align-items:start;}
+.pub-grid{display:grid;grid-template-columns:1fr 320px;gap:16px;align-items:start;}
+.pub-panel-desktop{display:flex;flex-direction:column;gap:12px;}
+.pub-mobile-bar{display:none;}
+.lg-hidden{display:none;}
+@media(max-width:900px){
+  .pub-grid{grid-template-columns:1fr !important;}
+  .pub-panel-desktop{display:none !important;}
+  .pub-mobile-bar{display:flex !important;}
+  .lg-hidden{display:block !important;}
+}
 @media(max-width:900px){.sidebar{display:none;}.mob-bar{display:flex;}.main{padding-bottom:130px;}}
 @media(max-width:768px){
   .header-mid{display:none;}.main{padding:14px 12px 84px;}.card{padding:16px 14px;}
@@ -300,6 +310,10 @@ textarea.inp{resize:vertical;line-height:1.75;min-height:80px;}
   .guide-modal{max-width:100%;max-height:90vh;border-radius:20px;}.guide-header{padding:16px 16px 0;}
   .guide-body{padding:14px 14px 18px;}.guide-footer{padding:10px 14px;}.preview-inner{padding:20px 14px;}
   .flow-nav{flex-direction:column;align-items:stretch;}.flow-btn{justify-content:center;}
+  .pub-grid{grid-template-columns:1fr !important;}
+  .pub-panel-desktop{display:none !important;}
+  .pub-mobile-bar{display:flex !important;}
+  .lg-hidden{display:block;}
   .img-split{grid-template-columns:1fr !important;}
 }
 @media(max-width:480px){
@@ -400,7 +414,6 @@ export default function DashboardPage({user, onLogout, onAdminLogin, onThemeTogg
   const [newBlog, setNewBlog] = useState("");
   const [addingAcc, setAddingAcc] = useState(false);
   const [connId, setConnId] = useState<string|null>(null);
-  const [showPreview, setShowPreview] = useState(false);
   const [writeAI, setWriteAI] = useState(()=>localStorage.getItem("publy_write_ai")||"gemini");
   const [imageAI, setImageAI] = useState(()=>localStorage.getItem("publy_image_ai")||"openai_img");
   // ── 카테고리 / 공개 설정 / 예약 발행 ──
@@ -410,6 +423,24 @@ export default function DashboardPage({user, onLogout, onAdminLogin, onThemeTogg
   const [visibility, setVisibility] = useState<"public"|"neighbor"|"private">("public");
   const [scheduleOn, setScheduleOn] = useState(false);
   const [scheduleTime, setScheduleTime] = useState("");
+
+  // ── 블록 에디터 (tarry 방식) ──
+  type TextBlock = {type:"text";id:string;content:string};
+  type SingleImageBlock = {type:"image";id:string;src:string;alt:string;position:"left"|"center"|"right";source:"auto"|"manual"};
+  type ContentBlock = TextBlock | SingleImageBlock;
+  function uid(){return Math.random().toString(36).slice(2);}
+  const [blocks, setBlocks] = useState<ContentBlock[]>([{type:"text",id:uid(),content:""}]);
+  const [thumbnail, setThumbnail] = useState("");
+  const [greeting, setGreeting] = useState(()=>localStorage.getItem("publy_greeting")||"");
+  const [hashtags, setHashtags] = useState<string[]>([]);
+  const [newTag, setNewTag] = useState("");
+  const [imageMode, setImageMode] = useState<"auto"|"manual">("auto");
+  const [autoInserted, setAutoInserted] = useState(false);
+  const [showPreviewModal, setShowPreviewModal] = useState(false);
+  const [showNaverMenu, setShowNaverMenu] = useState(false);
+  const [showPublishPanel, setShowPublishPanel] = useState(false);
+  const thumbnailRef = useRef<HTMLInputElement>(null);
+  const manualFileRef = useRef<HTMLInputElement>(null);
 
   // 카테고리 로드
   async function loadCategories(plat: string) {
@@ -421,6 +452,164 @@ export default function DashboardPage({user, onLogout, onAdminLogin, onThemeTogg
       if (d.categories) setCategories(d.categories);
     } catch {}
     finally { setLoadingCats(false); }
+  }
+
+  // ── 블록 조작 ──
+  function updateBlock(id:string, updates:Partial<ContentBlock>){
+    setBlocks(prev=>prev.map(b=>b.id===id?({...b,...updates} as ContentBlock):b));
+  }
+  function removeBlock(id:string){setBlocks(prev=>prev.filter(b=>b.id!==id));}
+  function addTextBlock(afterId?:string){
+    const nb:TextBlock={type:"text",id:uid(),content:""};
+    if(!afterId){setBlocks(prev=>[...prev,nb]);return;}
+    setBlocks(prev=>{const i=prev.findIndex(b=>b.id===afterId);const n=[...prev];n.splice(i+1,0,nb);return n;});
+  }
+  function addManualImageBlock(afterId?:string){
+    const nb:SingleImageBlock={type:"image",id:uid(),src:"",alt:"",position:"center",source:"manual"};
+    if(!afterId){setBlocks(prev=>[...prev,nb]);return;}
+    setBlocks(prev=>{const i=prev.findIndex(b=>b.id===afterId);const n=[...prev];n.splice(i+1,0,nb);return n;});
+  }
+
+  // ── triggerAutoInsert (tarry 방식 그대로) ──
+  function triggerAutoInsert(images:{id:number;src:string;alt?:string}[]){
+    const textOnly=blocks.filter(b=>b.type==="text"||(b.type==="image"&&(b as SingleImageBlock).source==="manual"));
+    const textBlocks=textOnly.filter(b=>b.type==="text");
+    if(textBlocks.length===0)return;
+    function hasSectionMarker(b:ContentBlock):boolean{
+      if(b.type!=="text")return false;
+      const c=(b as TextBlock).content;
+      return c.includes("[FAQ시작]")||c.includes("[참고자료시작]")||c.includes("[관련글시작]");
+    }
+    const markerIdx=textOnly.findIndex(hasSectionMarker);
+    const safeBlocks=markerIdx===-1?textOnly:textOnly.slice(0,markerIdx);
+    const sectionBlocks=markerIdx===-1?[]:textOnly.slice(markerIdx);
+    const safeTextCount=safeBlocks.filter(b=>b.type==="text").length;
+    const imgs=images.filter(img=>img?.src&&img.src.trim()!=="");
+    if(imgs.length===0)return;
+    const result:ContentBlock[]=[];
+    let insertedCount=0;
+    // 첫 이미지 맨 앞 삽입 (썸네일)
+    result.push({type:"image",id:uid(),src:imgs[0].src,alt:imgs[0].alt||"이미지 1",position:"center",source:"auto"} as ContentBlock);
+    insertedCount++;
+    const remainingImages=imgs.slice(1);
+    const insertMap=new Map<number,typeof remainingImages>();
+    if(safeTextCount>0&&remainingImages.length>0){
+      remainingImages.forEach((img,index)=>{
+        const targetTextIndex=Math.min(safeTextCount,Math.max(1,Math.ceil(((index+1)*safeTextCount)/remainingImages.length)));
+        const bucket=insertMap.get(targetTextIndex)||[];bucket.push(img);insertMap.set(targetTextIndex,bucket);
+      });
+    }
+    let textCount=0;
+    for(let i=0;i<safeBlocks.length;i++){
+      result.push(safeBlocks[i]);
+      if(safeBlocks[i].type==="text"){
+        textCount++;
+        const toInsert=insertMap.get(textCount)||[];
+        toInsert.forEach((img,idx)=>{result.push({type:"image",id:uid(),src:img.src,alt:img.alt||`이미지 ${insertedCount+idx+1}`,position:"center",source:"auto"} as ContentBlock);});
+        insertedCount+=toInsert.length;
+      }
+    }
+    if(insertedCount<imgs.length){
+      const remaining=imgs.slice(insertedCount);
+      let lastTextIdx=-1;
+      for(let i=result.length-1;i>=0;i--){if(result[i].type==="text"){lastTextIdx=i;break;}}
+      const insertAt=lastTextIdx>=0?lastTextIdx+1:result.length;
+      remaining.reverse().forEach(img=>{result.splice(insertAt,0,{type:"image",id:uid(),src:img.src,alt:img.alt||"이미지",position:"center",source:"auto"} as ContentBlock);});
+    }
+    for(const b of sectionBlocks)result.push(b);
+    setBlocks(result);setAutoInserted(true);
+  }
+
+  function handleAutoInsert(){
+    const imgs=getActiveImages();
+    if(imgs.length===0){alert("이미지를 먼저 생성해주세요");return;}
+    triggerAutoInsert(imgs.map((src,i)=>({id:i,src,alt:`${keyword||genTitle} ${i===0?"대표":"현장"} 사진`})));
+  }
+  function handleRemoveAutoImages(){
+    setBlocks(prev=>prev.filter(b=>b.type==="text"||(b.type==="image"&&(b as SingleImageBlock).source==="manual")));
+    setAutoInserted(false);
+  }
+
+  // ── 네이버 복사 함수들 (tarry 방식) ──
+  function addNaverImageMarkers(text:string):string{
+    const hasRealImages=blocks.some(b=>(b.type==="image"&&(b as SingleImageBlock).src&&(b as SingleImageBlock).src.trim()!==""));
+    if(hasRealImages)return text;
+    const lines=text.split("\n").map(l=>l.trim()).filter(l=>l.length>0);
+    if(lines.length<=1)return text;
+    const CHUNK=300;const chunks:string[]=[];let buf="";
+    for(const line of lines.slice(1)){
+      if(buf.length>0&&buf.length+line.length+1>CHUNK){chunks.push(buf.trim());buf=line;}
+      else{buf=buf?buf+"\n"+line:line;}
+    }
+    if(buf.trim())chunks.push(buf.trim());
+    const result:string[]=[lines[0]];
+    for(const chunk of chunks){result.push("📸 [여기에 사진 삽입]");result.push(chunk);}
+    return result.join("\n\n");
+  }
+
+  function buildNaverText(mode:"full"|"faq"|"body"):string{
+    const lines:string[]=[];
+    if(pubTitle.trim())lines.push(pubTitle.trim()+"\n");
+    if(greeting.trim())lines.push(greeting.trim()+"\n");
+    blocks.forEach(b=>{
+      if(b.type==="text"){
+        let c=(b as TextBlock).content;
+        if(mode==="body"){
+          c=c.replace(/\[FAQ시작\][\s\S]*?\[FAQ끝\]/g,"").replace(/\[참고자료시작\][\s\S]*?\[참고자료끝\]/g,"").replace(/\[관련글시작\][\s\S]*?\[관련글끝\]/g,"").trim();
+        }else if(mode==="faq"){
+          c=c.replace(/\[참고자료시작\][\s\S]*?\[참고자료끝\]/g,"").replace(/\[관련글시작\][\s\S]*?\[관련글끝\]/g,"").trim();
+        }
+        c=c.replace(/^#{1,3}\s+/gm,"").replace(/\*\*(.*?)\*\*/g,"$1").replace(/\*(.*?)\*/g,"$1");
+        if(c)lines.push(c);
+      }else if(b.type==="image"&&(b as SingleImageBlock).src){lines.push("[이미지]");}
+    });
+    if(hashtags.length>0)lines.push("\n"+hashtags.join(" "));
+    return addNaverImageMarkers(lines.filter(Boolean).join("\n"));
+  }
+
+  function copyForNaver(){navigator.clipboard.writeText(buildNaverText("full"));}
+  function copyForNaverWithFaq(){navigator.clipboard.writeText(buildNaverText("faq"));}
+  function copyForNaverBodyOnly(){navigator.clipboard.writeText(buildNaverText("body"));}
+
+  // ── HTML 빌더 (tarry 방식) ──
+  function buildHtmlContent():string{
+    function escHtml(t:string){return t.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");}
+    function inlineFmt(t:string){return escHtml(t).replace(/\*\*(.+?)\*\*/g,"<strong>$1</strong>").replace(/\*(.+?)\*/g,"<em>$1</em>");}
+    const parts:string[]=[];
+    const sectionMarkerIdx=blocks.findIndex(b=>b.type==="text"&&((b as TextBlock).content.includes("[FAQ시작]")||(b as TextBlock).content.includes("[참고자료시작]")||(b as TextBlock).content.includes("[관련글시작]")));
+    blocks.forEach((b,blockIdx)=>{
+      const afterSection=sectionMarkerIdx!==-1&&blockIdx>=sectionMarkerIdx;
+      if(b.type==="text"){
+        const cleaned=(b as TextBlock).content
+          .replace(/\[FAQ시작\][\s\S]*?\[FAQ끝\]/g,"").replace(/\[참고자료시작\][\s\S]*?\[참고자료끝\]/g,"").replace(/\[관련글시작\][\s\S]*?\[관련글끝\]/g,"").trim();
+        if(cleaned){
+          const html=cleaned.split("\n").map(line=>{
+            const t=line.trim();if(!t)return"";
+            if(/^##\s+/.test(t))return`<h2 style="font-size:20px;font-weight:800;margin:28px 0 12px;color:#111;border-bottom:2px solid #eee;padding-bottom:8px">${inlineFmt(t.replace(/^##\s+/,""))}</h2>`;
+            if(/^###\s+/.test(t))return`<h3 style="font-size:17px;font-weight:700;margin:20px 0 8px;color:#1a1a1a;border-left:4px solid #2563eb;padding-left:10px">${inlineFmt(t.replace(/^###\s+/,""))}</h3>`;
+            if(/^---+$/.test(t))return`<hr style="border:none;border-top:2px solid #eee;margin:20px 0">`;
+            return`<p style="line-height:1.9;margin:0 0 14px;color:#333;font-size:16px">${inlineFmt(t)}</p>`;
+          }).filter(Boolean).join("\n");
+          if(html)parts.push(html);
+        }
+      }else if(b.type==="image"&&!afterSection){
+        const src=(b as SingleImageBlock).src;const alt=(b as SingleImageBlock).alt;
+        if(src)parts.push(`<div style="padding:24px 0"><figure style="margin:0;text-align:center"><img src="${escHtml(src)}" alt="${escHtml(alt||"")}" style="width:100%;border-radius:12px;display:block">${alt?`<figcaption style="font-size:12px;color:#888;text-align:center;margin-top:6px">${inlineFmt(alt)}</figcaption>`:""}</figure></div>`);
+      }
+    });
+    if(hashtags.length>0)parts.push(`<p style="margin-top:20px;color:#888;font-size:14px">${hashtags.join(" ")}</p>`);
+    return parts.join("\n");
+  }
+
+  // ── 미리보기 렌더 ──
+  function renderPreview(text:string):React.ReactElement[]{
+    return text.split("\n").map((line,i)=>{
+      if(line.startsWith("## "))return<h2 key={i} style={{fontSize:18,fontWeight:800,margin:"20px 0 8px",color:"var(--text)"}}>{line.slice(3)}</h2>;
+      if(line.startsWith("### "))return<h3 key={i} style={{fontSize:16,fontWeight:700,margin:"16px 0 6px",color:"var(--text)"}}>{line.slice(4)}</h3>;
+      if(line==="---")return<hr key={i} style={{border:"none",borderTop:"1px solid var(--border)",margin:"16px 0"}}/>;
+      if(line==="")return<br key={i}/>;
+      return<p key={i} style={{marginBottom:8,fontSize:14,lineHeight:1.8,color:"var(--text)"}}>{line}</p>;
+    });
   }
 
   const checkBot = useCallback(async()=>{
@@ -850,6 +1039,12 @@ POST3: (제목)|(이유)
       setGenTitle(title);if(tgm)setGenTags(tgm[1].trim());
       const body=bm?bm[1].trim():cleaned;setGenContent(body);
       if(imgCountAuto)setImgCount(recommendImgCount(body));
+      // ── tarry 방식: 블록 자동 분리 + 제목/태그 자동 연동 ──
+      const rawBlocks = body.split("\n\n").filter(Boolean).map(p=>({type:"text" as const,id:uid(),content:p}));
+      setBlocks(rawBlocks.length>0?rawBlocks:[{type:"text",id:uid(),content:body}]);
+      setPubTitle(title);
+      if(tgm)setHashtags(tgm[1].trim().split(",").map((t:string)=>t.trim().startsWith("#")?t.trim():"#"+t.trim()).filter(Boolean));
+      setAutoInserted(false);setThumbnail("");
     }catch(e:any){if(e.name!=="AbortError")alert("글 생성 실패: "+e.message);}
     finally{setGenerating(false);}
   }
@@ -867,8 +1062,12 @@ POST3: (제목)|(이유)
         const url=await generateOneImage(keyword||genTitle,imgAbortRef.current.signal,i);
         imgs.push(url);setGeneratedImages([...imgs]);setGenImgProgress(Math.round(((i+1)/imgCount)*100));
       }
-      // 이미지 생성 완료 시 캡션 자동생성
+      // 이미지 생성 완료 시 캡션 자동생성 + 블록 자동배치 + 썸네일 자동지정
       setCaptions(buildCaptions(keyword||genTitle,imgs.length));
+      if(imgs.length>0){
+        if(!thumbnail)setThumbnail(imgs[0]);
+        triggerAutoInsert(imgs.map((src,i)=>({id:i,src,alt:`${keyword||genTitle} ${i===0?"대표":"현장"} 사진`})));
+      }
     }catch(e:any){if(e.name!=="AbortError")alert("이미지 생성 실패: "+e.message);}
     finally{setGenImgLoading(false);imgAbortRef.current=null;}
   }
@@ -883,6 +1082,8 @@ POST3: (제목)|(이유)
   function getActiveImages():string[]{return imgSource==="upload"?uploadedImages:generatedImages;}
 
   function buildPublishContent():string{
+    // tarry 방식: 블록 기반 HTML 빌드
+    if(blocks.some(b=>b.type==="text"&&(b as TextBlock).content.trim()))return buildHtmlContent();
     if(!genContent)return "";
     if(pubConcept==="full")return genContent;
     if(pubConcept==="body_faq"){const i=genContent.indexOf("[관련글시작]");return i>0?genContent.slice(0,i).trim():genContent;}
@@ -894,10 +1095,11 @@ POST3: (제목)|(이유)
     const content=buildPublishContent();if(!content){alert("발행할 내용이 없어요");return;}
     if(scheduleOn&&!scheduleTime){alert("예약 날짜와 시간을 선택해주세요");return;}
     setPublishing(true);setPubMsg(scheduleOn?"예약 설정 중...":"발행 중...");
+    const tags=hashtags.map(t=>t.replace("#","")).filter(Boolean);
     const publishBody={
       userId:user.id,platform,title:pubTitle,content,
-      tags:pubTags.split(",").map((t:string)=>t.trim()).filter(Boolean),
-      imageUrl:getActiveImages()[0]||undefined,
+      tags,
+      imageUrl:thumbnail||getActiveImages()[0]||undefined,
       categoryId:category||undefined,
       visibility,
       scheduleTime:scheduleOn?scheduleTime:undefined,
@@ -906,12 +1108,9 @@ POST3: (제목)|(이유)
       const ok=await useQuota(user.id);if(!ok){setPubMsg("❌ 발행 건수 초과");setPublishing(false);return;}
       if(!botOnline){
         await supabase.from("publy_jobs").insert({user_id:user.id,platform,title:pubTitle,content,
-          tags:pubTags.split(",").map((t:string)=>t.trim()).filter(Boolean),
-          image_url:getActiveImages()[0]||undefined,
-          category_id:category||undefined,
-          visibility,
-          schedule_time:scheduleOn?scheduleTime:undefined,
-          status:"pending"});
+          tags,image_url:thumbnail||getActiveImages()[0]||undefined,
+          category_id:category||undefined,visibility,
+          schedule_time:scheduleOn?scheduleTime:undefined,status:"pending"});
         setPubMsg("✅ PC 봇에 예약됐어요! Publy 앱 실행 시 자동 발행돼요.");
         await addHistory({user_id:user.id,platform,title:pubTitle,status:"pending" as "success"|"fail"});
       }else{
@@ -925,6 +1124,122 @@ POST3: (제목)|(이유)
       getHistory(user.id).then(setHistory);getQuota(user.id).then((q:PublyQuota|null)=>q&&setQuota(q));
     }catch(e:any){await addHistory({user_id:user.id,platform,title:pubTitle,status:"fail",error_message:e.message});setPubMsg("❌ "+e.message);}
     finally{setPublishing(false);}
+  }
+
+  // ── 발행 패널 렌더 함수 ──
+  function renderPublishPanel(){
+    return(<>
+      {/* 발행 방식 */}
+      <div className="card" style={{padding:"14px 16px"}}>
+        <div className="card-title" style={{marginBottom:12}}>📝 발행 방식</div>
+        <div style={{display:"flex",flexDirection:"column",gap:8}}>
+          {([{id:"full",ico:"📄",name:"전체 발행",sub:"본문+FAQ+관련글"},{id:"body_faq",ico:"💬",name:"본문+FAQ",sub:"관련글 제외"},{id:"body_only",ico:"✏️",name:"본문만",sub:"가장 간결"}] as const).map(c=>(
+            <button key={c.id} onClick={()=>setPubConcept(c.id)} style={{padding:"11px 14px",borderRadius:10,border:`2px solid ${pubConcept===c.id?"var(--accent)":"var(--border)"}`,background:pubConcept===c.id?"var(--accent-bg)":"var(--bg)",cursor:"pointer",fontFamily:"inherit",textAlign:"left",transition:"all .15s",display:"flex",alignItems:"center",gap:10}}>
+              <span style={{fontSize:20}}>{c.ico}</span>
+              <div style={{flex:1}}>
+                <div style={{fontSize:13,fontWeight:700,color:pubConcept===c.id?"var(--accent-text)":"var(--text)"}}>{c.name}</div>
+                <div style={{fontSize:11,color:"var(--text3)"}}>{c.sub}</div>
+              </div>
+              {pubConcept===c.id&&<span style={{color:"var(--accent-text)"}}>✓</span>}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* 플랫폼 */}
+      <div className="card" style={{padding:"14px 16px"}}>
+        <div className="card-title" style={{marginBottom:10}}>🌐 플랫폼</div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+          {([{p:"naver",ico:"🟢",name:"네이버",c:"var(--naver)"},{p:"tistory",ico:"🟠",name:"티스토리",c:"var(--tistory)"}] as const).map(({p,ico,name,c})=>(
+            <button key={p} onClick={()=>{setPlatform(p);if(pubAccId)loadCategories(p);}} style={{padding:"12px",borderRadius:10,border:`2px solid ${platform===p?c:"var(--border)"}`,background:platform===p?`${c}18`:"var(--bg)",cursor:"pointer",fontFamily:"inherit",display:"flex",alignItems:"center",gap:8,transition:"all .15s"}}>
+              <span style={{fontSize:22}}>{ico}</span>
+              <span style={{fontSize:13,fontWeight:700,color:"var(--text)"}}>{name}</span>
+              {platform===p&&<span style={{marginLeft:"auto",color:c,fontSize:14}}>✓</span>}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* 계정 */}
+      <div className="card" style={{padding:"14px 16px"}}>
+        <div className="card-title" style={{marginBottom:10}}>🔗 발행 계정</div>
+        {connAccs.length===0?(
+          <div style={{textAlign:"center",padding:"16px"}}>
+            <div style={{fontSize:13,color:"var(--text3)",marginBottom:10}}>연결된 계정이 없어요</div>
+            <button className="btn btn-primary btn-sm" onClick={()=>setTab("accounts")}>계정 관리 →</button>
+          </div>
+        ):connAccs.map(a=>(
+          <label key={a.id} onClick={()=>{setPubAccId(a.id);loadCategories(platform);}} style={{display:"flex",alignItems:"center",gap:10,padding:"12px 14px",borderRadius:10,cursor:"pointer",marginBottom:6,background:pubAccId===a.id?"var(--accent-bg)":"var(--bg)",border:`2px solid ${pubAccId===a.id?"var(--accent)":"var(--border)"}`,transition:"all .15s"}}>
+            <input type="radio" name="pacc" checked={pubAccId===a.id} onChange={()=>{}} style={{accentColor:"var(--accent)",width:16,height:16,flexShrink:0}}/>
+            <div style={{flex:1}}><div style={{fontSize:14,fontWeight:700,color:"var(--text)"}}>{a.username}</div>{a.blog_name&&<div style={{fontSize:11,color:"var(--text3)"}}>{a.blog_name}</div>}</div>
+            {pubAccId===a.id&&<span style={{fontSize:11,fontWeight:700,padding:"2px 8px",borderRadius:99,background:"var(--accent-bg)",color:"var(--accent-text)",border:"1px solid var(--accent-border)"}}>✅</span>}
+          </label>
+        ))}
+      </div>
+
+      {/* 카테고리 */}
+      {pubAccId&&(
+        <div className="card" style={{padding:"14px 16px"}}>
+          <div className="card-title" style={{marginBottom:10}}>📂 카테고리</div>
+          {loadingCats?(
+            <div style={{display:"flex",alignItems:"center",gap:8,padding:"8px",color:"var(--text3)",fontSize:13}}><span className="spinner" style={{width:16,height:16}}/>불러오는 중...</div>
+          ):categories.length===0?(
+            <div style={{display:"flex",flexDirection:"column",gap:8}}>
+              <div style={{fontSize:12,color:"var(--text3)",textAlign:"center"}}>카테고리 없음 (기본 발행)</div>
+              <button className="btn btn-secondary btn-sm" onClick={()=>loadCategories(platform)}>🔄 다시 불러오기</button>
+            </div>
+          ):(
+            <select value={category} onChange={e=>setCategory(e.target.value)} style={{width:"100%",padding:"10px 12px",borderRadius:10,border:"1px solid var(--border)",background:"var(--bg)",color:"var(--text)",fontSize:14,fontFamily:"inherit",outline:"none"}}>
+              <option value="">선택 안 함 (기본)</option>
+              {categories.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+          )}
+        </div>
+      )}
+
+      {/* 공개 설정 */}
+      <div className="card" style={{padding:"14px 16px"}}>
+        <div className="card-title" style={{marginBottom:10}}>👁️ 공개 설정</div>
+        <div style={{display:"flex",flexDirection:"column",gap:8}}>
+          {(platform==="naver"?[{v:"public",ico:"🌍",label:"전체 공개"},{v:"neighbor",ico:"👥",label:"이웃 공개"},{v:"private",ico:"🔒",label:"비공개"}]:[{v:"public",ico:"🌍",label:"전체 공개"},{v:"private",ico:"🔒",label:"비공개"}] as {v:string,ico:string,label:string}[]).map(opt=>(
+            <button key={opt.v} onClick={()=>setVisibility(opt.v as "public"|"neighbor"|"private")} style={{padding:"11px 14px",borderRadius:10,border:`2px solid ${visibility===opt.v?"var(--accent)":"var(--border)"}`,background:visibility===opt.v?"var(--accent-bg)":"var(--bg)",cursor:"pointer",fontFamily:"inherit",textAlign:"left",transition:"all .15s",display:"flex",alignItems:"center",gap:10}}>
+              <span style={{fontSize:20}}>{opt.ico}</span>
+              <span style={{fontSize:13,fontWeight:600,color:visibility===opt.v?"var(--accent-text)":"var(--text)"}}>{opt.label}</span>
+              {visibility===opt.v&&<span style={{marginLeft:"auto",color:"var(--accent-text)"}}>✓</span>}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* 예약 발행 */}
+      <div className="card" style={{padding:"14px 16px"}}>
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:scheduleOn?12:0}}>
+          <div>
+            <div className="card-title" style={{margin:0}}>⏰ 예약 발행</div>
+            <div style={{fontSize:11,color:"var(--text3)",marginTop:2}}>설정 시간에 자동 발행</div>
+          </div>
+          <button onClick={()=>{setScheduleOn(v=>!v);if(!scheduleTime){const d=new Date();d.setHours(d.getHours()+1,0,0,0);setScheduleTime(d.toISOString().slice(0,16));}}} style={{width:48,height:26,borderRadius:99,background:scheduleOn?"var(--accent)":"var(--border)",border:"none",cursor:"pointer",position:"relative",transition:"background .2s",flexShrink:0}}>
+            <div style={{position:"absolute",top:3,left:scheduleOn?24:3,width:20,height:20,borderRadius:"50%",background:"#fff",transition:"left .2s",boxShadow:"0 1px 4px rgba(0,0,0,.3)"}}/>
+          </button>
+        </div>
+        {scheduleOn&&(
+          <div>
+            <input type="datetime-local" value={scheduleTime} onChange={e=>setScheduleTime(e.target.value)} min={new Date().toISOString().slice(0,16)} style={{width:"100%",padding:"10px 12px",borderRadius:10,border:"2px solid var(--border)",background:"var(--bg)",color:"var(--text)",fontSize:14,fontFamily:"inherit",outline:"none",boxSizing:"border-box"}}/>
+            {scheduleTime&&<div style={{marginTop:8,padding:"10px 12px",borderRadius:10,background:"var(--accent-bg)",border:"1px solid var(--accent-border)",fontSize:12,color:"var(--accent-text)",fontWeight:600}}>
+              ✅ {new Date(scheduleTime).toLocaleDateString("ko-KR",{month:"long",day:"numeric",weekday:"short"})} {new Date(scheduleTime).toLocaleTimeString("ko-KR",{hour:"2-digit",minute:"2-digit"})} 발행
+            </div>}
+          </div>
+        )}
+      </div>
+
+      {/* 발행 버튼 */}
+      <button onClick={handlePublish} disabled={publishing||!pubAccId||!pubTitle||!buildPublishContent()||(quota?.remaining_quota||0)<=0||(scheduleOn&&!scheduleTime)} className="btn btn-primary btn-full btn-xl">
+        {publishing
+          ?<><span className="spinner"/>{scheduleOn?"예약 중...":"발행 중..."}</>
+          :scheduleOn?<>⏰ 예약 발행 설정하기</>:<>🚀 블로그 자동 발행</>
+        }
+      </button>
+    </>);
   }
 
   async function handleAddAccount(){
@@ -1120,12 +1435,12 @@ POST3: (제목)|(이유)
         )}
 
         {/* 미리보기 모달 */}
-        {showPreview&&(
-          <div className="preview-overlay" onClick={()=>setShowPreview(false)}>
+        {showPreviewModal&&(
+          <div className="preview-overlay" onClick={()=>setShowPreviewModal(false)}>
             <div className="preview-inner" onClick={e=>e.stopPropagation()}>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:18}}>
                 <span style={{fontSize:13,color:"#888",fontWeight:700}}>📱 구독자 미리보기</span>
-                <button style={{background:"none",border:"none",cursor:"pointer",fontSize:22,color:"#aaa"}} onClick={()=>setShowPreview(false)}>✕</button>
+                <button style={{background:"none",border:"none",cursor:"pointer",fontSize:22,color:"#aaa"}} onClick={()=>setShowPreviewModal(false)}>✕</button>
               </div>
               <div style={{fontFamily:"'Apple SD Gothic Neo','Malgun Gothic',sans-serif"}}>
                 <h1 style={{fontSize:24,fontWeight:700,color:"#191919",lineHeight:1.4,marginBottom:14}}>{genTitle||pubTitle}</h1>
@@ -1330,7 +1645,7 @@ POST3: (제목)|(이유)
                       <div className="card-title">🎉 글 생성 완료!</div>
                       <div style={{display:"flex",gap:7,alignItems:"center"}}>
                         <span style={{padding:"4px 12px",borderRadius:99,fontSize:12,fontWeight:800,background:"var(--accent-bg)",color:"var(--accent-text)",border:"1px solid var(--accent-border)"}}>{genContent.length.toLocaleString()}자</span>
-                        <button style={{padding:"7px 14px",borderRadius:9,border:"1px solid var(--accent-border)",background:"var(--accent-bg)",color:"var(--accent-text)",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:"inherit"}} onClick={()=>setShowPreview(true)}>👁️ 미리보기</button>
+                        <button style={{padding:"7px 14px",borderRadius:9,border:"1px solid var(--accent-border)",background:"var(--accent-bg)",color:"var(--accent-text)",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:"inherit"}} onClick={()=>setShowPreviewModal(true)}>👁️ 미리보기</button>
                       </div>
                     </div>
                     <div style={{display:"flex",flexDirection:"column",gap:12,marginBottom:14}}>
@@ -1582,235 +1897,259 @@ POST3: (제목)|(이유)
 
             {/* ===== 발행하기 ===== */}
             {tab==="publish"&&(
-              <div style={{animation:"fadeUp .25s ease both"}}>
-                {!botOnline&&<div className="alert-box alert-warn">⚠️ 봇 서버 오프라인 — PC에서 Publy 앱을 실행하면 즉시 발행, 아니면 예약 발행으로 처리돼요.</div>}
-                {quota&&quota.remaining_quota<=0&&<div className="alert-box alert-danger">⚠️ 발행 건수를 모두 사용했어요. 플랜을 업그레이드해주세요.</div>}
+              <div style={{animation:"fadeUp .25s ease both",paddingBottom:80}}>
+                {!botOnline&&<div className="alert-box alert-warn" style={{marginBottom:12}}>⚠️ 봇 오프라인 — PC에서 Publy 앱 실행 시 즉시 발행, 아니면 대기열 저장돼요.</div>}
+                {quota&&quota.remaining_quota<=0&&<div className="alert-box alert-danger" style={{marginBottom:12}}>⚠️ 발행 건수 초과. 플랜을 업그레이드해주세요.</div>}
 
-                {/* 이미지/영상 설정 요약 */}
-                {(getActiveImages().length>0||videoOn)&&(
-                  <div className="card" style={{padding:"14px 16px",marginBottom:14}}>
-                    <div className="card-title" style={{marginBottom:10}}>📐 발행 설정 요약</div>
-                    <div style={{display:"flex",flexWrap:"wrap",gap:8}}>
-                      <div style={{padding:"6px 12px",borderRadius:99,background:"var(--accent-bg)",border:"1px solid var(--accent-border)",fontSize:12,fontWeight:700,color:"var(--accent-text)"}}>
-                        🖼️ 이미지 {getActiveImages().length}장
-                      </div>
-                      <div style={{padding:"6px 12px",borderRadius:99,background:"var(--card2)",border:"1px solid var(--border)",fontSize:12,fontWeight:700,color:"var(--text2)"}}>
-                        📐 패턴 {(()=>{
-                          if(imgPattern==="random"){const r=Math.random();return r<0.5?"A (자동)":r<0.85?"B (자동)":"C (자동)";}
-                          return imgPattern;
-                        })()}
-                      </div>
-                      {videoOn&&videoUrl&&(
-                        <div style={{padding:"6px 12px",borderRadius:99,background:"rgba(255,107,53,.08)",border:"1px solid rgba(255,107,53,.25)",fontSize:12,fontWeight:700,color:"var(--tistory)"}}>
-                          🎬 영상 {videoPosition==="top"?"상단":videoPosition==="middle"?"중간":"하단"} 삽입
-                        </div>
-                      )}
-                      {captions.filter(Boolean).length>0&&(
-                        <div style={{padding:"6px 12px",borderRadius:99,background:"rgba(78,205,196,.08)",border:"1px solid rgba(78,205,196,.25)",fontSize:12,fontWeight:700,color:"var(--info)"}}>
-                          💬 캡션 {captions.filter(Boolean).length}개
-                        </div>
-                      )}
-                    </div>
+                {/* ── 헤더 버튼줄 ── */}
+                <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:8,marginBottom:14}}>
+                  <div style={{fontSize:13,color:"var(--text2)",fontWeight:600}}>
+                    {blocks.filter(b=>b.type==="text").length}개 단락 · 이미지 {blocks.filter(b=>b.type==="image").length}장
                   </div>
-                )}
-
-                <div className="card">
-                  <div className="card-title" style={{marginBottom:14}}>📝 발행 방식 선택</div>
-                  <div className="concept-grid">
-                    {([{id:"full",ico:"📄",name:"① 전체 발행",sub:"본문 + FAQ + 관련글 모두\n가장 풍부한 내용",cls:"sel-full"},{id:"body_faq",ico:"💬",name:"② 본문 + FAQ",sub:"본문과 자주 묻는 질문까지\n관련글 섹션 제외",cls:"sel-faq"},{id:"body_only",ico:"✏️",name:"③ 본문만",sub:"핵심 내용만 깔끔하게\n가장 간결한 형태",cls:"sel-body"}] as const).map(c=>(
-                      <button key={c.id} className={`concept-btn ${pubConcept===c.id?c.cls:""}`} onClick={()=>setPubConcept(c.id)}>
-                        <div className="concept-ico">{c.ico}</div>
-                        <div className="concept-name">{c.name}</div>
-                        <div className="concept-sub">{c.sub}</div>
-                        {pubConcept===c.id&&<div style={{marginTop:8,fontSize:12,fontWeight:700,color:c.id==="full"?"var(--accent-text)":c.id==="body_faq"?"var(--pink)":"var(--yellow)"}}>✓ 선택됨</div>}
+                  <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                    {/* 네이버 복사 드롭다운 */}
+                    <div style={{position:"relative"}}>
+                      <button onClick={()=>setShowNaverMenu(v=>!v)} style={{display:"flex",alignItems:"center",gap:6,padding:"8px 14px",borderRadius:10,background:"#03C75A",color:"#fff",border:"none",cursor:"pointer",fontSize:13,fontWeight:700,fontFamily:"inherit"}}>
+                        📋 네이버 복사 ▲
                       </button>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="card">
-                  <div className="card-title" style={{marginBottom:12}}>🌐 플랫폼 선택</div>
-                  <div className="pub-plat-grid" style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
-                    {([{p:"naver",ico:"🟢",name:"네이버 블로그",c:"var(--naver)"},{p:"tistory",ico:"🟠",name:"티스토리",c:"var(--tistory)"}] as const).map(({p,ico,name,c})=>(
-                      <button key={p} style={{padding:"15px 16px",borderRadius:13,border:`2px solid ${platform===p?c:"var(--border)"}`,background:platform===p?`${c}12`:"var(--bg)",cursor:"pointer",textAlign:"left",fontFamily:"inherit",transition:"all .18s",display:"flex",alignItems:"center",gap:11}} onClick={()=>setPlatform(p)}>
-                        <span style={{fontSize:26}}>{ico}</span>
-                        <div style={{flex:1}}><div style={{fontSize:14,fontWeight:700,color:"var(--text)"}}>{name}</div></div>
-                        {platform===p&&<span style={{fontSize:16,color:c}}>✓</span>}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="card">
-                  <div className="card-title" style={{marginBottom:12}}>🔗 발행 계정 선택</div>
-                  {connAccs.length===0?(
-                    <div style={{textAlign:"center",padding:"24px 16px"}}>
-                      <div style={{fontSize:36,marginBottom:10}}>🔗</div>
-                      <div style={{fontSize:15,fontWeight:700,color:"var(--text)",marginBottom:6}}>연결된 계정이 없어요</div>
-                      <div style={{fontSize:13,color:"var(--text2)",marginBottom:14}}>계정 관리 탭에서 블로그 계정을 추가해주세요</div>
-                      <button className="btn btn-primary btn-sm" onClick={()=>setTab("accounts")}>계정 관리로 이동 →</button>
-                    </div>
-                  ):connAccs.map(a=>(
-                    <label key={a.id} style={{display:"flex",alignItems:"center",gap:12,padding:"16px",borderRadius:12,cursor:"pointer",marginBottom:8,background:pubAccId===a.id?"var(--accent-bg)":"var(--bg)",border:`2px solid ${pubAccId===a.id?"var(--accent)":"var(--border)"}`,transition:"all .15s"}}
-                      onClick={()=>{setPubAccId(a.id);loadCategories(platform);}}>
-                      <input type="radio" name="pacc" checked={pubAccId===a.id} onChange={()=>{}} style={{accentColor:"var(--accent)",width:20,height:20,flexShrink:0}}/>
-                      <div style={{flex:1}}><div style={{fontSize:16,fontWeight:700,color:"var(--text)"}}>{a.username}</div>{a.blog_name&&<div style={{fontSize:13,color:"var(--text2)",marginTop:3}}>{a.blog_name}</div>}</div>
-                      <span style={{fontSize:12,fontWeight:700,padding:"5px 12px",borderRadius:99,background:"var(--accent-bg)",color:"var(--accent-text)",border:"1px solid var(--accent-border)"}}>✅ 연결됨</span>
-                    </label>
-                  ))}
-                </div>
-
-                {/* ── 카테고리 선택 ── */}
-                <div className="card">
-                  <div className="card-title" style={{marginBottom:12}}>📂 카테고리 선택</div>
-                  {!pubAccId?(
-                    <div style={{padding:"14px",borderRadius:10,background:"var(--bg2)",fontSize:15,color:"var(--text3)",textAlign:"center"}}>
-                      위에서 계정을 먼저 선택해주세요
-                    </div>
-                  ):loadingCats?(
-                    <div style={{display:"flex",alignItems:"center",gap:12,padding:"14px",borderRadius:10,background:"var(--bg2)"}}>
-                      <span className="spinner sp-g" style={{width:20,height:20}}/>
-                      <span style={{fontSize:15,color:"var(--text2)"}}>카테고리 불러오는 중...</span>
-                    </div>
-                  ):categories.length===0?(
-                    <div style={{display:"flex",flexDirection:"column",gap:10}}>
-                      <div style={{padding:"14px",borderRadius:10,background:"var(--bg2)",fontSize:14,color:"var(--text2)",textAlign:"center",lineHeight:1.7}}>
-                        카테고리를 불러올 수 없어요<br/>
-                        <span style={{fontSize:13,color:"var(--text3)"}}>기본 카테고리로 발행돼요</span>
-                      </div>
-                      <button className="btn btn-secondary btn-sm" onClick={()=>loadCategories(platform)} style={{fontSize:14,padding:"12px"}}>🔄 다시 불러오기</button>
-                    </div>
-                  ):(
-                    <div style={{display:"flex",flexDirection:"column",gap:8}}>
-                      <button onClick={()=>setCategory("")} style={{padding:"16px",borderRadius:12,border:`2px solid ${!category?"var(--accent)":"var(--border)"}`,background:!category?"var(--accent-bg)":"var(--bg)",cursor:"pointer",fontFamily:"inherit",textAlign:"left",fontSize:16,fontWeight:600,color:!category?"var(--accent-text)":"var(--text2)",transition:"all .15s"}}>
-                        📋 카테고리 없음 (기본)
-                        {!category&&<span style={{float:"right",color:"var(--accent-text)"}}>✓</span>}
-                      </button>
-                      {categories.map(c=>(
-                        <button key={c.id} onClick={()=>setCategory(c.id)} style={{padding:"16px",borderRadius:12,border:`2px solid ${category===c.id?"var(--accent)":"var(--border)"}`,background:category===c.id?"var(--accent-bg)":"var(--bg)",cursor:"pointer",fontFamily:"inherit",textAlign:"left",fontSize:16,fontWeight:600,color:category===c.id?"var(--accent-text)":"var(--text)",transition:"all .15s"}}>
-                          📁 {c.name}
-                          {category===c.id&&<span style={{float:"right",color:"var(--accent-text)"}}>✓</span>}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-
-                {/* ── 공개 설정 ── */}
-                <div className="card">
-                  <div className="card-title" style={{marginBottom:14}}>👁️ 공개 설정</div>
-                  <div style={{display:"flex",flexDirection:"column",gap:10}}>
-                    {platform==="naver"?(
-                      <>
-                        {([
-                          {v:"public",   ico:"🌍", label:"전체 공개",   desc:"모든 사람이 볼 수 있어요"},
-                          {v:"neighbor", ico:"👥", label:"이웃 공개",   desc:"이웃으로 등록된 분만 볼 수 있어요"},
-                          {v:"private",  ico:"🔒", label:"비공개",      desc:"나만 볼 수 있어요"},
-                        ] as const).map(opt=>(
-                          <button key={opt.v} onClick={()=>setVisibility(opt.v)} style={{padding:"18px 16px",borderRadius:14,border:`2px solid ${visibility===opt.v?"var(--accent)":"var(--border)"}`,background:visibility===opt.v?"var(--accent-bg)":"var(--bg)",cursor:"pointer",fontFamily:"inherit",textAlign:"left",transition:"all .15s",display:"flex",alignItems:"center",gap:14}}>
-                            <span style={{fontSize:28,flexShrink:0}}>{opt.ico}</span>
-                            <div style={{flex:1}}>
-                              <div style={{fontSize:17,fontWeight:700,color:visibility===opt.v?"var(--accent-text)":"var(--text)",marginBottom:4}}>{opt.label}</div>
-                              <div style={{fontSize:14,color:"var(--text2)",lineHeight:1.5}}>{opt.desc}</div>
+                      {showNaverMenu&&(
+                        <>
+                          <div style={{position:"fixed",inset:0,zIndex:40}} onClick={()=>setShowNaverMenu(false)}/>
+                          <div style={{position:"absolute",top:42,right:0,zIndex:50,width:280,borderRadius:16,overflow:"hidden",background:"#1a1a2e",border:"1px solid rgba(255,255,255,.12)",boxShadow:"0 8px 32px rgba(0,0,0,.4)"}}>
+                            <div style={{padding:"12px 16px",borderBottom:"1px solid rgba(255,255,255,.1)"}}>
+                              <div style={{fontSize:12,fontWeight:700,color:"#fff"}}>📋 복사 방식 선택</div>
+                              <div style={{fontSize:11,color:"rgba(255,255,255,.5)",marginTop:2}}>글 종류에 맞게 선택하세요</div>
                             </div>
-                            {visibility===opt.v&&<span style={{fontSize:20,color:"var(--accent-text)",flexShrink:0}}>✓</span>}
-                          </button>
-                        ))}
-                      </>
-                    ):(
-                      <>
-                        {([
-                          {v:"public",  ico:"🌍", label:"전체 공개", desc:"모든 사람이 볼 수 있어요"},
-                          {v:"private", ico:"🔒", label:"비공개",    desc:"나만 볼 수 있어요"},
-                        ] as const).map(opt=>(
-                          <button key={opt.v} onClick={()=>setVisibility(opt.v as any)} style={{padding:"18px 16px",borderRadius:14,border:`2px solid ${visibility===opt.v?"var(--accent)":"var(--border)"}`,background:visibility===opt.v?"var(--accent-bg)":"var(--bg)",cursor:"pointer",fontFamily:"inherit",textAlign:"left",transition:"all .15s",display:"flex",alignItems:"center",gap:14}}>
-                            <span style={{fontSize:28,flexShrink:0}}>{opt.ico}</span>
-                            <div style={{flex:1}}>
-                              <div style={{fontSize:17,fontWeight:700,color:visibility===opt.v?"var(--accent-text)":"var(--text)",marginBottom:4}}>{opt.label}</div>
-                              <div style={{fontSize:14,color:"var(--text2)",lineHeight:1.5}}>{opt.desc}</div>
-                            </div>
-                            {visibility===opt.v&&<span style={{fontSize:20,color:"var(--accent-text)",flexShrink:0}}>✓</span>}
-                          </button>
-                        ))}
-                      </>
-                    )}
-                  </div>
-                </div>
-
-                {/* ── 예약 발행 ── */}
-                <div className="card">
-                  <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:scheduleOn?14:0}}>
-                    <div>
-                      <div className="card-title" style={{margin:0}}>⏰ 예약 발행</div>
-                      <div style={{fontSize:13,color:"var(--text3)",marginTop:4}}>설정한 시간에 블로그에 자동으로 글이 올라가요</div>
-                    </div>
-                    <div style={{display:"flex",alignItems:"center",gap:10}}>
-                      <span style={{fontSize:14,fontWeight:700,color:scheduleOn?"var(--accent-text)":"var(--text3)"}}>{scheduleOn?"ON":"OFF"}</span>
-                      <button onClick={()=>{setScheduleOn(v=>!v);if(!scheduleTime){const d=new Date();d.setHours(d.getHours()+1,0,0,0);setScheduleTime(d.toISOString().slice(0,16));}}} style={{width:56,height:30,borderRadius:99,background:scheduleOn?"var(--accent)":"var(--border)",border:"none",cursor:"pointer",position:"relative",transition:"background .2s",flexShrink:0}}>
-                        <div style={{position:"absolute",top:4,left:scheduleOn?28:4,width:22,height:22,borderRadius:"50%",background:"#fff",transition:"left .2s",boxShadow:"0 1px 4px rgba(0,0,0,.3)"}}/>
-                      </button>
-                    </div>
-                  </div>
-                  {scheduleOn&&(
-                    <div style={{animation:"fadeUp .2s ease both"}}>
-                      <label style={{display:"block",fontSize:15,fontWeight:700,color:"var(--text2)",marginBottom:8}}>📅 발행 날짜와 시간을 선택해주세요</label>
-                      <input
-                        type="datetime-local"
-                        value={scheduleTime}
-                        onChange={e=>setScheduleTime(e.target.value)}
-                        min={new Date().toISOString().slice(0,16)}
-                        style={{width:"100%",padding:"16px 14px",borderRadius:12,border:"2px solid var(--border)",background:"var(--bg)",color:"var(--text)",fontSize:17,fontFamily:"inherit",outline:"none",boxSizing:"border-box"}}
-                      />
-                      {scheduleTime&&(
-                        <div style={{marginTop:12,padding:"14px 16px",borderRadius:12,background:"var(--accent-bg)",border:"1px solid var(--accent-border)"}}>
-                          <div style={{fontSize:14,color:"var(--accent-text)",fontWeight:600,marginBottom:3}}>✅ 예약 확인</div>
-                          <div style={{fontSize:16,fontWeight:800,color:"var(--text)"}}>
-                            {new Date(scheduleTime).toLocaleDateString("ko-KR",{year:"numeric",month:"long",day:"numeric",weekday:"long"})}
+                            {[
+                              {label:"전체 복사",tag:"전체",color:"#03C75A",tagColor:"#fff",desc:"본문 + FAQ + 참고자료 + 관련글",tip:"✓ 정보성 글 · 리뷰 · 튜토리얼",fn:()=>{copyForNaver();setShowNaverMenu(false);}},
+                              {label:"본문 + FAQ",tag:"FAQ",color:"#fbbf24",tagColor:"#000",desc:"참고자료·관련글 제외, Q&A 포함",tip:"✓ 일반 블로그 · 상품 리뷰",fn:()=>{copyForNaverWithFaq();setShowNaverMenu(false);}},
+                              {label:"본문만",tag:"본문",color:"#f472b6",tagColor:"#fff",desc:"FAQ·참고자료·관련글 전부 제외",tip:"✓ 체험단 · 맛집 · 여행 후기",fn:()=>{copyForNaverBodyOnly();setShowNaverMenu(false);}},
+                            ].map((opt,i)=>(
+                              <button key={i} onClick={opt.fn} style={{width:"100%",textAlign:"left",padding:"12px 16px",borderBottom:i<2?"1px solid rgba(255,255,255,.08)":"none",background:"transparent",cursor:"pointer",border:"none",fontFamily:"inherit"}}>
+                                <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4}}>
+                                  <span style={{fontSize:10,fontWeight:800,padding:"2px 8px",borderRadius:99,background:opt.color,color:opt.tagColor}}>{opt.tag}</span>
+                                  <span style={{fontSize:13,fontWeight:700,color:"#fff"}}>{opt.label}</span>
+                                </div>
+                                <div style={{fontSize:11,color:"rgba(255,255,255,.55)"}}>{opt.desc}</div>
+                                <div style={{fontSize:11,color:opt.color,marginTop:2}}>{opt.tip}</div>
+                              </button>
+                            ))}
                           </div>
-                          <div style={{fontSize:15,color:"var(--text2)",marginTop:3}}>
-                            {new Date(scheduleTime).toLocaleTimeString("ko-KR",{hour:"2-digit",minute:"2-digit"})}에 자동으로 글이 올라가요
-                          </div>
-                        </div>
+                        </>
                       )}
                     </div>
+                    <button onClick={()=>setShowPreviewModal(true)} style={{display:"flex",alignItems:"center",gap:6,padding:"8px 14px",borderRadius:10,background:"oklch(.62 .22 300)",color:"#fff",border:"none",cursor:"pointer",fontSize:13,fontWeight:700,fontFamily:"inherit"}}>
+                      👁️ 미리보기
+                    </button>
+                  </div>
+                </div>
+
+                {/* ── 모바일: 발행 설정 접기/펼치기 ── */}
+                <div className="lg-hidden" style={{marginBottom:10}}>
+                  <button onClick={()=>setShowPublishPanel(v=>!v)} style={{width:"100%",display:"flex",alignItems:"center",justifyContent:"space-between",padding:"13px 16px",borderRadius:12,background:"var(--card)",border:"1px solid var(--border)",cursor:"pointer",fontFamily:"inherit"}}>
+                    <div style={{display:"flex",alignItems:"center",gap:8}}>
+                      <span style={{fontSize:16}}>🚀</span>
+                      <span style={{fontSize:14,fontWeight:700,color:"var(--text)"}}>발행 설정</span>
+                      {pubAccId&&<span style={{fontSize:11,fontWeight:700,padding:"2px 9px",borderRadius:99,background:"var(--accent-bg)",color:"var(--accent-text)"}}>계정 선택됨</span>}
+                    </div>
+                    <span style={{color:"var(--text3)"}}>{showPublishPanel?"▲":"▼"}</span>
+                  </button>
+                  {showPublishPanel&&(
+                    <div style={{marginTop:8,padding:"16px",borderRadius:12,background:"var(--card)",border:"1px solid var(--border)",display:"flex",flexDirection:"column",gap:12}}>
+                      {renderPublishPanel()}
+                    </div>
                   )}
                 </div>
 
-                <div className="card">
-                  <div className="card-header">
-                    <div className="card-title">📝 발행 내용</div>
-                    <button style={{padding:"7px 14px",borderRadius:9,border:"1px solid var(--accent-border)",background:"var(--accent-bg)",color:"var(--accent-text)",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:"inherit"}} onClick={()=>setShowPreview(true)}>👁️ 미리보기</button>
-                  </div>
-                  {activeImages[0]&&(
-                    <div style={{marginBottom:14}}>
-                      <label className="inp-label">🖼️ 썸네일 이미지</label>
-                      <div style={{position:"relative",display:"inline-block",width:"100%"}}>
-                        <img src={activeImages[0]} alt="" style={{width:"100%",maxHeight:200,objectFit:"cover",borderRadius:12,border:"1px solid var(--border)"}} onError={e=>{(e.target as HTMLImageElement).style.display="none";}}/>
-                        <button onClick={()=>{if(imgSource==="ai")setGeneratedImages(p=>p.filter((_,j)=>j!==0));else setUploadedImages(p=>p.filter((_,j)=>j!==0));}} style={{position:"absolute",top:9,right:9,background:"rgba(0,0,0,.7)",border:"none",color:"#fff",borderRadius:99,width:28,height:28,cursor:"pointer",fontSize:14,display:"flex",alignItems:"center",justifyContent:"center"}}>✕</button>
-                      </div>
-                    </div>
-                  )}
+                {/* ── 메인 그리드: 에디터(좌) + 발행패널(우) ── */}
+                <div style={{display:"grid",gridTemplateColumns:"1fr 320px",gap:16,alignItems:"start"}} className="pub-grid">
+
+                  {/* 왼쪽: 에디터 */}
                   <div style={{display:"flex",flexDirection:"column",gap:12}}>
-                    <div><label className="inp-label">제목 *</label><input className="inp lg" placeholder="블로그 글 제목..." value={pubTitle} onChange={e=>setPubTitle(e.target.value)}/></div>
-                    <div><label className="inp-label">태그 (쉼표 구분)</label><input className="inp" placeholder="태그1, 태그2, 태그3" value={pubTags} onChange={e=>setPubTags(e.target.value)}/></div>
-                    <div>
-                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}><label className="inp-label" style={{margin:0}}>본문 ({pubConcept==="full"?"전체":pubConcept==="body_faq"?"본문+FAQ":"본문만"})</label><span style={{fontSize:12,color:"var(--text2)"}}>{buildPublishContent().length.toLocaleString()}자</span></div>
-                      <textarea className="inp" rows={6} style={{fontSize:13,lineHeight:1.8}} readOnly value={buildPublishContent()}/>
+
+                    {/* 제목 */}
+                    <div className="card" style={{padding:"14px 16px"}}>
+                      <label className="inp-label">글 제목</label>
+                      <input className="inp lg" placeholder="블로그 글 제목..." value={pubTitle} onChange={e=>setPubTitle(e.target.value)}/>
                     </div>
+
+                    {/* 썸네일 */}
+                    <div className="card" style={{padding:"14px 16px"}}>
+                      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:10}}>
+                        <label className="inp-label" style={{margin:0}}>🖼️ 썸네일</label>
+                        {thumbnail&&<button onClick={()=>setThumbnail("")} style={{background:"transparent",border:"none",cursor:"pointer",color:"var(--text3)",fontSize:18}}>✕</button>}
+                      </div>
+                      {thumbnail?(
+                        <div style={{position:"relative",borderRadius:12,overflow:"hidden",aspectRatio:"16/9"}}>
+                          <img src={thumbnail} alt="썸네일" style={{width:"100%",height:"100%",objectFit:"cover",display:"block"}} onError={()=>setThumbnail("")}/>
+                        </div>
+                      ):(
+                        <div style={{display:"flex",flexDirection:"column",gap:10}}>
+                          {getActiveImages().length>0&&(
+                            <div>
+                              <div style={{fontSize:12,color:"var(--text3)",marginBottom:6}}>생성된 이미지에서 선택:</div>
+                              <div style={{display:"flex",gap:8,overflowX:"auto",paddingBottom:4}}>
+                                {getActiveImages().slice(0,6).map((src,i)=>(
+                                  <button key={i} onClick={()=>setThumbnail(src)} style={{flexShrink:0,width:56,height:56,borderRadius:8,overflow:"hidden",border:"1px solid var(--border)",padding:0,cursor:"pointer"}}>
+                                    <img src={src} alt="" style={{width:"100%",height:"100%",objectFit:"cover"}} onError={e=>{(e.target as HTMLImageElement).style.display="none";}}/>
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                          <button onClick={()=>thumbnailRef.current?.click()} style={{width:"100%",padding:"16px",borderRadius:12,border:"2px dashed var(--border)",background:"var(--bg)",cursor:"pointer",color:"var(--text3)",fontSize:13,fontFamily:"inherit"}}>
+                            📁 이미지 업로드
+                          </button>
+                        </div>
+                      )}
+                      <input ref={thumbnailRef} type="file" accept="image/*" style={{display:"none"}} onChange={e=>{const f=e.target.files?.[0];if(!f)return;const r=new FileReader();r.onload=ev=>setThumbnail(ev.target?.result as string);r.readAsDataURL(f);}}/>
+                    </div>
+
+                    {/* 인사말 */}
+                    <div className="card" style={{padding:"14px 16px"}}>
+                      <label className="inp-label">💬 글쓴이 인사말 (선택)</label>
+                      <textarea className="inp" rows={2} placeholder="안녕하세요! 오늘도 유용한 정보를 가지고 왔어요 😊" value={greeting} onChange={e=>setGreeting(e.target.value)} style={{resize:"none",fontSize:13}}/>
+                    </div>
+
+                    {/* 이미지 삽입 모드 */}
+                    <div className="card" style={{padding:0,overflow:"hidden"}}>
+                      <div style={{padding:"13px 16px",borderBottom:"1px solid var(--border)"}}>
+                        <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10}}>
+                          <span style={{fontSize:15}}>🖼️</span>
+                          <span style={{fontSize:14,fontWeight:700,color:"var(--text)"}}>이미지 삽입 모드</span>
+                        </div>
+                        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:10}}>
+                          {[{v:"auto",ico:"🤖",label:"자동",desc:"AI 이미지 자동 배치"},{v:"manual",ico:"📁",label:"수동",desc:"원하는 위치에 삽입"}].map(m=>(
+                            <button key={m.v} onClick={()=>setImageMode(m.v as "auto"|"manual")} style={{padding:"10px 12px",borderRadius:10,border:`2px solid ${imageMode===m.v?"var(--accent)":"var(--border)"}`,background:imageMode===m.v?"var(--accent-bg)":"var(--bg)",cursor:"pointer",textAlign:"left",fontFamily:"inherit",transition:"all .15s"}}>
+                              <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:3}}>
+                                <span>{m.ico}</span>
+                                <span style={{fontSize:13,fontWeight:700,color:imageMode===m.v?"var(--accent-text)":"var(--text)"}}>{m.label}</span>
+                                {imageMode===m.v&&blocks.filter(b=>b.type==="image").length>0&&<span style={{fontSize:10,fontWeight:700,padding:"1px 7px",borderRadius:99,background:"var(--accent-text)",color:"#000"}}>{blocks.filter(b=>b.type==="image").length}개</span>}
+                              </div>
+                              <div style={{fontSize:11,color:"var(--text3)"}}>{m.desc}</div>
+                            </button>
+                          ))}
+                        </div>
+                        {imageMode==="auto"&&(
+                          <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
+                            <div style={{flex:1,padding:"8px 12px",borderRadius:8,background:"var(--bg2)",border:"1px solid var(--border)",fontSize:12,color:"var(--text3)"}}>
+                              {getActiveImages().length>0?`${getActiveImages().length}개 준비됨`:"이미지 생성 먼저"}
+                            </div>
+                            {autoInserted?(
+                              <button onClick={handleRemoveAutoImages} style={{padding:"8px 14px",borderRadius:8,border:"1px solid rgba(255,71,87,.4)",background:"rgba(255,71,87,.08)",color:"var(--danger)",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:"inherit"}}>✕ 제거</button>
+                            ):(
+                              <button onClick={handleAutoInsert} disabled={getActiveImages().length===0} style={{padding:"8px 14px",borderRadius:8,border:"none",background:"var(--accent)",color:"#000",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:"inherit",opacity:getActiveImages().length===0?.4:1}}>🤖 자동 삽입</button>
+                            )}
+                          </div>
+                        )}
+                        {imageMode==="manual"&&(
+                          <div style={{display:"flex",gap:8}}>
+                            <button onClick={()=>manualFileRef.current?.click()} style={{padding:"8px 14px",borderRadius:8,border:"1px solid var(--border)",background:"var(--bg2)",color:"var(--text2)",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:"inherit"}}>📁 파일 첨부</button>
+                            <div style={{padding:"8px 12px",borderRadius:8,border:"1px solid var(--accent-border)",background:"var(--accent-bg)",color:"var(--accent-text)",fontSize:12,fontWeight:600}}>⌨️ Ctrl+V</div>
+                          </div>
+                        )}
+                        <input ref={manualFileRef} type="file" accept="image/*" style={{display:"none"}} onChange={e=>{const f=e.target.files?.[0];if(!f)return;const r=new FileReader();r.onload=ev=>{if(ev.target?.result){addManualImageBlock();setBlocks(prev=>{const last=prev[prev.length-1];return prev.map(b=>b.id===last.id?{...b,src:ev.target!.result as string,alt:f.name} as ContentBlock:b});}};r.readAsDataURL(f);e.target.value="";}}/>
+                      </div>
+
+                      {/* 본문 편집 헤더 */}
+                      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"12px 16px",borderBottom:"1px solid var(--border)"}}>
+                        <div style={{display:"flex",alignItems:"center",gap:8}}>
+                          <span style={{fontSize:14,fontWeight:700,color:"var(--text)"}}>📝 본문 편집</span>
+                          <span style={{fontSize:11,padding:"2px 8px",borderRadius:99,background:"var(--bg2)",color:"var(--text3)"}}>{blocks.length}블록</span>
+                        </div>
+                        <div style={{display:"flex",gap:6}}>
+                          <button onClick={()=>addTextBlock()} style={{padding:"5px 10px",borderRadius:7,border:"1px solid var(--border)",background:"var(--bg2)",color:"var(--text2)",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:"inherit"}}>+ 텍스트</button>
+                          {imageMode==="manual"&&<button onClick={()=>addManualImageBlock()} style={{padding:"5px 10px",borderRadius:7,border:"1px solid var(--border)",background:"var(--bg2)",color:"var(--text2)",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:"inherit"}}>+ 이미지</button>}
+                        </div>
+                      </div>
+
+                      {/* 블록 목록 */}
+                      <div style={{padding:"12px 16px",display:"flex",flexDirection:"column",gap:10}}>
+                        {blocks.map((block,idx)=>(
+                          <div key={block.id}>
+                            {block.type==="text"?(
+                              <div style={{position:"relative"}}>
+                                <textarea
+                                  value={(block as TextBlock).content}
+                                  onChange={e=>updateBlock(block.id,{content:e.target.value})}
+                                  placeholder="내용 입력..."
+                                  style={{width:"100%",minHeight:80,padding:"10px 12px",borderRadius:10,border:"1px solid var(--border)",background:"var(--bg)",color:"var(--text)",fontSize:13,lineHeight:1.8,fontFamily:"inherit",resize:"none",outline:"none",boxSizing:"border-box"}}
+                                  onInput={e=>{const el=e.target as HTMLTextAreaElement;el.style.height="auto";el.style.height=el.scrollHeight+"px";}}
+                                />
+                                <div style={{display:"flex",gap:5,marginTop:4,justifyContent:"flex-end"}}>
+                                  {imageMode==="manual"&&<button onClick={()=>addManualImageBlock(block.id)} style={{padding:"3px 9px",borderRadius:6,border:"1px solid var(--border)",background:"var(--bg2)",color:"var(--text3)",cursor:"pointer",fontSize:11,fontFamily:"inherit"}}>🖼️</button>}
+                                  <button onClick={()=>addTextBlock(block.id)} style={{padding:"3px 9px",borderRadius:6,border:"1px solid var(--border)",background:"var(--bg2)",color:"var(--text3)",cursor:"pointer",fontSize:11,fontFamily:"inherit"}}>+</button>
+                                  {blocks.length>1&&<button onClick={()=>removeBlock(block.id)} style={{padding:"3px 9px",borderRadius:6,border:"1px solid rgba(255,71,87,.3)",background:"rgba(255,71,87,.06)",color:"var(--danger)",cursor:"pointer",fontSize:11,fontFamily:"inherit"}}>✕</button>}
+                                </div>
+                              </div>
+                            ):(
+                              <div style={{borderRadius:12,overflow:"hidden",border:`2px solid ${(block as SingleImageBlock).source==="auto"?"var(--accent-border)":"oklch(.75 .12 300 / 50%)"}`}}>
+                                <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"7px 12px",background:(block as SingleImageBlock).source==="auto"?"var(--accent-bg)":"oklch(.75 .12 300 / 8%)"}}>
+                                  <span style={{fontSize:11,fontWeight:700,color:(block as SingleImageBlock).source==="auto"?"var(--accent-text)":"oklch(.75 .12 300)"}}>{(block as SingleImageBlock).source==="auto"?"🤖 AI 생성":"📁 내 이미지"}</span>
+                                  <div style={{display:"flex",gap:6,alignItems:"center"}}>
+                                    <select value={(block as SingleImageBlock).position} onChange={e=>updateBlock(block.id,{position:e.target.value as "left"|"center"|"right"})} style={{fontSize:11,padding:"2px 6px",borderRadius:5,border:"1px solid var(--border)",background:"var(--bg)",color:"var(--text)"}}>
+                                      <option value="left">왼쪽</option><option value="center">가운데</option><option value="right">오른쪽</option>
+                                    </select>
+                                    <button onClick={()=>removeBlock(block.id)} style={{background:"transparent",border:"none",color:"var(--text3)",cursor:"pointer",fontSize:14,lineHeight:1}}>✕</button>
+                                  </div>
+                                </div>
+                                {(block as SingleImageBlock).src?(
+                                  <div style={{padding:"8px 12px"}}>
+                                    <img src={(block as SingleImageBlock).src} alt="" style={{width:"100%",borderRadius:8,display:"block",maxHeight:200,objectFit:"cover"}} onError={e=>{(e.target as HTMLImageElement).style.display="none";}}/>
+                                  </div>
+                                ):(
+                                  <button onClick={()=>manualFileRef.current?.click()} style={{width:"100%",padding:"24px",background:"transparent",border:"none",cursor:"pointer",color:"var(--text3)",fontSize:13,fontFamily:"inherit"}}>📁 이미지 업로드</button>
+                                )}
+                                <div style={{padding:"0 12px 8px"}}>
+                                  <input placeholder="이미지 설명 (alt)" value={(block as SingleImageBlock).alt} onChange={e=>updateBlock(block.id,{alt:e.target.value})} style={{width:"100%",padding:"5px 8px",borderRadius:7,border:"1px solid var(--border)",background:"var(--bg2)",color:"var(--text)",fontSize:11,fontFamily:"inherit",outline:"none",boxSizing:"border-box"}}/>
+                                </div>
+                              </div>
+                            )}
+                            {idx<blocks.length-1&&<div style={{display:"flex",alignItems:"center",margin:"4px 0"}}><div style={{flex:1,height:1,background:"var(--border)"}}/><span style={{margin:"0 8px",fontSize:10,color:"var(--text3)",opacity:.5}}>{idx+2}</span><div style={{flex:1,height:1,background:"var(--border)"}}/></div>}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* 해시태그 */}
+                    <div className="card" style={{padding:"14px 16px"}}>
+                      <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10}}>
+                        <span style={{fontSize:15}}>#</span>
+                        <span style={{fontSize:14,fontWeight:700,color:"var(--text)"}}>해시태그</span>
+                        <span style={{fontSize:11,color:"var(--text3)"}}>5~8개 권장</span>
+                      </div>
+                      <div style={{display:"flex",flexWrap:"wrap",gap:7,marginBottom:10}}>
+                        {hashtags.map((tag,i)=>(
+                          <div key={i} style={{display:"flex",alignItems:"center",gap:5,padding:"5px 11px",borderRadius:99,background:"var(--accent-bg)",border:"1px solid var(--accent-border)",fontSize:12,fontWeight:600,color:"var(--accent-text)"}}>
+                            {tag}<button onClick={()=>setHashtags(prev=>prev.filter((_,j)=>j!==i))} style={{background:"transparent",border:"none",cursor:"pointer",color:"var(--accent-text)",fontSize:13,lineHeight:1,padding:0}}>✕</button>
+                          </div>
+                        ))}
+                      </div>
+                      <div style={{display:"flex",gap:8}}>
+                        <input className="inp" placeholder="#해시태그 입력" value={newTag} onChange={e=>setNewTag(e.target.value)} onKeyDown={e=>{if(e.key==="Enter"&&newTag.trim()){if(hashtags.length>=8)return;setHashtags(prev=>[...prev,`#${newTag.replace("#","").trim()}`]);setNewTag("");}}} style={{flex:1}}/>
+                        <button onClick={()=>{if(!newTag.trim()||hashtags.length>=8)return;setHashtags(prev=>[...prev,`#${newTag.replace("#","").trim()}`]);setNewTag("");}} className="btn btn-secondary" style={{padding:"0 16px",flexShrink:0}}>추가</button>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* 오른쪽: 발행 패널 (PC) */}
+                  <div style={{display:"flex",flexDirection:"column",gap:12}} className="pub-panel-desktop">
+                    {renderPublishPanel()}
                   </div>
                 </div>
 
-                <button className="btn btn-primary btn-full btn-xl" style={{marginBottom:14}} onClick={handlePublish} disabled={publishing||!pubAccId||!pubTitle||!buildPublishContent()||(quota?.remaining_quota||0)<=0||(scheduleOn&&!scheduleTime)}>
-                  {publishing
-                    ?<><span className="spinner"/>{scheduleOn?"예약 설정 중...":"발행 중..."}</>
-                    :scheduleOn
-                      ?<>⏰ 예약 발행 설정하기</>
-                      :<>🚀 블로그 자동 발행</>
-                  }
-                </button>
-                {pubMsg&&<div className={`alert-box ${pubMsg.includes("✅")?"alert-success":"alert-danger"}`}>{pubMsg}</div>}
+                {/* 모바일 하단 고정 버튼 */}
+                <div style={{position:"fixed",bottom:60,left:0,right:0,zIndex:40,background:"var(--card)",borderTop:"1px solid var(--border)",padding:"10px 16px",display:"flex",gap:10}} className="pub-mobile-bar">
+                  <button onClick={()=>setShowPreviewModal(true)} style={{flex:1,padding:"12px",borderRadius:12,background:"oklch(.62 .22 300)",color:"#fff",border:"none",cursor:"pointer",fontSize:14,fontWeight:700,fontFamily:"inherit"}}>👁️ 미리보기</button>
+                  <button onClick={handlePublish} disabled={publishing||!pubAccId||!pubTitle||!buildPublishContent()||(quota?.remaining_quota||0)<=0||(scheduleOn&&!scheduleTime)} style={{flex:2,padding:"12px",borderRadius:12,background:scheduleOn?"var(--warn)":"var(--accent)",color:"#000",border:"none",cursor:"pointer",fontSize:14,fontWeight:800,fontFamily:"inherit",opacity:(publishing||!pubAccId||!pubTitle)?.5:1}}>
+                    {publishing?(scheduleOn?"예약 중...":"발행 중..."):scheduleOn?"⏰ 예약 발행":"🚀 자동 발행"}
+                  </button>
+                </div>
+
+                {pubMsg&&<div className={`alert-box ${pubMsg.includes("✅")?"alert-success":"alert-danger"}`} style={{marginTop:8}}>{pubMsg}</div>}
               </div>
             )}
+
 
             {/* ===== 발행 기록 ===== */}
             {tab==="manage"&&(
@@ -1935,7 +2274,7 @@ POST3: (제목)|(이유)
               <div style={{display:"flex",alignItems:"center",gap:8}}><div style={{width:8,height:8,borderRadius:"50%",background:botOnline?"var(--accent)":"var(--danger)",flexShrink:0}}/><span style={{fontSize:12,color:botOnline?"var(--accent-text)":"var(--danger)",fontWeight:700}}>{botOnline?"온라인":"오프라인"}</span><button className="icon-btn" style={{width:26,height:26,marginLeft:"auto"}} onClick={checkBot}>🔄</button></div>
             </div>
             <button className="rp-btn rp-btn-primary" disabled={!genContent||!pubAccId} onClick={()=>setTab("publish")}>🚀 발행하러 가기</button>
-            <button className="rp-btn rp-btn-secondary" onClick={()=>setShowPreview(true)} disabled={!genContent}>👁️ 미리보기</button>
+            <button className="rp-btn rp-btn-secondary" onClick={()=>setShowPreviewModal(true)} disabled={!genContent}>👁️ 미리보기</button>
           </div>
 
         </div>
@@ -1944,6 +2283,50 @@ POST3: (제목)|(이유)
           {MAIN_TABS.filter(t=>["keyword","write","image","publish","manage","settings"].includes(t.k)).map(t=>(<button key={t.k} className={`mob-btn ${tab===t.k?"active":""}`} onClick={()=>setTab(t.k as MainTab)}><span className="mob-btn-ico">{t.i}</span><span className="mob-btn-lbl">{t.k==="keyword"?"키워드":t.k==="write"?"글쓰기":t.k==="image"?"이미지":t.k==="publish"?"발행":t.k==="manage"?"발행관리":"설정"}</span></button>))}
         </div>
       </div>
+
+      {/* ── 전체화면 미리보기 모달 ── */}
+      {showPreviewModal&&(
+        <div style={{position:"fixed",inset:0,zIndex:100,display:"flex",flexDirection:"column",background:"var(--bg)"}}>
+          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"12px 16px",borderBottom:"1px solid var(--border)",background:"var(--card)",flexShrink:0}}>
+            <div style={{display:"flex",alignItems:"center",gap:10}}>
+              <div style={{width:8,height:8,borderRadius:"50%",background:"var(--accent)"}}/>
+              <span style={{fontSize:14,fontWeight:700,color:"var(--text)"}}>구독자 시점 미리보기</span>
+              <div style={{position:"relative"}}>
+                <button onClick={()=>setShowNaverMenu(v=>!v)} style={{padding:"6px 12px",borderRadius:8,background:"#03C75A",color:"#fff",border:"none",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:"inherit"}}>📋 네이버 복사 ▲</button>
+                {showNaverMenu&&(
+                  <>
+                    <div style={{position:"fixed",inset:0,zIndex:40}} onClick={()=>setShowNaverMenu(false)}/>
+                    <div style={{position:"absolute",top:36,left:0,zIndex:50,width:240,borderRadius:12,overflow:"hidden",background:"#1a1a2e",border:"1px solid rgba(255,255,255,.12)",boxShadow:"0 8px 32px rgba(0,0,0,.4)"}}>
+                      {[{tag:"전체",color:"#03C75A",tagColor:"#fff",label:"전체 복사",fn:()=>{copyForNaver();setShowNaverMenu(false);}},{tag:"FAQ",color:"#fbbf24",tagColor:"#000",label:"본문+FAQ",fn:()=>{copyForNaverWithFaq();setShowNaverMenu(false);}},{tag:"본문",color:"#f472b6",tagColor:"#fff",label:"본문만",fn:()=>{copyForNaverBodyOnly();setShowNaverMenu(false);}}].map((opt,i)=>(
+                        <button key={i} onClick={opt.fn} style={{width:"100%",textAlign:"left",padding:"10px 14px",borderBottom:i<2?"1px solid rgba(255,255,255,.08)":"none",background:"transparent",cursor:"pointer",border:"none",fontFamily:"inherit",display:"flex",alignItems:"center",gap:8}}>
+                          <span style={{fontSize:10,fontWeight:800,padding:"2px 7px",borderRadius:99,background:opt.color,color:opt.tagColor}}>{opt.tag}</span>
+                          <span style={{fontSize:13,fontWeight:600,color:"#fff"}}>{opt.label}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </div>
+            </div>
+            <button onClick={()=>setShowPreviewModal(false)} style={{width:32,height:32,borderRadius:8,background:"transparent",border:"1px solid var(--border)",cursor:"pointer",color:"var(--text3)",fontSize:18,display:"flex",alignItems:"center",justifyContent:"center"}}>✕</button>
+          </div>
+          <div style={{flex:1,overflowY:"auto"}}>
+            <div style={{maxWidth:720,margin:"0 auto",padding:"24px 16px"}}>
+              {thumbnail&&<div style={{borderRadius:16,overflow:"hidden",marginBottom:20,aspectRatio:"16/9"}}><img src={thumbnail} alt="썸네일" style={{width:"100%",height:"100%",objectFit:"cover"}}/></div>}
+              {pubTitle&&<h1 style={{fontSize:22,fontWeight:900,color:"var(--text)",marginBottom:16,lineHeight:1.3}}>{pubTitle}</h1>}
+              {greeting&&<div style={{padding:"14px 16px",borderRadius:12,background:"var(--accent-bg)",border:"1px solid var(--accent-border)",marginBottom:16,fontSize:13,color:"var(--text)",lineHeight:1.7}}>{greeting}</div>}
+              <div style={{display:"flex",flexDirection:"column",gap:12}}>
+                {blocks.map(block=>{
+                  if(block.type==="text")return(<div key={block.id}>{renderPreview((block as TextBlock).content)}</div>);
+                  const imgBlock=block as SingleImageBlock;
+                  return imgBlock.src?(<div key={block.id} style={{textAlign:imgBlock.position}}><img src={imgBlock.src} alt={imgBlock.alt} style={{width:"100%",borderRadius:12,display:"block"}} onError={e=>{(e.target as HTMLImageElement).style.display="none";}}/>{imgBlock.alt&&<div style={{fontSize:11,color:"var(--text3)",textAlign:"center",marginTop:4}}>{imgBlock.alt}</div>}</div>):null;
+                })}
+              </div>
+              {hashtags.length>0&&<div style={{display:"flex",flexWrap:"wrap",gap:6,marginTop:20,paddingTop:16,borderTop:"1px solid var(--border)"}}>{hashtags.map((t,i)=><span key={i} style={{fontSize:13,padding:"4px 12px",borderRadius:99,background:"var(--accent-bg)",color:"var(--accent-text)"}}>{t}</span>)}</div>}
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }
