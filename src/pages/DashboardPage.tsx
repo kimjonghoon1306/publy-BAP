@@ -303,8 +303,9 @@ textarea.inp{resize:vertical;line-height:1.75;min-height:80px;}
   .img-split{grid-template-columns:1fr !important;}
 }
 @media(max-width:480px){
-  .header{padding:0 10px;gap:6px;}.user-name{display:none;}.logout-btn{display:none;}.quota-chip{display:none;}
+  .header{padding:0 8px;gap:5px;}.user-name{display:none;}.logout-btn{display:none;}.quota-chip{display:none;}
   .dl-btn span:last-child{display:none;}.dl-btn{padding:9px 12px;}
+  .guide-open-btn{display:none;}
   .adtype-row{grid-template-columns:1fr;}.guide-overlay{padding:6px;}
   .guide-modal{max-height:94vh;border-radius:16px;}.guide-tab{font-size:11px;padding:9px 11px;}
   .acc-form-grid{grid-template-columns:1fr !important;}
@@ -1111,9 +1112,9 @@ POST3: (제목)|(이유)
             <div className={`server-chip ${botOnline?"server-on":"server-off"}`}><div className={`dot ${botOnline?"dot-on":"dot-off"}`}/>{botOnline?"서버 온라인":"서버 오프라인"}</div>
             <div className="quota-chip"><div className="quota-bar-bg"><div className="quota-bar-fill" style={{width:`${quota?Math.min(100,(quota.used_quota/quota.total_quota)*100):0}%`}}/></div>{quota?.remaining_quota??"-"}건<span className={`plan-badge plan-${user.plan}`}>{PLAN_LABELS[user.plan]}</span></div>
             <a href={EXE_DOWNLOAD_URL} className="dl-btn" download><span>⬇️</span><span>PC앱 다운로드</span></a>
-            <button className="guide-open-btn" onClick={()=>{setShowGuide(true);setGuideTab(0);}}>📖 사용설명서</button>
           </div>
           <div className="header-right">
+            <button className="guide-open-btn" onClick={()=>{setShowGuide(true);setGuideTab(0);}}>📖 <span className="guide-btn-text">사용설명서</span></button>
             <button className="icon-btn" onClick={onThemeToggle}>{theme==="dark"?"☀️":"🌙"}</button>
             <button className="icon-btn" onClick={checkBot}>🔄</button>
             <div className="user-chip" onClick={onAdminLogin}><div className="user-avatar">{(user.name||user.email)[0].toUpperCase()}</div><span className="user-name">{user.name||user.email.split("@")[0]}</span></div>
@@ -1765,6 +1766,7 @@ POST3: (제목)|(이유)
 
         <div className="mob-bar">
           {MAIN_TABS.map(t=>(<button key={t.k} className={`mob-btn ${tab===t.k?"active":""}`} onClick={()=>setTab(t.k as MainTab)}><span className="mob-btn-ico">{t.i}</span><span className="mob-btn-lbl">{t.l}</span></button>))}
+          <button className="mob-btn" onClick={()=>{setShowGuide(true);setGuideTab(0);}}><span className="mob-btn-ico">📖</span><span className="mob-btn-lbl">사용방법</span></button>
         </div>
       </div>
     </>
