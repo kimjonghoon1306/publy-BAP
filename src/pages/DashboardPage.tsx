@@ -2048,8 +2048,21 @@ POST3: (제목)|(이유)
                             <div style={{padding:"8px 12px",borderRadius:8,border:"1px solid var(--accent-border)",background:"var(--accent-bg)",color:"var(--accent-text)",fontSize:12,fontWeight:600}}>⌨️ Ctrl+V</div>
                           </div>
                         )}
-                        <input ref={manualFileRef} type="file" accept="image/*" style={{display:"none"}} onChange={e=>{const f=e.target.files?.[0];if(!f)return;const r=new FileReader();r.onload=ev=>{if(ev.target?.result){addManualImageBlock();setBlocks(prev=>{const last=prev[prev.length-1];return prev.map(b=>b.id===last.id?{...b,src:ev.target!.result as string,alt:f.name} as ContentBlock:b});}};r.readAsDataURL(f);e.target.value="";}}/>
-                      </div>
+                        <input ref={manualFileRef} type="file" accept="image/*" style={{display:"none"}} onChange={e=>{
+                          const f=e.target.files?.[0];if(!f)return;
+                          const r=new FileReader();
+                          r.onload=ev=>{
+                            if(ev.target?.result){
+                              const src=ev.target.result as string;
+                              addManualImageBlock();
+                              setBlocks(prev=>{
+                                const last=prev[prev.length-1];
+                                return prev.map(b=>b.id===last.id?({...b,src,alt:f.name} as ContentBlock):b);
+                              });
+                            }
+                          };
+                          r.readAsDataURL(f);e.target.value="";
+                        }}/>                      </div>
 
                       {/* 본문 편집 헤더 */}
                       <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"12px 16px",borderBottom:"1px solid var(--border)"}}>
