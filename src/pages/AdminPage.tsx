@@ -496,6 +496,7 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
 
   // 계정
   const [newPlat, setNewPlat] = useState<"naver"|"tistory">("naver"); const [newUser, setNewUser] = useState(""); const [newPw, setNewPw] = useState(""); const [newBlog, setNewBlog] = useState(""); const [addingAcc, setAddingAcc] = useState(false); const [connId, setConnId] = useState<string|null>(null);
+  const [showPw, setShowPw] = useState(false); const [showPw1, setShowPw1] = useState(false); const [showPw2, setShowPw2] = useState(false);
 
   // 회원
   const [users, setUsers] = useState<UserFull[]>([]); const [loading, setLoading] = useState(true); const [search, setSearch] = useState(""); const [selUser, setSelUser] = useState<UserFull|null>(null);
@@ -1682,7 +1683,7 @@ POST3: (제목)|(이유)
                   <div style={{display:"grid",gridTemplateColumns:"100px 1fr 1fr",gap:10,marginBottom:12}}>
                     <div><label className="inp-label">플랫폼</label><select className="inp" value={newPlat} onChange={e=>setNewPlat(e.target.value as any)}><option value="naver">네이버</option><option value="tistory">티스토리</option></select></div>
                     <div><label className="inp-label">아이디</label><input className="inp" placeholder="블로그 아이디" value={newUser} onChange={e=>setNewUser(e.target.value)}/></div>
-                    <div><label className="inp-label">비밀번호</label><input className="inp" type="password" placeholder="비밀번호" value={newPw} onChange={e=>setNewPw(e.target.value)}/></div>
+                    <div><label className="inp-label">비밀번호</label><div style={{position:"relative"}}><input className="inp" type={showPw?"text":"password"} placeholder="비밀번호" value={newPw} onChange={e=>setNewPw(e.target.value)} style={{paddingRight:40}}/><button type="button" onClick={()=>setShowPw(v=>!v)} style={{position:"absolute",right:10,top:"50%",transform:"translateY(-50%)",background:"none",border:"none",cursor:"pointer",fontSize:18,color:"var(--text3)"}}>{showPw?"🙈":"👁️"}</button></div></div>
                   </div>
                   <div style={{marginBottom:14}}><label className="inp-label">블로그명 <span style={{color:"var(--text3)",fontWeight:400}}>(티스토리만)</span></label><input className="inp" placeholder="예: myblog" value={newBlog} onChange={e=>setNewBlog(e.target.value)}/></div>
                   <button className="btn btn-primary" onClick={handleAddAcc} disabled={addingAcc||!newUser||!newPw}>{addingAcc?<><span className="spinner"/>추가 중...</>:<>➕ 계정 추가</>}</button>
@@ -1934,8 +1935,8 @@ POST3: (제목)|(이유)
                 <div className="card">
                   <div className="card-title">🔐 관리자 비밀번호 변경</div>
                   <div style={{display:"flex",flexDirection:"column",gap:10}}>
-                    <div><label className="inp-label">새 비밀번호</label><input className="inp" type="password" value={newPw1} onChange={e=>setNewPw1(e.target.value)} placeholder="새 비밀번호 입력"/></div>
-                    <div><label className="inp-label">비밀번호 확인</label><input className="inp" type="password" value={newPw2} onChange={e=>setNewPw2(e.target.value)} placeholder="비밀번호 재입력"/></div>
+                    <div><label className="inp-label">새 비밀번호</label><div style={{position:"relative"}}><input className="inp" type={showPw1?"text":"password"} value={newPw1} onChange={e=>setNewPw1(e.target.value)} placeholder="새 비밀번호 입력" style={{paddingRight:40}}/><button type="button" onClick={()=>setShowPw1(v=>!v)} style={{position:"absolute",right:10,top:"50%",transform:"translateY(-50%)",background:"none",border:"none",cursor:"pointer",fontSize:18,color:"var(--text3)"}}>{showPw1?"🙈":"👁️"}</button></div></div>
+                    <div><label className="inp-label">비밀번호 확인</label><div style={{position:"relative"}}><input className="inp" type={showPw2?"text":"password"} value={newPw2} onChange={e=>setNewPw2(e.target.value)} placeholder="비밀번호 재입력" style={{paddingRight:40}}/><button type="button" onClick={()=>setShowPw2(v=>!v)} style={{position:"absolute",right:10,top:"50%",transform:"translateY(-50%)",background:"none",border:"none",cursor:"pointer",fontSize:18,color:"var(--text3)"}}>{showPw2?"🙈":"👁️"}</button></div></div>
                     <button className="btn btn-primary" style={{alignSelf:"flex-start"}} onClick={changeAdminPw}>🔐 비밀번호 변경</button>
                     {pwMsg&&<div className={`alert ${pwMsg.includes("✅")?"alert-success":"alert-danger"}`} style={{margin:0}}>{pwMsg}</div>}
                   </div>
