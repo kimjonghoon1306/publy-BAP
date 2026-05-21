@@ -523,7 +523,26 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
   // 설정
   const [writeAI, setWriteAI] = useState(()=>localStorage.getItem("publy_adm_write_ai")||"gemini");
   const [imageAI, setImageAI] = useState(()=>localStorage.getItem("publy_adm_image_ai")||"openai_img");
+  // ── 카테고리 / 공개 설정 / 예약 발행 ──
+  const [category, setCategory] = useState("");
+  const [categories, setCategories] = useState<{id:string;name:string}[]>([]);
+  const [loadingCats, setLoadingCats] = useState(false);
+  const [visibility, setVisibility] = useState<"public"|"neighbor"|"private">("public");
+  const [scheduleOn, setScheduleOn] = useState(false);
+  const [scheduleTime, setScheduleTime] = useState("");
   const [newPw1, setNewPw1] = useState(""); const [newPw2, setNewPw2] = useState(""); const [pwMsg, setPwMsg] = useState("");
+
+  // 카테고리 로드
+  async function loadCategories(plat: string) {
+    if (!botOnline) return;
+    setLoadingCats(true); setCategories([]); setCategory("");
+    try {
+      const r = await fetch(`${BOT}/api/${plat}/categories/${ADM_UID}`, {signal: AbortSignal.timeout(30000)});
+      const d = await r.json();
+      if (d.categories) setCategories(d.categories);
+    } catch {}
+    finally { setLoadingCats(false); }
+  }
 
   const checkBot = useCallback(async () => {
     try { const r = await fetch(`${BOT}/health`,{signal:AbortSignal.timeout(3000)}); setBotOnline(r.ok); }
@@ -978,11 +997,23 @@ POST3: (제목)|(이유)
   async function handlePublish() {
     const content = buildAdmPublishContent();
     if (!pubTitle||!content||!pubAccId) return;
-    setPublishing(true); setPubMsg("발행 중...");
+    if (scheduleOn&&!scheduleTime) { setPubMsg("❌ 예약 날짜와 시간을 선택해주세요"); return; }
+    setPublishing(true); setPubMsg(scheduleOn?"예약 설정 중...":"발행 중...");
+    const publishBody = {
+      userId:ADM_UID, platform, title:pubTitle, content,
+      tags:pubTags.split(",").map((t:string)=>t.trim()).filter(Boolean),
+      imageUrl:pubImg||undefined,
+      categoryId:category||undefined,
+      visibility,
+      scheduleTime:scheduleOn?scheduleTime:undefined,
+    };
     try {
-      const r = await fetch(`${BOT}/api/publish-full`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({userId:ADM_UID,platform,title:pubTitle,content:content,tags:pubTags.split(",").map((t:string)=>t.trim()).filter(Boolean),imageUrl:pubImg||undefined})});
-      const d = await r.json(); if (!r.ok) throw new Error(d.error);
-      setPubMsg("✅ 발행 완료!"); setPubTitle(""); setPubContent(""); setPubTags(""); setPubImg("");
+      const r = await fetch(`${BOT}/api/publish-full`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(publishBody)});
+      const d = await r.json();
+      if (r.status===401) { setPubMsg("❌ 세션 만료 — 계정 관리 탭에서 재연결해주세요"); setPublishing(false); return; }
+      if (!r.ok) throw new Error(d.error);
+      setPubMsg(scheduleOn?"✅ 예약 완료! 설정한 시간에 자동 발행돼요.":"✅ 발행 완료!");
+      setPubTitle(""); setPubContent(""); setPubTags(""); setPubImg("");
     } catch(e:any) { setPubMsg("❌ "+e.message); }
     finally { setPublishing(false); }
   }
@@ -1717,13 +1748,131 @@ POST3: (제목)|(이유)
                       <button className="btn btn-primary btn-sm" onClick={()=>setTab("accounts")}>계정 관리로 이동</button>
                     </div>
                   ):connAccs.map(a=>(
-                    <label key={a.id} style={{display:"flex",alignItems:"center",gap:12,padding:"14px 16px",borderRadius:12,cursor:"pointer",marginBottom:8,background:pubAccId===a.id?"var(--accent-bg)":"var(--bg)",border:`2px solid ${pubAccId===a.id?"var(--accent)":"var(--border)"}`,transition:"all .15s"}}>
-                      <input type="radio" name="pacc" checked={pubAccId===a.id} onChange={()=>setPubAccId(a.id)} style={{accentColor:"var(--accent)",width:18,height:18,flexShrink:0}}/>
-                      <div style={{flex:1}}><div style={{fontSize:15,fontWeight:700}}>{a.username}</div>{a.blog_name&&<div style={{fontSize:12,color:"var(--text2)"}}>{a.blog_name}</div>}</div>
-                      <span style={{fontSize:11,fontWeight:700,padding:"4px 10px",borderRadius:99,background:"var(--accent-bg)",color:"var(--accent-text)",border:"1px solid var(--accent-border)"}}>✅ 연결됨</span>
+                    <label key={a.id} style={{display:"flex",alignItems:"center",gap:12,padding:"16px",borderRadius:12,cursor:"pointer",marginBottom:8,background:pubAccId===a.id?"var(--accent-bg)":"var(--bg)",border:`2px solid ${pubAccId===a.id?"var(--accent)":"var(--border)"}`,transition:"all .15s"}}
+                      onClick={()=>{setPubAccId(a.id);loadCategories(platform);}}>
+                      <input type="radio" name="pacc" checked={pubAccId===a.id} onChange={()=>{}} style={{accentColor:"var(--accent)",width:20,height:20,flexShrink:0}}/>
+                      <div style={{flex:1}}><div style={{fontSize:16,fontWeight:700}}>{a.username}</div>{a.blog_name&&<div style={{fontSize:13,color:"var(--text2)",marginTop:3}}>{a.blog_name}</div>}</div>
+                      <span style={{fontSize:12,fontWeight:700,padding:"5px 12px",borderRadius:99,background:"var(--accent-bg)",color:"var(--accent-text)",border:"1px solid var(--accent-border)"}}>✅ 연결됨</span>
                     </label>
                   ))}
                 </div>
+
+                {/* ── 카테고리 선택 ── */}
+                <div className="card">
+                  <div className="card-title" style={{marginBottom:12}}>📂 카테고리 선택</div>
+                  {!pubAccId?(
+                    <div style={{padding:"14px",borderRadius:10,background:"var(--bg2)",fontSize:15,color:"var(--text3)",textAlign:"center"}}>
+                      위에서 계정을 먼저 선택해주세요
+                    </div>
+                  ):loadingCats?(
+                    <div style={{display:"flex",alignItems:"center",gap:12,padding:"14px",borderRadius:10,background:"var(--bg2)"}}>
+                      <span className="spinner" style={{width:20,height:20}}/>
+                      <span style={{fontSize:15,color:"var(--text2)"}}>카테고리 불러오는 중...</span>
+                    </div>
+                  ):categories.length===0?(
+                    <div style={{display:"flex",flexDirection:"column",gap:10}}>
+                      <div style={{padding:"14px",borderRadius:10,background:"var(--bg2)",fontSize:14,color:"var(--text2)",textAlign:"center",lineHeight:1.7}}>
+                        카테고리를 불러올 수 없어요<br/>
+                        <span style={{fontSize:13,color:"var(--text3)"}}>기본 카테고리로 발행돼요</span>
+                      </div>
+                      <button className="btn btn-secondary btn-sm" onClick={()=>loadCategories(platform)} style={{fontSize:14,padding:"12px"}}>🔄 다시 불러오기</button>
+                    </div>
+                  ):(
+                    <div style={{display:"flex",flexDirection:"column",gap:8}}>
+                      <button onClick={()=>setCategory("")} style={{padding:"16px",borderRadius:12,border:`2px solid ${!category?"var(--accent)":"var(--border)"}`,background:!category?"var(--accent-bg)":"var(--bg)",cursor:"pointer",fontFamily:"inherit",textAlign:"left",fontSize:16,fontWeight:600,color:!category?"var(--accent-text)":"var(--text2)",transition:"all .15s"}}>
+                        📋 카테고리 없음 (기본)
+                        {!category&&<span style={{float:"right",color:"var(--accent-text)"}}>✓</span>}
+                      </button>
+                      {categories.map(c=>(
+                        <button key={c.id} onClick={()=>setCategory(c.id)} style={{padding:"16px",borderRadius:12,border:`2px solid ${category===c.id?"var(--accent)":"var(--border)"}`,background:category===c.id?"var(--accent-bg)":"var(--bg)",cursor:"pointer",fontFamily:"inherit",textAlign:"left",fontSize:16,fontWeight:600,color:category===c.id?"var(--accent-text)":"var(--text)",transition:"all .15s"}}>
+                          📁 {c.name}
+                          {category===c.id&&<span style={{float:"right",color:"var(--accent-text)"}}>✓</span>}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* ── 공개 설정 ── */}
+                <div className="card">
+                  <div className="card-title" style={{marginBottom:14}}>👁️ 공개 설정</div>
+                  <div style={{display:"flex",flexDirection:"column",gap:10}}>
+                    {platform==="naver"?(
+                      <>
+                        {([
+                          {v:"public",   ico:"🌍", label:"전체 공개",  desc:"모든 사람이 볼 수 있어요"},
+                          {v:"neighbor", ico:"👥", label:"이웃 공개",  desc:"이웃으로 등록된 분만 볼 수 있어요"},
+                          {v:"private",  ico:"🔒", label:"비공개",     desc:"나만 볼 수 있어요"},
+                        ] as const).map(opt=>(
+                          <button key={opt.v} onClick={()=>setVisibility(opt.v)} style={{padding:"18px 16px",borderRadius:14,border:`2px solid ${visibility===opt.v?"var(--accent)":"var(--border)"}`,background:visibility===opt.v?"var(--accent-bg)":"var(--bg)",cursor:"pointer",fontFamily:"inherit",textAlign:"left",transition:"all .15s",display:"flex",alignItems:"center",gap:14}}>
+                            <span style={{fontSize:28,flexShrink:0}}>{opt.ico}</span>
+                            <div style={{flex:1}}>
+                              <div style={{fontSize:17,fontWeight:700,color:visibility===opt.v?"var(--accent-text)":"var(--text)",marginBottom:4}}>{opt.label}</div>
+                              <div style={{fontSize:14,color:"var(--text2)",lineHeight:1.5}}>{opt.desc}</div>
+                            </div>
+                            {visibility===opt.v&&<span style={{fontSize:20,color:"var(--accent-text)",flexShrink:0}}>✓</span>}
+                          </button>
+                        ))}
+                      </>
+                    ):(
+                      <>
+                        {([
+                          {v:"public",  ico:"🌍", label:"전체 공개", desc:"모든 사람이 볼 수 있어요"},
+                          {v:"private", ico:"🔒", label:"비공개",    desc:"나만 볼 수 있어요"},
+                        ] as const).map(opt=>(
+                          <button key={opt.v} onClick={()=>setVisibility(opt.v as any)} style={{padding:"18px 16px",borderRadius:14,border:`2px solid ${visibility===opt.v?"var(--accent)":"var(--border)"}`,background:visibility===opt.v?"var(--accent-bg)":"var(--bg)",cursor:"pointer",fontFamily:"inherit",textAlign:"left",transition:"all .15s",display:"flex",alignItems:"center",gap:14}}>
+                            <span style={{fontSize:28,flexShrink:0}}>{opt.ico}</span>
+                            <div style={{flex:1}}>
+                              <div style={{fontSize:17,fontWeight:700,color:visibility===opt.v?"var(--accent-text)":"var(--text)",marginBottom:4}}>{opt.label}</div>
+                              <div style={{fontSize:14,color:"var(--text2)",lineHeight:1.5}}>{opt.desc}</div>
+                            </div>
+                            {visibility===opt.v&&<span style={{fontSize:20,color:"var(--accent-text)",flexShrink:0}}>✓</span>}
+                          </button>
+                        ))}
+                      </>
+                    )}
+                  </div>
+                </div>
+
+                {/* ── 예약 발행 ── */}
+                <div className="card">
+                  <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:scheduleOn?14:0}}>
+                    <div>
+                      <div className="card-title" style={{margin:0}}>⏰ 예약 발행</div>
+                      <div style={{fontSize:13,color:"var(--text3)",marginTop:4}}>설정한 시간에 블로그에 자동으로 글이 올라가요</div>
+                    </div>
+                    <div style={{display:"flex",alignItems:"center",gap:10}}>
+                      <span style={{fontSize:14,fontWeight:700,color:scheduleOn?"var(--accent-text)":"var(--text3)"}}>{scheduleOn?"ON":"OFF"}</span>
+                      <button onClick={()=>{setScheduleOn(v=>!v);if(!scheduleTime){const d=new Date();d.setHours(d.getHours()+1,0,0,0);setScheduleTime(d.toISOString().slice(0,16));}}} style={{width:56,height:30,borderRadius:99,background:scheduleOn?"var(--accent)":"var(--border)",border:"none",cursor:"pointer",position:"relative",transition:"background .2s",flexShrink:0}}>
+                        <div style={{position:"absolute",top:4,left:scheduleOn?28:4,width:22,height:22,borderRadius:"50%",background:"#fff",transition:"left .2s",boxShadow:"0 1px 4px rgba(0,0,0,.3)"}}/>
+                      </button>
+                    </div>
+                  </div>
+                  {scheduleOn&&(
+                    <div style={{animation:"fadeUp .2s ease both"}}>
+                      <label style={{display:"block",fontSize:15,fontWeight:700,color:"var(--text2)",marginBottom:8}}>📅 발행 날짜와 시간을 선택해주세요</label>
+                      <input
+                        type="datetime-local"
+                        value={scheduleTime}
+                        onChange={e=>setScheduleTime(e.target.value)}
+                        min={new Date().toISOString().slice(0,16)}
+                        style={{width:"100%",padding:"16px 14px",borderRadius:12,border:"2px solid var(--border)",background:"var(--bg)",color:"var(--text)",fontSize:17,fontFamily:"inherit",outline:"none",boxSizing:"border-box"}}
+                      />
+                      {scheduleTime&&(
+                        <div style={{marginTop:12,padding:"14px 16px",borderRadius:12,background:"var(--accent-bg)",border:"1px solid var(--accent-border)"}}>
+                          <div style={{fontSize:14,color:"var(--accent-text)",fontWeight:600,marginBottom:3}}>✅ 예약 확인</div>
+                          <div style={{fontSize:16,fontWeight:800,color:"var(--text)"}}>
+                            {new Date(scheduleTime).toLocaleDateString("ko-KR",{year:"numeric",month:"long",day:"numeric",weekday:"long"})}
+                          </div>
+                          <div style={{fontSize:15,color:"var(--text2)",marginTop:3}}>
+                            {new Date(scheduleTime).toLocaleTimeString("ko-KR",{hour:"2-digit",minute:"2-digit"})}에 자동으로 글이 올라가요
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+
                 <div className="card">
                   <div className="card-title">📝 발행 내용</div>
                   {pubImg&&(
@@ -1747,10 +1896,15 @@ POST3: (제목)|(이유)
                     </div>
                   </div>
                 </div>
-                <button className="btn btn-primary btn-full btn-xl" style={{marginBottom:14}} onClick={handlePublish} disabled={publishing||!botOnline||!pubAccId||!pubTitle||!buildAdmPublishContent()}>
-                  {publishing?<><span className="spinner"/>발행 중...</>:<>🚀 블로그 자동 발행</>}
+                <button className="btn btn-primary btn-full btn-xl" style={{marginBottom:14}} onClick={handlePublish} disabled={publishing||!botOnline||!pubAccId||!pubTitle||!buildAdmPublishContent()||(scheduleOn&&!scheduleTime)}>
+                  {publishing
+                    ?<><span className="spinner"/>{scheduleOn?"예약 설정 중...":"발행 중..."}</>
+                    :scheduleOn
+                      ?<>⏰ 예약 발행 설정하기</>
+                      :<>🚀 블로그 자동 발행</>
+                  }
                 </button>
-                {pubMsg&&<div className={`alert ${pubMsg.includes("✅")?"alert-success":"alert-danger"}`}>{pubMsg}</div>}
+                {pubMsg&&<div className={`alert ${pubMsg.includes("✅")?"alert-success":"alert-danger"}`} style={{fontSize:16,padding:"16px",lineHeight:1.6}}>{pubMsg}</div>}
               </div>
             )}
 
