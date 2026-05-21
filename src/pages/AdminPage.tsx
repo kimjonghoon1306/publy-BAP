@@ -377,9 +377,8 @@ select.field-inp{cursor:pointer;appearance:auto;}
   .adtype-grid{grid-template-columns:1fr;}
   .key-row-input{flex-wrap:wrap;}
   .key-row-input .inp{width:100%;}
-  /* 헤더 버튼 텍스트 숨기기 - 아이콘만 */
-  .adm-guide-text{display:none;}
-  .adm-guide-btn{padding:8px 10px;}
+  /* 모바일: 헤더 가이드 버튼 숨기기 → 탭바로 이동 */
+  .adm-guide-btn{display:none;}
   .back-text{display:none;}
   .back-btn{padding:7px 9px;}
   /* 회원 목록 모바일 짤림 방지 */
@@ -1385,10 +1384,10 @@ POST3: (제목)|(이유)
                       <label className="inp-label">이미지 소스</label>
                       <div style={{display:"flex",flexDirection:"column",gap:6}}>
                         {([{id:"ai",ico:"🤖",label:"AI 자동 생성"},{id:"upload",ico:"📁",label:"내 이미지 업로드"},{id:"none",ico:"🚫",label:"이미지 없이 발행"}] as const).map(s=>(
-                          <button key={s.id} onClick={()=>setImgSource(s.id)} style={{padding:"10px 12px",borderRadius:9,border:`1.5px solid ${imgSource===s.id?"var(--a)":"var(--b)"}`,background:imgSource===s.id?"var(--ad)":"var(--ib)",cursor:"pointer",fontFamily:"inherit",display:"flex",alignItems:"center",gap:8,textAlign:"left"}}>
+                          <button key={s.id} onClick={()=>setImgSource(s.id)} style={{padding:"10px 12px",borderRadius:9,border:`1.5px solid ${imgSource===s.id?"var(--accent-text)":"var(--border)"}`,background:imgSource===s.id?"var(--accent-bg)":"var(--bg2)",cursor:"pointer",fontFamily:"inherit",display:"flex",alignItems:"center",gap:8,textAlign:"left"}}>
                             <span style={{fontSize:17}}>{s.ico}</span>
-                            <span style={{fontSize:13,fontWeight:600,color:imgSource===s.id?"var(--a)":"var(--m)"}}>{s.label}</span>
-                            {imgSource===s.id&&<span style={{marginLeft:"auto",color:"var(--a)",fontSize:13}}>✓</span>}
+                            <span style={{fontSize:13,fontWeight:600,color:imgSource===s.id?"var(--accent-text)":"var(--text2)"}}>{s.label}</span>
+                            {imgSource===s.id&&<span style={{marginLeft:"auto",color:"var(--accent-text)",fontSize:13}}>✓</span>}
                           </button>
                         ))}
                       </div>
@@ -1399,45 +1398,45 @@ POST3: (제목)|(이유)
                           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
                             <label className="inp-label" style={{margin:0}}>생성 수량</label>
                             <div style={{display:"flex",alignItems:"center",gap:7}}>
-                              <span style={{fontSize:26,fontWeight:900,color:"var(--a)"}}>{imgCount}</span>
-                              <span style={{fontSize:12,color:"var(--m)"}}>장</span>
-                              {!imgCountAuto&&<button style={{padding:"3px 8px",borderRadius:6,border:"1px solid var(--b)",background:"transparent",color:"var(--a)",cursor:"pointer",fontSize:10,fontFamily:"inherit",fontWeight:700}} onClick={()=>{setImgCountAuto(true);if(genContent)setImgCount(Math.max(1,Math.min(10,Math.floor(genContent.length/200))));}}>자동</button>}
+                              <span style={{fontSize:26,fontWeight:900,color:"var(--accent-text)"}}>{imgCount}</span>
+                              <span style={{fontSize:12,color:"var(--text2)"}}>장</span>
+                              {!imgCountAuto&&<button style={{padding:"3px 8px",borderRadius:6,border:"1px solid var(--b)",background:"transparent",color:"var(--accent-text)",cursor:"pointer",fontSize:10,fontFamily:"inherit",fontWeight:700}} onClick={()=>{setImgCountAuto(true);if(genContent)setImgCount(Math.max(1,Math.min(10,Math.floor(genContent.length/200))));}}>자동</button>}
                             </div>
                           </div>
-                          <input type="range" min={1} max={20} step={1} value={imgCount} onChange={e=>{setImgCountAuto(false);setImgCount(Number(e.target.value));}} style={{width:"100%",accentColor:"var(--a)",height:6,cursor:"pointer"}}/>
-                          {imgCountAuto&&genContent&&<div style={{marginTop:6,padding:"6px 10px",borderRadius:7,background:"var(--ad)",border:"1px solid",borderColor:"var(--a)30",fontSize:11,color:"var(--a)",fontWeight:600}}>💡 자동 추천: {imgCount}장</div>}
+                          <input type="range" min={1} max={20} step={1} value={imgCount} onChange={e=>{setImgCountAuto(false);setImgCount(Number(e.target.value));}} style={{width:"100%",accentColor:"var(--accent-text)",height:6,cursor:"pointer"}}/>
+                          {imgCountAuto&&genContent&&<div style={{marginTop:6,padding:"6px 10px",borderRadius:7,background:"var(--accent-bg)",border:"1px solid",borderColor:"var(--accent-border)",fontSize:11,color:"var(--accent-text)",fontWeight:600}}>💡 자동 추천: {imgCount}장</div>}
                         </div>
                         {genImgLoading&&(
-                          <div style={{marginBottom:14,padding:"12px",borderRadius:9,background:"var(--ib)",border:"1px solid var(--b)"}}>
+                          <div style={{marginBottom:14,padding:"12px",borderRadius:9,background:"var(--bg2)",border:"1px solid var(--b)"}}>
                             <div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}>
-                              <span style={{fontSize:12,fontWeight:700,color:"var(--a)"}}>⏳ {genImgCurrent}/{imgCount}장</span>
-                              <span style={{fontSize:13,fontWeight:900,color:"var(--a)"}}>{genImgProgress}%</span>
+                              <span style={{fontSize:12,fontWeight:700,color:"var(--accent-text)"}}>⏳ {genImgCurrent}/{imgCount}장</span>
+                              <span style={{fontSize:13,fontWeight:900,color:"var(--accent-text)"}}>{genImgProgress}%</span>
                             </div>
-                            <div style={{height:7,background:"var(--b)",borderRadius:99,overflow:"hidden"}}>
+                            <div style={{height:7,background:"var(--border)",borderRadius:99,overflow:"hidden"}}>
                               <div style={{height:"100%",width:`${genImgProgress}%`,background:"linear-gradient(90deg,var(--a),#00cc80)",borderRadius:99,transition:"width .4s"}}/>
                             </div>
                             <div style={{display:"flex",gap:3,marginTop:7}}>
                               {Array.from({length:imgCount}).map((_,i)=>(
-                                <div key={i} style={{flex:1,height:4,borderRadius:99,background:i<genImgCurrent?"var(--a)":"var(--b)",transition:"background .3s"}}/>
+                                <div key={i} style={{flex:1,height:4,borderRadius:99,background:i<genImgCurrent?"var(--accent-text)":"var(--border)",transition:"background .3s"}}/>
                               ))}
                             </div>
                           </div>
                         )}
                         <div style={{display:"flex",flexDirection:"column",gap:7}}>
                           <button className="abp" onClick={handleGenerateImages} disabled={genImgLoading||!genContent}>{genImgLoading?<><span className="asp2"/>생성 중...</>:<>🎨 이미지 {imgCount}장 생성</>}</button>
-                          {genImgLoading&&<button onClick={stopImageGen} style={{padding:"9px",borderRadius:99,border:"1.5px solid rgba(248,81,73,.35)",background:"rgba(248,81,73,.1)",color:"var(--err)",cursor:"pointer",fontFamily:"inherit",fontSize:13,fontWeight:800,display:"flex",alignItems:"center",justifyContent:"center",gap:7}}>⏹ 생성 중단</button>}
-                          {generatedImages.length>0&&!genImgLoading&&<button onClick={()=>{setGeneratedImages([]);setGenImgProgress(0);setGenImgCurrent(0);}} style={{padding:"8px",borderRadius:8,border:"1px solid rgba(248,81,73,.3)",background:"rgba(248,81,73,.08)",color:"var(--err)",cursor:"pointer",fontFamily:"inherit",fontSize:12,fontWeight:700}}>🗑 이미지 초기화</button>}
+                          {genImgLoading&&<button onClick={stopImageGen} style={{padding:"9px",borderRadius:99,border:"1.5px solid rgba(248,81,73,.35)",background:"rgba(248,81,73,.1)",color:"var(--danger)",cursor:"pointer",fontFamily:"inherit",fontSize:13,fontWeight:800,display:"flex",alignItems:"center",justifyContent:"center",gap:7}}>⏹ 생성 중단</button>}
+                          {generatedImages.length>0&&!genImgLoading&&<button onClick={()=>{setGeneratedImages([]);setGenImgProgress(0);setGenImgCurrent(0);}} style={{padding:"8px",borderRadius:8,border:"1px solid rgba(248,81,73,.3)",background:"rgba(248,81,73,.08)",color:"var(--danger)",cursor:"pointer",fontFamily:"inherit",fontSize:12,fontWeight:700}}>🗑 이미지 초기화</button>}
                         </div>
                       </>
                     )}
                     {imgSource==="upload"&&(
                       <div>
-                        <label style={{display:"flex",alignItems:"center",gap:10,padding:"14px",borderRadius:10,border:"2px dashed var(--a)40",background:"var(--ad)",cursor:"pointer"}}>
+                        <label style={{display:"flex",alignItems:"center",gap:10,padding:"14px",borderRadius:10,border:"2px dashed var(--a)40",background:"var(--accent-bg)",cursor:"pointer"}}>
                           <span style={{fontSize:22}}>📁</span>
-                          <div><div style={{fontSize:13,fontWeight:700,color:"var(--a)"}}>파일 선택</div><div style={{fontSize:11,color:"var(--m)",marginTop:2}}>여러 장 동시 가능</div></div>
+                          <div><div style={{fontSize:13,fontWeight:700,color:"var(--accent-text)"}}>파일 선택</div><div style={{fontSize:11,color:"var(--text2)",marginTop:2}}>여러 장 동시 가능</div></div>
                           <input type="file" accept="image/*" multiple onChange={handleImageUpload} style={{display:"none"}}/>
                         </label>
-                        {uploadedImages.length>0&&<button onClick={()=>setUploadedImages([])} style={{marginTop:8,width:"100%",padding:"7px",borderRadius:7,border:"1px solid rgba(248,81,73,.3)",background:"rgba(248,81,73,.08)",color:"var(--err)",cursor:"pointer",fontFamily:"inherit",fontSize:12,fontWeight:700}}>🗑 업로드 초기화</button>}
+                        {uploadedImages.length>0&&<button onClick={()=>setUploadedImages([])} style={{marginTop:8,width:"100%",padding:"7px",borderRadius:7,border:"1px solid rgba(248,81,73,.3)",background:"rgba(248,81,73,.08)",color:"var(--danger)",cursor:"pointer",fontFamily:"inherit",fontSize:12,fontWeight:700}}>🗑 업로드 초기화</button>}
                       </div>
                     )}
                   </div>
@@ -1445,22 +1444,22 @@ POST3: (제목)|(이유)
                   <div>
                     <div className="card" style={{minHeight:280}}>
                       <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:14,flexWrap:"wrap",gap:8}}>
-                        <div className="card-title" style={{margin:0}}>🖼️ 생성된 이미지{getActiveImages().length>0&&<span style={{fontWeight:400,color:"var(--m)",textTransform:"none",letterSpacing:0}}> — {getActiveImages().length}장 · 첫 번째 썸네일</span>}</div>
+                        <div className="card-title" style={{margin:0}}>🖼️ 생성된 이미지{getActiveImages().length>0&&<span style={{fontWeight:400,color:"var(--text2)",textTransform:"none",letterSpacing:0}}> — {getActiveImages().length}장 · 첫 번째 썸네일</span>}</div>
                         {getActiveImages().length>0&&captions.length===0&&(
-                          <button style={{padding:"5px 12px",borderRadius:8,border:"1px solid var(--b)",background:"var(--ad)",color:"var(--a)",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:"inherit"}} onClick={()=>setCaptions(buildCaptions(keyword||selectedTitle,getActiveImages().length))}>💬 캡션 자동생성</button>
+                          <button style={{padding:"5px 12px",borderRadius:8,border:"1px solid var(--b)",background:"var(--accent-bg)",color:"var(--accent-text)",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:"inherit"}} onClick={()=>setCaptions(buildCaptions(keyword||selectedTitle,getActiveImages().length))}>💬 캡션 자동생성</button>
                         )}
                       </div>
                       {getActiveImages().length===0&&!genImgLoading?(
-                        <div style={{textAlign:"center",padding:"36px 20px",color:"var(--m)"}}>
+                        <div style={{textAlign:"center",padding:"36px 20px",color:"var(--text2)"}}>
                           <div style={{fontSize:44,marginBottom:10}}>🖼️</div>
                           <div style={{fontSize:14,fontWeight:700,marginBottom:5}}>아직 이미지가 없어요</div>
-                          <div style={{fontSize:12,color:"var(--m)"}}>왼쪽에서 수량 설정 후 생성 버튼!</div>
+                          <div style={{fontSize:12,color:"var(--text2)"}}>왼쪽에서 수량 설정 후 생성 버튼!</div>
                         </div>
                       ):(
                         <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(150px,1fr))",gap:12}}>
                           {genImgLoading&&Array.from({length:imgCount-generatedImages.length}).map((_,i)=>(
                             <div key={`ph-${i}`} style={{display:"flex",flexDirection:"column",gap:6}}>
-                              <div style={{aspectRatio:"1",borderRadius:11,background:"var(--ib)",border:"2px dashed var(--b)",display:"flex",alignItems:"center",justifyContent:"center"}}>
+                              <div style={{aspectRatio:"1",borderRadius:11,background:"var(--bg2)",border:"2px dashed var(--b)",display:"flex",alignItems:"center",justifyContent:"center"}}>
                                 {i===0?<><span className="asp2"/></>:<span style={{fontSize:20,opacity:.3}}>🖼️</span>}
                               </div>
                             </div>
@@ -1469,8 +1468,8 @@ POST3: (제목)|(이유)
                             <div key={i} style={{display:"flex",flexDirection:"column",gap:5}}>
                               <div style={{position:"relative",aspectRatio:"1"}}>
                                 <img src={img} alt="" style={{width:"100%",height:"100%",objectFit:"cover",borderRadius:11,border:i===0?"2px solid var(--a)":"2px solid var(--b)",display:"block",cursor:"pointer"}} onClick={()=>window.open(img,"_blank")} onError={e=>{(e.target as HTMLImageElement).style.display="none";}}/>
-                                {i===0&&<span style={{position:"absolute",top:-7,left:-4,fontSize:9,fontWeight:800,padding:"2px 7px",borderRadius:99,background:"var(--a)",color:"#000"}}>썸네일</span>}
-                                <button style={{position:"absolute",top:-7,right:-7,width:24,height:24,borderRadius:"50%",background:"var(--err)",border:"2px solid var(--ib)",color:"#fff",cursor:"pointer",fontSize:11,display:"flex",alignItems:"center",justifyContent:"center"}}
+                                {i===0&&<span style={{position:"absolute",top:-7,left:-4,fontSize:9,fontWeight:800,padding:"2px 7px",borderRadius:99,background:"var(--accent-text)",color:"#000"}}>썸네일</span>}
+                                <button style={{position:"absolute",top:-7,right:-7,width:24,height:24,borderRadius:"50%",background:"var(--danger)",border:"2px solid var(--bg2)",color:"#fff",cursor:"pointer",fontSize:11,display:"flex",alignItems:"center",justifyContent:"center"}}
                                   onClick={()=>{
                                     if(imgSource==="ai")setGeneratedImages(p=>p.filter((_,j)=>j!==i));
                                     else setUploadedImages(p=>p.filter((_,j)=>j!==i));
@@ -1479,7 +1478,7 @@ POST3: (제목)|(이유)
                               </div>
                               {/* 캡션 입력 - 필수 */}
                               <input
-                                style={{width:"100%",padding:"5px 8px",borderRadius:7,border:"1px solid var(--b)",background:"var(--ib)",color:"var(--c)",fontSize:11,fontFamily:"inherit",outline:"none"}}
+                                style={{width:"100%",padding:"5px 8px",borderRadius:7,border:"1px solid var(--b)",background:"var(--bg2)",color:"var(--text)",fontSize:11,fontFamily:"inherit",outline:"none"}}
                                 placeholder={`캡션 (예: ${keyword||"사진"} ${i===0?"대표":"현장"} 사진)`}
                                 value={captions[i]||""}
                                 onChange={e=>{const next=[...captions];next[i]=e.target.value;setCaptions(next);}}
@@ -1495,16 +1494,16 @@ POST3: (제목)|(이유)
                       <div className="card" style={{padding:"13px 14px"}}>
                         <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:videoOn?12:0}}>
                           <div className="card-title" style={{margin:0,fontSize:11}}>🎬 영상 삽입</div>
-                          <button onClick={()=>setVideoOn(v=>!v)} style={{width:40,height:22,borderRadius:99,background:videoOn?"var(--a)":"var(--b)",border:"none",cursor:"pointer",position:"relative",transition:"background .2s",flexShrink:0}}>
+                          <button onClick={()=>setVideoOn(v=>!v)} style={{width:40,height:22,borderRadius:99,background:videoOn?"var(--accent-text)":"var(--border)",border:"none",cursor:"pointer",position:"relative",transition:"background .2s",flexShrink:0}}>
                             <div style={{position:"absolute",top:3,left:videoOn?21:3,width:16,height:16,borderRadius:"50%",background:"#fff",transition:"left .2s"}}/>
                           </button>
                         </div>
                         {videoOn&&(
                           <>
-                            <input style={{width:"100%",padding:"7px 10px",borderRadius:8,border:"1px solid var(--b)",background:"var(--ib)",color:"var(--c)",fontSize:12,fontFamily:"inherit",outline:"none",marginBottom:8}} placeholder="영상 URL (네이버TV/유튜브)" value={videoUrl} onChange={e=>setVideoUrl(e.target.value)}/>
+                            <input style={{width:"100%",padding:"7px 10px",borderRadius:8,border:"1px solid var(--b)",background:"var(--bg2)",color:"var(--text)",fontSize:12,fontFamily:"inherit",outline:"none",marginBottom:8}} placeholder="영상 URL (네이버TV/유튜브)" value={videoUrl} onChange={e=>setVideoUrl(e.target.value)}/>
                             <div style={{display:"flex",gap:5}}>
                               {(["top","middle","bottom"] as const).map(p=>(
-                                <button key={p} onClick={()=>setVideoPosition(p)} style={{flex:1,padding:"5px",borderRadius:7,border:`1.5px solid ${videoPosition===p?"var(--a)":"var(--b)"}`,background:videoPosition===p?"var(--ad)":"transparent",cursor:"pointer",fontSize:11,fontWeight:700,color:videoPosition===p?"var(--a)":"var(--m)",fontFamily:"inherit"}}>{p==="top"?"상단":p==="middle"?"중간":"하단"}</button>
+                                <button key={p} onClick={()=>setVideoPosition(p)} style={{flex:1,padding:"5px",borderRadius:7,border:`1.5px solid ${videoPosition===p?"var(--accent-text)":"var(--border)"}`,background:videoPosition===p?"var(--accent-bg)":"transparent",cursor:"pointer",fontSize:11,fontWeight:700,color:videoPosition===p?"var(--accent-text)":"var(--text2)",fontFamily:"inherit"}}>{p==="top"?"상단":p==="middle"?"중간":"하단"}</button>
                               ))}
                             </div>
                           </>
@@ -1514,7 +1513,7 @@ POST3: (제목)|(이유)
                         <div className="card-title" style={{marginBottom:8,fontSize:11}}>📐 이미지 패턴</div>
                         <div style={{display:"flex",flexDirection:"column",gap:5}}>
                           {(["random","A","B","C"] as const).map(p=>(
-                            <button key={p} onClick={()=>setImgPattern(p)} style={{padding:"6px 10px",borderRadius:8,border:`1.5px solid ${imgPattern===p?"var(--a)":"var(--b)"}`,background:imgPattern===p?"var(--ad)":"transparent",cursor:"pointer",fontFamily:"inherit",textAlign:"left",fontSize:11,fontWeight:700,color:imgPattern===p?"var(--a)":"var(--m)"}}>
+                            <button key={p} onClick={()=>setImgPattern(p)} style={{padding:"6px 10px",borderRadius:8,border:`1.5px solid ${imgPattern===p?"var(--accent-text)":"var(--border)"}`,background:imgPattern===p?"var(--accent-bg)":"transparent",cursor:"pointer",fontFamily:"inherit",textAlign:"left",fontSize:11,fontWeight:700,color:imgPattern===p?"var(--accent-text)":"var(--text2)"}}>
                               {p==="random"?"🎲 랜덤(권장)":p==="A"?"A: 중간 1장":p==="B"?"B: 앞뒤 각 1장":"C: 균등 분산"}
                             </button>
                           ))}
@@ -1524,7 +1523,7 @@ POST3: (제목)|(이유)
 
                     <div style={{display:"flex",gap:10,marginTop:10,flexWrap:"wrap"}}>
                       <button className="abp" style={{flex:1}} onClick={()=>setTab("publish")} disabled={!genContent}>🚀 발행하기로 이동 →</button>
-                      <button style={{flex:1,padding:"13px",borderRadius:99,border:"1px solid var(--b)",background:"var(--ib)",color:"var(--m)",cursor:"pointer",fontFamily:"inherit",fontSize:14,fontWeight:700}} onClick={()=>setTab("write")}>← 글 생성으로</button>
+                      <button style={{flex:1,padding:"13px",borderRadius:99,border:"1px solid var(--b)",background:"var(--bg2)",color:"var(--text2)",cursor:"pointer",fontFamily:"inherit",fontSize:14,fontWeight:700}} onClick={()=>setTab("write")}>← 글 생성으로</button>
                     </div>
                   </div>
                 </div>
@@ -1542,10 +1541,10 @@ POST3: (제목)|(이유)
                       {id:"body_faq", ico:"💬", name:"② 본문 + FAQ", sub:"본문과 자주 묻는 질문까지"},
                       {id:"body_only",ico:"✏️", name:"③ 본문만",     sub:"핵심 내용만 깔끔하게"},
                     ] as const).map(c=>(
-                      <button key={c.id} onClick={()=>setPubSub(c.id as any)} style={{padding:"15px 17px",borderRadius:12,border:`2px solid ${(pubSub||"full")===c.id?(c.id==="full"?"var(--a)":c.id==="body_faq"?"var(--pink,#FF6B9D)":"var(--yellow,#FFD93D)"):"var(--b)"}`,background:(pubSub||"full")===c.id?(c.id==="full"?"var(--ad)":c.id==="body_faq"?"rgba(255,107,157,.08)":"rgba(255,217,61,.08)"):"var(--ib)",cursor:"pointer",textAlign:"left",fontFamily:"inherit"}}>
+                      <button key={c.id} onClick={()=>setPubSub(c.id as any)} style={{padding:"15px 17px",borderRadius:12,border:`2px solid ${(pubSub||"full")===c.id?(c.id==="full"?"var(--accent-text)":c.id==="body_faq"?"var(--pink,#FF6B9D)":"var(--yellow,#FFD93D)"):"var(--border)"}`,background:(pubSub||"full")===c.id?(c.id==="full"?"var(--accent-bg)":c.id==="body_faq"?"rgba(255,107,157,.08)":"rgba(255,217,61,.08)"):"var(--bg2)",cursor:"pointer",textAlign:"left",fontFamily:"inherit"}}>
                         <div style={{fontSize:22,marginBottom:6}}>{c.ico}</div>
                         <div style={{fontSize:15,fontWeight:800,color:"var(--text,#e8f4ff)",marginBottom:3}}>{c.name}</div>
-                        <div style={{fontSize:12,color:"var(--m)"}}>{c.sub}</div>
+                        <div style={{fontSize:12,color:"var(--text2)"}}>{c.sub}</div>
                       </button>
                     ))}
                   </div>
@@ -1556,9 +1555,9 @@ POST3: (제목)|(이유)
                   <div className="card-title">📋 발행 현황</div>
                   <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10}}>
                     {[{l:"전체 회원",v:String(users.length)},{l:"오늘 발행",v:"—"},{l:"잔여 건수",v:"—"}].map((s,i)=>(
-                      <div key={i} style={{padding:"14px 12px",borderRadius:11,background:"var(--ib)",border:"1px solid var(--b)",textAlign:"center"}}>
-                        <div style={{fontSize:22,fontWeight:900,color:i===0?"var(--a)":"var(--text,#e8f4ff)"}}>{s.v}</div>
-                        <div style={{fontSize:10,color:"var(--m)",marginTop:3}}>{s.l}</div>
+                      <div key={i} style={{padding:"14px 12px",borderRadius:11,background:"var(--bg2)",border:"1px solid var(--b)",textAlign:"center"}}>
+                        <div style={{fontSize:22,fontWeight:900,color:i===0?"var(--accent-text)":"var(--text,#e8f4ff)"}}>{s.v}</div>
+                        <div style={{fontSize:10,color:"var(--text2)",marginTop:3}}>{s.l}</div>
                       </div>
                     ))}
                   </div>
@@ -1899,12 +1898,16 @@ POST3: (제목)|(이유)
 
         {/* 모바일 탭바 */}
         <div className="mob-tabs">
-          {TABS.map(t=>(
+          {TABS.filter(t=>["write","publish","users","stats","settings"].includes(t.k)).map(t=>(
             <button key={t.k} className={`mob-tab ${tab===t.k?"active":""}`} onClick={()=>setTab(t.k as any)}>
               <span className="mob-tab-ico">{t.i}</span>
-              <span className="mob-tab-lbl">{t.l}</span>
+              <span className="mob-tab-lbl">{t.k==="write"?"글쓰기":t.k==="publish"?"발행":t.k==="users"?"회원":t.k==="stats"?"통계":"설정"}</span>
             </button>
           ))}
+          <button className="mob-tab" onClick={()=>{setShowGuide(true);setGuideTab(0);}}>
+            <span className="mob-tab-ico">📋</span>
+            <span className="mob-tab-lbl">가이드</span>
+          </button>
         </div>
 
       </div>
