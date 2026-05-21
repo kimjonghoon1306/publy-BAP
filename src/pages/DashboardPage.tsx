@@ -345,6 +345,20 @@ export default function DashboardPage({user, onLogout, onAdminLogin, onThemeTogg
   const [keyword, setKeyword] = useState("");
   const [keywords, setKeywords] = useState<string[]>(()=>{try{return JSON.parse(localStorage.getItem("publy_kws")||"[]");}catch{return [];}});
   const [targetChars, setTargetChars] = useState(1350);
+  const [charMode, setCharMode] = useState<"auto"|"manual">("auto");
+
+  // 플랫폼/타입별 랜덤 글자수 계산
+  function calcTargetChars():number{
+    if(charMode==="manual")return targetChars;
+    if(platform==="tistory") return Math.floor(Math.random()*1500)+2500; // 2500~4000
+    if(adType==="adpost"){
+      // 체험단/맛집 키워드 감지
+      if(/체험단|맛집|후기|리뷰|방문|다녀/.test(keyword))
+        return Math.floor(Math.random()*1000)+2000; // 2000~3000
+      return Math.floor(Math.random()*700)+1800; // 1800~2500
+    }
+    return Math.floor(Math.random()*700)+1800;
+  }
   const [titles, setTitles] = useState<string[]>(()=>{try{return JSON.parse(localStorage.getItem("publy_titles")||"[]");}catch{return[];}});
   const [selectedTitle, setSelectedTitle] = useState("");
   const [loadingTitles, setLoadingTitles] = useState(false);
@@ -714,12 +728,54 @@ export default function DashboardPage({user, onLogout, onAdminLogin, onThemeTogg
     if(!selectedTitle&&!keyword){alert("키워드와 제목을 먼저 선택해주세요");return;}
     const title=selectedTitle||keyword;
     setGenerating(true);abortRef.current=new AbortController();
+
+    // 글자수 자동 랜덤화
+    const chars=calcTargetChars();
+    if(charMode==="auto")setTargetChars(chars);
+
+    // AI 패턴 뱅크 - 매번 랜덤 선택
+    const INTRO_BANK=[
+      `오늘은 ${keyword} 직접 경험한 거 솔직하게 써볼게요.`,
+      `솔직히 처음엔 별 기대 안 했어요. 근데 ${keyword} 해보고 나서 생각이 완전히 바뀌었어요.`,
+      `${keyword} 궁금한 분들 많죠? 저도 한참 찾아봤거든요.`,
+      `주변에서 ${keyword} 어디 좋냐고 물어봐서 이참에 정리해봤어요.`,
+      `사실 이거 쓸까 말까 고민했는데... ${keyword} 후기 한번 솔직하게 써볼게요.`,
+      `${keyword} 직접 겪은 거라 자신있게 말할 수 있어요.`,
+      `블로그에 ${keyword} 글 많은데 제 경험이랑 달라서 새로 써봐요.`,
+      `${keyword} 처음 접하시는 분들을 위해 제 경험 기반으로 정리했어요.`,
+      `저도 처음엔 막막했는데 ${keyword} 이렇게 하면 됩니다.`,
+      `${keyword} 고민하다가 직접 해봤는데 결과를 공유해드릴게요.`,
+    ];
+    const SUBHEAD_BANK=[
+      `왜 {주제}가 이렇게 인기 있는 걸까요?`,
+      `직접 해보니까 이런 점이 달랐어요`,
+      `기대했던 것 vs 실제로 느낀 것`,
+      `꼭 알아야 할 핵심 포인트`,
+      `이런 분들께 특히 추천해요`,
+    ];
+    const OUTRO_BANK=[
+      `다음에 또 기회가 되면 다시 경험해보고 싶어요.`,
+      `이 글이 도움이 됐으면 좋겠습니다.`,
+      `궁금한 거 있으면 댓글로 물어봐요!`,
+      `저처럼 고민하시는 분들한테 도움이 됐으면 해요.`,
+      `더 좋은 정보 있으면 공유해주세요 :)`,
+      `오늘도 긴 글 읽어주셔서 감사해요.`,
+      `여러분도 꼭 한번 경험해보시길 추천드려요.`,
+      `다음에 또 좋은 정보로 돌아올게요.`,
+    ];
+    const intro=INTRO_BANK[Math.floor(Math.random()*INTRO_BANK.length)];
+    const subStyle=SUBHEAD_BANK[Math.floor(Math.random()*SUBHEAD_BANK.length)];
+    const outro=OUTRO_BANK[Math.floor(Math.random()*OUTRO_BANK.length)];
+
     const catGuide=getCatGuide(keyword,title);
     const adGuide=adType==="adpost"?"[수익] 애드포스트: 체류시간 늘리는 감성 스토리.":"[수익] 애드센스: 클릭 유도, 키워드 밀도 높게.";
+    const platGuide=platform==="naver"
+      ?"[플랫폼] 네이버: ## 기호 절대 금지. 순수 텍스트. 감성적 경험담."
+      :"[플랫폼] 티스토리: 정보성 중심. 내부링크 2개 자연스럽게 포함.";
     const prompt=`당신은 대한민국 최고의 블로그 작가입니다.
 
 키워드: "${keyword}"  제목: "${title}"
-목표 글자수: ${targetChars}자 내외 (±50자, 반드시 이 범위 안에서 작성)
+목표 글자수: ${chars}자 내외 (±100자, 반드시 이 범위 안에서 작성)
 
 ${catGuide}
 
@@ -727,19 +783,25 @@ ${catGuide}
 ⛔ ## 기호 완전 금지 (소제목은 그냥 텍스트로)
 ⛔ ** * - + 마크다운 기호 전부 금지
 ⛔ 한자,중국어,일본어 금지
-⛔ AI 티 나는 표현 금지
+⛔ AI 티 나는 표현 금지 (중요합니다, 다양한, 효과적인, 필수적으로 등)
 ✅ 독자에게 직접 말 걸기
-✅ 구체적 수치, 가격, 기간
+✅ 구체적 수치, 가격, 기간 포함
 ✅ 문장 끝: ~해요, ~거든요, ~더라고요, ~잖아요 다양하게
-✅ 키워드 7회 이상 자연스럽게
-✅ 반드시 ${targetChars-50}~${targetChars+50}자 사이로 작성
+✅ 키워드 3~4회 자연스럽게 (동의어 활용)
+✅ 반드시 ${chars-100}~${chars+100}자 사이로 작성
+
+=== 글 패턴 가이드 (매번 다르게) ===
+인트로: "${intro}"
+소제목 스타일: "${subStyle}"
+마무리: "${outro}"
 
 ${adGuide}
+${platGuide}
 
 === 출력 형식 ===
 태그: 태그1, 태그2, 태그3, 태그4, 태그5
 
-(본문 ${targetChars}자 내외 - 순수 텍스트)
+(본문 ${chars}자 내외 - 순수 텍스트)
 
 [FAQ시작]
 Q1: (질문)
@@ -1158,8 +1220,24 @@ POST3: (제목)|(이유)
                       <label className="inp-label" style={{margin:0}}>📏 목표 글자수</label>
                       <span style={{fontSize:18,fontWeight:900,color:"var(--accent-text)",fontFamily:"'Space Grotesk',sans-serif"}}>{targetChars.toLocaleString()}자</span>
                     </div>
-                    <input type="range" min={1200} max={2000} step={50} value={targetChars} onChange={e=>setTargetChars(Number(e.target.value))} style={{width:"100%",accentColor:"var(--accent)",height:6,cursor:"pointer"}}/>
-                    <div style={{display:"flex",justifyContent:"space-between",fontSize:11,color:"var(--text3)",marginTop:4}}><span>1,200자</span><span>1,500자</span><span>2,000자</span></div>
+                    {/* 자동/수동 모드 */}
+                    <div style={{display:"flex",gap:6,marginBottom:10}}>
+                      <button onClick={()=>setCharMode("auto")} style={{flex:1,padding:"7px",borderRadius:8,border:`1.5px solid ${charMode==="auto"?"var(--accent)":"var(--border)"}`,background:charMode==="auto"?"var(--accent-bg)":"transparent",cursor:"pointer",fontSize:11,fontWeight:700,color:charMode==="auto"?"var(--accent-text)":"var(--text2)",fontFamily:"inherit"}}>🎲 자동 랜덤</button>
+                      <button onClick={()=>setCharMode("manual")} style={{flex:1,padding:"7px",borderRadius:8,border:`1.5px solid ${charMode==="manual"?"var(--accent)":"var(--border)"}`,background:charMode==="manual"?"var(--accent-bg)":"transparent",cursor:"pointer",fontSize:11,fontWeight:700,color:charMode==="manual"?"var(--accent-text)":"var(--text2)",fontFamily:"inherit"}}>✏️ 직접 설정</button>
+                    </div>
+                    {charMode==="auto"?(
+                      <div style={{padding:"10px 12px",borderRadius:9,background:"var(--accent-bg)",border:"1px solid var(--accent-border)",fontSize:12,color:"var(--accent-text)",fontWeight:600,lineHeight:1.6}}>
+                        🎲 생성마다 자동 랜덤<br/>
+                        <span style={{fontSize:11,opacity:.8}}>
+                          {platform==="tistory"?"티스토리: 2500~4000자":adType==="adpost"&&/체험단|맛집|후기|리뷰/.test(keyword)?"체험단/맛집: 2000~3000자":"네이버: 1800~2500자"}
+                        </span>
+                      </div>
+                    ):(
+                      <>
+                        <input type="range" min={1200} max={4000} step={50} value={targetChars} onChange={e=>setTargetChars(Number(e.target.value))} style={{width:"100%",accentColor:"var(--accent)",height:6,cursor:"pointer"}}/>
+                        <div style={{display:"flex",justifyContent:"space-between",fontSize:11,color:"var(--text3)",marginTop:4}}><span>1,200자</span><span>2,500자</span><span>4,000자</span></div>
+                      </>
+                    )}
                   </div>
                   <button className="btn btn-primary btn-full btn-xl" onClick={handleGenerate} disabled={generating||!selectedTitle}>
                     {generating?<><span className="spinner"/>AI가 글을 쓰고 있어요...</>:<>✍️ 본문 생성 시작</>}
@@ -1412,6 +1490,34 @@ POST3: (제목)|(이유)
               <div style={{animation:"fadeUp .25s ease both"}}>
                 {!botOnline&&<div className="alert-box alert-warn">⚠️ 봇 서버 오프라인 — PC에서 Publy 앱을 실행하면 즉시 발행, 아니면 예약 발행으로 처리돼요.</div>}
                 {quota&&quota.remaining_quota<=0&&<div className="alert-box alert-danger">⚠️ 발행 건수를 모두 사용했어요. 플랜을 업그레이드해주세요.</div>}
+
+                {/* 이미지/영상 설정 요약 */}
+                {(getActiveImages().length>0||videoOn)&&(
+                  <div className="card" style={{padding:"14px 16px",marginBottom:14}}>
+                    <div className="card-title" style={{marginBottom:10}}>📐 발행 설정 요약</div>
+                    <div style={{display:"flex",flexWrap:"wrap",gap:8}}>
+                      <div style={{padding:"6px 12px",borderRadius:99,background:"var(--accent-bg)",border:"1px solid var(--accent-border)",fontSize:12,fontWeight:700,color:"var(--accent-text)"}}>
+                        🖼️ 이미지 {getActiveImages().length}장
+                      </div>
+                      <div style={{padding:"6px 12px",borderRadius:99,background:"var(--card2)",border:"1px solid var(--border)",fontSize:12,fontWeight:700,color:"var(--text2)"}}>
+                        📐 패턴 {(()=>{
+                          if(imgPattern==="random"){const r=Math.random();return r<0.5?"A (자동)":r<0.85?"B (자동)":"C (자동)";}
+                          return imgPattern;
+                        })()}
+                      </div>
+                      {videoOn&&videoUrl&&(
+                        <div style={{padding:"6px 12px",borderRadius:99,background:"rgba(255,107,53,.08)",border:"1px solid rgba(255,107,53,.25)",fontSize:12,fontWeight:700,color:"var(--tistory)"}}>
+                          🎬 영상 {videoPosition==="top"?"상단":videoPosition==="middle"?"중간":"하단"} 삽입
+                        </div>
+                      )}
+                      {captions.filter(Boolean).length>0&&(
+                        <div style={{padding:"6px 12px",borderRadius:99,background:"rgba(78,205,196,.08)",border:"1px solid rgba(78,205,196,.25)",fontSize:12,fontWeight:700,color:"var(--info)"}}>
+                          💬 캡션 {captions.filter(Boolean).length}개
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
 
                 <div className="card">
                   <div className="card-title" style={{marginBottom:14}}>📝 발행 방식 선택</div>
