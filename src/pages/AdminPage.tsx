@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import { supabase, getAccounts, upsertAccount, PublyAccount } from "../lib/supabase";
 
 interface Props {
@@ -34,7 +34,7 @@ const PLAN_QUOTA: Record<string,number> = {free:10, basic:50, pro:999999};
 const PLAN_LABELS: Record<string,string> = {free:"FREE", basic:"BASIC", pro:"PRO"};
 
 // ── AdmKeyInput (건드리지 않음) ─────────────────────────
-function AdmKeyInput({k}:{k:any}) {
+function AdmKeyInput({k}:{k:any; [x:string]:any}) {
   const [val,setVal] = useState(()=>localStorage.getItem(k.storageKey)||"");
   const [show,setShow] = useState(false);
   const [saved,setSaved] = useState(false);
@@ -767,7 +767,7 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
     Array.from(files).forEach(file => {
       const reader = new FileReader();
       reader.onload = ev => { if (ev.target?.result) setUploadedImages(prev=>[...prev,ev.target!.result as string]); };
-      reader.readAsDataURL(file);
+      reader.readAsDataURL(file as Blob);
     });
   }
 
