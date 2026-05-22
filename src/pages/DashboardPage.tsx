@@ -97,6 +97,12 @@ const CSS = `
 .logo-ico{width:34px;height:34px;border-radius:10px;background:linear-gradient(135deg,#00ff9d,#00c870);display:flex;align-items:center;justify-content:center;flex-shrink:0;box-shadow:0 2px 12px rgba(0,255,157,.35);}
 .logo-text{font-size:17px;font-weight:900;letter-spacing:.18em;color:var(--accent-text);font-family:'Space Grotesk',sans-serif;}
 .header-mid{display:flex;align-items:center;gap:8px;flex:1;justify-content:center;flex-wrap:wrap;}
+.plat-toggle{display:flex;align-items:center;gap:5px;flex-shrink:0;}
+.plat-btn{padding:5px 12px;border-radius:99px;border:1.5px solid;font-size:11px;font-weight:700;cursor:pointer;font-family:'Noto Sans KR',sans-serif;transition:all .15s;white-space:nowrap;}
+.plat-btn-naver{background:rgba(3,199,90,.1);color:var(--naver);border-color:rgba(3,199,90,.4);}
+.plat-btn-naver-off{background:transparent;color:var(--text2);border-color:var(--border);}
+.plat-btn-tistory{background:rgba(255,107,53,.1);color:var(--tistory);border-color:rgba(255,107,53,.4);}
+.plat-btn-tistory-off{background:transparent;color:var(--text2);border-color:var(--border);}
 .header-right{display:flex;align-items:center;gap:6px;margin-left:auto;}
 .server-chip{display:flex;align-items:center;gap:5px;padding:5px 12px;border-radius:99px;font-size:11px;font-weight:700;border:1px solid;white-space:nowrap;}
 .server-on{background:rgba(0,214,143,.1);color:var(--success);border-color:rgba(0,214,143,.3);}
@@ -1498,9 +1504,12 @@ POST3: (제목)|(이유)
             <div className="logo-ico" style={{fontSize:17,fontWeight:900,color:"#000"}}>P</div>
             <span className="logo-text">PUBLY</span>
           </a>
+          {/* 플랫폼 토글 - 항상 표시 */}
+          <div className="plat-toggle">
+            <button className={`plat-btn ${platform==="naver"?"plat-btn-naver":"plat-btn-naver-off"}`} onClick={()=>setPlatform("naver")}>🟢 네이버</button>
+            <button className={`plat-btn ${platform==="tistory"?"plat-btn-tistory":"plat-btn-tistory-off"}`} onClick={()=>setPlatform("tistory")}>🟠 티스토리</button>
+          </div>
           <div className="header-mid">
-            <button style={{padding:"5px 12px",borderRadius:99,border:"1.5px solid",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit",transition:"all .15s",background:platform==="naver"?"rgba(3,199,90,.1)":"transparent",color:platform==="naver"?"var(--naver)":"var(--text2)",borderColor:platform==="naver"?"rgba(3,199,90,.4)":"var(--border)"}} onClick={()=>setPlatform("naver")}>🟢 네이버</button>
-            <button style={{padding:"5px 12px",borderRadius:99,border:"1.5px solid",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit",transition:"all .15s",background:platform==="tistory"?"rgba(255,107,53,.1)":"transparent",color:platform==="tistory"?"var(--tistory)":"var(--text2)",borderColor:platform==="tistory"?"rgba(255,107,53,.4)":"var(--border)"}} onClick={()=>setPlatform("tistory")}>🟠 티스토리</button>
             <div className={`server-chip ${botOnline?"server-on":"server-off"}`}><div className={`dot ${botOnline?"dot-on":"dot-off"}`}/>{botOnline?"서버 온라인":"서버 오프라인"}</div>
             <div className="quota-chip"><div className="quota-bar-bg"><div className="quota-bar-fill" style={{width:`${quota?Math.min(100,(quota.used_quota/quota.total_quota)*100):0}%`}}/></div>{quota?.remaining_quota??"-"}건<span className={`plan-badge plan-${user.plan}`}>{PLAN_LABELS[user.plan]}</span></div>
             <a href={EXE_DOWNLOAD_URL} className="dl-btn" download><span>⬇️</span><span>PC앱 다운로드</span></a>
