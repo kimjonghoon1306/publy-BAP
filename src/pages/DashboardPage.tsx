@@ -361,7 +361,16 @@ textarea.inp{resize:vertical;line-height:1.75;min-height:80px;}
 .pub-ready-no{background:rgba(255,83,99,.08);color:var(--danger);border-color:rgba(255,83,99,.2);}
 .pub-settings-panel{border-top:1px solid var(--border);padding:16px;background:var(--card2);display:grid;grid-template-columns:1fr 1fr;gap:12px;}
 @media(max-width:768px){.pub-settings-panel{grid-template-columns:1fr;}}
-@media(max-width:900px){.right-panel{display:none;}}`;
+@media(max-width:900px){.right-panel{display:none;}}
+.app.large{font-size:16px;}
+.app.large .nav-item{font-size:15px;padding:13px 12px;}
+.app.large .card-title{font-size:14px;}
+.app.large .inp{font-size:16px;padding:13px 14px;}
+.app.large .inp-label{font-size:14px;}
+.app.large .btn{font-size:15px;padding:13px 22px;}
+.app.large .btn-sm{font-size:13px;padding:10px 16px;}
+.app.large .flow-btn{font-size:16px;}
+`;
 interface Props {
   user: PublyUser;
   onLogout: () => void;
@@ -519,6 +528,8 @@ export default function DashboardPage({user, onLogout, onAdminLogin, onThemeTogg
   const [writeAI, setWriteAI] = useState(()=>localStorage.getItem("publy_write_ai")||"gemini");
   const [imageAI, setImageAI] = useState(()=>localStorage.getItem("publy_image_ai")||"openai_img");
   const [writeStyle, setWriteStyle] = useState<WriteStyle>(()=>(localStorage.getItem("publy_write_style") as WriteStyle)||"감성일기");
+  const [fontMode, setFontMode] = useState<"normal"|"large">(()=>(localStorage.getItem("publy_font_mode")||"normal") as "normal"|"large");
+  const [noticePopup, setNoticePopup] = useState<{title:string;body:string;key:string}|null>(null);
   const [qualityScore, setQualityScore] = useState<{seo:number;read:number;len:number;total:number}|null>(null);
   // ── 카테고리 / 공개 설정 / 예약 발행 ──
   const [category, setCategory] = useState("");
@@ -788,6 +799,22 @@ export default function DashboardPage({user, onLogout, onAdminLogin, onThemeTogg
     window.addEventListener("paste",handlePaste);
     return ()=>window.removeEventListener("paste",handlePaste);
   },[tab,keyword]);
+
+  // 공지 팝업 로드
+  useEffect(()=>{
+    (async()=>{
+      try{
+        const {data}=await supabase.from("publy_settings").select("value").eq("key","global_notice").maybeSingle();
+        if(data?.value){
+          const n=JSON.parse(data.value);
+          if(n.active){
+            const dismissed=localStorage.getItem("publy_dismissed_"+n.created_at);
+            if(!dismissed) setNoticePopup({title:n.title,body:n.body,key:n.created_at});
+          }
+        }
+      }catch{}
+    })();
+  },[]);
 
   const checkBot = useCallback(async()=>{
     try{const r=await fetch(`${BOT}/health`,{signal:AbortSignal.timeout(3000)});setBotOnline(r.ok);}
@@ -1620,7 +1647,7 @@ POST3: (제목)|(이유)
   return (
     <>
       <style>{CSS}</style>
-      <div className={`app ${theme}`}>
+      <div className={`app ${theme} ${fontMode==="large"?"large":""}`}>
 
         {/* 가이드 모달 */}
         {showGuide&&(
@@ -2704,6 +2731,38 @@ POST3: (제목)|(이유)
             {/* ===== 설정 ===== */}
             {tab==="settings"&&(
               <div style={{animation:"fadeUp .25s ease both"}}>
+
+                {/* 큰 글씨 모드 */}
+                <div className="card">
+                  <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+                    <div>
+                      <div className="card-title" style={{marginBottom:4}}>🔠 큰 글씨 모드</div>
+                      <div style={{fontSize:12,color:"var(--text3)"}}>어르신·시력 불편한 분께 추천 — 전체 글씨 크기 확대</div>
+                    </div>
+                    <button onClick={()=>{const next=fontMode==="normal"?"large":"normal";setFontMode(next);localStorage.setItem("publy_font_mode",next);}}
+                      style={{padding:"8px 20px",borderRadius:99,border:"none",cursor:"pointer",fontSize:13,fontWeight:800,fontFamily:"inherit",transition:"all .2s",
+                        background:fontMode==="large"?"var(--accent)":"var(--card2)",
+                        color:fontMode==="large"?"#000":"var(--text2)",
+                        boxShadow:fontMode==="large"?"0 3px 12px var(--accent-30)":"none"}}>
+                      {fontMode==="large"?"✅ 켜짐":"OFF"}
+                    </button>
+                  </div>
+                </div>
+
+                {/* 레퍼럴 링크 */}
+                <div className="card">
+                  <div className="card-title" style={{marginBottom:4}}>🔗 친구 초대 링크</div>
+                  <div style={{fontSize:12,color:"var(--text3)",marginBottom:12}}>초대 링크로 가입하면 양쪽 모두 쿼터 보너스 (어드민 설정에 따라)</div>
+                  <div style={{display:"flex",gap:8,alignItems:"center"}}>
+                    <input className="inp" readOnly value={`${typeof window!=="undefined"?window.location.origin:""}?ref=${user.id}`}
+                      style={{flex:1,fontSize:12,color:"var(--text2)",background:"var(--card2)"}}/>
+                    <button className="btn btn-secondary btn-sm" onClick={()=>{
+                      navigator.clipboard.writeText(`${window.location.origin}?ref=${user.id}`);
+                      showToast("📋 초대 링크 복사됐어요!");
+                    }}>복사</button>
+                  </div>
+                </div>
+
                 <div className="card">
                   <div className="card-title" style={{marginBottom:14}}>🤖 글쓰기 AI 선택</div>
                   <div className="ai-grid">
@@ -2932,6 +2991,28 @@ POST3: (제목)|(이유)
             <div style={{padding:"0 20px 20px"}}>
               <button onClick={()=>setShowKwInfo(false)} style={{width:"100%",padding:"13px",borderRadius:12,border:"none",background:"linear-gradient(135deg,#ff6b9d,#ff4081)",color:"#fff",fontSize:15,fontWeight:800,cursor:"pointer",fontFamily:"inherit",boxShadow:"0 4px 14px rgba(255,64,129,.4)"}}>
                 알겠어요! 👍
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 공지 팝업 */}
+      {noticePopup&&(
+        <div style={{position:"fixed",inset:0,zIndex:9100,background:"rgba(0,0,0,.85)",display:"flex",alignItems:"center",justifyContent:"center",padding:20}}
+          onClick={()=>{localStorage.setItem("publy_dismissed_"+noticePopup.key,"1");setNoticePopup(null);}}>
+          <div style={{width:"100%",maxWidth:440,borderRadius:20,background:"var(--card)",border:"1px solid var(--border)",overflow:"hidden",animation:"fadeUp .25s ease",boxShadow:"0 24px 60px rgba(0,0,0,.6)"}}
+            onClick={e=>e.stopPropagation()}>
+            <div style={{background:"linear-gradient(135deg,var(--accent),#00cc80)",padding:"18px 22px",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+              <div style={{fontSize:16,fontWeight:900,color:"#000"}}>📢 {noticePopup.title}</div>
+              <button onClick={()=>{localStorage.setItem("publy_dismissed_"+noticePopup.key,"1");setNoticePopup(null);}}
+                style={{background:"rgba(0,0,0,.2)",border:"none",color:"#000",width:30,height:30,borderRadius:8,cursor:"pointer",fontSize:15,fontFamily:"inherit"}}>✕</button>
+            </div>
+            <div style={{padding:"18px 22px",fontSize:14,color:"var(--text)",lineHeight:1.8,whiteSpace:"pre-line"}}>{noticePopup.body}</div>
+            <div style={{padding:"0 22px 20px"}}>
+              <button onClick={()=>{localStorage.setItem("publy_dismissed_"+noticePopup.key,"1");setNoticePopup(null);}}
+                style={{width:"100%",padding:"12px",borderRadius:12,border:"none",background:"var(--accent)",color:"#000",fontSize:14,fontWeight:800,cursor:"pointer",fontFamily:"inherit"}}>
+                확인했어요 👍
               </button>
             </div>
           </div>
