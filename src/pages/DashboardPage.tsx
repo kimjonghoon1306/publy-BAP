@@ -289,7 +289,7 @@ textarea.inp{resize:vertical;line-height:1.75;min-height:80px;}
 .mob-btn.active .mob-btn-lbl{color:var(--accent-text);}
 .img-split{display:grid;grid-template-columns:300px 1fr;gap:14px;align-items:start;}
 .pub-grid{display:grid;grid-template-columns:1fr 320px;gap:16px;align-items:start;}
-.pub-panel-desktop{display:flex;flex-direction:column;gap:12px;}
+.pub-panel-desktop{display:flex;flex-direction:column;gap:12px;position:sticky;top:20px;max-height:calc(100dvh - 120px);overflow-y:auto;padding-right:2px;}
 .pub-mobile-bar{display:none;}
 .lg-hidden{display:none;}
 @media(max-width:900px){
@@ -414,6 +414,10 @@ export default function DashboardPage({user, onLogout, onAdminLogin, onThemeTogg
   const [newBlog, setNewBlog] = useState("");
   const [addingAcc, setAddingAcc] = useState(false);
   const [connId, setConnId] = useState<string|null>(null);
+  // 계정별 카테고리 (accId → 카테고리 배열)
+  const [accCats, setAccCats] = useState<Record<string,string[]>>(()=>{try{return JSON.parse(localStorage.getItem("publy_acc_cats")||"{}");}catch{return {};}});
+  const [editingCatAccId, setEditingCatAccId] = useState<string|null>(null);
+  const [catInput, setCatInput] = useState("");
   const [writeAI, setWriteAI] = useState(()=>localStorage.getItem("publy_write_ai")||"gemini");
   const [imageAI, setImageAI] = useState(()=>localStorage.getItem("publy_image_ai")||"openai_img");
   // ── 카테고리 / 공개 설정 / 예약 발행 ──
@@ -444,13 +448,30 @@ export default function DashboardPage({user, onLogout, onAdminLogin, onThemeTogg
 
   // 카테고리 로드
   async function loadCategories(plat: string) {
-    if (!botOnline) return;
+    if (!botOnline) {
+      // 봇 오프라인 → accCats에서 로드
+      const saved=accCats[pubAccId]||[];
+      setCategories(saved.map((c,i)=>({id:String(i),name:c})));
+      return;
+    }
     setLoadingCats(true); setCategories([]); setCategory("");
     try {
       const r = await fetch(`${BOT}/api/${plat}/categories/${user.id}`, {signal: AbortSignal.timeout(30000)});
       const d = await r.json();
-      if (d.categories) setCategories(d.categories);
-    } catch {}
+      if (d.categories && d.categories.length>0) {
+        setCategories(d.categories);
+        // 봇에서 불러온 카테고리를 accCats에도 저장
+        const names=d.categories.map((c:{id:string;name:string})=>c.name);
+        saveAccCat(pubAccId, names);
+      } else {
+        // 봇 응답이 비었으면 저장된 accCats 사용
+        const saved=accCats[pubAccId]||[];
+        setCategories(saved.map((c,i)=>({id:String(i),name:c})));
+      }
+    } catch {
+      const saved=accCats[pubAccId]||[];
+      setCategories(saved.map((c,i)=>({id:String(i),name:c})));
+    }
     finally { setLoadingCats(false); }
   }
 
@@ -1183,17 +1204,21 @@ POST3: (제목)|(이유)
           <div className="card-title" style={{marginBottom:10}}>📂 카테고리</div>
           {loadingCats?(
             <div style={{display:"flex",alignItems:"center",gap:8,padding:"8px",color:"var(--text3)",fontSize:13}}><span className="spinner" style={{width:16,height:16}}/>불러오는 중...</div>
-          ):categories.length===0?(
-            <div style={{display:"flex",flexDirection:"column",gap:8}}>
-              <div style={{fontSize:12,color:"var(--text3)",textAlign:"center"}}>카테고리 없음 (기본 발행)</div>
-              <button className="btn btn-secondary btn-sm" onClick={()=>loadCategories(platform)}>🔄 다시 불러오기</button>
-            </div>
-          ):(
-            <select value={category} onChange={e=>setCategory(e.target.value)} style={{width:"100%",padding:"10px 12px",borderRadius:10,border:"1px solid var(--border)",background:"var(--bg)",color:"var(--text)",fontSize:14,fontFamily:"inherit",outline:"none"}}>
-              <option value="">선택 안 함 (기본)</option>
-              {categories.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}
-            </select>
-          )}
+          ):(()=>{
+            const cats = categories.length>0 ? categories : (accCats[pubAccId]||[]).map((c,i)=>({id:String(i),name:c}));
+            return cats.length===0?(
+              <div style={{display:"flex",flexDirection:"column",gap:8}}>
+                <div style={{fontSize:12,color:"var(--text3)",textAlign:"center"}}>카테고리 없음 (기본 발행)</div>
+                <button className="btn btn-secondary btn-sm" onClick={()=>loadCategories(platform)}>🔄 불러오기</button>
+                <button className="btn btn-secondary btn-sm" onClick={()=>setTab("accounts")} style={{fontSize:11}}>📂 계정 관리에서 직접 입력</button>
+              </div>
+            ):(
+              <select value={category} onChange={e=>setCategory(e.target.value)} style={{width:"100%",padding:"10px 12px",borderRadius:10,border:"1px solid var(--border)",background:"var(--bg)",color:"var(--text)",fontSize:14,fontFamily:"inherit",outline:"none"}}>
+                <option value="">선택 안 함 (기본)</option>
+                {cats.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+            );
+          })()}
         </div>
       )}
 
@@ -1240,6 +1265,22 @@ POST3: (제목)|(이유)
         }
       </button>
     </>);
+  }
+
+  function saveAccCat(accId:string, cats:string[]){
+    const next={...accCats,[accId]:cats};
+    setAccCats(next);
+    localStorage.setItem("publy_acc_cats",JSON.stringify(next));
+  }
+  function addCatToAcc(accId:string){
+    const val=catInput.trim();if(!val)return;
+    const cur=accCats[accId]||[];
+    if(cur.includes(val))return;
+    saveAccCat(accId,[...cur,val]);
+    setCatInput("");
+  }
+  function removeCatFromAcc(accId:string, cat:string){
+    saveAccCat(accId,(accCats[accId]||[]).filter(c=>c!==cat));
   }
 
   async function handleAddAccount(){
@@ -2220,12 +2261,55 @@ POST3: (제목)|(이유)
                 {accounts.filter(a=>a.platform!=="google").length===0?(
                   <div className="empty-state"><span className="empty-ico">🔗</span><div className="empty-title">등록된 계정이 없어요</div><div className="empty-sub">위에서 블로그 계정을 추가해주세요</div></div>
                 ):accounts.filter(a=>a.platform!=="google").map((a,i)=>(
-                  <div key={a.id} className={`acc-card ${a.is_connected?(a.platform==="naver"?"conn-naver":"conn-tistory"):""}`} style={{animationDelay:`${i*.06}s`}}>
-                    <span style={{fontSize:26}}>{a.platform==="naver"?"🟢":"🟠"}</span>
-                    <div style={{flex:1,minWidth:0}}><div style={{fontSize:15,fontWeight:700,color:"var(--text)"}}>{a.username}</div><div style={{fontSize:11,color:"var(--text2)",marginTop:2}}>{a.platform}{a.blog_name&&` · ${a.blog_name}`}</div></div>
-                    <span style={{fontSize:11,fontWeight:700,padding:"4px 11px",borderRadius:99,background:a.is_connected?"var(--accent-bg)":"var(--card-hover)",color:a.is_connected?"var(--accent-text)":"var(--text2)",border:"1px solid",borderColor:a.is_connected?"var(--accent-border)":"var(--border)"}}>{a.is_connected?"✅ 연결됨":"미연결"}</span>
-                    <button className="btn btn-secondary btn-sm" onClick={()=>handleConnect(a)} disabled={!!connId||!botOnline}>{connId===a.id?<><span className="sp-w spinner"/>연결 중...</>:a.is_connected?"재연결":"연결"}</button>
-                    <button className="btn btn-danger btn-sm" onClick={()=>handleDeleteAccount(a.id)}>🗑 삭제</button>
+                  <div key={a.id} style={{animationDelay:`${i*.06}s`}}>
+                    <div className={`acc-card ${a.is_connected?(a.platform==="naver"?"conn-naver":"conn-tistory"):""}`}>
+                      <span style={{fontSize:26}}>{a.platform==="naver"?"🟢":"🟠"}</span>
+                      <div style={{flex:1,minWidth:0}}><div style={{fontSize:15,fontWeight:700,color:"var(--text)"}}>{a.username}</div><div style={{fontSize:11,color:"var(--text2)",marginTop:2}}>{a.platform}{a.blog_name&&` · ${a.blog_name}`}</div></div>
+                      <span style={{fontSize:11,fontWeight:700,padding:"4px 11px",borderRadius:99,background:a.is_connected?"var(--accent-bg)":"var(--card-hover)",color:a.is_connected?"var(--accent-text)":"var(--text2)",border:"1px solid",borderColor:a.is_connected?"var(--accent-border)":"var(--border)"}}>{a.is_connected?"✅ 연결됨":"미연결"}</span>
+                      <button className="btn btn-secondary btn-sm" onClick={()=>handleConnect(a)} disabled={!!connId||!botOnline}>{connId===a.id?<><span className="sp-w spinner"/>연결 중...</>:a.is_connected?"재연결":"연결"}</button>
+                      <button className="btn btn-danger btn-sm" onClick={()=>handleDeleteAccount(a.id)}>🗑 삭제</button>
+                      <button onClick={()=>setEditingCatAccId(editingCatAccId===a.id?null:a.id)} style={{padding:"5px 11px",borderRadius:8,border:"1px solid var(--border)",background:"var(--bg2)",color:"var(--text2)",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:"inherit",flexShrink:0}}>
+                        📂 카테고리 {(accCats[a.id]||[]).length>0?`(${(accCats[a.id]||[]).length})`:""}
+                      </button>
+                    </div>
+
+                    {/* 카테고리 관리 패널 */}
+                    {editingCatAccId===a.id&&(
+                      <div style={{margin:"-8px 0 8px",padding:"14px 16px",borderRadius:"0 0 14px 14px",background:"var(--bg2)",border:"1px solid var(--border)",borderTop:"none"}}>
+                        <div style={{fontSize:12,fontWeight:700,color:"var(--text3)",marginBottom:10}}>
+                          📂 {a.username} 카테고리 목록
+                          <span style={{fontWeight:400,marginLeft:6}}>발행 시 선택 가능해요</span>
+                        </div>
+                        {/* 등록된 카테고리 */}
+                        <div style={{display:"flex",flexWrap:"wrap",gap:7,marginBottom:10}}>
+                          {(accCats[a.id]||[]).length===0?(
+                            <span style={{fontSize:12,color:"var(--text3)"}}>등록된 카테고리 없음</span>
+                          ):(accCats[a.id]||[]).map((cat,ci)=>(
+                            <div key={ci} style={{display:"flex",alignItems:"center",gap:5,padding:"5px 12px",borderRadius:99,background:"var(--accent-bg)",border:"1px solid var(--accent-border)",fontSize:13,fontWeight:600,color:"var(--accent-text)"}}>
+                              {cat}
+                              <button onClick={()=>removeCatFromAcc(a.id,cat)} style={{background:"transparent",border:"none",cursor:"pointer",color:"var(--accent-text)",fontSize:14,lineHeight:1,padding:0}}>✕</button>
+                            </div>
+                          ))}
+                        </div>
+                        {/* 카테고리 추가 */}
+                        <div style={{display:"flex",gap:8}}>
+                          <input
+                            className="inp"
+                            placeholder="카테고리명 입력 (예: 맛집, 여행, 리뷰)"
+                            value={catInput}
+                            onChange={e=>setCatInput(e.target.value)}
+                            onKeyDown={e=>{if(e.key==="Enter")addCatToAcc(a.id);}}
+                            style={{flex:1,fontSize:13}}
+                          />
+                          <button onClick={()=>addCatToAcc(a.id)} className="btn btn-primary" style={{padding:"0 16px",flexShrink:0}}>추가</button>
+                        </div>
+                        {botOnline&&(
+                          <button onClick={async()=>{await loadCategories(a.platform);setEditingCatAccId(a.id);}} style={{marginTop:8,width:"100%",padding:"8px",borderRadius:9,border:"1px solid var(--border)",background:"var(--bg)",color:"var(--text2)",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:"inherit"}}>
+                            🔄 봇에서 자동 불러오기
+                          </button>
+                        )}
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>
