@@ -236,8 +236,8 @@ export async function saveAdminNaverApiKeys(keys: NaverApiKeys): Promise<void> {
 // ── 네이버 API 일일 쿼타 ──────────────────────────────────
 export const NAVER_DAILY_LIMIT: Record<string, number> = {
   free: 5,
-  pro: 50,
-  business: 200,
+  pro: 20,
+  business: 100,
   admin: 9999,
 };
 
@@ -298,4 +298,19 @@ export async function resetPasswordTemp(email: string): Promise<string> {
   const { error } = await supabase.from("publy_users").update({ password_hash: hash }).eq("id", user.id);
   if (error) throw new Error(error.message);
   return tempPw;
+}
+
+// ── 회원 개인키만 조회 (관리자 폴백 없음, UI 표시용) ──────
+export async function getUserNaverApiKeys(userId: string): Promise<NaverApiKeys> {
+  const names = ["naver_access_license","naver_secret_key","naver_customer_id","naver_datalab_client_id","naver_datalab_client_secret"];
+  const result: NaverApiKeys = {};
+  for (const k of names) {
+    const { data } = await supabase
+      .from("publy_settings")
+      .select("value")
+      .eq("key", `user_${userId}_${k}`)
+      .maybeSingle();
+    if (data?.value) (result as any)[k] = data.value;
+  }
+  return result;
 }
