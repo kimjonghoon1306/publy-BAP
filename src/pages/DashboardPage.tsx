@@ -335,6 +335,12 @@ textarea.inp{resize:vertical;line-height:1.75;min-height:80px;}
   .pub-plat-grid{grid-template-columns:1fr !important;}
 }
 .pub-sticky-bar{position:sticky;top:0;z-index:30;background:var(--card);border-bottom:1px solid var(--border);padding:10px 16px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;backdrop-filter:blur(12px);}
+.toast-wrap{position:fixed;bottom:28px;right:24px;z-index:9999;display:flex;flex-direction:column;gap:8px;pointer-events:none;}
+.toast{padding:12px 18px;border-radius:12px;font-size:13px;font-weight:700;font-family:'Noto Sans KR',sans-serif;box-shadow:0 4px 24px rgba(0,0,0,.35);animation:toastIn .25s ease;pointer-events:all;display:flex;align-items:center;gap:8px;max-width:320px;}
+.toast-success{background:#1a2e1a;color:#4ade80;border:1px solid rgba(74,222,128,.25);}
+.toast-error{background:#2e1a1a;color:#f87171;border:1px solid rgba(248,113,113,.25);}
+.toast-info{background:#1a1f2e;color:#93c5fd;border:1px solid rgba(147,197,253,.25);}
+@keyframes toastIn{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}
 .pub-ready{display:flex;align-items:center;gap:6px;flex-wrap:wrap;}
 .pub-ready-chip{display:flex;align-items:center;gap:4px;padding:4px 10px;border-radius:99px;font-size:11px;font-weight:700;border:1px solid;}
 .pub-ready-ok{background:rgba(0,214,143,.1);color:var(--success);border-color:rgba(0,214,143,.25);}
@@ -430,7 +436,8 @@ export default function DashboardPage({user, onLogout, onAdminLogin, onThemeTogg
   // ── 블록 에디터 (tarry 방식) ──
   type TextBlock = {type:"text";id:string;content:string};
   type SingleImageBlock = {type:"image";id:string;src:string;alt:string;position:"left"|"center"|"right";source:"auto"|"manual"};
-  type ContentBlock = TextBlock | SingleImageBlock;
+  type ImagePairBlock = {type:"image-pair";id:string;images:{src:string;alt:string}[]};
+  type ContentBlock = TextBlock | SingleImageBlock | ImagePairBlock;
   function uid(){return Math.random().toString(36).slice(2);}
   const [blocks, setBlocks] = useState<ContentBlock[]>([{type:"text",id:uid(),content:""}]);
   const [thumbnail, setThumbnail] = useState("");
@@ -442,7 +449,13 @@ export default function DashboardPage({user, onLogout, onAdminLogin, onThemeTogg
   const [showPreviewModal, setShowPreviewModal] = useState(false);
   const [showNaverMenu, setShowNaverMenu] = useState(false);
   const [showPublishPanel, setShowPublishPanel] = useState(false);
-  const [showMeta, setShowMeta] = useState(false); // 썸네일+인사말 접기 (이미지 있으면 자동펼침)
+  const [showMeta, setShowMeta] = useState(false);
+  const [toasts, setToasts] = useState<{id:number;msg:string;type:"success"|"error"|"info"}[]>([]);
+  function showToast(msg:string, type:"success"|"error"|"info"="success"){
+    const id=Date.now();
+    setToasts(p=>[...p,{id,msg,type}]);
+    setTimeout(()=>setToasts(p=>p.filter(t=>t.id!==id)),3200);
+  } // 썸네일+인사말 접기 (이미지 있으면 자동펼침)
   const [currentPw, setCurrentPw] = useState("");
   const [newPw1, setNewPw1] = useState("");
   const [newPw2, setNewPw2] = useState("");
@@ -593,9 +606,9 @@ export default function DashboardPage({user, onLogout, onAdminLogin, onThemeTogg
     return addNaverImageMarkers(lines.filter(Boolean).join("\n"));
   }
 
-  function copyForNaver(){navigator.clipboard.writeText(buildNaverText("full"));}
-  function copyForNaverWithFaq(){navigator.clipboard.writeText(buildNaverText("faq"));}
-  function copyForNaverBodyOnly(){navigator.clipboard.writeText(buildNaverText("body"));}
+  function copyForNaver(){navigator.clipboard.writeText(buildNaverText("full"));showToast("📋 전체 복사 완료!");}
+  function copyForNaverWithFaq(){navigator.clipboard.writeText(buildNaverText("faq"));showToast("📋 본문+FAQ 복사 완료!");}
+  function copyForNaverBodyOnly(){navigator.clipboard.writeText(buildNaverText("body"));showToast("📋 본문만 복사 완료!");}
 
   // ── HTML 빌더 (tarry 방식) ──
   function buildHtmlContent():string{
@@ -652,6 +665,28 @@ export default function DashboardPage({user, onLogout, onAdminLogin, onThemeTogg
       setPwMsg("❌ " + e.message);
     } finally { setPwChanging(false); }
   }
+
+  // ── Ctrl+V 클립보드 이미지 붙여넣기 ──
+  useEffect(()=>{
+    const handlePaste=(e:ClipboardEvent)=>{
+      if(tab!=="publish")return;
+      const items=Array.from(e.clipboardData?.items||[]);
+      const imgItem=items.find(i=>i.type.startsWith("image/"));
+      if(!imgItem)return;
+      const file=imgItem.getAsFile();
+      if(!file)return;
+      const reader=new FileReader();
+      reader.onload=ev=>{
+        const src=ev.target?.result as string;
+        const newBlock:SingleImageBlock={id:Date.now().toString(),type:"image",src,alt:keyword||"붙여넣기 이미지",position:"center",source:"manual"};
+        setBlocks(p=>[...p,newBlock]);
+        showToast("📋 이미지가 본문에 추가됐어요!");
+      };
+      reader.readAsDataURL(file);
+    };
+    window.addEventListener("paste",handlePaste);
+    return ()=>window.removeEventListener("paste",handlePaste);
+  },[tab,keyword]);
 
   const checkBot = useCallback(async()=>{
     try{const r=await fetch(`${BOT}/health`,{signal:AbortSignal.timeout(3000)});setBotOnline(r.ok);}
@@ -953,6 +988,22 @@ export default function DashboardPage({user, onLogout, onAdminLogin, onThemeTogg
     return clean.split("\n").map(l=>l.replace(/^[\d]+[).\s]+|^[-*•\s]+/,"").replace(/^[\s"']+|[\s"']+$/g,"").trim()).filter(l=>l.length>4&&l.length<100);
   }
 
+  function calcTitleScore(title:string):number{
+    let score=0;
+    const len=title.length;
+    // 적정 길이 (25~42자)
+    if(len>=25&&len<=42)score+=30;else if(len>=20&&len<=50)score+=15;
+    // 숫자 포함 (BEST 7, TOP 5 등)
+    if(/[0-9]/.test(title))score+=20;
+    // 상업적/클릭유발 단어
+    if(/추천|리뷰|후기|방법|비결|솔직|이것만|꿀팁|실패|성공|필수|완벽|최고|진짜|효과|비교/.test(title))score+=25;
+    // 경험공유형
+    if(/써봤|해봤|다녀온|먹어본|가봤|사봤|써보니|해보니/.test(title))score+=15;
+    // 질문형/호기심
+    if(/\?|왜|어떻게|언제|어디|뭐가|무엇이/.test(title))score+=10;
+    return Math.min(100,score);
+  }
+
   async function handleGenerateTitles(reset=false){
     if(!keyword.trim()){alert("키워드를 입력해주세요");return;}
     // 키워드 풀에 누적 (중복제거, 90개 제한)
@@ -1136,7 +1187,7 @@ POST3: (제목)|(이유)
     if(!pubAccId||!pubTitle){alert("계정과 제목을 확인해주세요");return;}
     const content=buildPublishContent();if(!content){alert("발행할 내용이 없어요");return;}
     if(scheduleOn&&!scheduleTime){alert("예약 날짜와 시간을 선택해주세요");return;}
-    setPublishing(true);setPubMsg(scheduleOn?"예약 설정 중...":"발행 중...");
+    setPublishing(true);showToast(scheduleOn?"예약 설정 중...":"발행 중...","info");
     const tags=hashtags.map(t=>t.replace("#","")).filter(Boolean);
     const publishBody={
       userId:user.id,platform,title:pubTitle,content,
@@ -1147,24 +1198,25 @@ POST3: (제목)|(이유)
       scheduleTime:scheduleOn?scheduleTime:undefined,
     };
     try{
-      const ok=await useQuota(user.id);if(!ok){setPubMsg("❌ 발행 건수 초과");setPublishing(false);return;}
+      const ok=await useQuota(user.id);if(!ok){showToast("❌ 발행 건수 초과","error");setPublishing(false);return;}
       if(!botOnline){
         await supabase.from("publy_jobs").insert({user_id:user.id,platform,title:pubTitle,content,
           tags,image_url:thumbnail||getActiveImages()[0]||undefined,
           category_id:category||undefined,visibility,
           schedule_time:scheduleOn?scheduleTime:undefined,status:"pending"});
-        setPubMsg("✅ PC 봇에 예약됐어요! Publy 앱 실행 시 자동 발행돼요.");
+        showToast("✅ PC 봇에 예약됐어요! Publy 앱 실행 시 자동 발행돼요.");
         await addHistory({user_id:user.id,platform,title:pubTitle,status:"pending" as "success"|"fail"});
       }else{
         const r=await fetch(`${BOT}/api/publish-full`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(publishBody)});
         const d=await r.json();
-        if(r.status===401){setPubMsg("❌ 세션 만료 — 계정 관리 탭에서 재연결해주세요");setPublishing(false);return;}
+        if(r.status===401){showToast("❌ 세션 만료 — 계정 관리 탭에서 재연결해주세요","error");setPublishing(false);return;}
         if(!r.ok)throw new Error(d.error);
         await addHistory({user_id:user.id,platform,title:pubTitle,post_url:d.postUrl,status:"success"});
         setPubMsg(scheduleOn?"✅ 예약 완료! 설정한 시간에 자동 발행돼요.":"✅ 발행 완료!");
+        showToast(scheduleOn?"⏰ 예약 완료!":"✅ 발행 완료! 🎉");
       }
       getHistory(user.id).then(setHistory);getQuota(user.id).then((q:PublyQuota|null)=>q&&setQuota(q));
-    }catch(e:any){await addHistory({user_id:user.id,platform,title:pubTitle,status:"fail",error_message:e.message});setPubMsg("❌ "+e.message);}
+    }catch(e:any){await addHistory({user_id:user.id,platform,title:pubTitle,status:"fail",error_message:e.message});setPubMsg("❌ "+e.message);showToast("❌ "+e.message,"error");}
     finally{setPublishing(false);}
   }
 
@@ -1616,13 +1668,23 @@ POST3: (제목)|(이유)
                     </div>
                     {selectedTitle&&(<div className="sel-banner"><div className="sel-banner-lbl">✅ 선택된 제목</div><div className="sel-banner-txt">{selectedTitle}</div></div>)}
                     <div className="title-grid">
-                      {titles.map((t,i)=>(
-                        <button key={`${t}-${i}`} className={`title-card ${selectedTitle===t?"sel":""}`} onClick={()=>setSelectedTitle(t)}>
-                          <div className="title-n">#{titles.length-i}</div>
-                          <div className="title-t">{t}</div>
-                          {selectedTitle===t&&<div className="title-chk">✓</div>}
-                        </button>
-                      ))}
+                      {titles.map((t,i)=>{
+                        const score=calcTitleScore(t);
+                        const sc=score>=80?"#4ade80":score>=55?"#fbbf24":"#94a3b8";
+                        return(
+                          <button key={`${t}-${i}`} className={`title-card ${selectedTitle===t?"sel":""}`} onClick={()=>setSelectedTitle(t)}>
+                            <div className="title-n">#{titles.length-i}</div>
+                            <div className="title-t">{t}</div>
+                            <div style={{display:"flex",alignItems:"center",gap:6,marginTop:4}}>
+                              <div style={{flex:1,height:3,background:"var(--border)",borderRadius:99,overflow:"hidden"}}>
+                                <div style={{height:"100%",width:`${score}%`,background:sc,borderRadius:99,transition:"width .4s"}}/>
+                              </div>
+                              <span style={{fontSize:10,fontWeight:800,color:sc,minWidth:28}}>{score}점</span>
+                            </div>
+                            {selectedTitle===t&&<div className="title-chk">✓</div>}
+                          </button>
+                        );
+                      })}
                     </div>
                   </div>
                 )}
@@ -2141,9 +2203,16 @@ POST3: (제목)|(이유)
                           <span style={{fontSize:14,fontWeight:700,color:"var(--text)"}}>📝 본문 편집</span>
                           <span style={{fontSize:11,padding:"2px 8px",borderRadius:99,background:"var(--bg2)",color:"var(--text3)"}}>{blocks.length}블록</span>
                         </div>
-                        <div style={{display:"flex",gap:6}}>
+                        <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
                           <button onClick={()=>addTextBlock()} style={{padding:"5px 10px",borderRadius:7,border:"1px solid var(--border)",background:"var(--bg2)",color:"var(--text2)",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:"inherit"}}>+ 텍스트</button>
                           {imageMode==="manual"&&<button onClick={()=>addManualImageBlock()} style={{padding:"5px 10px",borderRadius:7,border:"1px solid var(--border)",background:"var(--bg2)",color:"var(--text2)",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:"inherit"}}>+ 이미지</button>}
+                          {imageMode==="manual"&&getActiveImages().length>=2&&<button onClick={()=>{
+                            const imgs=getActiveImages().slice(0,2);
+                            const pair:ImagePairBlock={id:Date.now().toString(),type:"image-pair",images:imgs.map((src,i)=>({src,alt:`${keyword||"이미지"} ${i+1}`}))};
+                            setBlocks(p=>[...p,pair]);
+                            showToast("🖼️🖼️ 2열 이미지 추가됐어요!");
+                          }} style={{padding:"5px 10px",borderRadius:7,border:"1px solid oklch(.75 .12 300 / 40%)",background:"oklch(.75 .12 300 / 8%)",color:"oklch(.75 .12 300)",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:"inherit"}}>🖼️🖼️ 2열</button>}
+                          <span style={{fontSize:10,color:"var(--text3)",alignSelf:"center",marginLeft:4}}>Ctrl+V로 이미지 붙여넣기 가능</span>
                         </div>
                       </div>
 
@@ -2164,6 +2233,21 @@ POST3: (제목)|(이유)
                                   {imageMode==="manual"&&<button onClick={()=>addManualImageBlock(block.id)} style={{padding:"3px 9px",borderRadius:6,border:"1px solid var(--border)",background:"var(--bg2)",color:"var(--text3)",cursor:"pointer",fontSize:11,fontFamily:"inherit"}}>🖼️</button>}
                                   <button onClick={()=>addTextBlock(block.id)} style={{padding:"3px 9px",borderRadius:6,border:"1px solid var(--border)",background:"var(--bg2)",color:"var(--text3)",cursor:"pointer",fontSize:11,fontFamily:"inherit"}}>+</button>
                                   {blocks.length>1&&<button onClick={()=>removeBlock(block.id)} style={{padding:"3px 9px",borderRadius:6,border:"1px solid rgba(255,71,87,.3)",background:"rgba(255,71,87,.06)",color:"var(--danger)",cursor:"pointer",fontSize:11,fontFamily:"inherit"}}>✕</button>}
+                                </div>
+                              </div>
+                            ):block.type==="image-pair"?(
+                              <div style={{borderRadius:12,overflow:"hidden",border:"2px solid oklch(.75 .12 300 / 50%)"}}>
+                                <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"7px 12px",background:"oklch(.75 .12 300 / 8%)"}}>
+                                  <span style={{fontSize:11,fontWeight:700,color:"oklch(.75 .12 300)"}}>🖼️🖼️ 2열 나란히</span>
+                                  <button onClick={()=>removeBlock(block.id)} style={{background:"transparent",border:"none",color:"var(--text3)",cursor:"pointer",fontSize:14}}>✕</button>
+                                </div>
+                                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:4,padding:"8px 12px"}}>
+                                  {(block as ImagePairBlock).images.map((img,i)=>(
+                                    <div key={i} style={{borderRadius:8,overflow:"hidden",aspectRatio:"1/1",background:"var(--bg2)"}}>
+                                      {img.src?<img src={img.src} alt={img.alt} style={{width:"100%",height:"100%",objectFit:"cover",display:"block"}} onError={e=>{(e.target as HTMLImageElement).style.display="none";}}/>
+                                      :<div style={{width:"100%",height:"100%",display:"flex",alignItems:"center",justifyContent:"center",color:"var(--text3)",fontSize:11}}>📁 {i+1}번</div>}
+                                    </div>
+                                  ))}
                                 </div>
                               </div>
                             ):(
@@ -2390,7 +2474,7 @@ POST3: (제목)|(이유)
                 </div>
               </div>
             )}
-          </div>
+          </div>{/* main */}
         </div>{/* layout */}
 
         <div className="mob-bar">
@@ -2441,6 +2525,15 @@ POST3: (제목)|(이유)
           </div>
         </div>
       )}
+
+      {/* 토스트 알림 */}
+      <div className="toast-wrap">
+        {toasts.map(t=>(
+          <div key={t.id} className={`toast toast-${t.type}`}>
+            {t.msg}
+          </div>
+        ))}
+      </div>
     </>
   );
 }
