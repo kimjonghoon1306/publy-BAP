@@ -2031,6 +2031,17 @@ POST3: (제목)|(이유)
 
                 {/* ── 발행 준비도 + 설정 스티키 바 ── */}
                 <div className="pub-sticky-bar">
+                  {/* 플랫폼 토글 - 항상 보임 */}
+                  <div style={{display:"flex",gap:6,flexShrink:0}}>
+                    {([{p:"naver",ico:"🟢",name:"네이버",c:"var(--naver)"},{p:"tistory",ico:"🟠",name:"티스토리",c:"var(--tistory)"}] as const).map(({p,ico,name,c})=>(
+                      <button key={p} onClick={()=>{setPlatform(p);if(pubAccId)loadCategories(p);}}
+                        style={{display:"flex",alignItems:"center",gap:5,padding:"6px 12px",borderRadius:8,border:`2px solid ${platform===p?c:"var(--border)"}`,background:platform===p?`${c}18`:"var(--bg)",cursor:"pointer",fontFamily:"inherit",fontSize:12,fontWeight:700,color:"var(--text)",whiteSpace:"nowrap",transition:"all .15s"}}>
+                        <span>{ico}</span>{name}{platform===p&&<span style={{color:c}}>✓</span>}
+                      </button>
+                    ))}
+                  </div>
+                  <div style={{width:1,height:20,background:"var(--border)",flexShrink:0}}/>
+                  {/* 준비도 체크 */}
                   <div className="pub-ready">
                     {[
                       {label:"제목",ok:!!pubTitle},
