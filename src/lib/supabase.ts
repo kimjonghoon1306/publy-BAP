@@ -147,7 +147,7 @@ export async function upsertAccount(account: Partial<PublyAccount> & { password_
 }
 
 // ── 관리자 비밀번호 (Supabase 저장) ──────────────────────
-const ADMIN_ROW_ID = "admin-publy";
+const ADMIN_ROW_ID = "00000000-0000-0000-0000-000000000001"; // 관리자 전용 고정 UUID
 const ADMIN_DEFAULT_PW = "123456";
 
 export async function verifyAdminPassword(pw: string): Promise<boolean> {
