@@ -1,5 +1,4 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
-import * as XLSX from "xlsx";
 import { supabase, getAccounts, upsertAccount, PublyAccount, getHistory, PublyHistory, addHistory, deleteHistory, deleteAllHistory, setAdminPassword, saveAdminNaverApiKeys, getNaverApiKeys, NaverApiKeys, getNaverDailyUsage, NAVER_DAILY_LIMIT } from "../lib/supabase";
 
 interface Props {
@@ -793,37 +792,35 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
   }
 
   function exportToExcel() {
+    const headers = ["이름","이메일","연락처","등급","활성여부","마지막 결제일","다음 결제일(만료일)","총 발행 건수","사용한 건수","남은 건수","발행 이력","가입일","회원 ID"];
     const rows = users.map(u => {
       const lastPay = u.payments?.[0];
-      const lastPayDate = lastPay ? new Date(lastPay.created_at).toLocaleDateString("ko-KR") : "—";
-      const nextPayDate = u.quota?.reset_date ? new Date(u.quota.reset_date).toLocaleDateString("ko-KR") : "—";
-      const remaining = u.quota?.remaining_quota ?? 0;
-      const total = u.quota?.total_quota ?? 0;
-      const used = u.quota?.used_quota ?? 0;
-      return {
-        "이름": u.name || "—",
-        "이메일": u.email,
-        "연락처": u.phone || "—",
-        "등급": (PLAN_LABELS[u.plan] || u.plan).toUpperCase(),
-        "활성여부": u.is_active ? "활성" : "비활성",
-        "마지막 결제일": lastPayDate,
-        "다음 결제일 (만료일)": nextPayDate,
-        "총 발행 건수": total,
-        "사용한 건수": used,
-        "남은 건수": remaining,
-        "발행 이력": u.history_count ?? 0,
-        "가입일": new Date(u.created_at).toLocaleDateString("ko-KR"),
-        "회원 ID": u.id,
-      };
+      return [
+        u.name||"",
+        u.email,
+        u.phone||"",
+        (PLAN_LABELS[u.plan]||u.plan).toUpperCase(),
+        u.is_active?"활성":"비활성",
+        lastPay?new Date(lastPay.created_at).toLocaleDateString("ko-KR"):"",
+        u.quota?.reset_date?new Date(u.quota.reset_date).toLocaleDateString("ko-KR"):"",
+        u.quota?.total_quota??0,
+        u.quota?.used_quota??0,
+        u.quota?.remaining_quota??0,
+        u.history_count??0,
+        new Date(u.created_at).toLocaleDateString("ko-KR"),
+        u.id,
+      ];
     });
-    const ws = XLSX.utils.json_to_sheet(rows);
-    // 컬럼 너비 자동 조정
-    const colWidths = Object.keys(rows[0] || {}).map(k => ({wch: Math.max(k.length + 2, 14)}));
-    ws["!cols"] = colWidths;
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "회원목록");
-    const today = new Date().toISOString().slice(0,10);
-    XLSX.writeFile(wb, `publy_회원목록_${today}.xlsx`);
+    // BOM + CSV (Excel에서 한글 깨짐 방지)
+    const escape = (v:any)=>{const s=String(v!=null?v:"");return s.includes(",")||s.includes("\n")||s.includes('"')?`"${s.replace(/"/g,'""')}"`:s;};
+    const csv="\uFEFF"+[headers,...rows].map(r=>r.map(escape).join(",")).join("\n");
+    const blob=new Blob([csv],{type:"text/csv;charset=utf-8;"});
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement("a");
+    a.href=url;
+    a.download=`publy_회원목록_${new Date().toISOString().slice(0,10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
   }
 
   // 이미지 프롬프트 (KO_EN_MAP 축약 버전)
