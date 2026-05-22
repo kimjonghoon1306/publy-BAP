@@ -2708,36 +2708,34 @@ POST3: (제목)|(이유)
 
       {/* 황금 키워드 분석 설명 팝업 */}
       {showKwInfo&&(
-        <div style={{position:"fixed",inset:0,zIndex:999,background:"rgba(0,0,0,.8)",display:"flex",alignItems:"center",justifyContent:"center",padding:20}} onClick={()=>setShowKwInfo(false)}>
-          <div style={{width:"100%",maxWidth:460,borderRadius:20,background:"var(--card)",border:"1px solid var(--border)",overflow:"hidden",animation:"fadeUp .25s ease",boxShadow:"0 24px 60px rgba(0,0,0,.5)"}} onClick={e=>e.stopPropagation()}>
-            {/* 헤더 */}
+        <div style={{position:"fixed",inset:0,zIndex:9000,background:"rgba(0,0,0,.85)",display:"flex",alignItems:"center",justifyContent:"center",padding:20}} onClick={()=>setShowKwInfo(false)}>
+          <div style={{width:"100%",maxWidth:460,borderRadius:20,background:"#1a1f2e",border:"1px solid #2d3548",overflow:"hidden",animation:"fadeUp .25s ease",boxShadow:"0 24px 60px rgba(0,0,0,.7)"}} onClick={e=>e.stopPropagation()}>
             <div style={{background:"linear-gradient(135deg,#ff6b9d,#ff4081)",padding:"20px 24px",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
               <div>
                 <div style={{fontSize:18,fontWeight:900,color:"#fff"}}>📊 황금 키워드 분석</div>
-                <div style={{fontSize:12,color:"rgba(255,255,255,.8)",marginTop:3}}>네이버 실데이터 기반 키워드 점수 분석</div>
+                <div style={{fontSize:12,color:"rgba(255,255,255,.85)",marginTop:3}}>네이버 실데이터 기반 키워드 점수 분석</div>
               </div>
-              <button onClick={()=>setShowKwInfo(false)} style={{background:"rgba(255,255,255,.2)",border:"none",color:"#fff",width:32,height:32,borderRadius:8,cursor:"pointer",fontSize:16,display:"flex",alignItems:"center",justifyContent:"center"}}>✕</button>
+              <button onClick={()=>setShowKwInfo(false)} style={{background:"rgba(255,255,255,.25)",border:"none",color:"#fff",width:32,height:32,borderRadius:8,cursor:"pointer",fontSize:16,display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"inherit"}}>✕</button>
             </div>
-            {/* 내용 */}
             <div style={{padding:20,display:"flex",flexDirection:"column",gap:10}}>
               {[
                 {ico:"🎯",title:"어떤 기능이야?",desc:"네이버 검색광고 API로 실제 검색량·경쟁도·CPC를 가져와서 내 키워드가 얼마나 좋은지 점수로 보여줘요"},
                 {ico:"⭐",title:"황금점수 계산 방법",desc:"경쟁 낮음(35%) + 검색량 1천~3만(25%) + 클릭률(15%) + CPC 단가(25%)\n+ 구매의도 단어·롱테일 키워드 보너스"},
                 {ico:"👆",title:"어떻게 써?",desc:"점수 높은 키워드 클릭 → 키워드 자동 입력\n\"제목 추천 →\" 버튼으로 바로 SEO 제목 생성!"},
-                {ico:"📅",title:"무료 사용 한도",desc:`무료회원 ${NAVER_DAILY_LIMIT.free}회/일 · PRO ${NAVER_DAILY_LIMIT.pro}회/일\n설정탭에서 내 API 키 입력하면 한도 없이 무제한 사용`},
-                {ico:"💻",title:"봇이 필요해요",desc:"키워드 분석은 PC에서 Publy 봇이 실행 중이어야 사용 가능해요"},
+                {ico:"📅",title:"무료 사용 한도",desc:`FREE ${NAVER_DAILY_LIMIT.free}회/일 · PRO ${NAVER_DAILY_LIMIT.pro}회/일\n설정탭에서 내 API 키 입력하면 한도 없이 무제한!`},
+                {ico:"💻",title:"봇이 필요해요",desc:"PC에서 Publy 봇이 실행 중이어야 사용 가능해요"},
               ].map((item,i)=>(
-                <div key={i} style={{display:"flex",gap:12,padding:"12px 14px",borderRadius:12,background:"var(--bg2)"}}>
+                <div key={i} style={{display:"flex",gap:12,padding:"12px 14px",borderRadius:12,background:"#242938"}}>
                   <span style={{fontSize:22,flexShrink:0,lineHeight:1}}>{item.ico}</span>
                   <div>
-                    <div style={{fontSize:13,fontWeight:800,color:"var(--text)",marginBottom:4}}>{item.title}</div>
-                    <div style={{fontSize:12,color:"var(--text2)",lineHeight:1.65,whiteSpace:"pre-line"}}>{item.desc}</div>
+                    <div style={{fontSize:13,fontWeight:800,color:"#ffffff",marginBottom:4}}>{item.title}</div>
+                    <div style={{fontSize:12,color:"#a0aec0",lineHeight:1.7,whiteSpace:"pre-line"}}>{item.desc}</div>
                   </div>
                 </div>
               ))}
             </div>
             <div style={{padding:"0 20px 20px"}}>
-              <button onClick={()=>setShowKwInfo(false)} style={{width:"100%",padding:"12px",borderRadius:12,border:"none",background:"linear-gradient(135deg,#ff6b9d,#ff4081)",color:"#fff",fontSize:14,fontWeight:800,cursor:"pointer",fontFamily:"inherit",boxShadow:"0 4px 14px rgba(255,64,129,.35)"}}>
+              <button onClick={()=>setShowKwInfo(false)} style={{width:"100%",padding:"13px",borderRadius:12,border:"none",background:"linear-gradient(135deg,#ff6b9d,#ff4081)",color:"#fff",fontSize:15,fontWeight:800,cursor:"pointer",fontFamily:"inherit",boxShadow:"0 4px 14px rgba(255,64,129,.4)"}}>
                 알겠어요! 👍
               </button>
             </div>
