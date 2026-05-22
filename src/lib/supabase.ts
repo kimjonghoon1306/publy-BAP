@@ -145,3 +145,50 @@ export async function upsertAccount(account: Partial<PublyAccount> & { password_
   const { error } = await supabase.from("publy_accounts").upsert(account);
   if (error) throw new Error(error.message);
 }
+
+// ── 관리자 비밀번호 (Supabase 저장) ──────────────────────
+const ADMIN_ROW_ID = "admin-publy";
+const ADMIN_DEFAULT_PW = "123456";
+
+export async function verifyAdminPassword(pw: string): Promise<boolean> {
+  try {
+    const { data } = await supabase
+      .from("publy_users")
+      .select("password_hash")
+      .eq("id", ADMIN_ROW_ID)
+      .single();
+    if (!data?.password_hash) return pw === ADMIN_DEFAULT_PW;
+    return bcrypt.compare(pw, data.password_hash);
+  } catch {
+    return pw === ADMIN_DEFAULT_PW;
+  }
+}
+
+export async function setAdminPassword(newPw: string): Promise<void> {
+  const hash = await bcrypt.hash(newPw, 10);
+  const { error } = await supabase.from("publy_users").upsert(
+    { id: ADMIN_ROW_ID, email: "admin@publy.local", name: "관리자", password_hash: hash, plan: "pro" as const, app_type: "both" as const, is_active: true },
+    { onConflict: "id" }
+  );
+  if (error) throw new Error(error.message);
+  // 구버전 localStorage 키 정리
+  localStorage.removeItem("publy_admin_pw");
+}
+
+// ── 일반 회원 비밀번호 변경 ───────────────────────────────
+export async function changeUserPassword(userId: string, currentPw: string, newPw: string): Promise<void> {
+  const { data: user } = await supabase
+    .from("publy_users")
+    .select("password_hash")
+    .eq("id", userId)
+    .single();
+  if (!user) throw new Error("사용자를 찾을 수 없습니다");
+  const match = await bcrypt.compare(currentPw, user.password_hash);
+  if (!match) throw new Error("현재 비밀번호가 올바르지 않습니다");
+  const newHash = await bcrypt.hash(newPw, 10);
+  const { error } = await supabase
+    .from("publy_users")
+    .update({ password_hash: newHash })
+    .eq("id", userId);
+  if (error) throw new Error(error.message);
+}
