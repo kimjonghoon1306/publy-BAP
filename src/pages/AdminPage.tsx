@@ -513,6 +513,7 @@ const TABS = [
 
 export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: Props) {
   const [tab, setTab] = useState<"keyword"|"write"|"image"|"publish"|"manage"|"accounts"|"rank"|"users"|"stats"|"settings">("keyword");
+  const [statsSubTab, setStatsSubTab] = useState<"mine"|"all">("mine");
   const [showGuide, setShowGuide] = useState(false);
   const [guideTab, setGuideTab] = useState(0);
   const [botOnline, setBotOnline] = useState(false);
@@ -2776,56 +2777,138 @@ POST3: (제목)|(이유)
             {/* ───── 📊 통계 ───── */}
             {tab === "stats" && (
               <div style={{animation:"fadeUp .25s ease both"}}>
-                <div className="stats-grid">
-                  {[
-                    {label:"전체 회원",value:users.length,sub:"가입 회원 수",color:"var(--accent-text)"},
-                    {label:"활성 회원",value:users.filter(u=>u.is_active).length,sub:"현재 이용 중",color:"var(--success)"},
-                    {label:"PRO 회원",value:users.filter(u=>u.plan==="pro").length,sub:"최상위 플랜",color:"var(--info)"},
-                    {label:"BASIC 회원",value:users.filter(u=>u.plan==="basic").length,sub:"기본 플랜",color:"var(--warn)"},
-                    {label:"FREE 회원",value:users.filter(u=>u.plan==="free").length,sub:"무료 플랜",color:"var(--text2)"},
-                    {label:"총 발행 건수",value:users.reduce((s,u)=>s+(u.history_count||0),0),sub:"전체 합산",color:"var(--danger)"},
-                  ].map((s,i)=>(
-                    <div key={i} className="stats-card">
-                      <div className="stats-num" style={{color:s.color}}>{s.value.toLocaleString()}</div>
-                      <div className="stats-label">{s.label}</div>
-                      <div className="stats-sub">{s.sub}</div>
-                    </div>
+
+                {/* 서브탭 */}
+                <div style={{display:"flex",gap:6,marginBottom:16,background:"var(--card)",border:"1px solid var(--border)",borderRadius:12,padding:4}}>
+                  {([{k:"mine",l:"👤 내 통계"},{k:"all",l:"👥 전체 통계"}] as const).map(t=>(
+                    <button key={t.k} onClick={()=>setStatsSubTab(t.k)}
+                      style={{flex:1,padding:"9px",borderRadius:9,border:"none",cursor:"pointer",fontSize:13,fontWeight:700,fontFamily:"inherit",
+                        background:statsSubTab===t.k?"var(--accent-bg)":"transparent",
+                        color:statsSubTab===t.k?"var(--accent-text)":"var(--text2)",
+                        borderBottom:statsSubTab===t.k?"2px solid var(--accent)":"2px solid transparent",
+                        transition:"all .15s"}}>
+                      {t.l}
+                    </button>
                   ))}
                 </div>
 
-                <div className="card">
-                  <div className="card-title">📋 플랜 분포</div>
-                  {(["pro","basic","free"] as const).map(plan=>{
-                    const cnt = users.filter(u=>u.plan===plan).length;
-                    const pct = users.length>0?Math.round((cnt/users.length)*100):0;
-                    return (
-                      <div key={plan} style={{marginBottom:14}}>
-                        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:5}}>
-                          <span style={{fontSize:13,fontWeight:600}}><span className={`plan-chip plan-${plan}`}>{PLAN_LABELS[plan]}</span></span>
-                          <span style={{fontSize:12,fontWeight:700,color:"var(--text2)"}}>{cnt}명 ({pct}%)</span>
-                        </div>
-                        <div style={{height:8,background:"var(--border)",borderRadius:99,overflow:"hidden"}}>
-                          <div style={{height:"100%",width:`${pct}%`,background:plan==="pro"?"var(--info)":plan==="basic"?"var(--warn)":"var(--text3)",borderRadius:99,transition:"width .6s"}}/>
+                {/* 내 통계 */}
+                {statsSubTab==="mine"&&(()=>{
+                  const now=new Date();
+                  const thisWeek=history.filter(h=>{const d=new Date(h.published_at);return(now.getTime()-d.getTime())/(1000*60*60*24)<=7;});
+                  const thisMonth=history.filter(h=>new Date(h.published_at).getMonth()===now.getMonth()&&new Date(h.published_at).getFullYear()===now.getFullYear());
+                  const success=history.filter(h=>h.status==="success");
+                  const successRate=history.length>0?Math.round((success.length/history.length)*100):0;
+                  const naverCnt=success.filter(h=>h.platform==="naver").length;
+                  const tistoryCnt=success.filter(h=>h.platform==="tistory").length;
+                  const estViews=success.length*120;
+                  const estRevenue=Math.round(estViews*0.35);
+                  return(
+                    <div>
+                      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(120px,1fr))",gap:10,marginBottom:14}}>
+                        {[
+                          {label:"이번 주 발행",value:`${thisWeek.length}건`,color:"var(--accent-text)"},
+                          {label:"이번 달 발행",value:`${thisMonth.length}건`,color:"var(--info)"},
+                          {label:"누적 발행",value:`${history.length}건`,color:"var(--success)"},
+                          {label:"성공률",value:`${successRate}%`,color:successRate>=80?"var(--success)":successRate>=50?"var(--warn)":"var(--danger)"},
+                          {label:"예상 누적 조회",value:`${estViews.toLocaleString()}회`,color:"var(--purple)"},
+                          {label:"예상 수익",value:`₩${estRevenue.toLocaleString()}`,color:"var(--warn)"},
+                        ].map((s,i)=>(
+                          <div key={i} style={{padding:"12px 14px",borderRadius:12,background:"var(--card)",border:"1px solid var(--border)",textAlign:"center"}}>
+                            <div style={{fontSize:18,fontWeight:900,color:s.color,fontFamily:"'Space Grotesk',sans-serif"}}>{s.value}</div>
+                            <div style={{fontSize:11,color:"var(--text3)",marginTop:4,fontWeight:600}}>{s.label}</div>
+                          </div>
+                        ))}
+                      </div>
+                      <div className="card">
+                        <div className="card-title" style={{marginBottom:14}}>📋 플랫폼별 발행</div>
+                        <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                          <div style={{flex:1,minWidth:120,padding:"12px 16px",borderRadius:10,background:"rgba(3,199,90,.08)",border:"1px solid rgba(3,199,90,.2)"}}>
+                            <div style={{fontSize:11,color:"var(--naver)",fontWeight:700,marginBottom:4}}>🟢 네이버</div>
+                            <div style={{fontSize:22,fontWeight:900,color:"var(--naver)"}}>{naverCnt}건</div>
+                          </div>
+                          <div style={{flex:1,minWidth:120,padding:"12px 16px",borderRadius:10,background:"rgba(255,107,53,.08)",border:"1px solid rgba(255,107,53,.2)"}}>
+                            <div style={{fontSize:11,color:"var(--tistory)",fontWeight:700,marginBottom:4}}>🟠 티스토리</div>
+                            <div style={{fontSize:22,fontWeight:900,color:"var(--tistory)"}}>{tistoryCnt}건</div>
+                          </div>
                         </div>
                       </div>
-                    );
-                  })}
-                </div>
-
-                <div className="card">
-                  <div className="card-title">🏆 발행 TOP 10</div>
-                  {[...users].sort((a,b)=>(b.history_count||0)-(a.history_count||0)).slice(0,10).map((u,i)=>(
-                    <div key={u.id} style={{display:"flex",alignItems:"center",gap:12,padding:"10px 0",borderBottom:"1px solid var(--border)"}}>
-                      <span style={{fontSize:16,fontWeight:900,color:i<3?"var(--warn)":"var(--text3)",width:24,textAlign:"center"}}>{i+1}</span>
-                      <div className="user-avatar" style={{width:30,height:30,fontSize:12}}>{(u.name||u.email)[0].toUpperCase()}</div>
-                      <div style={{flex:1,minWidth:0}}>
-                        <div style={{fontSize:13,fontWeight:700,color:"var(--text)"}}>{u.name||"이름없음"}</div>
-                        <div style={{fontSize:11,color:"var(--text2)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{u.email}</div>
+                      <div className="card" style={{marginTop:14}}>
+                        <div className="card-title" style={{marginBottom:14}}>📜 최근 발행 기록</div>
+                        {history.length===0?(
+                          <div style={{textAlign:"center",padding:"24px",color:"var(--text3)",fontSize:13}}>발행 기록이 없어요</div>
+                        ):history.slice(0,10).map((h,i)=>(
+                          <div key={h.id} style={{display:"flex",alignItems:"center",gap:10,padding:"9px 0",borderBottom:"1px solid var(--border)"}}>
+                            <span style={{fontSize:18,flexShrink:0}}>{h.platform==="naver"?"🟢":"🟠"}</span>
+                            <div style={{flex:1,minWidth:0}}>
+                              <div style={{fontSize:13,fontWeight:600,color:"var(--text)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{h.title}</div>
+                              <div style={{fontSize:11,color:"var(--text3)",marginTop:2}}>{new Date(h.published_at).toLocaleString("ko-KR")}</div>
+                            </div>
+                            <span style={{fontSize:11,fontWeight:700,padding:"3px 9px",borderRadius:99,flexShrink:0,
+                              background:h.status==="success"?"rgba(0,214,143,.1)":h.status==="fail"?"rgba(255,83,99,.1)":"rgba(255,159,63,.1)",
+                              color:h.status==="success"?"var(--success)":h.status==="fail"?"var(--danger)":"var(--warn)"}}>
+                              {h.status==="success"?"✅ 성공":h.status==="fail"?"❌ 실패":"⏳ 대기"}
+                            </span>
+                          </div>
+                        ))}
                       </div>
-                      <span style={{fontSize:14,fontWeight:800,color:"var(--accent-text)"}}>{u.history_count||0}건</span>
                     </div>
-                  ))}
-                </div>
+                  );
+                })()}
+
+                {/* 전체 통계 */}
+                {statsSubTab==="all"&&(
+                  <div>
+                    <div className="stats-grid">
+                      {[
+                        {label:"전체 회원",value:users.length,sub:"가입 회원 수",color:"var(--accent-text)"},
+                        {label:"활성 회원",value:users.filter(u=>u.is_active).length,sub:"현재 이용 중",color:"var(--success)"},
+                        {label:"PRO 회원",value:users.filter(u=>u.plan==="pro").length,sub:"최상위 플랜",color:"var(--info)"},
+                        {label:"BASIC 회원",value:users.filter(u=>u.plan==="basic").length,sub:"기본 플랜",color:"var(--warn)"},
+                        {label:"FREE 회원",value:users.filter(u=>u.plan==="free").length,sub:"무료 플랜",color:"var(--text2)"},
+                        {label:"총 발행 건수",value:users.reduce((s,u)=>s+(u.history_count||0),0),sub:"전체 합산",color:"var(--danger)"},
+                      ].map((s,i)=>(
+                        <div key={i} className="stats-card">
+                          <div className="stats-num" style={{color:s.color}}>{s.value.toLocaleString()}</div>
+                          <div className="stats-label">{s.label}</div>
+                          <div className="stats-sub">{s.sub}</div>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="card">
+                      <div className="card-title">📋 플랜 분포</div>
+                      {(["pro","basic","free"] as const).map(plan=>{
+                        const cnt = users.filter(u=>u.plan===plan).length;
+                        const pct = users.length>0?Math.round((cnt/users.length)*100):0;
+                        return (
+                          <div key={plan} style={{marginBottom:14}}>
+                            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:5}}>
+                              <span style={{fontSize:13,fontWeight:600}}><span className={`plan-chip plan-${plan}`}>{PLAN_LABELS[plan]}</span></span>
+                              <span style={{fontSize:12,fontWeight:700,color:"var(--text2)"}}>{cnt}명 ({pct}%)</span>
+                            </div>
+                            <div style={{height:8,background:"var(--border)",borderRadius:99,overflow:"hidden"}}>
+                              <div style={{height:"100%",width:`${pct}%`,background:plan==="pro"?"var(--info)":plan==="basic"?"var(--warn)":"var(--text3)",borderRadius:99,transition:"width .6s"}}/>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                    <div className="card">
+                      <div className="card-title">🏆 발행 TOP 10</div>
+                      {[...users].sort((a,b)=>(b.history_count||0)-(a.history_count||0)).slice(0,10).map((u,i)=>(
+                        <div key={u.id} style={{display:"flex",alignItems:"center",gap:12,padding:"10px 0",borderBottom:"1px solid var(--border)"}}>
+                          <span style={{fontSize:16,fontWeight:900,color:i<3?"var(--warn)":"var(--text3)",width:24,textAlign:"center"}}>{i+1}</span>
+                          <div className="user-avatar" style={{width:30,height:30,fontSize:12}}>{(u.name||u.email)[0].toUpperCase()}</div>
+                          <div style={{flex:1,minWidth:0}}>
+                            <div style={{fontSize:13,fontWeight:700,color:"var(--text)"}}>{u.name||"이름없음"}</div>
+                            <div style={{fontSize:11,color:"var(--text2)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{u.email}</div>
+                          </div>
+                          <span style={{fontSize:14,fontWeight:800,color:"var(--accent-text)"}}>{u.history_count||0}건</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 
