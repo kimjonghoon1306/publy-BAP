@@ -476,6 +476,13 @@ select.field-inp{cursor:pointer;appearance:auto;}
 @media(max-width:768px){
   .flow-nav{flex-direction:column;align-items:stretch;}
   .flow-btn{justify-content:center;font-size:16px;padding:16px 22px;}
+.app.large{font-size:16px;}
+.app.large .nav-item{font-size:15px;padding:13px 12px;}
+.app.large .card-title{font-size:14px;}
+.app.large .inp{font-size:16px;padding:13px 14px;}
+.app.large .inp-label{font-size:14px;}
+.app.large .btn{font-size:15px;padding:13px 22px;}
+.app.large .btn-sm{font-size:13px;padding:10px 16px;}
 }
 .toast-wrap{position:fixed;bottom:28px;right:24px;z-index:9999;display:flex;flex-direction:column;gap:8px;pointer-events:none;}
 .toast{padding:12px 18px;border-radius:12px;font-size:13px;font-weight:700;font-family:'Noto Sans KR',sans-serif;box-shadow:0 4px 24px rgba(0,0,0,.35);animation:toastIn .25s ease;pointer-events:all;display:flex;align-items:center;gap:8px;max-width:320px;}
@@ -514,6 +521,7 @@ const TABS = [
 export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: Props) {
   const [tab, setTab] = useState<"keyword"|"write"|"image"|"publish"|"manage"|"accounts"|"rank"|"users"|"stats"|"settings">("keyword");
   const [statsSubTab, setStatsSubTab] = useState<"mine"|"all">("mine");
+  const [fontMode, setFontMode] = useState<"normal"|"large">(()=>(localStorage.getItem("publy_adm_font_mode")||"normal") as "normal"|"large");
   const [showGuide, setShowGuide] = useState(false);
   const [guideTab, setGuideTab] = useState(0);
   const [botOnline, setBotOnline] = useState(false);
@@ -594,6 +602,10 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
   const [scheduleOn, setScheduleOn] = useState(false);
   const [scheduleTime, setScheduleTime] = useState("");
   const [newPw1, setNewPw1] = useState(""); const [newPw2, setNewPw2] = useState(""); const [pwMsg, setPwMsg] = useState("");
+  const [noticeTitle, setNoticeTitle] = useState("");
+  const [noticeBody, setNoticeBody] = useState("");
+  const [noticeSaving, setNoticeSaving] = useState(false);
+  const [noticeMsg, setNoticeMsg] = useState("");
   const [adminNaverKeys, setAdminNaverKeys] = useState<NaverApiKeys>({});
   const [adminNaverSaving, setAdminNaverSaving] = useState(false);
   const [adminNaverMsg, setAdminNaverMsg] = useState("");
@@ -1562,7 +1574,7 @@ POST3: (제목)|(이유)
   return (
     <>
       <style>{CSS}</style>
-      <div className={`app ${theme}`}>
+      <div className={`app ${theme} ${fontMode==="large"?"large":""}`}>
 
         {/* ── 관리자 사용설명서 모달 ── */}
         {showGuide && (() => {
@@ -2262,10 +2274,36 @@ POST3: (제목)|(이유)
             {tab === "manage" && (
               <div style={{animation:"fadeUp .25s ease both"}}>
 
-                {/* 발행 기록 */}
+                {/* 요약 카드 */}
+                {(()=>{
+                  const success=history.filter(h=>h.status==="success");
+                  const fail=history.filter(h=>h.status==="fail");
+                  const pending=history.filter(h=>h.status==="pending");
+                  const naverCnt=success.filter(h=>h.platform==="naver").length;
+                  const tistoryCnt=success.filter(h=>h.platform==="tistory").length;
+                  return(
+                    <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(110px,1fr))",gap:10,marginBottom:14}}>
+                      {[
+                        {label:"전체 발행",value:history.length,color:"var(--text)"},
+                        {label:"✅ 성공",value:success.length,color:"var(--success)"},
+                        {label:"❌ 실패",value:fail.length,color:"var(--danger)"},
+                        {label:"⏳ 대기",value:pending.length,color:"var(--warn)"},
+                        {label:"🟢 네이버",value:naverCnt,color:"var(--naver)"},
+                        {label:"🟠 티스토리",value:tistoryCnt,color:"var(--tistory)"},
+                      ].map((s,i)=>(
+                        <div key={i} style={{padding:"12px 14px",borderRadius:12,background:"var(--card)",border:"1px solid var(--border)",textAlign:"center"}}>
+                          <div style={{fontSize:20,fontWeight:900,color:s.color,fontFamily:"'Space Grotesk',sans-serif"}}>{s.value}</div>
+                          <div style={{fontSize:11,color:"var(--text3)",marginTop:4,fontWeight:600}}>{s.label}</div>
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })()}
+
+                {/* 전체 발행 기록 */}
                 <div className="card">
                   <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:14}}>
-                    <div className="card-title" style={{margin:0}}>📋 발행 기록</div>
+                    <div className="card-title" style={{margin:0}}>📋 전체 발행 기록</div>
                     <div style={{display:"flex",gap:8,alignItems:"center"}}>
                       <span style={{fontSize:13,color:"var(--text2)"}}>총 {history.length}건</span>
                       {history.length>0&&<button className="btn btn-danger btn-sm" onClick={async()=>{if(!confirm("전체 삭제할까요?"))return;await deleteAllHistory(ADM_UID);setHistory([]);}}>🗑 전체삭제</button>}
@@ -2283,7 +2321,9 @@ POST3: (제목)|(이유)
                         <div style={{fontSize:13,fontWeight:700,color:"var(--text)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{h.title}</div>
                         <div style={{fontSize:11,color:"var(--text2)",marginTop:2}}>{new Date(h.published_at).toLocaleString("ko-KR")}</div>
                       </div>
-                      <span style={{fontSize:11,fontWeight:700,padding:"3px 8px",borderRadius:99,background:h.status==="success"?"var(--accent-bg)":h.status==="fail"?"rgba(255,71,87,.1)":"rgba(255,179,71,.1)",color:h.status==="success"?"var(--accent-text)":h.status==="fail"?"var(--danger)":"var(--warn)",flexShrink:0}}>
+                      <span style={{fontSize:11,fontWeight:700,padding:"3px 8px",borderRadius:99,flexShrink:0,
+                        background:h.status==="success"?"var(--accent-bg)":h.status==="fail"?"rgba(255,71,87,.1)":"rgba(255,179,71,.1)",
+                        color:h.status==="success"?"var(--accent-text)":h.status==="fail"?"var(--danger)":"var(--warn)"}}>
                         {h.status==="success"?"✅ 성공":h.status==="fail"?"❌ 실패":"⏳ 대기"}
                       </span>
                       {h.post_url&&<a href={h.post_url} target="_blank" rel="noopener noreferrer" style={{fontSize:12,color:"var(--accent-text)",fontWeight:700,flexShrink:0}}>보기</a>}
@@ -2833,25 +2873,7 @@ POST3: (제목)|(이유)
                           </div>
                         </div>
                       </div>
-                      <div className="card" style={{marginTop:14}}>
-                        <div className="card-title" style={{marginBottom:14}}>📜 최근 발행 기록</div>
-                        {history.length===0?(
-                          <div style={{textAlign:"center",padding:"24px",color:"var(--text3)",fontSize:13}}>발행 기록이 없어요</div>
-                        ):history.slice(0,10).map((h,i)=>(
-                          <div key={h.id} style={{display:"flex",alignItems:"center",gap:10,padding:"9px 0",borderBottom:"1px solid var(--border)"}}>
-                            <span style={{fontSize:18,flexShrink:0}}>{h.platform==="naver"?"🟢":"🟠"}</span>
-                            <div style={{flex:1,minWidth:0}}>
-                              <div style={{fontSize:13,fontWeight:600,color:"var(--text)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{h.title}</div>
-                              <div style={{fontSize:11,color:"var(--text3)",marginTop:2}}>{new Date(h.published_at).toLocaleString("ko-KR")}</div>
-                            </div>
-                            <span style={{fontSize:11,fontWeight:700,padding:"3px 9px",borderRadius:99,flexShrink:0,
-                              background:h.status==="success"?"rgba(0,214,143,.1)":h.status==="fail"?"rgba(255,83,99,.1)":"rgba(255,159,63,.1)",
-                              color:h.status==="success"?"var(--success)":h.status==="fail"?"var(--danger)":"var(--warn)"}}>
-                              {h.status==="success"?"✅ 성공":h.status==="fail"?"❌ 실패":"⏳ 대기"}
-                            </span>
-                          </div>
-                        ))}
-                      </div>
+
                     </div>
                   );
                 })()}
@@ -2915,6 +2937,56 @@ POST3: (제목)|(이유)
             {/* ───── 🔐 설정 ───── */}
             {tab === "settings" && (
               <div style={{animation:"fadeUp .25s ease both"}}>
+
+                {/* 큰 글씨 모드 */}
+                <div className="card">
+                  <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+                    <div>
+                      <div className="card-title" style={{marginBottom:4}}>🔠 큰 글씨 모드</div>
+                      <div style={{fontSize:12,color:"var(--text3)"}}>어르신·시력 불편한 분께 추천 — 전체 글씨 크기 확대</div>
+                    </div>
+                    <button onClick={()=>{const next=fontMode==="normal"?"large":"normal";setFontMode(next);localStorage.setItem("publy_adm_font_mode",next);}}
+                      style={{padding:"8px 20px",borderRadius:99,border:"none",cursor:"pointer",fontSize:13,fontWeight:800,fontFamily:"inherit",transition:"all .2s",
+                        background:fontMode==="large"?"var(--accent)":"var(--card2)",
+                        color:fontMode==="large"?"#000":"var(--text2)",
+                        boxShadow:fontMode==="large"?"0 3px 12px rgba(0,255,157,.3)":"none"}}>
+                      {fontMode==="large"?"✅ 켜짐":"OFF"}
+                    </button>
+                  </div>
+                </div>
+
+                {/* 공지 발송 */}
+                <div className="card">
+                  <div className="card-title" style={{marginBottom:4}}>📢 전체 공지 발송</div>
+                  <div style={{fontSize:12,color:"var(--text3)",marginBottom:12}}>저장하면 모든 회원이 다음 접속 시 팝업으로 확인해요</div>
+                  <div style={{display:"flex",flexDirection:"column",gap:10}}>
+                    <div>
+                      <label className="inp-label">공지 제목</label>
+                      <input className="inp" placeholder="예: 서비스 점검 안내" value={noticeTitle} onChange={e=>setNoticeTitle(e.target.value)}/>
+                    </div>
+                    <div>
+                      <label className="inp-label">공지 내용</label>
+                      <textarea className="inp" rows={4} placeholder="회원들에게 전달할 내용을 입력해주세요" value={noticeBody} onChange={e=>setNoticeBody(e.target.value)} style={{resize:"vertical"}}/>
+                    </div>
+                    <div style={{display:"flex",gap:8}}>
+                      <button className="btn btn-primary" disabled={noticeSaving||!noticeTitle||!noticeBody} onClick={async()=>{
+                        setNoticeSaving(true);setNoticeMsg("");
+                        try{
+                          const val=JSON.stringify({title:noticeTitle,body:noticeBody,active:true,created_at:Date.now().toString()});
+                          await supabase.from("publy_settings").upsert({key:"global_notice",value:val},{onConflict:"key"});
+                          setNoticeMsg("✅ 공지가 발송됐어요!");showToast("📢 공지 발송 완료!");
+                        }catch(e:any){setNoticeMsg("❌ "+e.message);}
+                        finally{setNoticeSaving(false);setTimeout(()=>setNoticeMsg(""),3000);}
+                      }}>{noticeSaving?<><span className="spinner"/>발송 중...</>:"📢 공지 발송"}</button>
+                      <button className="btn btn-secondary" onClick={async()=>{
+                        await supabase.from("publy_settings").upsert({key:"global_notice",value:JSON.stringify({active:false})},{onConflict:"key"});
+                        showToast("공지가 비활성화됐어요");
+                      }}>비활성화</button>
+                    </div>
+                    {noticeMsg&&<div className={`alert ${noticeMsg.includes("✅")?"alert-success":"alert-danger"}`} style={{margin:0}}>{noticeMsg}</div>}
+                  </div>
+                </div>
+
                 <div className="card">
                   <div className="card-title">🤖 글쓰기 AI</div>
                   <div className="ai-grid">
