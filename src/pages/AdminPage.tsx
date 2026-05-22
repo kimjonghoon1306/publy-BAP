@@ -477,6 +477,12 @@ select.field-inp{cursor:pointer;appearance:auto;}
   .flow-nav{flex-direction:column;align-items:stretch;}
   .flow-btn{justify-content:center;font-size:16px;padding:16px 22px;}
 }
+.toast-wrap{position:fixed;bottom:28px;right:24px;z-index:9999;display:flex;flex-direction:column;gap:8px;pointer-events:none;}
+.toast{padding:12px 18px;border-radius:12px;font-size:13px;font-weight:700;font-family:'Noto Sans KR',sans-serif;box-shadow:0 4px 24px rgba(0,0,0,.35);animation:toastIn .25s ease;pointer-events:all;display:flex;align-items:center;gap:8px;max-width:320px;}
+.toast-success{background:#1a2e1a;color:#4ade80;border:1px solid rgba(74,222,128,.25);}
+.toast-error{background:#2e1a1a;color:#f87171;border:1px solid rgba(248,113,113,.25);}
+.toast-info{background:#1a1f2e;color:#93c5fd;border:1px solid rgba(147,197,253,.25);}
+@keyframes toastIn{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}
 `;
 
 const TABS = [
@@ -578,6 +584,12 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
   const [adminNaverSaving, setAdminNaverSaving] = useState(false);
   const [adminNaverMsg, setAdminNaverMsg] = useState("");
   const [showRankInfo, setShowRankInfo] = useState(false);
+  const [toasts, setToasts] = useState<{id:number;msg:string;type:"success"|"error"|"info"}[]>([]);
+  function showToast(msg:string, type:"success"|"error"|"info"="success"){
+    const id=Date.now();
+    setToasts(p=>[...p,{id,msg,type}]);
+    setTimeout(()=>setToasts(p=>p.filter(t=>t.id!==id)),3200);
+  }
   const [kwData, setKwData] = useState<{keyword:string;volume:number;competition:string;cpc:number;clicks:number}[]>([]);
   const [loadingKw, setLoadingKw] = useState(false);
   const [showKwInfo, setShowKwInfo] = useState(false);
@@ -2969,6 +2981,13 @@ POST3: (제목)|(이유)
           </div>
         </div>
       )}
+
+      {/* 토스트 알림 */}
+      <div className="toast-wrap">
+        {toasts.map(t=>(
+          <div key={t.id} className={`toast toast-${t.type}`}>{t.msg}</div>
+        ))}
+      </div>
     </>
   );
 }
