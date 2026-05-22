@@ -159,6 +159,71 @@ app.post("/api/register-user", (req, res) => {
   res.json({ success: true });
 });
 
+/* ── 네이버 검색광고 키워드 API 프록시 ── */
+app.post("/api/naver-keywords", async (req, res) => {
+  const { accessLicense, secretKey, customerId, keywords } = req.body;
+  if (!accessLicense || !secretKey || !customerId || !keywords?.length)
+    return res.status(400).json({ error: "accessLicense, secretKey, customerId, keywords 필요" });
+  try {
+    const crypto = await import("crypto");
+    const timestamp = Date.now().toString();
+    const message = `${timestamp}.GET./keywordstool`;
+    const signature = crypto.default
+      .createHmac("sha256", secretKey)
+      .update(message)
+      .digest("base64");
+    const url = `https://api.naver.com/keywordstool?hintKeywords=${encodeURIComponent(keywords.join(","))}&showDetail=1`;
+    const r = await fetch(url, {
+      headers: {
+        "X-Timestamp": timestamp,
+        "X-API-KEY": accessLicense,
+        "X-Customer": customerId,
+        "X-Signature": signature,
+      },
+    });
+    if (!r.ok) {
+      const txt = await r.text();
+      return res.status(r.status).json({ error: `네이버 API 오류 ${r.status}: ${txt}` });
+    }
+    const data = await r.json();
+    res.json(data);
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+/* ── 네이버 DataLab 검색어 트렌드 API 프록시 ── */
+app.post("/api/naver-datalab", async (req, res) => {
+  const { clientId, clientSecret, keyword } = req.body;
+  if (!clientId || !clientSecret || !keyword)
+    return res.status(400).json({ error: "clientId, clientSecret, keyword 필요" });
+  try {
+    const endDate = new Date().toISOString().slice(0, 10);
+    const startDate = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    const body = {
+      startDate, endDate, timeUnit: "week",
+      keywordGroups: [{ groupName: keyword, keywords: [keyword] }],
+    };
+    const r = await fetch("https://openapi.naver.com/v1/datalab/search", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Naver-Client-Id": clientId,
+        "X-Naver-Client-Secret": clientSecret,
+      },
+      body: JSON.stringify(body),
+    });
+    if (!r.ok) {
+      const txt = await r.text();
+      return res.status(r.status).json({ error: `DataLab API 오류 ${r.status}: ${txt}` });
+    }
+    const data = await r.json();
+    res.json({ ok: true, ...data });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 /* ── 서버 시작 ── */
 app.listen(PORT, () => {
   console.log(`[bot] Publy 봇 서버 v2.0 → http://localhost:${PORT}`);
