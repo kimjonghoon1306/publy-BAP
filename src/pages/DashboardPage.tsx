@@ -1150,23 +1150,6 @@ POST3: (제목)|(이유)
   // ── 발행 패널 렌더 함수 ──
   function renderPublishPanel(){
     return(<>
-      {/* 발행 방식 */}
-      <div className="card" style={{padding:"14px 16px"}}>
-        <div className="card-title" style={{marginBottom:12}}>📝 발행 방식</div>
-        <div style={{display:"flex",flexDirection:"column",gap:8}}>
-          {([{id:"full",ico:"📄",name:"전체 발행",sub:"본문+FAQ+관련글"},{id:"body_faq",ico:"💬",name:"본문+FAQ",sub:"관련글 제외"},{id:"body_only",ico:"✏️",name:"본문만",sub:"가장 간결"}] as const).map(c=>(
-            <button key={c.id} onClick={()=>setPubConcept(c.id)} style={{padding:"11px 14px",borderRadius:10,border:`2px solid ${pubConcept===c.id?"var(--accent)":"var(--border)"}`,background:pubConcept===c.id?"var(--accent-bg)":"var(--bg)",cursor:"pointer",fontFamily:"inherit",textAlign:"left",transition:"all .15s",display:"flex",alignItems:"center",gap:10}}>
-              <span style={{fontSize:20}}>{c.ico}</span>
-              <div style={{flex:1}}>
-                <div style={{fontSize:13,fontWeight:700,color:pubConcept===c.id?"var(--accent-text)":"var(--text)"}}>{c.name}</div>
-                <div style={{fontSize:11,color:"var(--text3)"}}>{c.sub}</div>
-              </div>
-              {pubConcept===c.id&&<span style={{color:"var(--accent-text)"}}>✓</span>}
-            </button>
-          ))}
-        </div>
-      </div>
-
       {/* 플랫폼 */}
       <div className="card" style={{padding:"14px 16px"}}>
         <div className="card-title" style={{marginBottom:10}}>🌐 플랫폼</div>
@@ -2008,6 +1991,23 @@ POST3: (제목)|(이유)
                   {/* 왼쪽: 에디터 */}
                   <div style={{display:"flex",flexDirection:"column",gap:12}}>
 
+                    {/* 발행 방식 */}
+                    <div className="card" style={{padding:"14px 16px"}}>
+                      <div className="card-title" style={{marginBottom:10}}>📝 발행 방식</div>
+                      <div style={{display:"flex",flexDirection:"column",gap:8}}>
+                        {([{id:"full",ico:"📄",name:"전체 발행",sub:"본문+FAQ+관련글"},{id:"body_faq",ico:"💬",name:"본문+FAQ",sub:"관련글 제외"},{id:"body_only",ico:"✏️",name:"본문만",sub:"가장 간결"}] as const).map(c=>(
+                          <button key={c.id} onClick={()=>setPubConcept(c.id)} style={{padding:"11px 14px",borderRadius:10,border:`2px solid ${pubConcept===c.id?"var(--accent)":"var(--border)"}`,background:pubConcept===c.id?"var(--accent-bg)":"var(--bg)",cursor:"pointer",fontFamily:"inherit",textAlign:"left",transition:"all .15s",display:"flex",alignItems:"center",gap:10}}>
+                            <span style={{fontSize:20}}>{c.ico}</span>
+                            <div style={{flex:1}}>
+                              <div style={{fontSize:13,fontWeight:700,color:pubConcept===c.id?"var(--accent-text)":"var(--text)"}}>{c.name}</div>
+                              <div style={{fontSize:11,color:"var(--text3)"}}>{c.sub}</div>
+                            </div>
+                            {pubConcept===c.id&&<span style={{color:"var(--accent-text)"}}>✓</span>}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
                     {/* 제목 */}
                     <div className="card" style={{padding:"14px 16px"}}>
                       <label className="inp-label">글 제목</label>
@@ -2187,7 +2187,7 @@ POST3: (제목)|(이유)
                   </div>
 
                   {/* 오른쪽: 발행 패널 (PC) */}
-                  <div style={{display:"flex",flexDirection:"column",gap:12}} className="pub-panel-desktop">
+                  <div className="pub-panel-desktop">
                     {renderPublishPanel()}
                   </div>
                 </div>
