@@ -146,19 +146,18 @@ export async function upsertAccount(account: Partial<PublyAccount> & { password_
   if (error) throw new Error(error.message);
 }
 
-// ── 관리자 비밀번호 (Supabase 저장) ──────────────────────
-const ADMIN_ROW_ID = "00000000-0000-0000-0000-000000000001"; // 관리자 전용 고정 UUID
+// ── 관리자 비밀번호 (publy_settings 테이블) ──────────────
 const ADMIN_DEFAULT_PW = "123456";
 
 export async function verifyAdminPassword(pw: string): Promise<boolean> {
   try {
     const { data } = await supabase
-      .from("publy_users")
-      .select("password_hash")
-      .eq("id", ADMIN_ROW_ID)
+      .from("publy_settings")
+      .select("value")
+      .eq("key", "admin_pw_hash")
       .single();
-    if (!data?.password_hash) return pw === ADMIN_DEFAULT_PW;
-    return bcrypt.compare(pw, data.password_hash);
+    if (!data?.value) return pw === ADMIN_DEFAULT_PW;
+    return bcrypt.compare(pw, data.value);
   } catch {
     return pw === ADMIN_DEFAULT_PW;
   }
@@ -166,12 +165,10 @@ export async function verifyAdminPassword(pw: string): Promise<boolean> {
 
 export async function setAdminPassword(newPw: string): Promise<void> {
   const hash = await bcrypt.hash(newPw, 10);
-  const { error } = await supabase.from("publy_users").upsert(
-    { id: ADMIN_ROW_ID, email: "admin@publy.local", name: "관리자", password_hash: hash, plan: "pro" as const, app_type: "both" as const, is_active: true },
-    { onConflict: "id" }
-  );
+  const { error } = await supabase
+    .from("publy_settings")
+    .upsert({ key: "admin_pw_hash", value: hash }, { onConflict: "key" });
   if (error) throw new Error(error.message);
-  // 구버전 localStorage 키 정리
   localStorage.removeItem("publy_admin_pw");
 }
 
