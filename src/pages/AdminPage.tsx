@@ -407,8 +407,8 @@ select.field-inp{cursor:pointer;appearance:auto;}
 /* ── 관리자 사용설명서 ───────────────────────── */
 @keyframes guideIn{from{opacity:0;transform:scale(.93) translateY(18px)}to{opacity:1;transform:scale(1) translateY(0)}}
 @keyframes admGuideFloat{0%,100%{transform:translateY(0)}50%{transform:translateY(-4px)}}
-.guide-overlay{position:fixed;inset:0;z-index:999;background:rgba(0,0,0,.78);backdrop-filter:blur(8px);display:flex;align-items:center;justify-content:center;padding:12px;}
-.guide-modal{width:100%;max-width:580px;max-height:92vh;border-radius:24px;overflow:hidden;display:flex;flex-direction:column;animation:guideIn .32s cubic-bezier(.34,1.56,.64,1) both;box-shadow:0 32px 80px rgba(0,0,0,.6);position:relative;}
+.guide-overlay{position:fixed;inset:0;z-index:999;background:rgba(0,0,0,.78);backdrop-filter:blur(8px);display:flex;align-items:center;justify-content:center;padding:max(12px,env(safe-area-inset-top)) 12px max(12px,env(safe-area-inset-bottom));}
+.guide-modal{width:100%;max-width:580px;max-height:calc(100dvh - 24px - env(safe-area-inset-top) - env(safe-area-inset-bottom));border-radius:24px;overflow:hidden;display:flex;flex-direction:column;animation:guideIn .32s cubic-bezier(.34,1.56,.64,1) both;box-shadow:0 32px 80px rgba(0,0,0,.6);position:relative;}
 .guide-header{padding:22px 22px 0;background:linear-gradient(135deg,#2a0a0a 0%,#1a0505 100%);flex-shrink:0;border-bottom:1px solid rgba(255,255,255,.06);}
 .guide-logo-row{display:flex;align-items:center;gap:10px;margin-bottom:14px;}
 .guide-logo-ico{width:40px;height:40px;border-radius:12px;background:linear-gradient(135deg,#ff6b6b,#ff3333);display:flex;align-items:center;justify-content:center;font-size:20px;flex-shrink:0;}
@@ -440,7 +440,7 @@ select.field-inp{cursor:pointer;appearance:auto;}
 .adm-guide-btn:hover{filter:brightness(1.1);}
 
 @media(max-width:768px){
-  .guide-modal{max-width:100%;max-height:90vh;border-radius:20px;}
+  .guide-modal{max-width:100%;max-height:calc(100dvh - 20px - env(safe-area-inset-top) - env(safe-area-inset-bottom));border-radius:20px;}
   .guide-header{padding:16px 16px 0;}
   .guide-title{font-size:17px;}
   .guide-body{padding:14px 14px 18px;}
@@ -451,7 +451,7 @@ select.field-inp{cursor:pointer;appearance:auto;}
 }
 @media(max-width:480px){
   .guide-overlay{padding:6px;}
-  .guide-modal{max-height:94vh;border-radius:16px;}
+  .guide-modal{max-height:calc(100dvh - 12px - env(safe-area-inset-top) - env(safe-area-inset-bottom));border-radius:16px;}
   .guide-tab{font-size:11px;padding:9px 11px;}
 }
 
@@ -556,6 +556,7 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
   const [showPreviewModal, setShowPreviewModal] = useState(false);
   const [showNaverMenu, setShowNaverMenu] = useState(false);
   const [showPublishPanel, setShowPublishPanel] = useState(false);
+  const [showMeta, setShowMeta] = useState(false);
   const thumbnailRef = useRef<HTMLInputElement>(null);
   const manualFileRef = useRef<HTMLInputElement>(null);
   // ── 카테고리 / 공개 설정 / 예약 발행 ──
@@ -1043,6 +1044,7 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
       if(imgs.length>0){
         if(!thumbnail)setThumbnail(imgs[0]);
         triggerAutoInsert(imgs.map((src,i)=>({id:i,src,alt:`${keyword||selectedTitle} ${i===0?"대표":"현장"} 사진`})));
+        setShowMeta(true);
       }
     } catch(e:any) { if (e.name!=="AbortError") alert("이미지 생성 실패: "+e.message); }
     finally { setGenImgLoading(false); imgAbortRef.current=null; }
@@ -2065,21 +2067,7 @@ POST3: (제목)|(이유)
                 </div>
 
                 {/* 에디터 (전폭) */}
-                <div style={{display:"flex",flexDirection:"column",gap:12}}>
-
-                    {/* 발행 방식 */}
-                    <div className="card" style={{padding:"14px 16px"}}>
-                      <div className="card-title" style={{marginBottom:10}}>📝 발행 방식</div>
-                      <div style={{display:"flex",flexDirection:"column",gap:8}}>
-                        {([{id:"full",ico:"📄",name:"전체 발행",sub:"본문+FAQ+관련글"},{id:"body_faq",ico:"💬",name:"본문+FAQ",sub:"관련글 제외"},{id:"body_only",ico:"✏️",name:"본문만",sub:"가장 간결"}] as const).map(c=>(
-                          <button key={c.id} onClick={()=>setPubSub(c.id)} style={{padding:"10px 14px",borderRadius:10,border:`2px solid ${pubSub===c.id?"var(--accent)":"var(--border)"}`,background:pubSub===c.id?"var(--accent-bg)":"var(--bg)",cursor:"pointer",fontFamily:"inherit",textAlign:"left",transition:"all .15s",display:"flex",alignItems:"center",gap:10}}>
-                            <span style={{fontSize:18}}>{c.ico}</span>
-                            <div style={{flex:1}}><div style={{fontSize:13,fontWeight:700,color:pubSub===c.id?"var(--accent-text)":"var(--text)"}}>{c.name}</div><div style={{fontSize:11,color:"var(--text3)"}}>{c.sub}</div></div>
-                            {pubSub===c.id&&<span style={{color:"var(--accent-text)"}}>✓</span>}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
+                <div style={{display:"flex",flexDirection:"column",gap:16}}>
 
                     {/* 제목 */}
                     <div className="card" style={{padding:"14px 16px"}}>
@@ -2087,40 +2075,52 @@ POST3: (제목)|(이유)
                       <input className="inp lg" placeholder="블로그 글 제목..." value={pubTitle} onChange={e=>setPubTitle(e.target.value)}/>
                     </div>
 
-                    {/* 썸네일 */}
-                    <div className="card" style={{padding:"14px 16px"}}>
-                      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:10}}>
-                        <label className="inp-label" style={{margin:0}}>🖼️ 썸네일</label>
-                        {thumbnail&&<button onClick={()=>setThumbnail("")} style={{background:"transparent",border:"none",cursor:"pointer",color:"var(--text3)",fontSize:18}}>✕</button>}
-                      </div>
-                      {thumbnail?(
-                        <div style={{position:"relative",borderRadius:12,overflow:"hidden",aspectRatio:"16/9"}}>
-                          <img src={thumbnail} alt="썸네일" style={{width:"100%",height:"100%",objectFit:"cover",display:"block"}} onError={()=>setThumbnail("")}/>
+                    {/* 썸네일 + 인사말 접기 */}
+                    <div className="card" style={{padding:0,overflow:"hidden"}}>
+                      <button onClick={()=>setShowMeta(v=>!v)} style={{width:"100%",display:"flex",alignItems:"center",justifyContent:"space-between",padding:"14px 18px",background:"transparent",border:"none",cursor:"pointer",fontFamily:"inherit"}}>
+                        <div style={{display:"flex",alignItems:"center",gap:10}}>
+                          <span style={{fontSize:14,fontWeight:700,color:"var(--text)"}}>🖼️ 썸네일 · 인사말</span>
+                          {thumbnail&&<span style={{fontSize:10,fontWeight:800,padding:"2px 8px",borderRadius:99,background:"var(--accent)",color:"#000"}}>썸네일 ✓</span>}
+                          {!thumbnail&&getActiveImages().length===0&&<span style={{fontSize:11,color:"var(--text3)"}}>선택사항</span>}
                         </div>
-                      ):(
-                        <div style={{display:"flex",flexDirection:"column",gap:10}}>
-                          {getActiveImages().length>0&&(
-                            <div>
-                              <div style={{fontSize:12,color:"var(--text3)",marginBottom:6}}>생성된 이미지에서 선택:</div>
-                              <div style={{display:"flex",gap:8,overflowX:"auto",paddingBottom:4}}>
-                                {getActiveImages().slice(0,6).map((src,i)=>(
-                                  <button key={i} onClick={()=>setThumbnail(src)} style={{flexShrink:0,width:56,height:56,borderRadius:8,overflow:"hidden",border:"1px solid var(--border)",padding:0,cursor:"pointer"}}>
-                                    <img src={src} alt="" style={{width:"100%",height:"100%",objectFit:"cover"}} onError={e=>{(e.target as HTMLImageElement).style.display="none";}}/>
-                                  </button>
-                                ))}
-                              </div>
+                        <span style={{fontSize:16,color:"var(--text3)",transition:"transform .2s",display:"inline-block",transform:showMeta?"rotate(180deg)":"rotate(0deg)"}}>▼</span>
+                      </button>
+                      {showMeta&&(
+                        <div style={{padding:"0 16px 16px",borderTop:"1px solid var(--border)",display:"flex",flexDirection:"column",gap:14,marginTop:4,paddingTop:16}}>
+                          <div>
+                            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:8}}>
+                              <label className="inp-label" style={{margin:0}}>🖼️ 썸네일</label>
+                              {thumbnail&&<button onClick={()=>setThumbnail("")} style={{background:"transparent",border:"none",cursor:"pointer",color:"var(--text3)",fontSize:18}}>✕</button>}
                             </div>
-                          )}
-                          <button onClick={()=>thumbnailRef.current?.click()} style={{width:"100%",padding:"16px",borderRadius:12,border:"2px dashed var(--border)",background:"var(--bg)",cursor:"pointer",color:"var(--text3)",fontSize:13,fontFamily:"inherit"}}>📁 이미지 업로드</button>
+                            {thumbnail?(
+                              <div style={{position:"relative",borderRadius:12,overflow:"hidden",aspectRatio:"16/9"}}>
+                                <img src={thumbnail} alt="썸네일" style={{width:"100%",height:"100%",objectFit:"cover",display:"block"}} onError={()=>setThumbnail("")}/>
+                              </div>
+                            ):(
+                              <div style={{display:"flex",flexDirection:"column",gap:10}}>
+                                {getActiveImages().length>0&&(
+                                  <div>
+                                    <div style={{fontSize:12,color:"var(--text3)",marginBottom:6}}>생성된 이미지에서 선택:</div>
+                                    <div style={{display:"flex",gap:8,overflowX:"auto",paddingBottom:4}}>
+                                      {getActiveImages().slice(0,6).map((src,i)=>(
+                                        <button key={i} onClick={()=>setThumbnail(src)} style={{flexShrink:0,width:64,height:64,borderRadius:10,overflow:"hidden",border:"2px solid var(--border)",padding:0,cursor:"pointer"}}>
+                                          <img src={src} alt="" style={{width:"100%",height:"100%",objectFit:"cover"}} onError={e=>{(e.target as HTMLImageElement).style.display="none";}}/>
+                                        </button>
+                                      ))}
+                                    </div>
+                                  </div>
+                                )}
+                                <button onClick={()=>thumbnailRef.current?.click()} style={{width:"100%",padding:"18px",borderRadius:12,border:"2px dashed var(--border)",background:"var(--bg)",cursor:"pointer",color:"var(--text3)",fontSize:13,fontFamily:"inherit"}}>📁 직접 업로드</button>
+                              </div>
+                            )}
+                            <input ref={thumbnailRef} type="file" accept="image/*" style={{display:"none"}} onChange={e=>{const f=e.target.files?.[0];if(!f)return;const r=new FileReader();r.onload=ev=>setThumbnail(ev.target?.result as string);r.readAsDataURL(f);}}/>
+                          </div>
+                          <div>
+                            <label className="inp-label">💬 인사말 <span style={{fontWeight:400,color:"var(--text3)"}}>(선택)</span></label>
+                            <textarea className="inp" rows={2} placeholder="안녕하세요! 오늘도 유용한 정보를 가지고 왔어요 😊" value={greeting} onChange={e=>setGreeting(e.target.value)} style={{resize:"none",fontSize:13}}/>
+                          </div>
                         </div>
                       )}
-                      <input ref={thumbnailRef} type="file" accept="image/*" style={{display:"none"}} onChange={e=>{const f=e.target.files?.[0];if(!f)return;const r=new FileReader();r.onload=ev=>setThumbnail(ev.target?.result as string);r.readAsDataURL(f);}}/>
-                    </div>
-
-                    {/* 인사말 */}
-                    <div className="card" style={{padding:"14px 16px"}}>
-                      <label className="inp-label">💬 인사말 (선택)</label>
-                      <textarea className="inp" rows={2} placeholder="안녕하세요! 오늘도 유용한 정보를 가지고 왔어요 😊" value={greeting} onChange={e=>setGreeting(e.target.value)} style={{resize:"none",fontSize:13}}/>
                     </div>
 
                     {/* 이미지 삽입 */}
