@@ -2764,7 +2764,7 @@ POST3: (제목)|(이유)
         </div>{/* layout */}
 
         <div className="mob-bar">
-          {MAIN_TABS.filter(t=>["keyword","write","image","publish","manage","settings"].includes(t.k)).map(t=>(<button key={t.k} className={`mob-btn ${tab===t.k?"active":""}`} onClick={()=>setTab(t.k as MainTab)}><span className="mob-btn-ico">{t.i}</span><span className="mob-btn-lbl">{t.k==="keyword"?"키워드":t.k==="write"?"글쓰기":t.k==="image"?"이미지":t.k==="publish"?"발행":t.k==="manage"?"발행관리":"설정"}</span></button>))}
+          {MAIN_TABS.filter(t=>["keyword","write","image","publish","manage","settings"].includes(t.k)).map(t=>(<button key={t.k} className={`mob-btn ${tab===t.k?"active":""}`} onClick={()=>{if(t.k==="rank"){window.open("https://rank.xn--zk5biyyw.com/","_blank");return;}setTab(t.k as MainTab);}}><span className="mob-btn-ico">{t.i}</span><span className="mob-btn-lbl">{t.k==="keyword"?"키워드":t.k==="write"?"글쓰기":t.k==="image"?"이미지":t.k==="publish"?"발행":t.k==="manage"?"발행관리":"설정"}</span></button>))}
         </div>
       </div>
 
