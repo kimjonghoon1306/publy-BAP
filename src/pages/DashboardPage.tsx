@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
-import { PublyUser, getQuota, getHistory, getAccounts, PublyQuota, PublyHistory, PublyAccount, upsertAccount, useQuota, addHistory, deleteHistory, deleteAllHistory, changeUserPassword, getNaverApiKeys, saveNaverApiKeys, NaverApiKeys } from "../lib/supabase";
+import { PublyUser, getQuota, getHistory, getAccounts, PublyQuota, PublyHistory, PublyAccount, upsertAccount, useQuota, addHistory, deleteHistory, deleteAllHistory, changeUserPassword, getNaverApiKeys, saveNaverApiKeys, NaverApiKeys, checkNaverQuota, incrementNaverQuota, getNaverDailyUsage, NAVER_DAILY_LIMIT } from "../lib/supabase";
 import { supabase } from "../lib/supabase";
 
 type MainTab = "keyword" | "write" | "image" | "publish" | "manage" | "accounts" | "settings";
@@ -411,6 +411,14 @@ export default function DashboardPage({user, onLogout, onAdminLogin, onThemeTogg
         showToast("설정탭에서 네이버 검색광고 API 키를 입력해주세요","error");
         setLoadingKw(false);return;
       }
+      // 개인키 여부: naverKeys state에 값이 있으면 개인키
+      const isPersonal=!!(naverKeys.naver_access_license&&naverKeys.naver_secret_key&&naverKeys.naver_customer_id);
+      const qc=await checkNaverQuota(user.id,user.plan,isPersonal);
+      setNaverQuotaInfo({used:qc.used,limit:qc.limit});
+      if(!qc.ok){
+        showToast(`❌ 일일 한도 초과 (${qc.used}/${qc.limit}회) — 개인 API 키 입력 시 무제한!`,"error");
+        setLoadingKw(false);return;
+      }
       const r=await fetch(`${BOT}/api/naver-keywords`,{
         method:"POST",headers:{"Content-Type":"application/json"},
         body:JSON.stringify({accessLicense:keys.naver_access_license,secretKey:keys.naver_secret_key,customerId:keys.naver_customer_id,keywords:[keyword.trim()]}),
@@ -426,7 +434,10 @@ export default function DashboardPage({user, onLogout, onAdminLogin, onThemeTogg
           competition:item.compIdx==="높음"?"높음":item.compIdx==="낮음"?"낮음":"중"};
       }).filter((k:any)=>k.keyword);
       setKwData(list);
-      showToast(`📊 키워드 ${list.length}개 수집 완료!`);
+      if(!isPersonal) await incrementNaverQuota(user.id);
+      const newUsed=qc.used+1;
+      setNaverQuotaInfo({used:newUsed,limit:qc.limit});
+      showToast(`📊 키워드 ${list.length}개 수집 완료! (${newUsed}/${qc.limit}회 사용)`);
     }catch(e:any){showToast("❌ "+e.message,"error");}
     finally{setLoadingKw(false);}
   }
@@ -508,6 +519,7 @@ export default function DashboardPage({user, onLogout, onAdminLogin, onThemeTogg
   const [naverKeys, setNaverKeys] = useState<NaverApiKeys>({});
   const [naverKeysSaving, setNaverKeysSaving] = useState(false);
   const [naverKeysMsg, setNaverKeysMsg] = useState("");
+  const [naverQuotaInfo, setNaverQuotaInfo] = useState<{used:number;limit:number}|null>(null);
   const thumbnailRef = useRef<HTMLInputElement>(null);
   const manualFileRef = useRef<HTMLInputElement>(null);
 
@@ -1703,6 +1715,14 @@ POST3: (제목)|(이유)
                     <button className="btn btn-secondary" onClick={fetchKeywordData} disabled={loadingKw||!keyword||!botOnline} style={{borderColor:"var(--naver)",color:"var(--naver)"}}>
                       {loadingKw?<><span className="spinner"/>수집 중...</>:"📊 황금 키워드 분석"}
                     </button>
+                    {naverQuotaInfo&&!naverKeys.naver_access_license&&(
+                      <span style={{fontSize:11,color:naverQuotaInfo.used>=naverQuotaInfo.limit?"var(--danger)":"var(--text3)",alignSelf:"center"}}>
+                        {naverQuotaInfo.used}/{naverQuotaInfo.limit}회 사용
+                      </span>
+                    )}
+                    {naverKeys.naver_access_license&&(
+                      <span style={{fontSize:11,color:"var(--accent-text)",alignSelf:"center"}}>🔑 개인키 (무제한)</span>
+                    )}
                   </div>
 
                   {/* 황금 키워드 결과 테이블 */}
