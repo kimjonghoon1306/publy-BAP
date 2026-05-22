@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
-import { PublyUser, getQuota, getHistory, getAccounts, PublyQuota, PublyHistory, PublyAccount, upsertAccount, useQuota, addHistory, deleteHistory, deleteAllHistory, changeUserPassword } from "../lib/supabase";
+import { PublyUser, getQuota, getHistory, getAccounts, PublyQuota, PublyHistory, PublyAccount, upsertAccount, useQuota, addHistory, deleteHistory, deleteAllHistory, changeUserPassword, getNaverApiKeys, saveNaverApiKeys, NaverApiKeys } from "../lib/supabase";
 import { supabase } from "../lib/supabase";
 
 type MainTab = "keyword" | "write" | "image" | "publish" | "manage" | "accounts" | "settings";
@@ -386,6 +386,50 @@ export default function DashboardPage({user, onLogout, onAdminLogin, onThemeTogg
   const [titles, setTitles] = useState<string[]>(()=>{try{return JSON.parse(localStorage.getItem("publy_titles")||"[]");}catch{return[];}});
   const [selectedTitle, setSelectedTitle] = useState("");
   const [loadingTitles, setLoadingTitles] = useState(false);
+  const [kwData, setKwData] = useState<{keyword:string;volume:number;competition:string;cpc:number;clicks:number}[]>([]);
+  const [loadingKw, setLoadingKw] = useState(false);
+
+  function calcGoldScore(kw:{volume:number;competition:string;cpc:number;clicks:number;keyword?:string}):number{
+    const compScore=kw.competition==="낮음"?100:kw.competition==="중"?50:10;
+    const volScore=kw.volume>=1000&&kw.volume<=30000?100:kw.volume>30000&&kw.volume<=80000?60:kw.volume<1000?20:40;
+    const ctrScore=kw.volume>0?Math.min(100,(kw.clicks/kw.volume)*1000):0;
+    const cpcScore=Math.min(100,kw.cpc/8);
+    const kwText=(kw.keyword||"").toLowerCase();
+    const commercialBonus=/추천|비교|후기|리뷰|방법|가격|구매|어디|어떻게|얼마|순위|최고|좋은|싼/.test(kwText)?20:0;
+    const wordCount=kwText.replace(/\s+/g," ").trim().split(" ").length;
+    const longtailBonus=wordCount>=3?15:wordCount===2?8:0;
+    const base=Math.round(compScore*0.35+volScore*0.25+ctrScore*0.15+cpcScore*0.25);
+    return Math.min(100,base+commercialBonus+longtailBonus);
+  }
+
+  async function fetchKeywordData(){
+    if(!keyword.trim()){showToast("키워드를 먼저 입력해주세요","error");return;}
+    setLoadingKw(true);
+    try{
+      const keys=await getNaverApiKeys(user.id);
+      if(!keys.naver_access_license||!keys.naver_secret_key||!keys.naver_customer_id){
+        showToast("설정탭에서 네이버 검색광고 API 키를 입력해주세요","error");
+        setLoadingKw(false);return;
+      }
+      const r=await fetch(`${BOT}/api/naver-keywords`,{
+        method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({accessLicense:keys.naver_access_license,secretKey:keys.naver_secret_key,customerId:keys.naver_customer_id,keywords:[keyword.trim()]}),
+      });
+      if(!r.ok)throw new Error((await r.json()).error);
+      const data=await r.json();
+      const list=(data.keywordList||[]).slice(0,20).map((item:any,i:number)=>{
+        const pc=parseInt((item.monthlyPcQcCnt||"0").toString().replace(/,/g,""))||0;
+        const mob=parseInt((item.monthlyMobileQcCnt||"0").toString().replace(/,/g,""))||0;
+        const total=pc+mob;
+        return{keyword:item.relKeyword||"",volume:total,clicks:Math.round(total*0.03),
+          cpc:Math.round((parseFloat(item.avgMonthlyPC||"0")||0)*1000),
+          competition:item.compIdx==="높음"?"높음":item.compIdx==="낮음"?"낮음":"중"};
+      }).filter((k:any)=>k.keyword);
+      setKwData(list);
+      showToast(`📊 키워드 ${list.length}개 수집 완료!`);
+    }catch(e:any){showToast("❌ "+e.message,"error");}
+    finally{setLoadingKw(false);}
+  }
   const [genContent, setGenContent] = useState("");
   const [genTitle, setGenTitle] = useState("");
   const [genTags, setGenTags] = useState("");
@@ -461,6 +505,9 @@ export default function DashboardPage({user, onLogout, onAdminLogin, onThemeTogg
   const [newPw2, setNewPw2] = useState("");
   const [pwMsg, setPwMsg] = useState("");
   const [pwChanging, setPwChanging] = useState(false);
+  const [naverKeys, setNaverKeys] = useState<NaverApiKeys>({});
+  const [naverKeysSaving, setNaverKeysSaving] = useState(false);
+  const [naverKeysMsg, setNaverKeysMsg] = useState("");
   const thumbnailRef = useRef<HTMLInputElement>(null);
   const manualFileRef = useRef<HTMLInputElement>(null);
 
@@ -692,6 +739,13 @@ export default function DashboardPage({user, onLogout, onAdminLogin, onThemeTogg
     try{const r=await fetch(`${BOT}/health`,{signal:AbortSignal.timeout(3000)});setBotOnline(r.ok);}
     catch{setBotOnline(false);}
   },[]);
+
+  // 설정탭 열 때 네이버 키 로드
+  useEffect(()=>{
+    if(tab==="settings"){
+      getNaverApiKeys(user.id).then(setNaverKeys).catch(()=>{});
+    }
+  },[tab,user.id]);
 
   useEffect(()=>{
     checkBot();
@@ -1646,7 +1700,59 @@ POST3: (제목)|(이유)
                     <button className="btn btn-primary" onClick={()=>handleGenerateTitles(true)} disabled={loadingTitles||!keyword}>{loadingTitles?<><span className="spinner"/>추천 중...</>:<>⭐ 제목 {BATCH}개 추천받기</>}</button>
                     {titles.length>0&&<button className="btn btn-secondary" onClick={()=>handleGenerateTitles(false)} disabled={loadingTitles}>{titles.length>=MAX_TITLES?"🔄 초기화 후 재생성":"➕ 30개 추가"}</button>}
                     {titles.length>0&&<button className="btn btn-danger btn-sm" onClick={()=>{setTitles([]);setSelectedTitle("");localStorage.removeItem("publy_titles");}}>🗑 제목 초기화</button>}
+                    <button className="btn btn-secondary" onClick={fetchKeywordData} disabled={loadingKw||!keyword||!botOnline} style={{borderColor:"var(--naver)",color:"var(--naver)"}}>
+                      {loadingKw?<><span className="spinner"/>수집 중...</>:"📊 황금 키워드 분석"}
+                    </button>
                   </div>
+
+                  {/* 황금 키워드 결과 테이블 */}
+                  {kwData.length>0&&(
+                    <div className="card" style={{marginTop:12,padding:0,overflow:"hidden",animation:"fadeUp .2s ease both"}}>
+                      <div style={{padding:"12px 16px",borderBottom:"1px solid var(--border)",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+                        <span style={{fontSize:13,fontWeight:800,color:"var(--text)"}}>📊 키워드 분석 결과</span>
+                        <button onClick={()=>setKwData([])} style={{background:"transparent",border:"none",color:"var(--text3)",cursor:"pointer",fontSize:18}}>✕</button>
+                      </div>
+                      <div style={{overflowX:"auto"}}>
+                        <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
+                          <thead>
+                            <tr style={{background:"var(--bg2)"}}>
+                              {["키워드","검색량","경쟁도","CPC","황금점수",""].map(h=>(
+                                <th key={h} style={{padding:"8px 12px",textAlign:"left",fontWeight:700,color:"var(--text3)",whiteSpace:"nowrap",borderBottom:"1px solid var(--border)"}}>{h}</th>
+                              ))}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {kwData.sort((a,b)=>calcGoldScore(b)-calcGoldScore(a)).map((kw,i)=>{
+                              const score=calcGoldScore(kw);
+                              const sc=score>=70?"#4ade80":score>=45?"#fbbf24":"#94a3b8";
+                              const compC=kw.competition==="낮음"?"#4ade80":kw.competition==="중"?"#fbbf24":"#f87171";
+                              return(
+                                <tr key={i} style={{borderBottom:"1px solid var(--border)",cursor:"pointer",transition:"background .1s"}}
+                                  onClick={()=>{setKeyword(kw.keyword);showToast(`"${kw.keyword}" 선택됐어요!`);}}
+                                  onMouseEnter={e=>(e.currentTarget.style.background="var(--card-hover)")}
+                                  onMouseLeave={e=>(e.currentTarget.style.background="")}>
+                                  <td style={{padding:"9px 12px",fontWeight:700,color:"var(--text)"}}>{kw.keyword}</td>
+                                  <td style={{padding:"9px 12px",color:"var(--text2)"}}>{kw.volume.toLocaleString()}</td>
+                                  <td style={{padding:"9px 12px"}}><span style={{fontSize:11,fontWeight:700,color:compC}}>{kw.competition}</span></td>
+                                  <td style={{padding:"9px 12px",color:"var(--text2)"}}>{kw.cpc>0?kw.cpc.toLocaleString()+"원":"—"}</td>
+                                  <td style={{padding:"9px 12px"}}>
+                                    <div style={{display:"flex",alignItems:"center",gap:6}}>
+                                      <div style={{width:48,height:4,background:"var(--border)",borderRadius:99,overflow:"hidden"}}>
+                                        <div style={{height:"100%",width:`${score}%`,background:sc,borderRadius:99}}/>
+                                      </div>
+                                      <span style={{fontSize:11,fontWeight:800,color:sc,minWidth:28}}>{score}</span>
+                                    </div>
+                                  </td>
+                                  <td style={{padding:"9px 12px"}}><button onClick={e=>{e.stopPropagation();setKeyword(kw.keyword);handleGenerateTitles(true);}} style={{padding:"3px 8px",borderRadius:6,border:"1px solid var(--accent)",background:"var(--accent-bg)",color:"var(--accent-text)",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:"inherit",whiteSpace:"nowrap"}}>제목 추천 →</button></td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                      <div style={{padding:"8px 16px",fontSize:11,color:"var(--text3)",borderTop:"1px solid var(--border)"}}>💡 클릭하면 해당 키워드로 바로 적용 · 점수 기준: 경쟁도(35%) + 검색량(25%) + CTR(15%) + CPC(25%) + 보너스</div>
+                    </div>
+                  )}
 
                   {/* 제목 진행바 */}
                   {titles.length>0&&(
@@ -2470,6 +2576,44 @@ POST3: (제목)|(이유)
                       {pwChanging?<><span className="spinner"/>변경 중...</>:"🔐 비밀번호 변경"}
                     </button>
                     {pwMsg&&<div className={`alert-box ${pwMsg.includes("✅")?"alert-success":"alert-danger"}`} style={{margin:0}}>{pwMsg}</div>}
+                  </div>
+                </div>
+
+                {/* 네이버 API 키 */}
+                <div className="card">
+                  <div className="card-title" style={{marginBottom:4}}>🟢 네이버 검색광고 API</div>
+                  <div style={{fontSize:11,color:"var(--text3)",marginBottom:12}}>키워드 검색량·경쟁도·CPC 데이터에 사용 — 없으면 관리자 공용키 사용</div>
+                  <div style={{display:"flex",flexDirection:"column",gap:8}}>
+                    {[
+                      {label:"Customer ID",key:"naver_customer_id",ph:"123456789"},
+                      {label:"Access License",key:"naver_access_license",ph:"xxxx-xxxx-xxxx"},
+                      {label:"Secret Key",key:"naver_secret_key",ph:"secret"},
+                    ].map(f=>(
+                      <div key={f.key}>
+                        <label className="inp-label">{f.label}</label>
+                        <input className="inp" placeholder={f.ph} value={(naverKeys as any)[f.key]||""} onChange={e=>setNaverKeys(p=>({...p,[f.key]:e.target.value}))}/>
+                      </div>
+                    ))}
+                    <div className="card-title" style={{marginBottom:4,marginTop:8}}>📊 네이버 DataLab API</div>
+                    <div style={{fontSize:11,color:"var(--text3)",marginBottom:4}}>검색 트렌드 분석에 사용</div>
+                    {[
+                      {label:"Client ID",key:"naver_datalab_client_id",ph:"Client ID"},
+                      {label:"Client Secret",key:"naver_datalab_client_secret",ph:"Client Secret"},
+                    ].map(f=>(
+                      <div key={f.key}>
+                        <label className="inp-label">{f.label}</label>
+                        <input className="inp" placeholder={f.ph} value={(naverKeys as any)[f.key]||""} onChange={e=>setNaverKeys(p=>({...p,[f.key]:e.target.value}))}/>
+                      </div>
+                    ))}
+                    <button className="btn btn-primary" style={{alignSelf:"flex-start"}} disabled={naverKeysSaving} onClick={async()=>{
+                      setNaverKeysSaving(true); setNaverKeysMsg("");
+                      try{ await saveNaverApiKeys(user.id, naverKeys); setNaverKeysMsg("✅ 저장 완료!"); showToast("🟢 네이버 API 키 저장됐어요!"); }
+                      catch(e:any){ setNaverKeysMsg("❌ "+e.message); }
+                      finally{ setNaverKeysSaving(false); setTimeout(()=>setNaverKeysMsg(""),3000); }
+                    }}>
+                      {naverKeysSaving?<><span className="spinner"/>저장 중...</>:"💾 키 저장"}
+                    </button>
+                    {naverKeysMsg&&<div className={`alert-box ${naverKeysMsg.includes("✅")?"alert-success":"alert-danger"}`} style={{margin:0}}>{naverKeysMsg}</div>}
                   </div>
                 </div>
               </div>
