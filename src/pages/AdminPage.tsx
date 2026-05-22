@@ -486,13 +486,14 @@ const TABS = [
   {k:"publish",  i:"🚀", l:"발행하기"},
   {k:"manage",   i:"📋", l:"발행 관리"},
   {k:"accounts", i:"🔗", l:"계정관리"},
+  {k:"rank",     i:"📊", l:"블로그 순위"},
   {k:"users",    i:"👥", l:"회원관리"},
-  {k:"stats",    i:"📊", l:"통계"},
+  {k:"stats",    i:"📈", l:"통계"},
   {k:"settings", i:"🔐", l:"설정"},
 ] as const;
 
 export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: Props) {
-  const [tab, setTab] = useState<"keyword"|"write"|"image"|"publish"|"manage"|"accounts"|"users"|"stats"|"settings">("keyword");
+  const [tab, setTab] = useState<"keyword"|"write"|"image"|"publish"|"manage"|"accounts"|"rank"|"users"|"stats"|"settings">("keyword");
   const [showGuide, setShowGuide] = useState(false);
   const [guideTab, setGuideTab] = useState(0);
   const [botOnline, setBotOnline] = useState(false);
@@ -576,6 +577,7 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
   const [adminNaverKeys, setAdminNaverKeys] = useState<NaverApiKeys>({});
   const [adminNaverSaving, setAdminNaverSaving] = useState(false);
   const [adminNaverMsg, setAdminNaverMsg] = useState("");
+  const [showRankInfo, setShowRankInfo] = useState(false);
 
   // 카테고리 로드
   async function loadCategories(plat: string) {
@@ -2424,6 +2426,25 @@ POST3: (제목)|(이유)
               </div>
             )}
 
+            {/* ───── 📊 블로그 순위 ───── */}
+            {tab === "rank" && (
+              <div style={{animation:"fadeUp .25s ease both",height:"calc(100vh - 60px - 40px)",display:"flex",flexDirection:"column"}}>
+                <div style={{padding:"14px 16px 10px",display:"flex",alignItems:"center",justifyContent:"space-between",flexShrink:0}}>
+                  <div>
+                    <div style={{fontSize:16,fontWeight:900,color:"var(--text)"}}>📊 블로그 순위 확인</div>
+                    <div style={{fontSize:12,color:"var(--text3)",marginTop:2}}>내 네이버 블로그 키워드 순위를 확인해요</div>
+                  </div>
+                  <button onClick={()=>setShowRankInfo(true)}
+                    style={{padding:"7px 14px",borderRadius:8,border:"none",background:"linear-gradient(135deg,#ff6b9d,#ff4081)",color:"#fff",cursor:"pointer",fontSize:12,fontWeight:800,fontFamily:"inherit",whiteSpace:"nowrap",boxShadow:"0 3px 10px rgba(255,64,129,.35)",flexShrink:0}}>
+                    💡 키 입력 안내
+                  </button>
+                </div>
+                <div style={{flex:1,overflow:"hidden",border:"1px solid var(--border)",borderLeft:"none",borderRight:"none",borderBottom:"none"}}>
+                  <iframe src="https://rank.xn--zk5biyyw.com/" style={{width:"100%",height:"100%",border:"none",display:"block"}} title="블로그 순위 확인" allow="clipboard-read; clipboard-write"/>
+                </div>
+              </div>
+            )}
+
             {/* ───── 👥 회원 관리 ───── */}
             {tab === "users" && (
               <div style={{animation:"fadeUp .25s ease both"}}>
@@ -2713,6 +2734,46 @@ POST3: (제목)|(이유)
             )}
           </div>
         </div>
+
+        {/* 블로그 순위 키 안내 팝업 */}
+        {showRankInfo&&(
+          <div style={{position:"fixed",inset:0,zIndex:9000,background:"rgba(0,0,0,.85)",display:"flex",alignItems:"center",justifyContent:"center",padding:20}} onClick={()=>setShowRankInfo(false)}>
+            <div style={{width:"100%",maxWidth:440,borderRadius:20,background:"#1a1f2e",border:"1px solid #2d3548",overflow:"hidden",animation:"fadeUp .25s ease",boxShadow:"0 24px 60px rgba(0,0,0,.7)"}} onClick={e=>e.stopPropagation()}>
+              <div style={{background:"linear-gradient(135deg,#ff6b9d,#ff4081)",padding:"20px 24px",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+                <div>
+                  <div style={{fontSize:18,fontWeight:900,color:"#fff"}}>🔑 API 키 안내</div>
+                  <div style={{fontSize:12,color:"rgba(255,255,255,.85)",marginTop:3}}>블로그 순위 확인 서비스 사용 전 꼭 읽어주세요</div>
+                </div>
+                <button onClick={()=>setShowRankInfo(false)} style={{background:"rgba(255,255,255,.25)",border:"none",color:"#fff",width:32,height:32,borderRadius:8,cursor:"pointer",fontSize:16,fontFamily:"inherit"}}>✕</button>
+              </div>
+              <div style={{padding:20,display:"flex",flexDirection:"column",gap:10}}>
+                {[
+                  {ico:"⚠️",title:"키가 매번 초기화돼요",desc:"이 서비스는 API 키를 브라우저 localStorage에 저장해요.\n창을 닫거나 새로고침하면 키가 사라지기 때문에\n들어갈 때마다 다시 입력해야 해요."},
+                  {ico:"🔑",title:"어떤 키가 필요해요?",desc:"네이버 검색 API의\n• Client ID\n• Client Secret\n두 가지가 필요해요."},
+                  {ico:"🔗",title:"키 발급 방법",desc:"네이버 개발자센터 (developers.naver.com) 에서\n애플리케이션 등록 후\n'검색' 권한을 추가하면 발급받을 수 있어요."},
+                  {ico:"💡",title:"팁",desc:"DataLab API 키랑 달라요!\n검색광고 API 키가 아닌\n'네이버 오픈API' 키를 사용해야 해요."},
+                ].map((item,i)=>(
+                  <div key={i} style={{display:"flex",gap:12,padding:"12px 14px",borderRadius:12,background:"#242938"}}>
+                    <span style={{fontSize:22,flexShrink:0,lineHeight:1}}>{item.ico}</span>
+                    <div>
+                      <div style={{fontSize:13,fontWeight:800,color:"#ffffff",marginBottom:4}}>{item.title}</div>
+                      <div style={{fontSize:12,color:"#a0aec0",lineHeight:1.7,whiteSpace:"pre-line"}}>{item.desc}</div>
+                    </div>
+                  </div>
+                ))}
+                <a href="https://developers.naver.com/apps/#/list" target="_blank" rel="noreferrer"
+                  style={{display:"flex",alignItems:"center",justifyContent:"center",gap:6,padding:"12px",borderRadius:12,background:"rgba(3,199,90,.1)",border:"1px solid rgba(3,199,90,.3)",color:"#03C75A",fontSize:13,fontWeight:800,textDecoration:"none"}}>
+                  🔗 네이버 개발자센터에서 키 발급하기 →
+                </a>
+              </div>
+              <div style={{padding:"0 20px 20px"}}>
+                <button onClick={()=>setShowRankInfo(false)} style={{width:"100%",padding:"13px",borderRadius:12,border:"none",background:"linear-gradient(135deg,#ff6b9d,#ff4081)",color:"#fff",fontSize:15,fontWeight:800,cursor:"pointer",fontFamily:"inherit"}}>
+                  알겠어요! 👍
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* 모바일 탭바 */}
         <div className="mob-tabs">
