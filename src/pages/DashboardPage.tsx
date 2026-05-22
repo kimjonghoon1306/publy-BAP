@@ -1717,7 +1717,9 @@ POST3: (제목)|(이유)
                       <button className="btn btn-secondary" onClick={fetchKeywordData} disabled={loadingKw||!keyword} style={{borderColor:"var(--naver)",color:"var(--naver)"}}>
                         {loadingKw?<><span className="spinner"/>수집 중...</>:"📊 황금 키워드 분석"}
                       </button>
-                      <button onClick={()=>setShowKwInfo(true)} style={{width:22,height:22,borderRadius:"50%",border:"1px solid var(--border)",background:"var(--card2)",color:"var(--text3)",cursor:"pointer",fontSize:12,fontWeight:800,fontFamily:"inherit",flexShrink:0}}>?</button>
+                      <button onClick={()=>setShowKwInfo(true)} style={{padding:"7px 14px",borderRadius:8,border:"none",background:"linear-gradient(135deg,#ff6b9d,#ff4081)",color:"#fff",cursor:"pointer",fontSize:12,fontWeight:800,fontFamily:"inherit",whiteSpace:"nowrap",boxShadow:"0 3px 10px rgba(255,64,129,.35)"}}>
+                        💡 이게 뭐야?
+                      </button>
                     </div>
                     {naverQuotaInfo&&!naverKeys.naver_access_license&&(
                       <span style={{fontSize:11,color:naverQuotaInfo.used>=naverQuotaInfo.limit?"var(--danger)":"var(--text3)",alignSelf:"center"}}>
@@ -2706,30 +2708,39 @@ POST3: (제목)|(이유)
 
       {/* 황금 키워드 분석 설명 팝업 */}
       {showKwInfo&&(
-        <div style={{position:"fixed",inset:0,zIndex:999,background:"rgba(0,0,0,.7)",backdropFilter:"blur(6px)",display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onClick={()=>setShowKwInfo(false)}>
-          <div style={{width:"100%",maxWidth:480,borderRadius:20,background:"var(--card)",border:"1px solid var(--border)",padding:28,animation:"fadeUp .25s ease"}} onClick={e=>e.stopPropagation()}>
-            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:20}}>
-              <div style={{fontSize:18,fontWeight:900,color:"var(--text)"}}>📊 황금 키워드 분석</div>
-              <button onClick={()=>setShowKwInfo(false)} style={{background:"transparent",border:"none",color:"var(--text3)",fontSize:20,cursor:"pointer"}}>✕</button>
+        <div style={{position:"fixed",inset:0,zIndex:999,background:"rgba(0,0,0,.8)",display:"flex",alignItems:"center",justifyContent:"center",padding:20}} onClick={()=>setShowKwInfo(false)}>
+          <div style={{width:"100%",maxWidth:460,borderRadius:20,background:"var(--card)",border:"1px solid var(--border)",overflow:"hidden",animation:"fadeUp .25s ease",boxShadow:"0 24px 60px rgba(0,0,0,.5)"}} onClick={e=>e.stopPropagation()}>
+            {/* 헤더 */}
+            <div style={{background:"linear-gradient(135deg,#ff6b9d,#ff4081)",padding:"20px 24px",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+              <div>
+                <div style={{fontSize:18,fontWeight:900,color:"#fff"}}>📊 황금 키워드 분석</div>
+                <div style={{fontSize:12,color:"rgba(255,255,255,.8)",marginTop:3}}>네이버 실데이터 기반 키워드 점수 분석</div>
+              </div>
+              <button onClick={()=>setShowKwInfo(false)} style={{background:"rgba(255,255,255,.2)",border:"none",color:"#fff",width:32,height:32,borderRadius:8,cursor:"pointer",fontSize:16,display:"flex",alignItems:"center",justifyContent:"center"}}>✕</button>
             </div>
-            <div style={{display:"flex",flexDirection:"column",gap:14}}>
+            {/* 내용 */}
+            <div style={{padding:20,display:"flex",flexDirection:"column",gap:10}}>
               {[
-                {ico:"🎯",title:"뭐야?",desc:"네이버 검색광고 API로 실제 검색량·경쟁도·CPC를 가져와서 황금 키워드를 찾아드려요"},
-                {ico:"⭐",title:"황금점수 기준",desc:"경쟁 낮음(35%) + 검색량 1천~3만(25%) + 클릭률(15%) + CPC 단가(25%) + 상업적 단어·롱테일 보너스"},
-                {ico:"📈",title:"어떻게 활용해?",desc:"점수 높은 키워드 클릭 → 자동으로 키워드 입력 → \"제목 추천\" 버튼으로 바로 SEO 제목 생성"},
-                {ico:"🔑",title:"사용 조건",desc:`관리자 공용키 사용 시 FREE ${NAVER_DAILY_LIMIT.free}회/일 · PRO ${NAVER_DAILY_LIMIT.pro}회/일\n설정탭에 내 키 입력하면 무제한 사용 가능`},
-                {ico:"🤖",title:"봇 필요해?",desc:"네이버 키워드 API는 봇이 켜져 있어야 호출 가능해요 (PC에서 Publy 봇 실행 필요)"},
+                {ico:"🎯",title:"어떤 기능이야?",desc:"네이버 검색광고 API로 실제 검색량·경쟁도·CPC를 가져와서 내 키워드가 얼마나 좋은지 점수로 보여줘요"},
+                {ico:"⭐",title:"황금점수 계산 방법",desc:"경쟁 낮음(35%) + 검색량 1천~3만(25%) + 클릭률(15%) + CPC 단가(25%)\n+ 구매의도 단어·롱테일 키워드 보너스"},
+                {ico:"👆",title:"어떻게 써?",desc:"점수 높은 키워드 클릭 → 키워드 자동 입력\n\"제목 추천 →\" 버튼으로 바로 SEO 제목 생성!"},
+                {ico:"📅",title:"무료 사용 한도",desc:`무료회원 ${NAVER_DAILY_LIMIT.free}회/일 · PRO ${NAVER_DAILY_LIMIT.pro}회/일\n설정탭에서 내 API 키 입력하면 한도 없이 무제한 사용`},
+                {ico:"💻",title:"봇이 필요해요",desc:"키워드 분석은 PC에서 Publy 봇이 실행 중이어야 사용 가능해요"},
               ].map((item,i)=>(
-                <div key={i} style={{display:"flex",gap:12,padding:"12px 14px",borderRadius:12,background:"var(--bg2)",border:"1px solid var(--border)"}}>
-                  <span style={{fontSize:20,flexShrink:0}}>{item.ico}</span>
+                <div key={i} style={{display:"flex",gap:12,padding:"12px 14px",borderRadius:12,background:"var(--bg2)"}}>
+                  <span style={{fontSize:22,flexShrink:0,lineHeight:1}}>{item.ico}</span>
                   <div>
-                    <div style={{fontSize:13,fontWeight:800,color:"var(--text)",marginBottom:3}}>{item.title}</div>
-                    <div style={{fontSize:12,color:"var(--text2)",lineHeight:1.6,whiteSpace:"pre-line"}}>{item.desc}</div>
+                    <div style={{fontSize:13,fontWeight:800,color:"var(--text)",marginBottom:4}}>{item.title}</div>
+                    <div style={{fontSize:12,color:"var(--text2)",lineHeight:1.65,whiteSpace:"pre-line"}}>{item.desc}</div>
                   </div>
                 </div>
               ))}
             </div>
-            <button className="btn btn-primary btn-full" style={{marginTop:20}} onClick={()=>setShowKwInfo(false)}>확인했어요!</button>
+            <div style={{padding:"0 20px 20px"}}>
+              <button onClick={()=>setShowKwInfo(false)} style={{width:"100%",padding:"12px",borderRadius:12,border:"none",background:"linear-gradient(135deg,#ff6b9d,#ff4081)",color:"#fff",fontSize:14,fontWeight:800,cursor:"pointer",fontFamily:"inherit",boxShadow:"0 4px 14px rgba(255,64,129,.35)"}}>
+                알겠어요! 👍
+              </button>
+            </div>
           </div>
         </div>
       )}
