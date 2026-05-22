@@ -485,6 +485,19 @@ select.field-inp{cursor:pointer;appearance:auto;}
 @keyframes toastIn{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}
 `;
 
+const WRITE_STYLES = [
+  {id:"감성일기", i:"📔", desc:"감성·경험 중심 에세이체"},
+  {id:"정보글",  i:"📋", desc:"SEO 최적화 정보 전달"},
+  {id:"맛집후기",i:"🍽️", desc:"음식·분위기·가격 묘사"},
+  {id:"여행기",  i:"✈️", desc:"일정·팁·감성 여행 스토리"},
+] as const;
+type WriteStyle = typeof WRITE_STYLES[number]["id"];
+const WRITE_STYLE_GUIDE: Record<WriteStyle,string> = {
+  "감성일기":"[스타일] 개인 감정·경험 중심의 따뜻한 에세이체. 독자에게 말 걸듯 친근하게. 감성적 표현 풍부하게.",
+  "정보글":  "[스타일] 명확한 정보 전달. 번호 목록·수치·비교 표현 적극 활용. SEO 키워드 자연스럽게 반복.",
+  "맛집후기":"[스타일] 맛·향·식감 생생하게 묘사. 가격·위치·웨이팅·주차 정보 포함. 재방문 의향 솔직하게.",
+  "여행기":  "[스타일] 여행지 분위기·감성 묘사. 일정·비용·교통 팁 포함. 포토스팟·현지 맛집 자연스럽게 언급.",
+};
 const TABS = [
   {k:"keyword",  i:"🔍", l:"키워드/제목"},
   {k:"write",    i:"✍️", l:"글 생성"},
@@ -585,6 +598,8 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
   const [adminNaverMsg, setAdminNaverMsg] = useState("");
   const [showRankInfo, setShowRankInfo] = useState(false);
   const [toasts, setToasts] = useState<{id:number;msg:string;type:"success"|"error"|"info"}[]>([]);
+  const [writeStyle, setWriteStyle] = useState<WriteStyle>(()=>(localStorage.getItem("publy_adm_write_style") as WriteStyle)||"감성일기");
+  const [qualityScore, setQualityScore] = useState<{seo:number;read:number;len:number;total:number}|null>(null);
   function showToast(msg:string, type:"success"|"error"|"info"="success"){
     const id=Date.now();
     setToasts(p=>[...p,{id,msg,type}]);
@@ -606,6 +621,30 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
     const longtailBonus=wordCount>=3?15:wordCount===2?8:0;
     const base=Math.round(compScore*0.35+volScore*0.25+ctrScore*0.15+cpcScore*0.25);
     return Math.min(100,base+commercialBonus+longtailBonus);
+  }
+
+  function calcQualityScore(content:string,kw:string):{seo:number;read:number;len:number;total:number}{
+    const kwCount=(content.match(new RegExp(kw.replace(/[.*+?^${}()|[\]\\]/g,"\\$&"),"gi"))||[]).length;
+    const kwDensity=content.length>0?kwCount/(content.length/100):0;
+    const hasFaq=content.includes("[FAQ시작]")||content.includes("Q1:");
+    const seo=Math.min(100,Math.round(
+      (kwDensity>=2&&kwDensity<=6?40:kwDensity>0?20:0)+
+      (hasFaq?30:0)+
+      (content.length>=1500?30:content.length>=800?15:0)
+    ));
+    const paragraphs=content.split(/\n\n+/).filter(Boolean);
+    const sentences=content.split(/[.!?]\s+/).filter(s=>s.length>5);
+    const avgSentLen=sentences.length>0?content.length/sentences.length:0;
+    const read=Math.min(100,Math.round(
+      (paragraphs.length>=5?40:paragraphs.length>=3?25:10)+
+      (avgSentLen>10&&avgSentLen<80?40:20)+
+      (!content.includes("##")&&!content.includes("**")?20:0)
+    ));
+    const len=Math.min(100,Math.round(
+      content.length>=2000?100:content.length>=1500?85:content.length>=1000?65:content.length>=500?40:20
+    ));
+    const total=Math.round(seo*0.4+read*0.35+len*0.25);
+    return{seo,read,len,total};
   }
 
   async function fetchKeywordData(){
@@ -1209,7 +1248,7 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
   async function handleGenerate() {
     if (!selectedTitle && !keyword) return;
     const title = selectedTitle || keyword;
-    setGenerating(true); setGenImage("");
+    setGenerating(true); setGenImage(""); setQualityScore(null);
 
     // 글자수 자동 랜덤
     const chars = calcTargetChars();
@@ -1252,6 +1291,7 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
     const platGuide = platform==="naver"
       ? "[플랫폼] 네이버: ## 기호 절대 금지. 순수 텍스트. 감성적 경험담."
       : "[플랫폼] 티스토리: 정보성 중심. 내부링크 2개 자연스럽게 포함.";
+    const styleGuide = WRITE_STYLE_GUIDE[writeStyle]||"";
 
     const prompt = `당신은 대한민국 최고의 블로그 작가입니다.
 
@@ -1278,6 +1318,7 @@ ${catGuide}
 
 ${adGuide}
 ${platGuide}
+${styleGuide}
 
 === 출력 형식 ===
 태그: 태그1, 태그2, 태그3, 태그4, 태그5
@@ -1307,6 +1348,7 @@ POST3: (제목)|(이유)
       if (tgm) setGenTags(tgm[1].trim());
       const body = bm ? bm[1].trim() : cleaned;
       setGenContent(body);
+      setQualityScore(calcQualityScore(body,keyword));
       const recCount = imgCountManual ?? recommendImageCount(body);
       if (imgCountAuto) setImgCount(recCount);
       // ── tarry 방식: 블록 자동 분리 + 제목/태그 자동 연동 ──
@@ -1888,6 +1930,21 @@ POST3: (제목)|(이유)
                 )}
                 <div className="card">
                   <div className="card-title">⚙️ 생성 설정</div>
+
+                  {/* 글 스타일 프리셋 */}
+                  <div style={{marginBottom:16}}>
+                    <label className="inp-label">✍️ 글 스타일</label>
+                    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:7}}>
+                      {WRITE_STYLES.map(s=>(
+                        <button key={s.id} onClick={()=>{setWriteStyle(s.id);localStorage.setItem("publy_adm_write_style",s.id);}}
+                          style={{padding:"10px 12px",borderRadius:10,border:`1.5px solid ${writeStyle===s.id?"var(--accent)":"var(--border)"}`,background:writeStyle===s.id?"var(--accent-bg)":"var(--bg)",cursor:"pointer",textAlign:"left",fontFamily:"inherit",transition:"all .15s"}}>
+                          <div style={{fontSize:13,fontWeight:700,color:writeStyle===s.id?"var(--accent-text)":"var(--text)"}}>{s.i} {s.id}</div>
+                          <div style={{fontSize:11,color:"var(--text3)",marginTop:2}}>{s.desc}</div>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
                   <div style={{marginBottom:16}}>
                     <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
                       <label className="inp-label" style={{margin:0}}>📏 목표 글자수</label>
@@ -1928,6 +1985,28 @@ POST3: (제목)|(이유)
                           <button className="preview-btn" onClick={()=>setShowPreview(true)}>👁️ 미리보기</button>
                         </div>
                       </div>
+
+                      {/* 품질 점수 */}
+                      {qualityScore&&(
+                        <div style={{padding:"12px 14px",borderRadius:12,background:"var(--card2)",border:"1px solid var(--border)",marginBottom:14}}>
+                          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:10}}>
+                            <span style={{fontSize:12,fontWeight:800,color:"var(--text2)"}}>📊 글 품질 점수</span>
+                            <span style={{fontSize:20,fontWeight:900,color:qualityScore.total>=80?"var(--success)":qualityScore.total>=55?"var(--warn)":"var(--danger)",fontFamily:"'Space Grotesk',sans-serif"}}>{qualityScore.total}점</span>
+                          </div>
+                          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}}>
+                            {([{l:"SEO",v:qualityScore.seo},{l:"가독성",v:qualityScore.read},{l:"글자수",v:qualityScore.len}] as const).map(({l,v})=>(
+                              <div key={l} style={{textAlign:"center"}}>
+                                <div style={{fontSize:10,color:"var(--text3)",marginBottom:4,fontWeight:700}}>{l}</div>
+                                <div style={{height:4,background:"var(--border)",borderRadius:99,overflow:"hidden",marginBottom:4}}>
+                                  <div style={{height:"100%",width:`${v}%`,background:v>=80?"var(--success)":v>=55?"var(--warn)":"var(--danger)",borderRadius:99,transition:"width .6s ease"}}/>
+                                </div>
+                                <div style={{fontSize:11,fontWeight:800,color:v>=80?"var(--success)":v>=55?"var(--warn)":"var(--danger)"}}>{v}</div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
                       <div style={{display:"flex",flexDirection:"column",gap:12}}>
                         {([{l:"제목",v:genTitle,s:setGenTitle},{l:"태그",v:genTags,s:setGenTags}] as const).map(f=>(
                           <div key={f.l}><label className="inp-label">{f.l}</label><input className="inp" value={f.v} onChange={e=>f.s(e.target.value)}/></div>
