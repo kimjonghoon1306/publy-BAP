@@ -131,6 +131,8 @@ const CSS = `
 .logo-ico{width:32px;height:32px;border-radius:8px;background:linear-gradient(135deg,#ff6b6b,#ff3333);display:flex;align-items:center;justify-content:center;flex-shrink:0;}
 .logo-text{font-size:17px;font-weight:900;letter-spacing:.15em;color:var(--danger);}
 .header-mid{display:flex;align-items:center;gap:8px;flex:1;justify-content:center;}
+.plat-toggle{display:flex;align-items:center;gap:5px;flex-shrink:0;}
+.plat-hdr-btn{padding:5px 12px;border-radius:99px;border:1.5px solid;font-size:11px;font-weight:700;cursor:pointer;font-family:'Noto Sans KR',sans-serif;transition:all .15s;white-space:nowrap;}
 .header-right{display:flex;align-items:center;gap:6px;margin-left:auto;}
 .server-badge{display:flex;align-items:center;gap:5px;padding:5px 12px;border-radius:99px;font-size:12px;font-weight:700;border:1px solid;white-space:nowrap;}
 .server-on{background:rgba(63,185,80,.1);color:var(--success);border-color:rgba(63,185,80,.3);}
@@ -1570,6 +1572,17 @@ POST3: (제목)|(이유)
               </svg>
             </div>
             <span className="logo-text">PUBLY ADM</span>
+          </div>
+          {/* 플랫폼 토글 - 항상 표시 */}
+          <div className="plat-toggle">
+            <button className="plat-hdr-btn" onClick={()=>{setPlatform("naver");if(pubAccId)loadCategories("naver");}}
+              style={{background:platform==="naver"?"rgba(3,199,90,.12)":"transparent",color:platform==="naver"?"var(--naver)":"var(--text2)",borderColor:platform==="naver"?"rgba(3,199,90,.4)":"var(--border)"}}>
+              🟢 네이버
+            </button>
+            <button className="plat-hdr-btn" onClick={()=>{setPlatform("tistory");if(pubAccId)loadCategories("tistory");}}
+              style={{background:platform==="tistory"?"rgba(255,107,53,.12)":"transparent",color:platform==="tistory"?"var(--tistory)":"var(--text2)",borderColor:platform==="tistory"?"rgba(255,107,53,.4)":"var(--border)"}}>
+              🟠 티스토리
+            </button>
           </div>
           <div className="header-mid">
             <div className={`server-badge ${botOnline?"server-on":"server-off"}`}>
