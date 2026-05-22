@@ -277,11 +277,13 @@ textarea.inp{resize:vertical;min-height:80px;line-height:1.7;}
 .pub-panel-desktop{display:flex;flex-direction:column;gap:12px;}
 .pub-mobile-bar{display:none;}
 .lg-hidden{display:none;}
+.pub-submit-btn{display:block;}
 @media(max-width:900px){
   .pub-grid{grid-template-columns:1fr !important;}
   .pub-panel-desktop{display:none !important;}
   .pub-mobile-bar{display:flex !important;}
   .lg-hidden{display:block !important;}
+  .pub-submit-btn{display:none !important;}
 }
 .detail-field{display:flex;flex-direction:column;gap:5px;}
 .field-label{font-size:11px;font-weight:700;color:var(--text2);}
@@ -354,7 +356,7 @@ select.field-inp{cursor:pointer;appearance:auto;}
 }
 @media(max-width:768px){
   .header-mid{display:none;}
-  .main{padding:14px 12px 90px;}
+  .main{padding:14px 12px calc(84px + env(safe-area-inset-bottom));}
   .plat-grid{grid-template-columns:1fr 1fr;}
   .title-grid{grid-template-columns:1fr;}
   .adtype-grid{grid-template-columns:1fr;}
@@ -1309,7 +1311,7 @@ POST3: (제목)|(이유)
         )}
       </div>
 
-      <button onClick={handlePublish} disabled={publishing||!botOnline||!pubAccId||!pubTitle||!buildAdmPublishContent()||(scheduleOn&&!scheduleTime)} className="btn btn-primary btn-full btn-xl">
+      <button onClick={handlePublish} disabled={publishing||!botOnline||!pubAccId||!pubTitle||!buildAdmPublishContent()||(scheduleOn&&!scheduleTime)} className="btn btn-primary btn-full btn-xl pub-submit-btn">
         {publishing
           ?<><span className="spinner"/>{scheduleOn?"예약 중...":"발행 중..."}</>
           :scheduleOn?<>⏰ 예약 발행 설정하기</>:<>🚀 블로그 자동 발행</>
@@ -2015,7 +2017,7 @@ POST3: (제목)|(이유)
 
             {/* ───── 🚀 자동발행 ───── */}
             {tab === "publish" && (
-              <div style={{animation:"fadeUp .25s ease both",paddingBottom:80}}>
+              <div style={{animation:"fadeUp .25s ease both",paddingBottom:160}}>
                 {!botOnline&&<div className="alert alert-danger" style={{marginBottom:12}}>⚠️ 봇 오프라인 — PC에서 Publy 앱 실행 시 즉시 발행돼요.</div>}
 
                 {/* ── 헤더 버튼줄 ── */}
@@ -2057,23 +2059,6 @@ POST3: (제목)|(이유)
                       👁️ 미리보기
                     </button>
                   </div>
-                </div>
-
-                {/* 모바일 발행 설정 접기 */}
-                <div className="lg-hidden" style={{marginBottom:10}}>
-                  <button onClick={()=>setShowPublishPanel(v=>!v)} style={{width:"100%",display:"flex",alignItems:"center",justifyContent:"space-between",padding:"13px 16px",borderRadius:12,background:"var(--card)",border:"1px solid var(--border)",cursor:"pointer",fontFamily:"inherit"}}>
-                    <div style={{display:"flex",alignItems:"center",gap:8}}>
-                      <span style={{fontSize:16}}>🚀</span>
-                      <span style={{fontSize:14,fontWeight:700,color:"var(--text)"}}>발행 설정</span>
-                      {pubAccId&&<span style={{fontSize:11,fontWeight:700,padding:"2px 9px",borderRadius:99,background:"var(--accent-bg)",color:"var(--accent-text)"}}>계정 선택됨</span>}
-                    </div>
-                    <span style={{color:"var(--text3)"}}>{showPublishPanel?"▲":"▼"}</span>
-                  </button>
-                  {showPublishPanel&&(
-                    <div style={{marginTop:8,padding:"16px",borderRadius:12,background:"var(--card)",border:"1px solid var(--border)",display:"flex",flexDirection:"column",gap:12}}>
-                      {renderAdmPublishPanel()}
-                    </div>
-                  )}
                 </div>
 
                 {/* 메인 그리드 */}
@@ -2279,10 +2264,24 @@ POST3: (제목)|(이유)
                 {/* 모바일 하단 고정 */}
                 <div style={{position:"fixed",bottom:0,left:0,right:0,zIndex:40,background:"var(--card)",borderTop:"1px solid var(--border)",padding:"10px 16px",display:"flex",gap:10}} className="pub-mobile-bar">
                   <button onClick={()=>setShowPreviewModal(true)} style={{flex:1,padding:"12px",borderRadius:12,background:"oklch(.62 .22 300)",color:"#fff",border:"none",cursor:"pointer",fontSize:14,fontWeight:700,fontFamily:"inherit"}}>👁️ 미리보기</button>
+                  <button onClick={()=>setShowPublishPanel(v=>!v)} style={{flex:1,padding:"12px",borderRadius:12,background:"var(--card2)",color:"var(--text)",border:"1px solid var(--border)",cursor:"pointer",fontSize:13,fontWeight:700,fontFamily:"inherit"}}>
+                    🚀 발행 설정 {showPublishPanel?"▲":"▼"}
+                  </button>
                   <button onClick={handlePublish} disabled={publishing||!pubAccId||!pubTitle||!buildAdmPublishContent()||(scheduleOn&&!scheduleTime)} style={{flex:2,padding:"12px",borderRadius:12,background:scheduleOn?"var(--warn)":"var(--accent)",color:"#000",border:"none",cursor:"pointer",fontSize:14,fontWeight:800,fontFamily:"inherit",opacity:(publishing||!pubAccId||!pubTitle)?.5:1}}>
-                    {publishing?(scheduleOn?"예약 중...":"발행 중..."):scheduleOn?"⏰ 예약 발행":"🚀 자동 발행"}
+                    {publishing?(scheduleOn?"예약 중...":"발행 중..."):scheduleOn?"⏰ 예약":"🚀 발행"}
                   </button>
                 </div>
+
+                {/* 모바일 발행 설정 바텀시트 */}
+                {showPublishPanel&&(
+                  <div className="lg-hidden" style={{position:"fixed",bottom:64,left:0,right:0,zIndex:39,maxHeight:"70vh",overflowY:"auto",background:"var(--card)",borderTop:"2px solid var(--accent-border)",padding:"16px",display:"flex",flexDirection:"column",gap:12,boxShadow:"0 -8px 32px rgba(0,0,0,.3)"}}>
+                    <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:4}}>
+                      <span style={{fontSize:14,fontWeight:800,color:"var(--text)"}}>🚀 발행 설정</span>
+                      <button onClick={()=>setShowPublishPanel(false)} style={{background:"transparent",border:"none",color:"var(--text3)",fontSize:20,cursor:"pointer"}}>✕</button>
+                    </div>
+                    {renderAdmPublishPanel()}
+                  </div>
+                )}
 
                 {pubMsg&&<div className={`alert ${pubMsg.includes("✅")?"alert-success":"alert-danger"}`} style={{marginTop:8,fontSize:16,padding:"16px",lineHeight:1.6}}>{pubMsg}</div>}
               </div>
