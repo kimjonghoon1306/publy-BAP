@@ -1658,13 +1658,13 @@ POST3: (제목)|(이유)
           <div className="sidebar">
             <div className="nav-section" style={{fontSize:10,fontWeight:800,color:"var(--text3)",padding:"8px 12px 4px",letterSpacing:".08em"}}>✍️ 블로그 기능</div>
             {TABS.filter(t=>["keyword","write","image","publish","manage","accounts"].includes(t.k)).map(t => (
-              <button key={t.k} className={`nav-item ${tab===t.k?"active":""}`} onClick={()=>setTab(t.k as any)}>
+              <button key={t.k} className={`nav-item ${tab===t.k?"active":""}`} onClick={()=>{if(t.k==="rank"){window.open("https://rank.xn--zk5biyyw.com/","_blank");return;}setTab(t.k as any);}}>
                 <span className="nav-ico">{t.i}</span>{t.l}
               </button>
             ))}
             <div className="nav-section" style={{fontSize:10,fontWeight:800,color:"var(--text3)",padding:"10px 12px 4px",letterSpacing:".08em",borderTop:"1px solid var(--border)",marginTop:6}}>🔐 관리자 전용</div>
             {TABS.filter(t=>["users","stats","settings"].includes(t.k)).map(t => (
-              <button key={t.k} className={`nav-item ${tab===t.k?"active":""}`} onClick={()=>setTab(t.k as any)}>
+              <button key={t.k} className={`nav-item ${tab===t.k?"active":""}`} onClick={()=>{if(t.k==="rank"){window.open("https://rank.xn--zk5biyyw.com/","_blank");return;}setTab(t.k as any);}}>
                 <span className="nav-ico">{t.i}</span>{t.l}
                 {t.k==="users" && users.length>0 && <span className="nav-badge">{users.length}</span>}
               </button>
@@ -2778,7 +2778,7 @@ POST3: (제목)|(이유)
         {/* 모바일 탭바 */}
         <div className="mob-tabs">
           {TABS.map(t=>(
-            <button key={t.k} className={`mob-tab ${tab===t.k?"active":""}`} onClick={()=>setTab(t.k as any)}>
+            <button key={t.k} className={`mob-tab ${tab===t.k?"active":""}`} onClick={()=>{if(t.k==="rank"){window.open("https://rank.xn--zk5biyyw.com/","_blank");return;}setTab(t.k as any);}}>
               <span className="mob-tab-ico">{t.i}</span>
               <span className="mob-tab-lbl">{t.l}</span>
             </button>
