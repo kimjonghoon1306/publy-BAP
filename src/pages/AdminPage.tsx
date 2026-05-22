@@ -274,7 +274,7 @@ textarea.inp{resize:vertical;min-height:80px;line-height:1.7;}
 .detail-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px;}
 .adm-img-split{display:grid;grid-template-columns:280px 1fr;gap:14px;align-items:start;}
 .pub-grid{display:grid;grid-template-columns:1fr 320px;gap:16px;align-items:start;}
-.pub-panel-desktop{display:flex;flex-direction:column;gap:12px;position:sticky;top:20px;max-height:calc(100dvh - 120px);overflow-y:auto;padding-right:2px;}
+.pub-panel-desktop{display:flex;flex-direction:column;gap:12px;}
 .pub-mobile-bar{display:none;}
 .lg-hidden{display:none;}
 @media(max-width:900px){
@@ -2271,7 +2271,7 @@ POST3: (제목)|(이유)
                   </div>
 
                   {/* 오른쪽: 발행 패널 (PC) */}
-                  <div style={{display:"flex",flexDirection:"column",gap:12}} className="pub-panel-desktop">
+                  <div className="pub-panel-desktop">
                     {renderAdmPublishPanel()}
                   </div>
                 </div>
