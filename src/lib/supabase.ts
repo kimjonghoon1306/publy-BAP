@@ -189,3 +189,44 @@ export async function changeUserPassword(userId: string, currentPw: string, newP
     .eq("id", userId);
   if (error) throw new Error(error.message);
 }
+
+// ── 네이버 API 키 관리 ────────────────────────────────────
+export interface NaverApiKeys {
+  naver_access_license?: string;
+  naver_secret_key?: string;
+  naver_customer_id?: string;
+  naver_datalab_client_id?: string;
+  naver_datalab_client_secret?: string;
+}
+
+export async function saveNaverApiKeys(userId: string, keys: NaverApiKeys): Promise<void> {
+  for (const [key, value] of Object.entries(keys)) {
+    if (!value) continue;
+    const { error } = await supabase
+      .from("publy_settings")
+      .upsert({ key: `user_${userId}_${key}`, value }, { onConflict: "key" });
+    if (error) throw new Error(error.message);
+  }
+}
+
+export async function getNaverApiKeys(userId: string): Promise<NaverApiKeys> {
+  const names = ["naver_access_license","naver_secret_key","naver_customer_id","naver_datalab_client_id","naver_datalab_client_secret"];
+  const result: NaverApiKeys = {};
+  for (const k of names) {
+    const { data: uRow } = await supabase.from("publy_settings").select("value").eq("key",`user_${userId}_${k}`).single();
+    if (uRow?.value) { (result as any)[k] = uRow.value; continue; }
+    const { data: aRow } = await supabase.from("publy_settings").select("value").eq("key",`admin_${k}`).single();
+    if (aRow?.value) (result as any)[k] = aRow.value;
+  }
+  return result;
+}
+
+export async function saveAdminNaverApiKeys(keys: NaverApiKeys): Promise<void> {
+  for (const [key, value] of Object.entries(keys)) {
+    if (!value) continue;
+    const { error } = await supabase
+      .from("publy_settings")
+      .upsert({ key: `admin_${key}`, value }, { onConflict: "key" });
+    if (error) throw new Error(error.message);
+  }
+}
