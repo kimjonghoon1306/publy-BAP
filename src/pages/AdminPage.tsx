@@ -159,8 +159,12 @@ const CSS = `
 .stat-lbl{font-size:9px;color:var(--text2);margin-top:3px;font-weight:600;}
 
 .main{flex:1;overflow-y:auto;padding:20px;min-width:0;}
-.right-panel{width:280px;flex-shrink:0;background:var(--bg2);border-left:1px solid var(--border);display:flex;flex-direction:column;padding:14px 12px;gap:10px;overflow-y:auto;}
-@media(max-width:900px){.right-panel{display:none;}}
+.pub-sticky-bar{position:sticky;top:0;z-index:30;background:var(--card);border-bottom:1px solid var(--border);padding:10px 16px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;backdrop-filter:blur(12px);}
+.pub-ready{display:flex;align-items:center;gap:6px;flex-wrap:wrap;}
+.pub-ready-chip{display:flex;align-items:center;gap:4px;padding:4px 10px;border-radius:99px;font-size:11px;font-weight:700;border:1px solid;}
+.pub-ready-ok{background:rgba(63,185,80,.1);color:var(--success);border-color:rgba(63,185,80,.25);}
+.pub-ready-no{background:rgba(248,81,73,.08);color:var(--danger);border-color:rgba(248,81,73,.2);}
+@media(max-width:900px){.right-panel{display:none;}.pub-ready{display:none;}.pub-sticky-bar{flex-wrap:wrap;gap:6px;}}
 
 .card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:20px 22px;margin-bottom:14px;transition:border-color .15s;}
 .card:hover{border-color:var(--border-focus);}
@@ -2022,52 +2026,70 @@ POST3: (제목)|(이유)
 
             {/* ───── 🚀 자동발행 ───── */}
             {tab === "publish" && (
-              <div style={{animation:"fadeUp .25s ease both",paddingBottom:160}}>
-                {!botOnline&&<div className="alert alert-danger" style={{marginBottom:12}}>⚠️ 봇 오프라인 — PC에서 Publy 앱 실행 시 즉시 발행돼요.</div>}
+              <div style={{animation:"fadeUp .25s ease both"}}>
+                {!botOnline&&<div className="alert alert-danger" style={{margin:"12px 16px 0"}}>⚠️ 봇 오프라인 — PC에서 Publy 앱 실행 시 즉시 발행돼요.</div>}
 
-                {/* ── 헤더 버튼줄 ── */}
-                <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:8,marginBottom:14}}>
-                  <div style={{fontSize:13,color:"var(--text2)",fontWeight:600}}>
-                    {blocks.filter(b=>b.type==="text").length}개 단락 · 이미지 {blocks.filter(b=>b.type==="image").length}장
+                {/* ── 발행 준비도 + 설정 스티키 바 ── */}
+                <div className="pub-sticky-bar">
+                  <div className="pub-ready">
+                    {[
+                      {label:"제목",ok:!!pubTitle},
+                      {label:"본문",ok:blocks.some(b=>b.type==="text"&&(b as TextBlock).content.trim().length>0)},
+                      {label:`이미지 ${blocks.filter(b=>b.type==="image").length}장`,ok:blocks.some(b=>b.type==="image")},
+                      {label:pubAccId?connAccs.find(a=>a.id===pubAccId)?.username||"계정":"계정 미선택",ok:!!pubAccId},
+                    ].map(c=>(
+                      <span key={c.label} className={`pub-ready-chip ${c.ok?"pub-ready-ok":"pub-ready-no"}`}>
+                        {c.ok?"✅":"❌"} {c.label}
+                      </span>
+                    ))}
                   </div>
-                  <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                  <div style={{marginLeft:"auto",display:"flex",gap:8,alignItems:"center"}}>
                     <div style={{position:"relative"}}>
-                      <button onClick={()=>setShowNaverMenu(v=>!v)} style={{display:"flex",alignItems:"center",gap:6,padding:"8px 14px",borderRadius:10,background:"#03C75A",color:"#fff",border:"none",cursor:"pointer",fontSize:13,fontWeight:700,fontFamily:"inherit"}}>
-                        📋 네이버 복사 ▲
+                      <button onClick={()=>setShowNaverMenu(v=>!v)} style={{display:"flex",alignItems:"center",gap:5,padding:"7px 12px",borderRadius:8,background:"#03C75A",color:"#fff",border:"none",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:"inherit",whiteSpace:"nowrap"}}>
+                        📋 N복사 ▲
                       </button>
                       {showNaverMenu&&(
                         <>
                           <div style={{position:"fixed",inset:0,zIndex:40}} onClick={()=>setShowNaverMenu(false)}/>
-                          <div style={{position:"absolute",top:42,right:0,zIndex:50,width:280,borderRadius:16,overflow:"hidden",background:"#1a1a2e",border:"1px solid rgba(255,255,255,.12)",boxShadow:"0 8px 32px rgba(0,0,0,.4)"}}>
-                            <div style={{padding:"12px 16px",borderBottom:"1px solid rgba(255,255,255,.1)"}}>
-                              <div style={{fontSize:12,fontWeight:700,color:"#fff"}}>📋 복사 방식 선택</div>
-                            </div>
+                          <div style={{position:"absolute",top:38,right:0,zIndex:50,width:260,borderRadius:14,overflow:"hidden",background:"#1a1a2e",border:"1px solid rgba(255,255,255,.12)",boxShadow:"0 8px 32px rgba(0,0,0,.4)"}}>
                             {[
-                              {label:"전체 복사",tag:"전체",color:"#03C75A",tagColor:"#fff",desc:"본문+FAQ+관련글",tip:"✓ 정보성 글 · 리뷰",fn:()=>{copyForNaver();setShowNaverMenu(false);}},
-                              {label:"본문+FAQ",tag:"FAQ",color:"#fbbf24",tagColor:"#000",desc:"참고자료·관련글 제외",tip:"✓ 일반 블로그 · 상품 리뷰",fn:()=>{copyForNaverWithFaq();setShowNaverMenu(false);}},
-                              {label:"본문만",tag:"본문",color:"#f472b6",tagColor:"#fff",desc:"FAQ·관련글 전부 제외",tip:"✓ 체험단 · 맛집 · 여행",fn:()=>{copyForNaverBodyOnly();setShowNaverMenu(false);}},
+                              {label:"전체 복사",tag:"전체",color:"#03C75A",tagColor:"#fff",tip:"정보성 글·리뷰",fn:()=>{copyForNaver();setShowNaverMenu(false);}},
+                              {label:"본문+FAQ",tag:"FAQ",color:"#fbbf24",tagColor:"#000",tip:"일반 블로그",fn:()=>{copyForNaverWithFaq();setShowNaverMenu(false);}},
+                              {label:"본문만",tag:"본문",color:"#f472b6",tagColor:"#fff",tip:"체험단·맛집",fn:()=>{copyForNaverBodyOnly();setShowNaverMenu(false);}},
                             ].map((opt,i)=>(
-                              <button key={i} onClick={opt.fn} style={{width:"100%",textAlign:"left",padding:"12px 16px",borderBottom:i<2?"1px solid rgba(255,255,255,.08)":"none",background:"transparent",cursor:"pointer",border:"none",fontFamily:"inherit"}}>
-                                <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4}}>
-                                  <span style={{fontSize:10,fontWeight:800,padding:"2px 8px",borderRadius:99,background:opt.color,color:opt.tagColor}}>{opt.tag}</span>
-                                  <span style={{fontSize:13,fontWeight:700,color:"#fff"}}>{opt.label}</span>
-                                </div>
-                                <div style={{fontSize:11,color:"rgba(255,255,255,.55)"}}>{opt.desc}</div>
-                                <div style={{fontSize:11,color:opt.color,marginTop:2}}>{opt.tip}</div>
+                              <button key={i} onClick={opt.fn} style={{width:"100%",textAlign:"left",padding:"10px 14px",borderBottom:i<2?"1px solid rgba(255,255,255,.08)":"none",background:"transparent",cursor:"pointer",border:"none",fontFamily:"inherit",display:"flex",alignItems:"center",gap:8}}>
+                                <span style={{fontSize:10,fontWeight:800,padding:"2px 7px",borderRadius:99,background:opt.color,color:opt.tagColor,flexShrink:0}}>{opt.tag}</span>
+                                <div><div style={{fontSize:12,fontWeight:700,color:"#fff"}}>{opt.label}</div><div style={{fontSize:10,color:"rgba(255,255,255,.45)"}}>{opt.tip}</div></div>
                               </button>
                             ))}
                           </div>
                         </>
                       )}
                     </div>
-                    <button onClick={()=>setShowPreviewModal(true)} style={{display:"flex",alignItems:"center",gap:6,padding:"8px 14px",borderRadius:10,background:"oklch(.62 .22 300)",color:"#fff",border:"none",cursor:"pointer",fontSize:13,fontWeight:700,fontFamily:"inherit"}}>
+                    <button onClick={()=>setShowPreviewModal(true)} style={{display:"flex",alignItems:"center",gap:5,padding:"7px 12px",borderRadius:8,background:"oklch(.62 .22 300)",color:"#fff",border:"none",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:"inherit",whiteSpace:"nowrap"}}>
                       👁️ 미리보기
+                    </button>
+                    <button onClick={()=>setShowPublishPanel(v=>!v)} style={{display:"flex",alignItems:"center",gap:5,padding:"7px 12px",borderRadius:8,border:"1px solid var(--border)",background:showPublishPanel?"var(--accent-bg)":"var(--card)",color:showPublishPanel?"var(--accent-text)":"var(--text2)",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:"inherit",whiteSpace:"nowrap"}}>
+                      ⚙️ 발행 설정 {showPublishPanel?"▲":"▼"}
+                    </button>
+                    <button onClick={handlePublish} disabled={publishing||!pubAccId||!pubTitle||!buildAdmPublishContent()||(scheduleOn&&!scheduleTime)}
+                      style={{display:"flex",alignItems:"center",gap:5,padding:"7px 16px",borderRadius:8,border:"none",background:scheduleOn?"var(--warn)":"var(--accent)",color:"#000",cursor:"pointer",fontSize:13,fontWeight:800,fontFamily:"inherit",whiteSpace:"nowrap",opacity:(publishing||!pubAccId||!pubTitle)?.5:1}}>
+                      {publishing?(scheduleOn?"예약 중...":"발행 중..."):scheduleOn?"⏰ 예약":"🚀 발행"}
                     </button>
                   </div>
                 </div>
 
-                {/* 에디터 (전폭) */}
-                <div style={{display:"flex",flexDirection:"column",gap:16}}>
+                {/* ── 발행 설정 패널 (접이식) ── */}
+                {showPublishPanel&&(
+                  <div style={{background:"var(--bg2)",borderBottom:"2px solid var(--accent-border)",padding:"16px"}}>
+                    {renderAdmPublishPanel()}
+                  </div>
+                )}
+
+                {pubMsg&&<div className={`alert ${pubMsg.includes("✅")?"alert-success":"alert-danger"}`} style={{margin:"12px 16px 0",fontSize:16,padding:"16px",lineHeight:1.6}}>{pubMsg}</div>}
+
+                {/* ── 에디터 (전폭) ── */}
+                <div style={{padding:"16px",display:"flex",flexDirection:"column",gap:16}}>
 
                     {/* 제목 */}
                     <div className="card" style={{padding:"14px 16px"}}>
@@ -2255,29 +2277,6 @@ POST3: (제목)|(이유)
                     </div>
                 </div>
 
-                {/* 모바일 하단 고정 */}
-                <div style={{position:"fixed",bottom:0,left:0,right:0,zIndex:40,background:"var(--card)",borderTop:"1px solid var(--border)",padding:"10px 16px",display:"flex",gap:10}} className="pub-mobile-bar">
-                  <button onClick={()=>setShowPreviewModal(true)} style={{flex:1,padding:"12px",borderRadius:12,background:"oklch(.62 .22 300)",color:"#fff",border:"none",cursor:"pointer",fontSize:14,fontWeight:700,fontFamily:"inherit"}}>👁️ 미리보기</button>
-                  <button onClick={()=>setShowPublishPanel(v=>!v)} style={{flex:1,padding:"12px",borderRadius:12,background:"var(--card2)",color:"var(--text)",border:"1px solid var(--border)",cursor:"pointer",fontSize:13,fontWeight:700,fontFamily:"inherit"}}>
-                    🚀 발행 설정 {showPublishPanel?"▲":"▼"}
-                  </button>
-                  <button onClick={handlePublish} disabled={publishing||!pubAccId||!pubTitle||!buildAdmPublishContent()||(scheduleOn&&!scheduleTime)} style={{flex:2,padding:"12px",borderRadius:12,background:scheduleOn?"var(--warn)":"var(--accent)",color:"#000",border:"none",cursor:"pointer",fontSize:14,fontWeight:800,fontFamily:"inherit",opacity:(publishing||!pubAccId||!pubTitle)?.5:1}}>
-                    {publishing?(scheduleOn?"예약 중...":"발행 중..."):scheduleOn?"⏰ 예약":"🚀 발행"}
-                  </button>
-                </div>
-
-                {/* 모바일 발행 설정 바텀시트 */}
-                {showPublishPanel&&(
-                  <div className="lg-hidden" style={{position:"fixed",bottom:64,left:0,right:0,zIndex:39,maxHeight:"70vh",overflowY:"auto",background:"var(--card)",borderTop:"2px solid var(--accent-border)",padding:"16px",display:"flex",flexDirection:"column",gap:12,boxShadow:"0 -8px 32px rgba(0,0,0,.3)"}}>
-                    <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:4}}>
-                      <span style={{fontSize:14,fontWeight:800,color:"var(--text)"}}>🚀 발행 설정</span>
-                      <button onClick={()=>setShowPublishPanel(false)} style={{background:"transparent",border:"none",color:"var(--text3)",fontSize:20,cursor:"pointer"}}>✕</button>
-                    </div>
-                    {renderAdmPublishPanel()}
-                  </div>
-                )}
-
-                {pubMsg&&<div className={`alert ${pubMsg.includes("✅")?"alert-success":"alert-danger"}`} style={{marginTop:8,fontSize:16,padding:"16px",lineHeight:1.6}}>{pubMsg}</div>}
               </div>
             )}
 
@@ -2575,14 +2574,6 @@ POST3: (제목)|(이유)
               </div>
             )}
           </div>
-
-          {/* 우측 발행 패널 (데스크탑) */}
-          {tab==="publish"&&(
-            <div className="right-panel">
-              <div style={{fontSize:10,fontWeight:800,letterSpacing:".1em",textTransform:"uppercase",color:"var(--text3)",padding:"4px 2px 10px",borderBottom:"1px solid var(--border)",marginBottom:4}}>🚀 발행 설정</div>
-              {renderAdmPublishPanel()}
-            </div>
-          )}
         </div>
 
         {/* 모바일 탭바 */}
