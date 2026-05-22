@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
-import { PublyUser, getQuota, getHistory, getAccounts, PublyQuota, PublyHistory, PublyAccount, upsertAccount, useQuota, addHistory, deleteHistory, deleteAllHistory, changeUserPassword, getNaverApiKeys, saveNaverApiKeys, NaverApiKeys, checkNaverQuota, incrementNaverQuota, getNaverDailyUsage, NAVER_DAILY_LIMIT } from "../lib/supabase";
+import { PublyUser, getQuota, getHistory, getAccounts, PublyQuota, PublyHistory, PublyAccount, upsertAccount, useQuota, addHistory, deleteHistory, deleteAllHistory, changeUserPassword, getNaverApiKeys, saveNaverApiKeys, NaverApiKeys, checkNaverQuota, incrementNaverQuota, getNaverDailyUsage, NAVER_DAILY_LIMIT, getUserNaverApiKeys } from "../lib/supabase";
 import { supabase } from "../lib/supabase";
 
 type MainTab = "keyword" | "write" | "image" | "publish" | "manage" | "accounts" | "settings";
@@ -520,6 +520,7 @@ export default function DashboardPage({user, onLogout, onAdminLogin, onThemeTogg
   const [naverKeysSaving, setNaverKeysSaving] = useState(false);
   const [naverKeysMsg, setNaverKeysMsg] = useState("");
   const [naverQuotaInfo, setNaverQuotaInfo] = useState<{used:number;limit:number}|null>(null);
+  const [showKwInfo, setShowKwInfo] = useState(false);
   const thumbnailRef = useRef<HTMLInputElement>(null);
   const manualFileRef = useRef<HTMLInputElement>(null);
 
@@ -755,7 +756,7 @@ export default function DashboardPage({user, onLogout, onAdminLogin, onThemeTogg
   // 설정탭 열 때 네이버 키 로드
   useEffect(()=>{
     if(tab==="settings"){
-      getNaverApiKeys(user.id).then(setNaverKeys).catch(()=>{});
+      getUserNaverApiKeys(user.id).then(setNaverKeys).catch(()=>{});
     }
   },[tab,user.id]);
 
@@ -1712,9 +1713,12 @@ POST3: (제목)|(이유)
                     <button className="btn btn-primary" onClick={()=>handleGenerateTitles(true)} disabled={loadingTitles||!keyword}>{loadingTitles?<><span className="spinner"/>추천 중...</>:<>⭐ 제목 {BATCH}개 추천받기</>}</button>
                     {titles.length>0&&<button className="btn btn-secondary" onClick={()=>handleGenerateTitles(false)} disabled={loadingTitles}>{titles.length>=MAX_TITLES?"🔄 초기화 후 재생성":"➕ 30개 추가"}</button>}
                     {titles.length>0&&<button className="btn btn-danger btn-sm" onClick={()=>{setTitles([]);setSelectedTitle("");localStorage.removeItem("publy_titles");}}>🗑 제목 초기화</button>}
-                    <button className="btn btn-secondary" onClick={fetchKeywordData} disabled={loadingKw||!keyword||!botOnline} style={{borderColor:"var(--naver)",color:"var(--naver)"}}>
-                      {loadingKw?<><span className="spinner"/>수집 중...</>:"📊 황금 키워드 분석"}
-                    </button>
+                    <div style={{display:"flex",alignItems:"center",gap:6}}>
+                      <button className="btn btn-secondary" onClick={fetchKeywordData} disabled={loadingKw||!keyword} style={{borderColor:"var(--naver)",color:"var(--naver)"}}>
+                        {loadingKw?<><span className="spinner"/>수집 중...</>:"📊 황금 키워드 분석"}
+                      </button>
+                      <button onClick={()=>setShowKwInfo(true)} style={{width:22,height:22,borderRadius:"50%",border:"1px solid var(--border)",background:"var(--card2)",color:"var(--text3)",cursor:"pointer",fontSize:12,fontWeight:800,fontFamily:"inherit",flexShrink:0}}>?</button>
+                    </div>
                     {naverQuotaInfo&&!naverKeys.naver_access_license&&(
                       <span style={{fontSize:11,color:naverQuotaInfo.used>=naverQuotaInfo.limit?"var(--danger)":"var(--text3)",alignSelf:"center"}}>
                         {naverQuotaInfo.used}/{naverQuotaInfo.limit}회 사용
@@ -2601,8 +2605,18 @@ POST3: (제목)|(이유)
 
                 {/* 네이버 API 키 */}
                 <div className="card">
-                  <div className="card-title" style={{marginBottom:4}}>🟢 네이버 검색광고 API</div>
-                  <div style={{fontSize:11,color:"var(--text3)",marginBottom:12}}>키워드 검색량·경쟁도·CPC 데이터에 사용 — 없으면 관리자 공용키 사용</div>
+                  <div className="card-title" style={{marginBottom:4}}>🟢 네이버 검색광고 API <span style={{fontSize:10,fontWeight:400,color:"var(--text3)"}}>(선택 — 없으면 관리자 공용키 사용)</span></div>
+                  <div style={{fontSize:11,color:"var(--text3)",marginBottom:8}}>개인 키 입력 시 일일 한도 없이 무제한 사용 가능해요</div>
+                  <div style={{display:"flex",gap:8,marginBottom:12,flexWrap:"wrap"}}>
+                    <a href="https://searchad.naver.com" target="_blank" rel="noreferrer"
+                      style={{display:"inline-flex",alignItems:"center",gap:5,padding:"6px 12px",borderRadius:8,border:"1px solid rgba(3,199,90,.4)",background:"rgba(3,199,90,.08)",color:"var(--naver)",fontSize:12,fontWeight:700,textDecoration:"none",whiteSpace:"nowrap"}}>
+                      🔗 검색광고 API 발급 →
+                    </a>
+                    <a href="https://developers.naver.com/apps/#/list" target="_blank" rel="noreferrer"
+                      style={{display:"inline-flex",alignItems:"center",gap:5,padding:"6px 12px",borderRadius:8,border:"1px solid rgba(3,199,90,.3)",background:"transparent",color:"var(--naver)",fontSize:12,fontWeight:700,textDecoration:"none",whiteSpace:"nowrap"}}>
+                      🔗 DataLab API 발급 →
+                    </a>
+                  </div>
                   <div style={{display:"flex",flexDirection:"column",gap:8}}>
                     {[
                       {label:"Customer ID",key:"naver_customer_id",ph:"123456789"},
@@ -2686,6 +2700,36 @@ POST3: (제목)|(이유)
               </div>
               {hashtags.length>0&&<div style={{display:"flex",flexWrap:"wrap",gap:6,marginTop:20,paddingTop:16,borderTop:"1px solid var(--border)"}}>{hashtags.map((t,i)=><span key={i} style={{fontSize:13,padding:"4px 12px",borderRadius:99,background:"var(--accent-bg)",color:"var(--accent-text)"}}>{t}</span>)}</div>}
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* 황금 키워드 분석 설명 팝업 */}
+      {showKwInfo&&(
+        <div style={{position:"fixed",inset:0,zIndex:999,background:"rgba(0,0,0,.7)",backdropFilter:"blur(6px)",display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onClick={()=>setShowKwInfo(false)}>
+          <div style={{width:"100%",maxWidth:480,borderRadius:20,background:"var(--card)",border:"1px solid var(--border)",padding:28,animation:"fadeUp .25s ease"}} onClick={e=>e.stopPropagation()}>
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:20}}>
+              <div style={{fontSize:18,fontWeight:900,color:"var(--text)"}}>📊 황금 키워드 분석</div>
+              <button onClick={()=>setShowKwInfo(false)} style={{background:"transparent",border:"none",color:"var(--text3)",fontSize:20,cursor:"pointer"}}>✕</button>
+            </div>
+            <div style={{display:"flex",flexDirection:"column",gap:14}}>
+              {[
+                {ico:"🎯",title:"뭐야?",desc:"네이버 검색광고 API로 실제 검색량·경쟁도·CPC를 가져와서 황금 키워드를 찾아드려요"},
+                {ico:"⭐",title:"황금점수 기준",desc:"경쟁 낮음(35%) + 검색량 1천~3만(25%) + 클릭률(15%) + CPC 단가(25%) + 상업적 단어·롱테일 보너스"},
+                {ico:"📈",title:"어떻게 활용해?",desc:"점수 높은 키워드 클릭 → 자동으로 키워드 입력 → \"제목 추천\" 버튼으로 바로 SEO 제목 생성"},
+                {ico:"🔑",title:"사용 조건",desc:`관리자 공용키 사용 시 FREE ${NAVER_DAILY_LIMIT.free}회/일 · PRO ${NAVER_DAILY_LIMIT.pro}회/일\n설정탭에 내 키 입력하면 무제한 사용 가능`},
+                {ico:"🤖",title:"봇 필요해?",desc:"네이버 키워드 API는 봇이 켜져 있어야 호출 가능해요 (PC에서 Publy 봇 실행 필요)"},
+              ].map((item,i)=>(
+                <div key={i} style={{display:"flex",gap:12,padding:"12px 14px",borderRadius:12,background:"var(--bg2)",border:"1px solid var(--border)"}}>
+                  <span style={{fontSize:20,flexShrink:0}}>{item.ico}</span>
+                  <div>
+                    <div style={{fontSize:13,fontWeight:800,color:"var(--text)",marginBottom:3}}>{item.title}</div>
+                    <div style={{fontSize:12,color:"var(--text2)",lineHeight:1.6,whiteSpace:"pre-line"}}>{item.desc}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <button className="btn btn-primary btn-full" style={{marginTop:20}} onClick={()=>setShowKwInfo(false)}>확인했어요!</button>
           </div>
         </div>
       )}
