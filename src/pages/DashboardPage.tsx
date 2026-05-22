@@ -1646,7 +1646,7 @@ POST3: (제목)|(이유)
           <div className="sidebar">
             <div className="nav-lbl">메뉴</div>
             {MAIN_TABS.map(t=>(
-              <button key={t.k} className={`nav-item ${tab===t.k?"active":""}`} onClick={()=>setTab(t.k as MainTab)}>
+              <button key={t.k} className={`nav-item ${tab===t.k?"active":""}`} onClick={()=>{if(t.k==="rank"){window.open("https://rank.xn--zk5biyyw.com/","_blank");return;}setTab(t.k as MainTab);}}>
                 <span className="nav-ico">{t.i}</span>{t.l}
                 {t.k==="keyword"&&titles.length>0&&<span className="nav-badge">{titles.length}</span>}
                 {t.k==="manage"&&history.length>0&&<span className="nav-badge">{history.length}</span>}
