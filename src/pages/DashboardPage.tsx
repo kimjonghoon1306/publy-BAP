@@ -2520,6 +2520,55 @@ POST3: (제목)|(이유)
             {tab==="manage"&&(
               <div style={{animation:"fadeUp .25s ease both"}}>
 
+                {/* ── 발행 통계 + 수익 예측 ── */}
+                {history.length>0&&(()=>{
+                  const now=new Date();
+                  const thisMonth=history.filter(h=>new Date(h.published_at).getMonth()===now.getMonth()&&new Date(h.published_at).getFullYear()===now.getFullYear());
+                  const thisWeek=history.filter(h=>{const d=new Date(h.published_at);const diff=(now.getTime()-d.getTime())/(1000*60*60*24);return diff<=7;});
+                  const success=history.filter(h=>h.status==="success");
+                  const successRate=history.length>0?Math.round((success.length/history.length)*100):0;
+                  const naverCnt=success.filter(h=>h.platform==="naver").length;
+                  const tistoryCnt=success.filter(h=>h.platform==="tistory").length;
+                  const estViews=success.length*120;
+                  const estRevenue=Math.round(estViews*0.35);
+                  return(
+                    <div className="card" style={{marginBottom:14}}>
+                      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:14}}>
+                        <div className="card-title" style={{margin:0}}>📊 발행 통계 & 수익 예측</div>
+                        <span style={{fontSize:11,color:"var(--text3)"}}>* 예측값은 평균 조회수 기준 추산</span>
+                      </div>
+                      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(120px,1fr))",gap:10,marginBottom:14}}>
+                        {[
+                          {label:"이번 달 발행",value:`${thisMonth.length}건`,color:"var(--accent-text)"},
+                          {label:"이번 주 발행",value:`${thisWeek.length}건`,color:"var(--info)"},
+                          {label:"성공률",value:`${successRate}%`,color:successRate>=80?"var(--success)":successRate>=50?"var(--warn)":"var(--danger)"},
+                          {label:"예상 누적 조회",value:`${estViews.toLocaleString()}회`,color:"var(--purple)"},
+                          {label:"예상 수익",value:`₩${estRevenue.toLocaleString()}`,color:"var(--warn)"},
+                        ].map((s,i)=>(
+                          <div key={i} style={{padding:"12px 14px",borderRadius:12,background:"var(--card2)",border:"1px solid var(--border)",textAlign:"center"}}>
+                            <div style={{fontSize:18,fontWeight:900,color:s.color,fontFamily:"'Space Grotesk',sans-serif"}}>{s.value}</div>
+                            <div style={{fontSize:11,color:"var(--text3)",marginTop:4,fontWeight:600}}>{s.label}</div>
+                          </div>
+                        ))}
+                      </div>
+                      <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                        <div style={{flex:1,minWidth:120,padding:"10px 14px",borderRadius:10,background:"rgba(3,199,90,.08)",border:"1px solid rgba(3,199,90,.2)"}}>
+                          <div style={{fontSize:11,color:"var(--naver)",fontWeight:700,marginBottom:2}}>🟢 네이버</div>
+                          <div style={{fontSize:16,fontWeight:900,color:"var(--naver)"}}>{naverCnt}건</div>
+                        </div>
+                        <div style={{flex:1,minWidth:120,padding:"10px 14px",borderRadius:10,background:"rgba(255,107,53,.08)",border:"1px solid rgba(255,107,53,.2)"}}>
+                          <div style={{fontSize:11,color:"var(--tistory)",fontWeight:700,marginBottom:2}}>🟠 티스토리</div>
+                          <div style={{fontSize:16,fontWeight:900,color:"var(--tistory)"}}>{tistoryCnt}건</div>
+                        </div>
+                        <div style={{flex:1,minWidth:120,padding:"10px 14px",borderRadius:10,background:"var(--accent-dim)",border:"1px solid var(--accent-border)"}}>
+                          <div style={{fontSize:11,color:"var(--accent-text)",fontWeight:700,marginBottom:2}}>📈 누적 총계</div>
+                          <div style={{fontSize:16,fontWeight:900,color:"var(--accent-text)"}}>{success.length}건 성공</div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })()}
+
                 {/* 발행 기록 */}
                 <div className="card">
                   <div className="card-header">
