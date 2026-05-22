@@ -121,8 +121,8 @@ const CSS = `
 .logout-btn:hover{border-color:var(--danger);color:var(--danger);}
 .dl-btn{display:inline-flex;align-items:center;gap:7px;padding:8px 16px;border-radius:99px;border:none;background:linear-gradient(135deg,#00ff9d,#00c870);color:#000;font-size:12px;font-weight:800;font-family:'Noto Sans KR',sans-serif;cursor:pointer;text-decoration:none;animation:dlFloat 2.5s ease-in-out infinite;white-space:nowrap;flex-shrink:0;box-shadow:0 3px 14px rgba(0,255,157,.35);}
 .guide-open-btn{display:inline-flex;align-items:center;gap:6px;padding:8px 15px;border-radius:99px;border:none;background:linear-gradient(135deg,#FF6B9D,#FF3D7F);color:#fff;font-size:12px;font-weight:800;font-family:'Noto Sans KR',sans-serif;cursor:pointer;animation:guideFloat 2.8s ease-in-out infinite;white-space:nowrap;flex-shrink:0;box-shadow:0 3px 14px rgba(255,61,127,.35);}
-.layout{flex:1;display:flex;overflow:hidden;min-height:0;}
-.sidebar{width:196px;flex-shrink:0;background:var(--bg2);border-right:1px solid var(--border);display:flex;flex-direction:column;padding:12px 8px;gap:2px;overflow-y:auto;}
+.layout{flex:1;display:flex;overflow:hidden;min-height:0;padding-left:210px;}
+.sidebar{position:fixed;left:0;top:58px;bottom:0;z-index:50;width:210px;background:var(--bg2);border-right:1px solid var(--border);display:flex;flex-direction:column;padding:12px 8px;gap:2px;overflow-y:auto;}
 .nav-lbl{font-size:9px;font-weight:800;letter-spacing:.13em;text-transform:uppercase;color:var(--text3);padding:5px 11px 7px;margin-top:4px;}
 .nav-item{display:flex;align-items:center;gap:10px;padding:11px 12px;border-radius:9px;border:none;cursor:pointer;width:100%;font-size:13px;font-weight:500;font-family:'Noto Sans KR',sans-serif;color:var(--text2);background:transparent;transition:all .15s;text-align:left;position:relative;}
 .nav-item:hover{background:var(--card-hover);color:var(--text);}
@@ -300,7 +300,7 @@ textarea.inp{resize:vertical;line-height:1.75;min-height:80px;}
   .lg-hidden{display:block !important;}
   .pub-submit-btn{display:none !important;}
 }
-@media(max-width:900px){.sidebar{display:none;}.mob-bar{display:flex;}.main{padding-bottom:130px;}}
+@media(max-width:900px){.sidebar{display:none;}.mob-bar{display:flex;}.main{padding-bottom:130px;}.layout{padding-left:0;}}
 @media(max-width:768px){
   .header-mid{display:none;}.main{padding:14px 12px calc(80px + env(safe-area-inset-bottom));}.card{padding:16px 14px;}
   .adtype-row{grid-template-columns:1fr 1fr;}.title-grid{grid-template-columns:1fr;}.ai-grid{flex-direction:column;}
@@ -327,7 +327,7 @@ textarea.inp{resize:vertical;line-height:1.75;min-height:80px;}
   .acc-form-grid{grid-template-columns:1fr !important;}
   .pub-plat-grid{grid-template-columns:1fr !important;}
 }
-.right-panel{width:200px;flex-shrink:0;background:var(--bg2);border-left:1px solid var(--border);display:flex;flex-direction:column;padding:14px 12px;gap:10px;overflow-y:auto;}
+.right-panel{width:280px;flex-shrink:0;background:var(--bg2);border-left:1px solid var(--border);display:flex;flex-direction:column;padding:14px 12px;gap:10px;overflow-y:auto;}
 .rp-section{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:12px 13px;}
 .rp-title{font-size:10px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;color:var(--text3);margin-bottom:9px;display:flex;align-items:center;gap:5px;}
 .rp-row{display:flex;align-items:center;justify-content:space-between;padding:4px 0;border-bottom:1px solid var(--border);gap:6px;}
@@ -343,7 +343,7 @@ textarea.inp{resize:vertical;line-height:1.75;min-height:80px;}
 .rp-btn-primary:hover:not(:disabled){filter:brightness(1.08);transform:translateY(-1px);}
 .rp-btn-secondary{background:var(--card2);color:var(--text);border:1px solid var(--border);}
 .rp-btn-secondary:hover:not(:disabled){background:var(--card-hover);border-color:var(--border2);}
-@media(max-width:1100px){.right-panel{display:none;}}
+@media(max-width:900px){.right-panel{display:none;}}
 `;
 interface Props {
   user: PublyUser;
@@ -1970,11 +1970,8 @@ POST3: (제목)|(이유)
                   </div>
                 </div>
 
-                {/* ── 메인 그리드: 에디터(좌) + 발행패널(우) ── */}
-                <div style={{display:"grid",gridTemplateColumns:"1fr 320px",gap:16,alignItems:"start"}} className="pub-grid">
-
-                  {/* 왼쪽: 에디터 */}
-                  <div style={{display:"flex",flexDirection:"column",gap:12}}>
+                {/* ── 에디터 (전폭) ── */}
+                <div style={{display:"flex",flexDirection:"column",gap:12}}>
 
                     {/* 발행 방식 */}
                     <div className="card" style={{padding:"14px 16px"}}>
@@ -2169,12 +2166,6 @@ POST3: (제목)|(이유)
                         <button onClick={()=>{if(!newTag.trim()||hashtags.length>=8)return;setHashtags(prev=>[...prev,`#${newTag.replace("#","").trim()}`]);setNewTag("");}} className="btn btn-secondary" style={{padding:"0 16px",flexShrink:0}}>추가</button>
                       </div>
                     </div>
-                  </div>
-
-                  {/* 오른쪽: 발행 패널 (PC) */}
-                  <div className="pub-panel-desktop">
-                    {renderPublishPanel()}
-                  </div>
                 </div>
 
                 {/* 모바일 하단 고정 버튼 */}
@@ -2356,6 +2347,15 @@ POST3: (제목)|(이유)
           </div>
 
           <div className="right-panel">
+            {tab==="publish"?(
+              <>
+                <div className="rp-section">
+                  <div className="rp-title">🚀 발행 설정</div>
+                </div>
+                {renderPublishPanel()}
+              </>
+            ):(
+              <>
             <div className="rp-section">
               <div className="rp-title">📌 현재 작업</div>
               <div className="rp-row"><span className="rp-key">키워드</span><span className={`rp-val${keyword?" accent":" warn"}`}>{keyword||"미입력"}</span></div>
@@ -2371,9 +2371,9 @@ POST3: (제목)|(이유)
             </div>
             <button className="rp-btn rp-btn-primary" disabled={!genContent||!pubAccId} onClick={()=>setTab("publish")}>🚀 발행하러 가기</button>
             <button className="rp-btn rp-btn-secondary" onClick={()=>setShowPreviewModal(true)} disabled={!genContent}>👁️ 미리보기</button>
+              </>
+            )}
           </div>
-
-        </div>
 
         <div className="mob-bar">
           {MAIN_TABS.filter(t=>["keyword","write","image","publish","manage","settings"].includes(t.k)).map(t=>(<button key={t.k} className={`mob-btn ${tab===t.k?"active":""}`} onClick={()=>setTab(t.k as MainTab)}><span className="mob-btn-ico">{t.i}</span><span className="mob-btn-lbl">{t.k==="keyword"?"키워드":t.k==="write"?"글쓰기":t.k==="image"?"이미지":t.k==="publish"?"발행":t.k==="manage"?"발행관리":"설정"}</span></button>))}
