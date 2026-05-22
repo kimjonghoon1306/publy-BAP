@@ -144,8 +144,8 @@ const CSS = `
 .back-btn:hover{background:var(--card-hover);color:var(--text);border-color:var(--border-focus);}
 .adm-badge{padding:5px 12px;border-radius:99px;font-size:11px;font-weight:800;background:rgba(248,81,73,.1);color:var(--danger);border:1px solid rgba(248,81,73,.3);letter-spacing:.05em;}
 
-.layout{flex:1;display:flex;overflow:hidden;min-height:0;}
-.sidebar{width:200px;flex-shrink:0;background:var(--bg2);border-right:1px solid var(--border);display:flex;flex-direction:column;padding:12px 8px;gap:2px;overflow-y:auto;}
+.layout{flex:1;display:flex;overflow:hidden;min-height:0;padding-left:210px;}
+.sidebar{position:fixed;left:0;top:60px;bottom:0;z-index:50;width:210px;background:var(--bg2);border-right:1px solid var(--border);display:flex;flex-direction:column;padding:12px 8px;gap:2px;overflow-y:auto;}
 .nav-section{font-size:10px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--text3);padding:4px 10px 6px;margin-top:4px;}
 .nav-item{display:flex;align-items:center;gap:10px;padding:11px 12px;border-radius:8px;border:none;cursor:pointer;width:100%;font-size:13px;font-weight:500;font-family:'Noto Sans KR',sans-serif;color:var(--text2);background:transparent;transition:all .15s;text-align:left;position:relative;}
 .nav-item:hover{background:var(--card-hover);color:var(--text);}
@@ -159,6 +159,8 @@ const CSS = `
 .stat-lbl{font-size:9px;color:var(--text2);margin-top:3px;font-weight:600;}
 
 .main{flex:1;overflow-y:auto;padding:20px;min-width:0;}
+.right-panel{width:280px;flex-shrink:0;background:var(--bg2);border-left:1px solid var(--border);display:flex;flex-direction:column;padding:14px 12px;gap:10px;overflow-y:auto;}
+@media(max-width:900px){.right-panel{display:none;}}
 
 .card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:20px 22px;margin-bottom:14px;transition:border-color .15s;}
 .card:hover{border-color:var(--border-focus);}
@@ -353,6 +355,7 @@ select.field-inp{cursor:pointer;appearance:auto;}
   .sidebar{display:none;}
   .mob-tabs{display:flex;}
   .main{padding-bottom:130px;}
+  .layout{padding-left:0;}
 }
 @media(max-width:768px){
   .header-mid{display:none;}
@@ -2061,11 +2064,8 @@ POST3: (제목)|(이유)
                   </div>
                 </div>
 
-                {/* 메인 그리드 */}
-                <div style={{display:"grid",gridTemplateColumns:"1fr 320px",gap:16,alignItems:"start"}} className="pub-grid">
-
-                  {/* 왼쪽: 에디터 */}
-                  <div style={{display:"flex",flexDirection:"column",gap:12}}>
+                {/* 에디터 (전폭) */}
+                <div style={{display:"flex",flexDirection:"column",gap:12}}>
 
                     {/* 발행 방식 */}
                     <div className="card" style={{padding:"14px 16px"}}>
@@ -2253,12 +2253,6 @@ POST3: (제목)|(이유)
                         <button onClick={()=>{if(!newTag.trim()||hashtags.length>=8)return;setHashtags(prev=>[...prev,`#${newTag.replace("#","").trim()}`]);setNewTag("");}} className="btn btn-secondary" style={{padding:"0 16px",flexShrink:0}}>추가</button>
                       </div>
                     </div>
-                  </div>
-
-                  {/* 오른쪽: 발행 패널 (PC) */}
-                  <div className="pub-panel-desktop">
-                    {renderAdmPublishPanel()}
-                  </div>
                 </div>
 
                 {/* 모바일 하단 고정 */}
@@ -2581,6 +2575,14 @@ POST3: (제목)|(이유)
               </div>
             )}
           </div>
+
+          {/* 우측 발행 패널 (데스크탑) */}
+          {tab==="publish"&&(
+            <div className="right-panel">
+              <div style={{fontSize:10,fontWeight:800,letterSpacing:".1em",textTransform:"uppercase",color:"var(--text3)",padding:"4px 2px 10px",borderBottom:"1px solid var(--border)",marginBottom:4}}>🚀 발행 설정</div>
+              {renderAdmPublishPanel()}
+            </div>
+          )}
         </div>
 
         {/* 모바일 탭바 */}
