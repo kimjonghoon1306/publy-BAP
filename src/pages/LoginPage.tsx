@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { signIn, signUp, PublyUser } from "../lib/supabase";
+import { signIn, signUp, PublyUser, findEmailByNamePhone, resetPasswordTemp } from "../lib/supabase";
 
 interface Props {
   onLogin: (user: PublyUser) => void;
@@ -255,6 +255,34 @@ const CSS = `
   .login-card { width:95vw; padding:40px 24px; }
   .logo-name { font-size:30px; }
 }
+
+/* 찾기 링크 */
+.find-links { display:flex; justify-content:center; gap:16px; margin-top:16px; }
+.find-link { background:none; border:none; cursor:pointer; font-size:12px; font-family:'Noto Sans KR',sans-serif; font-weight:600; letter-spacing:.03em; opacity:.55; transition:opacity .2s; text-decoration:underline; }
+.find-link:hover { opacity:1; }
+.dark .find-link  { color:rgba(255,255,255,.7); }
+.light .find-link { color:rgba(0,0,0,.6); }
+
+/* 찾기 모달 오버레이 */
+.find-overlay { position:fixed; inset:0; z-index:999; display:flex; align-items:center; justify-content:center; padding:16px; backdrop-filter:blur(8px); }
+.dark .find-overlay  { background:rgba(0,0,0,.75); }
+.light .find-overlay { background:rgba(0,0,0,.45); }
+.find-modal { width:100%; max-width:400px; border-radius:24px; padding:32px 28px; animation:form-rise .3s ease both; }
+.dark .find-modal  { background:#0d1117; border:1px solid rgba(0,255,136,.15); }
+.light .find-modal { background:#fff; border:1px solid rgba(0,180,80,.2); box-shadow:0 24px 60px rgba(0,0,0,.15); }
+.find-title { font-size:18px; font-weight:900; margin-bottom:20px; display:flex; align-items:center; justify-content:space-between; }
+.dark .find-title  { color:#fff; }
+.light .find-title { color:#09090b; }
+.find-tabs { display:grid; grid-template-columns:1fr 1fr; gap:4px; border-radius:12px; padding:4px; margin-bottom:20px; }
+.dark .find-tabs  { background:rgba(255,255,255,.06); }
+.light .find-tabs { background:rgba(0,0,0,.06); }
+.find-tab { padding:9px; border:none; border-radius:9px; cursor:pointer; font-size:12px; font-weight:700; font-family:'Noto Sans KR',sans-serif; transition:all .2s; }
+.find-tab.active { background:linear-gradient(135deg,#00ff88,#00cc66); color:#000; }
+.dark .find-tab.inactive  { background:transparent; color:rgba(255,255,255,.4); }
+.light .find-tab.inactive { background:transparent; color:rgba(0,0,0,.4); }
+.find-result { margin-top:16px; padding:16px; border-radius:12px; font-size:14px; font-weight:700; text-align:center; line-height:1.6; }
+.dark .find-result  { background:rgba(0,255,136,.08); border:1px solid rgba(0,255,136,.2); color:#00ff88; }
+.light .find-result { background:rgba(0,180,80,.06); border:1px solid rgba(0,180,80,.2); color:#00a050; }
 `;
 
 // 별 생성
@@ -319,19 +347,66 @@ export default function LoginPage({ onLogin, onAdminLogin, theme, onThemeToggle 
   const [email, setEmail] = useState("");
   const [pw, setPw] = useState("");
   const [name, setName] = useState("");
+  const [phone, setPhone] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
+  // 찾기 모달
+  const [findOpen, setFindOpen] = useState(false);
+  const [findTab, setFindTab] = useState<"email"|"pw">("email");
+  const [findName, setFindName] = useState("");
+  const [findPhone, setFindPhone] = useState("");
+  const [findEmail, setFindEmail] = useState("");
+  const [findLoading, setFindLoading] = useState(false);
+  const [findResult, setFindResult] = useState("");
+  const [findError, setFindError] = useState("");
+
+  function openFind(tab: "email"|"pw") {
+    setFindTab(tab); setFindOpen(true);
+    setFindName(""); setFindPhone(""); setFindEmail("");
+    setFindResult(""); setFindError("");
+  }
+
+  async function handleFindEmail() {
+    if(!findName.trim()||!findPhone.trim()){setFindError("이름과 연락처를 모두 입력하세요");return;}
+    setFindLoading(true); setFindResult(""); setFindError("");
+    try {
+      const found = await findEmailByNamePhone(findName, findPhone);
+      if(!found) { setFindError("일치하는 회원 정보가 없습니다"); return; }
+      // 이메일 마스킹: hong***@gmail.com
+      const [local, domain] = found.split("@");
+      const masked = local.slice(0,3) + "***@" + domain;
+      setFindResult(`가입된 이메일: ${masked}`);
+    } catch(e:any) { setFindError(e.message); }
+    finally { setFindLoading(false); }
+  }
+
+  async function handleResetPw() {
+    if(!findEmail.trim()){setFindError("이메일을 입력하세요");return;}
+    setFindLoading(true); setFindResult(""); setFindError("");
+    try {
+      const tempPw = await resetPasswordTemp(findEmail);
+      setFindResult(`임시 비밀번호: ${tempPw}\n\n로그인 후 설정탭에서 꼭 변경해주세요!`);
+    } catch(e:any) { setFindError(e.message); }
+    finally { setFindLoading(false); }
+  }
+
   async function handleSubmit() {
     if (!email || !pw) { setError("이메일과 비밀번호를 입력하세요"); return; }
+    if (mode === "register") {
+      if (!name) { setError("이름을 입력하세요"); return; }
+      if (!phone.trim()) { setError("연락처는 필수 입력 항목이에요\n이메일/비밀번호 찾기에 사용됩니다 📱"); return; }
+      if (!/^01[0-9]-?\d{3,4}-?\d{4}$/.test(phone.replace(/\s/g,""))) {
+        setError("올바른 연락처 형식으로 입력해주세요\n예: 010-1234-5678"); return;
+      }
+    }
     setLoading(true); setError("");
     try {
       if (mode === "login") {
         const user = await signIn(email, pw);
         onLogin(user);
       } else {
-        if (!name) { setError("이름을 입력하세요"); setLoading(false); return; }
-        const user = await signUp(email, pw, name);
+        const user = await signUp(email, pw, name, phone.trim());
         onLogin(user);
       }
     } catch (e: any) { setError(e.message); }
@@ -427,13 +502,37 @@ export default function LoginPage({ onLogin, onAdminLogin, theme, onThemeToggle 
               value={pw} onChange={e => setPw(e.target.value)}
               onKeyDown={e => e.key === "Enter" && handleSubmit()} />
           </div>
+          {mode === "register" && (
+            <div className="field">
+              <div className="field-label">
+                📱 연락처 <span style={{color:"#ff6b6b",fontSize:10,marginLeft:4}}>필수</span>
+              </div>
+              <input className="field-input" type="tel" placeholder="010-1234-5678"
+                value={phone} onChange={e => setPhone(e.target.value)}
+                onKeyDown={e => e.key === "Enter" && handleSubmit()} />
+              <div style={{marginTop:6,padding:"8px 12px",borderRadius:9,fontSize:11,lineHeight:1.6,
+                background:"rgba(0,255,136,.06)",border:"1px solid rgba(0,255,136,.15)",
+                color:theme==="dark"?"rgba(0,255,136,.8)":"rgba(0,150,80,.9)"}}>
+                💡 연락처는 이메일 찾기 · 비밀번호 찾기에 꼭 필요해요
+              </div>
+            </div>
+          )}
 
           <button className="submit-btn" onClick={handleSubmit} disabled={loading}>
             {loading && <span className="btn-spin" />}
             {mode === "login" ? "🚀 입장하기" : "✨ 가입하기"}
           </button>
 
-          {error && <div className="error-box">⚠️ {error}</div>}
+          {error && <div className="error-box" style={{whiteSpace:"pre-line"}}>⚠️ {error}</div>}
+
+          {/* 이메일/비밀번호 찾기 링크 */}
+          {mode==="login"&&(
+            <div className="find-links">
+              <button className="find-link" onClick={()=>openFind("email")}>이메일 찾기</button>
+              <span style={{opacity:.3,fontSize:12}}>|</span>
+              <button className="find-link" onClick={()=>openFind("pw")}>비밀번호 찾기</button>
+            </div>
+          )}
 
           <div className="card-footer">
             {[0, 1, 2, 3, 4].map(i => (
@@ -441,6 +540,69 @@ export default function LoginPage({ onLogin, onAdminLogin, theme, onThemeToggle 
             ))}
           </div>
         </div>
+
+      {/* 이메일/비밀번호 찾기 모달 */}
+      {findOpen&&(
+        <div className="find-overlay" onClick={()=>setFindOpen(false)}>
+          <div className="find-modal" onClick={e=>e.stopPropagation()}>
+            <div className="find-title">
+              <span>{findTab==="email"?"📧 이메일 찾기":"🔑 비밀번호 찾기"}</span>
+              <button onClick={()=>setFindOpen(false)} style={{background:"none",border:"none",cursor:"pointer",fontSize:20,opacity:.5,color:"inherit"}}>✕</button>
+            </div>
+
+            <div className="find-tabs">
+              <button className={`find-tab ${findTab==="email"?"active":"inactive"}`} onClick={()=>{setFindTab("email");setFindResult("");setFindError("");}}>이메일 찾기</button>
+              <button className={`find-tab ${findTab==="pw"?"active":"inactive"}`} onClick={()=>{setFindTab("pw");setFindResult("");setFindError("");}}>비밀번호 찾기</button>
+            </div>
+
+            {findTab==="email"?(
+              <>
+                <div style={{padding:"10px 14px",borderRadius:10,fontSize:12,lineHeight:1.7,marginBottom:16,
+                  background:theme==="dark"?"rgba(255,255,255,.04)":"rgba(0,0,0,.04)",
+                  color:theme==="dark"?"rgba(255,255,255,.5)":"rgba(0,0,0,.5)"}}>
+                  📌 가입 시 입력한 <b>이름</b>과 <b>연락처</b>로 이메일을 찾아드려요
+                </div>
+                <div className="field">
+                  <div className="field-label">👤 이름</div>
+                  <input className="field-input" placeholder="가입 시 입력한 이름" value={findName} onChange={e=>setFindName(e.target.value)}/>
+                </div>
+                <div className="field">
+                  <div className="field-label">📱 연락처</div>
+                  <input className="field-input" placeholder="010-1234-5678" value={findPhone} onChange={e=>setFindPhone(e.target.value)} onKeyDown={e=>e.key==="Enter"&&handleFindEmail()}/>
+                </div>
+                <button className="submit-btn" onClick={handleFindEmail} disabled={findLoading}>
+                  {findLoading&&<span className="btn-spin"/>}🔍 이메일 찾기
+                </button>
+              </>
+            ):(
+              <>
+                <div style={{padding:"10px 14px",borderRadius:10,fontSize:12,lineHeight:1.7,marginBottom:16,
+                  background:theme==="dark"?"rgba(255,255,255,.04)":"rgba(0,0,0,.04)",
+                  color:theme==="dark"?"rgba(255,255,255,.5)":"rgba(0,0,0,.5)"}}>
+                  📌 가입한 이메일 주소를 입력하면<br/>
+                  <b>임시 비밀번호</b>를 발급해 드려요<br/>
+                  로그인 후 설정탭에서 꼭 변경해주세요!
+                </div>
+                <div className="field">
+                  <div className="field-label">✉️ 가입한 이메일</div>
+                  <input className="field-input" type="email" placeholder="email@example.com" value={findEmail} onChange={e=>setFindEmail(e.target.value)} onKeyDown={e=>e.key==="Enter"&&handleResetPw()}/>
+                </div>
+                <button className="submit-btn" onClick={handleResetPw} disabled={findLoading}>
+                  {findLoading&&<span className="btn-spin"/>}🔑 임시 비밀번호 발급
+                </button>
+              </>
+            )}
+
+            {findResult&&(
+              <div className="find-result" style={{whiteSpace:"pre-line"}}>✅ {findResult}</div>
+            )}
+            {findError&&(
+              <div className="error-box" style={{marginTop:12}}>⚠️ {findError}</div>
+            )}
+          </div>
+        </div>
+      )}
+
       <PWAInstallBtn theme={theme} />
       </div>
     </>
