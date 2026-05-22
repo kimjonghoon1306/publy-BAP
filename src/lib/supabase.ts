@@ -269,3 +269,31 @@ export async function incrementNaverQuota(userId: string): Promise<void> {
     .from("publy_settings")
     .upsert({ key, value: String(used + 1) }, { onConflict: "key" });
 }
+
+// ── 이메일 찾기 ───────────────────────────────────────────
+export async function findEmailByNamePhone(name: string, phone: string): Promise<string | null> {
+  const { data } = await supabase
+    .from("publy_users")
+    .select("email")
+    .eq("name", name.trim())
+    .eq("phone", phone.trim())
+    .maybeSingle();
+  return data?.email || null;
+}
+
+// ── 임시 비밀번호 발급 ────────────────────────────────────
+export async function resetPasswordTemp(email: string): Promise<string> {
+  const { data: user } = await supabase
+    .from("publy_users")
+    .select("id")
+    .eq("email", email.trim())
+    .maybeSingle();
+  if (!user) throw new Error("가입된 이메일이 없습니다");
+  // 임시 비번: 영문+숫자 8자
+  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789";
+  const tempPw = Array.from({length: 8}, () => chars[Math.floor(Math.random() * chars.length)]).join("");
+  const hash = await bcrypt.hash(tempPw, 10);
+  const { error } = await supabase.from("publy_users").update({ password_hash: hash }).eq("id", user.id);
+  if (error) throw new Error(error.message);
+  return tempPw;
+}
