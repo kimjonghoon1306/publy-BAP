@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
-import { supabase, getAccounts, upsertAccount, PublyAccount, getHistory, PublyHistory, addHistory, deleteHistory, deleteAllHistory, setAdminPassword } from "../lib/supabase";
+import { supabase, getAccounts, upsertAccount, PublyAccount, getHistory, PublyHistory, addHistory, deleteHistory, deleteAllHistory, setAdminPassword, saveAdminNaverApiKeys, getNaverApiKeys, NaverApiKeys } from "../lib/supabase";
 
 interface Props {
   onBack: () => void;
@@ -573,6 +573,9 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
   const [scheduleOn, setScheduleOn] = useState(false);
   const [scheduleTime, setScheduleTime] = useState("");
   const [newPw1, setNewPw1] = useState(""); const [newPw2, setNewPw2] = useState(""); const [pwMsg, setPwMsg] = useState("");
+  const [adminNaverKeys, setAdminNaverKeys] = useState<NaverApiKeys>({});
+  const [adminNaverSaving, setAdminNaverSaving] = useState(false);
+  const [adminNaverMsg, setAdminNaverMsg] = useState("");
 
   // 카테고리 로드
   async function loadCategories(plat: string) {
@@ -755,6 +758,22 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
     getHistory(ADM_UID).then(setHistory);
     const iv = setInterval(checkBot, 30000); return () => clearInterval(iv);
   }, [checkBot]);
+
+  // 설정탭 열 때 관리자 네이버 키 로드
+  useEffect(()=>{
+    if(tab==="settings"){
+      // admin_ 접두사 키만 직접 조회
+      const keys = ["naver_customer_id","naver_access_license","naver_secret_key","naver_datalab_client_id","naver_datalab_client_secret"];
+      Promise.all(keys.map(k=>
+        supabase.from("publy_settings").select("value").eq("key",`admin_${k}`).single()
+          .then(({data})=>({k, v:data?.value||""}))
+      )).then(results=>{
+        const obj: NaverApiKeys = {};
+        results.forEach(({k,v})=>{ if(v)(obj as any)[k]=v; });
+        setAdminNaverKeys(obj);
+      }).catch(()=>{});
+    }
+  },[tab]);
 
   async function loadUsers() {
     setLoading(true);
@@ -2602,6 +2621,46 @@ POST3: (제목)|(이유)
                     <div><label className="inp-label">비밀번호 확인</label><div style={{position:"relative"}}><input className="inp" type={showPw2?"text":"password"} value={newPw2} onChange={e=>setNewPw2(e.target.value)} placeholder="비밀번호 재입력" style={{paddingRight:40}}/><button type="button" onClick={()=>setShowPw2(v=>!v)} style={{position:"absolute",right:10,top:"50%",transform:"translateY(-50%)",background:"none",border:"none",cursor:"pointer",fontSize:18,color:"var(--text3)"}}>{showPw2?"🙈":"👁️"}</button></div></div>
                     <button className="btn btn-primary" style={{alignSelf:"flex-start"}} onClick={changeAdminPw}>🔐 비밀번호 변경</button>
                     {pwMsg&&<div className={`alert ${pwMsg.includes("✅")?"alert-success":"alert-danger"}`} style={{margin:0}}>{pwMsg}</div>}
+                  </div>
+                </div>
+
+                {/* 네이버 API 공용 키 (관리자) */}
+                <div className="card">
+                  <div className="card-title" style={{marginBottom:4}}>🟢 네이버 검색광고 API (공용 키)</div>
+                  <div style={{fontSize:11,color:"var(--text3)",marginBottom:12}}>회원 개인 키 없을 때 이 키 사용 · 전체 회원 공유</div>
+                  <div style={{display:"flex",flexDirection:"column",gap:8}}>
+                    {[
+                      {label:"Customer ID",key:"naver_customer_id",ph:"123456789"},
+                      {label:"Access License",key:"naver_access_license",ph:"xxxx-xxxx-xxxx"},
+                      {label:"Secret Key",key:"naver_secret_key",ph:"secret"},
+                    ].map(f=>(
+                      <div key={f.key}>
+                        <label className="inp-label">{f.label}</label>
+                        <input className="inp" placeholder={f.ph} value={(adminNaverKeys as any)[f.key]||""} onChange={e=>setAdminNaverKeys(p=>({...p,[f.key]:e.target.value}))}/>
+                      </div>
+                    ))}
+                    <div className="card-title" style={{marginBottom:4,marginTop:8}}>📊 네이버 DataLab API (공용)</div>
+                    {[
+                      {label:"Client ID",key:"naver_datalab_client_id",ph:"Client ID"},
+                      {label:"Client Secret",key:"naver_datalab_client_secret",ph:"Client Secret"},
+                    ].map(f=>(
+                      <div key={f.key}>
+                        <label className="inp-label">{f.label}</label>
+                        <input className="inp" placeholder={f.ph} value={(adminNaverKeys as any)[f.key]||""} onChange={e=>setAdminNaverKeys(p=>({...p,[f.key]:e.target.value}))}/>
+                      </div>
+                    ))}
+                    <button className="btn btn-primary" style={{alignSelf:"flex-start"}} disabled={adminNaverSaving} onClick={async()=>{
+                      setAdminNaverSaving(true); setAdminNaverMsg("");
+                      try{
+                        await saveAdminNaverApiKeys(adminNaverKeys);
+                        setAdminNaverMsg("✅ 저장 완료! 전체 회원에게 적용됩니다");
+                        setTimeout(()=>setAdminNaverMsg(""),4000);
+                      }catch(e:any){setAdminNaverMsg("❌ "+e.message);}
+                      finally{setAdminNaverSaving(false);}
+                    }}>
+                      {adminNaverSaving?<><span className="spinner"/>저장 중...</>:"💾 공용 키 저장"}
+                    </button>
+                    {adminNaverMsg&&<div className={`alert ${adminNaverMsg.includes("✅")?"alert-success":"alert-danger"}`} style={{margin:0}}>{adminNaverMsg}</div>}
                   </div>
                 </div>
               </div>
