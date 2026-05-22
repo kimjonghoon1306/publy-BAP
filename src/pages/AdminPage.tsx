@@ -364,7 +364,7 @@ select.field-inp{cursor:pointer;appearance:auto;}
   .layout{padding-left:0;}
 }
 @media(max-width:768px){
-  .header-mid{display:none;}
+  .server-badge{display:none;}.adm-badge{display:none;}
   .main{padding:14px 12px calc(84px + env(safe-area-inset-bottom));}
   .plat-grid{grid-template-columns:1fr 1fr;}
   .title-grid{grid-template-columns:1fr;}
@@ -1585,6 +1585,15 @@ POST3: (제목)|(이유)
             </button>
           </div>
           <div className="header-mid">
+            <button className="plat-hdr-btn" onClick={()=>{setPlatform("naver");if(pubAccId)loadCategories("naver");}}
+              style={{background:platform==="naver"?"rgba(3,199,90,.12)":"transparent",color:platform==="naver"?"var(--naver)":"var(--text2)",borderColor:platform==="naver"?"rgba(3,199,90,.4)":"var(--border)"}}>
+              🟢 네이버
+            </button>
+            <button className="plat-hdr-btn" onClick={()=>{setPlatform("tistory");if(pubAccId)loadCategories("tistory");}}
+              style={{background:platform==="tistory"?"rgba(255,107,53,.12)":"transparent",color:platform==="tistory"?"var(--tistory)":"var(--text2)",borderColor:platform==="tistory"?"rgba(255,107,53,.4)":"var(--border)"}}>
+              🟠 티스토리
+            </button>
+            <div style={{width:1,height:16,background:"var(--border)",flexShrink:0}}/>
             <div className={`server-badge ${botOnline?"server-on":"server-off"}`}>
               <span className={`dot ${botOnline?"dot-on":"dot-off"}`}/>
               {botOnline?"봇 온라인":"봇 오프라인"}
