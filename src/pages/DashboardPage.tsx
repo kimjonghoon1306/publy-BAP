@@ -253,8 +253,8 @@ textarea.inp{resize:vertical;line-height:1.75;min-height:80px;}
 .info-val{font-size:14px;font-weight:700;color:var(--text);}
 .preview-overlay{position:fixed;inset:0;z-index:500;background:rgba(0,0,0,.85);display:flex;align-items:center;justify-content:center;padding:16px;}
 .preview-inner{width:100%;max-width:720px;max-height:92vh;overflow-y:auto;background:#fff;border-radius:18px;padding:32px 28px;animation:guideIn .3s ease both;}
-.guide-overlay{position:fixed;inset:0;z-index:999;background:rgba(0,0,0,.78);backdrop-filter:blur(8px);display:flex;align-items:center;justify-content:center;padding:12px;}
-.guide-modal{width:100%;max-width:560px;max-height:92vh;border-radius:24px;overflow:hidden;display:flex;flex-direction:column;animation:guideIn .32s cubic-bezier(.34,1.56,.64,1) both;box-shadow:0 32px 80px rgba(0,0,0,.6);position:relative;}
+.guide-overlay{position:fixed;inset:0;z-index:999;background:rgba(0,0,0,.78);backdrop-filter:blur(8px);display:flex;align-items:center;justify-content:center;padding:max(12px,env(safe-area-inset-top)) 12px max(12px,env(safe-area-inset-bottom));}
+.guide-modal{width:100%;max-width:560px;max-height:calc(100dvh - 24px - env(safe-area-inset-top) - env(safe-area-inset-bottom));border-radius:24px;overflow:hidden;display:flex;flex-direction:column;animation:guideIn .32s cubic-bezier(.34,1.56,.64,1) both;box-shadow:0 32px 80px rgba(0,0,0,.6);position:relative;}
 .guide-header{padding:22px 22px 0;background:linear-gradient(135deg,#1a2e1a,#0d1a0d);flex-shrink:0;border-bottom:1px solid rgba(255,255,255,.06);}
 .guide-logo-row{display:flex;align-items:center;gap:10px;margin-bottom:14px;}
 .guide-logo-ico{width:40px;height:40px;border-radius:12px;background:linear-gradient(135deg,#00ff9d,#00c870);display:flex;align-items:center;justify-content:center;font-size:20px;flex-shrink:0;}
@@ -309,7 +309,7 @@ textarea.inp{resize:vertical;line-height:1.75;min-height:80px;}
   .g-step-desc{font-size:14px !important;line-height:1.9 !important;}
   .g-step-title{font-size:16px !important;}
   .nav-item{padding:13px 12px;font-size:14px;}
-  .guide-modal{max-width:100%;max-height:90vh;border-radius:20px;}.guide-header{padding:16px 16px 0;}
+  .guide-modal{max-width:100%;max-height:calc(100dvh - 20px - env(safe-area-inset-top) - env(safe-area-inset-bottom));border-radius:20px;}.guide-header{padding:16px 16px 0;}
   .guide-body{padding:14px 14px 18px;}.guide-footer{padding:10px 14px;}.preview-inner{padding:20px 14px;}
   .flow-nav{flex-direction:column;align-items:stretch;}.flow-btn{justify-content:center;}
   .pub-grid{grid-template-columns:1fr !important;}
@@ -323,7 +323,7 @@ textarea.inp{resize:vertical;line-height:1.75;min-height:80px;}
   .dl-btn span:last-child{display:none;}.dl-btn{padding:9px 12px;}
   .guide-open-btn{font-size:11px;padding:6px 10px;}
   .adtype-row{grid-template-columns:1fr;}.guide-overlay{padding:6px;}
-  .guide-modal{max-height:94vh;border-radius:16px;}.guide-tab{font-size:11px;padding:9px 11px;}
+  .guide-modal{max-height:calc(100dvh - 12px - env(safe-area-inset-top) - env(safe-area-inset-bottom));border-radius:16px;}.guide-tab{font-size:11px;padding:9px 11px;}
   .acc-form-grid{grid-template-columns:1fr !important;}
   .pub-plat-grid{grid-template-columns:1fr !important;}
 }
@@ -445,6 +445,7 @@ export default function DashboardPage({user, onLogout, onAdminLogin, onThemeTogg
   const [showPreviewModal, setShowPreviewModal] = useState(false);
   const [showNaverMenu, setShowNaverMenu] = useState(false);
   const [showPublishPanel, setShowPublishPanel] = useState(false);
+  const [showMeta, setShowMeta] = useState(false); // 썸네일+인사말 접기 (이미지 있으면 자동펼침)
   const thumbnailRef = useRef<HTMLInputElement>(null);
   const manualFileRef = useRef<HTMLInputElement>(null);
 
@@ -1090,6 +1091,7 @@ POST3: (제목)|(이유)
       if(imgs.length>0){
         if(!thumbnail)setThumbnail(imgs[0]);
         triggerAutoInsert(imgs.map((src,i)=>({id:i,src,alt:`${keyword||genTitle} ${i===0?"대표":"현장"} 사진`})));
+        setShowMeta(true); // 이미지 생성 완료 → 썸네일+인사말 자동 펼침
       }
     }catch(e:any){if(e.name!=="AbortError")alert("이미지 생성 실패: "+e.message);}
     finally{setGenImgLoading(false);imgAbortRef.current=null;}
@@ -1157,10 +1159,10 @@ POST3: (제목)|(이유)
         <div className="card-title" style={{marginBottom:10}}>🌐 플랫폼</div>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
           {([{p:"naver",ico:"🟢",name:"네이버",c:"var(--naver)"},{p:"tistory",ico:"🟠",name:"티스토리",c:"var(--tistory)"}] as const).map(({p,ico,name,c})=>(
-            <button key={p} onClick={()=>{setPlatform(p);if(pubAccId)loadCategories(p);}} style={{padding:"12px",borderRadius:10,border:`2px solid ${platform===p?c:"var(--border)"}`,background:platform===p?`${c}18`:"var(--bg)",cursor:"pointer",fontFamily:"inherit",display:"flex",alignItems:"center",gap:8,transition:"all .15s"}}>
-              <span style={{fontSize:22}}>{ico}</span>
-              <span style={{fontSize:13,fontWeight:700,color:"var(--text)"}}>{name}</span>
-              {platform===p&&<span style={{marginLeft:"auto",color:c,fontSize:14}}>✓</span>}
+            <button key={p} onClick={()=>{setPlatform(p);if(pubAccId)loadCategories(p);}} style={{padding:"12px 10px",borderRadius:10,border:`2px solid ${platform===p?c:"var(--border)"}`,background:platform===p?`${c}18`:"var(--bg)",cursor:"pointer",fontFamily:"inherit",display:"flex",alignItems:"center",justifyContent:"center",gap:6,transition:"all .15s",whiteSpace:"nowrap",overflow:"hidden"}}>
+              <span style={{fontSize:18,flexShrink:0}}>{ico}</span>
+              <span style={{fontSize:13,fontWeight:700,color:"var(--text)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{name}</span>
+              {platform===p&&<span style={{color:c,fontSize:12,flexShrink:0}}>✓</span>}
             </button>
           ))}
         </div>
@@ -1395,24 +1397,24 @@ POST3: (제목)|(이유)
       <div className="g-step" style={{borderColor:`${P}40`,background:`${P}08`}}>
         <div className="g-step-num" style={{color:P}}>🚨 발행 전 필수 확인!</div>
         <div className="g-step-title" style={{color:"#fff"}}>PC에서 Publy 앱이 실행 중이어야 해요</div>
-        <div className="g-step-desc">우측 패널에 <b style={{color:G}}>● 온라인</b>이 보여야 즉시 발행! 오프라인이면 예약 발행으로 처리돼요.</div>
+        <div className="g-step-desc">오른쪽 패널에 <b style={{color:G}}>● 온라인</b>이 보여야 즉시 발행! 오프라인이면 자동으로 대기열에 저장돼요 😊</div>
       </div>
-      <div className="g-step" style={{borderColor:`${Y}40`,background:`${Y}08`}}>
-        <div className="g-step-num" style={{color:Y}}>📝 발행 방식 3가지</div>
-        <div className="g-step-title" style={{color:"#fff"}}>어떤 내용을 발행할까요?</div>
+      <div className="g-step" style={{borderColor:`${G}40`,background:`${G}08`}}>
+        <div className="g-step-num" style={{color:G}}>✅ 발행 순서 (이거 하나면 끝!)</div>
+        <div className="g-step-title" style={{color:"#fff"}}>순서대로만 하면 돼요</div>
         <div className="g-step-desc">
-          {[["① 전체 발행","본문 + FAQ + 관련글 모두. 가장 풍부한 내용"],["② 본문+FAQ","FAQ까지만. 관련글 제외"],["③ 본문만","핵심만 깔끔하게. 가장 간결"]].map(([t,d],i)=>(
-            <div key={i} style={{display:"flex",gap:8,padding:"8px 0",borderBottom:i<2?"1px solid rgba(255,255,255,.06)":"none"}}>
+          {[["① 이미지 생성 후 발행탭 이동","이미지가 자동으로 글 사이에 배치돼요. 썸네일도 자동 설정!"],["② 오른쪽 패널에서 계정·플랫폼 선택","네이버 또는 티스토리, 연결된 계정 선택"],["③ 발행 방식 선택","전체/본문+FAQ/본문만 — 오른쪽 패널에서 선택"],["④ 🚀 발행 버튼 클릭","오른쪽 아래 큰 초록 버튼!"]].map(([t,d],i)=>(
+            <div key={i} style={{display:"flex",gap:8,padding:"8px 0",borderBottom:i<3?"1px solid rgba(255,255,255,.06)":"none"}}>
               <div><div style={{fontSize:14,fontWeight:800,color:"#fff"}}>{t}</div><div style={{fontSize:13,color:"rgba(255,255,255,.6)",marginTop:2}}>{d}</div></div>
             </div>
           ))}
         </div>
-      </div>
-      <div className="g-step" style={{borderColor:`${G}40`,background:`${G}08`}}>
-        <div className="g-step-num" style={{color:G}}>✅ 발행 설정 요약 확인</div>
-        <div className="g-step-title" style={{color:"#fff"}}>발행 전 이미지 패턴·캡션 확인하세요</div>
-        <div className="g-step-desc">발행 탭 상단에 <b>이미지 장수, 배치 패턴, 영상 유무, 캡션 개수</b>가 표시돼요. 확인 후 발행!</div>
         <button className="g-btn" style={{background:`linear-gradient(135deg,${G},#00c870)`,color:"#000"}} onClick={()=>{setShowGuide(false);setTab("accounts");}}>🔗 계정 연결하러 가기</button>
+      </div>
+      <div className="g-step" style={{borderColor:`${Y}40`,background:`${Y}08`}}>
+        <div className="g-step-num" style={{color:Y}}>🖼️ 이미지+글 패턴 확인</div>
+        <div className="g-step-title" style={{color:"#fff"}}>본문 편집기에서 눈으로 확인하세요</div>
+        <div className="g-step-desc">이미지와 글이 섞인 순서가 보여요. 위치가 마음에 안 들면 블록 옆 <b>🖼️ 버튼</b>으로 직접 조정!</div>
       </div>
     </div>,
 
@@ -1971,24 +1973,7 @@ POST3: (제목)|(이유)
                 </div>
 
                 {/* ── 에디터 (전폭) ── */}
-                <div style={{display:"flex",flexDirection:"column",gap:12}}>
-
-                    {/* 발행 방식 */}
-                    <div className="card" style={{padding:"14px 16px"}}>
-                      <div className="card-title" style={{marginBottom:10}}>📝 발행 방식</div>
-                      <div style={{display:"flex",flexDirection:"column",gap:8}}>
-                        {([{id:"full",ico:"📄",name:"전체 발행",sub:"본문+FAQ+관련글"},{id:"body_faq",ico:"💬",name:"본문+FAQ",sub:"관련글 제외"},{id:"body_only",ico:"✏️",name:"본문만",sub:"가장 간결"}] as const).map(c=>(
-                          <button key={c.id} onClick={()=>setPubConcept(c.id)} style={{padding:"11px 14px",borderRadius:10,border:`2px solid ${pubConcept===c.id?"var(--accent)":"var(--border)"}`,background:pubConcept===c.id?"var(--accent-bg)":"var(--bg)",cursor:"pointer",fontFamily:"inherit",textAlign:"left",transition:"all .15s",display:"flex",alignItems:"center",gap:10}}>
-                            <span style={{fontSize:20}}>{c.ico}</span>
-                            <div style={{flex:1}}>
-                              <div style={{fontSize:13,fontWeight:700,color:pubConcept===c.id?"var(--accent-text)":"var(--text)"}}>{c.name}</div>
-                              <div style={{fontSize:11,color:"var(--text3)"}}>{c.sub}</div>
-                            </div>
-                            {pubConcept===c.id&&<span style={{color:"var(--accent-text)"}}>✓</span>}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
+                <div style={{display:"flex",flexDirection:"column",gap:16}}>
 
                     {/* 제목 */}
                     <div className="card" style={{padding:"14px 16px"}}>
@@ -1996,42 +1981,56 @@ POST3: (제목)|(이유)
                       <input className="inp lg" placeholder="블로그 글 제목..." value={pubTitle} onChange={e=>setPubTitle(e.target.value)}/>
                     </div>
 
-                    {/* 썸네일 */}
-                    <div className="card" style={{padding:"14px 16px"}}>
-                      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:10}}>
-                        <label className="inp-label" style={{margin:0}}>🖼️ 썸네일</label>
-                        {thumbnail&&<button onClick={()=>setThumbnail("")} style={{background:"transparent",border:"none",cursor:"pointer",color:"var(--text3)",fontSize:18}}>✕</button>}
-                      </div>
-                      {thumbnail?(
-                        <div style={{position:"relative",borderRadius:12,overflow:"hidden",aspectRatio:"16/9"}}>
-                          <img src={thumbnail} alt="썸네일" style={{width:"100%",height:"100%",objectFit:"cover",display:"block"}} onError={()=>setThumbnail("")}/>
+                    {/* 썸네일 + 인사말 접기 (이미지 있으면 자동 펼침) */}
+                    <div className="card" style={{padding:0,overflow:"hidden"}}>
+                      <button onClick={()=>setShowMeta(v=>!v)} style={{width:"100%",display:"flex",alignItems:"center",justifyContent:"space-between",padding:"14px 18px",background:"transparent",border:"none",cursor:"pointer",fontFamily:"inherit"}}>
+                        <div style={{display:"flex",alignItems:"center",gap:10}}>
+                          <span style={{fontSize:14,fontWeight:700,color:"var(--text)"}}>🖼️ 썸네일 · 인사말</span>
+                          {thumbnail&&<span style={{fontSize:10,fontWeight:800,padding:"2px 8px",borderRadius:99,background:"var(--accent)",color:"#000"}}>썸네일 ✓</span>}
+                          {!thumbnail&&getActiveImages().length===0&&<span style={{fontSize:11,color:"var(--text3)"}}>선택사항</span>}
                         </div>
-                      ):(
-                        <div style={{display:"flex",flexDirection:"column",gap:10}}>
-                          {getActiveImages().length>0&&(
-                            <div>
-                              <div style={{fontSize:12,color:"var(--text3)",marginBottom:6}}>생성된 이미지에서 선택:</div>
-                              <div style={{display:"flex",gap:8,overflowX:"auto",paddingBottom:4}}>
-                                {getActiveImages().slice(0,6).map((src,i)=>(
-                                  <button key={i} onClick={()=>setThumbnail(src)} style={{flexShrink:0,width:56,height:56,borderRadius:8,overflow:"hidden",border:"1px solid var(--border)",padding:0,cursor:"pointer"}}>
-                                    <img src={src} alt="" style={{width:"100%",height:"100%",objectFit:"cover"}} onError={e=>{(e.target as HTMLImageElement).style.display="none";}}/>
-                                  </button>
-                                ))}
-                              </div>
+                        <span style={{fontSize:16,color:"var(--text3)",transition:"transform .2s",display:"inline-block",transform:showMeta?"rotate(180deg)":"rotate(0deg)"}}>▼</span>
+                      </button>
+                      {showMeta&&(
+                        <div style={{padding:"0 16px 16px",borderTop:"1px solid var(--border)",display:"flex",flexDirection:"column",gap:14,marginTop:4,paddingTop:16}}>
+                          {/* 썸네일 */}
+                          <div>
+                            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:8}}>
+                              <label className="inp-label" style={{margin:0}}>🖼️ 썸네일</label>
+                              {thumbnail&&<button onClick={()=>setThumbnail("")} style={{background:"transparent",border:"none",cursor:"pointer",color:"var(--text3)",fontSize:18}}>✕</button>}
                             </div>
-                          )}
-                          <button onClick={()=>thumbnailRef.current?.click()} style={{width:"100%",padding:"16px",borderRadius:12,border:"2px dashed var(--border)",background:"var(--bg)",cursor:"pointer",color:"var(--text3)",fontSize:13,fontFamily:"inherit"}}>
-                            📁 이미지 업로드
-                          </button>
+                            {thumbnail?(
+                              <div style={{position:"relative",borderRadius:12,overflow:"hidden",aspectRatio:"16/9"}}>
+                                <img src={thumbnail} alt="썸네일" style={{width:"100%",height:"100%",objectFit:"cover",display:"block"}} onError={()=>setThumbnail("")}/>
+                              </div>
+                            ):(
+                              <div style={{display:"flex",flexDirection:"column",gap:10}}>
+                                {getActiveImages().length>0&&(
+                                  <div>
+                                    <div style={{fontSize:12,color:"var(--text3)",marginBottom:6}}>생성된 이미지에서 선택:</div>
+                                    <div style={{display:"flex",gap:8,overflowX:"auto",paddingBottom:4}}>
+                                      {getActiveImages().slice(0,6).map((src,i)=>(
+                                        <button key={i} onClick={()=>setThumbnail(src)} style={{flexShrink:0,width:64,height:64,borderRadius:10,overflow:"hidden",border:"2px solid var(--border)",padding:0,cursor:"pointer",transition:"border-color .15s"}}>
+                                          <img src={src} alt="" style={{width:"100%",height:"100%",objectFit:"cover"}} onError={e=>{(e.target as HTMLImageElement).style.display="none";}}/>
+                                        </button>
+                                      ))}
+                                    </div>
+                                  </div>
+                                )}
+                                <button onClick={()=>thumbnailRef.current?.click()} style={{width:"100%",padding:"18px",borderRadius:12,border:"2px dashed var(--border)",background:"var(--bg)",cursor:"pointer",color:"var(--text3)",fontSize:13,fontFamily:"inherit"}}>
+                                  📁 직접 업로드
+                                </button>
+                              </div>
+                            )}
+                            <input ref={thumbnailRef} type="file" accept="image/*" style={{display:"none"}} onChange={e=>{const f=e.target.files?.[0];if(!f)return;const r=new FileReader();r.onload=ev=>setThumbnail(ev.target?.result as string);r.readAsDataURL(f);}}/>
+                          </div>
+                          {/* 인사말 */}
+                          <div>
+                            <label className="inp-label">💬 글쓴이 인사말 <span style={{fontWeight:400,color:"var(--text3)"}}>(선택)</span></label>
+                            <textarea className="inp" rows={2} placeholder="안녕하세요! 오늘도 유용한 정보를 가지고 왔어요 😊" value={greeting} onChange={e=>setGreeting(e.target.value)} style={{resize:"none",fontSize:13}}/>
+                          </div>
                         </div>
                       )}
-                      <input ref={thumbnailRef} type="file" accept="image/*" style={{display:"none"}} onChange={e=>{const f=e.target.files?.[0];if(!f)return;const r=new FileReader();r.onload=ev=>setThumbnail(ev.target?.result as string);r.readAsDataURL(f);}}/>
-                    </div>
-
-                    {/* 인사말 */}
-                    <div className="card" style={{padding:"14px 16px"}}>
-                      <label className="inp-label">💬 글쓴이 인사말 (선택)</label>
-                      <textarea className="inp" rows={2} placeholder="안녕하세요! 오늘도 유용한 정보를 가지고 왔어요 😊" value={greeting} onChange={e=>setGreeting(e.target.value)} style={{resize:"none",fontSize:13}}/>
                     </div>
 
                     {/* 이미지 삽입 모드 */}
