@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
-import { supabase, getAccounts, upsertAccount, PublyAccount, getHistory, PublyHistory, addHistory, deleteHistory, deleteAllHistory } from "../lib/supabase";
+import { supabase, getAccounts, upsertAccount, PublyAccount, getHistory, PublyHistory, addHistory, deleteHistory, deleteAllHistory, setAdminPassword } from "../lib/supabase";
 
 interface Props {
   onBack: () => void;
@@ -1386,7 +1386,18 @@ POST3: (제목)|(이유)
     try { await supabase.from("publy_payments").insert({user_id:uid,amount:Number(newPayAmt),plan,method:"manual",status:"completed",note:newPayNote||undefined}); await supabase.from("publy_users").update({plan}).eq("id",uid); await supabase.from("publy_quotas").update({total_quota:PLAN_QUOTA[plan]||10}).eq("user_id",uid); setNewPayAmt(""); setNewPayNote(""); await loadUsers(); }
     finally { setAddingPay(false); }
   }
-  function changeAdminPw() { if (!newPw1||newPw1!==newPw2) { setPwMsg("비밀번호를 확인하세요"); return; } if (newPw1.length<4) { setPwMsg("4자 이상"); return; } localStorage.setItem("publy_admin_pw",newPw1); setNewPw1(""); setNewPw2(""); setPwMsg("✅ 변경 완료"); setTimeout(()=>setPwMsg(""),3000); }
+  async function changeAdminPw() {
+    if (!newPw1 || newPw1 !== newPw2) { setPwMsg("비밀번호를 확인하세요"); return; }
+    if (newPw1.length < 4) { setPwMsg("4자 이상 입력하세요"); return; }
+    try {
+      await setAdminPassword(newPw1);
+      setNewPw1(""); setNewPw2("");
+      setPwMsg("✅ 변경 완료 — Supabase에 저장됨");
+      setTimeout(() => setPwMsg(""), 3000);
+    } catch (e: any) {
+      setPwMsg("❌ 변경 실패: " + e.message);
+    }
+  }
 
   const filteredUsers = users.filter(u => !search || u.email.includes(search) || (u.name||"").includes(search) || (u.phone||"").includes(search));
   const writeStep = genContent ? 3 : selectedTitle ? 2 : titles.length > 0 ? 1 : 0;
