@@ -2521,7 +2521,7 @@ POST3: (제목)|(이유)
               <div style={{animation:"fadeUp .25s ease both"}}>
 
                 {/* ── 발행 통계 + 수익 예측 ── */}
-                {history.length>0&&(()=>{
+                {(()=>{
                   const now=new Date();
                   const thisMonth=history.filter(h=>new Date(h.published_at).getMonth()===now.getMonth()&&new Date(h.published_at).getFullYear()===now.getFullYear());
                   const thisWeek=history.filter(h=>{const d=new Date(h.published_at);const diff=(now.getTime()-d.getTime())/(1000*60*60*24);return diff<=7;});
