@@ -1573,17 +1573,6 @@ POST3: (제목)|(이유)
             </div>
             <span className="logo-text">PUBLY ADM</span>
           </div>
-          {/* 플랫폼 토글 - 항상 표시 */}
-          <div className="plat-toggle">
-            <button className="plat-hdr-btn" onClick={()=>{setPlatform("naver");if(pubAccId)loadCategories("naver");}}
-              style={{background:platform==="naver"?"rgba(3,199,90,.12)":"transparent",color:platform==="naver"?"var(--naver)":"var(--text2)",borderColor:platform==="naver"?"rgba(3,199,90,.4)":"var(--border)"}}>
-              🟢 네이버
-            </button>
-            <button className="plat-hdr-btn" onClick={()=>{setPlatform("tistory");if(pubAccId)loadCategories("tistory");}}
-              style={{background:platform==="tistory"?"rgba(255,107,53,.12)":"transparent",color:platform==="tistory"?"var(--tistory)":"var(--text2)",borderColor:platform==="tistory"?"rgba(255,107,53,.4)":"var(--border)"}}>
-              🟠 티스토리
-            </button>
-          </div>
           <div className="header-mid">
             <button className="plat-hdr-btn" onClick={()=>{setPlatform("naver");if(pubAccId)loadCategories("naver");}}
               style={{background:platform==="naver"?"rgba(3,199,90,.12)":"transparent",color:platform==="naver"?"var(--naver)":"var(--text2)",borderColor:platform==="naver"?"rgba(3,199,90,.4)":"var(--border)"}}>
