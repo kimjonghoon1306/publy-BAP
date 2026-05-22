@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
-import { PublyUser, getQuota, getHistory, getAccounts, PublyQuota, PublyHistory, PublyAccount, upsertAccount, useQuota, addHistory, deleteHistory, deleteAllHistory } from "../lib/supabase";
+import { PublyUser, getQuota, getHistory, getAccounts, PublyQuota, PublyHistory, PublyAccount, upsertAccount, useQuota, addHistory, deleteHistory, deleteAllHistory, changeUserPassword } from "../lib/supabase";
 import { supabase } from "../lib/supabase";
 
 type MainTab = "keyword" | "write" | "image" | "publish" | "manage" | "accounts" | "settings";
@@ -438,6 +438,11 @@ export default function DashboardPage({user, onLogout, onAdminLogin, onThemeTogg
   const [showNaverMenu, setShowNaverMenu] = useState(false);
   const [showPublishPanel, setShowPublishPanel] = useState(false);
   const [showMeta, setShowMeta] = useState(false); // 썸네일+인사말 접기 (이미지 있으면 자동펼침)
+  const [currentPw, setCurrentPw] = useState("");
+  const [newPw1, setNewPw1] = useState("");
+  const [newPw2, setNewPw2] = useState("");
+  const [pwMsg, setPwMsg] = useState("");
+  const [pwChanging, setPwChanging] = useState(false);
   const thumbnailRef = useRef<HTMLInputElement>(null);
   const manualFileRef = useRef<HTMLInputElement>(null);
 
@@ -626,6 +631,21 @@ export default function DashboardPage({user, onLogout, onAdminLogin, onThemeTogg
       if(line==="")return<br key={i}/>;
       return<p key={i} style={{marginBottom:8,fontSize:14,lineHeight:1.8,color:"var(--text)"}}>{line}</p>;
     });
+  }
+
+  async function handleChangePw() {
+    if (!currentPw || !newPw1 || !newPw2) { setPwMsg("모든 항목을 입력하세요"); return; }
+    if (newPw1 !== newPw2) { setPwMsg("새 비밀번호가 일치하지 않습니다"); return; }
+    if (newPw1.length < 6) { setPwMsg("비밀번호는 6자 이상이어야 합니다"); return; }
+    setPwChanging(true); setPwMsg("");
+    try {
+      await changeUserPassword(user.id, currentPw, newPw1);
+      setCurrentPw(""); setNewPw1(""); setNewPw2("");
+      setPwMsg("✅ 비밀번호가 변경됐어요!");
+      setTimeout(() => setPwMsg(""), 4000);
+    } catch (e: any) {
+      setPwMsg("❌ " + e.message);
+    } finally { setPwChanging(false); }
   }
 
   const checkBot = useCallback(async()=>{
@@ -2339,6 +2359,27 @@ POST3: (제목)|(이유)
                     {[{k:"이름",v:user.name||"-"},{k:"이메일",v:user.email},{k:"플랜",v:PLAN_LABELS[user.plan]},{k:"잔여 건수",v:`${quota?.remaining_quota??"-"}건`},{k:"만료일",v:quota?new Date(quota.reset_date).toLocaleDateString("ko-KR"):"-"}].map(row=>(
                       <div key={row.k} className="info-row"><span className="info-key">{row.k}</span><span className="info-val">{row.v}</span></div>
                     ))}
+                  </div>
+                </div>
+                <div className="card">
+                  <div className="card-title" style={{marginBottom:14}}>🔐 비밀번호 변경</div>
+                  <div style={{display:"flex",flexDirection:"column",gap:10}}>
+                    <div>
+                      <label className="inp-label">현재 비밀번호</label>
+                      <input className="inp" type="password" placeholder="현재 비밀번호" value={currentPw} onChange={e=>setCurrentPw(e.target.value)}/>
+                    </div>
+                    <div>
+                      <label className="inp-label">새 비밀번호 (6자 이상)</label>
+                      <input className="inp" type="password" placeholder="새 비밀번호" value={newPw1} onChange={e=>setNewPw1(e.target.value)}/>
+                    </div>
+                    <div>
+                      <label className="inp-label">새 비밀번호 확인</label>
+                      <input className="inp" type="password" placeholder="새 비밀번호 재입력" value={newPw2} onChange={e=>setNewPw2(e.target.value)}/>
+                    </div>
+                    <button className="btn btn-primary" onClick={handleChangePw} disabled={pwChanging} style={{alignSelf:"flex-start"}}>
+                      {pwChanging?<><span className="spinner"/>변경 중...</>:"🔐 비밀번호 변경"}
+                    </button>
+                    {pwMsg&&<div className={`alert-box ${pwMsg.includes("✅")?"alert-success":"alert-danger"}`} style={{margin:0}}>{pwMsg}</div>}
                   </div>
                 </div>
               </div>
