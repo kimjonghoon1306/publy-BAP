@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
-import { supabase, getAccounts, upsertAccount, PublyAccount, getHistory, PublyHistory, addHistory, deleteHistory, deleteAllHistory, setAdminPassword, saveAdminNaverApiKeys, getNaverApiKeys, NaverApiKeys } from "../lib/supabase";
+import * as XLSX from "xlsx";
+import { supabase, getAccounts, upsertAccount, PublyAccount, getHistory, PublyHistory, addHistory, deleteHistory, deleteAllHistory, setAdminPassword, saveAdminNaverApiKeys, getNaverApiKeys, NaverApiKeys, getNaverDailyUsage, NAVER_DAILY_LIMIT } from "../lib/supabase";
 
 interface Props {
   onBack: () => void;
@@ -789,6 +790,40 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
       return {...u, quota:q||undefined, payments:p||[], notes:n||[], history_count:count||0};
     }));
     setUsers(full as UserFull[]); setLoading(false);
+  }
+
+  function exportToExcel() {
+    const rows = users.map(u => {
+      const lastPay = u.payments?.[0];
+      const lastPayDate = lastPay ? new Date(lastPay.created_at).toLocaleDateString("ko-KR") : "—";
+      const nextPayDate = u.quota?.reset_date ? new Date(u.quota.reset_date).toLocaleDateString("ko-KR") : "—";
+      const remaining = u.quota?.remaining_quota ?? 0;
+      const total = u.quota?.total_quota ?? 0;
+      const used = u.quota?.used_quota ?? 0;
+      return {
+        "이름": u.name || "—",
+        "이메일": u.email,
+        "연락처": u.phone || "—",
+        "등급": (PLAN_LABELS[u.plan] || u.plan).toUpperCase(),
+        "활성여부": u.is_active ? "활성" : "비활성",
+        "마지막 결제일": lastPayDate,
+        "다음 결제일 (만료일)": nextPayDate,
+        "총 발행 건수": total,
+        "사용한 건수": used,
+        "남은 건수": remaining,
+        "발행 이력": u.history_count ?? 0,
+        "가입일": new Date(u.created_at).toLocaleDateString("ko-KR"),
+        "회원 ID": u.id,
+      };
+    });
+    const ws = XLSX.utils.json_to_sheet(rows);
+    // 컬럼 너비 자동 조정
+    const colWidths = Object.keys(rows[0] || {}).map(k => ({wch: Math.max(k.length + 2, 14)}));
+    ws["!cols"] = colWidths;
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "회원목록");
+    const today = new Date().toISOString().slice(0,10);
+    XLSX.writeFile(wb, `publy_회원목록_${today}.xlsx`);
   }
 
   // 이미지 프롬프트 (KO_EN_MAP 축약 버전)
@@ -2395,8 +2430,12 @@ POST3: (제목)|(이유)
             {/* ───── 👥 회원 관리 ───── */}
             {tab === "users" && (
               <div style={{animation:"fadeUp .25s ease both"}}>
-                <div className="card" style={{padding:"14px 16px",marginBottom:14}}>
-                  <input className="inp" placeholder="🔍 이름, 이메일, 연락처 검색..." value={search} onChange={e=>setSearch(e.target.value)}/>
+                <div className="card" style={{padding:"14px 16px",marginBottom:14,display:"flex",gap:10,alignItems:"center"}}>
+                  <input className="inp" style={{flex:1}} placeholder="🔍 이름, 이메일, 연락처 검색..." value={search} onChange={e=>setSearch(e.target.value)}/>
+                  <button onClick={exportToExcel} disabled={users.length===0}
+                    style={{flexShrink:0,padding:"10px 16px",borderRadius:10,border:"1px solid rgba(0,200,100,.4)",background:"rgba(0,200,100,.08)",color:"#00c864",cursor:"pointer",fontSize:12,fontWeight:800,fontFamily:"inherit",whiteSpace:"nowrap",display:"flex",alignItems:"center",gap:6}}>
+                    📥 엑셀 저장 ({users.length}명)
+                  </button>
                 </div>
                 {loading ? (
                   <div style={{textAlign:"center",padding:40,color:"var(--text2)"}}>
@@ -2444,8 +2483,18 @@ POST3: (제목)|(이유)
                             <div className="detail-grid">
                               <div className="detail-field"><span className="field-label">플랜</span>
                                 <select className="field-inp" value={editMap[u.id]?.plan??u.plan} onChange={e=>setEditMap(p=>({...p,[u.id]:{...p[u.id],plan:e.target.value}}))}>
-                                  <option value="free">FREE (10건)</option><option value="basic">BASIC (50건)</option><option value="pro">PRO (무제한)</option>
+                                  <option value="free">FREE — 발행 10건 · 네이버 5회/일</option>
+                                  <option value="basic">BASIC — 발행 50건 · 네이버 50회/일</option>
+                                  <option value="pro">PRO — 발행 무제한 · 네이버 200회/일</option>
                                 </select>
+                              </div>
+                              <div className="detail-field"><span className="field-label">네이버 키워드 분석</span>
+                                <div style={{display:"flex",alignItems:"center",gap:8}}>
+                                  <span style={{fontSize:12,color:"var(--text2)"}}>
+                                    {`한도: ${NAVER_DAILY_LIMIT[editMap[u.id]?.plan??u.plan]??5}회/일`}
+                                  </span>
+                                  <span style={{fontSize:11,color:"var(--text3)"}}>(개인키 있으면 무제한)</span>
+                                </div>
                               </div>
                               <div className="detail-field"><span className="field-label">총 발행 건수</span>
                                 <input className="field-inp" type="number" value={editMap[u.id]?.quota??u.quota?.total_quota??10} onChange={e=>setEditMap(p=>({...p,[u.id]:{...p[u.id],quota:e.target.value}}))}/>
