@@ -71,14 +71,14 @@ export async function signUp(email: string, password: string, name: string) {
 
 export async function signIn(email: string, password: string) {
 
-  const { data: user, error } = await supabase
+  const { data: user } = await supabase
     .from("publy_users")
     .select("*")
     .eq("email", email)
     .eq("is_active", true)
-    .single();
+    .maybeSingle();
 
-  if (error || !user) throw new Error("이메일 또는 비밀번호가 올바르지 않습니다");
+  if (!user) throw new Error("이메일 또는 비밀번호가 올바르지 않습니다");
 
   const match = await bcrypt.compare(password, user.password_hash);
   if (!match) throw new Error("이메일 또는 비밀번호가 올바르지 않습니다");
@@ -92,7 +92,7 @@ export async function getQuota(userId: string): Promise<PublyQuota | null> {
     .from("publy_quotas")
     .select("*")
     .eq("user_id", userId)
-    .single();
+    .maybeSingle();
   return data;
 }
 
@@ -155,7 +155,7 @@ export async function verifyAdminPassword(pw: string): Promise<boolean> {
       .from("publy_settings")
       .select("value")
       .eq("key", "admin_pw_hash")
-      .single();
+      .maybeSingle();
     if (!data?.value) return pw === ADMIN_DEFAULT_PW;
     return bcrypt.compare(pw, data.value);
   } catch {
@@ -178,7 +178,7 @@ export async function changeUserPassword(userId: string, currentPw: string, newP
     .from("publy_users")
     .select("password_hash")
     .eq("id", userId)
-    .single();
+    .maybeSingle();
   if (!user) throw new Error("사용자를 찾을 수 없습니다");
   const match = await bcrypt.compare(currentPw, user.password_hash);
   if (!match) throw new Error("현재 비밀번호가 올바르지 않습니다");
@@ -213,9 +213,9 @@ export async function getNaverApiKeys(userId: string): Promise<NaverApiKeys> {
   const names = ["naver_access_license","naver_secret_key","naver_customer_id","naver_datalab_client_id","naver_datalab_client_secret"];
   const result: NaverApiKeys = {};
   for (const k of names) {
-    const { data: uRow } = await supabase.from("publy_settings").select("value").eq("key",`user_${userId}_${k}`).single();
+    const { data: uRow } = await supabase.from("publy_settings").select("value").eq("key",`user_${userId}_${k}`).maybeSingle();
     if (uRow?.value) { (result as any)[k] = uRow.value; continue; }
-    const { data: aRow } = await supabase.from("publy_settings").select("value").eq("key",`admin_${k}`).single();
+    const { data: aRow } = await supabase.from("publy_settings").select("value").eq("key",`admin_${k}`).maybeSingle();
     if (aRow?.value) (result as any)[k] = aRow.value;
   }
   return result;
@@ -229,4 +229,43 @@ export async function saveAdminNaverApiKeys(keys: NaverApiKeys): Promise<void> {
       .upsert({ key: `admin_${key}`, value }, { onConflict: "key" });
     if (error) throw new Error(error.message);
   }
+}
+
+// ── 네이버 API 일일 쿼타 ──────────────────────────────────
+export const NAVER_DAILY_LIMIT: Record<string, number> = {
+  free: 5,
+  pro: 50,
+  business: 200,
+  admin: 9999,
+};
+
+function naverQuotaKey(userId: string): string {
+  const today = new Date().toISOString().slice(0, 10);
+  return `naver_daily_${userId}_${today}`;
+}
+
+export async function getNaverDailyUsage(userId: string): Promise<number> {
+  try {
+    const { data } = await supabase
+      .from("publy_settings")
+      .select("value")
+      .eq("key", naverQuotaKey(userId))
+      .maybeSingle();
+    return data?.value ? parseInt(data.value) || 0 : 0;
+  } catch { return 0; }
+}
+
+export async function checkNaverQuota(userId: string, plan: string, hasPersonalKey: boolean): Promise<{ok: boolean; used: number; limit: number}> {
+  if (hasPersonalKey) return { ok: true, used: 0, limit: 9999 };
+  const limit = NAVER_DAILY_LIMIT[plan] ?? 5;
+  const used = await getNaverDailyUsage(userId);
+  return { ok: used < limit, used, limit };
+}
+
+export async function incrementNaverQuota(userId: string): Promise<void> {
+  const key = naverQuotaKey(userId);
+  const used = await getNaverDailyUsage(userId);
+  await supabase
+    .from("publy_settings")
+    .upsert({ key, value: String(used + 1) }, { onConflict: "key" });
 }
