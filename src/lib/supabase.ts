@@ -48,12 +48,14 @@ export interface PublyHistory {
 }
 
 // ── 인증 ─────────────────────────────────────────────────
-export async function signUp(email: string, password: string, name: string) {
+export async function signUp(email: string, password: string, name: string, phone?: string) {
   const hash = await bcrypt.hash(password, 10);
+  const insertData: any = { email, password_hash: hash, name };
+  if (phone) insertData.phone = phone;
 
   const { data: user, error } = await supabase
     .from("publy_users")
-    .insert({ email, password_hash: hash, name })
+    .insert(insertData)
     .select()
     .single();
 
