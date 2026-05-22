@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { verifyAdminPassword } from "../lib/supabase";
 
 interface Props {
   onAdminAuth: () => void;
@@ -6,8 +7,6 @@ interface Props {
   theme: "dark" | "light";
   onThemeToggle: () => void;
 }
-
-const DEFAULT_PW = "123456"; // 관리자 비밀번호
 
 const CSS = `
 @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@700;900&family=Noto+Sans+KR:wght@400;600;700&display=swap');
@@ -118,13 +117,16 @@ export default function AdminLoginPage({ onAdminAuth, onBack, theme, onThemeTogg
   async function handleLogin() {
     if (!pw) { setError("비밀번호를 입력하세요"); return; }
     setLoading(true);
-    await new Promise(r => setTimeout(r, 600));
-    const currentPw = localStorage.getItem("publy_admin_pw") || DEFAULT_PW;
-    if (pw === currentPw) {
-      sessionStorage.setItem("publy_admin_auth", "true");
-      onAdminAuth();
-    } else {
-      setError("비밀번호가 올바르지 않습니다");
+    try {
+      const ok = await verifyAdminPassword(pw);
+      if (ok) {
+        sessionStorage.setItem("publy_admin_auth", "true");
+        onAdminAuth();
+      } else {
+        setError("비밀번호가 올바르지 않습니다");
+      }
+    } catch {
+      setError("서버 연결 오류. 잠시 후 다시 시도해주세요.");
     }
     setLoading(false);
   }
