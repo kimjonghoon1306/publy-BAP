@@ -513,13 +513,14 @@ const TABS = [
   {k:"manage",   i:"📋", l:"발행 관리"},
   {k:"accounts", i:"🔗", l:"계정관리"},
   {k:"rank",     i:"📊", l:"블로그 순위"},
+  {k:"calendar", i:"📅", l:"콘텐츠 캘린더"},
   {k:"users",    i:"👥", l:"회원관리"},
   {k:"stats",    i:"📈", l:"통계"},
   {k:"settings", i:"🔐", l:"설정"},
 ] as const;
 
 export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: Props) {
-  const [tab, setTab] = useState<"keyword"|"write"|"image"|"publish"|"manage"|"accounts"|"rank"|"users"|"stats"|"settings">("keyword");
+  const [tab, setTab] = useState<"keyword"|"write"|"image"|"publish"|"manage"|"accounts"|"rank"|"calendar"|"users"|"stats"|"settings">("keyword");
   const [statsSubTab, setStatsSubTab] = useState<"mine"|"all">("mine");
   const [usersSubTab, setUsersSubTab] = useState<"list"|"referral">("list");
   const [referralData, setReferralData] = useState<{referrer:any;referred:any[]}[]>([]);
@@ -616,6 +617,12 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
   const [toasts, setToasts] = useState<{id:number;msg:string;type:"success"|"error"|"info"}[]>([]);
   const [writeStyle, setWriteStyle] = useState<WriteStyle>(()=>(localStorage.getItem("publy_adm_write_style") as WriteStyle)||"감성일기");
   const [qualityScore, setQualityScore] = useState<{seo:number;read:number;len:number;total:number}|null>(null);
+  const [calKeywords, setCalKeywords] = useState("");
+  const [calPlatform, setCalPlatform] = useState<"naver"|"tistory">("naver");
+  const [calDays, setCalDays] = useState(30);
+  const [calSchedule, setCalSchedule] = useState<{date:string;keyword:string;title:string;style:string;adType:string}[]>([]);
+  const [calLoading, setCalLoading] = useState(false);
+  const [calDone, setCalDone] = useState(false);
   function showToast(msg:string, type:"success"|"error"|"info"="success"){
     const id=Date.now();
     setToasts(p=>[...p,{id,msg,type}]);
@@ -661,6 +668,40 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
     ));
     const total=Math.round(seo*0.4+read*0.35+len*0.25);
     return{seo,read,len,total};
+  }
+
+  async function generateCalendar(){
+    const kws = calKeywords.split(/[,\n]+/).map((s:string)=>s.trim()).filter(Boolean);
+    if(kws.length===0){showToast("키워드를 입력해주세요","error");return;}
+    setCalLoading(true);setCalDone(false);setCalSchedule([]);
+    try{
+      const today=new Date();
+      const keys=await getNaverApiKeys(ADM_UID);
+      const geminiKey=(await (async()=>{const {data}=await supabase.from("publy_settings").select("value").eq("key","admin_gemini_key").maybeSingle();return data?.value||""})());
+      if(!geminiKey){showToast("설정탭에서 Gemini API 키를 먼저 입력해주세요","error");setCalLoading(false);return;}
+      const prompt=`다음 키워드 목록과 설정으로 ${calDays}일치 블로그 발행 스케줄을 JSON 배열로 만들어줘.
+키워드: ${kws.join(", ")}
+플랫폼: ${calPlatform==="naver"?"네이버 블로그":"티스토리"}
+규칙:
+- 키워드가 부족하면 연관 키워드를 추가로 생성해서 ${calDays}일을 채워
+- 주말(토/일)은 감성/여행/맛집 위주, 평일은 정보글 위주
+- 같은 키워드 연속 금지
+- 응답은 JSON 배열만, 다른 텍스트 없이:
+[{"date":"YYYY-MM-DD","keyword":"키워드","title":"SEO 최적화 제목","style":"글스타일","adType":"adpost 또는 adsense"}]
+오늘 날짜: ${today.toISOString().slice(0,10)}`;
+      const r=await fetch("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key="+encodeURIComponent(geminiKey),
+        {method:"POST",headers:{"Content-Type":"application/json"},
+          body:JSON.stringify({contents:[{parts:[{text:prompt}]}],generationConfig:{temperature:0.8,maxOutputTokens:4096}})}
+      );
+      const d=await r.json();
+      const raw=d.candidates?.[0]?.content?.parts?.[0]?.text||"";
+      const clean=raw.replace(/```json|```/g,"").trim();
+      const parsed=JSON.parse(clean);
+      setCalSchedule(parsed.slice(0,calDays));
+      setCalDone(true);
+      showToast(`${parsed.slice(0,calDays).length}일치 스케줄 생성 완료!`);
+    }catch(e:any){showToast("❌ "+e.message,"error");}
+    finally{setCalLoading(false);}
   }
 
   async function fetchKeywordData(){
@@ -2904,6 +2945,110 @@ POST3: (제목)|(이유)
                         ))}
                       </>
                     )}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* ───── 📅 콘텐츠 캘린더 ───── */}
+            {tab === "calendar" && (
+              <div style={{animation:"fadeUp .25s ease both"}}>
+                <div className="card">
+                  <div className="card-title" style={{marginBottom:16}}>📅 콘텐츠 캘린더 생성</div>
+                  <div style={{marginBottom:14}}>
+                    <label className="inp-label">🔑 키워드 입력 (쉼표 또는 줄바꿈으로 구분)</label>
+                    <textarea className="inp" rows={4} placeholder={"예: 다이어트 방법, 제주도 여행, 강남 맛집
+오징어 젓갈, 홈카페 레시피"}
+                      value={calKeywords} onChange={e=>setCalKeywords(e.target.value)} style={{resize:"vertical"}}/>
+                  </div>
+                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:14}}>
+                    <div>
+                      <label className="inp-label">📱 플랫폼</label>
+                      <div style={{display:"flex",gap:8}}>
+                        {(["naver","tistory"] as const).map(p=>(
+                          <button key={p} onClick={()=>setCalPlatform(p)}
+                            style={{flex:1,padding:"10px",borderRadius:10,border:`1.5px solid ${calPlatform===p?"var(--accent)":"var(--border)"}`,background:calPlatform===p?"var(--accent-bg)":"var(--bg)",cursor:"pointer",fontSize:13,fontWeight:700,fontFamily:"inherit",color:calPlatform===p?"var(--accent-text)":"var(--text2)",transition:"all .15s"}}>
+                            {p==="naver"?"🟢 네이버":"🟠 티스토리"}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <div>
+                      <label className="inp-label">📆 기간</label>
+                      <div style={{display:"flex",gap:8}}>
+                        {[7,14,30].map(d=>(
+                          <button key={d} onClick={()=>setCalDays(d)}
+                            style={{flex:1,padding:"10px",borderRadius:10,border:`1.5px solid ${calDays===d?"var(--accent)":"var(--border)"}`,background:calDays===d?"var(--accent-bg)":"var(--bg)",cursor:"pointer",fontSize:13,fontWeight:700,fontFamily:"inherit",color:calDays===d?"var(--accent-text)":"var(--text2)",transition:"all .15s"}}>
+                            {d}일
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                  <button className="btn btn-primary btn-full" onClick={generateCalendar} disabled={calLoading||!calKeywords.trim()}>
+                    {calLoading?<><span className="spinner"/>AI 스케줄 생성 중...</>:"✨ AI 스케줄 자동 생성"}
+                  </button>
+                </div>
+
+                {calDone&&calSchedule.length>0&&(
+                  <div className="card" style={{marginTop:0,padding:0,overflow:"hidden",animation:"fadeUp .2s ease both"}}>
+                    <div style={{padding:"14px 16px",borderBottom:"1px solid var(--border)",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+                      <div className="card-title" style={{margin:0}}>📋 {calSchedule.length}일치 발행 스케줄</div>
+                      <button onClick={()=>{
+                        const csv=["날짜,키워드,제목,스타일,수익유형",...calSchedule.map(s=>`${s.date},${s.keyword},"${s.title}",${s.style},${s.adType}`)].join("
+");
+                        const a=document.createElement("a");a.href=URL.createObjectURL(new Blob(["﻿"+csv],{type:"text/csv"}));a.download="콘텐츠캘린더.csv";a.click();
+                      }} style={{padding:"6px 14px",borderRadius:8,border:"1px solid var(--border)",background:"var(--card2)",color:"var(--text2)",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:"inherit"}}>
+                        📥 CSV 다운로드
+                      </button>
+                    </div>
+                    <div style={{overflowX:"auto"}}>
+                      <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
+                        <thead>
+                          <tr style={{background:"var(--bg2)"}}>
+                            {["날짜","키워드","제목","스타일","수익",""].map(h=>(
+                              <th key={h} style={{padding:"9px 12px",textAlign:"left",fontWeight:700,color:"var(--text3)",whiteSpace:"nowrap",borderBottom:"1px solid var(--border)"}}>{h}</th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {calSchedule.map((s,i)=>{
+                            const d=new Date(s.date);
+                            const dow=["일","월","화","수","목","금","토"][d.getDay()];
+                            const isWeekend=d.getDay()===0||d.getDay()===6;
+                            return(
+                              <tr key={i} style={{borderBottom:"1px solid var(--border)",transition:"background .1s"}}
+                                onMouseEnter={e=>(e.currentTarget.style.background="var(--card-hover)")}
+                                onMouseLeave={e=>(e.currentTarget.style.background="")}>
+                                <td style={{padding:"10px 12px",whiteSpace:"nowrap"}}>
+                                  <span style={{fontWeight:700,color:isWeekend?"var(--warn)":"var(--text)"}}>{s.date}</span>
+                                  <span style={{fontSize:10,marginLeft:4,color:"var(--text3)"}}>({dow})</span>
+                                </td>
+                                <td style={{padding:"10px 12px",color:"var(--accent-text)",fontWeight:700,whiteSpace:"nowrap"}}>{s.keyword}</td>
+                                <td style={{padding:"10px 12px",color:"var(--text)",maxWidth:260,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{s.title}</td>
+                                <td style={{padding:"10px 12px",whiteSpace:"nowrap"}}>
+                                  <span style={{fontSize:11,padding:"2px 8px",borderRadius:99,background:"var(--card2)",color:"var(--text2)",border:"1px solid var(--border)"}}>{s.style}</span>
+                                </td>
+                                <td style={{padding:"10px 12px",whiteSpace:"nowrap"}}>
+                                  <span style={{fontSize:11,padding:"2px 8px",borderRadius:99,
+                                    background:s.adType==="adpost"?"rgba(3,199,90,.1)":"rgba(66,133,244,.1)",
+                                    color:s.adType==="adpost"?"var(--naver)":"#4285F4",
+                                    border:`1px solid ${s.adType==="adpost"?"rgba(3,199,90,.3)":"rgba(66,133,244,.3)"}`}}>
+                                    {s.adType==="adpost"?"애드포스트":"애드센스"}
+                                  </span>
+                                </td>
+                                <td style={{padding:"10px 12px"}}>
+                                  <button onClick={()=>{setKeyword(s.keyword);setSelectedTitle(s.title);setTab("write" as any);showToast("키워드와 제목이 적용됐어요!");}}
+                                    style={{padding:"4px 10px",borderRadius:7,border:"1px solid var(--accent-border)",background:"var(--accent-bg)",color:"var(--accent-text)",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:"inherit",whiteSpace:"nowrap"}}>
+                                    글 생성 →
+                                  </button>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
                   </div>
                 )}
               </div>
