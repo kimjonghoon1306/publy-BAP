@@ -2993,8 +2993,7 @@ POST3: (제목)|(이유)
                     <div style={{padding:"14px 16px",borderBottom:"1px solid var(--border)",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
                       <div className="card-title" style={{margin:0}}>📋 {calSchedule.length}일치 발행 스케줄</div>
                       <button onClick={()=>{
-                        const csv=["날짜,키워드,제목,스타일,수익유형",...calSchedule.map(s=>`${s.date},${s.keyword},"${s.title}",${s.style},${s.adType}`)].join("
-");
+                        const csv=["날짜,키워드,제목,스타일,수익유형",...calSchedule.map(s=>`${s.date},${s.keyword},"${s.title}",${s.style},${s.adType}`)].join("\n");
                         const a=document.createElement("a");a.href=URL.createObjectURL(new Blob(["﻿"+csv],{type:"text/csv"}));a.download="콘텐츠캘린더.csv";a.click();
                       }} style={{padding:"6px 14px",borderRadius:8,border:"1px solid var(--border)",background:"var(--card2)",color:"var(--text2)",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:"inherit"}}>
                         📥 CSV 다운로드
