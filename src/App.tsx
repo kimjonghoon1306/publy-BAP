@@ -1,7 +1,8 @@
-import { useState, useEffect } from "react";
+import React, { useState, useEffect } from "react";
 import LoginPage from "./pages/LoginPage";
 import AdminLoginPage from "./pages/AdminLoginPage";
-import AdminPage from "./pages/AdminPage";
+import AdminPageRaw from "./pages/AdminPage";
+const AdminPage = AdminPageRaw as React.ComponentType<any>;
 import DashboardPage from "./pages/DashboardPage";
 import { PublyUser } from "./lib/supabase";
 
@@ -11,7 +12,9 @@ declare global {
   interface Window {
     electron?: {
       getBotStatus: () => Promise<string>;
+      getBotSecret: () => Promise<string>;
       registerUser: (userId: string) => Promise<boolean>;
+      unregisterUser: (userId: string) => Promise<boolean>;
     };
   }
 }
