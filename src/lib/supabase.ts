@@ -159,25 +159,25 @@ export async function upsertAccount(account: Partial<PublyAccount> & { password_
 
 export async function isAdminPasswordSet(): Promise<boolean> {
   try {
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from("publy_settings")
       .select("value")
       .eq("key", "admin_pw_hash")
       .maybeSingle();
+    if (error) return false;
     return !!(data?.value);
   } catch { return false; }
 }
 
 export async function verifyAdminPassword(pw: string): Promise<boolean> {
   try {
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from("publy_settings")
       .select("value")
       .eq("key", "admin_pw_hash")
       .maybeSingle();
-    // DB에 hash가 없으면 인증 불가 — 반드시 setAdminPassword() 먼저 호출해야 함
-    if (!data?.value) return false;
-    return bcrypt.compare(pw, data.value);
+    if (error || !data?.value) return false;
+    return await bcrypt.compare(pw, data.value);  // await 필수
   } catch {
     return false;
   }
