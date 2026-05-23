@@ -5,7 +5,7 @@ import { supabase } from "../lib/supabase";
 type MainTab = "keyword" | "write" | "image" | "publish" | "manage" | "accounts" | "rank" | "calendar" | "settings";
 type PublishConcept = "full" | "body_faq" | "body_only";
 
-const BOT = "http://localhost:3333";
+const BOT = "http://127.0.0.1:3333";
 const EXE_DOWNLOAD_URL = "https://github.com/kimjonghoon13/publy-BAP/releases/latest/download/Publy-Setup.exe";
 const BATCH = 30;
 const MAX_TITLES = 90;
@@ -385,6 +385,7 @@ export default function DashboardPage({user, onLogout, onAdminLogin, onThemeTogg
   const [showGuide, setShowGuide] = useState(false);
   const [guideTab, setGuideTab] = useState(0);
   const [botOnline, setBotOnline] = useState(false);
+  const [botSecret, setBotSecret] = useState<string>("");  // 봇 API 인증 시크릿
   const [quota, setQuota] = useState<PublyQuota|null>(null);
   const [accounts, setAccounts] = useState<PublyAccount[]>([]);
   const [history, setHistory] = useState<PublyHistory[]>([]);
@@ -498,8 +499,8 @@ Output format (JSON array only, no other text):
         showToast(`❌ 일일 한도 초과 (${qc.used}/${qc.limit}회) — 개인 API 키 입력 시 무제한!`,"error");
         setLoadingKw(false);return;
       }
-      const r=await fetch(`${BOT}/api/naver-keywords`,{
-        method:"POST",headers:{"Content-Type":"application/json"},
+      const r=await botFetch(`${BOT}/api/naver-keywords`,{
+        method:"POST",
         body:JSON.stringify({accessLicense:keys.naver_access_license,secretKey:keys.naver_secret_key,customerId:keys.naver_customer_id,keywords:[keyword.trim()]}),
       });
       if(!r.ok)throw new Error((await r.json()).error);
@@ -626,7 +627,7 @@ Output format (JSON array only, no other text):
     }
     setLoadingCats(true); setCategories([]); setCategory("");
     try {
-      const r = await fetch(`${BOT}/api/${plat}/categories/${user.id}`, {signal: AbortSignal.timeout(30000)});
+      const r = await botFetch(`${BOT}/api/${plat}/categories/${user.id}`, {method:"GET", signal: AbortSignal.timeout(30000)} as any);
       const d = await r.json();
       if (d.categories && d.categories.length>0) {
         setCategories(d.categories);
@@ -855,6 +856,21 @@ Output format (JSON array only, no other text):
       }catch{}
     })();
   },[]);
+
+  // 봇 시크릿 로드 (Electron 환경에서만)
+  useEffect(()=>{
+    window.electron?.getBotSecret().then(s=>{if(s) setBotSecret(s);}).catch(()=>{});
+  },[]);
+
+  // 봇 API 인증 헤더 포함 fetch 헬퍼
+  const botFetch = useCallback((url: string, opts: RequestInit = {}) => {
+    const headers: Record<string,string> = {
+      "Content-Type": "application/json",
+      ...(opts.headers as Record<string,string> || {}),
+    };
+    if (botSecret) headers["X-Bot-Secret"] = botSecret;
+    return fetch(url, { ...opts, headers });
+  }, [botSecret]);
 
   const checkBot = useCallback(async()=>{
     try{const r=await fetch(`${BOT}/health`,{signal:AbortSignal.timeout(3000)});setBotOnline(r.ok);}
@@ -1089,6 +1105,10 @@ Output format (JSON array only, no other text):
       .replace(/^\s*\|.*\|.*$/gm,"")
       .replace(/[一-鿿㐀-䶿]/g,"")
       .replace(/[\u3040-\u30FF]/g,"")
+      // 문장 안 영어 단어 제거: 한글 사이에 끼어든 영어 단어 (브랜드명 예외 최소화)
+      .replace(/(^|[\s,.])[A-Za-z]{4,}(?=[\s,.]|$)/g,"$1")
+      // 줄 전체가 영어인 경우 제거
+      .replace(/^[A-Za-z\s\d.,!?'"-]{10,}$/gm,"")
       .replace(/ {2,}/g," ")
       .replace(/\n{3,}/g,"\n\n")
       .trim();
@@ -1269,6 +1289,7 @@ ${catGuide}
 ⛔ ## 기호 완전 금지 (소제목은 그냥 텍스트로)
 ⛔ ** * - + 마크다운 기호 전부 금지
 ⛔ 한자,중국어,일본어 금지
+⛔ 영어 단어 절대 금지 — 브랜드명·제품명 제외 100% 순수 한국어로만 작성
 ⛔ AI 티 나는 표현 금지 (중요합니다, 다양한, 효과적인, 필수적으로 등)
 ✅ 독자에게 직접 말 걸기
 ✅ 구체적 수치, 가격, 기간 포함
@@ -1388,7 +1409,7 @@ POST3: (제목)|(이유)
         showToast("✅ PC 봇에 예약됐어요! Publy 앱 실행 시 자동 발행돼요.");
         await addHistory({user_id:user.id,platform,title:pubTitle,status:"pending" as "success"|"fail"});
       }else{
-        const r=await fetch(`${BOT}/api/publish-full`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(publishBody)});
+        const r=await botFetch(`${BOT}/api/publish-full`,{method:"POST",body:JSON.stringify(publishBody)});
         const d=await r.json();
         if(r.status===401){showToast("❌ 세션 만료 — 계정 관리 탭에서 재연결해주세요","error");setPublishing(false);return;}
         if(!r.ok)throw new Error(d.error);
@@ -1528,7 +1549,7 @@ POST3: (제목)|(이유)
   async function handleConnect(acc:PublyAccount){
     if(!botOnline){alert("PC에서 Publy 앱을 먼저 실행해주세요");return;}setConnId(acc.id);
     try{
-      const r=await fetch(`${BOT}/api/${acc.platform}/save-session`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({userId:acc.user_id,id:acc.username,pw:atob((acc as any).password_encrypted||""),blogName:acc.blog_name})});
+      const r=await botFetch(`${BOT}/api/${acc.platform}/save-session`,{method:"POST",body:JSON.stringify({userId:acc.user_id,id:acc.username,pw:atob((acc as any).password_encrypted||""),blogName:acc.blog_name})});
       const d=await r.json();if(!d.success)throw new Error(d.error||"연결 실패");
       getAccounts(user.id).then(setAccounts);
     }catch(e:any){alert("연결 실패: "+e.message);}finally{setConnId(null);}
@@ -1749,7 +1770,7 @@ POST3: (제목)|(이유)
             <button className="icon-btn" onClick={onThemeToggle}>{theme==="dark"?"☀️":"🌙"}</button>
             <button className="icon-btn" onClick={checkBot}>🔄</button>
             <div className="user-chip" onClick={onAdminLogin}><div className="user-avatar">{(user.name||user.email)[0].toUpperCase()}</div><span className="user-name">{user.name||user.email.split("@")[0]}</span></div>
-            <button className="logout-btn" onClick={onLogout}>로그아웃</button>
+            <button className="logout-btn" onClick={()=>{window.electron?.unregisterUser(user.id);onLogout();}}>로그아웃</button>
           </div>
         </div>
 
