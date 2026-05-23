@@ -565,6 +565,8 @@ Output format (JSON array only, no other text):
   const [noticePopup, setNoticePopup] = useState<{title:string;body:string;key:string}|null>(null);
   const [myReferrals, setMyReferrals] = useState<{id:string;name:string;email:string;plan:string;created_at:string}[]>([]);
   const [referralLoaded, setReferralLoaded] = useState(false);
+  const [showUserDrop, setShowUserDrop] = useState(false);
+  const [showReferralModal, setShowReferralModal] = useState(false);
   const [qualityScore, setQualityScore] = useState<{seo:number;read:number;len:number;total:number}|null>(null);
   const [calKeywords, setCalKeywords] = useState("");
   const [calPlatform, setCalPlatform] = useState<"naver"|"tistory">("naver");
@@ -877,13 +879,16 @@ Output format (JSON array only, no other text):
     catch{setBotOnline(false);}
   },[]);
 
+  function loadReferrals() {
+    if (referralLoaded) return;
+    supabase.from("publy_users").select("id,name,email,plan,created_at").eq("referred_by", user.id)
+      .then(({data}) => { setMyReferrals(data||[]); setReferralLoaded(true); });
+  }
+
   // 설정탭 열 때 네이버 키 로드
   useEffect(()=>{
     if(tab==="settings"){
-      if(!referralLoaded){
-        supabase.from("publy_users").select("id,name,email,plan,created_at").eq("referred_by",user.id)
-          .then(({data})=>{setMyReferrals(data||[]);setReferralLoaded(true);});
-      }
+      loadReferrals();
       getUserNaverApiKeys(user.id).then(setNaverKeys).catch(()=>{});
     }
   },[tab,user.id]);
@@ -1769,10 +1774,128 @@ POST3: (제목)|(이유)
             <button className="guide-open-btn" onClick={()=>{setShowGuide(true);setGuideTab(0);}}>📖 <span className="guide-btn-text">사용설명서</span></button>
             <button className="icon-btn" onClick={onThemeToggle}>{theme==="dark"?"☀️":"🌙"}</button>
             <button className="icon-btn" onClick={checkBot}>🔄</button>
-            <div className="user-chip" onClick={onAdminLogin}><div className="user-avatar">{(user.name||user.email)[0].toUpperCase()}</div><span className="user-name">{user.name||user.email.split("@")[0]}</span></div>
+
+            {/* 유저 칩 + 드롭다운 */}
+            <div style={{position:"relative"}}>
+              <div className="user-chip" onClick={()=>{setShowUserDrop(v=>!v);loadReferrals();}}>
+                <div className="user-avatar">{(user.name||user.email)[0].toUpperCase()}</div>
+                <span className="user-name">{user.name||user.email.split("@")[0]}</span>
+              </div>
+              {showUserDrop&&(
+                <>
+                  {/* 배경 클릭 닫기 */}
+                  <div style={{position:"fixed",inset:0,zIndex:199}} onClick={()=>setShowUserDrop(false)}/>
+                  <div style={{
+                    position:"absolute",top:"calc(100% + 8px)",right:0,zIndex:200,
+                    width:220,borderRadius:14,overflow:"hidden",
+                    background:"var(--card)",border:"1px solid var(--border)",
+                    boxShadow:"0 8px 32px rgba(0,0,0,.18)",
+                  }}>
+                    {/* 유저 정보 */}
+                    <div style={{padding:"14px 16px 12px",borderBottom:"1px solid var(--border)"}}>
+                      <div style={{display:"flex",alignItems:"center",gap:10}}>
+                        <div style={{width:36,height:36,borderRadius:10,background:"var(--accent-bg)",border:"1px solid var(--accent-border)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:15,fontWeight:900,color:"var(--accent-text)",flexShrink:0}}>
+                          {(user.name||user.email)[0].toUpperCase()}
+                        </div>
+                        <div style={{minWidth:0}}>
+                          <div style={{fontSize:13,fontWeight:700,color:"var(--text)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{user.name||user.email.split("@")[0]}</div>
+                          <span style={{fontSize:10,fontWeight:800,padding:"1px 7px",borderRadius:99,background:"var(--accent-bg)",color:"var(--accent-text)",border:"1px solid var(--accent-border)"}}>{PLAN_LABELS[user.plan]||user.plan}</span>
+                        </div>
+                      </div>
+                    </div>
+                    {/* 초대 코드 */}
+                    <div style={{padding:"12px 16px",borderBottom:"1px solid var(--border)"}}>
+                      <div style={{fontSize:10,fontWeight:700,color:"var(--text3)",marginBottom:6,letterSpacing:".05em"}}>🎁 내 초대 코드</div>
+                      <div style={{display:"flex",alignItems:"center",gap:6}}>
+                        <code style={{flex:1,fontSize:12,fontWeight:700,color:"var(--accent-text)",background:"var(--accent-bg)",border:"1px solid var(--accent-border)",borderRadius:7,padding:"5px 9px",letterSpacing:".08em",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                          {user.id.slice(0,8).toUpperCase()}
+                        </code>
+                        <button onClick={()=>{navigator.clipboard.writeText(user.id.slice(0,8).toUpperCase());showToast("📋 초대 코드 복사됐어요!");setShowUserDrop(false);}}
+                          style={{padding:"5px 10px",borderRadius:7,border:"1px solid var(--border)",background:"var(--bg2)",color:"var(--text2)",cursor:"pointer",fontSize:11,fontWeight:700,flexShrink:0,fontFamily:"inherit"}}>
+                          복사
+                        </button>
+                      </div>
+                    </div>
+                    {/* 초대한 친구 */}
+                    <div style={{padding:"12px 16px",borderBottom:"1px solid var(--border)"}}>
+                      <button onClick={()=>{setShowUserDrop(false);setShowReferralModal(true);}}
+                        style={{width:"100%",display:"flex",alignItems:"center",justifyContent:"space-between",background:"none",border:"none",cursor:"pointer",padding:0,fontFamily:"inherit"}}>
+                        <span style={{fontSize:12,fontWeight:600,color:"var(--text2)"}}>👥 초대한 친구</span>
+                        <span style={{display:"flex",alignItems:"center",gap:6}}>
+                          <span style={{fontSize:12,fontWeight:800,color:"var(--accent-text)",background:"var(--accent-bg)",border:"1px solid var(--accent-border)",borderRadius:99,padding:"2px 9px"}}>{myReferrals.length}명</span>
+                          <span style={{fontSize:11,color:"var(--text3)"}}>→</span>
+                        </span>
+                      </button>
+                    </div>
+                    {/* 어드민 */}
+                    <div style={{padding:"10px 16px"}}>
+                      <button onClick={()=>{setShowUserDrop(false);onAdminLogin();}}
+                        style={{width:"100%",textAlign:"left",background:"none",border:"none",cursor:"pointer",fontSize:12,color:"var(--text3)",fontFamily:"inherit",padding:0}}>
+                        ⚙️ 관리자 로그인
+                      </button>
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+
             <button className="logout-btn" onClick={()=>{window.electron?.unregisterUser(user.id);onLogout();}}>로그아웃</button>
           </div>
         </div>
+
+        {/* 래퍼럴 전체화면 모달 */}
+        {showReferralModal&&(
+          <div style={{position:"fixed",inset:0,zIndex:500,background:"var(--bg)",display:"flex",flexDirection:"column"}}>
+            {/* 헤더 */}
+            <div style={{padding:"20px 24px",borderBottom:"1px solid var(--border)",display:"flex",alignItems:"center",gap:14,flexShrink:0}}>
+              <button onClick={()=>setShowReferralModal(false)}
+                style={{width:36,height:36,borderRadius:10,border:"1px solid var(--border)",background:"var(--card)",cursor:"pointer",fontSize:18,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
+                ←
+              </button>
+              <div>
+                <div style={{fontSize:17,fontWeight:800,color:"var(--text)"}}>👥 내가 초대한 친구</div>
+                <div style={{fontSize:12,color:"var(--text3)",marginTop:2}}>총 {myReferrals.length}명</div>
+              </div>
+            </div>
+            {/* 목록 */}
+            <div style={{flex:1,overflowY:"auto",padding:"16px 24px"}}>
+              {myReferrals.length===0?(
+                <div style={{textAlign:"center",padding:"60px 0",color:"var(--text3)"}}>
+                  <div style={{fontSize:40,marginBottom:12}}>🎁</div>
+                  <div style={{fontSize:15,fontWeight:600,marginBottom:6}}>아직 초대한 친구가 없어요</div>
+                  <div style={{fontSize:13}}>초대 코드를 공유해보세요!</div>
+                  <div style={{marginTop:20,display:"inline-flex",alignItems:"center",gap:10,background:"var(--card)",border:"1px solid var(--border)",borderRadius:12,padding:"12px 18px"}}>
+                    <code style={{fontSize:14,fontWeight:800,color:"var(--accent-text)",letterSpacing:".1em"}}>{user.id.slice(0,8).toUpperCase()}</code>
+                    <button onClick={()=>{navigator.clipboard.writeText(user.id.slice(0,8).toUpperCase());showToast("📋 복사됐어요!");}}
+                      style={{padding:"5px 12px",borderRadius:7,border:"1px solid var(--accent-border)",background:"var(--accent-bg)",color:"var(--accent-text)",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:"inherit"}}>
+                      복사
+                    </button>
+                  </div>
+                </div>
+              ):(
+                <div style={{display:"flex",flexDirection:"column",gap:8,maxWidth:560,margin:"0 auto"}}>
+                  {myReferrals.map((u,i)=>(
+                    <div key={u.id} style={{display:"flex",alignItems:"center",gap:12,padding:"14px 16px",borderRadius:12,background:"var(--card)",border:"1px solid var(--border)"}}>
+                      <div style={{width:40,height:40,borderRadius:11,background:"var(--accent-bg)",border:"1px solid var(--accent-border)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:15,fontWeight:900,color:"var(--accent-text)",flexShrink:0}}>
+                        {(u.name||u.email||"?")[0].toUpperCase()}
+                      </div>
+                      <div style={{flex:1,minWidth:0}}>
+                        <div style={{fontSize:14,fontWeight:700,color:"var(--text)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{u.name||"이름없음"}</div>
+                        <div style={{fontSize:12,color:"var(--text3)",marginTop:2}}>{u.email} · {new Date(u.created_at).toLocaleDateString("ko-KR")} 가입</div>
+                      </div>
+                      <span style={{fontSize:11,fontWeight:800,padding:"4px 10px",borderRadius:99,flexShrink:0,
+                        background:u.plan==="pro"?"rgba(99,102,241,.12)":u.plan==="basic"?"rgba(251,191,36,.1)":"var(--bg2)",
+                        color:u.plan==="pro"?"#818cf8":u.plan==="basic"?"#f59e0b":"var(--text3)",
+                        border:`1px solid ${u.plan==="pro"?"rgba(99,102,241,.3)":u.plan==="basic"?"rgba(251,191,36,.3)":"var(--border)"}`}}>
+                        {u.plan==="pro"?"PRO":u.plan==="basic"?"BASIC":"FREE"}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
 
         {/* 레이아웃 */}
         <div className="layout">
@@ -2918,49 +3041,6 @@ POST3: (제목)|(이유)
                       {fontMode==="large"?"✅ 켜짐":"OFF"}
                     </button>
                   </div>
-                </div>
-
-                {/* 레퍼럴 링크 + 초대한 친구 목록 */}
-                <div className="card">
-                  <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:4}}>
-                    <div className="card-title" style={{margin:0}}>🔗 친구 초대 링크</div>
-                    {myReferrals.length>0&&<span style={{fontSize:12,fontWeight:700,padding:"3px 10px",borderRadius:99,background:"var(--accent-bg)",color:"var(--accent-text)",border:"1px solid var(--accent-border)"}}>{myReferrals.length}명 초대함</span>}
-                  </div>
-                  <div style={{fontSize:12,color:"var(--text3)",marginBottom:12}}>초대 링크로 가입하면 양쪽 모두 쿼터 보너스 (어드민 설정에 따라)</div>
-                  <div style={{display:"flex",gap:8,alignItems:"center",marginBottom:myReferrals.length>0?14:0}}>
-                    <input className="inp" readOnly value={`${typeof window!=="undefined"?window.location.origin:""}?ref=${user.id}`}
-                      style={{flex:1,fontSize:12,color:"var(--text2)",background:"var(--card2)"}}/>
-                    <button className="btn btn-secondary btn-sm" onClick={()=>{
-                      navigator.clipboard.writeText(`${window.location.origin}?ref=${user.id}`);
-                      showToast("📋 초대 링크 복사됐어요!");
-                    }}>복사</button>
-                  </div>
-
-                  {/* 내가 초대한 친구들 */}
-                  {myReferrals.length>0&&(
-                    <div>
-                      <div style={{fontSize:12,fontWeight:700,color:"var(--text2)",marginBottom:8}}>👥 내가 초대한 친구</div>
-                      <div style={{display:"flex",flexDirection:"column",gap:7}}>
-                        {myReferrals.map((u,i)=>(
-                          <div key={u.id} style={{display:"flex",alignItems:"center",gap:10,padding:"9px 12px",borderRadius:10,background:"var(--card2)",border:"1px solid var(--border)"}}>
-                            <div style={{width:28,height:28,borderRadius:8,background:"var(--accent-bg)",border:"1px solid var(--accent-border)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:12,fontWeight:900,color:"var(--accent-text)",flexShrink:0}}>
-                              {(u.name||u.email||"?")[0].toUpperCase()}
-                            </div>
-                            <div style={{flex:1,minWidth:0}}>
-                              <div style={{fontSize:13,fontWeight:600,color:"var(--text)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{u.name||"이름없음"}</div>
-                              <div style={{fontSize:11,color:"var(--text3)"}}>{new Date(u.created_at).toLocaleDateString("ko-KR")} 가입</div>
-                            </div>
-                            <span style={{fontSize:11,fontWeight:700,padding:"3px 9px",borderRadius:99,flexShrink:0,
-                              background:u.plan==="pro"?"rgba(99,102,241,.12)":u.plan==="basic"?"rgba(251,191,36,.1)":"var(--card)",
-                              color:u.plan==="pro"?"#818cf8":u.plan==="basic"?"#f59e0b":"var(--text3)",
-                              border:`1px solid ${u.plan==="pro"?"rgba(99,102,241,.3)":u.plan==="basic"?"rgba(251,191,36,.3)":"var(--border)"}`}}>
-                              {u.plan==="pro"?"PRO":u.plan==="basic"?"BASIC":"FREE"}
-                            </span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
                 </div>
 
                 <div className="card">
