@@ -273,7 +273,11 @@ export async function publishNaver(params: {
 
     // 7. 본문 입력
     console.log("[naver] 본문 입력...");
-    // SE4 본문 첫 단락 셀렉터
+
+    // HTML 여부 감지 (buildHtmlContent 결과물은 <p>, <img>, <div> 포함)
+    const isHtml = /<(p|div|img|h[1-6]|figure|br)\s*/i.test(content);
+    console.log(`[naver] 콘텐츠 형식: ${isHtml ? "HTML" : "텍스트"}`);
+
     const bodySel = [
       ".se-section-text .se-text-paragraph span[contenteditable='true']",
       ".se-section-text [contenteditable='true']",
@@ -287,30 +291,57 @@ export async function publishNaver(params: {
         if (el) {
           await frame.click(sel, { timeout: 5000 });
           await page.waitForTimeout(500);
-          // 본문은 줄바꿈 처리 필요 — 단락별로 Enter 입력
-          const lines = content.split("\n");
-          for (let i = 0; i < lines.length; i++) {
-            if (lines[i].trim()) {
-              await frame.evaluate((t) => {
-                document.execCommand("insertText", false, t);
-              }, lines[i]);
+
+          if (isHtml) {
+            // ── HTML 콘텐츠: 이미지 포함 전체 주입 ──
+            const ok = await frame.evaluate((html) => {
+              const active = document.activeElement as HTMLElement;
+              if (!active) return false;
+              active.focus();
+              document.execCommand("selectAll", false);
+              document.execCommand("delete", false);
+              // SE4는 insertHTML을 지원함
+              const result = document.execCommand("insertHTML", false, html);
+              if (result) return true;
+              // insertHTML 실패 시 innerHTML 직접 설정 시도
+              const editable = document.querySelector("[contenteditable='true']") as HTMLElement;
+              if (editable) { editable.innerHTML = html; editable.dispatchEvent(new Event("input", { bubbles: true })); return true; }
+              return false;
+            }, content);
+            if (ok) {
+              bodyInserted = true;
+              console.log("[naver] 본문 HTML 주입 완료");
+              break;
             }
-            if (i < lines.length - 1) {
-              await page.keyboard.press("Enter");
-              await page.waitForTimeout(30);
+          } else {
+            // ── 순수 텍스트: 줄바꿈 처리 ──
+            const lines = content.split("\n");
+            for (let i = 0; i < lines.length; i++) {
+              if (lines[i].trim()) {
+                await frame.evaluate((t) => {
+                  document.execCommand("insertText", false, t);
+                }, lines[i]);
+              }
+              if (i < lines.length - 1) {
+                await page.keyboard.press("Enter");
+                await page.waitForTimeout(30);
+              }
             }
+            bodyInserted = true;
+            console.log(`[naver] 본문 텍스트 입력 완료 (sel: ${sel})`);
+            break;
           }
-          bodyInserted = true;
-          console.log(`[naver] 본문 입력 완료 (sel: ${sel})`);
-          break;
         }
       } catch {}
     }
     if (!bodyInserted) {
-      // 최후 폴백
+      // 최후 폴백 — HTML이면 태그 제거 후 텍스트로
+      const fallbackText = isHtml
+        ? content.replace(/<img[^>]*>/gi, "[이미지]").replace(/<[^>]+>/g, "").replace(/\s{2,}/g, " ").trim()
+        : content;
       await frame.click(".se-main-container", { timeout: 5000 }).catch(() => {});
       await page.waitForTimeout(500);
-      await page.keyboard.type(content, { delay: 8 });
+      await page.keyboard.type(fallbackText, { delay: 8 });
     }
     await page.waitForTimeout(1000);
 
