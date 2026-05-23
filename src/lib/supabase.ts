@@ -1,12 +1,10 @@
 import { createClient } from "@supabase/supabase-js";
 import bcrypt from "bcryptjs";
 
-const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
-const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_KEY as string;
-
-if (!SUPABASE_URL || !SUPABASE_KEY) {
-  throw new Error("[Publy] VITE_SUPABASE_URL / VITE_SUPABASE_KEY 환경변수가 설정되지 않았습니다.\n루트의 .env 파일을 확인하세요.");
-}
+const SUPABASE_URL = (import.meta.env.VITE_SUPABASE_URL as string | undefined)
+  || "https://qhhoyxexxlimbjrbwrgq.supabase.co";
+const SUPABASE_KEY = (import.meta.env.VITE_SUPABASE_KEY as string | undefined)
+  || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFoaG95eGV4eGxpbWJqcmJ3cmdxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzczMTMzOTQsImV4cCI6MjA5Mjg4OTM5NH0.pw_qUR0oOxgt82S_DA6GTka3WP0JBu2vmWuKZ9VvTKM";
 
 export const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
