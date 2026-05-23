@@ -31,7 +31,7 @@ async function applyAntiDetection(context: BrowserContext) {
 
 /* ── 티스토리 로그인 (카카오 OAuth) ── */
 export async function saveTistorySession(userId: string, id: string, pw: string, blogName: string): Promise<void> {
-  const browser = await chromium.launch({ headless: false, args: LAUNCH_ARGS, slowMo: 50 });
+  const browser = await chromium.launch({ headless: true, args: LAUNCH_ARGS, slowMo: 50 });
   const context = await browser.newContext({ userAgent: UA, viewport: { width: 1280, height: 800 }, locale: "ko-KR", timezoneId: "Asia/Seoul" });
   await applyAntiDetection(context);
   const page = await context.newPage();
