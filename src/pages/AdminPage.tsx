@@ -678,22 +678,29 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
       const today=new Date();
       const geminiKey=localStorage.getItem("publy_adm_gemini_key")||"";
       if(!geminiKey){showToast("설정탭에서 관리자 Gemini API 키를 먼저 입력해주세요","error");setCalLoading(false);return;}
-      const prompt=`다음 키워드 목록과 설정으로 ${calDays}일치 블로그 발행 스케줄을 JSON 배열로 만들어줘.
-키워드: ${kws.join(", ")}
-플랫폼: ${calPlatform==="naver"?"네이버 블로그":"티스토리"}
-규칙:
-- 키워드가 부족하면 연관 키워드를 추가로 생성해서 ${calDays}일을 채워
-- 주말(토/일)은 감성/여행/맛집 위주, 평일은 정보글 위주
-- 같은 키워드 연속 금지
-- 응답은 JSON 배열만, 다른 텍스트 없이:
-[{"date":"YYYY-MM-DD","keyword":"키워드","title":"SEO 최적화 제목","style":"글스타일","adType":"adpost 또는 adsense"}]
-오늘 날짜: ${today.toISOString().slice(0,10)}`;
+      const prompt=`You are a JSON generator. Return ONLY a valid JSON array, no explanation, no markdown, no code blocks.
+Generate a ${calDays}-day blog publishing schedule.
+Keywords: ${kws.join(", ")}
+Platform: ${calPlatform==="naver"?"Naver Blog":"Tistory"}
+Rules:
+- If keywords are insufficient, generate related keywords to fill ${calDays} days
+- Weekends (Sat/Sun): lifestyle/travel/food topics. Weekdays: informational topics
+- No consecutive same keywords
+- adType: use "adpost" for emotional/lifestyle posts, "adsense" for informational posts
+- style: one of 감성일기/정보글/맛집후기/여행기
+Today: ${today.toISOString().slice(0,10)}
+Output format (JSON array only, no other text):
+[{"date":"YYYY-MM-DD","keyword":"키워드","title":"SEO제목","style":"글스타일","adType":"adpost or adsense"}]`;
       const r=await fetch("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key="+encodeURIComponent(geminiKey),
         {method:"POST",headers:{"Content-Type":"application/json"},
-          body:JSON.stringify({contents:[{parts:[{text:prompt}]}],generationConfig:{temperature:0.8,maxOutputTokens:4096}})}
+          body:JSON.stringify({
+            contents:[{parts:[{text:prompt}]}],
+            generationConfig:{temperature:0.5,maxOutputTokens:8192,responseMimeType:"application/json"}
+          })}
       );
       const d=await r.json();
       const raw=d.candidates?.[0]?.content?.parts?.[0]?.text||"";
+      if(!raw){throw new Error("Gemini 응답이 비어있어요. API 키를 확인해주세요.");}
       const clean=raw.replace(/```json|```/g,"").trim();
       const parsed=JSON.parse(clean);
       setCalSchedule(parsed.slice(0,calDays));
