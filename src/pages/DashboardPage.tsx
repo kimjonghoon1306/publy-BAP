@@ -468,14 +468,7 @@ export default function DashboardPage({user, onLogout, onAdminLogin, onThemeTogg
 [{"date":"YYYY-MM-DD","keyword":"키워드","title":"SEO 최적화 제목","style":"글스타일","adType":"adpost 또는 adsense"}]
 오늘 날짜: ${today.toISOString().slice(0,10)}`;
 
-      const {data:gkRow}=await supabase.from("publy_settings").select("value").eq("key","admin_gemini_key").maybeSingle();
-      const geminiKey=gkRow?.value||"";
-      if(!geminiKey){showToast("설정탭에서 Gemini API 키를 먼저 입력해주세요","error");setCalLoading(false);return;}
-      const r=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${encodeURIComponent(geminiKey)}`,
-        {method:"POST",headers:{"Content-Type":"application/json"},
-          body:JSON.stringify({contents:[{parts:[{text:prompt}]}],generationConfig:{temperature:0.8,maxOutputTokens:4096}})});
-      const d=await r.json();
-      const raw=d.candidates?.[0]?.content?.parts?.[0]?.text||"";
+      const raw=await callAI(prompt);
       const clean=raw.replace(/```json|```/g,"").trim();
       const parsed=JSON.parse(clean);
       setCalSchedule(parsed.slice(0,calDays));
