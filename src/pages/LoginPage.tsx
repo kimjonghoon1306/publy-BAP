@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { signIn, signUp, PublyUser, findEmailByNamePhone, resetPasswordTemp } from "../lib/supabase";
+import { signIn, signUp, PublyUser, findEmailByNamePhone, resetPasswordTemp, supabase } from "../lib/supabase";
 
 interface Props {
   onLogin: (user: PublyUser) => void;
@@ -353,6 +353,7 @@ export default function LoginPage({ onLogin, onAdminLogin, theme, onThemeToggle 
   const [refCode, setRefCode] = useState("");
 
   useEffect(()=>{
+    // URL 파라미터 방식은 Electron에서 동작 안 함 — 코드 직접 입력으로 전환
     const params = new URLSearchParams(window.location.search);
     const ref = params.get("ref");
     if (ref) { setRefCode(ref); setMode("register"); }
@@ -413,7 +414,17 @@ export default function LoginPage({ onLogin, onAdminLogin, theme, onThemeToggle 
         const user = await signIn(email, pw);
         onLogin(user);
       } else {
-        const user = await signUp(email, pw, name, phone.trim(), refCode||undefined);
+        // 초대 코드 8자리 → userId 조회
+        let referredBy: string | undefined = undefined;
+        if (refCode.length === 8) {
+          const { data: refUser } = await supabase
+            .from("publy_users")
+            .select("id")
+            .ilike("id", `${refCode}%`)
+            .maybeSingle();
+          if (refUser?.id) referredBy = refUser.id;
+        }
+        const user = await signUp(email, pw, name, phone.trim(), referredBy);
         onLogin(user);
       }
     } catch (e: any) { setError(e.message); }
@@ -529,6 +540,16 @@ export default function LoginPage({ onLogin, onAdminLogin, theme, onThemeToggle 
                 color:theme==="dark"?"rgba(0,255,136,.8)":"rgba(0,150,80,.9)"}}>
                 💡 연락처는 이메일 찾기 · 비밀번호 찾기에 꼭 필요해요
               </div>
+            </div>
+          )}
+
+          {mode === "register" && (
+            <div className="field">
+              <div className="field-label">🎁 초대 코드 <span style={{fontSize:10,opacity:.6,marginLeft:4}}>선택</span></div>
+              <input className="field-input" placeholder="초대 코드 입력 (8자리)"
+                value={refCode} onChange={e => setRefCode(e.target.value.toUpperCase().trim())}
+                maxLength={8}
+                style={{letterSpacing:".1em",fontWeight:700}} />
             </div>
           )}
 
