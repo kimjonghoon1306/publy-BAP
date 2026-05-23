@@ -15,6 +15,7 @@ export interface PublyUser {
   app_type: "app" | "web" | "both";
   is_active: boolean;
   created_at: string;
+  referred_by?: string;
 }
 
 export interface PublyQuota {
@@ -48,10 +49,11 @@ export interface PublyHistory {
 }
 
 // ── 인증 ─────────────────────────────────────────────────
-export async function signUp(email: string, password: string, name: string, phone?: string) {
+export async function signUp(email: string, password: string, name: string, phone?: string, referredBy?: string) {
   const hash = await bcrypt.hash(password, 10);
   const insertData: any = { email, password_hash: hash, name };
   if (phone) insertData.phone = phone;
+  if (referredBy) insertData.referred_by = referredBy;
 
   const { data: user, error } = await supabase
     .from("publy_users")
@@ -313,4 +315,19 @@ export async function getUserNaverApiKeys(userId: string): Promise<NaverApiKeys>
     if (data?.value) (result as any)[k] = data.value;
   }
   return result;
+}
+
+// ── 래퍼럴 조회 ─────────────────────────────────────────
+export async function getReferrals(): Promise<{referrer: PublyUser; referred: PublyUser[]}[]> {
+  const { data: users } = await supabase
+    .from("publy_users")
+    .select("id, email, name, plan, app_type, is_active, created_at, referred_by")
+    .order("created_at", { ascending: true });
+  if (!users) return [];
+  const referred = users.filter(u => u.referred_by);
+  const referrerIds = [...new Set(referred.map(u => u.referred_by))];
+  return referrerIds.map(rid => ({
+    referrer: users.find(u => u.id === rid) as PublyUser,
+    referred: referred.filter(u => u.referred_by === rid) as PublyUser[],
+  })).filter(r => r.referrer);
 }
