@@ -161,7 +161,7 @@ export async function verifyAdminPassword(pw: string): Promise<boolean> {
       .eq("key", "admin_pw_hash")
       .maybeSingle();
     if (!data?.value) return pw === ADMIN_DEFAULT_PW;
-    return bcrypt.compare(pw, data.value);
+    return await bcrypt.compare(pw, data.value);
   } catch {
     return pw === ADMIN_DEFAULT_PW;
   }
