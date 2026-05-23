@@ -676,8 +676,8 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
     setCalLoading(true);setCalDone(false);setCalSchedule([]);
     try{
       const today=new Date();
-      const geminiKey=(await (async()=>{const {data}=await supabase.from("publy_settings").select("value").eq("key","admin_gemini_key").maybeSingle();return data?.value||""})());
-      if(!geminiKey){showToast("설정탭에서 Gemini API 키를 먼저 입력해주세요","error");setCalLoading(false);return;}
+      const geminiKey=localStorage.getItem("publy_adm_gemini_key")||"";
+      if(!geminiKey){showToast("설정탭에서 관리자 Gemini API 키를 먼저 입력해주세요","error");setCalLoading(false);return;}
       const prompt=`다음 키워드 목록과 설정으로 ${calDays}일치 블로그 발행 스케줄을 JSON 배열로 만들어줘.
 키워드: ${kws.join(", ")}
 플랫폼: ${calPlatform==="naver"?"네이버 블로그":"티스토리"}
@@ -1813,7 +1813,7 @@ POST3: (제목)|(이유)
           {/* 사이드바 */}
           <div className="sidebar">
             <div className="nav-section" style={{fontSize:10,fontWeight:800,color:"var(--text3)",padding:"8px 12px 4px",letterSpacing:".08em"}}>✍️ 블로그 기능</div>
-            {TABS.filter(t=>["keyword","write","image","publish","manage","accounts","rank"].includes(t.k)).map(t => (
+            {TABS.filter(t=>["keyword","write","image","publish","manage","accounts","rank","calendar"].includes(t.k)).map(t => (
               <button key={t.k} className={`nav-item ${tab===t.k?"active":""}`} onClick={()=>{if(t.k==="rank"){window.open("https://rank.xn--zk5biyyw.com/","_blank");return;}setTab(t.k as any);}}>
                 <span className="nav-ico">{t.i}</span>{t.l}
               </button>
