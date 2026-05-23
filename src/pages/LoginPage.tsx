@@ -350,6 +350,13 @@ export default function LoginPage({ onLogin, onAdminLogin, theme, onThemeToggle 
   const [phone, setPhone] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [refCode, setRefCode] = useState("");
+
+  useEffect(()=>{
+    const params = new URLSearchParams(window.location.search);
+    const ref = params.get("ref");
+    if (ref) { setRefCode(ref); setMode("register"); }
+  }, []);
 
   // 찾기 모달
   const [findOpen, setFindOpen] = useState(false);
@@ -406,7 +413,7 @@ export default function LoginPage({ onLogin, onAdminLogin, theme, onThemeToggle 
         const user = await signIn(email, pw);
         onLogin(user);
       } else {
-        const user = await signUp(email, pw, name, phone.trim());
+        const user = await signUp(email, pw, name, phone.trim(), refCode||undefined);
         onLogin(user);
       }
     } catch (e: any) { setError(e.message); }
@@ -473,6 +480,13 @@ export default function LoginPage({ onLogin, onAdminLogin, theme, onThemeToggle 
             <div className="logo-name">PUBLY</div>
             <div className="logo-tagline">Auto Publishing System v2</div>
           </div>
+
+          {/* 초대 링크 배지 */}
+          {refCode&&(
+            <div style={{marginBottom:16,padding:"8px 14px",borderRadius:10,background:"rgba(0,255,136,.08)",border:"1px solid rgba(0,255,136,.2)",fontSize:12,color:"#00ff88",fontWeight:700,textAlign:"center"}}>
+              🎉 초대 링크로 접속했어요! 가입하면 쿼터 보너스가 지급돼요
+            </div>
+          )}
 
           {/* 탭 */}
           <div className="tab-group">
