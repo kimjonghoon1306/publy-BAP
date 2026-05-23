@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
-import { supabase, getAccounts, upsertAccount, PublyAccount, getHistory, PublyHistory, addHistory, deleteHistory, deleteAllHistory, setAdminPassword, saveAdminNaverApiKeys, getNaverApiKeys, NaverApiKeys, getNaverDailyUsage, NAVER_DAILY_LIMIT, checkNaverQuota, incrementNaverQuota, getUserNaverApiKeys } from "../lib/supabase";
+import { supabase, getAccounts, upsertAccount, PublyAccount, getHistory, PublyHistory, addHistory, deleteHistory, deleteAllHistory, setAdminPassword, saveAdminNaverApiKeys, getNaverApiKeys, NaverApiKeys, getNaverDailyUsage, NAVER_DAILY_LIMIT, checkNaverQuota, incrementNaverQuota, getUserNaverApiKeys, getReferrals } from "../lib/supabase";
 
 interface Props {
   onBack: () => void;
@@ -521,6 +521,9 @@ const TABS = [
 export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: Props) {
   const [tab, setTab] = useState<"keyword"|"write"|"image"|"publish"|"manage"|"accounts"|"rank"|"users"|"stats"|"settings">("keyword");
   const [statsSubTab, setStatsSubTab] = useState<"mine"|"all">("mine");
+  const [usersSubTab, setUsersSubTab] = useState<"list"|"referral">("list");
+  const [referralData, setReferralData] = useState<{referrer:any;referred:any[]}[]>([]);
+  const [referralLoading, setReferralLoading] = useState(false);
   const [fontMode, setFontMode] = useState<"normal"|"large">(()=>(localStorage.getItem("publy_adm_font_mode")||"normal") as "normal"|"large");
   const [showGuide, setShowGuide] = useState(false);
   const [guideTab, setGuideTab] = useState(0);
@@ -2683,6 +2686,29 @@ POST3: (제목)|(이유)
             {/* ───── 👥 회원 관리 ───── */}
             {tab === "users" && (
               <div style={{animation:"fadeUp .25s ease both"}}>
+
+                {/* 서브탭 */}
+                <div style={{display:"flex",gap:6,marginBottom:14,background:"var(--card)",border:"1px solid var(--border)",borderRadius:12,padding:4}}>
+                  {([{k:"list",l:"👥 회원 목록"},{k:"referral",l:"🔗 래퍼럴 현황"}] as const).map(t=>(
+                    <button key={t.k} onClick={()=>{
+                      setUsersSubTab(t.k);
+                      if(t.k==="referral"&&referralData.length===0){
+                        setReferralLoading(true);
+                        getReferrals().then(d=>{setReferralData(d);setReferralLoading(false);}).catch(()=>setReferralLoading(false));
+                      }
+                    }}
+                      style={{flex:1,padding:"9px",borderRadius:9,border:"none",cursor:"pointer",fontSize:13,fontWeight:700,fontFamily:"inherit",
+                        background:usersSubTab===t.k?"var(--accent-bg)":"transparent",
+                        color:usersSubTab===t.k?"var(--accent-text)":"var(--text2)",
+                        borderBottom:usersSubTab===t.k?"2px solid var(--accent)":"2px solid transparent",
+                        transition:"all .15s"}}>
+                      {t.l}
+                    </button>
+                  ))}
+                </div>
+
+                {/* 회원 목록 */}
+                {usersSubTab==="list"&&<>
                 <div className="card" style={{padding:"14px 16px",marginBottom:14,display:"flex",gap:10,alignItems:"center"}}>
                   <input className="inp" style={{flex:1}} placeholder="🔍 이름, 이메일, 연락처 검색..." value={search} onChange={e=>setSearch(e.target.value)}/>
                   <button onClick={exportToExcel} disabled={users.length===0}
@@ -2809,6 +2835,75 @@ POST3: (제목)|(이유)
                         )}
                       </div>
                     ))}
+                  </div>
+                )}
+                </>}
+
+                {/* 래퍼럴 현황 */}
+                {usersSubTab==="referral"&&(
+                  <div>
+                    {referralLoading?(
+                      <div style={{textAlign:"center",padding:40,color:"var(--text2)"}}>
+                        <span className="spinner" style={{width:24,height:24,borderTopColor:"var(--accent)"}}/>
+                        <div style={{marginTop:12}}>래퍼럴 데이터 불러오는 중...</div>
+                      </div>
+                    ):referralData.length===0?(
+                      <div style={{textAlign:"center",padding:"40px 20px",color:"var(--text3)"}}>
+                        <div style={{fontSize:36,marginBottom:12}}>🔗</div>
+                        <div style={{fontSize:15,fontWeight:700,color:"var(--text2)",marginBottom:6}}>아직 래퍼럴 데이터가 없어요</div>
+                        <div style={{fontSize:12}}>초대 링크로 가입한 회원이 생기면 여기에 표시돼요</div>
+                      </div>
+                    ):(
+                      <>
+                        {/* 요약 */}
+                        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(130px,1fr))",gap:10,marginBottom:14}}>
+                          {[
+                            {label:"래퍼럴 발생 수",value:`${referralData.length}명`,color:"var(--accent-text)"},
+                            {label:"총 초대된 회원",value:`${referralData.reduce((s,r)=>s+r.referred.length,0)}명`,color:"var(--success)"},
+                          ].map((s,i)=>(
+                            <div key={i} style={{padding:"12px 16px",borderRadius:12,background:"var(--card)",border:"1px solid var(--border)",textAlign:"center"}}>
+                              <div style={{fontSize:22,fontWeight:900,color:s.color,fontFamily:"'Space Grotesk',sans-serif"}}>{s.value}</div>
+                              <div style={{fontSize:11,color:"var(--text3)",marginTop:4,fontWeight:600}}>{s.label}</div>
+                            </div>
+                          ))}
+                        </div>
+
+                        {/* 래퍼럴 트리 */}
+                        {[...referralData].sort((a,b)=>b.referred.length-a.referred.length).map((r,i)=>(
+                          <div key={i} className="card" style={{marginBottom:10}}>
+                            {/* 추천인 */}
+                            <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:12}}>
+                              <div style={{width:36,height:36,borderRadius:10,background:"var(--accent-bg)",border:"1px solid var(--accent-border)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:14,fontWeight:900,color:"var(--accent-text)",flexShrink:0}}>
+                                {(r.referrer?.name||r.referrer?.email||"?")[0].toUpperCase()}
+                              </div>
+                              <div style={{flex:1,minWidth:0}}>
+                                <div style={{fontSize:13,fontWeight:700,color:"var(--text)"}}>{r.referrer?.name||"이름없음"}</div>
+                                <div style={{fontSize:11,color:"var(--text3)"}}>{r.referrer?.email}</div>
+                              </div>
+                              <span style={{fontSize:12,fontWeight:800,padding:"4px 12px",borderRadius:99,background:"var(--accent-bg)",color:"var(--accent-text)",border:"1px solid var(--accent-border)",flexShrink:0}}>
+                                {r.referred.length}명 초대
+                              </span>
+                            </div>
+                            {/* 초대된 회원들 */}
+                            <div style={{paddingLeft:16,borderLeft:"2px solid var(--accent-border)",display:"flex",flexDirection:"column",gap:8}}>
+                              {r.referred.map((u,j)=>(
+                                <div key={j} style={{display:"flex",alignItems:"center",gap:10}}>
+                                  <div style={{width:28,height:28,borderRadius:8,background:"var(--card2)",border:"1px solid var(--border)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:12,fontWeight:700,color:"var(--text2)",flexShrink:0}}>
+                                    {(u.name||u.email||"?")[0].toUpperCase()}
+                                  </div>
+                                  <div style={{flex:1,minWidth:0}}>
+                                    <div style={{fontSize:12,fontWeight:600,color:"var(--text)"}}>{u.name||"이름없음"}</div>
+                                    <div style={{fontSize:11,color:"var(--text3)"}}>{u.email}</div>
+                                  </div>
+                                  <span className={`plan-chip plan-${u.plan}`}>{PLAN_LABELS[u.plan]||u.plan}</span>
+                                  <span style={{fontSize:11,color:"var(--text3)",flexShrink:0}}>{new Date(u.created_at).toLocaleDateString("ko-KR")}</span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        ))}
+                      </>
+                    )}
                   </div>
                 )}
               </div>
