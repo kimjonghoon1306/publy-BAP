@@ -160,31 +160,35 @@ export default function AdminLoginPage({ onAdminAuth, onBack, theme, onThemeTogg
 
     setLoading(true);
     setError("");
+    let ok = false;
+    let errMsg = "";
     try {
-      const ok = await verifyAdminPassword(pw);
-      if (ok) {
+      ok = await verifyAdminPassword(pw);
+    } catch (e: any) {
+      errMsg = e?.message || String(e) || "알 수 없는 오류";
+      setError("❌ " + errMsg);
+      setLoading(false);
+      return;
+    }
+    if (ok) {
+      failCount.current = 0;
+      sessionStorage.setItem("publy_admin_auth", "true");
+      onAdminAuth();
+    } else {
+      failCount.current += 1;
+      if (failCount.current >= 5) {
+        lockUntil.current = Date.now() + 60_000;
+        setError("5회 실패. 1분 후 다시 시도하세요");
         failCount.current = 0;
-        sessionStorage.setItem("publy_admin_auth", "true");
-        onAdminAuth();
       } else {
-        failCount.current += 1;
-        if (failCount.current >= 5) {
-          lockUntil.current = Date.now() + 60_000;
-          setError("5회 실패. 1분 후 다시 시도하세요");
-          failCount.current = 0;
+        const isSet = await isAdminPasswordSet().catch(() => true);
+        if (!isSet) {
+          setIsSetup(true);
+          setError("");
         } else {
-          // DB에 비번 없으면 setup 화면으로 전환
-          const isSet = await isAdminPasswordSet().catch(() => true);
-          if (!isSet) {
-            setIsSetup(true);
-            setError("");
-          } else {
-            setError(`비밀번호가 올바르지 않습니다 (${failCount.current}/5)`);
-          }
+          setError(`비밀번호가 올바르지 않습니다 (${failCount.current}/5)`);
         }
       }
-    } catch (e: any) {
-      setError("오류: " + (e?.message || "알 수 없는 오류"));
     }
     setLoading(false);
   }
