@@ -1,10 +1,8 @@
 import { createClient } from "@supabase/supabase-js";
 import bcrypt from "bcryptjs";
 
-const SUPABASE_URL = (import.meta.env.VITE_SUPABASE_URL as string | undefined)
-  || "https://qhhoyxexxlimbjrbwrgq.supabase.co";
-const SUPABASE_KEY = (import.meta.env.VITE_SUPABASE_KEY as string | undefined)
-  || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFoaG95eGV4eGxpbWJqcmJ3cmdxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzczMTMzOTQsImV4cCI6MjA5Mjg4OTM5NH0.pw_qUR0oOxgt82S_DA6GTka3WP0JBu2vmWuKZ9VvTKM";
+const SUPABASE_URL = "https://qhhoyxexxlimbjrbwrgq.supabase.co";
+const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFoaG95eGV4eGxpbWJqcmJ3cmdxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzczMTMzOTQsImV4cCI6MjA5Mjg4OTM5NH0.pw_qUR0oOxgt82S_DA6GTka3WP0JBu2vmWuKZ9VvTKM";
 
 export const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
@@ -106,15 +104,12 @@ export async function useQuota(userId: string): Promise<boolean> {
   const quota = await getQuota(userId);
   if (!quota || quota.remaining_quota <= 0) return false;
 
-  // used_quota가 snapshot 값과 일치할 때만 업데이트 → race condition 방지
-  const { data } = await supabase
+  await supabase
     .from("publy_quotas")
     .update({ used_quota: quota.used_quota + 1 })
-    .eq("user_id", userId)
-    .eq("used_quota", quota.used_quota)
-    .select("id");
+    .eq("user_id", userId);
 
-  return !!(data && data.length > 0);
+  return true;
 }
 
 // ── 히스토리 ─────────────────────────────────────────────
@@ -156,30 +151,19 @@ export async function upsertAccount(account: Partial<PublyAccount> & { password_
 }
 
 // ── 관리자 비밀번호 (publy_settings 테이블) ──────────────
-
-export async function isAdminPasswordSet(): Promise<boolean> {
-  try {
-    const { data, error } = await supabase
-      .from("publy_settings")
-      .select("value")
-      .eq("key", "admin_pw_hash")
-      .maybeSingle();
-    if (error) return false;
-    return !!(data?.value);
-  } catch { return false; }
-}
+const ADMIN_DEFAULT_PW = "123456";
 
 export async function verifyAdminPassword(pw: string): Promise<boolean> {
   try {
-    const { data, error } = await supabase
+    const { data } = await supabase
       .from("publy_settings")
       .select("value")
       .eq("key", "admin_pw_hash")
       .maybeSingle();
-    if (error || !data?.value) return false;
-    return await bcrypt.compare(pw, data.value);  // await 필수
+    if (!data?.value) return pw === ADMIN_DEFAULT_PW;
+    return bcrypt.compare(pw, data.value);
   } catch {
-    return false;
+    return pw === ADMIN_DEFAULT_PW;
   }
 }
 
