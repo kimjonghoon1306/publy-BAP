@@ -2956,8 +2956,7 @@ POST3: (제목)|(이유)
                   <div className="card-title" style={{marginBottom:16}}>📅 콘텐츠 캘린더 생성</div>
                   <div style={{marginBottom:14}}>
                     <label className="inp-label">🔑 키워드 입력 (쉼표 또는 줄바꿈으로 구분)</label>
-                    <textarea className="inp" rows={4} placeholder={"예: 다이어트 방법, 제주도 여행, 강남 맛집
-오징어 젓갈, 홈카페 레시피"}
+                    <textarea className="inp" rows={4} placeholder={"예: 다이어트 방법, 제주도 여행, 강남 맛집\n오징어 젓갈, 홈카페 레시피"}
                       value={calKeywords} onChange={e=>setCalKeywords(e.target.value)} style={{resize:"vertical"}}/>
                   </div>
                   <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:14}}>
