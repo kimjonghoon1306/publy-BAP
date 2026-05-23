@@ -566,6 +566,8 @@ export default function DashboardPage({user, onLogout, onAdminLogin, onThemeTogg
   const [writeStyle, setWriteStyle] = useState<WriteStyle>(()=>(localStorage.getItem("publy_write_style") as WriteStyle)||"감성일기");
   const [fontMode, setFontMode] = useState<"normal"|"large">(()=>(localStorage.getItem("publy_font_mode")||"normal") as "normal"|"large");
   const [noticePopup, setNoticePopup] = useState<{title:string;body:string;key:string}|null>(null);
+  const [myReferrals, setMyReferrals] = useState<{id:string;name:string;email:string;plan:string;created_at:string}[]>([]);
+  const [referralLoaded, setReferralLoaded] = useState(false);
   const [qualityScore, setQualityScore] = useState<{seo:number;read:number;len:number;total:number}|null>(null);
   const [calKeywords, setCalKeywords] = useState("");
   const [calPlatform, setCalPlatform] = useState<"naver"|"tistory">("naver");
@@ -866,6 +868,10 @@ export default function DashboardPage({user, onLogout, onAdminLogin, onThemeTogg
   // 설정탭 열 때 네이버 키 로드
   useEffect(()=>{
     if(tab==="settings"){
+      if(!referralLoaded){
+        supabase.from("publy_users").select("id,name,email,plan,created_at").eq("referred_by",user.id)
+          .then(({data})=>{setMyReferrals(data||[]);setReferralLoaded(true);});
+      }
       getUserNaverApiKeys(user.id).then(setNaverKeys).catch(()=>{});
     }
   },[tab,user.id]);
@@ -2897,11 +2903,14 @@ POST3: (제목)|(이유)
                   </div>
                 </div>
 
-                {/* 레퍼럴 링크 */}
+                {/* 레퍼럴 링크 + 초대한 친구 목록 */}
                 <div className="card">
-                  <div className="card-title" style={{marginBottom:4}}>🔗 친구 초대 링크</div>
+                  <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:4}}>
+                    <div className="card-title" style={{margin:0}}>🔗 친구 초대 링크</div>
+                    {myReferrals.length>0&&<span style={{fontSize:12,fontWeight:700,padding:"3px 10px",borderRadius:99,background:"var(--accent-bg)",color:"var(--accent-text)",border:"1px solid var(--accent-border)"}}>{myReferrals.length}명 초대함</span>}
+                  </div>
                   <div style={{fontSize:12,color:"var(--text3)",marginBottom:12}}>초대 링크로 가입하면 양쪽 모두 쿼터 보너스 (어드민 설정에 따라)</div>
-                  <div style={{display:"flex",gap:8,alignItems:"center"}}>
+                  <div style={{display:"flex",gap:8,alignItems:"center",marginBottom:myReferrals.length>0?14:0}}>
                     <input className="inp" readOnly value={`${typeof window!=="undefined"?window.location.origin:""}?ref=${user.id}`}
                       style={{flex:1,fontSize:12,color:"var(--text2)",background:"var(--card2)"}}/>
                     <button className="btn btn-secondary btn-sm" onClick={()=>{
@@ -2909,6 +2918,32 @@ POST3: (제목)|(이유)
                       showToast("📋 초대 링크 복사됐어요!");
                     }}>복사</button>
                   </div>
+
+                  {/* 내가 초대한 친구들 */}
+                  {myReferrals.length>0&&(
+                    <div>
+                      <div style={{fontSize:12,fontWeight:700,color:"var(--text2)",marginBottom:8}}>👥 내가 초대한 친구</div>
+                      <div style={{display:"flex",flexDirection:"column",gap:7}}>
+                        {myReferrals.map((u,i)=>(
+                          <div key={u.id} style={{display:"flex",alignItems:"center",gap:10,padding:"9px 12px",borderRadius:10,background:"var(--card2)",border:"1px solid var(--border)"}}>
+                            <div style={{width:28,height:28,borderRadius:8,background:"var(--accent-bg)",border:"1px solid var(--accent-border)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:12,fontWeight:900,color:"var(--accent-text)",flexShrink:0}}>
+                              {(u.name||u.email||"?")[0].toUpperCase()}
+                            </div>
+                            <div style={{flex:1,minWidth:0}}>
+                              <div style={{fontSize:13,fontWeight:600,color:"var(--text)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{u.name||"이름없음"}</div>
+                              <div style={{fontSize:11,color:"var(--text3)"}}>{new Date(u.created_at).toLocaleDateString("ko-KR")} 가입</div>
+                            </div>
+                            <span style={{fontSize:11,fontWeight:700,padding:"3px 9px",borderRadius:99,flexShrink:0,
+                              background:u.plan==="pro"?"rgba(99,102,241,.12)":u.plan==="basic"?"rgba(251,191,36,.1)":"var(--card)",
+                              color:u.plan==="pro"?"#818cf8":u.plan==="basic"?"#f59e0b":"var(--text3)",
+                              border:`1px solid ${u.plan==="pro"?"rgba(99,102,241,.3)":u.plan==="basic"?"rgba(251,191,36,.3)":"var(--border)"}`}}>
+                              {u.plan==="pro"?"PRO":u.plan==="basic"?"BASIC":"FREE"}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 <div className="card">
