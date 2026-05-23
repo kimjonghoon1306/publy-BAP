@@ -1,5 +1,5 @@
-import { useState, useEffect, useRef } from "react";
-import { verifyAdminPassword, setAdminPassword, isAdminPasswordSet } from "../lib/supabase";
+import { useState } from "react";
+import { verifyAdminPassword } from "../lib/supabase";
 
 interface Props {
   onAdminAuth: () => void;
@@ -111,94 +111,25 @@ const CSS = `
 
 export default function AdminLoginPage({ onAdminAuth, onBack, theme, onThemeToggle }: Props) {
   const [pw, setPw] = useState("");
-  const [newPw, setNewPw] = useState("");
-  const [newPwConfirm, setNewPwConfirm] = useState("");
   const [error, setError] = useState("");
-  const [loading, setLoading] = useState(true);
-  const [isSetup, setIsSetup] = useState(false); // 최초 비번 설정 모드
-
-  // 실패 횟수 추적 (브루트포스 방어)
-  const failCount = useRef(0);
-  const lockUntil = useRef(0);
-
-  useEffect(() => {
-    isAdminPasswordSet()
-      .then(set => {
-        setIsSetup(!set);
-        setLoading(false);
-      })
-      .catch(() => {
-        // DB 연결 실패해도 로그인 폼 보여줌 (verifyAdminPassword가 false 반환)
-        setIsSetup(false);
-        setLoading(false);
-      });
-  }, []);
-
-  async function handleSetup() {
-    if (newPw.length < 8) { setError("비밀번호는 8자 이상이어야 합니다"); return; }
-    if (newPw !== newPwConfirm) { setError("비밀번호가 일치하지 않습니다"); return; }
-    setLoading(true);
-    try {
-      await setAdminPassword(newPw);
-      setIsSetup(false);
-      setError("");
-    } catch (e: any) {
-      setError("저장 실패: " + (e?.message || "잠시 후 다시 시도해주세요"));
-    }
-    setLoading(false);
-  }
+  const [loading, setLoading] = useState(false);
 
   async function handleLogin() {
     if (!pw) { setError("비밀번호를 입력하세요"); return; }
-
-    const now = Date.now();
-    if (now < lockUntil.current) {
-      const sec = Math.ceil((lockUntil.current - now) / 1000);
-      setError(`로그인 시도 초과. ${sec}초 후 다시 시도하세요`);
-      return;
-    }
-
     setLoading(true);
-    setError("");
-    let ok = false;
-    let errMsg = "";
     try {
-      ok = await verifyAdminPassword(pw);
-    } catch (e: any) {
-      errMsg = e?.message || String(e) || "알 수 없는 오류";
-      setError("❌ " + errMsg);
-      setLoading(false);
-      return;
-    }
-    if (ok) {
-      failCount.current = 0;
-      sessionStorage.setItem("publy_admin_auth", "true");
-      onAdminAuth();
-    } else {
-      failCount.current += 1;
-      if (failCount.current >= 5) {
-        lockUntil.current = Date.now() + 60_000;
-        setError("5회 실패. 1분 후 다시 시도하세요");
-        failCount.current = 0;
+      const ok = await verifyAdminPassword(pw);
+      if (ok) {
+        sessionStorage.setItem("publy_admin_auth", "true");
+        onAdminAuth();
       } else {
-        const isSet = await isAdminPasswordSet().catch(() => true);
-        if (!isSet) {
-          setIsSetup(true);
-          setError("");
-        } else {
-          setError(`비밀번호가 올바르지 않습니다 (${failCount.current}/5)`);
-        }
+        setError("비밀번호가 올바르지 않습니다");
       }
+    } catch {
+      setError("서버 연결 오류. 잠시 후 다시 시도해주세요.");
     }
     setLoading(false);
   }
-
-  if (loading) return (
-    <div style={{width:"100vw",height:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:theme==="dark"?"#080a06":"#fffbeb"}}>
-      <span style={{width:32,height:32,border:"3px solid rgba(245,158,11,.2)",borderTopColor:"#f59e0b",borderRadius:"50%",display:"inline-block",animation:"spin 1s linear infinite"}}/>
-      <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
-    </div>
-  );
 
   return (
     <>
@@ -228,40 +159,21 @@ export default function AdminLoginPage({ onAdminAuth, onBack, theme, onThemeTogg
               </svg>
             </div>
             <div className="admin-logo-text">ADMIN</div>
-            <div className="admin-sub">{isSetup ? "초기 비밀번호 설정" : "관리자 전용 페이지"}</div>
+            <div className="admin-sub">관리자 전용 페이지</div>
           </div>
 
-          {isSetup ? (
-            <>
-              <div style={{fontSize:12,marginBottom:16,padding:"10px 12px",borderRadius:8,background:"rgba(245,158,11,.1)",border:"1px solid rgba(245,158,11,.3)",color:theme==="dark"?"#f59e0b":"#b45309"}}>
-                ⚠️ 관리자 비밀번호가 설정되지 않았습니다. 8자 이상의 비밀번호를 설정하세요.
-              </div>
-              <label className="admin-label">새 비밀번호 (8자 이상)</label>
-              <input className="admin-input" type="password" placeholder="새 비밀번호"
-                value={newPw} onChange={e=>setNewPw(e.target.value)}/>
-              <label className="admin-label">비밀번호 확인</label>
-              <input className="admin-input" type="password" placeholder="비밀번호 재입력"
-                value={newPwConfirm} onChange={e=>setNewPwConfirm(e.target.value)}
-                onKeyDown={e=>e.key==="Enter"&&handleSetup()}/>
-              <button className="admin-btn" onClick={handleSetup} disabled={loading}>
-                비밀번호 설정
-              </button>
-            </>
-          ) : (
-            <>
-              <label className="admin-label">관리자 비밀번호</label>
-              <input className="admin-input" type="password" placeholder="관리자 비밀번호 입력"
-                value={pw} onChange={e=>setPw(e.target.value)}
-                onKeyDown={e=>e.key==="Enter"&&handleLogin()}/>
-              <button className="admin-btn" onClick={handleLogin} disabled={loading}>
-                {loading
-                  ? <span style={{display:"inline-block",width:16,height:16,border:"2px solid rgba(0,0,0,.3)",borderTopColor:"#000",borderRadius:"50%",animation:"spin 1s linear infinite",verticalAlign:"middle",marginRight:6}}/>
-                  : null
-                }
-                관리자 입장
-              </button>
-            </>
-          )}
+          <label className="admin-label">관리자 비밀번호</label>
+          <input className="admin-input" type="password" placeholder="관리자 비밀번호 입력"
+            value={pw} onChange={e=>setPw(e.target.value)}
+            onKeyDown={e=>e.key==="Enter"&&handleLogin()}/>
+
+          <button className="admin-btn" onClick={handleLogin} disabled={loading}>
+            {loading
+              ? <span style={{display:"inline-block",width:16,height:16,border:"2px solid rgba(0,0,0,.3)",borderTopColor:"#000",borderRadius:"50%",animation:"spin 1s linear infinite",verticalAlign:"middle",marginRight:6}}/>
+              : null
+            }
+            관리자 입장
+          </button>
 
           {error && <div className="admin-error">⚠️ {error}</div>}
         </div>
