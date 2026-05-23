@@ -676,7 +676,6 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
     setCalLoading(true);setCalDone(false);setCalSchedule([]);
     try{
       const today=new Date();
-      const keys=await getNaverApiKeys(ADM_UID);
       const geminiKey=(await (async()=>{const {data}=await supabase.from("publy_settings").select("value").eq("key","admin_gemini_key").maybeSingle();return data?.value||""})());
       if(!geminiKey){showToast("설정탭에서 Gemini API 키를 먼저 입력해주세요","error");setCalLoading(false);return;}
       const prompt=`다음 키워드 목록과 설정으로 ${calDays}일치 블로그 발행 스케줄을 JSON 배열로 만들어줘.
