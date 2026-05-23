@@ -49,7 +49,7 @@ async function applyAntiDetection(context: BrowserContext) {
 /* ── 네이버 로그인 + blogId 추출 ── */
 export async function saveNaverSession(userId: string, id: string, pw: string): Promise<{ blogId: string }> {
   const browser = await chromium.launch({
-    headless: false,
+    headless: true,
     args: LAUNCH_ARGS,
     slowMo: 50,
   });
@@ -125,7 +125,7 @@ export async function saveNaverSession(userId: string, id: string, pw: string): 
     console.log(`[naver] ✅ blogId: ${blogId}`);
 
     const cookies = await context.cookies();
-    fs.writeFileSync(sessionPath(userId), JSON.stringify({ loginId: id, blogId, cookies }, null, 2));
+    fs.writeFileSync(sessionPath(userId), JSON.stringify({ blogId, cookies }, null, 2));
     await browser.close();
     return { blogId };
   } catch (e) {
@@ -148,7 +148,7 @@ export async function publishNaver(params: {
   const { blogId, cookies } = JSON.parse(fs.readFileSync(sp, "utf-8"));
 
   const browser = await chromium.launch({
-    headless: false,
+    headless: true,
     args: LAUNCH_ARGS,
   });
   const context = await browser.newContext({
