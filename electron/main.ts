@@ -6,9 +6,6 @@ let mainWindow: BrowserWindow | null = null;
 let botProcess: ChildProcess | null = null;
 const isDev = !app.isPackaged;
 
-// 봇 시크릿 (봇 서버와 공유할 랜덤 키)
-const BOT_SECRET = Math.random().toString(36).slice(2);
-
 async function startBotServer() {
   const botPath = isDev
     ? path.join(__dirname, "../../naver-bot")
@@ -22,20 +19,13 @@ async function startBotServer() {
     }
   } catch { return; }
 
-  // Playwright chromium 경로 설정 (패키징된 앱)
-  const playwrightEnv: NodeJS.ProcessEnv = { ...process.env };
-  if (app.isPackaged) {
-    const chromiumPath = path.join(process.resourcesPath, "chromium");
-    playwrightEnv.PLAYWRIGHT_BROWSERS_PATH = chromiumPath;
-  }
-
   const startBot = () => {
     console.log("[bot] 봇 서버 시작...");
     botProcess = spawn("node", ["dist/server.js"], {
       cwd: botPath,
       stdio: "pipe",
       shell: true,
-      env: { ...playwrightEnv, BOT_SECRET },
+      env: { ...process.env },
     });
 
     botProcess.stdout?.on("data", d => console.log("[bot]", d.toString().trim()));
@@ -61,24 +51,14 @@ function createWindow() {
       contextIsolation: true, nodeIntegration: false,
     },
   });
-
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     shell.openExternal(url); return { action: "deny" };
   });
-
-  // 로드 실패 시 개발자 도구 자동 오픈 (디버깅용)
-  mainWindow.webContents.on("did-fail-load", (_e, code, desc) => {
-    console.error("[main] 페이지 로드 실패:", code, desc);
-    if (!app.isPackaged) mainWindow?.webContents.openDevTools();
-  });
-
   if (isDev) {
     mainWindow.loadURL("http://localhost:5173");
-    mainWindow.webContents.openDevTools();
   } else {
     mainWindow.loadFile(path.join(__dirname, "../dist/index.html"));
   }
-
   mainWindow.on("closed", () => { mainWindow = null; });
 }
 
@@ -97,7 +77,6 @@ app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();
 });
 
-// ── IPC 핸들러 ──────────────────────────────────────────────
 ipcMain.handle("get-bot-status", async () => {
   try {
     const res = await fetch("http://localhost:3333/health", { signal: AbortSignal.timeout(2000) });
@@ -105,9 +84,7 @@ ipcMain.handle("get-bot-status", async () => {
   } catch { return "offline"; }
 });
 
-ipcMain.handle("get-bot-secret", async () => {
-  return BOT_SECRET;
-});
+ipcMain.handle("get-bot-secret", async () => "");
 
 ipcMain.handle("register-user", async (_event, userId: string) => {
   try {
