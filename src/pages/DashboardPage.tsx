@@ -806,11 +806,11 @@ Output format (JSON array only, no other text):
   // ── 미리보기 렌더 ──
   function renderPreview(text:string):React.ReactElement[]{
     return text.split("\n").map((line,i)=>{
-      if(line.startsWith("## "))return<h2 key={i} style={{fontSize:18,fontWeight:800,margin:"20px 0 8px",color:"var(--text)"}}>{line.slice(3)}</h2>;
-      if(line.startsWith("### "))return<h3 key={i} style={{fontSize:16,fontWeight:700,margin:"16px 0 6px",color:"var(--text)"}}>{line.slice(4)}</h3>;
-      if(line==="---")return<hr key={i} style={{border:"none",borderTop:"1px solid var(--border)",margin:"16px 0"}}/>;
+      if(line.startsWith("## "))return<h2 key={i} style={{fontSize:18,fontWeight:800,margin:"20px 0 8px",color:"#111"}}>{line.slice(3)}</h2>;
+      if(line.startsWith("### "))return<h3 key={i} style={{fontSize:16,fontWeight:700,margin:"16px 0 6px",color:"#222"}}>{line.slice(4)}</h3>;
+      if(line==="---")return<hr key={i} style={{border:"none",borderTop:"1px solid #ddd",margin:"16px 0"}}/>;
       if(line==="")return<br key={i}/>;
-      return<p key={i} style={{marginBottom:8,fontSize:14,lineHeight:1.8,color:"var(--text)"}}>{line}</p>;
+      return<p key={i} style={{marginBottom:8,fontSize:14,lineHeight:1.8,color:"#333"}}>{line}</p>;
     });
   }
 
@@ -1753,23 +1753,7 @@ POST3: (제목)|(이유)
           </div>
         )}
 
-        {/* 미리보기 모달 */}
-        {showPreviewModal&&(
-          <div className="preview-overlay" onClick={()=>setShowPreviewModal(false)}>
-            <div className="preview-inner" onClick={e=>e.stopPropagation()}>
-              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:18}}>
-                <span style={{fontSize:13,color:"#888",fontWeight:700}}>📱 구독자 미리보기</span>
-                <button style={{background:"none",border:"none",cursor:"pointer",fontSize:22,color:"#aaa"}} onClick={()=>setShowPreviewModal(false)}>✕</button>
-              </div>
-              <div style={{fontFamily:"'Apple SD Gothic Neo','Malgun Gothic',sans-serif"}}>
-                <h1 style={{fontSize:24,fontWeight:700,color:"#191919",lineHeight:1.4,marginBottom:14}}>{genTitle||pubTitle}</h1>
-                {genTags&&<div style={{marginBottom:16,display:"flex",flexWrap:"wrap",gap:5}}>{genTags.split(",").map((t:string,i:number)=><span key={i} style={{fontSize:12,padding:"3px 10px",borderRadius:99,background:"#f1f3f5",color:"#495057"}}>#{t.trim()}</span>)}</div>}
-                {activeImages[0]&&<img src={activeImages[0]} alt="" style={{width:"100%",maxHeight:300,objectFit:"cover",borderRadius:12,marginBottom:18}} onError={e=>{(e.target as HTMLImageElement).style.display="none";}}/>}
-                <div style={{fontSize:16,color:"#333",lineHeight:2,whiteSpace:"pre-wrap"}}>{buildPublishContent()}</div>
-              </div>
-            </div>
-          </div>
-        )}
+
 
         {/* ── 헤더 ── */}
         <div className="header">
@@ -3173,8 +3157,8 @@ POST3: (제목)|(이유)
 
       {/* ── 전체화면 미리보기 모달 ── */}
       {showPreviewModal&&(
-        <div style={{position:"fixed",inset:0,zIndex:100,display:"flex",flexDirection:"column",background:"var(--bg)"}}>
-          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"12px 16px",borderBottom:"1px solid var(--border)",background:"var(--card)",flexShrink:0}}>
+        <div style={{position:"fixed",inset:0,zIndex:9999,display:"flex",flexDirection:"column",background:"#ffffff"}}>
+          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"12px 16px",borderBottom:"1px solid #e0e0e0",background:"#f8f8f8",flexShrink:0}}>
             <div style={{display:"flex",alignItems:"center",gap:10}}>
               <div style={{width:8,height:8,borderRadius:"50%",background:"var(--accent)"}}/>
               <span style={{fontSize:14,fontWeight:700,color:"var(--text)"}}>구독자 시점 미리보기</span>
@@ -3200,7 +3184,7 @@ POST3: (제목)|(이유)
           <div style={{flex:1,overflowY:"auto"}}>
             <div style={{maxWidth:720,margin:"0 auto",padding:"24px 16px"}}>
               {thumbnail&&<div style={{borderRadius:16,overflow:"hidden",marginBottom:20,aspectRatio:"16/9"}}><img src={thumbnail} alt="썸네일" style={{width:"100%",height:"100%",objectFit:"cover"}}/></div>}
-              {pubTitle&&<h1 style={{fontSize:22,fontWeight:900,color:"var(--text)",marginBottom:16,lineHeight:1.3}}>{pubTitle}</h1>}
+              {pubTitle&&<h1 style={{fontSize:22,fontWeight:900,color:"#111111",marginBottom:16,lineHeight:1.3}}>{pubTitle}</h1>}
               {greeting&&<div style={{padding:"14px 16px",borderRadius:12,background:"var(--accent-bg)",border:"1px solid var(--accent-border)",marginBottom:16,fontSize:13,color:"var(--text)",lineHeight:1.7}}>{greeting}</div>}
               <div style={{display:"flex",flexDirection:"column",gap:12}}>
                 {blocks.map(block=>{
