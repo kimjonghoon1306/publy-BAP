@@ -24,9 +24,38 @@ jobs:
         working-directory: naver-bot
         run: npx esbuild src/server.ts --bundle --platform=node --target=node20 --outfile=dist/server.js --external:playwright
 
-      - name: Install Playwright Chromium
+      - name: Install Playwright Chromium & copy to resources
         working-directory: naver-bot
-        run: npx playwright install chromium
+        run: |
+          npx playwright install chromium
+          node -e "
+            const { execSync } = require('child_process');
+            const path = require('path');
+            const fs = require('fs');
+            // playwright chromium 캐시 경로 확인
+            const result = execSync('npx playwright install --dry-run chromium 2>&1', { encoding: 'utf8' });
+            console.log(result);
+          " || true
+          # chromium 바이너리를 naver-bot/chromium 으로 복사 (extraResources에서 참조)
+          node -e "
+            const { chromium } = require('playwright');
+            const execPath = chromium.executablePath();
+            console.log('Chromium path:', execPath);
+            require('fs').writeFileSync('../chromium-path.txt', execPath);
+          " || true
+
+      - name: Copy Chromium to bundle path
+        shell: pwsh
+        run: |
+          \$chromiumSrc = \$env:LOCALAPPDATA + '\ms-playwright'
+          if (Test-Path \$chromiumSrc) {
+            Write-Host "Chromium found at: \$chromiumSrc"
+            New-Item -ItemType Directory -Force -Path 'chromium' | Out-Null
+            Copy-Item -Recurse -Force "\$chromiumSrc\chromium-*" 'chromium/' -ErrorAction SilentlyContinue
+            Get-ChildItem 'chromium/' | Select-Object Name, Length
+          } else {
+            Write-Host "Chromium not found, skipping"
+          }
 
       - name: Install app dependencies
         run: npm install
