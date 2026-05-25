@@ -182,7 +182,8 @@ app.post("/api/naver-keywords", async (req, res) => {
       .createHmac("sha256", secretKey)
       .update(message)
       .digest("base64");
-    const url = `https://api.naver.com/keywordstool?hintKeywords=${encodeURIComponent(keywords.join(","))}&showDetail=1`;
+    const params = new URLSearchParams({ hintKeywords: keywords.join(","), showDetail: "1" });
+    const url = `https://api.naver.com/keywordstool?${params.toString()}`;
     const r = await fetch(url, {
       headers: {
         "X-Timestamp": timestamp,
