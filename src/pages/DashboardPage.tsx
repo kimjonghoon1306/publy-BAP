@@ -122,7 +122,7 @@ const CSS = `
 .server-on{background:rgba(0,214,143,.1);color:var(--success);border-color:rgba(0,214,143,.3);}
 .server-off{background:rgba(120,120,120,.06);color:var(--text2);border-color:var(--border);}
 .dot{width:6px;height:6px;border-radius:50%;flex-shrink:0;}
-.dot-on{background:var(--success);box-shadow:0 0 6px var(--success);}
+.dot-on{background:var(--success);box-shadow:0 0 6px var(--success);animation:pulse 1.5s ease-in-out infinite;}
 .dot-off{background:var(--text3);}
 .quota-chip{display:flex;align-items:center;gap:7px;padding:5px 12px;border-radius:99px;background:var(--card);border:1px solid var(--border);font-size:12px;font-weight:600;color:var(--text2);white-space:nowrap;}
 .quota-bar-bg{width:56px;height:4px;background:var(--border);border-radius:99px;overflow:hidden;}
@@ -1580,7 +1580,8 @@ POST3: (제목)|(이유)
   }
 
   const quotaPct=quota?Math.min(100,(quota.used_quota/quota.total_quota)*100):0;
-  const connAccs=accounts.filter(a=>a.is_connected&&a.platform===platform);
+  // 봇 온라인: 연결된 계정만 / 봇 오프라인: 해당 플랫폼 전체 계정 (Supabase 큐 발행 가능)
+  const connAccs=accounts.filter(a=>a.platform===platform&&(botOnline?a.is_connected:true));
   const todayPub=history.filter(h=>new Date(h.published_at).toDateString()===new Date().toDateString()).length;
   const activeImages=getActiveImages();
   useEffect(()=>{if(genTitle)setPubTitle(genTitle);},[genTitle]);
