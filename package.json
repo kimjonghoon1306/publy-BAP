@@ -50,6 +50,11 @@
       {
         "from": "naver-bot/node_modules",
         "to": "naver-bot/node_modules"
+      },
+      {
+        "from": "chromium",
+        "to": "chromium",
+        "filter": ["**/*"]
       }
     ],
     "win": {
