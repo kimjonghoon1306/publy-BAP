@@ -499,10 +499,18 @@ Output format (JSON array only, no other text):
         showToast(`❌ 일일 한도 초과 (${qc.used}/${qc.limit}회) — 개인 API 키 입력 시 무제한!`,"error");
         setLoadingKw(false);return;
       }
-      const r=await botFetch(`${BOT}/api/naver-keywords`,{
-        method:"POST",
-        body:JSON.stringify({accessLicense:keys.naver_access_license,secretKey:keys.naver_secret_key,customerId:keys.naver_customer_id,keywords:[keyword.trim()]}),
-      });
+      const isWeb = !window.electron;
+      const apiUrl = isWeb ? `/api/naver-keywords` : `${BOT}/api/naver-keywords`;
+      const r = isWeb
+        ? await fetch(apiUrl, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ accessLicense: keys.naver_access_license, secretKey: keys.naver_secret_key, customerId: keys.naver_customer_id, keywords: [keyword.trim()] }),
+          })
+        : await botFetch(apiUrl, {
+            method: "POST",
+            body: JSON.stringify({ accessLicense: keys.naver_access_license, secretKey: keys.naver_secret_key, customerId: keys.naver_customer_id, keywords: [keyword.trim()] }),
+          });
       if(!r.ok)throw new Error((await r.json()).error);
       const data=await r.json();
       const list=(data.keywordList||[]).slice(0,20).map((item:any,i:number)=>{
@@ -916,7 +924,7 @@ Output format (JSON array only, no other text):
   }
 
   // ─── 300+ 키워드 이미지 프롬프트 시스템 ────────────────────
-  const NP_TAG = "no people, no person, no face, no human, no text, no watermark";
+  const NP_TAG = "zero people, absolutely no humans, no person, no face, no hands, no body parts, no text, no watermark, object only";
   const PROMPT_DB: {keywords:string[];prompt:string}[] = [
     // 음식/맛집
     {keywords:["한식","한정식","백반","집밥","가정식"],prompt:"Korean home-style meal spread, banchan side dishes, stone pot bibimbap, wooden table, steam rising, cozy restaurant interior, warm natural lighting"},
@@ -1017,6 +1025,7 @@ Output format (JSON array only, no other text):
     {keywords:["가드닝","정원","식물","화분","홈가드닝"],prompt:"lush indoor plant collection, botanical home aesthetic, morning light through leaves, terra cotta pots"},
     {keywords:["요리","쿠킹","홈쿠킹","레시피","만드는법"],prompt:"home cooking preparation, fresh ingredients on wooden cutting board, kitchen lifestyle, warm cooking"},
     // 패션/뷰티/쇼핑
+    {keywords:["퍼스널컬러","봄웜","여름쿨","가을웜","겨울쿨","웜톤","쿨톤","계절진단","색조진단","퍼컬"],prompt:"color analysis swatches, seasonal color palette spread on white surface, fabric swatches in warm cool tones, beauty color wheel editorial flat lay, soft diffused natural light, no text"},
     {keywords:["패션","옷","코디","스타일링","OOTD","옷잘입는"],prompt:"Korean fashion street style flat lay, seasonal outfit coordination, accessories, clean white background"},
     {keywords:["명품","가방","지갑","액세서리","주얼리","럭셔리"],prompt:"luxury handbag editorial, leather texture, branded accessories, marble surface, premium lifestyle"},
     {keywords:["화장","메이크업","립스틱","파운데이션","뷰티"],prompt:"K-beauty makeup flat lay, cosmetic products arranged artfully, rose gold accents, mirror, beauty editorial"},
@@ -1095,6 +1104,12 @@ Output format (JSON array only, no other text):
 
   function stripMarkdown(text:string):string{
     return text
+      // AI 메타 주석 제거 (Self-correction, Character count 등)
+      .replace(/<!--[\s\S]*?-->/g,"")
+      .replace(/\(Self-correction:[\s\S]*?\)/gi,"")
+      .replace(/\(self correction:[\s\S]*?\)/gi,"")
+      .replace(/\(.*?character count.*?\)/gi,"")
+      .replace(/\(.*?I've used.*?\)/gi,"")
       .replace(/^#{1,6}\s+/gm,"")
       .replace(/\*{2,3}(.*?)\*{2,3}/g,"$1")
       .replace(/\*(.*?)\*/g,"$1")
@@ -1521,7 +1536,7 @@ POST3: (제목)|(이유)
       </div>
 
       {/* 발행 버튼 */}
-      <button onClick={handlePublish} disabled={publishing||!pubAccId||!pubTitle||!buildPublishContent()||(quota?.remaining_quota||0)<=0||(scheduleOn&&!scheduleTime)} className="btn btn-primary btn-full btn-xl pub-submit-btn">
+      <button onClick={handlePublish} disabled={publishing||!pubAccId||!pubTitle||!buildPublishContent()||(quota!==null&&(quota.remaining_quota||0)<=0)||(scheduleOn&&!scheduleTime)} className="btn btn-primary btn-full btn-xl pub-submit-btn">
         {publishing
           ?<><span className="spinner"/>{scheduleOn?"예약 중...":"발행 중..."}</>
           :scheduleOn?<>⏰ 예약 발행 설정하기</>:<>🚀 블로그 자동 발행</>
@@ -2494,7 +2509,7 @@ POST3: (제목)|(이유)
                       ⚙️ 발행 설정 {showPublishPanel?"▲":"▼"}
                     </button>
                     {/* 발행 버튼 */}
-                    <button onClick={handlePublish} disabled={publishing||!pubAccId||!pubTitle||!buildPublishContent()||(quota?.remaining_quota||0)<=0||(scheduleOn&&!scheduleTime)}
+                    <button onClick={handlePublish} disabled={publishing||!pubAccId||!pubTitle||!buildPublishContent()||(quota!==null&&(quota.remaining_quota||0)<=0)||(scheduleOn&&!scheduleTime)}
                       style={{display:"flex",alignItems:"center",gap:5,padding:"7px 16px",borderRadius:8,border:"none",background:scheduleOn?"var(--warn)":"var(--accent)",color:"#000",cursor:"pointer",fontSize:13,fontWeight:800,fontFamily:"inherit",whiteSpace:"nowrap",opacity:(publishing||!pubAccId||!pubTitle)?.5:1}}>
                       {publishing?(scheduleOn?"예약 중...":"발행 중..."):scheduleOn?"⏰ 예약":"🚀 발행"}
                     </button>
