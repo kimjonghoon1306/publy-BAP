@@ -1,11 +1,7 @@
 import { createClient } from "@supabase/supabase-js";
 
-const SUPABASE_URL = process.env.SUPABASE_URL;
-const SUPABASE_KEY = process.env.SUPABASE_KEY;
-
-if (!SUPABASE_URL || !SUPABASE_KEY) {
-  throw new Error("[Publy Bot] SUPABASE_URL / SUPABASE_KEY 환경변수가 설정되지 않았습니다.\nnaver-bot/.env 파일을 확인하세요.");
-}
+const SUPABASE_URL = "https://qhhoyxexxlimbjrbwrgq.supabase.co";
+const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFoaG95eGV4eGxpbWJqcmJ3cmdxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDU4MzA5NzcsImV4cCI6MjA2MTQwNjk3N30.bHtF5g_cJjlcLLFH5JaTzqOeD03j6fNXQYhYkVvTKM";
 
 export const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
@@ -23,7 +19,6 @@ export interface PublyJob {
   created_at: string;
 }
 
-// 내 유저의 pending 작업 가져오기
 export async function fetchPendingJobs(userId: string): Promise<PublyJob[]> {
   const { data, error } = await supabase
     .from("publy_jobs")
@@ -36,12 +31,23 @@ export async function fetchPendingJobs(userId: string): Promise<PublyJob[]> {
   return data || [];
 }
 
-// 작업 상태 업데이트
+export async function fetchAllPendingJobs(userIds: string[]): Promise<PublyJob[]> {
+  if (!userIds.length) return [];
+  const { data, error } = await supabase
+    .from("publy_jobs")
+    .select("*")
+    .in("user_id", userIds)
+    .eq("status", "pending")
+    .order("created_at", { ascending: true })
+    .limit(10);
+  if (error) return [];
+  return data || [];
+}
+
 export async function updateJob(id: string, update: Partial<PublyJob>) {
   await supabase.from("publy_jobs").update(update).eq("id", id);
 }
 
-// 발행 히스토리 추가
 export async function addHistory(params: {
   user_id: string;
   platform: string;
@@ -56,7 +62,6 @@ export async function addHistory(params: {
   });
 }
 
-// 쿼터 차감 (원자적: snapshot 값이 일치할 때만 업데이트)
 export async function useQuota(userId: string): Promise<boolean> {
   const { data } = await supabase
     .from("publy_quotas")
@@ -69,22 +74,8 @@ export async function useQuota(userId: string): Promise<boolean> {
     .from("publy_quotas")
     .update({ used_quota: data.used_quota + 1 })
     .eq("user_id", userId)
-    .eq("used_quota", data.used_quota)  // race condition 방지
+    .eq("used_quota", data.used_quota)
     .select("id");
 
   return !!(updated && updated.length > 0);
-}
-
-// 모든 유저의 pending 작업 가져오기 (다중 유저 지원)
-export async function fetchAllPendingJobs(userIds: string[]): Promise<PublyJob[]> {
-  if (!userIds.length) return [];
-  const { data, error } = await supabase
-    .from("publy_jobs")
-    .select("*")
-    .in("user_id", userIds)
-    .eq("status", "pending")
-    .order("created_at", { ascending: true })
-    .limit(10);
-  if (error) return [];
-  return data || [];
 }
