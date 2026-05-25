@@ -159,6 +159,16 @@ app.post("/api/register-user", (req, res) => {
   res.json({ success: true });
 });
 
+/* ── 유저 등록 해제 (로그아웃 시 호출) ── */
+app.post("/api/unregister-user", (req, res) => {
+  const { userId } = req.body;
+  if (currentUserId === userId) {
+    currentUserId = null;
+    console.log(`[bot] 유저 등록 해제: ${userId}`);
+  }
+  res.json({ success: true });
+});
+
 /* ── 네이버 검색광고 키워드 API 프록시 ── */
 app.post("/api/naver-keywords", async (req, res) => {
   const { accessLicense, secretKey, customerId, keywords } = req.body;
