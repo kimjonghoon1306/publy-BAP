@@ -49,7 +49,7 @@ async function applyAntiDetection(context: BrowserContext) {
 /* ── 네이버 로그인 + blogId 추출 ── */
 export async function saveNaverSession(userId: string, id: string, pw: string): Promise<{ blogId: string }> {
   const browser = await chromium.launch({
-    headless: true,
+    headless: false,
     args: LAUNCH_ARGS,
     slowMo: 50,
   });
