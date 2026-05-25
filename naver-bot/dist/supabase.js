@@ -2,6 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.supabase = void 0;
 exports.fetchPendingJobs = fetchPendingJobs;
+exports.fetchAllPendingJobs = fetchAllPendingJobs;
 exports.updateJob = updateJob;
 exports.addHistory = addHistory;
 exports.useQuota = useQuota;
@@ -9,7 +10,7 @@ const supabase_js_1 = require("@supabase/supabase-js");
 const SUPABASE_URL = "https://qhhoyxexxlimbjrbwrgq.supabase.co";
 const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFoaG95eGV4eGxpbWJqcmJ3cmdxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDU4MzA5NzcsImV4cCI6MjA2MTQwNjk3N30.bHtF5g_cJjlcLLFH5JaTzqOeD03j6fNXQYhYkVvTKM";
 exports.supabase = (0, supabase_js_1.createClient)(SUPABASE_URL, SUPABASE_KEY);
-// 내 유저의 pending 작업 가져오기
+// 단일 유저의 pending 작업 가져오기
 async function fetchPendingJobs(userId) {
     const { data, error } = await exports.supabase
         .from("publy_jobs")
@@ -18,6 +19,21 @@ async function fetchPendingJobs(userId) {
         .eq("status", "pending")
         .order("created_at", { ascending: true })
         .limit(5);
+    if (error)
+        return [];
+    return data || [];
+}
+// 다중 유저의 pending 작업 가져오기
+async function fetchAllPendingJobs(userIds) {
+    if (!userIds.length)
+        return [];
+    const { data, error } = await exports.supabase
+        .from("publy_jobs")
+        .select("*")
+        .in("user_id", userIds)
+        .eq("status", "pending")
+        .order("created_at", { ascending: true })
+        .limit(10);
     if (error)
         return [];
     return data || [];
@@ -42,10 +58,11 @@ async function useQuota(userId) {
         .single();
     if (!data || data.remaining_quota <= 0)
         return false;
-    await exports.supabase
+    const { data: updated } = await exports.supabase
         .from("publy_quotas")
         .update({ used_quota: data.used_quota + 1 })
-        .eq("user_id", userId);
-    return true;
+        .eq("user_id", userId)
+        .eq("used_quota", data.used_quota)
+        .select("id");
+    return !!(updated && updated.length > 0);
 }
-//# sourceMappingURL=supabase.js.map
