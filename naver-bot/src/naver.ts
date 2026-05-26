@@ -446,8 +446,32 @@ export async function publishNaver(params: {
       }
     }
 
-    // ── 본문 입력 ──
+    // ── 본문 입력 (HTML/텍스트 자동 감지) ──
     console.log("[naver] 본문 입력...");
+
+    // HTML 여부 감지 및 처리
+    const isHtml = /<[a-z][\s\S]*>/i.test(content);
+    let plainContent = content;
+    const inlineImageUrls: string[] = [];
+
+    if (isHtml) {
+      // img src 추출 (썸네일 imageUrl 제외)
+      const imgMatches = content.matchAll(/<img[^>]+src="([^"]+)"/gi);
+      for (const m of imgMatches) {
+        if (m[1] !== imageUrl) inlineImageUrls.push(m[1]);
+      }
+      // HTML 태그 제거 → 순수 텍스트
+      plainContent = content
+        .replace(/<br\s*\/?>/gi, "\n")
+        .replace(/<\/p>/gi, "\n").replace(/<\/h[1-6]>/gi, "\n").replace(/<\/div>/gi, "\n")
+        .replace(/<hr[^>]*>/gi, "\n---\n")
+        .replace(/<figcaption[^>]*>([\s\S]*?)<\/figcaption>/gi, "[$1]")
+        .replace(/<[^>]+>/g, "")
+        .replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"')
+        .replace(/
+{3,}/g, "\n\n").trim();
+    }
+
     const bodySels = [
       ".se-section-text .se-text-paragraph span[contenteditable='true']",
       ".se-section-text [contenteditable='true']",
@@ -461,7 +485,7 @@ export async function publishNaver(params: {
         if (el) {
           await frame.click(sel, { timeout: 5000 });
           await page.waitForTimeout(500);
-          const lines = content.split("\n");
+          const lines = plainContent.split("\n");
           for (let i = 0; i < lines.length; i++) {
             if (lines[i].trim()) {
               await frame.evaluate((t) => {
@@ -482,7 +506,45 @@ export async function publishNaver(params: {
     if (!bodyInserted) {
       await frame.click(".se-main-container", { timeout: 5000 }).catch(() => {});
       await page.waitForTimeout(500);
-      await page.keyboard.type(content, { delay: 8 });
+      await page.keyboard.type(plainContent, { delay: 8 });
+    }
+
+    // ── 인라인 이미지 업로드 ──
+    if (inlineImageUrls.length > 0) {
+      console.log(`[naver] 인라인 이미지 ${inlineImageUrls.length}장 업로드 시도...`);
+      for (const imgUrl of inlineImageUrls) {
+        const tmpFile = await downloadImageToTemp(imgUrl);
+        if (!tmpFile) continue;
+        try {
+          const imgBtnSels = [
+            "button[data-type='image']",
+            ".se-toolbar-item-imageUpload button",
+            "button[title='이미지']",
+            "button[class*='image']",
+          ];
+          let clicked = false;
+          for (const sel of imgBtnSels) {
+            try {
+              const el = await frame.$(sel);
+              if (el) { await frame.click(sel, { timeout: 3000 }); clicked = true; break; }
+            } catch {}
+          }
+          if (clicked) {
+            await page.waitForTimeout(1500);
+            const fileInput = await page.$("input[type='file']");
+            if (fileInput) {
+              await fileInput.setInputFiles(tmpFile);
+              await page.waitForTimeout(3000);
+              console.log("[naver] ✅ 인라인 이미지 업로드 완료");
+            }
+          }
+        } catch (e) {
+          console.log("[naver] 인라인 이미지 업로드 실패 (무시):", e);
+        } finally {
+          try { fs.unlinkSync(tmpFile); } catch {}
+        }
+        await page.waitForTimeout(1000);
+      }
     }
     await page.waitForTimeout(1000);
 
