@@ -468,8 +468,7 @@ export async function publishNaver(params: {
         .replace(/<figcaption[^>]*>([\s\S]*?)<\/figcaption>/gi, "[$1]")
         .replace(/<[^>]+>/g, "")
         .replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"')
-        .replace(/
-{3,}/g, "\n\n").trim();
+        .replace(/\n{3,}/g, "\n\n").trim();
     }
 
     const bodySels = [
