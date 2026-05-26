@@ -52,19 +52,7 @@ function createWindow() {
     },
   });
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    // 미리보기 창 (about:blank) 은 Electron 내부에서 열기
-    if (!url || url === "about:blank" || url === "") {
-      return {
-        action: "allow",
-        overrideBrowserWindowOptions: {
-          width: 820, height: 920,
-          title: "구독자 시점 미리보기",
-          webPreferences: { contextIsolation: true, nodeIntegration: false },
-        },
-      };
-    }
-    shell.openExternal(url);
-    return { action: "deny" };
+    shell.openExternal(url); return { action: "deny" };
   });
   if (isDev) {
     mainWindow.loadURL("http://localhost:5173");
@@ -108,6 +96,18 @@ ipcMain.handle("register-user", async (_event, userId: string) => {
     });
     return res.ok;
   } catch { return false; }
+});
+
+ipcMain.handle("open-preview", async (_event, html: string) => {
+  const preview = new BrowserWindow({
+    width: 900,
+    height: 960,
+    title: "구독자 시점 미리보기",
+    backgroundColor: "#ffffff",
+    webPreferences: { contextIsolation: true, nodeIntegration: false },
+  });
+  preview.loadURL("data:text/html;charset=utf-8," + encodeURIComponent(html));
+  preview.setMenuBarVisibility(false);
 });
 
 ipcMain.handle("unregister-user", async (_event, userId: string) => {
