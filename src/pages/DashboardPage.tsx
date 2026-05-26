@@ -1449,6 +1449,11 @@ POST3: (제목)|(이유)
       categoryId:category||undefined,
       visibility,
       scheduleTime:scheduleOn?scheduleTime:undefined,
+      blocks:blocks.map(b=>{
+        if(b.type==="text")return{type:"text",content:(b as TextBlock).content};
+        if(b.type==="image")return{type:"image",src:(b as SingleImageBlock).src,alt:(b as SingleImageBlock).alt||""};
+        return null;
+      }).filter(Boolean),
     };
     try{
       const ok=await useQuota(user.id);if(!ok){showToast("❌ 발행 건수 초과","error");setPublishing(false);return;}
