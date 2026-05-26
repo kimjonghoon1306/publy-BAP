@@ -15,6 +15,7 @@ declare global {
       getBotSecret: () => Promise<string>;
       registerUser: (userId: string) => Promise<boolean>;
       unregisterUser: (userId: string) => Promise<boolean>;
+      openPreview: (html: string) => Promise<void>;
     };
   }
 }
