@@ -1566,7 +1566,7 @@ POST3: (제목)|(이유)
     try{await upsertAccount({user_id:user.id,platform:newPlat,username:newUser,password_encrypted:btoa(newPw),blog_name:newBlog||undefined,is_connected:false});getAccounts(user.id).then(setAccounts);setNewUser("");setNewPw("");setNewBlog("");}
     catch(e:any){alert(e.message);}finally{setAddingAcc(false);}
   }
-  async function handleConnect(acc:PublyAccount){
+  async async function handleConnect(acc:PublyAccount){
     if(!botOnline){alert("PC에서 Publy 앱을 먼저 실행해주세요");return;}setConnId(acc.id);
     try{
       const r=await botFetch(`${BOT}/api/${acc.platform}/save-session`,{method:"POST",body:JSON.stringify({userId:acc.user_id,id:acc.username,pw:atob((acc as any).password_encrypted||""),blogName:acc.blog_name})});
