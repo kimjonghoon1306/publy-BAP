@@ -490,6 +490,37 @@ select.field-inp{cursor:pointer;appearance:auto;}
 .toast-error{background:#2e1a1a;color:#f87171;border:1px solid rgba(248,113,113,.25);}
 .toast-info{background:#1a1f2e;color:#93c5fd;border:1px solid rgba(147,197,253,.25);}
 @keyframes toastIn{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}
+/* ── 사진 글쓰기 꽃밭 테마 ── */
+.photo-root{padding:20px;max-width:860px;margin:0 auto;}
+.photo-story{display:flex;gap:0;margin-bottom:28px;border-radius:20px;overflow:hidden;box-shadow:0 4px 24px rgba(255,107,157,.15);}
+.photo-story-step{flex:1;padding:20px 16px;text-align:center;position:relative;}
+.photo-story-step.s1{background:linear-gradient(135deg,#FF6B9D22,#FF9E6C22);}
+.photo-story-step.s2{background:linear-gradient(135deg,#C77DFF22,#FF6B9D22);}
+.photo-story-step.s3{background:linear-gradient(135deg,#80FFDB22,#C77DFF22);}
+.photo-story-ico{font-size:32px;margin-bottom:8px;display:block;}
+.photo-story-num{font-size:10px;font-weight:900;letter-spacing:.1em;color:#FF6B9D;margin-bottom:4px;}
+.photo-story-title{font-size:13px;font-weight:800;color:var(--text);margin-bottom:4px;}
+.photo-story-desc{font-size:11px;color:var(--text3);line-height:1.5;}
+.photo-story-arrow{position:absolute;right:-10px;top:50%;transform:translateY(-50%);font-size:18px;color:#FF6B9D;z-index:2;}
+.photo-drop{border:2.5px dashed #FF6B9D55;border-radius:20px;padding:32px 20px;text-align:center;cursor:pointer;transition:all .2s;background:linear-gradient(135deg,#FFF0F588,#F5F0FF88);margin-bottom:16px;}
+.photo-drop.drag-over,.photo-drop:hover{border-color:#FF6B9D;background:linear-gradient(135deg,#FF6B9D11,#C77DFF11);}
+.photo-drop-ico{font-size:48px;margin-bottom:12px;}
+.photo-drop-title{font-size:16px;font-weight:800;color:#FF6B9D;margin-bottom:6px;}
+.photo-drop-desc{font-size:12px;color:var(--text3);}
+.photo-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(100px,1fr));gap:8px;margin-bottom:16px;}
+.photo-thumb{position:relative;aspect-ratio:1;border-radius:12px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,.12);}
+.photo-thumb img{width:100%;height:100%;object-fit:cover;}
+.photo-thumb-del{position:absolute;top:4px;right:4px;width:22px;height:22px;border-radius:50%;background:rgba(0,0,0,.6);color:#fff;border:none;cursor:pointer;font-size:12px;display:flex;align-items:center;justify-content:center;font-weight:700;}
+.photo-keypoints{width:100%;min-height:80px;padding:14px;border-radius:14px;border:1.5px solid #C77DFF44;background:linear-gradient(135deg,#F5F0FF88,#FFF0F588);color:var(--text);font-size:14px;font-family:inherit;resize:vertical;outline:none;transition:border .2s;line-height:1.7;}
+.photo-keypoints:focus{border-color:#C77DFF;}
+.photo-keypoints::placeholder{color:var(--text3);}
+.photo-gen-btn{width:100%;padding:18px;border-radius:16px;border:none;cursor:pointer;font-size:16px;font-weight:900;font-family:inherit;transition:all .2s;background:linear-gradient(135deg,#FF6B9D,#C77DFF);color:#fff;box-shadow:0 4px 20px rgba(255,107,157,.4);margin-top:8px;}
+.photo-gen-btn:hover{transform:translateY(-2px);box-shadow:0 8px 28px rgba(255,107,157,.5);}
+.photo-gen-btn:disabled{opacity:.6;cursor:not-allowed;transform:none;}
+.photo-guide-btn{position:fixed;bottom:80px;right:16px;padding:10px 16px;border-radius:99px;background:linear-gradient(135deg,#FF6B9D,#C77DFF);border:none;cursor:pointer;box-shadow:0 4px 16px rgba(255,107,157,.5);font-size:13px;font-weight:800;color:#fff;display:flex;align-items:center;gap:6px;z-index:100;transition:all .2s;white-space:nowrap;font-family:inherit;}
+.photo-guide-btn:hover{transform:scale(1.1);}
+@keyframes flowerFloat{0%,100%{transform:translateY(0) rotate(0deg);}50%{transform:translateY(-6px) rotate(3deg);}}
+.flower-deco{animation:flowerFloat 3s ease-in-out infinite;display:inline-block;}
 `;
 
 const WRITE_STYLES = [
@@ -532,6 +563,7 @@ const TABS = [
   {k:"keyword",  i:"🔍", l:"키워드/제목"},
   {k:"write",    i:"✍️", l:"글 생성"},
   {k:"image",    i:"🖼️", l:"이미지 생성"},
+  {k:"photo",    i:"📷", l:"사진 글쓰기"},
   {k:"publish",  i:"🚀", l:"발행하기"},
   {k:"manage",   i:"📋", l:"발행 관리"},
   {k:"accounts", i:"🔗", l:"계정관리"},
@@ -642,6 +674,11 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
   const [persona, setPersona] = useState<PersonaStyle>(()=>(localStorage.getItem("publy_adm_persona") as PersonaStyle)||"none");
   const [blogTemplate, setBlogTemplate] = useState<BlogTemplate>("none");
   const [pubScope, setPubScope] = useState<"body"|"faq"|"full">("full");
+  const [photoFiles, setPhotoFiles] = useState<{id:string;src:string;name:string}[]>([]);
+  const [photoKeypoints, setPhotoKeypoints] = useState("");
+  const [photoGenerating, setPhotoGenerating] = useState(false);
+  const [photoGenDone, setPhotoGenDone] = useState(false);
+  const [photoDragOver, setPhotoDragOver] = useState(false);
   const [qualityScore, setQualityScore] = useState<{score:number;items:{label:string;pass:boolean;detail:string;weight:number}[]}|null>(null);
   const [calKeywords, setCalKeywords] = useState("");
   const [calPlatform, setCalPlatform] = useState<"naver"|"tistory">("naver");
@@ -937,7 +974,72 @@ Output format (JSON array only, no other text):
     });
   }
 
-  function openPreview(){
+  function handlePhotoUpload(files: FileList|null) {
+    if(!files)return;
+    const arr = Array.from(files).slice(0, 20 - photoFiles.length);
+    arr.forEach(file=>{
+      if(!file.type.startsWith("image/"))return;
+      const reader = new FileReader();
+      reader.onload = ev=>{
+        const src = ev.target?.result as string;
+        setPhotoFiles(prev=>{
+          if(prev.length>=20)return prev;
+          return [...prev,{id:Date.now().toString()+Math.random(),src,name:file.name}];
+        });
+      };
+      reader.readAsDataURL(file);
+    });
+  }
+
+  async function generateFromPhotos() {
+    if(photoFiles.length===0){showToast("사진을 먼저 업로드해주세요","error");return;}
+    const geminiKey=localStorage.getItem("publy_adm_gemini_key")||localStorage.getItem("publy_gemini_key")||"";
+    if(!geminiKey){showToast("설정에서 Gemini API 키를 입력해주세요","error");return;}
+    setPhotoGenerating(true);setPhotoGenDone(false);
+    try {
+      const imgParts = photoFiles.slice(0,10).map(f=>{
+        const b64 = f.src.split(",")[1]||f.src;
+        const mime = f.src.startsWith("data:image/png")?"image/png":"image/jpeg";
+        return {inlineData:{mimeType:mime,data:b64}};
+      });
+      const keypointText = photoKeypoints.trim()?`\n\n[작성자 키포인트]\n${photoKeypoints.trim()}`:"";
+      const styleGuide = WRITE_STYLE_GUIDE[writeStyle]||"";
+      const personaGuide = PERSONA_STYLES.find(p=>p.id===persona)?.prompt||"";
+      const prompt = `당신은 대한민국 최고의 블로그 작가입니다. 첨부된 사진들을 자세히 분석하여 네이버 블로그 글을 작성해주세요.\n사진 속 모든 디테일을 실제로 경험한 것처럼 생생하게 묘사해주세요.${keypointText}\n\n=== 절대 규칙 ===\n⛔ ## 기호 완전 금지\n⛔ ** * 마크다운 기호 금지\n⛔ AI 티 나는 표현 금지\n⛔ 영어 단어 금지\n✅ 사진에서 직접 보이는 것을 구체적으로 묘사\n✅ 독자에게 말 걸듯 친근하게\n✅ 구체적 수치, 가격, 시간 포함\n\n${styleGuide}${personaGuide?`\n[말투]\n${personaGuide}`:""}\n\n=== 출력 형식 ===\n제목: (SEO 최적화 제목, 15~25자)\n태그: 태그1, 태그2, 태그3, 태그4, 태그5\n\n(본문 1500자 이상)\n\n[FAQ시작]\nQ1: (질문)\nA1: (답변)\nQ2: (질문)\nA2: (답변)\n[FAQ끝]\n\n[관련글시작]\nPOST1: (제목)|(이유)\nPOST2: (제목)|(이유)\n[관련글끝]`;
+      const body = {contents:[{parts:[...imgParts,{text:prompt}]}],generationConfig:{maxOutputTokens:4000,temperature:0.9}};
+      const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${geminiKey}`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body),signal:AbortSignal.timeout(120000)});
+      if(!r.ok){const e=await r.json();throw new Error(e.error?.message||r.status);}
+      const data = await r.json();
+      const text = data.candidates?.[0]?.content?.parts?.[0]?.text||"";
+      if(!text)throw new Error("응답이 비어있어요");
+      const titleM = text.match(/제목[^\n]+/);
+      const tagM = text.match(/태그[^\n]+/);
+      const bodyM = text.match(/태그[^\n]*\n([\s\S]+)/);
+      const title = titleM?.[0]?.replace(/^제목[:\s]*/,"").trim()||"사진으로 작성된 글";
+      if(tagM){
+        const tagStr = tagM[0].replace(/^태그[:\s]*/,"").trim();
+        setPubTags(tagStr);
+      }
+      const body2 = bodyM?.[1]?.trim()||text;
+      setGenContent(body2);setPubTitle(title);
+      const rawBlocks = body2.split("\n\n").filter(Boolean).map((p:string)=>({type:"text" as const,id:Date.now().toString()+Math.random(),content:p}));
+      setBlocks(rawBlocks.length>0?rawBlocks:[{type:"text" as const,id:Date.now().toString(),content:body2}]);
+      if(photoFiles.length>0){
+        const imgs = photoFiles.map((f,i)=>({id:i,src:f.src,alt:f.name.replace(/\.[^.]+$/,"")}));
+        triggerAutoInsert(imgs);
+        setThumbnail(photoFiles[0].src);
+      }
+      setQualityScore(calcQualityScore(body2, photoKeypoints.split(/[\s,]/)[0]||""));
+      setPhotoGenDone(true);setAutoInserted(true);
+      showToast("✅ 사진 기반 글 생성 완료!");
+    } catch(e:any) {
+      showToast("❌ 생성 실패: "+e.message,"error");
+    } finally {
+      setPhotoGenerating(false);
+    }
+  }
+
+    function openPreview(){
     const sectionTags=["[FAQ시작]","[관련글시작]","[참고자료시작]"];
     const blocksHtml=blocks.map((b:any)=>{
       if(b.type==="text"){
@@ -2500,6 +2602,130 @@ POST3: (제목)|(이유)
                 </div>
               </div>
             )}
+
+            {/* ───── 📷 사진 글쓰기 ───── */}
+            {tab === "photo" && (
+              <div className="photo-root">
+                <div className="photo-story">
+                  <div className="photo-story-step s1">
+                    <span className="photo-story-ico">📸</span>
+                    <div className="photo-story-num">STEP 1</div>
+                    <div className="photo-story-title">사진 업로드</div>
+                    <div className="photo-story-desc">내 사진을 최대 20장</div>
+                    <span className="photo-story-arrow">›</span>
+                  </div>
+                  <div className="photo-story-step s2">
+                    <span className="photo-story-ico">✏️</span>
+                    <div className="photo-story-num">STEP 2</div>
+                    <div className="photo-story-title">키포인트 입력</div>
+                    <div className="photo-story-desc">장소, 가격, 느낌</div>
+                    <span className="photo-story-arrow">›</span>
+                  </div>
+                  <div className="photo-story-step s3">
+                    <span className="photo-story-ico">🌸</span>
+                    <div className="photo-story-num">STEP 3</div>
+                    <div className="photo-story-title">AI 글 생성</div>
+                    <div className="photo-story-desc">사진 분석 기반 글</div>
+                  </div>
+                </div>
+                <div className="card" style={{padding:"18px",marginBottom:14}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+                    <label className="inp-label" style={{margin:0}}>📷 사진 업로드 <span style={{fontSize:11,color:"var(--text3)"}}>(최대 20장)</span></label>
+                    {photoFiles.length>0&&<button onClick={()=>setPhotoFiles([])} style={{fontSize:11,color:"#FF6B9D",background:"none",border:"none",cursor:"pointer",fontFamily:"inherit"}}>전체 삭제</button>}
+                  </div>
+                  <div className={`photo-drop${photoDragOver?" drag-over":""}`}
+                    onClick={()=>{const inp=document.createElement("input");inp.type="file";inp.multiple=true;inp.accept="image/*";inp.onchange=e=>handlePhotoUpload((e.target as HTMLInputElement).files);inp.click();}}
+                    onDragOver={e=>{e.preventDefault();setPhotoDragOver(true);}}
+                    onDragLeave={()=>setPhotoDragOver(false)}
+                    onDrop={e=>{e.preventDefault();setPhotoDragOver(false);handlePhotoUpload(e.dataTransfer.files);}}>
+                    <div className="photo-drop-ico"><span className="flower-deco">🌸</span></div>
+                    <div className="photo-drop-title">사진을 여기에 끌어다 놓거나 클릭하세요</div>
+                    <div className="photo-drop-desc">JPG, PNG 지원 · 최대 20장 · {photoFiles.length}/20장</div>
+                  </div>
+                  {photoFiles.length>0&&(
+                    <div className="photo-grid">
+                      {photoFiles.map((f,i)=>(
+                        <div key={f.id} className="photo-thumb">
+                          <img src={f.src} alt={f.name}/>
+                          {i===0&&<div style={{position:"absolute",bottom:4,left:4,fontSize:9,fontWeight:800,background:"#FF6B9D",color:"#fff",padding:"2px 6px",borderRadius:99}}>대표</div>}
+                          <button className="photo-thumb-del" onClick={()=>setPhotoFiles(p=>p.filter(x=>x.id!==f.id))}>✕</button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                <div className="card" style={{padding:"18px",marginBottom:14}}>
+                  <label className="inp-label">✏️ 키포인트 <span style={{fontSize:11,color:"var(--text3)"}}>(선택사항)</span></label>
+                  <textarea className="photo-keypoints" placeholder="예시: 강원도 홍천 맛집, 갈비탕 12,000원, 웨이팅 30분, 주차 가능" value={photoKeypoints} onChange={e=>setPhotoKeypoints(e.target.value)}/>
+                </div>
+                <div className="card" style={{padding:"18px",marginBottom:14}}>
+                  <div style={{marginBottom:14}}>
+                    <label className="inp-label">✍️ 글 스타일</label>
+                    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:7}}>
+                      {WRITE_STYLES.map(s=>(
+                        <button key={s.id} onClick={()=>{setWriteStyle(s.id);localStorage.setItem("publy_adm_write_style",s.id);}}
+                          style={{padding:"10px 12px",borderRadius:10,border:`1.5px solid ${writeStyle===s.id?"#FF6B9D":"var(--border)"}`,background:writeStyle===s.id?"#FF6B9D22":"var(--bg)",cursor:"pointer",textAlign:"left",fontFamily:"inherit"}}>
+                          <div style={{fontSize:13,fontWeight:700,color:writeStyle===s.id?"#FF6B9D":"var(--text)"}}>{s.i} {s.id}</div>
+                          <div style={{fontSize:11,color:"var(--text3)",marginTop:2}}>{s.desc}</div>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <div>
+                    <label className="inp-label">🎭 말투 설정</label>
+                    <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
+                      {PERSONA_STYLES.map(p=>(
+                        <button key={p.id} onClick={()=>{setPersona(p.id);localStorage.setItem("publy_adm_persona",p.id);}}
+                          style={{padding:"6px 11px",borderRadius:20,border:`1.5px solid ${persona===p.id?"#C77DFF":"var(--border)"}`,background:persona===p.id?"#C77DFF22":"var(--bg)",cursor:"pointer",fontFamily:"inherit",fontSize:12,fontWeight:persona===p.id?700:500,color:persona===p.id?"#C77DFF":"var(--text2)",whiteSpace:"nowrap"}}>
+                          {p.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+                <button className="photo-gen-btn" onClick={generateFromPhotos} disabled={photoGenerating||photoFiles.length===0}>
+                  {photoGenerating?<><span className="sp-w spinner" style={{width:18,height:18,marginRight:8}}/>AI가 사진을 분석하고 있어요...</>:<><span className="flower-deco">🌸</span> 사진으로 글 생성하기</>}
+                </button>
+                {photoGenDone&&genContent&&(
+                  <div style={{marginTop:20}}>
+                    <div style={{padding:"12px 16px",borderRadius:14,background:"linear-gradient(135deg,#FF6B9D11,#C77DFF11)",border:"1px solid #FF6B9D33",marginBottom:12}}>
+                      <div style={{fontSize:13,fontWeight:800,color:"#FF6B9D",marginBottom:4}}>🎉 글 생성 완료! {genContent.length.toLocaleString()}자 · 사진 {photoFiles.length}장 기반</div>
+                      <div style={{display:"flex",gap:8}}>
+                        <button onClick={()=>openPreview()} style={{padding:"7px 14px",borderRadius:9,border:"1px solid #C77DFF",background:"#C77DFF11",color:"#C77DFF",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:"inherit"}}>👁️ 미리보기</button>
+                        <button onClick={()=>setTab("publish")} style={{padding:"7px 14px",borderRadius:9,border:"none",background:"linear-gradient(135deg,#FF6B9D,#C77DFF)",color:"#fff",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:"inherit"}}>🚀 발행하기 탭으로 →</button>
+                      </div>
+                    </div>
+                    {qualityScore&&(
+                      <div style={{padding:"14px 16px",borderRadius:12,background:"var(--card2)",border:"1px solid var(--border)",marginBottom:14}}>
+                        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:10}}>
+                          <span style={{fontSize:12,fontWeight:800,color:"var(--text2)"}}>📊 SEO 품질 분석</span>
+                          <span style={{fontSize:20,fontWeight:900,color:qualityScore.score>=80?"var(--success)":qualityScore.score>=55?"var(--warn)":"var(--danger)"}}>{qualityScore.score}점</span>
+                        </div>
+                        <div style={{display:"flex",flexDirection:"column",gap:6}}>
+                          {qualityScore.items.map((item,idx2)=>(
+                            <div key={idx2} style={{display:"flex",alignItems:"center",gap:8,padding:"6px 10px",borderRadius:8,background:item.pass?"rgba(0,255,150,.06)":"rgba(255,80,80,.06)"}}>
+                              <span style={{fontSize:14,flexShrink:0}}>{item.pass?"✅":"❌"}</span>
+                              <div style={{flex:1}}>
+                                <div style={{fontSize:11,fontWeight:700,color:item.pass?"var(--success)":"var(--danger)"}}>{item.label}</div>
+                                <div style={{fontSize:10,color:"var(--text3)"}}>{item.detail}</div>
+                              </div>
+                              <span style={{fontSize:10,color:"var(--text3)",flexShrink:0}}>{item.weight}점</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+                <div style={{position:"fixed",bottom:80,right:16,display:"flex",flexDirection:"column",gap:8,zIndex:100}}>
+                  <button className="photo-guide-btn" onClick={()=>{const html=`<!DOCTYPE html><html><head><meta charset="utf-8"><title>사진 글쓰기 사용방법</title><style>*{box-sizing:border-box;margin:0;padding:0}body{font-family:'Malgun Gothic',sans-serif;background:#fdf0ff;color:#111}h1{background:linear-gradient(135deg,#FF6B9D,#C77DFF);color:#fff;padding:24px;font-size:20px;line-height:1.4}.content{padding:20px}.step{background:#fff;border-radius:14px;padding:18px;margin-bottom:14px;border:1px solid #FF6B9D22}.num{display:inline-block;background:linear-gradient(135deg,#FF6B9D,#C77DFF);color:#fff;width:26px;height:26px;border-radius:50%;text-align:center;line-height:26px;font-weight:900;font-size:13px;margin-bottom:8px}.title{font-size:15px;font-weight:800;color:#FF6B9D;margin-bottom:6px}.desc{font-size:14px;line-height:1.9;color:#333}.tip{background:#FF6B9D11;border:1px solid #FF6B9D33;border-radius:12px;padding:14px;margin-top:14px;font-size:13px;line-height:1.8}</style></head><body><h1>📷 사진으로 블로그 글 쓰는 방법</h1><div class="content"><div class="step"><div class="num">1</div><div class="title">사진을 올려주세요</div><div class="desc">사진 업로드 버튼을 누르거나 사진을 끌어다 놓으세요.<br>최대 20장까지 올릴 수 있어요. 첫 번째 사진이 대표 사진입니다.</div></div><div class="step"><div class="num">2</div><div class="title">키포인트를 적어주세요 (안 적어도 돼요)</div><div class="desc">글에 꼭 넣고 싶은 내용을 간단히 적으세요.<br>예시: 강원도 홍천 맛집, 갈비탕 12,000원, 웨이팅 30분</div></div><div class="step"><div class="num">3</div><div class="title">글 스타일을 선택하세요</div><div class="desc">맛집 후기, 여행기, 감성일기, 정보글 중 선택하세요.</div></div><div class="step"><div class="num">4</div><div class="title">🌸 사진으로 글 생성하기 버튼을 눌러요</div><div class="desc">AI가 사진을 분석해서 글을 써드립니다. 30초~1분 기다려 주세요.</div></div><div class="step"><div class="num">5</div><div class="title">블로그에 발행하세요</div><div class="desc">발행하기 탭으로 이동해서 계정을 선택하고 발행 버튼을 누르세요.</div></div><div class="tip">💡 밝고 선명한 사진일수록 더 좋은 글이 나와요!</div></div></body></html>`;if((window as any).electron?.openPreview){(window as any).electron.openPreview(html);}else{const w=window.open("","_blank","width=520,height=760");if(w){w.document.write(html);w.document.close();}}}}>📖 사용방법</button>
+                  <button className="photo-guide-btn" style={{background:"linear-gradient(135deg,#4285F4,#34A853)"}} onClick={()=>{const html=`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Gemini 키 발급</title><style>*{box-sizing:border-box;margin:0;padding:0}body{font-family:'Malgun Gothic',sans-serif;background:#f0f7ff;color:#111}h1{background:linear-gradient(135deg,#4285F4,#34A853);color:#fff;padding:24px;font-size:20px}.content{padding:20px}.step{background:#fff;border-radius:14px;padding:18px;margin-bottom:14px;border:1px solid #4285F422}.title{font-size:15px;font-weight:800;color:#4285F4;margin-bottom:8px}.desc{font-size:14px;line-height:1.9;color:#333}code{background:#f0f0f0;padding:2px 8px;border-radius:6px;font-size:13px}.free{background:#34A85311;border:1px solid #34A85333;border-radius:12px;padding:16px;margin-top:16px;font-size:14px;line-height:1.9}</style></head><body><h1>🔑 Gemini API 키 발급 방법</h1><div class="content"><div class="step"><div class="title">1단계. 구글 AI 스튜디오 접속</div><div class="desc">인터넷 브라우저 주소창에 <code>aistudio.google.com</code> 입력 후 구글 계정으로 로그인하세요.</div></div><div class="step"><div class="title">2단계. API 키 만들기</div><div class="desc">왼쪽 메뉴 <b>Get API Key</b> 클릭 → 파란색 <b>Create API key</b> 클릭 → 키 복사 (Ctrl+C)</div></div><div class="step"><div class="title">3단계. Publy에 입력하기</div><div class="desc">Publy 설정 탭 → AI 설정 → <b>Gemini API 키</b> 입력란에 붙여넣기 (Ctrl+V) → 저장</div></div><div class="free">✅ <b>완전 무료!</b> 하루 1,500번까지 무료로 사용할 수 있어요.</div></div></body></html>`;if((window as any).electron?.openPreview){(window as any).electron.openPreview(html);}else{const w=window.open("","_blank","width=500,height=580");if(w){w.document.write(html);w.document.close();}}}}>🔑 Gemini 키 발급</button>
+                </div>
+
+              </div>
+            )}
+
+            
 
             {/* ───── 🚀 자동발행 ───── */}
             {tab === "publish" && (
