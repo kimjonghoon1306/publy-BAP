@@ -313,9 +313,10 @@ export async function publishNaver(params: {
   imageUrl?: string;
   categoryId?: string;
   visibility?: "public" | "neighbor" | "private";
-  scheduleTime?: string; // ISO 8601 (e.g. "2025-03-15T10:00")
+  scheduleTime?: string;
+  blocks?: Array<{type: string; content?: string; src?: string; alt?: string}>;
 }): Promise<string> {
-  const { userId, title, content, tags, imageUrl, categoryId, visibility = "public", scheduleTime } = params;
+  const { userId, title, content, tags, imageUrl, categoryId, visibility = "public", scheduleTime, blocks } = params;
   const sp = sessionPath(userId);
   if (!fs.existsSync(sp)) throw new Error("네이버 세션 없음. 계정 재연결 필요");
 
@@ -446,105 +447,116 @@ export async function publishNaver(params: {
       }
     }
 
-    // ── 본문 입력 (HTML/텍스트 자동 감지) ──
-    console.log("[naver] 본문 입력...");
+    // ── 본문 + 이미지 블록 순서대로 입력 ──
+    console.log("[naver] 본문+이미지 블록 순서 발행 시작...");
 
-    // HTML 여부 감지 및 처리
-    const isHtml = /<[a-z][\s\S]*>/i.test(content);
-    let plainContent = content;
-    const inlineImageUrls: string[] = [];
-
-    if (isHtml) {
-      // img src 추출 (썸네일 imageUrl 제외)
-      const imgMatches = content.matchAll(/<img[^>]+src="([^"]+)"/gi);
-      for (const m of imgMatches) {
-        if (m[1] !== imageUrl) inlineImageUrls.push(m[1]);
-      }
-      // HTML 태그 제거 → 순수 텍스트
-      plainContent = content
-        .replace(/<br\s*\/?>/gi, "\n")
-        .replace(/<\/p>/gi, "\n").replace(/<\/h[1-6]>/gi, "\n").replace(/<\/div>/gi, "\n")
-        .replace(/<hr[^>]*>/gi, "\n---\n")
-        .replace(/<figcaption[^>]*>([\s\S]*?)<\/figcaption>/gi, "[$1]")
-        .replace(/<[^>]+>/g, "")
-        .replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"')
-        .replace(/\n{3,}/g, "\n\n").trim();
-    }
-
-    const bodySels = [
-      ".se-section-text .se-text-paragraph span[contenteditable='true']",
-      ".se-section-text [contenteditable='true']",
-      ".se-main-container .se-section:not(.se-section-documentTitle) [contenteditable='true']",
-      ".se-component-content [contenteditable='true']",
-    ];
-    let bodyInserted = false;
-    for (const sel of bodySels) {
-      try {
-        const el = await frame.$(sel);
-        if (el) {
-          await frame.click(sel, { timeout: 5000 });
-          await page.waitForTimeout(500);
-          const lines = plainContent.split("\n");
-          for (let i = 0; i < lines.length; i++) {
-            if (lines[i].trim()) {
-              await frame.evaluate((t) => {
-                document.execCommand("insertText", false, t);
-              }, lines[i]);
-            }
-            if (i < lines.length - 1) {
-              await page.keyboard.press("Enter");
-              await page.waitForTimeout(30);
-            }
-          }
-          bodyInserted = true;
-          console.log("[naver] 본문 입력 완료");
-          break;
-        }
-      } catch {}
-    }
-    if (!bodyInserted) {
-      await frame.click(".se-main-container", { timeout: 5000 }).catch(() => {});
-      await page.waitForTimeout(500);
-      await page.keyboard.type(plainContent, { delay: 8 });
-    }
-
-    // ── 인라인 이미지 업로드 ──
-    if (inlineImageUrls.length > 0) {
-      console.log(`[naver] 인라인 이미지 ${inlineImageUrls.length}장 업로드 시도...`);
-      for (const imgUrl of inlineImageUrls) {
-        const tmpFile = await downloadImageToTemp(imgUrl);
-        if (!tmpFile) continue;
+    // SE4 에디터 클릭 헬퍼
+    async function clickEditor() {
+      const bodySels = [
+        ".se-section-text .se-text-paragraph span[contenteditable='true']",
+        ".se-section-text [contenteditable='true']",
+        ".se-main-container .se-section:not(.se-section-documentTitle) [contenteditable='true']",
+        ".se-component-content [contenteditable='true']",
+      ];
+      for (const sel of bodySels) {
         try {
-          const imgBtnSels = [
-            "button[data-type='image']",
-            ".se-toolbar-item-imageUpload button",
-            "button[title='이미지']",
-            "button[class*='image']",
-          ];
-          let clicked = false;
-          for (const sel of imgBtnSels) {
-            try {
-              const el = await frame.$(sel);
-              if (el) { await frame.click(sel, { timeout: 3000 }); clicked = true; break; }
-            } catch {}
-          }
-          if (clicked) {
-            await page.waitForTimeout(1500);
-            const fileInput = await page.$("input[type='file']");
-            if (fileInput) {
-              await fileInput.setInputFiles(tmpFile);
-              await page.waitForTimeout(3000);
-              console.log("[naver] ✅ 인라인 이미지 업로드 완료");
-            }
-          }
-        } catch (e) {
-          console.log("[naver] 인라인 이미지 업로드 실패 (무시):", e);
-        } finally {
-          try { fs.unlinkSync(tmpFile); } catch {}
+          const el = await frame.$(sel);
+          if (el) { await frame.click(sel, { timeout: 3000 }); return true; }
+        } catch {}
+      }
+      await frame.click(".se-main-container", { timeout: 3000 }).catch(() => {});
+      return false;
+    }
+
+    // 텍스트 블록 입력 헬퍼
+    async function insertText(text: string) {
+      const isHtml = /<[a-z][\s\S]*>/i.test(text);
+      const plain = isHtml
+        ? text
+            .replace(/<br\s*\/?>/gi, "\n")
+            .replace(/<\/p>/gi, "\n").replace(/<\/h[1-6]>/gi, "\n").replace(/<\/div>/gi, "\n")
+            .replace(/<hr[^>]*>/gi, "\n---\n")
+            .replace(/<figcaption[^>]*>([\s\S]*?)<\/figcaption>/gi, "[$1]")
+            .replace(/<[^>]+>/g, "")
+            .replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"')
+            .replace(/[\n]{3,}/g, "\n\n").trim()
+        : text;
+
+      await clickEditor();
+      await page.waitForTimeout(300);
+      const lines = plain.split("\n");
+      for (let i = 0; i < lines.length; i++) {
+        if (lines[i].trim()) {
+          await frame.evaluate((t) => { document.execCommand("insertText", false, t); }, lines[i]);
         }
-        await page.waitForTimeout(1000);
+        if (i < lines.length - 1) {
+          await page.keyboard.press("Enter");
+          await page.waitForTimeout(20);
+        }
       }
     }
+
+    // 이미지 업로드 헬퍼
+    async function uploadImage(imgUrl: string) {
+      const tmpFile = await downloadImageToTemp(imgUrl);
+      if (!tmpFile) return;
+      try {
+        await clickEditor();
+        await page.waitForTimeout(300);
+        // 커서 뒤에 새 줄 추가
+        await page.keyboard.press("End");
+        await page.keyboard.press("Enter");
+        await page.waitForTimeout(300);
+
+        const imgBtnSels = [
+          "button[data-type='image']",
+          ".se-toolbar-item-imageUpload button",
+          "button[title='이미지']",
+          "button[class*='image']",
+        ];
+        let clicked = false;
+        for (const sel of imgBtnSels) {
+          try {
+            const el = await frame.$(sel);
+            if (el) { await frame.click(sel, { timeout: 3000 }); clicked = true; break; }
+          } catch {}
+        }
+        if (clicked) {
+          await page.waitForTimeout(1500);
+          const fileInput = await page.$("input[type='file']");
+          if (fileInput) {
+            await fileInput.setInputFiles(tmpFile);
+            await page.waitForTimeout(3000);
+            console.log("[naver] ✅ 이미지 업로드 완료");
+          }
+        }
+      } catch (e) {
+        console.log("[naver] 이미지 업로드 실패 (무시):", e);
+      } finally {
+        try { fs.unlinkSync(tmpFile); } catch {}
+      }
+      await page.waitForTimeout(500);
+    }
+
+    // blocks가 있으면 블록 순서대로, 없으면 기존 방식
+    if (blocks && blocks.length > 0) {
+      for (const block of blocks) {
+        if (block.type === "text" && block.content) {
+          // 섹션 마커([FAQ시작] 등) 포함 여부와 무관하게 전체 텍스트 입력
+          await insertText(block.content);
+          await page.waitForTimeout(200);
+        } else if (block.type === "image" && block.src) {
+          // 썸네일(imageUrl)과 같은 이미지는 이미 상단에 올라가 있으므로 스킵
+          if (block.src !== imageUrl) {
+            await uploadImage(block.src);
+          }
+        }
+      }
+    } else {
+      // fallback: blocks 없으면 기존 텍스트 입력 방식
+      await insertText(content);
+    }
+
     await page.waitForTimeout(1000);
 
     // ── 발행 패널 열기 ──
