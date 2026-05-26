@@ -1364,7 +1364,7 @@ POST3: (제목)|(이유)
       const rawBlocks = body.split("\n\n").filter(Boolean).map(p=>({type:"text" as const,id:uid(),content:p}));
       setBlocks(rawBlocks.length>0?rawBlocks:[{type:"text",id:uid(),content:body}]);
       setPubTitle(title);
-      if(tgm)setHashtags(tgm[1].trim().split(",").map((t:string)=>t.trim().startsWith("#")?t.trim():"#"+t.trim()).filter(Boolean));
+      if(tgm)setHashtags(tgm[1].trim().split(",").map((t:string)=>t.trim().startsWith("#")?t.trim():"#"+t.trim()).filter(Boolean).slice(0,Math.floor(Math.random()*4)+5));
       setAutoInserted(false);setThumbnail("");
     }catch(e:any){if(e.name!=="AbortError")alert("글 생성 실패: "+e.message);}
     finally{setGenerating(false);}
@@ -3203,8 +3203,7 @@ POST3: (제목)|(이유)
                     const secStart=sectionTags.reduce((min,tag)=>{const i=txt.indexOf(tag);return i>-1&&i<min?i:min;},Infinity);
                     const bodyTxt=secStart<Infinity?txt.slice(0,secStart).trim():txt;
                     const secTxt=secStart<Infinity?txt.slice(secStart).trim():"";
-                    const renderTxt=(t:string,kOffset:number)=>t.split("
-").filter(l=>l.trim()&&!sectionTags.some(tag=>l.includes(tag))).map((line,i)=>{
+                    const renderTxt=(t:string,kOffset:number)=>t.split("\n").filter(l=>l.trim()&&!sectionTags.some(tag=>l.includes(tag))).map((line,i)=>{
                       if(line.startsWith("## "))return<h2 key={kOffset+i} style={{fontSize:18,fontWeight:800,margin:"24px 0 10px",color:"#111",borderBottom:"2px solid #eee",paddingBottom:8}}>{line.slice(3)}</h2>;
                       if(line.startsWith("### "))return<h3 key={kOffset+i} style={{fontSize:15,fontWeight:700,margin:"18px 0 8px",color:"#222",borderLeft:"4px solid #2563eb",paddingLeft:10}}>{line.slice(4)}</h3>;
                       if(line==="---")return<hr key={kOffset+i} style={{border:"none",borderTop:"1px solid #eee",margin:"16px 0"}}/>;
