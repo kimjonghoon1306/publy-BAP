@@ -1161,7 +1161,7 @@ Output format (JSON array only, no other text):
     }
     if(ai==="groq"){
       const key=localStorage.getItem("publy_groq_key")||"";if(!key)throw new Error("Groq API 키 없음");
-      const r=await fetch("https://api.groq.com/openai/v1/chat/completions",{method:"POST",headers:{"Content-Type":"application/json","Authorization":`Bearer ${key}`},body:JSON.stringify({model:"llama-3.1-70b-versatile",max_tokens:8000,messages:[{role:"user",content:prompt}]}),signal:signal||AbortSignal.timeout(90000)});
+      const r=await fetch("https://api.groq.com/openai/v1/chat/completions",{method:"POST",headers:{"Content-Type":"application/json","Authorization":`Bearer ${key}`},body:JSON.stringify({model:"llama-3.3-70b-versatile",max_tokens:8000,messages:[{role:"user",content:prompt}]}),signal:signal||AbortSignal.timeout(90000)});
       if(!r.ok){const e=await r.json();throw new Error(e.error?.message||"Groq 오류");}
       const d=await r.json();return d.choices?.[0]?.message?.content||"";
     }
@@ -1570,7 +1570,7 @@ POST3: (제목)|(이유)
   async function handleConnect(acc:PublyAccount){
     if(!botOnline){alert("PC에서 Publy 앱을 먼저 실행해주세요");return;}setConnId(acc.id);
     try{
-      const r=await botFetch(`${BOT}/api/${acc.platform}/save-session`,{method:"POST",body:JSON.stringify({userId:acc.user_id,id:acc.username,pw:atob((acc as any).password_encrypted||""),blogName:acc.blog_name})});
+      const r=await fetch(`${BOT}/api/${acc.platform}/save-session`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({userId:acc.user_id,id:acc.username,pw:atob((acc as any).password_encrypted||""),blogName:acc.blog_name}),signal:AbortSignal.timeout(120000)});
       const d=await r.json();if(!d.success)throw new Error(d.error||"연결 실패");
       getAccounts(user.id).then(setAccounts);
     }catch(e:any){alert("연결 실패: "+e.message);}finally{setConnId(null);}
