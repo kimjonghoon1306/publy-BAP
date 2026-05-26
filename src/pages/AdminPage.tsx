@@ -506,6 +506,16 @@ const WRITE_STYLE_GUIDE: Record<WriteStyle,string> = {
   "여행기":  "[스타일] 여행지 분위기·감성 묘사. 일정·비용·교통 팁 포함. 포토스팟·현지 맛집 자연스럽게 언급.",
 };
 
+const BLOG_TEMPLATES = [
+  {id:"none",      label:"📝 템플릿 없음", style:"감성일기" as const, persona:"none" as const, guide:""},
+  {id:"restaurant",label:"🍽️ 맛집 후기",  style:"맛집후기" as const, persona:"young_w" as const, guide:"[템플릿: 맛집 후기]\n구성: 방문 계기 → 분위기/인테리어 → 메뉴/가격 → 맛 평가(식감·향·비주얼) → 서비스 → 재방문 의향\n필수: 가격대 언급, 주차/웨이팅 정보, 추천 메뉴"},
+  {id:"travel",    label:"✈️ 여행 후기",  style:"여행기" as const,  persona:"young_w" as const, guide:"[템플릿: 여행 후기]\n구성: 여행지 소개 → 이동 방법/비용 → 주요 볼거리 → 맛집/카페 → 숙소 → 총평/팁\n필수: 교통비·숙박비 언급, 포토스팟, 여행 꿀팁"},
+  {id:"product",   label:"📦 제품 리뷰",  style:"정보글" as const,  persona:"expert" as const, guide:"[템플릿: 제품 리뷰]\n구성: 구매 계기 → 언박싱/외관 → 실제 사용 후기 → 장점 3가지 → 단점 솔직하게 → 추천 대상\n필수: 가격 대비 만족도, 비교 제품 언급"},
+  {id:"info",      label:"📋 정보/꿀팁",  style:"정보글" as const,  persona:"teacher" as const, guide:"[템플릿: 정보/꿀팁]\n구성: 주제 소개 → 핵심 정보 5~7가지(번호 목록) → 주의사항 → 자주 묻는 질문 → 정리\n필수: 수치/데이터 포함, 실용적 팁 위주"},
+  {id:"experience",label:"💬 체험단 후기", style:"감성일기" as const, persona:"mid_w" as const, guide:"[템플릿: 체험단/협찬 후기]\n구성: 협찬 명시 → 첫인상 → 직접 체험 내용 → 솔직한 장단점 → 추천 이유\n필수: 협찬 투명하게 표시, 실제 사용 사진 캡션 포함"},
+] as const;
+type BlogTemplate = typeof BLOG_TEMPLATES[number]["id"];
+
 const PERSONA_STYLES = [
   {id:"none",     label:"🙂 기본",      color:"#888", prompt:""},
   {id:"young_w",  label:"👩 20대 여성",  color:"#f472b6", prompt:"20대 여성이 친한 친구에게 카톡 보내듯 친근하고 감성적으로 작성해줘. '~했어요', '~더라고요', '~거든요' 말투로."},
@@ -630,6 +640,7 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
   const [toasts, setToasts] = useState<{id:number;msg:string;type:"success"|"error"|"info"}[]>([]);
   const [writeStyle, setWriteStyle] = useState<WriteStyle>(()=>(localStorage.getItem("publy_adm_write_style") as WriteStyle)||"감성일기");
   const [persona, setPersona] = useState<PersonaStyle>(()=>(localStorage.getItem("publy_adm_persona") as PersonaStyle)||"none");
+  const [blogTemplate, setBlogTemplate] = useState<BlogTemplate>("none");
   const [qualityScore, setQualityScore] = useState<{score:number;items:{label:string;pass:boolean;detail:string;weight:number}[]}|null>(null);
   const [calKeywords, setCalKeywords] = useState("");
   const [calPlatform, setCalPlatform] = useState<"naver"|"tistory">("naver");
@@ -923,6 +934,34 @@ Output format (JSON array only, no other text):
       if(line==="")return<br key={i}/>;
       return<p key={i} style={{marginBottom:8,fontSize:14,lineHeight:1.8,color:"var(--text)"}}>{line}</p>;
     });
+  }
+
+  function openPreview(){
+    const sectionTags=["[FAQ시작]","[관련글시작]","[참고자료시작]"];
+    const blocksHtml=blocks.map((b:any)=>{
+      if(b.type==="text"){
+        const txt=b.content||"";
+        const secStart=sectionTags.reduce((min:number,tag:string)=>{const i=txt.indexOf(tag);return i>-1&&i<min?i:min;},Infinity);
+        const body=secStart<Infinity?txt.slice(0,secStart).trim():txt;
+        const sec=secStart<Infinity?txt.slice(secStart).trim():"";
+        const toHtml=(t:string)=>t.split("\n").filter((l:string)=>l.trim()&&!sectionTags.some(tag=>l.includes(tag))).map((line:string)=>{
+          if(line.startsWith("## "))return`<h2>${line.slice(3)}</h2>`;
+          if(line.startsWith("### "))return`<h3>${line.slice(4)}</h3>`;
+          if(line==="---")return`<hr/>`;
+          return`<p>${line}</p>`;
+        }).join("");
+        return toHtml(body)+(sec?`<div class="section-box">${toHtml(sec)}</div>`:"");
+      }
+      return b.src?`<figure><img src="${b.src}" alt="${b.alt||""}"/>${b.alt?`<figcaption>${b.alt}</figcaption>`:""}</figure>`:"";
+    }).join("");
+    const tagsHtml=pubTags?`<div class="tags">${pubTags.split(",").map((t:string)=>`<span class="tag">${t.trim().startsWith("#")?t.trim():"#"+t.trim()}</span>`).join("")}</div>`:"";
+    const html=`<!DOCTYPE html><html><head><meta charset="utf-8"><title>미리보기</title><style>*{box-sizing:border-box;margin:0;padding:0}body{background:#f5f5f5;font-family:'Apple SD Gothic Neo','Malgun Gothic',sans-serif;padding:20px}h1{font-size:24px;font-weight:900;color:#111;margin-bottom:16px;line-height:1.35;word-break:keep-all}.card{max-width:680px;margin:0 auto;background:#fff;border-radius:16px;padding:32px 28px;box-shadow:0 2px 12px rgba(0,0,0,.08)}h2{font-size:18px;font-weight:800;margin:24px 0 10px;color:#111;border-bottom:2px solid #eee;padding-bottom:8px}h3{font-size:15px;font-weight:700;margin:18px 0 8px;color:#222;border-left:4px solid #2563eb;padding-left:10px}p{margin:0 0 12px;font-size:15px;line-height:1.9;color:#333;word-break:keep-all}img{width:100%;border-radius:10px;display:block;margin:16px 0}figure{margin:16px 0}figcaption{font-size:11px;color:#999;text-align:center;margin-top:4px}.tags{margin-top:20px;display:flex;flex-wrap:wrap;gap:6px}.tag{font-size:12px;padding:3px 10px;border-radius:99px;background:#f0f4ff;color:#2563eb;font-weight:600}.section-box{margin-top:20px;padding:16px;background:#f8f8f8;border-radius:12px;border-left:4px solid #ddd}hr{border:none;border-top:1px solid #eee;margin:16px 0}</style></head><body><div class="card">${pubTitle?`<h1>${pubTitle}</h1>`:""}${pubImg?`<img src="${pubImg}" alt="썸네일"/>`:""}${blocksHtml}${tagsHtml}</div></body></html>`;
+    if((window as any).electron?.openPreview){
+      (window as any).electron.openPreview(html);
+    } else {
+      const w=window.open("","_blank","width=900,height=960,scrollbars=yes");
+      if(w){w.document.write(html);w.document.close();}
+    }
   }
 
   const checkBot = useCallback(async () => {
@@ -1371,6 +1410,7 @@ Output format (JSON array only, no other text):
       : "[플랫폼] 티스토리: 정보성 중심. 내부링크 2개 자연스럽게 포함.";
     const styleGuide = WRITE_STYLE_GUIDE[writeStyle]||"";
     const personaGuide = PERSONA_STYLES.find(p=>p.id===persona)?.prompt||"";
+    const templateGuide = BLOG_TEMPLATES.find(t=>t.id===blogTemplate)?.guide||"";
 
     const prompt = `당신은 대한민국 최고의 블로그 작가입니다.
 
@@ -1397,7 +1437,7 @@ ${catGuide}
 
 ${adGuide}
 ${platGuide}
-${styleGuide}${personaGuide?"\n\n[말투/페르소나]\n"+personaGuide:""}
+${styleGuide}${personaGuide?"\n\n[말투/페르소나]\n"+personaGuide:""}${templateGuide?"\n\n"+templateGuide:""}
 
 === 출력 형식 ===
 태그: 태그1, 태그2, 태그3, 태그4, 태그5
@@ -2010,6 +2050,23 @@ POST3: (제목)|(이유)
                 <div className="card">
                   <div className="card-title">⚙️ 생성 설정</div>
 
+                  {/* 글 템플릿 */}
+                  <div style={{marginBottom:14}}>
+                    <label className="inp-label">📋 글 템플릿 <span style={{fontSize:10,color:"var(--text3)",fontWeight:400}}>(선택 시 스타일·말투 자동 세팅)</span></label>
+                    <select value={blogTemplate} onChange={e=>{
+                      const t=BLOG_TEMPLATES.find(t=>t.id===e.target.value);
+                      if(t){
+                        setBlogTemplate(t.id);
+                        if(t.id!=="none"){
+                          setWriteStyle(t.style);localStorage.setItem("publy_adm_write_style",t.style);
+                          setPersona(t.persona);localStorage.setItem("publy_adm_persona",t.persona);
+                        }
+                      }
+                    }} style={{width:"100%",padding:"9px 12px",borderRadius:10,border:"1px solid var(--border)",background:"var(--bg)",color:"var(--text)",fontSize:13,fontFamily:"inherit",outline:"none",cursor:"pointer"}}>
+                      {BLOG_TEMPLATES.map(t=><option key={t.id} value={t.id}>{t.label}</option>)}
+                    </select>
+                  </div>
+
                   {/* 글 스타일 프리셋 */}
                   <div style={{marginBottom:16}}>
                     <label className="inp-label">✍️ 글 스타일</label>
@@ -2074,7 +2131,7 @@ POST3: (제목)|(이유)
                         <div className="card-title" style={{marginBottom:0}}>🎉 글 생성 완료!</div>
                         <div style={{display:"flex",gap:7,alignItems:"center"}}>
                           <span className="char-badge">{genContent.length.toLocaleString()}자</span>
-                          <button className="preview-btn" onClick={()=>setShowPreview(true)}>👁️ 미리보기</button>
+                          <button className="preview-btn" onClick={()=>openPreview()}>👁️ 미리보기</button>
                         </div>
                       </div>
 
@@ -2467,7 +2524,7 @@ POST3: (제목)|(이유)
                         </>
                       )}
                     </div>
-                    <button onClick={()=>setShowPreviewModal(true)} style={{display:"flex",alignItems:"center",gap:5,padding:"7px 12px",borderRadius:8,background:"oklch(.62 .22 300)",color:"#fff",border:"none",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:"inherit",whiteSpace:"nowrap"}}>
+                    <button onClick={()=>openPreview()} style={{display:"flex",alignItems:"center",gap:5,padding:"7px 12px",borderRadius:8,background:"oklch(.62 .22 300)",color:"#fff",border:"none",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:"inherit",whiteSpace:"nowrap"}}>
                       👁️ 미리보기
                     </button>
                     <button onClick={()=>setShowPublishPanel(v=>!v)} style={{display:"flex",alignItems:"center",gap:5,padding:"7px 12px",borderRadius:8,border:"1px solid var(--border)",background:showPublishPanel?"var(--accent-bg)":"var(--card)",color:showPublishPanel?"var(--accent-text)":"var(--text2)",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:"inherit",whiteSpace:"nowrap"}}>
@@ -3447,48 +3504,7 @@ POST3: (제목)|(이유)
       </div>
 
       {/* ── 전체화면 미리보기 모달 ── */}
-      {showPreviewModal&&(
-        <div style={{position:"fixed",inset:0,zIndex:100,display:"flex",flexDirection:"column",background:"var(--bg)"}}>
-          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"12px 16px",borderBottom:"1px solid var(--border)",background:"var(--card)",flexShrink:0}}>
-            <div style={{display:"flex",alignItems:"center",gap:10}}>
-              <div style={{width:8,height:8,borderRadius:"50%",background:"var(--accent)"}}/>
-              <span style={{fontSize:14,fontWeight:700,color:"var(--text)"}}>구독자 시점 미리보기</span>
-              <div style={{position:"relative"}}>
-                <button onClick={()=>setShowNaverMenu(v=>!v)} style={{padding:"6px 12px",borderRadius:8,background:"#03C75A",color:"#fff",border:"none",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:"inherit"}}>📋 네이버 복사 ▲</button>
-                {showNaverMenu&&(
-                  <>
-                    <div style={{position:"fixed",inset:0,zIndex:40}} onClick={()=>setShowNaverMenu(false)}/>
-                    <div style={{position:"absolute",top:36,left:0,zIndex:50,width:240,borderRadius:12,overflow:"hidden",background:"#1a1a2e",border:"1px solid rgba(255,255,255,.12)",boxShadow:"0 8px 32px rgba(0,0,0,.4)"}}>
-                      {[{tag:"전체",color:"#03C75A",tagColor:"#fff",label:"전체 복사",fn:()=>{copyForNaver();setShowNaverMenu(false);}},{tag:"FAQ",color:"#fbbf24",tagColor:"#000",label:"본문+FAQ",fn:()=>{copyForNaverWithFaq();setShowNaverMenu(false);}},{tag:"본문",color:"#f472b6",tagColor:"#fff",label:"본문만",fn:()=>{copyForNaverBodyOnly();setShowNaverMenu(false);}}].map((opt,i)=>(
-                        <button key={i} onClick={opt.fn} style={{width:"100%",textAlign:"left",padding:"10px 14px",borderBottom:i<2?"1px solid rgba(255,255,255,.08)":"none",background:"transparent",cursor:"pointer",border:"none",fontFamily:"inherit",display:"flex",alignItems:"center",gap:8}}>
-                          <span style={{fontSize:10,fontWeight:800,padding:"2px 7px",borderRadius:99,background:opt.color,color:opt.tagColor}}>{opt.tag}</span>
-                          <span style={{fontSize:13,fontWeight:600,color:"#fff"}}>{opt.label}</span>
-                        </button>
-                      ))}
-                    </div>
-                  </>
-                )}
-              </div>
-            </div>
-            <button onClick={()=>setShowPreviewModal(false)} style={{width:32,height:32,borderRadius:8,background:"transparent",border:"1px solid var(--border)",cursor:"pointer",color:"var(--text3)",fontSize:18,display:"flex",alignItems:"center",justifyContent:"center"}}>✕</button>
-          </div>
-          <div style={{flex:1,overflowY:"auto"}}>
-            <div style={{maxWidth:720,margin:"0 auto",padding:"24px 16px"}}>
-              {thumbnail&&<div style={{borderRadius:16,overflow:"hidden",marginBottom:20,aspectRatio:"16/9"}}><img src={thumbnail} alt="썸네일" style={{width:"100%",height:"100%",objectFit:"cover"}}/></div>}
-              {pubTitle&&<h1 style={{fontSize:22,fontWeight:900,color:"var(--text)",marginBottom:16,lineHeight:1.3}}>{pubTitle}</h1>}
-              {greeting&&<div style={{padding:"14px 16px",borderRadius:12,background:"var(--accent-bg)",border:"1px solid var(--accent-border)",marginBottom:16,fontSize:13,color:"var(--text)",lineHeight:1.7}}>{greeting}</div>}
-              <div style={{display:"flex",flexDirection:"column",gap:12}}>
-                {blocks.map(block=>{
-                  if(block.type==="text")return(<div key={block.id}>{renderPreview((block as TextBlock).content)}</div>);
-                  const imgBlock=block as SingleImageBlock;
-                  return imgBlock.src?(<div key={block.id} style={{textAlign:imgBlock.position}}><img src={imgBlock.src} alt={imgBlock.alt} style={{width:"100%",borderRadius:12,display:"block"}} onError={e=>{(e.target as HTMLImageElement).style.display="none";}}/>{imgBlock.alt&&<div style={{fontSize:11,color:"var(--text3)",textAlign:"center",marginTop:4}}>{imgBlock.alt}</div>}</div>):null;
-                })}
-              </div>
-              {hashtags.length>0&&<div style={{display:"flex",flexWrap:"wrap",gap:6,marginTop:20,paddingTop:16,borderTop:"1px solid var(--border)"}}>{hashtags.map((t,i)=><span key={i} style={{fontSize:13,padding:"4px 12px",borderRadius:99,background:"var(--accent-bg)",color:"var(--accent-text)"}}>{t}</span>)}</div>}
-            </div>
-          </div>
-        </div>
-      )}
+      
 
       {/* 토스트 알림 */}
       <div className="toast-wrap">
