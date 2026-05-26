@@ -556,6 +556,7 @@ Output format (JSON array only, no other text):
   const [pubTags, setPubTags] = useState("");
   const [publishing, setPublishing] = useState(false);
   const [pubMsg, setPubMsg] = useState("");
+  const [pubScope, setPubScope] = useState<"body"|"faq"|"full">("full");
   const [newPlat, setNewPlat] = useState<"naver"|"tistory">("naver");
   const [newUser, setNewUser] = useState("");
   const [newPw, setNewPw] = useState("");
@@ -1407,9 +1408,18 @@ POST3: (제목)|(이유)
     // tarry 방식: 블록 기반 HTML 빌드
     if(blocks.some(b=>b.type==="text"&&(b as TextBlock).content.trim()))return buildHtmlContent();
     if(!genContent)return "";
-    if(pubConcept==="full")return genContent;
-    if(pubConcept==="body_faq"){const i=genContent.indexOf("[관련글시작]");return i>0?genContent.slice(0,i).trim():genContent;}
-    const i=genContent.indexOf("[FAQ시작]");return i>0?genContent.slice(0,i).trim():genContent;
+    // pubScope 기준으로 발행 범위 결정
+    if(pubScope==="body"){
+      let t=genContent;
+      t=t.replace(/\[FAQ시작\][\s\S]*?\[FAQ끝\]/g,"").replace(/\[참고자료시작\][\s\S]*?\[참고자료끝\]/g,"").replace(/\[관련글시작\][\s\S]*?\[관련글끝\]/g,"").trim();
+      return t;
+    }
+    if(pubScope==="faq"){
+      let t=genContent;
+      t=t.replace(/\[참고자료시작\][\s\S]*?\[참고자료끝\]/g,"").replace(/\[관련글시작\][\s\S]*?\[관련글끝\]/g,"").trim();
+      return t;
+    }
+    return genContent;
   }
 
   async function handlePublish(){
@@ -1516,6 +1526,27 @@ POST3: (제목)|(이유)
               <span style={{fontSize:20}}>{opt.ico}</span>
               <span style={{fontSize:13,fontWeight:600,color:visibility===opt.v?"var(--accent-text)":"var(--text)"}}>{opt.label}</span>
               {visibility===opt.v&&<span style={{marginLeft:"auto",color:"var(--accent-text)"}}>✓</span>}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* 발행 범위 */}
+      <div className="card" style={{padding:"14px 16px"}}>
+        <div className="card-title" style={{marginBottom:10}}>📝 발행 범위</div>
+        <div style={{display:"flex",flexDirection:"column",gap:8}}>
+          {([
+            {v:"body",ico:"✍️",label:"본문 + 해시태그",desc:"관련글/링크/질문 제외"},
+            {v:"faq",ico:"❓",label:"본문 + FAQ + 해시태그",desc:"관련글/링크만 제외"},
+            {v:"full",ico:"📄",label:"전체 발행",desc:"모든 섹션 포함"},
+          ] as {v:string,ico:string,label:string,desc:string}[]).map(opt=>(
+            <button key={opt.v} onClick={()=>setPubScope(opt.v as "body"|"faq"|"full")} style={{padding:"11px 14px",borderRadius:10,border:`2px solid ${pubScope===opt.v?"var(--accent)":"var(--border)"}`,background:pubScope===opt.v?"var(--accent-bg)":"var(--bg)",cursor:"pointer",fontFamily:"inherit",textAlign:"left",transition:"all .15s",display:"flex",alignItems:"center",gap:10}}>
+              <span style={{fontSize:18,flexShrink:0}}>{opt.ico}</span>
+              <div style={{flex:1}}>
+                <div style={{fontSize:13,fontWeight:700,color:pubScope===opt.v?"var(--accent-text)":"var(--text)"}}>{opt.label}</div>
+                <div style={{fontSize:11,color:"var(--text3)",marginTop:2}}>{opt.desc}</div>
+              </div>
+              {pubScope===opt.v&&<span style={{color:"var(--accent-text)",flexShrink:0}}>✓</span>}
             </button>
           ))}
         </div>
