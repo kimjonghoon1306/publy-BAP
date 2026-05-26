@@ -440,28 +440,40 @@ export default function DashboardPage({user, onLogout, onAdminLogin, onThemeTogg
     return Math.min(100,base+commercialBonus+longtailBonus);
   }
 
-  function calcQualityScore(content:string,kw:string):{seo:number;read:number;len:number;total:number}{
-    const kwCount=(content.match(new RegExp(kw.replace(/[.*+?^${}()|[\]\\]/g,"\\$&"),"gi"))||[]).length;
-    const kwDensity=content.length>0?kwCount/(content.length/100):0;
-    const hasFaq=content.includes("[FAQ시작]")||content.includes("Q1:");
-    const seo=Math.min(100,Math.round(
-      (kwDensity>=2&&kwDensity<=6?40:kwDensity>0?20:0)+
-      (hasFaq?30:0)+
-      (content.length>=1500?30:content.length>=800?15:0)
-    ));
-    const paragraphs=content.split(/\n\n+/).filter(Boolean);
-    const sentences=content.split(/[.!?]\s+/).filter(s=>s.length>5);
-    const avgSentLen=sentences.length>0?content.length/sentences.length:0;
-    const read=Math.min(100,Math.round(
-      (paragraphs.length>=5?40:paragraphs.length>=3?25:10)+
-      (avgSentLen>10&&avgSentLen<80?40:20)+
-      (!content.includes("##")&&!content.includes("**")?20:0)
-    ));
-    const len=Math.min(100,Math.round(
-      content.length>=2000?100:content.length>=1500?85:content.length>=1000?65:content.length>=500?40:20
-    ));
-    const total=Math.round(seo*0.4+read*0.35+len*0.25);
-    return{seo,read,len,total};
+  function calcQualityScore(content:string, kw:string):{score:number;items:{label:string;pass:boolean;detail:string;weight:number}[]} | null {
+    if(!content||content.length<100)return null;
+    const items:{label:string;pass:boolean;detail:string;weight:number}[]=[];
+
+    // 1. 글자수
+    const charOk=content.length>=1200;
+    items.push({label:"글자수",pass:charOk,detail:`${content.length.toLocaleString()}자 (권장 1,200자+)`,weight:20});
+
+    // 2. 질문형 소제목 비율
+    const headings=(content.match(/^## .+/gm)||[]);
+    const qHeadings=headings.filter(h=>/[?？]/.test(h)||/하는법|방법|이유|이란|할까|될까|인가|인지|는지/.test(h));
+    const headingOk=headings.length>=3&&qHeadings.length>=Math.ceil(headings.length*0.5);
+    items.push({label:"질문형 소제목",pass:headingOk,detail:`${headings.length}개 중 ${qHeadings.length}개 질문형`,weight:25});
+
+    // 3. 키워드 밀도
+    const keyword=kw.trim();
+    const kwCount=keyword?(content.match(new RegExp(keyword.replace(/[.*+?^${}()|[\]\\]/g,"\\$&"),"gi"))||[]).length:0;
+    const kwOk=keyword?kwCount>=2&&kwCount<=6:true;
+    items.push({label:"키워드 밀도",pass:kwOk,detail:keyword?`"${keyword}" ${kwCount}회 (권장 2~6회)`:"키워드 없음",weight:20});
+
+    // 4. AI 패턴 감지
+    const aiPatterns=["해보겠습니다","알아보겠습니다","살펴보겠습니다","소개해드리겠습니다","정리해보겠습니다","결론적으로","중요합니다","다양한","효과적인","필수적으로"];
+    const aiHits=aiPatterns.filter(p=>content.includes(p));
+    const aiOk=aiHits.length===0;
+    items.push({label:"AI 패턴 차단",pass:aiOk,detail:aiOk?"AI 냄새 없음 ✓":`감지됨: ${aiHits.slice(0,2).join(", ")}`,weight:20});
+
+    // 5. 단락 균형
+    const paragraphs=content.split(/\n\n+/).filter(p=>p.trim().length>20&&!p.startsWith("##")&&!p.startsWith("["));
+    const avgLen=paragraphs.length>0?paragraphs.reduce((a,p)=>a+p.length,0)/paragraphs.length:0;
+    const paraOk=paragraphs.length>=4&&avgLen>=80&&avgLen<=400;
+    items.push({label:"단락 균형",pass:paraOk,detail:`단락 ${paragraphs.length}개, 평균 ${Math.round(avgLen)}자`,weight:15});
+
+    const score=Math.round(items.reduce((acc,it)=>acc+(it.pass?it.weight:0),0));
+    return{score,items};
   }
 
   async function generateCalendar(){
@@ -590,7 +602,7 @@ Output format (JSON array only, no other text):
   const [referralLoaded, setReferralLoaded] = useState(false);
   const [showUserDrop, setShowUserDrop] = useState(false);
   const [showReferralModal, setShowReferralModal] = useState(false);
-  const [qualityScore, setQualityScore] = useState<{seo:number;read:number;len:number;total:number}|null>(null);
+  const [qualityScore, setQualityScore] = useState<{score:number;items:{label:string;pass:boolean;detail:string;weight:number}[]}|null>(null);
   const [calKeywords, setCalKeywords] = useState("");
   const [calPlatform, setCalPlatform] = useState<"naver"|"tistory">("naver");
   const [calDays, setCalDays] = useState(30);
@@ -2265,19 +2277,20 @@ POST3: (제목)|(이유)
 
                     {/* 품질 점수 */}
                     {qualityScore&&(
-                      <div style={{padding:"12px 14px",borderRadius:12,background:"var(--card2)",border:"1px solid var(--border)",marginBottom:14}}>
+                      <div style={{padding:"14px 16px",borderRadius:12,background:"var(--card2)",border:"1px solid var(--border)",marginBottom:14}}>
                         <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:10}}>
-                          <span style={{fontSize:12,fontWeight:800,color:"var(--text2)"}}>📊 글 품질 점수</span>
-                          <span style={{fontSize:20,fontWeight:900,color:qualityScore.total>=80?"var(--success)":qualityScore.total>=55?"var(--warn)":"var(--danger)",fontFamily:"'Space Grotesk',sans-serif"}}>{qualityScore.total}점</span>
+                          <span style={{fontSize:12,fontWeight:800,color:"var(--text2)"}}>📊 SEO 품질 분석</span>
+                          <span style={{fontSize:20,fontWeight:900,color:qualityScore.score>=80?"var(--success)":qualityScore.score>=55?"var(--warn)":"var(--danger)",fontFamily:"'Space Grotesk',sans-serif"}}>{qualityScore.score}점</span>
                         </div>
-                        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}}>
-                          {([{l:"SEO",v:qualityScore.seo},{l:"가독성",v:qualityScore.read},{l:"글자수",v:qualityScore.len}] as const).map(({l,v})=>(
-                            <div key={l} style={{textAlign:"center"}}>
-                              <div style={{fontSize:10,color:"var(--text3)",marginBottom:4,fontWeight:700}}>{l}</div>
-                              <div style={{height:4,background:"var(--border)",borderRadius:99,overflow:"hidden",marginBottom:4}}>
-                                <div style={{height:"100%",width:`${v}%`,background:v>=80?"var(--success)":v>=55?"var(--warn)":"var(--danger)",borderRadius:99,transition:"width .6s ease"}}/>
+                        <div style={{display:"flex",flexDirection:"column",gap:6}}>
+                          {qualityScore.items.map((item,i)=>(
+                            <div key={i} style={{display:"flex",alignItems:"center",gap:8,padding:"6px 10px",borderRadius:8,background:item.pass?"rgba(0,255,150,.06)":"rgba(255,80,80,.06)"}}>
+                              <span style={{fontSize:14,flexShrink:0}}>{item.pass?"✅":"❌"}</span>
+                              <div style={{flex:1,minWidth:0}}>
+                                <div style={{fontSize:11,fontWeight:700,color:item.pass?"var(--success)":"var(--danger)"}}>{item.label}</div>
+                                <div style={{fontSize:10,color:"var(--text3)",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{item.detail}</div>
                               </div>
-                              <div style={{fontSize:11,fontWeight:800,color:v>=80?"var(--success)":v>=55?"var(--warn)":"var(--danger)"}}>{v}</div>
+                              <span style={{fontSize:10,color:"var(--text3)",flexShrink:0}}>{item.weight}점</span>
                             </div>
                           ))}
                         </div>
