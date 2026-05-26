@@ -52,7 +52,19 @@ function createWindow() {
     },
   });
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    shell.openExternal(url); return { action: "deny" };
+    // 미리보기 창 (about:blank) 은 Electron 내부에서 열기
+    if (!url || url === "about:blank" || url === "") {
+      return {
+        action: "allow",
+        overrideBrowserWindowOptions: {
+          width: 820, height: 920,
+          title: "구독자 시점 미리보기",
+          webPreferences: { contextIsolation: true, nodeIntegration: false },
+        },
+      };
+    }
+    shell.openExternal(url);
+    return { action: "deny" };
   });
   if (isDev) {
     mainWindow.loadURL("http://localhost:5173");
