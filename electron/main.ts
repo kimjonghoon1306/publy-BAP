@@ -104,7 +104,11 @@ ipcMain.handle("open-preview", async (_event, html: string) => {
     height: 960,
     title: "구독자 시점 미리보기",
     backgroundColor: "#ffffff",
-    webPreferences: { contextIsolation: true, nodeIntegration: false },
+    webPreferences: {
+      contextIsolation: true,
+      nodeIntegration: false,
+      webSecurity: false,
+    },
   });
   preview.loadURL("data:text/html;charset=utf-8," + encodeURIComponent(html));
   preview.setMenuBarVisibility(false);
