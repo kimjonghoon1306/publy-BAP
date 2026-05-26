@@ -1,16 +1,4 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
-
-declare global {
-  interface Window {
-    electron?: {
-      getBotStatus: () => Promise<string>;
-      getBotSecret: () => Promise<string>;
-      registerUser: (userId: string) => Promise<boolean>;
-      unregisterUser: (userId: string) => Promise<boolean>;
-      openPreview: (html: string) => Promise<void>;
-    };
-  }
-}
 import { PublyUser, getQuota, getHistory, getAccounts, PublyQuota, PublyHistory, PublyAccount, upsertAccount, useQuota, addHistory, deleteHistory, deleteAllHistory, changeUserPassword, getNaverApiKeys, saveNaverApiKeys, NaverApiKeys, checkNaverQuota, incrementNaverQuota, getNaverDailyUsage, NAVER_DAILY_LIMIT, getUserNaverApiKeys } from "../lib/supabase";
 import { supabase } from "../lib/supabase";
 
@@ -1689,8 +1677,8 @@ POST3: (제목)|(이유)
     const tagsHtml=hashtags.length>0?`<div class="tags">${hashtags.map(t=>`<span class="tag">${t.startsWith("#")?t:"#"+t}</span>`).join("")}</div>`:"";
     const html=`<!DOCTYPE html><html><head><meta charset="utf-8"><title>미리보기</title><style>*{box-sizing:border-box;margin:0;padding:0}body{background:#f5f5f5;font-family:'Apple SD Gothic Neo','Malgun Gothic',sans-serif;padding:20px}h1{font-size:24px;font-weight:900;color:#111;margin-bottom:16px;line-height:1.35;word-break:keep-all}.card{max-width:680px;margin:0 auto;background:#fff;border-radius:16px;padding:32px 28px;box-shadow:0 2px 12px rgba(0,0,0,.08)}h2{font-size:18px;font-weight:800;margin:24px 0 10px;color:#111;border-bottom:2px solid #eee;padding-bottom:8px}h3{font-size:15px;font-weight:700;margin:18px 0 8px;color:#222;border-left:4px solid #2563eb;padding-left:10px}p{margin:0 0 12px;font-size:15px;line-height:1.9;color:#333;word-break:keep-all}img{width:100%;border-radius:10px;display:block;margin:16px 0}figure{margin:16px 0}figcaption{font-size:11px;color:#999;text-align:center;margin-top:4px}.tags{margin-top:20px;display:flex;flex-wrap:wrap;gap:6px}.tag{font-size:12px;padding:3px 10px;border-radius:99px;background:#f0f4ff;color:#2563eb;font-weight:600}.section-box{margin-top:20px;padding:16px;background:#f8f8f8;border-radius:12px;border-left:4px solid #ddd}hr{border:none;border-top:1px solid #eee;margin:16px 0}</style></head><body><div class="card">${pubTitle?`<h1>${pubTitle}</h1>`:""}${thumbnail?`<img src="${thumbnail}" alt="썸네일"/>`:""}${blocksHtml}${tagsHtml}</div></body></html>`;
     // Electron IPC로 새 창 열기
-    if(window.electron?.openPreview){
-      window.electron.openPreview(html);
+    if((window as any).electron?.openPreview){
+      (window as any).electron.openPreview(html);
     } else {
       const w=window.open("","_blank","width=900,height=960,scrollbars=yes");
       if(w){w.document.write(html);w.document.close();}
