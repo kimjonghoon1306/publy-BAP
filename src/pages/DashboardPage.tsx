@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from "react";
+import React, { useState, useEffect, useCallback, useRef, createPortal } from "react";
 import { PublyUser, getQuota, getHistory, getAccounts, PublyQuota, PublyHistory, PublyAccount, upsertAccount, useQuota, addHistory, deleteHistory, deleteAllHistory, changeUserPassword, getNaverApiKeys, saveNaverApiKeys, NaverApiKeys, checkNaverQuota, incrementNaverQuota, getNaverDailyUsage, NAVER_DAILY_LIMIT, getUserNaverApiKeys } from "../lib/supabase";
 import { supabase } from "../lib/supabase";
 
@@ -3156,7 +3156,7 @@ POST3: (제목)|(이유)
       </div>
 
       {/* ── 전체화면 미리보기 모달 ── */}
-      {showPreviewModal&&(
+      {showPreviewModal&&createPortal((
         <div style={{position:"fixed",inset:0,zIndex:9999,display:"flex",flexDirection:"column",background:"#ffffff"}}>
           <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"12px 16px",borderBottom:"1px solid #e0e0e0",background:"#f8f8f8",flexShrink:0}}>
             <div style={{display:"flex",alignItems:"center",gap:10}}>
@@ -3197,7 +3197,7 @@ POST3: (제목)|(이유)
             </div>
           </div>
         </div>
-      )}
+      ), document.body)}
 
       {/* 블로그 순위 키 안내 팝업 */}
       {showRankInfo&&(
