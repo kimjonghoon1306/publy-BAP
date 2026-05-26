@@ -1,4 +1,16 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
+
+declare global {
+  interface Window {
+    electron?: {
+      getBotStatus: () => Promise<string>;
+      getBotSecret: () => Promise<string>;
+      registerUser: (userId: string) => Promise<boolean>;
+      unregisterUser: (userId: string) => Promise<boolean>;
+      openPreview: (html: string) => Promise<void>;
+    };
+  }
+}
 import { PublyUser, getQuota, getHistory, getAccounts, PublyQuota, PublyHistory, PublyAccount, upsertAccount, useQuota, addHistory, deleteHistory, deleteAllHistory, changeUserPassword, getNaverApiKeys, saveNaverApiKeys, NaverApiKeys, checkNaverQuota, incrementNaverQuota, getNaverDailyUsage, NAVER_DAILY_LIMIT, getUserNaverApiKeys } from "../lib/supabase";
 import { supabase } from "../lib/supabase";
 
