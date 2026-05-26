@@ -806,16 +806,22 @@ Output format (JSON array only, no other text):
 
   // ── 미리보기 렌더 ──
   function renderPreview(text:string):React.ReactElement[]{
-    return text.split("\n").map((line,i)=>{
-      if(line.startsWith("## "))return<h2 key={i} style={{fontSize:18,fontWeight:800,margin:"20px 0 8px",color:"#111"}}>{line.slice(3)}</h2>;
-      if(line.startsWith("### "))return<h3 key={i} style={{fontSize:16,fontWeight:700,margin:"16px 0 6px",color:"#222"}}>{line.slice(4)}</h3>;
-      if(line==="---")return<hr key={i} style={{border:"none",borderTop:"1px solid #ddd",margin:"16px 0"}}/>;
-      if(line==="")return<br key={i}/>;
-      return<p key={i} style={{marginBottom:8,fontSize:14,lineHeight:1.8,color:"#333"}}>{line}</p>;
+    const sectionTags=["[FAQ시작]","[관련글시작]","[참고자료시작]"];
+    const sectionStart=sectionTags.reduce((min,tag)=>{const i=text.indexOf(tag);return(i>-1&&i<min)?i:min;},Infinity);
+    const body=sectionStart<Infinity?text.slice(0,sectionStart).trim():text;
+    const section=sectionStart<Infinity?text.slice(sectionStart).trim():"";
+    const renderLines=(t:string,offset:number)=>t.split("\n").map((line,i)=>{
+      if(line.startsWith("## "))return<h2 key={offset+i} style={{fontSize:18,fontWeight:800,margin:"20px 0 8px",color:"#111"}}>{line.slice(3)}</h2>;
+      if(line.startsWith("### "))return<h3 key={offset+i} style={{fontSize:16,fontWeight:700,margin:"16px 0 6px",color:"#222"}}>{line.slice(4)}</h3>;
+      if(line==="---")return<hr key={offset+i} style={{border:"none",borderTop:"1px solid #ddd",margin:"16px 0"}}/>;
+      if(line==="")return<br key={offset+i}/>;
+      if(sectionTags.some(t=>line.includes(t)))return<div key={offset+i} style={{display:"none"}}/>;
+      return<p key={offset+i} style={{marginBottom:8,fontSize:14,lineHeight:1.8,color:"#333"}}>{line}</p>;
     });
+    return[...renderLines(body,0),section?<hr key="sep" style={{border:"none",borderTop:"1px solid #eee",margin:"20px 0"}}/>:<span key="no-sep"/>, ...renderLines(section,10000)];
   }
 
-  async function handleChangePw() {
+    async function handleChangePw() {
     if (!currentPw || !newPw1 || !newPw2) { setPwMsg("모든 항목을 입력하세요"); return; }
     if (newPw1 !== newPw2) { setPwMsg("새 비밀번호가 일치하지 않습니다"); return; }
     if (newPw1.length < 6) { setPwMsg("비밀번호는 6자 이상이어야 합니다"); return; }
@@ -3158,21 +3164,21 @@ POST3: (제목)|(이유)
 
       {/* ── 전체화면 미리보기 모달 ── */}
       {showPreviewModal&&createPortal((
-        <div style={{position:"fixed",inset:0,zIndex:9999,display:"flex",flexDirection:"column",background:"#ffffff"}}>
-          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"12px 16px",borderBottom:"1px solid #e0e0e0",background:"#f8f8f8",flexShrink:0}}>
-            <div style={{display:"flex",alignItems:"center",gap:10}}>
-              <div style={{width:8,height:8,borderRadius:"50%",background:"var(--accent)"}}/>
-              <span style={{fontSize:14,fontWeight:700,color:"var(--text)"}}>구독자 시점 미리보기</span>
+        <div style={{position:"fixed",inset:0,zIndex:99999,background:"#f5f5f5",display:"flex",flexDirection:"column",fontFamily:"'Apple SD Gothic Neo','Malgun Gothic',sans-serif"}}>
+          {/* 상단 바 */}
+          <div style={{background:"#fff",borderBottom:"1px solid #e0e0e0",padding:"10px 20px",display:"flex",alignItems:"center",justifyContent:"space-between",flexShrink:0,boxShadow:"0 1px 4px rgba(0,0,0,.06)"}}>
+            <div style={{display:"flex",alignItems:"center",gap:12}}>
+              <span style={{fontSize:13,fontWeight:800,color:"#111"}}>📱 구독자 시점 미리보기</span>
               <div style={{position:"relative"}}>
-                <button onClick={()=>setShowNaverMenu(v=>!v)} style={{padding:"6px 12px",borderRadius:8,background:"#03C75A",color:"#fff",border:"none",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:"inherit"}}>📋 네이버 복사 ▲</button>
+                <button onClick={()=>setShowNaverMenu(v=>!v)} style={{padding:"5px 12px",borderRadius:6,background:"#03C75A",color:"#fff",border:"none",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:"inherit"}}>📋 네이버 복사 ▲</button>
                 {showNaverMenu&&(
                   <>
                     <div style={{position:"fixed",inset:0,zIndex:40}} onClick={()=>setShowNaverMenu(false)}/>
-                    <div style={{position:"absolute",top:36,left:0,zIndex:50,width:240,borderRadius:12,overflow:"hidden",background:"#1a1a2e",border:"1px solid rgba(255,255,255,.12)",boxShadow:"0 8px 32px rgba(0,0,0,.4)"}}>
-                      {[{tag:"전체",color:"#03C75A",tagColor:"#fff",label:"전체 복사",fn:()=>{copyForNaver();setShowNaverMenu(false);}},{tag:"FAQ",color:"#fbbf24",tagColor:"#000",label:"본문+FAQ",fn:()=>{copyForNaverWithFaq();setShowNaverMenu(false);}},{tag:"본문",color:"#f472b6",tagColor:"#fff",label:"본문만",fn:()=>{copyForNaverBodyOnly();setShowNaverMenu(false);}}].map((opt,i)=>(
-                        <button key={i} onClick={opt.fn} style={{width:"100%",textAlign:"left",padding:"10px 14px",borderBottom:i<2?"1px solid rgba(255,255,255,.08)":"none",background:"transparent",cursor:"pointer",border:"none",fontFamily:"inherit",display:"flex",alignItems:"center",gap:8}}>
-                          <span style={{fontSize:10,fontWeight:800,padding:"2px 7px",borderRadius:99,background:opt.color,color:opt.tagColor}}>{opt.tag}</span>
-                          <span style={{fontSize:13,fontWeight:600,color:"#fff"}}>{opt.label}</span>
+                    <div style={{position:"absolute",top:34,left:0,zIndex:50,width:200,borderRadius:10,overflow:"hidden",background:"#1a1a2e",border:"1px solid rgba(255,255,255,.12)",boxShadow:"0 8px 32px rgba(0,0,0,.4)"}}>
+                      {[{tag:"전체",color:"#03C75A",label:"전체 복사",fn:()=>{copyForNaver();setShowNaverMenu(false);}},{tag:"FAQ",color:"#fbbf24",label:"본문+FAQ",fn:()=>{copyForNaverWithFaq();setShowNaverMenu(false);}},{tag:"본문",color:"#f472b6",label:"본문만",fn:()=>{copyForNaverBodyOnly();setShowNaverMenu(false);}}].map((opt,i)=>(
+                        <button key={i} onClick={opt.fn} style={{width:"100%",textAlign:"left",padding:"9px 12px",borderBottom:i<2?"1px solid rgba(255,255,255,.08)":"none",background:"transparent",cursor:"pointer",border:"none",fontFamily:"inherit",display:"flex",alignItems:"center",gap:8}}>
+                          <span style={{fontSize:10,fontWeight:800,padding:"2px 6px",borderRadius:99,background:opt.color,color:"#fff"}}>{opt.tag}</span>
+                          <span style={{fontSize:12,fontWeight:600,color:"#fff"}}>{opt.label}</span>
                         </button>
                       ))}
                     </div>
@@ -3180,21 +3186,47 @@ POST3: (제목)|(이유)
                 )}
               </div>
             </div>
-            <button onClick={()=>setShowPreviewModal(false)} style={{width:32,height:32,borderRadius:8,background:"transparent",border:"1px solid var(--border)",cursor:"pointer",color:"var(--text3)",fontSize:18,display:"flex",alignItems:"center",justifyContent:"center"}}>✕</button>
+            <button onClick={()=>setShowPreviewModal(false)} style={{width:32,height:32,borderRadius:8,background:"#f0f0f0",border:"none",cursor:"pointer",fontSize:18,color:"#555",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700}}>✕</button>
           </div>
-          <div style={{flex:1,overflowY:"auto"}}>
-            <div style={{maxWidth:720,margin:"0 auto",padding:"24px 16px"}}>
-              {thumbnail&&<div style={{borderRadius:16,overflow:"hidden",marginBottom:20,aspectRatio:"16/9"}}><img src={thumbnail} alt="썸네일" style={{width:"100%",height:"100%",objectFit:"cover"}}/></div>}
-              {pubTitle&&<h1 style={{fontSize:22,fontWeight:900,color:"#111111",marginBottom:16,lineHeight:1.3}}>{pubTitle}</h1>}
-              {greeting&&<div style={{padding:"14px 16px",borderRadius:12,background:"var(--accent-bg)",border:"1px solid var(--accent-border)",marginBottom:16,fontSize:13,color:"var(--text)",lineHeight:1.7}}>{greeting}</div>}
-              <div style={{display:"flex",flexDirection:"column",gap:12}}>
-                {blocks.map(block=>{
-                  if(block.type==="text")return(<div key={block.id}>{renderPreview((block as TextBlock).content)}</div>);
+          {/* 본문 */}
+          <div style={{flex:1,overflowY:"auto",padding:"24px 16px"}}>
+            <div style={{maxWidth:680,margin:"0 auto",background:"#fff",borderRadius:16,padding:"32px 28px",boxShadow:"0 2px 12px rgba(0,0,0,.08)"}}>
+              {thumbnail&&<div style={{borderRadius:12,overflow:"hidden",marginBottom:24}}><img src={thumbnail} alt="썸네일" style={{width:"100%",display:"block"}}/></div>}
+              {pubTitle&&<h1 style={{fontSize:24,fontWeight:900,color:"#111",marginBottom:16,lineHeight:1.35,wordBreak:"keep-all"}}>{pubTitle}</h1>}
+              {(()=>{
+                const sectionTags=["[FAQ시작]","[관련글시작]","[참고자료시작]"];
+                const imgs=getActiveImages();
+                let imgIdx=0;
+                return blocks.map((block,bi)=>{
+                  if(block.type==="text"){
+                    const txt=(block as TextBlock).content;
+                    const secStart=sectionTags.reduce((min,tag)=>{const i=txt.indexOf(tag);return i>-1&&i<min?i:min;},Infinity);
+                    const bodyTxt=secStart<Infinity?txt.slice(0,secStart).trim():txt;
+                    const secTxt=secStart<Infinity?txt.slice(secStart).trim():"";
+                    const renderTxt=(t:string,kOffset:number)=>t.split("
+").filter(l=>l.trim()&&!sectionTags.some(tag=>l.includes(tag))).map((line,i)=>{
+                      if(line.startsWith("## "))return<h2 key={kOffset+i} style={{fontSize:18,fontWeight:800,margin:"24px 0 10px",color:"#111",borderBottom:"2px solid #eee",paddingBottom:8}}>{line.slice(3)}</h2>;
+                      if(line.startsWith("### "))return<h3 key={kOffset+i} style={{fontSize:15,fontWeight:700,margin:"18px 0 8px",color:"#222",borderLeft:"4px solid #2563eb",paddingLeft:10}}>{line.slice(4)}</h3>;
+                      if(line==="---")return<hr key={kOffset+i} style={{border:"none",borderTop:"1px solid #eee",margin:"16px 0"}}/>;
+                      return<p key={kOffset+i} style={{margin:"0 0 12px",fontSize:15,lineHeight:1.9,color:"#333",wordBreak:"keep-all"}}>{line}</p>;
+                    });
+                    return(
+                      <div key={block.id}>
+                        {renderTxt(bodyTxt,bi*1000)}
+                        {secTxt&&<div style={{marginTop:24,padding:"16px",background:"#f8f8f8",borderRadius:12,borderLeft:"4px solid #ddd"}}>{renderTxt(secTxt,bi*1000+500)}</div>}
+                      </div>
+                    );
+                  }
                   const imgBlock=block as SingleImageBlock;
-                  return imgBlock.src?(<div key={block.id} style={{textAlign:imgBlock.position}}><img src={imgBlock.src} alt={imgBlock.alt} style={{width:"100%",borderRadius:12,display:"block"}} onError={e=>{(e.target as HTMLImageElement).style.display="none";}}/>{imgBlock.alt&&<div style={{fontSize:11,color:"var(--text3)",textAlign:"center",marginTop:4}}>{imgBlock.alt}</div>}</div>):null;
-                })}
-              </div>
-              {hashtags.length>0&&<div style={{display:"flex",flexWrap:"wrap",gap:6,marginTop:20,paddingTop:16,borderTop:"1px solid var(--border)"}}>{hashtags.map((t,i)=><span key={i} style={{fontSize:13,padding:"4px 12px",borderRadius:99,background:"var(--accent-bg)",color:"var(--accent-text)"}}>{t}</span>)}</div>}
+                  return imgBlock.src?(
+                    <div key={block.id} style={{margin:"20px 0"}}>
+                      <img src={imgBlock.src} alt={imgBlock.alt} style={{width:"100%",borderRadius:10,display:"block"}} onError={e=>{(e.target as HTMLImageElement).style.display="none";}}/>
+                      {imgBlock.alt&&<p style={{fontSize:11,color:"#999",textAlign:"center",marginTop:6}}>{imgBlock.alt}</p>}
+                    </div>
+                  ):null;
+                });
+              })()}
+              {hashtags.length>0&&<div style={{marginTop:24,display:"flex",flexWrap:"wrap",gap:6}}>{hashtags.map((t,i)=><span key={i} style={{fontSize:12,padding:"3px 10px",borderRadius:99,background:"#f0f4ff",color:"#2563eb",fontWeight:600}}>{t.startsWith("#")?t:"#"+t}</span>)}</div>}
             </div>
           </div>
         </div>
