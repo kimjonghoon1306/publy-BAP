@@ -2008,7 +2008,7 @@ POST3: (제목)|(이유)
           {/* 사이드바 */}
           <div className="sidebar">
             <div className="nav-section" style={{fontSize:10,fontWeight:800,color:"var(--text3)",padding:"8px 12px 4px",letterSpacing:".08em"}}>✍️ 블로그 기능</div>
-            {TABS.filter(t=>["keyword","write","image","publish","manage","accounts","rank","calendar"].includes(t.k)).map(t => (
+            {TABS.filter(t=>["keyword","write","image","photo","publish","manage","accounts","rank","calendar"].includes(t.k)).map(t => (
               <button key={t.k} className={`nav-item ${tab===t.k?"active":""}`} onClick={()=>{if(t.k==="rank"){window.open("https://rank.xn--zk5biyyw.com/","_blank");return;}setTab(t.k as any);}}>
                 <span className="nav-ico">{t.i}</span>{t.l}
               </button>
