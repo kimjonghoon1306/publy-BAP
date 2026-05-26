@@ -1241,7 +1241,7 @@ Output format (JSON array only, no other text):
     if(reset)setTitles([]);
     setLoadingTitles(true);abortRef.current=new AbortController();
     const prompt=adType==="adpost"
-      ?`당신은 대한민국 최고의 네이버 블로그 SEO 제목 전문가입니다.\n키워드: "${keyword.trim()}"\n\n제목 30개를 JSON 배열로만 반환하세요.\n- 키워드 자연스럽게 포함\n- 25~40자, 숫자 필수 (BEST 7, TOP 5 등)\n- 클릭 유발 ("솔직히","이것만","나만 알던")\n- 경험 공유형 ("써봤어요","해봤더니")\n\nJSON 배열만 반환.`
+      ?`당신은 대한민국 최고의 네이버 블로그 SEO 제목 전문가입니다.\n키워드: "${keyword.trim()}"\n\n제목 30개를 JSON 배열로만 반환하세요.\n- 키워드 반드시 포함\n- 15~25자 이내 (짧고 강렬하게)\n- 숫자 필수 (BEST 5, TOP 3, 7가지 등)\n- 클릭 유발어 ("솔직히","이것만","나만 알던","진짜","꿀팁")\n- 경험 공유형 ("써봤어요","해봤더니","알고보니")\n- 불필요한 수식어 금지\n\nJSON 배열만 반환.`
       :`당신은 구글 애드센스 SEO 전문가입니다.\n키워드: "${keyword.trim()}"\n\n제목 30개를 JSON 배열로만 반환하세요.\n- 키워드 자연스럽게 포함\n- 30~50자, 정보성 톤\n- "완벽 가이드","총정리","이유 5가지"\n\nJSON 배열만 반환.`;
     try{
       const text=await callAI(prompt,abortRef.current.signal);
@@ -1364,7 +1364,7 @@ POST3: (제목)|(이유)
       const rawBlocks = body.split("\n\n").filter(Boolean).map(p=>({type:"text" as const,id:uid(),content:p}));
       setBlocks(rawBlocks.length>0?rawBlocks:[{type:"text",id:uid(),content:body}]);
       setPubTitle(title);
-      if(tgm)setHashtags(tgm[1].trim().split(",").map((t:string)=>t.trim().startsWith("#")?t.trim():"#"+t.trim()).filter(Boolean).slice(0,Math.floor(Math.random()*4)+5));
+      if(tgm)setHashtags(tgm[1].trim().split(",").map((t:string)=>{const clean=t.trim().replace(/\s+/g,"");return clean.startsWith("#")?clean:"#"+clean;}).filter(Boolean).slice(0,Math.floor(Math.random()*4)+5));
       setAutoInserted(false);setThumbnail("");
     }catch(e:any){if(e.name!=="AbortError")alert("글 생성 실패: "+e.message);}
     finally{setGenerating(false);}
@@ -1581,6 +1581,38 @@ POST3: (제목)|(이유)
       getAccounts(user.id).then(setAccounts);
     }catch(e:any){alert("연결 실패: "+e.message);}finally{setConnId(null);}
   }
+  function openPreview(){
+    const imgs=getActiveImages();
+    const content=`<!DOCTYPE html><html><head><meta charset="utf-8"><title>미리보기</title><style>*{box-sizing:border-box;margin:0;padding:0}body{background:#f5f5f5;font-family:'Apple SD Gothic Neo','Malgun Gothic',sans-serif;padding:20px}h1{font-size:24px;font-weight:900;color:#111;margin-bottom:16px;line-height:1.35;word-break:keep-all}.card{max-width:680px;margin:0 auto;background:#fff;border-radius:16px;padding:32px 28px;box-shadow:0 2px 12px rgba(0,0,0,.08)}h2{font-size:18px;font-weight:800;margin:24px 0 10px;color:#111;border-bottom:2px solid #eee;padding-bottom:8px}h3{font-size:15px;font-weight:700;margin:18px 0 8px;color:#222;border-left:4px solid #2563eb;padding-left:10px}p{margin:0 0 12px;font-size:15px;line-height:1.9;color:#333;word-break:keep-all}img{width:100%;border-radius:10px;display:block;margin:16px 0}.tags{margin-top:20px;display:flex;flex-wrap:wrap;gap:6px}.tag{font-size:12px;padding:3px 10px;border-radius:99px;background:#f0f4ff;color:#2563eb;font-weight:600}.section-box{margin-top:20px;padding:16px;background:#f8f8f8;border-radius:12px;border-left:4px solid #ddd}hr{border:none;border-top:1px solid #eee;margin:16px 0}figcaption{font-size:11px;color:#999;text-align:center;margin-top:4px}</style></head><body><div class="card">${
+      pubTitle?`<h1>${pubTitle}</h1>`:""
+    }${
+      thumbnail?`<img src="${thumbnail}" alt="썸네일"/>`:""
+    }${
+      blocks.map(b=>{
+        if(b.type==="text"){
+          const txt=(b as TextBlock).content;
+          const sectionTags=["[FAQ시작]","[관련글시작]","[참고자료시작]"];
+          const secStart=sectionTags.reduce((min,tag)=>{const i=txt.indexOf(tag);return i>-1&&i<min?i:min;},Infinity);
+          const bodyTxt=secStart<Infinity?txt.slice(0,secStart).trim():txt;
+          const secTxt=secStart<Infinity?txt.slice(secStart).trim():"";
+          const toHtml=(t:string)=>t.split("\n").filter(l=>l.trim()&&!sectionTags.some(tag=>l.includes(tag))).map(line=>{
+            if(line.startsWith("## "))return`<h2>${line.slice(3)}</h2>`;
+            if(line.startsWith("### "))return`<h3>${line.slice(4)}</h3>`;
+            if(line==="---")return`<hr/>`;
+            return`<p>${line}</p>`;
+          }).join("");
+          return toHtml(bodyTxt)+(secTxt?`<div class="section-box">${toHtml(secTxt)}</div>`:"");
+        }
+        const ib=b as SingleImageBlock;
+        return ib.src?`<figure><img src="${ib.src}" alt="${ib.alt||""}"/>${ib.alt?`<figcaption>${ib.alt}</figcaption>`:""}</figure>`:"";
+      }).join("")
+    }${
+      hashtags.length>0?`<div class="tags">${hashtags.map(t=>`<span class="tag">${t.startsWith("#")?t:"#"+t}</span>`).join("")}</div>`:""
+    }</div></body></html>`;
+    const w=window.open("","_blank","width=800,height=900,scrollbars=yes");
+    if(w){w.document.write(content);w.document.close();}
+  }
+
   async function handleDeleteAccount(id:string){
     if(!confirm("이 계정을 삭제할까요?"))return;
     await supabase.from("publy_accounts").delete().eq("id",id);getAccounts(user.id).then(setAccounts);
@@ -2164,7 +2196,7 @@ POST3: (제목)|(이유)
                       <div className="card-title">🎉 글 생성 완료!</div>
                       <div style={{display:"flex",gap:7,alignItems:"center"}}>
                         <span style={{padding:"4px 12px",borderRadius:99,fontSize:12,fontWeight:800,background:"var(--accent-bg)",color:"var(--accent-text)",border:"1px solid var(--accent-border)"}}>{genContent.length.toLocaleString()}자</span>
-                        <button style={{padding:"7px 14px",borderRadius:9,border:"1px solid var(--accent-border)",background:"var(--accent-bg)",color:"var(--accent-text)",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:"inherit"}} onClick={()=>setShowPreviewModal(true)}>👁️ 미리보기</button>
+                        <button style={{padding:"7px 14px",borderRadius:9,border:"1px solid var(--accent-border)",background:"var(--accent-bg)",color:"var(--accent-text)",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:"inherit"}} onClick={()=>openPreview()}>👁️ 미리보기</button>
                       </div>
                     </div>
 
@@ -2492,7 +2524,7 @@ POST3: (제목)|(이유)
                       )}
                     </div>
                     {/* 미리보기 */}
-                    <button onClick={()=>setShowPreviewModal(true)} style={{display:"flex",alignItems:"center",gap:5,padding:"7px 12px",borderRadius:8,background:"oklch(.62 .22 300)",color:"#fff",border:"none",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:"inherit",whiteSpace:"nowrap"}}>
+                    <button onClick={()=>openPreview()} style={{display:"flex",alignItems:"center",gap:5,padding:"7px 12px",borderRadius:8,background:"oklch(.62 .22 300)",color:"#fff",border:"none",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:"inherit",whiteSpace:"nowrap"}}>
                       👁️ 미리보기
                     </button>
                     {/* 발행 설정 토글 */}
