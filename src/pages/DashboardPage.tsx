@@ -1,5 +1,4 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
-import { createPortal } from "react-dom";
 import { PublyUser, getQuota, getHistory, getAccounts, PublyQuota, PublyHistory, PublyAccount, upsertAccount, useQuota, addHistory, deleteHistory, deleteAllHistory, changeUserPassword, getNaverApiKeys, saveNaverApiKeys, NaverApiKeys, checkNaverQuota, incrementNaverQuota, getNaverDailyUsage, NAVER_DAILY_LIMIT, getUserNaverApiKeys } from "../lib/supabase";
 import { supabase } from "../lib/supabase";
 
@@ -36,6 +35,19 @@ const WRITE_STYLE_GUIDE: Record<WriteStyle,string> = {
   "맛집후기":"[스타일] 맛·향·식감 생생하게 묘사. 가격·위치·웨이팅·주차 정보 포함. 재방문 의향 솔직하게.",
   "여행기":  "[스타일] 여행지 분위기·감성 묘사. 일정·비용·교통 팁 포함. 포토스팟·현지 맛집 자연스럽게 언급.",
 };
+
+const PERSONA_STYLES = [
+  {id:"none",     label:"🙂 기본",      color:"#888", prompt:""},
+  {id:"young_w",  label:"👩 20대 여성",  color:"#f472b6", prompt:"20대 여성이 친한 친구에게 카톡 보내듯 친근하고 감성적으로 작성해줘. 이모지 적절히 사용하고 공감과 감성을 자극하는 표현을 써줘. '~했어요', '~더라고요', '~거든요' 말투로."},
+  {id:"young_m",  label:"👨 20대 남성",  color:"#60a5fa", prompt:"20대 남성이 친구에게 솔직하게 말하듯 써줘. 직접적이고 핵심만 짚는 문체로 유머와 현실적인 조언을 섞어서. '~했어요', '~임', '~거든요' 자연스럽게."},
+  {id:"mid_w",    label:"👩‍🦳 40대 여성", color:"#fb923c", prompt:"40대 주부나 직장맘이 또래 친구에게 진심으로 알려주듯 따뜻하고 실용적으로 써줘. 경험에서 우러나온 조언과 공감을 담아줘. '~해요', '~하더라고요', '~이에요' 말투로."},
+  {id:"mid_m",    label:"👨‍🦳 40대 남성", color:"#34d399", prompt:"40대 직장인 남성이 후배에게 조언해주듯 신뢰감 있고 경험 기반으로 써줘. 핵심 정보를 명확하게 전달하되 딱딱하지 않게. '~합니다', '~했어요', '~거든요' 섞어서."},
+  {id:"mom",      label:"👩‍👧 엄마",      color:"#f9a8d4", prompt:"자상한 엄마가 아이에게 설명해주듯 따뜻하고 걱정 어린 마음으로 써줘. 안전과 건강을 먼저 생각하고 실용적인 조언과 따뜻한 격려를 담아줘."},
+  {id:"expert",   label:"🎓 전문가",     color:"#a78bfa", prompt:"해당 분야 전문가가 신뢰감 있게 써줘. 전문 지식을 쉬운 말로 풀어서 근거와 데이터를 적극 활용하고 독자가 실제로 적용할 수 있는 실용적 조언을 담아줘."},
+  {id:"teacher",  label:"👨‍🏫 선생님",    color:"#4ade80", prompt:"친절한 선생님이 학생에게 설명해주듯 차근차근 이해하기 쉽게 써줘. 단계별로 설명하고 어려운 개념은 쉬운 예시로 풀어서."},
+  {id:"reporter", label:"📰 기자",       color:"#94a3b8", prompt:"신문 기자가 심층 취재 기사 쓰듯 객관적이고 사실 기반으로 써줘. 핵심 정보를 앞에 배치하고 신뢰감 있는 문체로."},
+] as const;
+type PersonaStyle = typeof PERSONA_STYLES[number]["id"];
 const MAIN_TABS = [
   {k:"keyword", i:"🔍", l:"키워드/제목"},
   {k:"write",   i:"✍️", l:"글 생성"},
@@ -571,6 +583,7 @@ Output format (JSON array only, no other text):
   const [writeAI, setWriteAI] = useState(()=>localStorage.getItem("publy_write_ai")||"gemini");
   const [imageAI, setImageAI] = useState(()=>localStorage.getItem("publy_image_ai")||"openai_img");
   const [writeStyle, setWriteStyle] = useState<WriteStyle>(()=>(localStorage.getItem("publy_write_style") as WriteStyle)||"감성일기");
+  const [persona, setPersona] = useState<PersonaStyle>(()=>(localStorage.getItem("publy_persona") as PersonaStyle)||"none");
   const [fontMode, setFontMode] = useState<"normal"|"large">(()=>(localStorage.getItem("publy_font_mode")||"normal") as "normal"|"large");
   const [noticePopup, setNoticePopup] = useState<{title:string;body:string;key:string}|null>(null);
   const [myReferrals, setMyReferrals] = useState<{id:string;name:string;email:string;plan:string;created_at:string}[]>([]);
@@ -1306,6 +1319,7 @@ Output format (JSON array only, no other text):
       ?"[플랫폼] 네이버: ## 기호 절대 금지. 순수 텍스트. 감성적 경험담."
       :"[플랫폼] 티스토리: 정보성 중심. 내부링크 2개 자연스럽게 포함.";
     const styleGuide=WRITE_STYLE_GUIDE[writeStyle]||"";
+    const personaGuide=PERSONA_STYLES.find(p=>p.id===persona)?.prompt||"";
     const prompt=`당신은 대한민국 최고의 블로그 작가입니다.
 
 키워드: "${keyword}"  제목: "${title}"
@@ -1332,7 +1346,7 @@ ${catGuide}
 
 ${adGuide}
 ${platGuide}
-${styleGuide}
+${styleGuide}${personaGuide?"\n\n[말투/페르소나]\n"+personaGuide:""}
 
 === 출력 형식 ===
 태그: 태그1, 태그2, 태그3, 태그4, 태그5
@@ -1517,20 +1531,6 @@ POST3: (제목)|(이유)
         </div>
       )}
 
-      {/* 공개 설정 */}
-      <div className="card" style={{padding:"14px 16px"}}>
-        <div className="card-title" style={{marginBottom:10}}>👁️ 공개 설정</div>
-        <div style={{display:"flex",flexDirection:"column",gap:8}}>
-          {(platform==="naver"?[{v:"public",ico:"🌍",label:"전체 공개"},{v:"neighbor",ico:"👥",label:"이웃 공개"},{v:"private",ico:"🔒",label:"비공개"}]:[{v:"public",ico:"🌍",label:"전체 공개"},{v:"private",ico:"🔒",label:"비공개"}] as {v:string,ico:string,label:string}[]).map(opt=>(
-            <button key={opt.v} onClick={()=>setVisibility(opt.v as "public"|"neighbor"|"private")} style={{padding:"11px 14px",borderRadius:10,border:`2px solid ${visibility===opt.v?"var(--accent)":"var(--border)"}`,background:visibility===opt.v?"var(--accent-bg)":"var(--bg)",cursor:"pointer",fontFamily:"inherit",textAlign:"left",transition:"all .15s",display:"flex",alignItems:"center",gap:10}}>
-              <span style={{fontSize:20}}>{opt.ico}</span>
-              <span style={{fontSize:13,fontWeight:600,color:visibility===opt.v?"var(--accent-text)":"var(--text)"}}>{opt.label}</span>
-              {visibility===opt.v&&<span style={{marginLeft:"auto",color:"var(--accent-text)"}}>✓</span>}
-            </button>
-          ))}
-        </div>
-      </div>
-
       {/* 발행 범위 */}
       <div className="card" style={{padding:"14px 16px"}}>
         <div className="card-title" style={{marginBottom:10}}>📝 발행 범위</div>
@@ -1547,6 +1547,20 @@ POST3: (제목)|(이유)
                 <div style={{fontSize:11,color:"var(--text3)",marginTop:2}}>{opt.desc}</div>
               </div>
               {pubScope===opt.v&&<span style={{color:"var(--accent-text)",flexShrink:0}}>✓</span>}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* 공개 설정 */}
+      <div className="card" style={{padding:"14px 16px"}}>
+        <div className="card-title" style={{marginBottom:10}}>👁️ 공개 설정</div>
+        <div style={{display:"flex",flexDirection:"column",gap:8}}>
+          {(platform==="naver"?[{v:"public",ico:"🌍",label:"전체 공개"},{v:"neighbor",ico:"👥",label:"이웃 공개"},{v:"private",ico:"🔒",label:"비공개"}]:[{v:"public",ico:"🌍",label:"전체 공개"},{v:"private",ico:"🔒",label:"비공개"}] as {v:string,ico:string,label:string}[]).map(opt=>(
+            <button key={opt.v} onClick={()=>setVisibility(opt.v as "public"|"neighbor"|"private")} style={{padding:"11px 14px",borderRadius:10,border:`2px solid ${visibility===opt.v?"var(--accent)":"var(--border)"}`,background:visibility===opt.v?"var(--accent-bg)":"var(--bg)",cursor:"pointer",fontFamily:"inherit",textAlign:"left",transition:"all .15s",display:"flex",alignItems:"center",gap:10}}>
+              <span style={{fontSize:20}}>{opt.ico}</span>
+              <span style={{fontSize:13,fontWeight:600,color:visibility===opt.v?"var(--accent-text)":"var(--text)"}}>{opt.label}</span>
+              {visibility===opt.v&&<span style={{marginLeft:"auto",color:"var(--accent-text)"}}>✓</span>}
             </button>
           ))}
         </div>
@@ -2186,6 +2200,19 @@ POST3: (제목)|(이유)
                           style={{padding:"10px 12px",borderRadius:10,border:`1.5px solid ${writeStyle===s.id?"var(--accent)":"var(--border)"}`,background:writeStyle===s.id?"var(--accent-bg)":"var(--bg)",cursor:"pointer",textAlign:"left",fontFamily:"inherit",transition:"all .15s"}}>
                           <div style={{fontSize:13,fontWeight:700,color:writeStyle===s.id?"var(--accent-text)":"var(--text)"}}>{s.i} {s.id}</div>
                           <div style={{fontSize:11,color:"var(--text3)",marginTop:2}}>{s.desc}</div>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* 말투/페르소나 */}
+                  <div style={{marginBottom:16}}>
+                    <label className="inp-label">🎭 말투 설정 <span style={{fontSize:10,color:"var(--text3)",fontWeight:400}}>(선택)</span></label>
+                    <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
+                      {PERSONA_STYLES.map(p=>(
+                        <button key={p.id} onClick={()=>{setPersona(p.id);localStorage.setItem("publy_persona",p.id);}}
+                          style={{padding:"6px 11px",borderRadius:20,border:`1.5px solid ${persona===p.id?p.color:"var(--border)"}`,background:persona===p.id?p.color+"22":"var(--bg)",cursor:"pointer",fontFamily:"inherit",fontSize:12,fontWeight:persona===p.id?700:500,color:persona===p.id?p.color:"var(--text2)",transition:"all .15s",whiteSpace:"nowrap"}}>
+                          {p.label}
                         </button>
                       ))}
                     </div>
@@ -3226,8 +3253,8 @@ POST3: (제목)|(이유)
       </div>
 
       {/* ── 전체화면 미리보기 모달 ── */}
-      {showPreviewModal&&createPortal((
-        <div style={{position:"fixed",inset:0,zIndex:99999,background:"#f5f5f5",display:"flex",flexDirection:"column",fontFamily:"'Apple SD Gothic Neo','Malgun Gothic',sans-serif"}}>
+      {showPreviewModal&&(
+        <div style={{position:"fixed",inset:0,zIndex:9999,background:"#f5f5f5",display:"flex",flexDirection:"column",fontFamily:"'Apple SD Gothic Neo','Malgun Gothic',sans-serif"}}>
           {/* 상단 바 */}
           <div style={{background:"#fff",borderBottom:"1px solid #e0e0e0",padding:"10px 20px",display:"flex",alignItems:"center",justifyContent:"space-between",flexShrink:0,boxShadow:"0 1px 4px rgba(0,0,0,.06)"}}>
             <div style={{display:"flex",alignItems:"center",gap:12}}>
@@ -3258,32 +3285,30 @@ POST3: (제목)|(이유)
               {pubTitle&&<h1 style={{fontSize:24,fontWeight:900,color:"#111",marginBottom:16,lineHeight:1.35,wordBreak:"keep-all"}}>{pubTitle}</h1>}
               {(()=>{
                 const sectionTags=["[FAQ시작]","[관련글시작]","[참고자료시작]"];
-                const imgs=getActiveImages();
-                let imgIdx=0;
                 return blocks.map((block,bi)=>{
                   if(block.type==="text"){
                     const txt=(block as TextBlock).content;
                     const secStart=sectionTags.reduce((min,tag)=>{const i=txt.indexOf(tag);return i>-1&&i<min?i:min;},Infinity);
                     const bodyTxt=secStart<Infinity?txt.slice(0,secStart).trim():txt;
                     const secTxt=secStart<Infinity?txt.slice(secStart).trim():"";
-                    const renderTxt=(t:string,kOffset:number)=>t.split("\n").filter(l=>l.trim()&&!sectionTags.some(tag=>l.includes(tag))).map((line,i)=>{
-                      if(line.startsWith("## "))return<h2 key={kOffset+i} style={{fontSize:18,fontWeight:800,margin:"24px 0 10px",color:"#111",borderBottom:"2px solid #eee",paddingBottom:8}}>{line.slice(3)}</h2>;
-                      if(line.startsWith("### "))return<h3 key={kOffset+i} style={{fontSize:15,fontWeight:700,margin:"18px 0 8px",color:"#222",borderLeft:"4px solid #2563eb",paddingLeft:10}}>{line.slice(4)}</h3>;
-                      if(line==="---")return<hr key={kOffset+i} style={{border:"none",borderTop:"1px solid #eee",margin:"16px 0"}}/>;
-                      return<p key={kOffset+i} style={{margin:"0 0 12px",fontSize:15,lineHeight:1.9,color:"#333",wordBreak:"keep-all"}}>{line}</p>;
+                    const toJsx=(t:string,kOff:number)=>t.split("\n").filter(l=>l.trim()&&!sectionTags.some(tag=>l.includes(tag))).map((line,i)=>{
+                      if(line.startsWith("## "))return<h2 key={kOff+i} style={{fontSize:18,fontWeight:800,margin:"24px 0 10px",color:"#111",borderBottom:"2px solid #eee",paddingBottom:8}}>{line.slice(3)}</h2>;
+                      if(line.startsWith("### "))return<h3 key={kOff+i} style={{fontSize:15,fontWeight:700,margin:"18px 0 8px",color:"#222",borderLeft:"4px solid #2563eb",paddingLeft:10}}>{line.slice(4)}</h3>;
+                      if(line==="---")return<hr key={kOff+i} style={{border:"none",borderTop:"1px solid #eee",margin:"16px 0"}}/>;
+                      return<p key={kOff+i} style={{margin:"0 0 12px",fontSize:15,lineHeight:1.9,color:"#333",wordBreak:"keep-all"}}>{line}</p>;
                     });
                     return(
                       <div key={block.id}>
-                        {renderTxt(bodyTxt,bi*1000)}
-                        {secTxt&&<div style={{marginTop:24,padding:"16px",background:"#f8f8f8",borderRadius:12,borderLeft:"4px solid #ddd"}}>{renderTxt(secTxt,bi*1000+500)}</div>}
+                        {toJsx(bodyTxt,bi*1000)}
+                        {secTxt&&<div style={{marginTop:20,padding:"16px",background:"#f8f8f8",borderRadius:12,borderLeft:"4px solid #ddd"}}>{toJsx(secTxt,bi*1000+500)}</div>}
                       </div>
                     );
                   }
-                  const imgBlock=block as SingleImageBlock;
-                  return imgBlock.src?(
+                  const ib=block as SingleImageBlock;
+                  return ib.src?(
                     <div key={block.id} style={{margin:"20px 0"}}>
-                      <img src={imgBlock.src} alt={imgBlock.alt} style={{width:"100%",borderRadius:10,display:"block"}} onError={e=>{(e.target as HTMLImageElement).style.display="none";}}/>
-                      {imgBlock.alt&&<p style={{fontSize:11,color:"#999",textAlign:"center",marginTop:6}}>{imgBlock.alt}</p>}
+                      <img src={ib.src} alt={ib.alt} style={{width:"100%",borderRadius:10,display:"block"}} onError={e=>{(e.target as HTMLImageElement).style.display="none";}}/>
+                      {ib.alt&&<p style={{fontSize:11,color:"#999",textAlign:"center",marginTop:6}}>{ib.alt}</p>}
                     </div>
                   ):null;
                 });
@@ -3292,7 +3317,7 @@ POST3: (제목)|(이유)
             </div>
           </div>
         </div>
-      ), document.body)}
+      )}
 
       {/* 블로그 순위 키 안내 팝업 */}
       {showRankInfo&&(
