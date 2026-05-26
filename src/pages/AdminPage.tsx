@@ -575,7 +575,7 @@ const TABS = [
 ] as const;
 
 export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: Props) {
-  const [tab, setTab] = useState<"keyword"|"write"|"image"|"publish"|"manage"|"accounts"|"rank"|"calendar"|"users"|"stats"|"settings">("keyword");
+  const [tab, setTab] = useState<"keyword"|"write"|"image"|"photo"|"publish"|"manage"|"accounts"|"rank"|"calendar"|"users"|"stats"|"settings">("keyword");
   const [statsSubTab, setStatsSubTab] = useState<"mine"|"all">("mine");
   const [usersSubTab, setUsersSubTab] = useState<"list"|"referral">("list");
   const [referralData, setReferralData] = useState<{referrer:any;referred:any[]}[]>([]);
