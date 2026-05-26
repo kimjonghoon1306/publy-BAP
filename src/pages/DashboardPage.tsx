@@ -1657,7 +1657,10 @@ POST3: (제목)|(이유)
   }
   function openPreview(){
     const sectionTags=["[FAQ시작]","[관련글시작]","[참고자료시작]"];
-    const blocksHtml=blocks.map(b=>{
+    // blocks가 비어있으면 genContent로 임시 블록 구성
+    const previewBlocks = blocks.length > 0 ? blocks :
+      genContent ? [{type:"text" as const, id:"tmp", content:genContent}] : [];
+    const blocksHtml=previewBlocks.map((b:any)=>{
       if(b.type==="text"){
         const txt=(b as TextBlock).content;
         const secStart=sectionTags.reduce((min,tag)=>{const i=txt.indexOf(tag);return i>-1&&i<min?i:min;},Infinity);
