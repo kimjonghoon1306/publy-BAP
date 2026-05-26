@@ -138,7 +138,7 @@ const CSS = `
 .server-on{background:rgba(63,185,80,.1);color:var(--success);border-color:rgba(63,185,80,.3);}
 .server-off{background:rgba(120,120,120,.08);color:var(--text2);border-color:var(--border);}
 .dot{width:7px;height:7px;border-radius:50%;flex-shrink:0;}
-.dot-on{background:var(--success);box-shadow:0 0 6px var(--success);}
+.dot-on{background:var(--success);box-shadow:0 0 6px var(--success);animation:pulse 1.5s ease-in-out infinite;}
 .dot-off{background:var(--text3);}
 .icon-btn{width:36px;height:36px;border-radius:8px;display:flex;align-items:center;justify-content:center;border:1px solid var(--border);background:transparent;color:var(--text2);cursor:pointer;font-size:15px;transition:all .15s;}
 .icon-btn:hover{background:var(--card-hover);color:var(--text);border-color:var(--border-focus);}
@@ -1220,7 +1220,7 @@ Output format (JSON array only, no other text):
     }
     if (ai === "groq") {
       const key = localStorage.getItem("publy_adm_groq_key") || ""; if (!key) throw new Error("Groq API 키 없음 (관리자 설정에서 입력하세요)");
-      const r = await fetch("https://api.groq.com/openai/v1/chat/completions",{method:"POST",headers:{"Content-Type":"application/json","Authorization":`Bearer ${key}`},body:JSON.stringify({model:"llama-3.1-70b-versatile",max_tokens:8000,messages:[{role:"user",content:prompt}]}),signal:AbortSignal.timeout(60000)});
+      const r = await fetch("https://api.groq.com/openai/v1/chat/completions",{method:"POST",headers:{"Content-Type":"application/json","Authorization":`Bearer ${key}`},body:JSON.stringify({model:"llama-3.3-70b-versatile",max_tokens:8000,messages:[{role:"user",content:prompt}]}),signal:AbortSignal.timeout(60000)});
       if (!r.ok) { const e = await r.json(); throw new Error(e.error?.message||"Groq 오류"); }
       const d = await r.json(); return d.choices?.[0]?.message?.content||"";
     }
@@ -1273,13 +1273,17 @@ Output format (JSON array only, no other text):
   function buildAdmPublishContent(): string {
     if(blocks.some(b=>b.type==="text"&&(b as TextBlock).content.trim()))return buildHtmlContent();
     if (!genContent) return pubContent;
-    if (pubSub === "full") return genContent;
-    if (pubSub === "body_faq") {
-      const i = genContent.indexOf("[관련글시작]");
-      return i > 0 ? genContent.slice(0, i).trim() : genContent;
+    if (pubScope === "body") {
+      let t = genContent;
+      t = t.replace(/\[FAQ시작\][\s\S]*?\[FAQ끝\]/g,"").replace(/\[참고자료시작\][\s\S]*?\[참고자료끝\]/g,"").replace(/\[관련글시작\][\s\S]*?\[관련글끝\]/g,"").trim();
+      return t;
     }
-    const i = genContent.indexOf("[FAQ시작]");
-    return i > 0 ? genContent.slice(0, i).trim() : genContent;
+    if (pubScope === "faq") {
+      let t = genContent;
+      t = t.replace(/\[참고자료시작\][\s\S]*?\[참고자료끝\]/g,"").replace(/\[관련글시작\][\s\S]*?\[관련글끝\]/g,"").trim();
+      return t;
+    }
+    return genContent;
   }
 
 
@@ -1494,6 +1498,11 @@ POST3: (제목)|(이유)
       categoryId:category||undefined,
       visibility,
       scheduleTime:scheduleOn?scheduleTime:undefined,
+      blocks:blocks.map((b:any)=>{
+        if(b.type==="text")return{type:"text",content:b.content};
+        if(b.type==="image")return{type:"image",src:b.src,alt:b.alt||""};
+        return null;
+      }).filter(Boolean),
     };
     try {
       const r = await fetch(`${BOT}/api/publish-full`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(publishBody)});
