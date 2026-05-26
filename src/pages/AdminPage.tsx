@@ -641,6 +641,7 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
   const [writeStyle, setWriteStyle] = useState<WriteStyle>(()=>(localStorage.getItem("publy_adm_write_style") as WriteStyle)||"감성일기");
   const [persona, setPersona] = useState<PersonaStyle>(()=>(localStorage.getItem("publy_adm_persona") as PersonaStyle)||"none");
   const [blogTemplate, setBlogTemplate] = useState<BlogTemplate>("none");
+  const [pubScope, setPubScope] = useState<"body"|"faq"|"full">("full");
   const [qualityScore, setQualityScore] = useState<{score:number;items:{label:string;pass:boolean;detail:string;weight:number}[]}|null>(null);
   const [calKeywords, setCalKeywords] = useState("");
   const [calPlatform, setCalPlatform] = useState<"naver"|"tistory">("naver");
@@ -1561,6 +1562,26 @@ POST3: (제목)|(이유)
         </div>
       )}
 
+        {/* 발행 범위 */}
+        <div className="card" style={{padding:"14px 16px"}}>
+          <div className="card-title" style={{marginBottom:10}}>📝 발행 범위</div>
+          <div style={{display:"flex",flexDirection:"column",gap:8}}>
+            {([
+              {v:"body",ico:"✍️",label:"본문 + 해시태그",desc:"관련글/링크/질문 제외"},
+              {v:"faq",ico:"❓",label:"본문 + FAQ + 해시태그",desc:"관련글/링크만 제외"},
+              {v:"full",ico:"📄",label:"전체 발행",desc:"모든 섹션 포함"},
+            ] as {v:string,ico:string,label:string,desc:string}[]).map(opt=>(
+              <button key={opt.v} onClick={()=>setPubScope(opt.v as "body"|"faq"|"full")} style={{padding:"11px 14px",borderRadius:10,border:`2px solid ${pubScope===opt.v?"var(--accent)":"var(--border)"}`,background:pubScope===opt.v?"var(--accent-bg)":"var(--bg)",cursor:"pointer",fontFamily:"inherit",textAlign:"left",transition:"all .15s",display:"flex",alignItems:"center",gap:10}}>
+                <span style={{fontSize:18,flexShrink:0}}>{opt.ico}</span>
+                <div style={{flex:1}}>
+                  <div style={{fontSize:13,fontWeight:700,color:pubScope===opt.v?"var(--accent-text)":"var(--text)"}}>{opt.label}</div>
+                  <div style={{fontSize:11,color:"var(--text3)",marginTop:2}}>{opt.desc}</div>
+                </div>
+                {pubScope===opt.v&&<span style={{color:"var(--accent-text)",flexShrink:0}}>✓</span>}
+              </button>
+            ))}
+          </div>
+        </div>
       <div className="card" style={{padding:"14px 16px"}}>
         <div className="card-title" style={{marginBottom:10}}>👁️ 공개 설정</div>
         <div style={{display:"flex",flexDirection:"column",gap:8}}>
