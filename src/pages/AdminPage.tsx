@@ -1165,7 +1165,7 @@ Output format (JSON array only, no other text):
     }
     if (ai === "groq") {
       const key = localStorage.getItem("publy_adm_groq_key") || ""; if (!key) throw new Error("Groq API 키 없음 (관리자 설정에서 입력하세요)");
-      const r = await fetch("https://api.groq.com/openai/v1/chat/completions",{method:"POST",headers:{"Content-Type":"application/json","Authorization":`Bearer ${key}`},body:JSON.stringify({model:"llama-3.1-70b-versatile",max_tokens:8000,messages:[{role:"user",content:prompt}]}),signal:AbortSignal.timeout(60000)});
+      const r = await fetch("https://api.groq.com/openai/v1/chat/completions",{method:"POST",headers:{"Content-Type":"application/json","Authorization":`Bearer ${key}`},body:JSON.stringify({model:"llama-3.3-70b-versatile",max_tokens:8000,messages:[{role:"user",content:prompt}]}),signal:AbortSignal.timeout(60000)});
       if (!r.ok) { const e = await r.json(); throw new Error(e.error?.message||"Groq 오류"); }
       const d = await r.json(); return d.choices?.[0]?.message?.content||"";
     }
