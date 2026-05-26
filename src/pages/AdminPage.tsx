@@ -505,6 +505,19 @@ const WRITE_STYLE_GUIDE: Record<WriteStyle,string> = {
   "맛집후기":"[스타일] 맛·향·식감 생생하게 묘사. 가격·위치·웨이팅·주차 정보 포함. 재방문 의향 솔직하게.",
   "여행기":  "[스타일] 여행지 분위기·감성 묘사. 일정·비용·교통 팁 포함. 포토스팟·현지 맛집 자연스럽게 언급.",
 };
+
+const PERSONA_STYLES = [
+  {id:"none",     label:"🙂 기본",      color:"#888", prompt:""},
+  {id:"young_w",  label:"👩 20대 여성",  color:"#f472b6", prompt:"20대 여성이 친한 친구에게 카톡 보내듯 친근하고 감성적으로 작성해줘. 이모지 적절히 사용하고 공감과 감성을 자극하는 표현을 써줘. '~했어요', '~더라고요', '~거든요' 말투로."},
+  {id:"young_m",  label:"👨 20대 남성",  color:"#60a5fa", prompt:"20대 남성이 친구에게 솔직하게 말하듯 써줘. 직접적이고 핵심만 짚는 문체로 유머와 현실적인 조언을 섞어서. '~했어요', '~임', '~거든요' 자연스럽게."},
+  {id:"mid_w",    label:"👩‍🦳 40대 여성", color:"#fb923c", prompt:"40대 주부나 직장맘이 또래 친구에게 진심으로 알려주듯 따뜻하고 실용적으로 써줘. 경험에서 우러나온 조언과 공감을 담아줘. '~해요', '~하더라고요', '~이에요' 말투로."},
+  {id:"mid_m",    label:"👨‍🦳 40대 남성", color:"#34d399", prompt:"40대 직장인 남성이 후배에게 조언해주듯 신뢰감 있고 경험 기반으로 써줘. 핵심 정보를 명확하게 전달하되 딱딱하지 않게. '~합니다', '~했어요', '~거든요' 섞어서."},
+  {id:"mom",      label:"👩‍👧 엄마",      color:"#f9a8d4", prompt:"자상한 엄마가 아이에게 설명해주듯 따뜻하고 걱정 어린 마음으로 써줘. 안전과 건강을 먼저 생각하고 실용적인 조언과 따뜻한 격려를 담아줘."},
+  {id:"expert",   label:"🎓 전문가",     color:"#a78bfa", prompt:"해당 분야 전문가가 신뢰감 있게 써줘. 전문 지식을 쉬운 말로 풀어서 근거와 데이터를 적극 활용하고 독자가 실제로 적용할 수 있는 실용적 조언을 담아줘."},
+  {id:"teacher",  label:"👨‍🏫 선생님",    color:"#4ade80", prompt:"친절한 선생님이 학생에게 설명해주듯 차근차근 이해하기 쉽게 써줘. 단계별로 설명하고 어려운 개념은 쉬운 예시로 풀어서."},
+  {id:"reporter", label:"📰 기자",       color:"#94a3b8", prompt:"신문 기자가 심층 취재 기사 쓰듯 객관적이고 사실 기반으로 써줘. 핵심 정보를 앞에 배치하고 신뢰감 있는 문체로."},
+] as const;
+type PersonaStyle = typeof PERSONA_STYLES[number]["id"];
 const TABS = [
   {k:"keyword",  i:"🔍", l:"키워드/제목"},
   {k:"write",    i:"✍️", l:"글 생성"},
@@ -616,6 +629,7 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
   const [showRankInfo, setShowRankInfo] = useState(false);
   const [toasts, setToasts] = useState<{id:number;msg:string;type:"success"|"error"|"info"}[]>([]);
   const [writeStyle, setWriteStyle] = useState<WriteStyle>(()=>(localStorage.getItem("publy_adm_write_style") as WriteStyle)||"감성일기");
+  const [persona, setPersona] = useState<PersonaStyle>(()=>(localStorage.getItem("publy_adm_persona") as PersonaStyle)||"none");
   const [qualityScore, setQualityScore] = useState<{seo:number;read:number;len:number;total:number}|null>(null);
   const [calKeywords, setCalKeywords] = useState("");
   const [calPlatform, setCalPlatform] = useState<"naver"|"tistory">("naver");
@@ -1165,7 +1179,7 @@ Output format (JSON array only, no other text):
     }
     if (ai === "groq") {
       const key = localStorage.getItem("publy_adm_groq_key") || ""; if (!key) throw new Error("Groq API 키 없음 (관리자 설정에서 입력하세요)");
-      const r = await fetch("https://api.groq.com/openai/v1/chat/completions",{method:"POST",headers:{"Content-Type":"application/json","Authorization":`Bearer ${key}`},body:JSON.stringify({model:"llama-3.3-70b-versatile",max_tokens:8000,messages:[{role:"user",content:prompt}]}),signal:AbortSignal.timeout(60000)});
+      const r = await fetch("https://api.groq.com/openai/v1/chat/completions",{method:"POST",headers:{"Content-Type":"application/json","Authorization":`Bearer ${key}`},body:JSON.stringify({model:"llama-3.1-70b-versatile",max_tokens:8000,messages:[{role:"user",content:prompt}]}),signal:AbortSignal.timeout(60000)});
       if (!r.ok) { const e = await r.json(); throw new Error(e.error?.message||"Groq 오류"); }
       const d = await r.json(); return d.choices?.[0]?.message?.content||"";
     }
@@ -1355,6 +1369,7 @@ Output format (JSON array only, no other text):
       ? "[플랫폼] 네이버: ## 기호 절대 금지. 순수 텍스트. 감성적 경험담."
       : "[플랫폼] 티스토리: 정보성 중심. 내부링크 2개 자연스럽게 포함.";
     const styleGuide = WRITE_STYLE_GUIDE[writeStyle]||"";
+    const personaGuide = PERSONA_STYLES.find(p=>p.id===persona)?.prompt||"";
 
     const prompt = `당신은 대한민국 최고의 블로그 작가입니다.
 
@@ -1381,7 +1396,7 @@ ${catGuide}
 
 ${adGuide}
 ${platGuide}
-${styleGuide}
+${styleGuide}${personaGuide?"\n\n[말투/페르소나]\n"+personaGuide:""}
 
 === 출력 형식 ===
 태그: 태그1, 태그2, 태그3, 태그4, 태그5
@@ -2003,6 +2018,19 @@ POST3: (제목)|(이유)
                           style={{padding:"10px 12px",borderRadius:10,border:`1.5px solid ${writeStyle===s.id?"var(--accent)":"var(--border)"}`,background:writeStyle===s.id?"var(--accent-bg)":"var(--bg)",cursor:"pointer",textAlign:"left",fontFamily:"inherit",transition:"all .15s"}}>
                           <div style={{fontSize:13,fontWeight:700,color:writeStyle===s.id?"var(--accent-text)":"var(--text)"}}>{s.i} {s.id}</div>
                           <div style={{fontSize:11,color:"var(--text3)",marginTop:2}}>{s.desc}</div>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* 말투/페르소나 */}
+                  <div style={{marginBottom:16}}>
+                    <label className="inp-label">🎭 말투 설정 <span style={{fontSize:10,color:"var(--text3)",fontWeight:400}}>(선택)</span></label>
+                    <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
+                      {PERSONA_STYLES.map(p=>(
+                        <button key={p.id} onClick={()=>{setPersona(p.id);localStorage.setItem("publy_adm_persona",p.id);}}
+                          style={{padding:"6px 11px",borderRadius:20,border:`1.5px solid ${persona===p.id?p.color:"var(--border)"}`,background:persona===p.id?p.color+"22":"var(--bg)",cursor:"pointer",fontFamily:"inherit",fontSize:12,fontWeight:persona===p.id?700:500,color:persona===p.id?p.color:"var(--text2)",transition:"all .15s",whiteSpace:"nowrap"}}>
+                          {p.label}
                         </button>
                       ))}
                     </div>
