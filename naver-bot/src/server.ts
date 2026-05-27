@@ -235,6 +235,30 @@ app.post("/api/naver-datalab", async (req, res) => {
   }
 });
 
+/* ── Gemini 프록시 ── */
+app.post("/api/gemini-vision", async (req, res) => {
+  const { apiKey, parts, prompt } = req.body;
+  if (!apiKey || !parts || !prompt) return res.status(400).json({ error: "파라미터 누락" });
+  const models = ["gemini-2.0-flash", "gemini-2.5-flash", "gemini-1.5-flash"];
+  const body = {
+    contents: [{ parts: [...parts, { text: prompt }] }],
+    generationConfig: { maxOutputTokens: 4000, temperature: 0.9 }
+  };
+  for (const model of models) {
+    try {
+      const r = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+        { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }
+      );
+      if (!r.ok) continue;
+      const d = await r.json();
+      const text = d?.candidates?.[0]?.content?.parts?.[0]?.text;
+      if (text) return res.json({ text });
+    } catch {}
+  }
+  return res.status(500).json({ error: "생성 실패. Gemini 키를 확인하거나 잠시 후 다시 시도해주세요." });
+});
+
 /* ── 서버 시작 ── */
 app.listen(PORT, () => {
   console.log(`[bot] Publy 봇 서버 v2.0 → http://localhost:${PORT}`);
