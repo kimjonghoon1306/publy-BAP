@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
-import { supabase, getAccounts, upsertAccount, PublyAccount, getHistory, PublyHistory, addHistory, deleteHistory, deleteAllHistory, setAdminPassword, saveAdminNaverApiKeys, getNaverApiKeys, NaverApiKeys, getNaverDailyUsage, NAVER_DAILY_LIMIT, checkNaverQuota, incrementNaverQuota, getUserNaverApiKeys, getReferrals, getErrorLogs, getUnreadErrorCount, markErrorsAsRead } from "../lib/supabase";
+import { supabase, getAccounts, upsertAccount, PublyAccount, getHistory, PublyHistory, addHistory, deleteHistory, deleteAllHistory, setAdminPassword, saveAdminNaverApiKeys, getNaverApiKeys, NaverApiKeys, getNaverDailyUsage, NAVER_DAILY_LIMIT, checkNaverQuota, incrementNaverQuota, getUserNaverApiKeys, getReferrals, getErrorLogs, getUnreadErrorCount, markErrorsAsRead, logError } from "../lib/supabase";
 
 interface Props {
   onBack: () => void;
@@ -1062,7 +1062,7 @@ Output format (JSON array only, no other text):
       setPhotoGenDone(true);setAutoInserted(true);
       showToast("✅ 사진 기반 글 생성 완료!");
     } catch(e:any) {
-      showToast("❌ 생성 실패: "+e.message,"error");
+      showToast("❌ 생성 실패: "+e.message+" (오류가 자동 전달됩니다)","error");logError({user_id:ADM_UID,user_name:"관리자",user_email:"",feature:"사진 글쓰기",error_message:e.message}).catch(()=>{});
     } finally {
       setPhotoGenerating(false);
     }
@@ -1659,7 +1659,7 @@ POST3: (제목)|(이유)
       if (!r.ok) throw new Error(d.error);
       setPubMsg(scheduleOn?"✅ 예약 완료! 설정한 시간에 자동 발행돼요.":"✅ 발행 완료!");
       setPubTitle(""); setPubContent(""); setPubTags(""); setPubImg("");
-    } catch(e:any) { setPubMsg("❌ "+e.message); }
+    } catch(e:any) { setPubMsg("❌ "+e.message+" (오류가 자동 전달됩니다)");logError({user_id:ADM_UID,user_name:"관리자",user_email:"",feature:"관리자 발행",error_message:e.message}).catch(()=>{}); }
     finally { setPublishing(false); }
   }
 
@@ -2757,6 +2757,9 @@ POST3: (제목)|(이유)
                 <button className="photo-gen-btn" onClick={generateFromPhotos} disabled={photoGenerating||photoFiles.length===0}>
                   {photoGenerating?<><span className="sp-w spinner" style={{width:18,height:18,marginRight:8}}/>AI가 사진을 분석하고 있어요...</>:<><span className="flower-deco">🌸</span> 사진으로 글 생성하기</>}
                 </button>
+                {photoGenerating&&(
+                  <button onClick={()=>setPhotoGenerating(false)} style={{width:"100%",marginTop:8,padding:"10px",borderRadius:12,border:"1px solid var(--border)",background:"var(--bg2)",color:"var(--text2)",cursor:"pointer",fontSize:13,fontWeight:700,fontFamily:"inherit"}}>⏹️ 생성 취소</button>
+                )}
                 {photoGenDone&&genContent&&(
                   <div style={{marginTop:20}}>
                     <div style={{padding:"12px 16px",borderRadius:14,background:"linear-gradient(135deg,#FF6B9D11,#C77DFF11)",border:"1px solid #FF6B9D33",marginBottom:12}}>
