@@ -2012,10 +2012,13 @@ POST3: (제목)|(이유)
         {q:"블로그에 ## 기호가 들어가요",a:"이미 수정됐어요! 마크다운 기호 완전 제거 기능이 적용돼 있어요.",c:P},
         {q:"이미지 생성이 안 돼요",a:"OpenAI 또는 Replicate 키가 필요해요. 없으면 '내 이미지 업로드' 또는 '이미지 없이 발행'을 선택하세요.",c:"#F55036"},
         {q:"발행 건수가 부족해요",a:"FREE 10건, BASIC 50건, PRO 무제한. 업그레이드는 관리자에게 문의하세요.",c:Y},
+        {q:"설치할 때 'Publy cannot be closed' 문구가 떠요",a:"이전에 실행 중인 Publy가 완전히 종료되지 않은 거예요.\n방법: 키보드 Ctrl+Shift+Esc 누르기 → 프로세스 탭에서 Publy 찾기 → 마우스 우클릭 → 작업 끝내기 → 다시 시도 클릭",c:"#f85149"},
+        {q:"봇이 오프라인으로 계속 뜨면요?",a:"PC에서 Publy 앱이 실행 중인지 확인하세요. 앱을 껐다 켜면 봇이 자동으로 켜져요.",c:"#ff8c00"},
+        {q:"오류가 났는데 어떻게 해요?",a:"걱정 마세요! 오류가 생기면 관리자에게 자동으로 전달돼요. 잠깐 기다렸다가 다시 시도해 보세요.",c:"#4ECDC4"},
       ].map((item,i)=>(
-        <div key={i} className="g-step" style={{borderColor:`${item.c}35`,background:`${item.c}08`,marginBottom:8}}>
-          <div className="g-step-title" style={{color:"#fff",fontSize:14}}>Q. {item.q}</div>
-          <div className="g-step-desc" style={{marginTop:6}}>👉 {item.a}</div>
+        <div key={i} className="g-step" style={{borderColor:`${item.c}55`,background:`${item.c}15`,marginBottom:10,padding:"14px 16px"}}>
+          <div style={{fontSize:13,fontWeight:900,color:item.c,marginBottom:6}}>Q. {item.q}</div>
+          <div style={{fontSize:13,color:"#ddd",lineHeight:1.8,whiteSpace:"pre-line"}}>👉 {item.a}</div>
         </div>
       ))}
     </div>,
