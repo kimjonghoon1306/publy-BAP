@@ -1839,7 +1839,7 @@ POST3: (제목)|(이유)
         {/* ── 관리자 사용설명서 모달 ── */}
         {showGuide && (() => {
           const PINK = "#FF6B9D"; const YELLOW = "#FFD93D"; const GREEN = "#00C875"; const RED = "#f85149";
-          const tabs = ["📋 개요","✍️ 글 생성","🖼️ 이미지","👥 회원관리","📊 통계/설정"];
+          const tabs = ["📋 개요","✍️ 글 생성","🖼️ 이미지","👥 회원관리","📊 통계/설정","❓ FAQ"];
           const pages = [
             // 0 - 개요
             <div key="0">
@@ -1953,6 +1953,23 @@ POST3: (제목)|(이유)
                 <button className="g-btn" style={{background:`linear-gradient(135deg,${YELLOW},#FFA500)`,color:"#000"}}
                   onClick={() => { setShowGuide(false); setTab("settings"); }}>🔐 API 키 설정하러 가기</button>
               </div>
+            </div>,
+
+            // 5 - FAQ
+            <div key="5">
+              {[
+                {q:"회원이 오류가 났다고 연락했어요",a:"회원관리 탭 → 해당 회원의 오류확인 버튼을 누르면 언제/어디서/어떤 오류인지 바로 확인할 수 있어요. 오류는 자동으로 저장돼요.",c:RED},
+                {q:"설치할 때 'Publy cannot be closed' 문구가 떠요",a:"이전에 실행 중인 Publy가 완전히 꺼지지 않은 거예요.\nCtrl+Shift+Esc → 프로세스 탭 → Publy 찾기 → 마우스 우클릭 → 작업 끝내기 → 다시 시도 클릭하면 돼요.",c:PINK},
+                {q:"봇이 계속 오프라인으로 떠요",a:"PC에서 Publy 앱이 실행 중인지 확인하세요. 앱을 껐다 켜면 봇이 자동으로 켜져요. 봇은 반드시 PC에서 실행해야 해요.",c:YELLOW},
+                {q:"회원이 발행이 안 된다고 해요",a:"1) 봇 온라인 상태 확인 2) 계정 연결 상태 확인 3) 발행 건수 초과 여부 확인 4) 회원의 오류확인 버튼으로 구체적인 오류 메시지 확인",c:GREEN},
+                {q:"새 오류 배지가 안 사라져요",a:"오류 팝업을 열고 '모두 읽음' 버튼을 누르면 배지가 사라져요.",c:"#8B5CF6"},
+                {q:"회원을 비활성화하면 어떻게 되나요?",a:"비활성화된 회원은 로그인이 차단돼요. 발행 기록과 데이터는 그대로 보존되고, 다시 활성화하면 정상 사용 가능해요.",c:"#4ECDC4"},
+              ].map((item,i)=>(
+                <div key={i} className="g-step" style={{borderColor:`${item.c}55`,background:`${item.c}15`,marginBottom:10,padding:"14px 16px"}}>
+                  <div style={{fontSize:13,fontWeight:900,color:item.c,marginBottom:6}}>Q. {item.q}</div>
+                  <div style={{fontSize:13,color:"rgba(255,255,255,.85)",lineHeight:1.8,whiteSpace:"pre-line"}}>👉 {item.a}</div>
+                </div>
+              ))}
             </div>,
           ];
 
@@ -3802,8 +3819,8 @@ POST3: (제목)|(이유)
 
       {/* 에러 로그 팝업 */}
       {showAllErrors&&(
-        <div style={{position:"fixed",inset:0,zIndex:9999,background:"rgba(0,0,0,.7)",display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
-          <div style={{background:"var(--card)",borderRadius:20,width:"100%",maxWidth:780,maxHeight:"80vh",display:"flex",flexDirection:"column",overflow:"hidden",border:"1px solid var(--border)"}}>
+        <div style={{position:"fixed",inset:0,zIndex:9999,background:"rgba(0,0,0,.92)",display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
+          <div style={{background:"var(--bg)",borderRadius:20,width:"100%",maxWidth:780,maxHeight:"80vh",boxShadow:"0 8px 40px rgba(0,0,0,.8)",display:"flex",flexDirection:"column",overflow:"hidden",border:"1px solid var(--border)"}}>
             {/* 헤더 */}
             <div style={{padding:"16px 20px",borderBottom:"1px solid var(--border)",display:"flex",alignItems:"center",justifyContent:"space-between",flexShrink:0}}>
               <div style={{display:"flex",alignItems:"center",gap:12}}>
