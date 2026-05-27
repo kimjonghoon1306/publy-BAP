@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
-import { PublyUser, getQuota, getHistory, getAccounts, PublyQuota, PublyHistory, PublyAccount, upsertAccount, useQuota, addHistory, deleteHistory, deleteAllHistory, changeUserPassword, getNaverApiKeys, saveNaverApiKeys, NaverApiKeys, checkNaverQuota, incrementNaverQuota, getNaverDailyUsage, NAVER_DAILY_LIMIT, getUserNaverApiKeys } from "../lib/supabase";
+import { PublyUser, getQuota, getHistory, getAccounts, PublyQuota, PublyHistory, PublyAccount, upsertAccount, useQuota, addHistory, deleteHistory, deleteAllHistory, changeUserPassword, getNaverApiKeys, saveNaverApiKeys, NaverApiKeys, checkNaverQuota, incrementNaverQuota, getNaverDailyUsage, NAVER_DAILY_LIMIT, getUserNaverApiKeys, logError } from "../lib/supabase";
 import { supabase } from "../lib/supabase";
 
 type MainTab = "keyword" | "write" | "image" | "photo" | "publish" | "manage" | "accounts" | "rank" | "calendar" | "settings";
@@ -1444,7 +1444,7 @@ POST3: (제목)|(이유)
       setPubTitle(title);
       if(tgm)setHashtags(tgm[1].trim().split(",").map((t:string)=>{const clean=t.trim().replace(/\s+/g,"");return clean.startsWith("#")?clean:"#"+clean;}).filter(Boolean).slice(0,Math.floor(Math.random()*4)+5));
       setAutoInserted(false);setThumbnail("");
-    }catch(e:any){if(e.name!=="AbortError")alert("글 생성 실패: "+e.message);}
+    }catch(e:any){if(e.name!=="AbortError"){showToast("❌ 글 생성 실패: "+e.message+" (오류가 관리자에게 자동 전달됩니다)","error");logError({user_id:user.id,user_name:(user as any).name||"",user_email:user.email||"",feature:"글 생성",error_message:e.message}).catch(()=>{});}}
     finally{setGenerating(false);}
   }
 
@@ -1537,7 +1537,7 @@ POST3: (제목)|(이유)
         showToast(scheduleOn?"⏰ 예약 완료!":"✅ 발행 완료! 🎉");
       }
       getHistory(user.id).then(setHistory);getQuota(user.id).then((q:PublyQuota|null)=>q&&setQuota(q));
-    }catch(e:any){await addHistory({user_id:user.id,platform,title:pubTitle,status:"fail",error_message:e.message});setPubMsg("❌ "+e.message);showToast("❌ "+e.message,"error");}
+    }catch(e:any){await addHistory({user_id:user.id,platform,title:pubTitle,status:"fail",error_message:e.message});setPubMsg("❌ "+e.message+" (오류가 관리자에게 자동 전달됩니다)");showToast("❌ "+e.message,"error");logError({user_id:user.id,user_name:(user as any).name||"",user_email:user.email||"",feature:"블로그 발행 ("+platform+")",error_message:e.message}).catch(()=>{});}
     finally{setPublishing(false);}
   }
 
@@ -1810,7 +1810,7 @@ POST3: (제목)|(이유)
       setAutoInserted(true);
       showToast("✅ 사진 기반 글 생성 완료!", "success");
     } catch(e:any) {
-      showToast("❌ 생성 실패: "+e.message, "error");
+      showToast("❌ 생성 실패: "+e.message+" (오류가 관리자에게 자동 전달됩니다)", "error");logError({user_id:user.id,user_name:(user as any).name||"",user_email:user.email||"",feature:"사진 글쓰기",error_message:e.message}).catch(()=>{});
     } finally {
       setPhotoGenerating(false);
     }
