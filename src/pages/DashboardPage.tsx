@@ -1758,20 +1758,39 @@ POST2: (제목)|(이유)
 POST3: (제목)|(이유)
 [관련글끝]`;
 
-      // 서버 프록시 경유 (tarry 방식)
-      const proxyR = await fetch(`${BOT}/api/gemini-vision`, {
-        method:"POST",
-        headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({apiKey:geminiKey, parts:imgParts, prompt}),
-        signal:AbortSignal.timeout(120000)
-      });
-      if(!proxyR.ok){
-        const e = await proxyR.json().catch(()=>({}));
-        throw new Error(e.error||"서버 연결 실패. 봇이 실행 중인지 확인해주세요.");
+      // 서버 프록시 경유 시도 → 실패 시 직접 호출 폴백
+      let text = "";
+      try {
+        const proxyR = await fetch(`${BOT}/api/gemini-vision`, {
+          method:"POST",
+          headers:{"Content-Type":"application/json"},
+          body:JSON.stringify({apiKey:geminiKey, parts:imgParts, prompt}),
+          signal:AbortSignal.timeout(30000)
+        });
+        if(proxyR.ok){
+          const proxyData = await proxyR.json();
+          if(proxyData.text) text = proxyData.text;
+        }
+      } catch {}
+
+      // 봇 없거나 실패 시 직접 호출
+      if(!text){
+        const MODELS = ["gemini-2.0-flash","gemini-2.5-flash","gemini-1.5-flash"];
+        const bodyDirect = {contents:[{parts:[...imgParts,{text:prompt}]}],generationConfig:{maxOutputTokens:4000,temperature:0.9}};
+        for(const model of MODELS){
+          try{
+            const r = await fetch(
+              `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiKey}`,
+              {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(bodyDirect),signal:AbortSignal.timeout(120000)}
+            );
+            if(!r.ok) continue;
+            const d = await r.json();
+            const t = d.candidates?.[0]?.content?.parts?.[0]?.text;
+            if(t){text=t;break;}
+          }catch{}
+        }
       }
-      const proxyData = await proxyR.json();
-      const text = proxyData.text;
-      if(!text) throw new Error("응답이 비어있어요. 잠시 후 다시 시도해주세요.");
+      if(!text) throw new Error("생성 실패. Gemini 키를 확인하거나 잠시 후 다시 시도해주세요.");
 
       const titleM = text.match(/제목[^\n]+/);
       const tagM = text.match(/태그[^\n]+/);
