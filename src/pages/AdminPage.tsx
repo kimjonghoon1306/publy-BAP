@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
-import { supabase, getAccounts, upsertAccount, PublyAccount, getHistory, PublyHistory, addHistory, deleteHistory, deleteAllHistory, setAdminPassword, saveAdminNaverApiKeys, getNaverApiKeys, NaverApiKeys, getNaverDailyUsage, NAVER_DAILY_LIMIT, checkNaverQuota, incrementNaverQuota, getUserNaverApiKeys, getReferrals } from "../lib/supabase";
+import { supabase, getAccounts, upsertAccount, PublyAccount, getHistory, PublyHistory, addHistory, deleteHistory, deleteAllHistory, setAdminPassword, saveAdminNaverApiKeys, getNaverApiKeys, NaverApiKeys, getNaverDailyUsage, NAVER_DAILY_LIMIT, checkNaverQuota, incrementNaverQuota, getUserNaverApiKeys, getReferrals, getErrorLogs, getUnreadErrorCount, markErrorsAsRead } from "../lib/supabase";
 
 interface Props {
   onBack: () => void;
@@ -674,6 +674,11 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
   const [persona, setPersona] = useState<PersonaStyle>(()=>(localStorage.getItem("publy_adm_persona") as PersonaStyle)||"none");
   const [blogTemplate, setBlogTemplate] = useState<BlogTemplate>("none");
   const [pubScope, setPubScope] = useState<"body"|"faq"|"full">("full");
+  const [errorLogs, setErrorLogs] = useState<{id:string;user_id:string;user_name:string;user_email:string;feature:string;error_message:string;created_at:string;is_read:boolean}[]>([]);
+  const [unreadErrors, setUnreadErrors] = useState(0);
+  const [showErrorPopup, setShowErrorPopup] = useState(false);
+  const [errorFilter, setErrorFilter] = useState<string|null>(null);
+  const [showAllErrors, setShowAllErrors] = useState(false);
   const [photoFiles, setPhotoFiles] = useState<{id:string;src:string;name:string}[]>([]);
   const [photoKeypoints, setPhotoKeypoints] = useState("");
   const [photoGenerating, setPhotoGenerating] = useState(false);
@@ -1039,6 +1044,22 @@ Output format (JSON array only, no other text):
     }
   }
 
+    async function loadErrorLogs(userId?: string) {
+    const logs = await getErrorLogs(userId||undefined);
+    setErrorLogs(logs);
+  }
+
+  async function loadUnreadCount() {
+    const count = await getUnreadErrorCount();
+    setUnreadErrors(count);
+  }
+
+  async function handleMarkAllRead() {
+    await markErrorsAsRead();
+    setUnreadErrors(0);
+    setErrorLogs(prev => prev.map(l => ({...l, is_read: true})));
+  }
+
     function openPreview(){
     const sectionTags=["[FAQ시작]","[관련글시작]","[참고자료시작]"];
     const blocksHtml=blocks.map((b:any)=>{
@@ -1075,7 +1096,8 @@ Output format (JSON array only, no other text):
   useEffect(() => {
     checkBot(); getAccounts(ADM_UID).then(setAdmAccs); loadUsers();
     getHistory(ADM_UID).then(setHistory);
-    const iv = setInterval(checkBot, 30000); return () => clearInterval(iv);
+    loadUnreadCount();
+    const iv = setInterval(() => { checkBot(); loadUnreadCount(); }, 30000); return () => clearInterval(iv);
   }, [checkBot]);
 
   // 설정탭 열 때 관리자 네이버 키 로드
@@ -1999,6 +2021,11 @@ POST3: (제목)|(이유)
             <button className="adm-guide-btn" onClick={() => { setShowGuide(true); setGuideTab(0); }}>
               📋 <span className="adm-guide-text">관리자 가이드</span>
             </button>
+            {unreadErrors>0&&(
+              <button onClick={()=>{setShowAllErrors(true);loadErrorLogs();markErrorsAsRead().then(()=>setUnreadErrors(0));}} style={{position:"relative",padding:"6px 14px",borderRadius:20,background:"#f85149",color:"#fff",border:"none",cursor:"pointer",fontSize:12,fontWeight:800,fontFamily:"inherit",animation:"pulse 1.5s ease-in-out infinite",whiteSpace:"nowrap"}}>
+                🚨 새 오류 {unreadErrors}건
+              </button>
+            )}
             <button className="back-btn" onClick={onDashboard}>🏠 <span className="back-text">회원 화면</span></button>
             <button className="back-btn" style={{borderColor:"rgba(248,81,73,.3)",color:"var(--danger)"}} onClick={onBack}>🚪 <span className="back-text">로그아웃</span></button>
           </div>
@@ -3080,6 +3107,13 @@ POST3: (제목)|(이유)
             {tab === "users" && (
               <div style={{animation:"fadeUp .25s ease both"}}>
 
+                {/* 전체 오류확인 */}
+                <div style={{display:"flex",justifyContent:"flex-end",marginBottom:12}}>
+                  <button onClick={()=>{setShowAllErrors(true);loadErrorLogs();}} style={{padding:"8px 16px",borderRadius:20,background:unreadErrors>0?"#f85149":"var(--card2)",color:unreadErrors>0?"#fff":"var(--text2)",border:`1px solid ${unreadErrors>0?"#f85149":"var(--border)"}`,cursor:"pointer",fontSize:12,fontWeight:800,fontFamily:"inherit",display:"flex",alignItems:"center",gap:6}}>
+                    🚨 전체 오류확인 {unreadErrors>0?`(새 오류 ${unreadErrors}건)`:""}
+                  </button>
+                </div>
+
                 {/* 서브탭 */}
                 <div style={{display:"flex",gap:6,marginBottom:14,background:"var(--card)",border:"1px solid var(--border)",borderRadius:12,padding:4}}>
                   {([{k:"list",l:"👥 회원 목록"},{k:"referral",l:"🔗 래퍼럴 현황"}] as const).map(t=>(
@@ -3148,6 +3182,7 @@ POST3: (제목)|(이유)
                               <div style={{marginLeft:"auto",display:"flex",gap:8,flexWrap:"wrap"}}>
                                 <button className="btn btn-secondary btn-sm" onClick={()=>toggleActive(u)}>{u.is_active?"비활성화":"활성화"}</button>
                                 <button className="btn btn-secondary btn-sm" onClick={()=>resetQuota(u.id)}>건수 초기화</button>
+                                <button onClick={()=>{setErrorFilter(u.id);loadErrorLogs(u.id);setShowAllErrors(true);}} style={{padding:"4px 10px",borderRadius:6,background:"var(--danger)",color:"#fff",border:"none",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:"inherit"}}>🚨 오류확인</button>
                                 <button className="btn btn-primary btn-sm" onClick={()=>saveUser(u)} disabled={saving===u.id}>{saving===u.id?<><span className="spinner"/>저장 중...</>:"💾 저장"}</button>
                               </div>
                             </div>
@@ -3764,6 +3799,54 @@ POST3: (제목)|(이유)
 
       {/* ── 전체화면 미리보기 모달 ── */}
       
+
+      {/* 에러 로그 팝업 */}
+      {showAllErrors&&(
+        <div style={{position:"fixed",inset:0,zIndex:9999,background:"rgba(0,0,0,.7)",display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
+          <div style={{background:"var(--card)",borderRadius:20,width:"100%",maxWidth:780,maxHeight:"80vh",display:"flex",flexDirection:"column",overflow:"hidden",border:"1px solid var(--border)"}}>
+            {/* 헤더 */}
+            <div style={{padding:"16px 20px",borderBottom:"1px solid var(--border)",display:"flex",alignItems:"center",justifyContent:"space-between",flexShrink:0}}>
+              <div style={{display:"flex",alignItems:"center",gap:12}}>
+                <span style={{fontSize:20}}>🚨</span>
+                <div>
+                  <div style={{fontSize:15,fontWeight:800,color:"var(--text)"}}>
+                    {errorFilter ? `회원 오류 내역` : "전체 오류 내역"}
+                  </div>
+                  <div style={{fontSize:11,color:"var(--text3)"}}>{errorLogs.length}건</div>
+                </div>
+              </div>
+              <div style={{display:"flex",gap:8,alignItems:"center"}}>
+                {errorFilter&&<button onClick={()=>{setErrorFilter(null);loadErrorLogs();}} style={{padding:"5px 12px",borderRadius:8,background:"var(--bg2)",border:"1px solid var(--border)",cursor:"pointer",fontSize:11,fontFamily:"inherit",color:"var(--text2)"}}>전체 보기</button>}
+                <button onClick={()=>markErrorsAsRead().then(()=>{setUnreadErrors(0);setErrorLogs(p=>p.map(l=>({...l,is_read:true})));loadErrorLogs(errorFilter||undefined);})} style={{padding:"5px 12px",borderRadius:8,background:"var(--bg2)",border:"1px solid var(--border)",cursor:"pointer",fontSize:11,fontFamily:"inherit",color:"var(--text2)"}}>모두 읽음</button>
+                <button onClick={()=>{setShowAllErrors(false);setErrorFilter(null);}} style={{width:32,height:32,borderRadius:8,background:"var(--bg2)",border:"1px solid var(--border)",cursor:"pointer",fontSize:18,color:"var(--text2)"}}>✕</button>
+              </div>
+            </div>
+            {/* 목록 */}
+            <div style={{flex:1,overflowY:"auto",padding:"12px 16px"}}>
+              {errorLogs.length===0?(
+                <div style={{textAlign:"center",padding:"40px 20px",color:"var(--text3)",fontSize:13}}>오류 내역이 없어요 ✅</div>
+              ):(
+                <div style={{display:"flex",flexDirection:"column",gap:8}}>
+                  {errorLogs.map(log=>(
+                    <div key={log.id} style={{padding:"12px 14px",borderRadius:12,background:log.is_read?"var(--bg2)":"#f8514915",border:`1px solid ${log.is_read?"var(--border)":"#f85149"}`,display:"flex",gap:12,alignItems:"flex-start"}}>
+                      {!log.is_read&&<span style={{width:8,height:8,borderRadius:"50%",background:"#f85149",flexShrink:0,marginTop:4}}/>}
+                      <div style={{flex:1,minWidth:0}}>
+                        <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4,flexWrap:"wrap"}}>
+                          <span style={{fontSize:12,fontWeight:800,color:"var(--text)"}}>{log.user_name||"이름없음"}</span>
+                          <span style={{fontSize:11,color:"var(--text3)"}}>{log.user_email}</span>
+                          <span style={{fontSize:10,padding:"2px 8px",borderRadius:99,background:"var(--accent-bg)",color:"var(--accent-text)",fontWeight:700}}>{log.feature}</span>
+                          <span style={{fontSize:10,color:"var(--text3)",marginLeft:"auto"}}>{new Date(log.created_at).toLocaleString("ko-KR")}</span>
+                        </div>
+                        <div style={{fontSize:12,color:"#f85149",wordBreak:"break-all",lineHeight:1.6}}>{log.error_message}</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* 토스트 알림 */}
       <div className="toast-wrap">
