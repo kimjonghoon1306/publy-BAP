@@ -625,6 +625,7 @@ Output format (JSON array only, no other text):
   const [publishing, setPublishing] = useState(false);
   const [pubMsg, setPubMsg] = useState("");
   const [pubScope, setPubScope] = useState<"body"|"faq"|"full">("full");
+  const [imgGenFailed, setImgGenFailed] = useState(false);
   const [photoFiles, setPhotoFiles] = useState<{id:string;src:string;name:string}[]>([]);
   const [photoKeypoints, setPhotoKeypoints] = useState("");
   const [photoGenerating, setPhotoGenerating] = useState(false);
@@ -1468,7 +1469,7 @@ POST3: (제목)|(이유)
         triggerAutoInsert(imgs.map((src,i)=>({id:i,src,alt:`${keyword||genTitle} ${i===0?"대표":"현장"} 사진`})));
         setShowMeta(true); // 이미지 생성 완료 → 썸네일+인사말 자동 펼침
       }
-    }catch(e:any){if(e.name!=="AbortError")alert("이미지 생성 실패: "+e.message);}
+    }catch(e:any){if(e.name!=="AbortError"){showToast("❌ 이미지 생성 실패: "+e.message,"error");setImgGenFailed(true);}}
     finally{setGenImgLoading(false);imgAbortRef.current=null;}
   }
 
@@ -2630,6 +2631,7 @@ POST3: (제목)|(이유)
                               {genImgLoading?<><span className="spinner"/>생성 중...</>:<>🎨 이미지 생성 시작</>}
                             </button>
                             {genImgLoading&&<button className="btn-stop" style={{width:"100%",justifyContent:"center"}} onClick={stopImageGen}>⏹ 생성 중단</button>}
+                            {imgGenFailed&&!genImgLoading&&<button className="btn btn-sm" onClick={()=>{setImgGenFailed(false);handleGenerateImages();}} style={{background:"var(--warn)",color:"#fff",border:"none",cursor:"pointer",width:"100%",justifyContent:"center",marginTop:4}}>🔄 재시도</button>}
                             {generatedImages.length>0&&!genImgLoading&&<button className="btn btn-danger btn-full btn-sm" onClick={()=>{setGeneratedImages([]);setCaptions([]);}}>🗑 이미지 초기화</button>}
                           </div>
                         </>
@@ -2883,6 +2885,9 @@ POST3: (제목)|(이유)
                 <button className="photo-gen-btn" onClick={generateFromPhotos} disabled={photoGenerating||photoFiles.length===0}>
                   {photoGenerating?<><span className="spinner" style={{width:18,height:18,marginRight:8,borderColor:"rgba(255,255,255,.3)",borderTopColor:"#fff"}}/>AI가 사진을 분석하고 있어요...</>:<><span className="flower-deco">🌸</span> 사진으로 글 생성하기</>}
                 </button>
+                {photoGenerating&&(
+                  <button onClick={()=>{setPhotoGenerating(false);}} style={{width:"100%",marginTop:8,padding:"10px",borderRadius:12,border:"1px solid var(--border)",background:"var(--bg2)",color:"var(--text2)",cursor:"pointer",fontSize:13,fontWeight:700,fontFamily:"inherit"}}>⏹️ 생성 취소</button>
+                )}
 
                 {/* 생성 완료 후 발행 패널 */}
                 {photoGenDone&&genContent&&(
