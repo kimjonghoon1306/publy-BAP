@@ -331,3 +331,40 @@ export async function getReferrals(): Promise<{referrer: PublyUser; referred: Pu
     referred: referred.filter(u => u.referred_by === rid) as PublyUser[],
   })).filter(r => r.referrer);
 }
+
+export async function logError(params: {
+  user_id: string;
+  user_name?: string;
+  user_email?: string;
+  feature: string;
+  error_message: string;
+}) {
+  try {
+    await supabase.from("publy_error_logs").insert({
+      user_id: params.user_id,
+      user_name: params.user_name || "",
+      user_email: params.user_email || "",
+      feature: params.feature,
+      error_message: params.error_message,
+    });
+  } catch {}
+}
+
+export async function getErrorLogs(userId?: string) {
+  let query = supabase.from("publy_error_logs").select("*").order("created_at", { ascending: false }).limit(100);
+  if (userId) query = query.eq("user_id", userId);
+  const { data } = await query;
+  return (data || []) as {id:string;user_id:string;user_name:string;user_email:string;feature:string;error_message:string;created_at:string;is_read:boolean}[];
+}
+
+export async function getUnreadErrorCount(): Promise<number> {
+  const { count } = await supabase.from("publy_error_logs").select("*", { count: "exact", head: true }).eq("is_read", false);
+  return count || 0;
+}
+
+export async function markErrorsAsRead(ids?: string[]) {
+  let query = supabase.from("publy_error_logs").update({ is_read: true });
+  if (ids?.length) query = query.in("id", ids);
+  else query = query.eq("is_read", false);
+  await query;
+}
