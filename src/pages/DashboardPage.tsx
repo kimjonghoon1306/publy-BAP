@@ -1763,14 +1763,23 @@ POST3: (제목)|(이유)
         generationConfig:{maxOutputTokens:4000,temperature:0.9}
       };
 
-      const r = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${geminiKey}`,
-        {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body),signal:AbortSignal.timeout(120000)}
-      );
-      if(!r.ok){const e=await r.json();throw new Error(e.error?.message||r.status);}
-      const data = await r.json();
-      const text = data.candidates?.[0]?.content?.parts?.[0]?.text||"";
-      if(!text)throw new Error("응답이 비어있어요");
+      // tarry 방식 - 여러 모델 순서대로 시도
+      // tarry 방식 모델 폴백
+      const MODELS = ["gemini-2.0-flash","gemini-2.5-flash","gemini-1.5-flash"];
+      let data:any = null;
+      for(const model of MODELS){
+        try{
+          const r = await fetch(
+            `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiKey}`,
+            {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body),signal:AbortSignal.timeout(120000)}
+          );
+          if(!r.ok) continue;
+          const d = await r.json();
+          if(d.candidates?.[0]?.content?.parts?.[0]?.text){data=d;break;}
+        }catch{}
+      }
+      if(!data?.candidates?.[0]?.content?.parts?.[0]?.text) throw new Error("생성 실패. Gemini 키를 확인하거나 잠시 후 다시 시도해주세요.");
+      const text = data.candidates[0].content.parts[0].text;
 
       const titleM = text.match(/제목[^\n]+/);
       const tagM = text.match(/태그[^\n]+/);
