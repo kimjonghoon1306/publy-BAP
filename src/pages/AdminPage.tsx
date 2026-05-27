@@ -1012,11 +1012,18 @@ Output format (JSON array only, no other text):
       const personaGuide = PERSONA_STYLES.find(p=>p.id===persona)?.prompt||"";
       const prompt = `당신은 대한민국 최고의 블로그 작가입니다. 첨부된 사진들을 자세히 분석하여 네이버 블로그 글을 작성해주세요.\n사진 속 모든 디테일을 실제로 경험한 것처럼 생생하게 묘사해주세요.${keypointText}\n\n=== 절대 규칙 ===\n⛔ ## 기호 완전 금지\n⛔ ** * 마크다운 기호 금지\n⛔ AI 티 나는 표현 금지\n⛔ 영어 단어 금지\n✅ 사진에서 직접 보이는 것을 구체적으로 묘사\n✅ 독자에게 말 걸듯 친근하게\n✅ 구체적 수치, 가격, 시간 포함\n\n${styleGuide}${personaGuide?`\n[말투]\n${personaGuide}`:""}\n\n=== 출력 형식 ===\n제목: (SEO 최적화 제목, 15~25자)\n태그: 태그1, 태그2, 태그3, 태그4, 태그5\n\n(본문 1500자 이상)\n\n[FAQ시작]\nQ1: (질문)\nA1: (답변)\nQ2: (질문)\nA2: (답변)\n[FAQ끝]\n\n[관련글시작]\nPOST1: (제목)|(이유)\nPOST2: (제목)|(이유)\n[관련글끝]`;
       const body = {contents:[{parts:[...imgParts,{text:prompt}]}],generationConfig:{maxOutputTokens:4000,temperature:0.9}};
-      const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${geminiKey}`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body),signal:AbortSignal.timeout(120000)});
-      if(!r.ok){const e=await r.json();throw new Error(e.error?.message||r.status);}
-      const data = await r.json();
-      const text = data.candidates?.[0]?.content?.parts?.[0]?.text||"";
-      if(!text)throw new Error("응답이 비어있어요");
+      const MODELS = ["gemini-2.0-flash","gemini-2.5-flash","gemini-1.5-flash"];
+      let data:any = null;
+      for(const model of MODELS){
+        try{
+          const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiKey}`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body),signal:AbortSignal.timeout(120000)});
+          if(!r.ok) continue;
+          const d = await r.json();
+          if(d.candidates?.[0]?.content?.parts?.[0]?.text){data=d;break;}
+        }catch{}
+      }
+      if(!data?.candidates?.[0]?.content?.parts?.[0]?.text) throw new Error("생성 실패. Gemini 키를 확인하거나 잠시 후 다시 시도해주세요.");
+      const text = data.candidates[0].content.parts[0].text;
       const titleM = text.match(/제목[^\n]+/);
       const tagM = text.match(/태그[^\n]+/);
       const bodyM = text.match(/태그[^\n]*\n([\s\S]+)/);
