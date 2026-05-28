@@ -2684,13 +2684,8 @@ POST3: (제목)|(이유)
                       </span>
                       {h.post_url&&<a href={h.post_url} target="_blank" rel="noopener noreferrer" style={{fontSize:12,color:"var(--accent-text)",fontWeight:700,flexShrink:0}}>보기</a>}
                       <button style={{padding:"4px 10px",borderRadius:7,border:"1px solid rgba(255,71,87,.3)",background:"transparent",color:"var(--danger)",cursor:"pointer",fontSize:12,fontWeight:700,flexShrink:0}} onClick={async()=>{await deleteHistory(h.id);setHistory(prev=>prev.filter(x=>x.id!==h.id));}}>삭제</button>
-                          {h.status!=="fail"&&h.title&&(
-                            <button onClick={()=>{
-                              setPubTitle(h.title||"");
-                              // content는 PublyHistory에 없으므로 제목만 복원
-                              setTab("publish");
-                              showToast("✅ 발행하기 탭으로 이동했어요");
-                            }} style={{padding:"4px 10px",borderRadius:7,border:"1px solid rgba(0,200,120,.3)",background:"transparent",color:"var(--success)",cursor:"pointer",fontSize:12,fontWeight:700,flexShrink:0}}>🔄 재발행</button>
+                          {h.status!=="fail"&&(
+                            <button onClick={()=>{setPubTitle(h.title||"");setTab("publish");showToast("✅ 발행하기 탭으로 이동했어요");}} style={{padding:"4px 10px",borderRadius:7,border:"1px solid rgba(0,200,120,.3)",background:"transparent",color:"var(--success)",cursor:"pointer",fontSize:12,fontWeight:700,flexShrink:0}}>🔄 재발행</button>
                           )}
                     </div>
                   ))}
