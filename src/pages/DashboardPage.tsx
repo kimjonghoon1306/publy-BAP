@@ -626,6 +626,8 @@ Output format (JSON array only, no other text):
   const [pubMsg, setPubMsg] = useState("");
   const [pubScope, setPubScope] = useState<"body"|"faq"|"full">("full");
   const [imgGenFailed, setImgGenFailed] = useState(false);
+  const [draftAvailable, setDraftAvailable] = useState(false);
+  const [draftData, setDraftData] = useState<{title:string;content:string;savedAt:string}|null>(null);
   const [photoFiles, setPhotoFiles] = useState<{id:string;src:string;name:string}[]>([]);
   const [photoKeypoints, setPhotoKeypoints] = useState("");
   const [photoGenerating, setPhotoGenerating] = useState(false);
@@ -990,6 +992,11 @@ Output format (JSON array only, no other text):
     getAccounts(user.id).then(setAccounts);
     getHistory(user.id).then(setHistory);
     getQuota(user.id).then((q:PublyQuota|null)=>q&&setQuota(q));
+    // 임시저장 확인
+    try{
+      const d=localStorage.getItem("publy_draft");
+      if(d){const p=JSON.parse(d);if(p.content&&p.title){setDraftAvailable(true);setDraftData(p);}}
+    }catch{}
     const iv=setInterval(checkBot,30000);
     if(!localStorage.getItem("publy_guide_seen")){setTimeout(()=>setShowGuide(true),900);}
     return()=>clearInterval(iv);
@@ -1445,6 +1452,12 @@ POST3: (제목)|(이유)
       setPubTitle(title);
       if(tgm)setHashtags(tgm[1].trim().split(",").map((t:string)=>{const clean=t.trim().replace(/\s+/g,"");return clean.startsWith("#")?clean:"#"+clean;}).filter(Boolean).slice(0,Math.floor(Math.random()*4)+5));
       setAutoInserted(false);setThumbnail("");
+      // 임시저장
+      try {
+        localStorage.setItem("publy_draft", JSON.stringify({
+          title, content:body, savedAt:new Date().toLocaleString("ko-KR")
+        }));
+      } catch {}
     }catch(e:any){if(e.name!=="AbortError"){showToast("❌ 글 생성 실패: "+e.message+" (오류가 관리자에게 자동 전달됩니다)","error");logError({user_id:user.id,user_name:(user as any).name||"",user_email:user.email||"",feature:"글 생성",error_message:e.message}).catch(()=>{});}}
     finally{setGenerating(false);}
   }
@@ -2406,6 +2419,40 @@ POST3: (제목)|(이유)
             {/* ═══ ✍️ 글 생성 탭 ═══ */}
             {tab==="write"&&(
               <div style={{animation:"fadeUp .25s ease both"}}>
+
+                {/* 임시저장 불러오기 배너 */}
+                {draftAvailable&&draftData&&!genContent&&(
+                  <div style={{padding:"12px 16px",borderRadius:12,background:"rgba(0,200,120,.1)",border:"1px solid rgba(0,200,120,.3)",marginBottom:12,display:"flex",alignItems:"center",justifyContent:"space-between",gap:10}}>
+                    <div>
+                      <div style={{fontSize:13,fontWeight:800,color:"var(--success)"}}>📝 임시저장된 글이 있어요</div>
+                      <div style={{fontSize:11,color:"var(--text3)",marginTop:2}}>{draftData.savedAt} · {draftData.title}</div>
+                    </div>
+                    <div style={{display:"flex",gap:6,flexShrink:0}}>
+                      <button onClick={()=>{
+                        setGenContent(draftData.content);
+                        setPubTitle(draftData.title);
+                        setGenTitle(draftData.title);
+                        const rawBlocks=draftData.content.split("\n\n").filter(Boolean).map(p=>({type:"text" as const,id:uid(),content:p}));
+                        setBlocks(rawBlocks.length>0?rawBlocks:[{type:"text",id:uid(),content:draftData.content}]);
+                        setDraftAvailable(false);
+                        showToast("✅ 임시저장 불러오기 완료","success");
+                      }} style={{padding:"5px 12px",borderRadius:8,background:"var(--success)",color:"#fff",border:"none",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:"inherit"}}>불러오기</button>
+                      <button onClick={()=>{localStorage.removeItem("publy_draft");setDraftAvailable(false);setDraftData(null);}} style={{padding:"5px 10px",borderRadius:8,background:"var(--bg2)",color:"var(--text3)",border:"1px solid var(--border)",cursor:"pointer",fontSize:12,fontFamily:"inherit"}}>삭제</button>
+                          {h.status!=="fail"&&h.title&&(
+                            <button onClick={()=>{
+                              setPubTitle(h.title||"");
+                              if(h.content) {
+                                setGenContent(h.content);
+                                const rawBlocks=(h.content).split("\n\n").filter(Boolean).map((p:string)=>({type:"text" as const,id:uid(),content:p}));
+                                setBlocks(rawBlocks.length>0?rawBlocks:[{type:"text",id:uid(),content:h.content}]);
+                              }
+                              setTab("publish");
+                              showToast("✅ 발행하기 탭으로 이동했어요","success");
+                            }} style={{padding:"4px 10px",borderRadius:7,border:"1px solid rgba(0,200,120,.3)",background:"transparent",color:"var(--success)",cursor:"pointer",fontSize:12,fontWeight:700,flexShrink:0}}>🔄 재발행</button>
+                          )}
+                    </div>
+                  </div>
+                )}
 
                 {/* 선택된 제목 표시 - 없으면 경고 */}
                 {selectedTitle?(
