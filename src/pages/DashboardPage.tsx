@@ -2441,11 +2441,7 @@ POST3: (제목)|(이유)
                           {h.status!=="fail"&&h.title&&(
                             <button onClick={()=>{
                               setPubTitle(h.title||"");
-                              if(h.content) {
-                                setGenContent(h.content);
-                                const rawBlocks=(h.content).split("\n\n").filter(Boolean).map((p:string)=>({type:"text" as const,id:uid(),content:p}));
-                                setBlocks(rawBlocks.length>0?rawBlocks:[{type:"text",id:uid(),content:h.content}]);
-                              }
+                              // content는 PublyHistory에 없으므로 제목만 복원, 글은 직접 작성
                               setTab("publish");
                               showToast("✅ 발행하기 탭으로 이동했어요","success");
                             }} style={{padding:"4px 10px",borderRadius:7,border:"1px solid rgba(0,200,120,.3)",background:"transparent",color:"var(--success)",cursor:"pointer",fontSize:12,fontWeight:700,flexShrink:0}}>🔄 재발행</button>
