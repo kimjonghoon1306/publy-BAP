@@ -674,6 +674,8 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
   const [persona, setPersona] = useState<PersonaStyle>(()=>(localStorage.getItem("publy_adm_persona") as PersonaStyle)||"none");
   const [blogTemplate, setBlogTemplate] = useState<BlogTemplate>("none");
   const [pubScope, setPubScope] = useState<"body"|"faq"|"full">("full");
+  const [draftAvailable, setDraftAvailable] = useState(false);
+  const [draftData, setDraftData] = useState<{title:string;content:string;savedAt:string}|null>(null);
   const [errorLogs, setErrorLogs] = useState<{id:string;user_id:string;user_name:string;user_email:string;feature:string;error_message:string;created_at:string;is_read:boolean}[]>([]);
   const [unreadErrors, setUnreadErrors] = useState(0);
   const [showErrorPopup, setShowErrorPopup] = useState(false);
@@ -1121,6 +1123,8 @@ Output format (JSON array only, no other text):
     checkBot(); getAccounts(ADM_UID).then(setAdmAccs); loadUsers();
     getHistory(ADM_UID).then(setHistory);
     loadUnreadCount();
+    // 임시저장 확인
+    try{const d=localStorage.getItem("publy_adm_draft");if(d){const p=JSON.parse(d);if(p.content&&p.title){setDraftAvailable(true);setDraftData(p);}}}catch{}
     const iv = setInterval(() => { checkBot(); loadUnreadCount(); }, 30000); return () => clearInterval(iv);
   }, [checkBot]);
 
@@ -1628,6 +1632,8 @@ POST3: (제목)|(이유)
       setBlocks(rawBlocks.length>0?rawBlocks:[{type:"text",id:uid(),content:body}]);
       setPubTitle(title);
       if(tgm)setHashtags(tgm[1].trim().split(",").map((t:string)=>t.trim().startsWith("#")?t.trim():"#"+t.trim()).filter(Boolean));
+      // 임시저장
+      try{localStorage.setItem("publy_adm_draft",JSON.stringify({title,content:body,savedAt:new Date().toLocaleString("ko-KR")}));}catch{}
       setAutoInserted(false);setThumbnail("");
     } catch(e:any) { alert("본문 생성 실패: "+e.message); }
     finally { setGenerating(false); }
@@ -2236,6 +2242,19 @@ POST3: (제목)|(이유)
             {/* ───── ✍️ 글 생성 ───── */}
             {tab === "write" && (
               <div style={{animation:"fadeUp .25s ease both"}}>
+                {/* 임시저장 불러오기 */}
+                {draftAvailable&&draftData&&!genContent&&(
+                  <div style={{padding:"12px 16px",borderRadius:12,background:"rgba(0,200,120,.1)",border:"1px solid rgba(0,200,120,.3)",marginBottom:12,display:"flex",alignItems:"center",justifyContent:"space-between",gap:10}}>
+                    <div>
+                      <div style={{fontSize:13,fontWeight:800,color:"var(--success)"}}>📝 임시저장된 글이 있어요</div>
+                      <div style={{fontSize:11,color:"var(--text3)",marginTop:2}}>{draftData.savedAt} · {draftData.title}</div>
+                    </div>
+                    <div style={{display:"flex",gap:6,flexShrink:0}}>
+                      <button onClick={()=>{setGenContent(draftData.content);setPubTitle(draftData.title);const rb=draftData.content.split("\n\n").filter(Boolean).map((p:string)=>({type:"text" as const,id:uid(),content:p}));setBlocks(rb.length>0?rb:[{type:"text",id:uid(),content:draftData.content}]);setDraftAvailable(false);showToast("✅ 임시저장 불러오기 완료");}} style={{padding:"5px 12px",borderRadius:8,background:"var(--success)",color:"#fff",border:"none",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:"inherit"}}>불러오기</button>
+                      <button onClick={()=>{localStorage.removeItem("publy_adm_draft");setDraftAvailable(false);setDraftData(null);}} style={{padding:"5px 10px",borderRadius:8,background:"var(--bg2)",color:"var(--text3)",border:"1px solid var(--border)",cursor:"pointer",fontSize:12,fontFamily:"inherit"}}>삭제</button>
+                    </div>
+                  </div>
+                )}
                 {selectedTitle?(
                   <div className="selected-banner" style={{marginBottom:14}}>
                     <div className="selected-banner-label">📌 선택된 제목 — <span style={{fontWeight:400,cursor:"pointer",textDecoration:"underline"}} onClick={()=>setTab("keyword")}>키워드/제목 탭에서 변경</span></div>
@@ -2665,6 +2684,14 @@ POST3: (제목)|(이유)
                       </span>
                       {h.post_url&&<a href={h.post_url} target="_blank" rel="noopener noreferrer" style={{fontSize:12,color:"var(--accent-text)",fontWeight:700,flexShrink:0}}>보기</a>}
                       <button style={{padding:"4px 10px",borderRadius:7,border:"1px solid rgba(255,71,87,.3)",background:"transparent",color:"var(--danger)",cursor:"pointer",fontSize:12,fontWeight:700,flexShrink:0}} onClick={async()=>{await deleteHistory(h.id);setHistory(prev=>prev.filter(x=>x.id!==h.id));}}>삭제</button>
+                          {h.status!=="fail"&&h.title&&(
+                            <button onClick={()=>{
+                              setPubTitle(h.title||"");
+                              if(h.content){setGenContent(h.content);const rb=h.content.split("\n\n").filter(Boolean).map((p:string)=>({type:"text" as const,id:uid(),content:p}));setBlocks(rb.length>0?rb:[{type:"text",id:uid(),content:h.content}]);}
+                              setTab("publish");
+                              showToast("✅ 발행하기 탭으로 이동했어요");
+                            }} style={{padding:"4px 10px",borderRadius:7,border:"1px solid rgba(0,200,120,.3)",background:"transparent",color:"var(--success)",cursor:"pointer",fontSize:12,fontWeight:700,flexShrink:0}}>🔄 재발행</button>
+                          )}
                     </div>
                   ))}
                 </div>
