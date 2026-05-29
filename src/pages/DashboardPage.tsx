@@ -2151,10 +2151,11 @@ POST3: (제목)|(이유)
                     style={{flex:1,padding:"10px",borderRadius:10,border:"1px solid var(--border)",background:"var(--card2)",color:"var(--text2)",cursor:"pointer",fontSize:13,fontWeight:700,fontFamily:"inherit"}}>
                     닫기
                   </button>
-                  <button onClick={()=>{setAlertPopup(null);setTab("settings");}}
-                    style={{flex:2,padding:"10px",borderRadius:10,border:"none",background:alertPopup.type==="expire"?"linear-gradient(135deg,#ff5363,#ff3366)":"linear-gradient(135deg,#ff9f3f,#ff6600)",color:"#fff",cursor:"pointer",fontSize:13,fontWeight:800,fontFamily:"inherit"}}>
-                    {alertPopup.type==="expire" ? "🔄 갱신/문의하기" : "⬆️ 플랜 업그레이드"}
-                  </button>
+                  <a href="https://open.kakao.com/o/s0lQ66wi" target="_blank" rel="noopener noreferrer"
+                    onClick={()=>setAlertPopup(null)}
+                    style={{flex:2,padding:"10px",borderRadius:10,border:"none",background:alertPopup.type==="expire"?"linear-gradient(135deg,#ff5363,#ff3366)":"linear-gradient(135deg,#ff9f3f,#ff6600)",color:"#fff",cursor:"pointer",fontSize:13,fontWeight:800,fontFamily:"inherit",textDecoration:"none",display:"flex",alignItems:"center",justifyContent:"center",gap:6}}>
+                    💬 {alertPopup.type==="expire" ? "카카오로 갱신 문의" : "카카오로 업그레이드 문의"}
+                  </a>
                 </div>
               </div>
             </div>
@@ -3816,6 +3817,12 @@ POST3: (제목)|(이유)
             )}
           </div>{/* main */}
         </div>{/* layout */}
+
+        {/* ── 카카오 결제문의 플로팅 버튼 ── */}
+        <a href="https://open.kakao.com/o/s0lQ66wi" target="_blank" rel="noopener noreferrer"
+          style={{position:"fixed",bottom:90,right:24,zIndex:500,display:"flex",alignItems:"center",gap:8,padding:"12px 18px",borderRadius:99,background:"#FEE500",color:"#3A1D1D",fontWeight:900,fontSize:13,fontFamily:"'Noto Sans KR',sans-serif",textDecoration:"none",boxShadow:"0 4px 20px rgba(254,229,0,.5)",animation:"float 2.5s ease-in-out infinite",whiteSpace:"nowrap",border:"none",cursor:"pointer"}}>
+          <span style={{fontSize:18}}>💬</span> 결제 문의
+        </a>
 
         <div className="mob-bar">
           {MAIN_TABS.filter(t=>["keyword","write","image","photo","publish","manage","settings"].includes(t.k)).map(t=>(<button key={t.k} className={`mob-btn ${tab===t.k?"active":""}`} onClick={()=>{if(t.k==="rank"){window.open("https://rank.xn--zk5biyyw.com/","_blank");return;}setTab(t.k as MainTab);}}><span className="mob-btn-ico">{t.i}</span><span className="mob-btn-lbl">{t.k==="keyword"?"키워드":t.k==="write"?"글쓰기":t.k==="image"?"이미지":t.k==="photo"?"사진글":t.k==="publish"?"발행":t.k==="manage"?"발행관리":"설정"}</span></button>))}
