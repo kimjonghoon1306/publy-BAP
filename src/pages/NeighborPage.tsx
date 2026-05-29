@@ -9,6 +9,7 @@ interface Account {
   blogId: string;    // 블로그 ID (로그인 후 확인)
   sessionOk: boolean;
   loginLoading: boolean;
+  showPw: boolean;   // 비밀번호 표시 여부
 }
 
 interface Target {
@@ -30,7 +31,7 @@ interface Props {
 export default function NeighborPage({ theme }: Props) {
   // ── 계정 ──
   const [accounts, setAccounts] = useState<Account[]>([
-    { accountId: "acc_1", id: "", pw: "", blogId: "", sessionOk: false, loginLoading: false },
+    { accountId: "acc_1", id: "", pw: "", blogId: "", sessionOk: false, loginLoading: false, showPw: false },
   ]);
 
   // ── 수집 설정 ──
@@ -134,7 +135,7 @@ export default function NeighborPage({ theme }: Props) {
   const addAccount = () => {
     setAccounts((p) => [
       ...p,
-      { accountId: `acc_${Date.now()}`, id: "", pw: "", blogId: "", sessionOk: false, loginLoading: false },
+      { accountId: `acc_${Date.now()}`, id: "", pw: "", blogId: "", sessionOk: false, loginLoading: false, showPw: false },
     ]);
   };
 
@@ -341,9 +342,16 @@ export default function NeighborPage({ theme }: Props) {
                   <input className="inp" placeholder="네이버 아이디" value={acc.id}
                     onChange={(e) => setAccounts((p) => p.map((a) => a.accountId === acc.accountId ? { ...a, id: e.target.value, sessionOk: false } : a))}
                     style={{ flex: 1, fontSize: 12, padding: "8px 10px" }} />
-                  <input className="inp" type="password" placeholder="비밀번호" value={acc.pw}
-                    onChange={(e) => setAccounts((p) => p.map((a) => a.accountId === acc.accountId ? { ...a, pw: e.target.value, sessionOk: false } : a))}
-                    style={{ flex: 1, fontSize: 12, padding: "8px 10px" }} />
+                  <div style={{ flex: 1, position: "relative", display: "flex" }}>
+                    <input className="inp" type={acc.showPw ? "text" : "password"} placeholder="비밀번호" value={acc.pw}
+                      onChange={(e) => setAccounts((p) => p.map((a) => a.accountId === acc.accountId ? { ...a, pw: e.target.value, sessionOk: false } : a))}
+                      style={{ flex: 1, fontSize: 12, padding: "8px 32px 8px 10px", width: "100%" }} />
+                    <button
+                      onClick={() => setAccounts((p) => p.map((a) => a.accountId === acc.accountId ? { ...a, showPw: !a.showPw } : a))}
+                      style={{ position: "absolute", right: 6, top: "50%", transform: "translateY(-50%)", background: "transparent", border: "none", cursor: "pointer", fontSize: 14, color: "var(--text3)", padding: "2px 4px", lineHeight: 1 }}>
+                      {acc.showPw ? "🙈" : "👁️"}
+                    </button>
+                  </div>
                 </div>
                 <button onClick={() => handleLogin(acc.accountId)} disabled={acc.loginLoading || !acc.id || !acc.pw}
                   style={{ width: "100%", padding: "9px", borderRadius: 9, border: "none", background: acc.sessionOk ? "rgba(0,214,143,.15)" : "var(--accent)", color: acc.sessionOk ? "var(--success)" : "#000", cursor: "pointer", fontSize: 12, fontWeight: 800, fontFamily: "inherit", transition: "all .2s" }}>
