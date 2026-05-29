@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
-    "electron:dev": "concurrently \"vite\" \"wait-on http://localhost:5173 && electron .\" \"cd naver-bot && npm start\"",
+    "electron:dev": "concurrently \"vite\" \"wait-on http://localhost:5173 && electron .\" \"cd naver-bot && npm start\" \"cd neighbor-bot && npm start\"",
     "electron:build:win": "vite build && electron-builder --win",
     "electron:build:mac": "vite build && electron-builder --mac",
     "preview": "vite preview"
@@ -50,6 +50,14 @@
       {
         "from": "naver-bot/node_modules",
         "to": "naver-bot/node_modules"
+      },
+      {
+        "from": "neighbor-bot/dist",
+        "to": "neighbor-bot/dist"
+      },
+      {
+        "from": "neighbor-bot/node_modules",
+        "to": "neighbor-bot/node_modules"
       }
     ],
     "win": {
