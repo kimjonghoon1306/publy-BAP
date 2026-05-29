@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
-import { PublyUser, getQuota, getHistory, getAccounts, PublyQuota, PublyHistory, PublyAccount, upsertAccount, useQuota, addHistory, deleteHistory, deleteAllHistory, changeUserPassword, getNaverApiKeys, saveNaverApiKeys, NaverApiKeys, checkNaverQuota, incrementNaverQuota, getNaverDailyUsage, NAVER_DAILY_LIMIT, getUserNaverApiKeys, logError } from "../lib/supabase";
+import { PublyUser, getQuota, getHistory, getAccounts, PublyQuota, PublyHistory, PublyAccount, upsertAccount, useQuota, addHistory, deleteHistory, deleteAllHistory, changeUserPassword, getNaverApiKeys, saveNaverApiKeys, NaverApiKeys, checkNaverQuota, incrementNaverQuota, getNaverDailyUsage, NAVER_DAILY_LIMIT, getUserNaverApiKeys, logError, PLAN_CONFIG, checkDailyPublishQuota, incrementDailyPublish, getDailyPublishUsage } from "../lib/supabase";
 import { supabase } from "../lib/supabase";
 import NeighborPage from "./NeighborPage";
 
@@ -446,6 +446,8 @@ export default function DashboardPage({user, onLogout, onAdminLogin, onThemeTogg
   const [botOnline, setBotOnline] = useState(false);
   const [botSecret, setBotSecret] = useState<string>("");  // 봇 API 인증 시크릿
   const [quota, setQuota] = useState<PublyQuota|null>(null);
+  const [dailyPublishUsed, setDailyPublishUsed] = useState(0);
+  const [alertPopup, setAlertPopup] = useState<{type:"expire"|"publish"; daysLeft?:number; used?:number; limit?:number} | null>(null);
   const [accounts, setAccounts] = useState<PublyAccount[]>([]);
   const [history, setHistory] = useState<PublyHistory[]>([]);
   const [adType, setAdType] = useState<"adpost"|"adsense">("adpost");
@@ -993,7 +995,34 @@ Output format (JSON array only, no other text):
     checkBot();
     getAccounts(user.id).then(setAccounts);
     getHistory(user.id).then(setHistory);
-    getQuota(user.id).then((q:PublyQuota|null)=>q&&setQuota(q));
+    getQuota(user.id).then(async (q:PublyQuota|null)=>{
+      if(!q) return;
+      setQuota(q);
+
+      // ── 알림 체크 ──
+      const now = new Date();
+      const expiry = new Date(q.reset_date);
+      const daysLeft = Math.ceil((expiry.getTime() - now.getTime()) / (1000*60*60*24));
+
+      // 만료 알림 (3일 이하)
+      if (daysLeft <= 3 && daysLeft >= 0) {
+        setAlertPopup({ type: "expire", daysLeft });
+        return;
+      }
+
+      // 발행 잔여 알림
+      const config = PLAN_CONFIG[user.plan] ?? PLAN_CONFIG.free;
+      const used = await getDailyPublishUsage(user.id);
+      setDailyPublishUsed(used);
+      const remaining = config.dailyPublish - used;
+      const pct = remaining / config.dailyPublish;
+      if (pct <= 0.1) {
+        setAlertPopup({ type: "publish", used, limit: config.dailyPublish });
+      } else if (pct <= 0.2 && !localStorage.getItem(`publy_alert_20_${now.toISOString().slice(0,10)}`)) {
+        localStorage.setItem(`publy_alert_20_${now.toISOString().slice(0,10)}`, "1");
+        setAlertPopup({ type: "publish", used, limit: config.dailyPublish });
+      }
+    });
     // 임시저장 확인
     try{
       const d=localStorage.getItem("publy_draft");
@@ -1535,6 +1564,12 @@ POST3: (제목)|(이유)
       }).filter(Boolean),
     };
     try{
+      // 하루 발행 한도 체크
+      const dailyCheck = await checkDailyPublishQuota(user.id, user.plan);
+      if (!dailyCheck.ok) {
+        showToast(`❌ 오늘 발행 한도(${dailyCheck.limit}개) 초과! 내일 다시 가능해요`, "error");
+        setPublishing(false); return;
+      }
       const ok=await useQuota(user.id);if(!ok){showToast("❌ 발행 건수 초과","error");setPublishing(false);return;}
       if(!botOnline){
         await supabase.from("publy_jobs").insert({user_id:user.id,platform,title:pubTitle,content,
@@ -1549,6 +1584,8 @@ POST3: (제목)|(이유)
         if(r.status===401){showToast("❌ 세션 만료 — 계정 관리 탭에서 재연결해주세요","error");setPublishing(false);return;}
         if(!r.ok)throw new Error(d.error);
         await addHistory({user_id:user.id,platform,title:pubTitle,post_url:d.postUrl,status:"success"});
+        await incrementDailyPublish(user.id);
+        setDailyPublishUsed(p => p + 1);
         setPubMsg(scheduleOn?"✅ 예약 완료! 설정한 시간에 자동 발행돼요.":"✅ 발행 완료!");
         showToast(scheduleOn?"⏰ 예약 완료!":"✅ 발행 완료! 🎉");
       }
@@ -1698,7 +1735,15 @@ POST3: (제목)|(이유)
   }
 
   async function handleAddAccount(){
-    if(!newUser||!newPw)return;setAddingAcc(true);
+    if(!newUser||!newPw)return;
+    // 계정 수 제한 체크
+    const config = PLAN_CONFIG[user.plan] ?? PLAN_CONFIG.free;
+    const currentCount = accounts.filter(a => a.platform !== "google").length;
+    if (currentCount >= config.maxAccounts) {
+      alert(`${config.label} 플랜은 최대 ${config.maxAccounts}개 계정까지 등록 가능합니다`);
+      return;
+    }
+    setAddingAcc(true);
     try{await upsertAccount({user_id:user.id,platform:newPlat,username:newUser,password_encrypted:btoa(newPw),blog_name:newBlog||undefined,is_connected:false});getAccounts(user.id).then(setAccounts);setNewUser("");setNewPw("");setNewBlog("");}
     catch(e:any){alert(e.message);}finally{setAddingAcc(false);}
   }
@@ -2064,6 +2109,57 @@ POST3: (제목)|(이유)
     <>
       <style>{CSS}</style>
       <div className={`app ${theme} ${fontMode==="large"?"large":""}`}>
+
+        {/* ── 만료/발행 알림 팝업 ── */}
+        {alertPopup&&(
+          <div style={{position:"fixed",inset:0,zIndex:9999,background:"rgba(0,0,0,.75)",display:"flex",alignItems:"center",justifyContent:"center",padding:20}} onClick={()=>setAlertPopup(null)}>
+            <div style={{width:"100%",maxWidth:400,borderRadius:20,background:"var(--card)",border:`1px solid ${alertPopup.type==="expire"?"rgba(255,83,99,.4)":"rgba(255,159,63,.4)"}`,overflow:"hidden",animation:"fadeUp .25s ease",boxShadow:"0 24px 60px rgba(0,0,0,.5)"}} onClick={e=>e.stopPropagation()}>
+              {/* 헤더 */}
+              <div style={{padding:"18px 22px 16px",background:alertPopup.type==="expire"?"linear-gradient(135deg,#ff5363,#ff3366)":"linear-gradient(135deg,#ff9f3f,#ff6600)",display:"flex",alignItems:"center",gap:12}}>
+                <div style={{fontSize:28}}>{alertPopup.type==="expire"?"⏰":"📊"}</div>
+                <div>
+                  <div style={{fontSize:16,fontWeight:900,color:"#fff"}}>
+                    {alertPopup.type==="expire"
+                      ? alertPopup.daysLeft===0 ? "오늘 만료됩니다!" : `만료 ${alertPopup.daysLeft}일 전`
+                      : "오늘 발행 한도가 얼마 안 남았어요"}
+                  </div>
+                  <div style={{fontSize:12,color:"rgba(255,255,255,.85)",marginTop:2}}>
+                    {alertPopup.type==="expire" ? "서비스 이용을 위해 갱신해주세요" : "추가 발행이 필요하면 플랜을 업그레이드하세요"}
+                  </div>
+                </div>
+              </div>
+              {/* 내용 */}
+              <div style={{padding:"18px 22px"}}>
+                {alertPopup.type==="expire" ? (
+                  <div style={{fontSize:14,color:"var(--text)",lineHeight:1.8}}>
+                    {alertPopup.daysLeft===0
+                      ? "오늘 자정에 서비스가 만료됩니다."
+                      : `${alertPopup.daysLeft}일 후 서비스가 만료됩니다.`}
+                    <br/>만료 후에는 <strong>모든 기능이 정지</strong>됩니다.
+                  </div>
+                ) : (
+                  <div style={{fontSize:14,color:"var(--text)",lineHeight:1.8}}>
+                    오늘 <strong>{alertPopup.used}개</strong> 발행 완료 / 한도 <strong>{alertPopup.limit}개</strong>
+                    <br/>남은 발행 수: <strong style={{color:"var(--warn)"}}>{(alertPopup.limit||0)-(alertPopup.used||0)}개</strong>
+                    <div style={{marginTop:10,height:6,borderRadius:99,background:"var(--border)",overflow:"hidden"}}>
+                      <div style={{height:"100%",borderRadius:99,width:`${Math.min(100,((alertPopup.used||0)/(alertPopup.limit||1))*100)}%`,background:"linear-gradient(90deg,#ff9f3f,#ff6600)",transition:"width .4s"}}/>
+                    </div>
+                  </div>
+                )}
+                <div style={{display:"flex",gap:8,marginTop:16}}>
+                  <button onClick={()=>setAlertPopup(null)}
+                    style={{flex:1,padding:"10px",borderRadius:10,border:"1px solid var(--border)",background:"var(--card2)",color:"var(--text2)",cursor:"pointer",fontSize:13,fontWeight:700,fontFamily:"inherit"}}>
+                    닫기
+                  </button>
+                  <button onClick={()=>{setAlertPopup(null);setTab("settings");}}
+                    style={{flex:2,padding:"10px",borderRadius:10,border:"none",background:alertPopup.type==="expire"?"linear-gradient(135deg,#ff5363,#ff3366)":"linear-gradient(135deg,#ff9f3f,#ff6600)",color:"#fff",cursor:"pointer",fontSize:13,fontWeight:800,fontFamily:"inherit"}}>
+                    {alertPopup.type==="expire" ? "🔄 갱신/문의하기" : "⬆️ 플랜 업그레이드"}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* 가이드 모달 */}
         {showGuide&&(
