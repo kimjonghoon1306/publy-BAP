@@ -54,14 +54,16 @@ async function startNeighborBotServer() {
     ? path.join(__dirname, "../../neighbor-bot")
     : path.join(process.resourcesPath, "neighbor-bot");
 
-  // Chromium 경로 — naver-bot과 공유
+  // playwright는 naver-bot node_modules 공유
+  const naverBotPath = isDev
+    ? path.join(__dirname, "../../naver-bot")
+    : path.join(process.resourcesPath, "naver-bot");
+
   const chromiumPath = isDev
     ? path.join(__dirname, "../../chromium")
     : path.join(process.resourcesPath, "chromium");
 
   const fs = await import("fs");
-
-  // dist/server.js 없으면 건너뜀
   if (!fs.existsSync(path.join(botPath, "dist", "server.js"))) {
     console.warn("[neighbor-bot] dist/server.js 없음:", botPath);
     return;
@@ -76,6 +78,7 @@ async function startNeighborBotServer() {
       env: {
         ...process.env,
         PLAYWRIGHT_BROWSERS_PATH: chromiumPath,
+        NODE_PATH: path.join(naverBotPath, "node_modules"),
       },
     });
 
