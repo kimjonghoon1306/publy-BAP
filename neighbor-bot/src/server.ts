@@ -54,9 +54,9 @@ app.post("/api/stop/:jobId", (req, res) => {
 
 /* ── 블로그 수집 (SSE) ── */
 app.get("/api/crawl", async (req, res) => {
-  const { accountId, keywords, countPerKeyword } = req.query as Record<string, string>;
-  if (!accountId || !keywords)
-    return res.status(400).json({ error: "accountId, keywords 필요" });
+  const { keywords, countPerKeyword } = req.query as Record<string, string>;
+  if (!keywords)
+    return res.status(400).json({ error: "keywords 필요" });
 
   sseSetup(res);
 
@@ -65,7 +65,7 @@ app.get("/api/crawl", async (req, res) => {
     const count = parseInt(countPerKeyword || "30", 10);
 
     const results = await crawlBlogIds({
-      accountId,
+      accountId: "",
       keywords: kwList,
       countPerKeyword: count,
       onLog: (msg) => sseSend(res, { type: "log", msg }),
