@@ -3,13 +3,13 @@ import React, { useState, useEffect, useRef, useCallback } from "react";
 const BOT = "http://127.0.0.1:3334";
 
 interface Account {
-  accountId: string; // 내부 식별자
-  id: string;        // 네이버 아이디
-  pw: string;        // 비밀번호
-  blogId: string;    // 블로그 ID (로그인 후 확인)
+  accountId: string;
+  id: string;
+  pw: string;
+  blogId: string;
   sessionOk: boolean;
   loginLoading: boolean;
-  showPw: boolean;   // 비밀번호 표시 여부
+  showPw: boolean;
 }
 
 interface Target {
@@ -26,13 +26,18 @@ interface WorkResult {
 
 interface Props {
   theme: "dark" | "light";
+  userId?: string;
+  plan?: string;
 }
 
-export default function NeighborPage({ theme }: Props) {
-  // ── 계정 ──
+export default function NeighborPage({ theme, userId, plan = "free" }: Props) {
   const [accounts, setAccounts] = useState<Account[]>([
     { accountId: "acc_1", id: "", pw: "", blogId: "", sessionOk: false, loginLoading: false, showPw: false },
   ]);
+
+  // ── 쿼타 ──
+  const [quotaUsed, setQuotaUsed] = useState(0);
+  const [quotaLimit, setQuotaLimit] = useState(0);
 
   // ── 수집 설정 ──
   const [keywords, setKeywords] = useState(""); // 쉼표 구분
@@ -77,6 +82,15 @@ export default function NeighborPage({ theme }: Props) {
     const t = setInterval(check, 5000);
     return () => clearInterval(t);
   }, []);
+
+  // ── 쿼타 로드 ──
+  useEffect(() => {
+    if (!userId) return;
+    fetch(`${BOT}/api/quota/${userId}`)
+      .then(r => r.json())
+      .then(d => { if (d.ok) { setQuotaUsed(d.used); setQuotaLimit(d.limit); } })
+      .catch(() => {});
+  }, [userId, botOnline]);
 
   // ── 로그 자동 스크롤 ──
   useEffect(() => {
@@ -166,13 +180,21 @@ export default function NeighborPage({ theme }: Props) {
     setFailCnt(0);
     addLog(`🔍 수집 시작 — 키워드: ${kwList.join(", ")} / 키워드당 ${countPerKw}개`);
 
-    const url = `${BOT}/api/crawl?keywords=${encodeURIComponent(kwList.join(","))}&countPerKeyword=${countPerKw}`;
+    const url = `${BOT}/api/crawl?keywords=${encodeURIComponent(kwList.join(","))}&countPerKeyword=${countPerKw}${userId ? `&userId=${userId}` : ""}`;
     const es = new EventSource(url);
     esRef.current = es;
 
     es.onmessage = (e) => {
       const data = JSON.parse(e.data);
       if (data.type === "log") addLog(data.msg);
+      if (data.type === "quota_info") {
+        setQuotaUsed(data.used); setQuotaLimit(data.limit);
+        addLog(`📊 오늘 서이추 현황: ${data.used}/${data.limit} (남은 ${data.remaining}명)`);
+      }
+      if (data.type === "quota_exceeded") {
+        addLog(`🚫 오늘 한도(${data.limit}명) 모두 사용! 내일 다시 가능합니다`);
+        setCrawling(false); es.close(); return;
+      }
       if (data.type === "crawl_done") {
         const newTargets: Target[] = data.results;
         setTargets(newTargets);
@@ -214,9 +236,9 @@ export default function NeighborPage({ theme }: Props) {
       message: msg,
       delayMin: delayMin.toString(),
       delayMax: delayMax.toString(),
-      dailyLimit: dailyLimit.toString(),
       skipDone: skipDone.toString(),
       jobId: jobIdRef.current,
+      ...(userId ? { userId } : {}),
     });
 
     const es = new EventSource(`${BOT}/api/add-neighbor?${params}`);
@@ -225,10 +247,19 @@ export default function NeighborPage({ theme }: Props) {
     es.onmessage = (e) => {
       const data = JSON.parse(e.data);
       if (data.type === "log") addLog(data.msg);
+      if (data.type === "quota_info") {
+        setQuotaUsed(data.used); setQuotaLimit(data.limit);
+        addLog(`📊 오늘 서이추 현황: ${data.used}/${data.limit} (남은 ${data.remaining}명)`);
+      }
+      if (data.type === "quota_exceeded") {
+        addLog(`🚫 오늘 한도(${data.limit}명) 모두 사용! 내일 다시 가능합니다`);
+        setWorking(false); es.close(); return;
+      }
       if (data.type === "result") {
         setResults((p) =>
           p.map((r) => r.blogId === data.blogId ? { ...r, status: data.status, message: data.message } : r)
         );
+        if (data.status === "success") setQuotaUsed(q => q + 1);
       }
       if (data.type === "progress") {
         setDoneCnt(data.done);
@@ -456,6 +487,26 @@ export default function NeighborPage({ theme }: Props) {
 
         {/* ── 오른쪽: 작업 현황 ── */}
         <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+
+          {/* 쿼타 */}
+          {userId && quotaLimit > 0 && (
+            <div style={{ padding: "12px 16px", borderRadius: 14, background: "var(--card)", border: `1px solid ${quotaUsed >= quotaLimit ? "rgba(255,83,99,.3)" : "var(--border)"}`, display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 0 }}>
+              <div>
+                <div style={{ fontSize: 11, color: "var(--text3)", fontWeight: 600, marginBottom: 4 }}>오늘 서이추 한도</div>
+                <div style={{ fontSize: 20, fontWeight: 900, color: quotaUsed >= quotaLimit ? "var(--danger)" : "var(--accent-text)", fontFamily: "'Space Grotesk',sans-serif" }}>
+                  {quotaUsed} <span style={{ fontSize: 13, color: "var(--text3)" }}>/ {quotaLimit}</span>
+                </div>
+              </div>
+              <div style={{ width: 60 }}>
+                <div style={{ height: 6, borderRadius: 99, background: "var(--border)", overflow: "hidden" }}>
+                  <div style={{ height: "100%", borderRadius: 99, width: `${Math.min(100, (quotaUsed / quotaLimit) * 100)}%`, background: quotaUsed >= quotaLimit ? "var(--danger)" : "var(--accent)", transition: "width .4s" }} />
+                </div>
+                <div style={{ fontSize: 10, color: "var(--text3)", textAlign: "center", marginTop: 3 }}>
+                  {quotaUsed >= quotaLimit ? "오늘 마감" : `${quotaLimit - quotaUsed}명 가능`}
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* 카운터 */}
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10 }}>
