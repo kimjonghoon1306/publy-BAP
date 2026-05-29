@@ -58,6 +58,10 @@
       {
         "from": "neighbor-bot/node_modules",
         "to": "neighbor-bot/node_modules"
+      },
+      {
+        "from": "chromium",
+        "to": "chromium"
       }
     ],
     "win": {
