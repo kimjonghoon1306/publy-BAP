@@ -236,6 +236,52 @@ export async function saveAdminNaverApiKeys(keys: NaverApiKeys): Promise<void> {
 }
 
 // ── 네이버 API 일일 쿼타 ──────────────────────────────────
+/* ── 등급별 설정 ── */
+export const PLAN_CONFIG: Record<string, {
+  label: string;
+  maxAccounts: number;
+  dailyPublish: number;
+  trialDays: number;
+}> = {
+  free:  { label: "FREE",  maxAccounts: 1, dailyPublish: 2,  trialDays: 7  },
+  basic: { label: "BASIC", maxAccounts: 2, dailyPublish: 6,  trialDays: 30 },
+  pro:   { label: "PRO",   maxAccounts: 3, dailyPublish: 15, trialDays: 30 },
+  admin: { label: "ADMIN", maxAccounts: 99, dailyPublish: 9999, trialDays: 9999 },
+};
+
+function publishQuotaKey(userId: string): string {
+  const today = new Date().toISOString().slice(0, 10);
+  return `publish_daily_${userId}_${today}`;
+}
+
+/* ── 오늘 발행 수 조회 ── */
+export async function getDailyPublishUsage(userId: string): Promise<number> {
+  try {
+    const { data } = await supabase
+      .from("publy_settings")
+      .select("value")
+      .eq("key", publishQuotaKey(userId))
+      .maybeSingle();
+    return data?.value ? parseInt(data.value) || 0 : 0;
+  } catch { return 0; }
+}
+
+/* ── 오늘 발행 쿼타 체크 ── */
+export async function checkDailyPublishQuota(userId: string, plan: string): Promise<{ ok: boolean; used: number; limit: number }> {
+  const config = PLAN_CONFIG[plan] ?? PLAN_CONFIG.free;
+  const used = await getDailyPublishUsage(userId);
+  return { ok: used < config.dailyPublish, used, limit: config.dailyPublish };
+}
+
+/* ── 오늘 발행 수 증가 ── */
+export async function incrementDailyPublish(userId: string): Promise<void> {
+  const key = publishQuotaKey(userId);
+  const used = await getDailyPublishUsage(userId);
+  await supabase
+    .from("publy_settings")
+    .upsert({ key, value: String(used + 1) }, { onConflict: "key" });
+}
+
 export const NAVER_DAILY_LIMIT: Record<string, number> = {
   free: 5,
   pro: 20,
