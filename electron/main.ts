@@ -4,6 +4,7 @@ import { spawn, ChildProcess } from "child_process";
 
 let mainWindow: BrowserWindow | null = null;
 let botProcess: ChildProcess | null = null;
+let neighborBotProcess: ChildProcess | null = null;
 const isDev = !app.isPackaged;
 
 async function startBotServer() {
@@ -41,6 +42,41 @@ async function startBotServer() {
   startBot();
 }
 
+async function startNeighborBotServer() {
+  const botPath = isDev
+    ? path.join(__dirname, "../../neighbor-bot")
+    : path.join(process.resourcesPath, "neighbor-bot");
+
+  try {
+    const fs = await import("fs");
+    if (!fs.existsSync(path.join(botPath, "dist", "server.js"))) {
+      console.warn("[neighbor-bot] dist/server.js 없음 — 빌드 필요:", botPath);
+      return;
+    }
+  } catch { return; }
+
+  const startBot = () => {
+    console.log("[neighbor-bot] 서버 시작...");
+    neighborBotProcess = spawn("node", ["dist/server.js"], {
+      cwd: botPath,
+      stdio: "pipe",
+      shell: true,
+      env: { ...process.env },
+    });
+
+    neighborBotProcess.stdout?.on("data", d => console.log("[neighbor-bot]", d.toString().trim()));
+    neighborBotProcess.stderr?.on("data", d => console.error("[neighbor-bot]", d.toString().trim()));
+
+    neighborBotProcess.on("exit", (code) => {
+      console.warn(`[neighbor-bot] 종료 (code: ${code}). 3초 후 재시작...`);
+      neighborBotProcess = null;
+      if (!app.isQuitting) setTimeout(startBot, 3000);
+    });
+  };
+
+  startBot();
+}
+
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1400, height: 900, minWidth: 380, minHeight: 600,
@@ -67,6 +103,7 @@ app.isQuitting = false;
 
 app.whenReady().then(async () => {
   await startBotServer();
+  await startNeighborBotServer();
   createWindow();
   app.on("activate", () => { if (!mainWindow) createWindow(); });
 });
