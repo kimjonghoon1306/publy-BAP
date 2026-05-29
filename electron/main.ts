@@ -12,6 +12,10 @@ async function startBotServer() {
     ? path.join(__dirname, "../../naver-bot")
     : path.join(process.resourcesPath, "naver-bot");
 
+  const chromiumPath = isDev
+    ? path.join(__dirname, "../../chromium")
+    : path.join(process.resourcesPath, "chromium");
+
   try {
     const fs = await import("fs");
     if (!fs.existsSync(path.join(botPath, "dist", "server.js"))) {
@@ -26,7 +30,10 @@ async function startBotServer() {
       cwd: botPath,
       stdio: "pipe",
       shell: true,
-      env: { ...process.env },
+      env: {
+        ...process.env,
+        PLAYWRIGHT_BROWSERS_PATH: chromiumPath,
+      },
     });
 
     botProcess.stdout?.on("data", d => console.log("[bot]", d.toString().trim()));
@@ -47,13 +54,18 @@ async function startNeighborBotServer() {
     ? path.join(__dirname, "../../neighbor-bot")
     : path.join(process.resourcesPath, "neighbor-bot");
 
-  try {
-    const fs = await import("fs");
-    if (!fs.existsSync(path.join(botPath, "dist", "server.js"))) {
-      console.warn("[neighbor-bot] dist/server.js 없음 — 빌드 필요:", botPath);
-      return;
-    }
-  } catch { return; }
+  // Chromium 경로 — naver-bot과 공유
+  const chromiumPath = isDev
+    ? path.join(__dirname, "../../chromium")
+    : path.join(process.resourcesPath, "chromium");
+
+  const fs = await import("fs");
+
+  // dist/server.js 없으면 건너뜀
+  if (!fs.existsSync(path.join(botPath, "dist", "server.js"))) {
+    console.warn("[neighbor-bot] dist/server.js 없음:", botPath);
+    return;
+  }
 
   const startBot = () => {
     console.log("[neighbor-bot] 서버 시작...");
@@ -61,7 +73,10 @@ async function startNeighborBotServer() {
       cwd: botPath,
       stdio: "pipe",
       shell: true,
-      env: { ...process.env },
+      env: {
+        ...process.env,
+        PLAYWRIGHT_BROWSERS_PATH: chromiumPath,
+      },
     });
 
     neighborBotProcess.stdout?.on("data", d => console.log("[neighbor-bot]", d.toString().trim()));
