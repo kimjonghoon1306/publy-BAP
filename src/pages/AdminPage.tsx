@@ -3629,7 +3629,7 @@ POST3: (제목)|(이유)
 
             {/* ───── 🤝 서이추 ───── */}
             {tab === "neighbor" && (
-              <NeighborPage theme={theme} />
+              <NeighborPage theme={theme} plan="admin" />
             )}
 
             {/* ───── 🔐 설정 ───── */}
