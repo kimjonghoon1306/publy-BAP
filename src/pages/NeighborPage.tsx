@@ -45,9 +45,9 @@ export default function NeighborPage({ theme }: Props) {
 
   // ── 멘트 ──
   const [msgMode, setMsgMode] = useState<"single" | "multi">("single");
-  const [singleMsg, setSingleMsg] = useState("안녕하세요! 좋은 글 잘 읽고 갑니다. 서로이웃 신청드려요 😊");
+  const [singleMsg, setSingleMsg] = useState("안녕하세요! 좋은 글 잘 읽고 갑니다. 서이추 신청드려요 😊");
   const [multiMsgs, setMultiMsgs] = useState(
-    "안녕하세요! 좋은 글 잘 읽고 갑니다. 서로이웃 신청드려요 😊\n공감가는 글이 많네요. 서로이웃 해요!\n좋은 정보 잘 보고 갑니다. 이웃 신청드려요^^"
+    "안녕하세요! 좋은 글 잘 읽고 갑니다. 서이추 신청드려요 😊\n공감가는 글이 많네요. 서이추 해요!\n좋은 정보 잘 보고 갑니다. 이웃 신청드려요^^"
   );
   const [msgIndex, setMsgIndex] = useState(0);
 
@@ -262,7 +262,7 @@ export default function NeighborPage({ theme }: Props) {
     const csv = ["키워드,블로그ID,결과,메시지", ...results.map((r) => `${r.keyword},${r.blogId},${r.status},${r.message}`)].join("\n");
     const a = document.createElement("a");
     a.href = URL.createObjectURL(new Blob(["\uFEFF" + csv], { type: "text/csv" }));
-    a.download = `서로이웃_작업내역_${new Date().toLocaleDateString("ko-KR").replace(/\. /g, "-").replace(".", "")}.csv`;
+    a.download = `서이추_작업내역_${new Date().toLocaleDateString("ko-KR").replace(/\. /g, "-").replace(".", "")}.csv`;
     a.click();
     addLog("💾 작업 내역 저장 완료");
   };
@@ -316,7 +316,7 @@ export default function NeighborPage({ theme }: Props) {
       {/* 봇 상태 */}
       {!botOnline && (
         <div style={{ marginBottom: 14, padding: "12px 16px", borderRadius: 12, background: "rgba(255,83,99,.08)", border: "1px solid rgba(255,83,99,.25)", color: "var(--danger)", fontSize: 13, fontWeight: 600 }}>
-          ⚠️ 서로이웃 봇 서버(포트 3334)가 오프라인입니다. <code style={{ fontSize: 11, background: "var(--card2)", padding: "2px 6px", borderRadius: 5 }}>neighbor-bot</code> 폴더에서 <code style={{ fontSize: 11, background: "var(--card2)", padding: "2px 6px", borderRadius: 5 }}>npm start</code> 를 실행하세요.
+          ⚠️ 서이추 봇 서버(포트 3334)가 오프라인입니다. <code style={{ fontSize: 11, background: "var(--card2)", padding: "2px 6px", borderRadius: 5 }}>neighbor-bot</code> 폴더에서 <code style={{ fontSize: 11, background: "var(--card2)", padding: "2px 6px", borderRadius: 5 }}>npm start</code> 를 실행하세요.
         </div>
       )}
 
@@ -414,9 +414,9 @@ export default function NeighborPage({ theme }: Props) {
             </div>
           </div>
 
-          {/* 서로이웃 멘트 */}
+          {/* 서이추 멘트 */}
           <div className="card" style={{ padding: "16px 18px" }}>
-            <div className="card-title" style={{ marginBottom: 12 }}>💬 서로이웃 멘트</div>
+            <div className="card-title" style={{ marginBottom: 12 }}>💬 서이추 멘트</div>
             <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
               {(["single", "multi"] as const).map((m) => (
                 <button key={m} onClick={() => setMsgMode(m)}
