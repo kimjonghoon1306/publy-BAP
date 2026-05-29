@@ -5,6 +5,59 @@ const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZ
 
 export const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
+/* ── 등급별 서이추 일일 한도 ── */
+export const NEIGHBOR_DAILY_LIMIT: Record<string, number> = {
+  free: 10,
+  basic: 50,
+  pro: 100,
+  admin: 9999,
+};
+
+function neighborQuotaKey(userId: string): string {
+  const today = new Date().toISOString().slice(0, 10);
+  return `neighbor_daily_${userId}_${today}`;
+}
+
+/* ── 오늘 사용량 조회 ── */
+export async function getNeighborDailyUsage(userId: string): Promise<number> {
+  try {
+    const { data } = await supabase
+      .from("publy_settings")
+      .select("value")
+      .eq("key", neighborQuotaKey(userId))
+      .maybeSingle();
+    return data?.value ? parseInt(data.value) || 0 : 0;
+  } catch { return 0; }
+}
+
+/* ── 쿼타 체크 ── */
+export async function checkNeighborQuota(userId: string, plan: string): Promise<{ ok: boolean; used: number; limit: number }> {
+  const limit = NEIGHBOR_DAILY_LIMIT[plan] ?? NEIGHBOR_DAILY_LIMIT.free;
+  const used = await getNeighborDailyUsage(userId);
+  return { ok: used < limit, used, limit };
+}
+
+/* ── 쿼타 증가 (신청 성공 시) ── */
+export async function incrementNeighborQuota(userId: string): Promise<void> {
+  const key = neighborQuotaKey(userId);
+  const used = await getNeighborDailyUsage(userId);
+  await supabase
+    .from("publy_settings")
+    .upsert({ key, value: String(used + 1) }, { onConflict: "key" });
+}
+
+/* ── 회원 플랜 조회 ── */
+export async function getUserPlan(userId: string): Promise<string> {
+  try {
+    const { data } = await supabase
+      .from("publy_users")
+      .select("plan")
+      .eq("id", userId)
+      .maybeSingle();
+    return data?.plan || "free";
+  } catch { return "free"; }
+}
+
 /* ── 관리자 블로그 검색 API 키 조회 ── */
 export async function getAdminBlogSearchKeys(): Promise<{ clientId: string; clientSecret: string } | null> {
   try {
