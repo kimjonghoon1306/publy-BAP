@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { PublyUser, getQuota, getHistory, getAccounts, PublyQuota, PublyHistory, PublyAccount, upsertAccount, useQuota, addHistory, deleteHistory, deleteAllHistory, changeUserPassword, getNaverApiKeys, saveNaverApiKeys, NaverApiKeys, checkNaverQuota, incrementNaverQuota, getNaverDailyUsage, NAVER_DAILY_LIMIT, getUserNaverApiKeys, logError } from "../lib/supabase";
 import { supabase } from "../lib/supabase";
+import NeighborPage from "./NeighborPage";
 
-type MainTab = "keyword" | "write" | "image" | "photo" | "publish" | "manage" | "accounts" | "rank" | "calendar" | "settings";
+type MainTab = "keyword" | "write" | "image" | "photo" | "publish" | "manage" | "accounts" | "rank" | "calendar" | "settings" | "neighbor";
 type PublishConcept = "full" | "body_faq" | "body_only";
 
 const BOT = "http://127.0.0.1:3333";
@@ -68,6 +69,7 @@ const MAIN_TABS = [
   {k:"accounts",i:"🔗", l:"계정 관리"},
   {k:"rank",    i:"📊", l:"블로그 순위"},
   {k:"calendar",i:"📅", l:"콘텐츠 캘린더"},
+  {k:"neighbor",i:"🤝", l:"서로이웃"},
   {k:"settings",i:"⚙️", l:"설정"},
 ] as const;
 
@@ -3585,6 +3587,10 @@ POST3: (제목)|(이유)
                   </div>
                 )}
               </div>
+            )}
+
+            {tab==="neighbor"&&(
+              <NeighborPage theme={theme as "dark"|"light"} />
             )}
 
             {tab==="settings"&&(
