@@ -203,7 +203,7 @@ export async function addNeighbors(params: {
   dailyLimit: number;
   skipDone: boolean;
   onLog: (msg: string) => void;
-  onResult: (r: NeighborResult) => void;
+  onResult: (r: NeighborResult) => void | Promise<void>;
   onProgress: (done: number, fail: number) => void;
   stopSignal: () => boolean;
 }): Promise<void> {
