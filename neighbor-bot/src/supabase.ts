@@ -5,6 +5,26 @@ const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZ
 
 export const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
+/* ── 관리자 블로그 검색 API 키 조회 ── */
+export async function getAdminBlogSearchKeys(): Promise<{ clientId: string; clientSecret: string } | null> {
+  try {
+    const { data: idRow } = await supabase
+      .from("publy_settings")
+      .select("value")
+      .eq("key", "admin_naver_datalab_client_id")
+      .maybeSingle();
+    const { data: secRow } = await supabase
+      .from("publy_settings")
+      .select("value")
+      .eq("key", "admin_naver_datalab_client_secret")
+      .maybeSingle();
+    if (!idRow?.value || !secRow?.value) return null;
+    return { clientId: idRow.value, clientSecret: secRow.value };
+  } catch {
+    return null;
+  }
+}
+
 export interface PublyJob {
   id: string;
   user_id: string;
