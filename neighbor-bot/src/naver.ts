@@ -1,6 +1,7 @@
 import { chromium, BrowserContext, Page } from "playwright";
 import fs from "fs";
 import path from "path";
+import { getAdminBlogSearchKeys } from "./supabase";
 
 const SESSION_DIR = path.join(__dirname, "../sessions");
 if (!fs.existsSync(SESSION_DIR)) fs.mkdirSync(SESSION_DIR, { recursive: true });
@@ -100,65 +101,89 @@ async function loadSession(accountId: string) {
   return { context, browser, blogId: saved.blogId as string };
 }
 
-/* ── 키워드로 블로그 ID 수집 ── */
+/* ── 키워드로 블로그 ID 수집 (네이버 블로그 검색 API) ── */
 export async function crawlBlogIds(params: {
   accountId: string;
   keywords: string[];
   countPerKeyword: number;
   onLog: (msg: string) => void;
 }): Promise<{ keyword: string; blogId: string }[]> {
-  const { accountId, keywords, countPerKeyword, onLog } = params;
+  const { keywords, countPerKeyword, onLog } = params;
   const results: { keyword: string; blogId: string }[] = [];
-  const { context, browser } = await loadSession(accountId);
-  const page = await context.newPage();
+
+  // 관리자 블로그 검색 API 키 조회
+  const keys = await getAdminBlogSearchKeys();
+  if (!keys) {
+    onLog("❌ 관리자 설정탭에서 네이버 DataLab API 키를 먼저 등록해주세요");
+    return results;
+  }
+
   const INVALID = ["PostView","PostList","BlogHome","FeedList","neighborPostList","TagList","GoBlogWrite","search","api"];
 
-  try {
-    for (const kw of keywords) {
-      onLog(`🔍 [${kw}] 수집 시작...`);
-      let collected = 0;
-      let start = 1;
+  for (const kw of keywords) {
+    onLog(`🔍 [${kw}] 블로그 검색 API 수집 시작...`);
+    let collected = 0;
+    let start = 1;
+    const display = 100; // 한번에 최대 100개
 
-      while (collected < countPerKeyword) {
-        try {
-          const url = `https://search.naver.com/search.naver?where=blog&query=${encodeURIComponent(kw)}&start=${start}`;
-          await page.goto(url, { waitUntil: "domcontentloaded", timeout: 20000 });
-          await page.waitForTimeout(1500);
+    while (collected < countPerKeyword) {
+      try {
+        const url = `https://openapi.naver.com/v1/search/blog?query=${encodeURIComponent(kw)}&display=${display}&start=${start}&sort=date`;
+        const res = await fetch(url, {
+          headers: {
+            "X-Naver-Client-Id": keys.clientId,
+            "X-Naver-Client-Secret": keys.clientSecret,
+          },
+        });
 
-          const links: string[] = await page.evaluate(() => {
-            const anchors = Array.from(document.querySelectorAll("a[href*='blog.naver.com']"));
-            return anchors.map((a) => (a as HTMLAnchorElement).href).filter((h) => h.includes("blog.naver.com"));
-          });
-
-          for (const link of links) {
-            if (collected >= countPerKeyword) break;
-            const m = link.match(/blog\.naver\.com\/([a-zA-Z0-9_-]+)/);
-            if (!m) continue;
-            const blogId = m[1];
-            if (INVALID.some(inv => blogId.toLowerCase().includes(inv.toLowerCase()))) continue;
-            if (blogId.length < 3) continue;
-            if (results.some((r) => r.blogId === blogId)) continue;
-            results.push({ keyword: kw, blogId });
-            collected++;
-            onLog(`  📌 [${kw}] ${blogId} (${collected}/${countPerKeyword})`);
-          }
-
-          if (collected >= countPerKeyword) break;
-          start += 10;
-          await randomDelay(0.5, 1.5);
-        } catch (e: any) {
-          onLog(`  ⚠️ [${kw}] 오류: ${e.message}`);
+        if (!res.ok) {
+          const errText = await res.text();
+          onLog(`❌ [${kw}] API 오류 ${res.status}: ${errText}`);
           break;
         }
+
+        const data = await res.json();
+        const items: any[] = data.items || [];
+
+        if (items.length === 0) {
+          onLog(`  ℹ️ [${kw}] 더 이상 결과 없음`);
+          break;
+        }
+
+        for (const item of items) {
+          if (collected >= countPerKeyword) break;
+
+          // bloggerlink: "https://blog.naver.com/blogId" 형식
+          const link: string = item.bloggerlink || item.link || "";
+          const m = link.match(/blog\.naver\.com\/([a-zA-Z0-9_-]+)/);
+          if (!m) continue;
+
+          const blogId = m[1];
+          if (INVALID.some(inv => blogId.toLowerCase().includes(inv.toLowerCase()))) continue;
+          if (blogId.length < 3) continue;
+          // 전체 중복 제거
+          if (results.some(r => r.blogId === blogId)) continue;
+
+          results.push({ keyword: kw, blogId });
+          collected++;
+          onLog(`  📌 [${kw}] ${blogId} (${collected}/${countPerKeyword})`);
+        }
+
+        if (collected >= countPerKeyword) break;
+        // 네이버 API 최대 start = 1000
+        start += display;
+        if (start > 1000) break;
+
+        await new Promise(r => setTimeout(r, 300));
+      } catch (e: any) {
+        onLog(`  ⚠️ [${kw}] 오류: ${e.message}`);
+        break;
       }
-      onLog(`✅ [${kw}] 완료: ${collected}개 수집`);
     }
-    await browser.close();
-    return results;
-  } catch (e) {
-    await browser.close().catch(() => {});
-    throw e;
+    onLog(`✅ [${kw}] 완료: ${collected}개 수집`);
   }
+
+  return results;
 }
 
 /* ── 서로이웃 신청 ── */
@@ -296,4 +321,3 @@ export async function addNeighbors(params: {
     throw e;
   }
 }
-
