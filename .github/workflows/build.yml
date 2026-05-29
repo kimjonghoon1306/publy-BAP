@@ -30,7 +30,7 @@ jobs:
 
       - name: Bundle neighbor-bot (esbuild)
         working-directory: neighbor-bot
-        run: npx esbuild src/server.ts --bundle --platform=node --target=node20 --outfile=dist/server.js --external:playwright
+        run: npx esbuild src/server.ts --bundle --platform=node --target=node20 --outfile=dist/server.js --external:playwright --node-paths=../naver-bot/node_modules
 
       - name: Install Playwright Chromium
         working-directory: naver-bot
