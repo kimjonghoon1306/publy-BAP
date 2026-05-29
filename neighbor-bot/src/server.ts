@@ -1,6 +1,7 @@
 import express from "express";
 import cors from "cors";
 import { saveSession, sessionExists, crawlBlogIds, addNeighbors, NeighborResult, donePath } from "./naver";
+import { checkNeighborQuota, incrementNeighborQuota, getNeighborDailyUsage, getUserPlan, NEIGHBOR_DAILY_LIMIT } from "./supabase";
 import fs from "fs";
 
 const app = express();
@@ -33,6 +34,19 @@ app.post("/api/login", async (req, res) => {
   }
 });
 
+/* ── 쿼타 조회 ── */
+app.get("/api/quota/:userId", async (req, res) => {
+  const { userId } = req.params;
+  try {
+    const plan = await getUserPlan(userId);
+    const used = await getNeighborDailyUsage(userId);
+    const limit = NEIGHBOR_DAILY_LIMIT[plan] ?? NEIGHBOR_DAILY_LIMIT.free;
+    res.json({ ok: true, used, limit, plan, remaining: Math.max(0, limit - used) });
+  } catch (e: any) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
 /* ── SSE 헬퍼 ── */
 function sseSetup(res: express.Response) {
   res.setHeader("Content-Type", "text/event-stream");
@@ -54,13 +68,25 @@ app.post("/api/stop/:jobId", (req, res) => {
 
 /* ── 블로그 수집 (SSE) ── */
 app.get("/api/crawl", async (req, res) => {
-  const { keywords, countPerKeyword } = req.query as Record<string, string>;
+  const { userId, keywords, countPerKeyword } = req.query as Record<string, string>;
   if (!keywords)
     return res.status(400).json({ error: "keywords 필요" });
 
   sseSetup(res);
 
   try {
+    // 쿼타 체크 (userId 있을 때만)
+    if (userId) {
+      const plan = await getUserPlan(userId);
+      const quota = await checkNeighborQuota(userId, plan);
+      if (!quota.ok) {
+        sseSend(res, { type: "quota_exceeded", used: quota.used, limit: quota.limit });
+        res.end();
+        return;
+      }
+      sseSend(res, { type: "quota_info", used: quota.used, limit: quota.limit, remaining: quota.limit - quota.used });
+    }
+
     const kwList = keywords.split(",").map((k) => k.trim()).filter(Boolean);
     const count = parseInt(countPerKeyword || "30", 10);
 
@@ -78,11 +104,11 @@ app.get("/api/crawl", async (req, res) => {
   res.end();
 });
 
-/* ── 서로이웃 신청 (SSE) ── */
+/* ── 서이추 신청 (SSE) ── */
 app.get("/api/add-neighbor", async (req, res) => {
   const {
-    accountId, targets: targetsRaw, message, delayMin, delayMax,
-    dailyLimit, skipDone, jobId,
+    userId, accountId, targets: targetsRaw, message,
+    delayMin, delayMax, skipDone, jobId,
   } = req.query as Record<string, string>;
 
   if (!accountId || !targetsRaw)
@@ -96,16 +122,36 @@ app.get("/api/add-neighbor", async (req, res) => {
   try {
     const targets = JSON.parse(decodeURIComponent(targetsRaw));
 
+    // 쿼타 체크 (userId 있을 때)
+    let dailyLimit = 100;
+    if (userId) {
+      const plan = await getUserPlan(userId);
+      const quota = await checkNeighborQuota(userId, plan);
+      dailyLimit = quota.limit - quota.used; // 오늘 남은 한도만큼
+      if (dailyLimit <= 0) {
+        sseSend(res, { type: "quota_exceeded", used: quota.used, limit: quota.limit });
+        res.end();
+        return;
+      }
+      sseSend(res, { type: "quota_info", used: quota.used, limit: quota.limit, remaining: dailyLimit });
+    }
+
     await addNeighbors({
       accountId,
       targets,
-      message: message || "안녕하세요! 좋은 글 잘 읽고 갑니다. 서로이웃 신청드려요 😊",
+      message: message || "안녕하세요! 좋은 글 잘 읽고 갑니다. 서이추 신청드려요 😊",
       delayMin: parseFloat(delayMin || "5"),
       delayMax: parseFloat(delayMax || "10"),
-      dailyLimit: parseInt(dailyLimit || "100", 10),
+      dailyLimit,
       skipDone: skipDone === "true",
       onLog: (msg) => sseSend(res, { type: "log", msg }),
-      onResult: (r: NeighborResult) => sseSend(res, { type: "result", ...r }),
+      onResult: async (r: NeighborResult) => {
+        sseSend(res, { type: "result", ...r });
+        // 신청 성공 시 쿼타 증가
+        if (r.status === "success" && userId) {
+          await incrementNeighborQuota(userId);
+        }
+      },
       onProgress: (done, fail) => sseSend(res, { type: "progress", done, fail }),
       stopSignal: () => stopMap.get(jid) === true,
     });
