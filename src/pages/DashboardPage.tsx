@@ -3590,7 +3590,7 @@ POST3: (제목)|(이유)
             )}
 
             {tab==="neighbor"&&(
-              <NeighborPage theme={theme as "dark"|"light"} />
+              <NeighborPage theme={theme as "dark"|"light"} userId={user.id} plan={user.plan} />
             )}
 
             {tab==="settings"&&(
