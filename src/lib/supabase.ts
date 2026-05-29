@@ -243,9 +243,22 @@ export const NAVER_DAILY_LIMIT: Record<string, number> = {
   admin: 9999,
 };
 
+/* ── 서이추 일일 한도 ── */
+export const NEIGHBOR_DAILY_LIMIT: Record<string, number> = {
+  free: 10,
+  basic: 50,
+  pro: 100,
+  admin: 9999,
+};
+
 function naverQuotaKey(userId: string): string {
   const today = new Date().toISOString().slice(0, 10);
   return `naver_daily_${userId}_${today}`;
+}
+
+function neighborQuotaKey(userId: string): string {
+  const today = new Date().toISOString().slice(0, 10);
+  return `neighbor_daily_${userId}_${today}`;
 }
 
 export async function getNaverDailyUsage(userId: string): Promise<number> {
@@ -269,6 +282,34 @@ export async function checkNaverQuota(userId: string, plan: string, hasPersonalK
 export async function incrementNaverQuota(userId: string): Promise<void> {
   const key = naverQuotaKey(userId);
   const used = await getNaverDailyUsage(userId);
+  await supabase
+    .from("publy_settings")
+    .upsert({ key, value: String(used + 1) }, { onConflict: "key" });
+}
+
+/* ── 서이추 일일 사용량 조회 ── */
+export async function getNeighborDailyUsage(userId: string): Promise<number> {
+  try {
+    const { data } = await supabase
+      .from("publy_settings")
+      .select("value")
+      .eq("key", neighborQuotaKey(userId))
+      .maybeSingle();
+    return data?.value ? parseInt(data.value) || 0 : 0;
+  } catch { return 0; }
+}
+
+/* ── 서이추 쿼타 체크 ── */
+export async function checkNeighborQuota(userId: string, plan: string): Promise<{ok: boolean; used: number; limit: number}> {
+  const limit = NEIGHBOR_DAILY_LIMIT[plan] ?? NEIGHBOR_DAILY_LIMIT.free;
+  const used = await getNeighborDailyUsage(userId);
+  return { ok: used < limit, used, limit };
+}
+
+/* ── 서이추 쿼타 증가 ── */
+export async function incrementNeighborQuota(userId: string): Promise<void> {
+  const key = neighborQuotaKey(userId);
+  const used = await getNeighborDailyUsage(userId);
   await supabase
     .from("publy_settings")
     .upsert({ key, value: String(used + 1) }, { onConflict: "key" });
