@@ -69,7 +69,7 @@ const MAIN_TABS = [
   {k:"accounts",i:"🔗", l:"계정 관리"},
   {k:"rank",    i:"📊", l:"블로그 순위"},
   {k:"calendar",i:"📅", l:"콘텐츠 캘린더"},
-  {k:"neighbor",i:"🤝", l:"서로이웃"},
+  {k:"neighbor",i:"🤝", l:"서이추"},
   {k:"settings",i:"⚙️", l:"설정"},
 ] as const;
 
