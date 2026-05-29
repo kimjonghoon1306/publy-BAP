@@ -158,8 +158,6 @@ export default function NeighborPage({ theme }: Props) {
   const handleCrawl = async () => {
     const kwList = keywords.split(",").map((k) => k.trim()).filter(Boolean);
     if (!kwList.length) return alert("키워드를 입력하세요");
-    const connectedAcc = accounts.find((a) => a.sessionOk);
-    if (!connectedAcc) return alert("먼저 계정을 연결하세요");
 
     setCrawling(true);
     setTargets([]);
@@ -168,7 +166,7 @@ export default function NeighborPage({ theme }: Props) {
     setFailCnt(0);
     addLog(`🔍 수집 시작 — 키워드: ${kwList.join(", ")} / 키워드당 ${countPerKw}개`);
 
-    const url = `${BOT}/api/crawl?accountId=${encodeURIComponent(connectedAcc.accountId)}&keywords=${encodeURIComponent(kwList.join(","))}&countPerKeyword=${countPerKw}`;
+    const url = `${BOT}/api/crawl?keywords=${encodeURIComponent(kwList.join(","))}&countPerKeyword=${countPerKw}`;
     const es = new EventSource(url);
     esRef.current = es;
 
