@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
-import { supabase, getAccounts, upsertAccount, PublyAccount, getHistory, PublyHistory, addHistory, deleteHistory, deleteAllHistory, setAdminPassword, saveAdminNaverApiKeys, getNaverApiKeys, NaverApiKeys, getNaverDailyUsage, NAVER_DAILY_LIMIT, checkNaverQuota, incrementNaverQuota, getUserNaverApiKeys, getReferrals, getErrorLogs, getUnreadErrorCount, markErrorsAsRead, logError } from "../lib/supabase";
+import { supabase, getAccounts, upsertAccount, PublyAccount, getHistory, PublyHistory, addHistory, deleteHistory, deleteAllHistory, setAdminPassword, saveAdminNaverApiKeys, getNaverApiKeys, NaverApiKeys, getNaverDailyUsage, NAVER_DAILY_LIMIT, checkNaverQuota, incrementNaverQuota, getUserNaverApiKeys, getReferrals, getErrorLogs, getUnreadErrorCount, markErrorsAsRead, logError, PLAN_CONFIG } from "../lib/supabase";
 import NeighborPage from "./NeighborPage";
 
 interface Props {
@@ -31,7 +31,12 @@ const ADM_IMAGE_AI = [
   {id:"openai_img",label:"DALL-E 3",sub:"유료",placeholder:"sk-...",storageKey:"publy_adm_openai_key",link:"https://platform.openai.com/api-keys",color:"#10A37F",logo:"O"},
   {id:"replicate",label:"Flux (Replicate)",sub:"유료",placeholder:"r8_...",storageKey:"publy_adm_replicate_key",link:"https://replicate.com/account/api-tokens",color:"#8B5CF6",logo:"R"},
 ];
-const PLAN_QUOTA: Record<string,number> = {free:10, basic:50, pro:999999};
+const PLAN_QUOTA: Record<string,number> = {
+  free:  PLAN_CONFIG.free.dailyPublish,
+  basic: PLAN_CONFIG.basic.dailyPublish,
+  pro:   PLAN_CONFIG.pro.dailyPublish,
+  admin: PLAN_CONFIG.admin.dailyPublish,
+};
 const PLAN_LABELS: Record<string,string> = {free:"FREE", basic:"BASIC", pro:"PRO"};
 
 // ── AdmKeyInput (건드리지 않음) ─────────────────────────
@@ -3258,9 +3263,9 @@ POST3: (제목)|(이유)
                             <div className="detail-grid">
                               <div className="detail-field"><span className="field-label">플랜</span>
                                 <select className="field-inp" value={editMap[u.id]?.plan??u.plan} onChange={e=>setEditMap(p=>({...p,[u.id]:{...p[u.id],plan:e.target.value}}))}>
-                                  <option value="free">FREE — 발행 10건 · 네이버 5회/일</option>
-                                  <option value="basic">BASIC — 발행 50건 · 네이버 50회/일</option>
-                                  <option value="pro">PRO — 발행 무제한 · 네이버 200회/일</option>
+                                  <option value="free">FREE — 하루 2건 · 계정 1개 · 7일</option>
+                                  <option value="basic">BASIC — 하루 6건 · 계정 2개 · 30일</option>
+                                  <option value="pro">PRO — 하루 15건 · 계정 3개 · 30일</option>
                                 </select>
                               </div>
                               <div className="detail-field"><span className="field-label">네이버 키워드 분석</span>
