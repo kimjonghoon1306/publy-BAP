@@ -320,8 +320,15 @@ export async function getAllNeighborHistory(): Promise<(NeighborHistory & { user
       .select("*, publy_users(name, email)")
       .order("created_at", { ascending: false })
       .limit(500);
-    return (data || []).map((d: any) => ({
-      ...d,
+    return (data || []).map((d: Record<string, any>) => ({
+      id: d.id,
+      user_id: d.user_id,
+      keyword: d.keyword,
+      target_blog_id: d.target_blog_id,
+      target_url: d.target_url,
+      status: d.status,
+      message: d.message,
+      created_at: d.created_at,
       user_name: d.publy_users?.name,
       user_email: d.publy_users?.email,
     }));
