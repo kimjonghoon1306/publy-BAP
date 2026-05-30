@@ -2336,8 +2336,16 @@ POST3: (제목)|(이유)
               </button>
             ))}
             <div className="sidebar-foot">
-              <div className="stat-card"><div className="stat-num">{todayPub}</div><div className="stat-lbl">오늘 발행</div></div>
-              <div className="stat-card" style={{background:"var(--accent-bg)",borderColor:"var(--accent-border)"}}><div className="stat-num" style={{fontSize:18,color:"var(--accent-text)"}}>{quota?.remaining_quota??"—"}</div><div className="stat-lbl">잔여 건수</div></div>
+              <div className="stat-card">
+                <div className="stat-num" style={{color: dailyPublishUsed >= (PLAN_CONFIG[user.plan]?.dailyPublish ?? 2) ? "var(--danger)" : "var(--text)"}}>
+                  {dailyPublishUsed}<span style={{fontSize:12,color:"var(--text3)",fontWeight:500}}>/{PLAN_CONFIG[user.plan]?.dailyPublish ?? 2}</span>
+                </div>
+                <div className="stat-lbl">오늘 발행</div>
+              </div>
+              <div className="stat-card" style={{background:"var(--accent-bg)",borderColor:"var(--accent-border)"}}>
+                <div className="stat-num" style={{fontSize:18,color:"var(--accent-text)"}}>{quota?.remaining_quota??"—"}</div>
+                <div className="stat-lbl">만료일 {quota ? new Date(quota.reset_date).toLocaleDateString("ko-KR",{month:"numeric",day:"numeric"}) : "—"}</div>
+              </div>
             </div>
           </div>
 
