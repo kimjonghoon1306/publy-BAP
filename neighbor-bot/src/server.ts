@@ -147,9 +147,12 @@ app.get("/api/add-neighbor", async (req, res) => {
       onLog: (msg) => sseSend(res, { type: "log", msg }),
       onResult: async (r: NeighborResult) => {
         sseSend(res, { type: "result", ...r });
-        // 신청 성공 시 쿼타 증가
+        // 신청 성공 시 쿼타 증가 + 히스토리 저장
         if (r.status === "success" && userId) {
           await incrementNeighborQuota(userId);
+          await addNeighborHistory({ user_id: userId, keyword: r.keyword, target_blog_id: r.blogId, status: "success", message: r.message });
+        } else if ((r.status === "fail" || r.status === "skip") && userId) {
+          await addNeighborHistory({ user_id: userId, keyword: r.keyword, target_blog_id: r.blogId, status: r.status === "fail" ? "fail" : "skip", message: r.message });
         }
       },
       onProgress: (done, fail) => sseSend(res, { type: "progress", done, fail }),
