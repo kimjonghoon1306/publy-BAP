@@ -18,7 +18,27 @@ function neighborQuotaKey(userId: string): string {
   return `neighbor_daily_${userId}_${today}`;
 }
 
-/* ── 오늘 사용량 조회 ── */
+/* ── 서이추 히스토리 저장 ── */
+export async function addNeighborHistory(data: {
+  user_id: string;
+  keyword: string;
+  target_blog_id: string;
+  status: "success" | "fail" | "skip";
+  message: string;
+}): Promise<void> {
+  try {
+    await supabase.from("publy_neighbor_history").insert({
+      user_id: data.user_id,
+      keyword: data.keyword,
+      target_blog_id: data.target_blog_id,
+      target_url: `https://blog.naver.com/${data.target_blog_id}`,
+      status: data.status,
+      message: data.message,
+    });
+  } catch (e) {
+    console.error("[neighbor] 히스토리 저장 오류:", e);
+  }
+}
 export async function getNeighborDailyUsage(userId: string): Promise<number> {
   try {
     const { data } = await supabase
