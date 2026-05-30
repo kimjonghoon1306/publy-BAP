@@ -63,11 +63,14 @@ export async function signUp(email: string, password: string, name: string, phon
 
   if (error) throw new Error(error.message);
 
-  // 기본 쿼터 생성
+  // 기본 쿼터 생성 (FREE 7일 체험)
+  const trialEnd = new Date();
+  trialEnd.setDate(trialEnd.getDate() + PLAN_CONFIG.free.trialDays);
   await supabase.from("publy_quotas").insert({
     user_id: user.id,
-    total_quota: 10,
+    total_quota: PLAN_CONFIG.free.dailyPublish,
     used_quota: 0,
+    reset_date: trialEnd.toISOString(),
   });
 
   return user;
