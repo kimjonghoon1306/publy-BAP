@@ -289,7 +289,44 @@ export const NAVER_DAILY_LIMIT: Record<string, number> = {
   admin: 9999,
 };
 
-/* ── 서이추 일일 한도 ── */
+/* ── 서이추 히스토리 조회 (관리자) ── */
+export interface NeighborHistory {
+  id: string;
+  user_id: string;
+  keyword: string;
+  target_blog_id: string;
+  target_url: string;
+  status: "success" | "fail" | "skip";
+  message: string;
+  created_at: string;
+}
+
+export async function getNeighborHistory(userId: string): Promise<NeighborHistory[]> {
+  try {
+    const { data } = await supabase
+      .from("publy_neighbor_history")
+      .select("*")
+      .eq("user_id", userId)
+      .order("created_at", { ascending: false })
+      .limit(200);
+    return data || [];
+  } catch { return []; }
+}
+
+export async function getAllNeighborHistory(): Promise<(NeighborHistory & { user_name?: string; user_email?: string })[]> {
+  try {
+    const { data } = await supabase
+      .from("publy_neighbor_history")
+      .select("*, publy_users(name, email)")
+      .order("created_at", { ascending: false })
+      .limit(500);
+    return (data || []).map((d: any) => ({
+      ...d,
+      user_name: d.publy_users?.name,
+      user_email: d.publy_users?.email,
+    }));
+  } catch { return []; }
+}
 export const NEIGHBOR_DAILY_LIMIT: Record<string, number> = {
   free: 10,
   basic: 50,
