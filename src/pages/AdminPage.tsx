@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
-import { supabase, getAccounts, upsertAccount, PublyAccount, getHistory, PublyHistory, addHistory, deleteHistory, deleteAllHistory, setAdminPassword, saveAdminNaverApiKeys, getNaverApiKeys, NaverApiKeys, getNaverDailyUsage, NAVER_DAILY_LIMIT, checkNaverQuota, incrementNaverQuota, getUserNaverApiKeys, getReferrals, getErrorLogs, getUnreadErrorCount, markErrorsAsRead, logError, PLAN_CONFIG } from "../lib/supabase";
+import { supabase, getAccounts, upsertAccount, PublyAccount, getHistory, PublyHistory, addHistory, deleteHistory, deleteAllHistory, setAdminPassword, saveAdminNaverApiKeys, getNaverApiKeys, NaverApiKeys, getNaverDailyUsage, NAVER_DAILY_LIMIT, checkNaverQuota, incrementNaverQuota, getUserNaverApiKeys, getReferrals, getErrorLogs, getUnreadErrorCount, markErrorsAsRead, logError, PLAN_CONFIG, getAllNeighborHistory, NeighborHistory } from "../lib/supabase";
 import NeighborPage from "./NeighborPage";
 
 interface Props {
@@ -566,27 +566,32 @@ const PERSONA_STYLES = [
 ] as const;
 type PersonaStyle = typeof PERSONA_STYLES[number]["id"];
 const TABS = [
-  {k:"keyword",  i:"🔍", l:"키워드/제목"},
-  {k:"write",    i:"✍️", l:"글 생성"},
-  {k:"image",    i:"🖼️", l:"이미지 생성"},
-  {k:"photo",    i:"📷", l:"사진 글쓰기"},
-  {k:"publish",  i:"🚀", l:"발행하기"},
-  {k:"manage",   i:"📋", l:"발행 관리"},
-  {k:"accounts", i:"🔗", l:"계정관리"},
-  {k:"rank",     i:"📊", l:"블로그 순위"},
-  {k:"calendar", i:"📅", l:"콘텐츠 캘린더"},
-  {k:"neighbor", i:"🤝", l:"서이추"},
-  {k:"users",    i:"👥", l:"회원관리"},
-  {k:"stats",    i:"📈", l:"통계"},
-  {k:"settings", i:"🔐", l:"설정"},
+  {k:"keyword",         i:"🔍", l:"키워드/제목"},
+  {k:"write",           i:"✍️", l:"글 생성"},
+  {k:"image",           i:"🖼️", l:"이미지 생성"},
+  {k:"photo",           i:"📷", l:"사진 글쓰기"},
+  {k:"publish",         i:"🚀", l:"발행하기"},
+  {k:"manage",          i:"📋", l:"발행 관리"},
+  {k:"accounts",        i:"🔗", l:"계정관리"},
+  {k:"rank",            i:"📊", l:"블로그 순위"},
+  {k:"calendar",        i:"📅", l:"콘텐츠 캘린더"},
+  {k:"neighbor",        i:"🤝", l:"서이추"},
+  {k:"neighbor_manage", i:"📋", l:"서이추 관리"},
+  {k:"users",           i:"👥", l:"회원관리"},
+  {k:"stats",           i:"📈", l:"통계"},
+  {k:"settings",        i:"🔐", l:"설정"},
 ] as const;
 
 export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: Props) {
-  const [tab, setTab] = useState<"keyword"|"write"|"image"|"photo"|"publish"|"manage"|"accounts"|"rank"|"calendar"|"neighbor"|"users"|"stats"|"settings">("keyword");
+  const [tab, setTab] = useState<"keyword"|"write"|"image"|"photo"|"publish"|"manage"|"accounts"|"rank"|"calendar"|"neighbor"|"neighbor_manage"|"users"|"stats"|"settings">("keyword");
   const [statsSubTab, setStatsSubTab] = useState<"mine"|"all">("mine");
   const [usersSubTab, setUsersSubTab] = useState<"list"|"referral">("list");
   const [referralData, setReferralData] = useState<{referrer:any;referred:any[]}[]>([]);
   const [referralLoading, setReferralLoading] = useState(false);
+  const [neighborHistory, setNeighborHistory] = useState<(NeighborHistory & {user_name?:string;user_email?:string})[]>([]);
+  const [neighborLoading, setNeighborLoading] = useState(false);
+  const [neighborFilter, setNeighborFilter] = useState<"all"|"success"|"fail"|"skip">("all");
+  const [neighborSearch, setNeighborSearch] = useState("");
   const [fontMode, setFontMode] = useState<"normal"|"large">(()=>(localStorage.getItem("publy_adm_font_mode")||"normal") as "normal"|"large");
   const [showGuide, setShowGuide] = useState(false);
   const [guideTab, setGuideTab] = useState(0);
@@ -1137,6 +1142,10 @@ Output format (JSON array only, no other text):
 
   // 설정탭 열 때 관리자 네이버 키 로드
   useEffect(()=>{
+    if(tab==="neighbor_manage" && neighborHistory.length === 0){
+      setNeighborLoading(true);
+      getAllNeighborHistory().then(d=>{ setNeighborHistory(d); setNeighborLoading(false); });
+    }
     if(tab==="settings"){
       // admin_ 접두사 키만 직접 조회
       const keys = ["naver_customer_id","naver_access_license","naver_secret_key","naver_datalab_client_id","naver_datalab_client_secret"];
@@ -2095,7 +2104,7 @@ POST3: (제목)|(이유)
               </button>
             ))}
             <div className="nav-section" style={{fontSize:10,fontWeight:800,color:"var(--text3)",padding:"10px 12px 4px",letterSpacing:".08em",borderTop:"1px solid var(--border)",marginTop:6}}>🔐 관리자 전용</div>
-            {TABS.filter(t=>["users","stats","settings"].includes(t.k)).map(t => (
+            {TABS.filter(t=>["neighbor_manage","users","stats","settings"].includes(t.k)).map(t => (
               <button key={t.k} className={`nav-item ${tab===t.k?"active":""}`} onClick={()=>setTab(t.k as any)}>
                 <span className="nav-ico">{t.i}</span>{t.l}
                 {t.k==="users" && users.length>0 && <span className="nav-badge">{users.length}</span>}
@@ -2644,15 +2653,16 @@ POST3: (제목)|(이유)
                   const pending=history.filter(h=>h.status==="pending");
                   const naverCnt=success.filter(h=>h.platform==="naver").length;
                   const tistoryCnt=success.filter(h=>h.platform==="tistory").length;
+                  const neighborCnt=history.filter(h=>h.platform==="neighbor").length;
                   return(
                     <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(110px,1fr))",gap:10,marginBottom:14}}>
                       {[
-                        {label:"전체 발행",value:history.length,color:"var(--text)"},
-                        {label:"✅ 성공",value:success.length,color:"var(--success)"},
-                        {label:"❌ 실패",value:fail.length,color:"var(--danger)"},
-                        {label:"⏳ 대기",value:pending.length,color:"var(--warn)"},
+                        {label:"전체 발행",value:history.filter(h=>h.platform!=="neighbor").length,color:"var(--text)"},
+                        {label:"✅ 성공",value:success.filter(h=>h.platform!=="neighbor").length,color:"var(--success)"},
+                        {label:"❌ 실패",value:fail.filter(h=>h.platform!=="neighbor").length,color:"var(--danger)"},
                         {label:"🟢 네이버",value:naverCnt,color:"var(--naver)"},
                         {label:"🟠 티스토리",value:tistoryCnt,color:"var(--tistory)"},
+                        {label:"🤝 서이추",value:neighborCnt,color:"var(--info)"},
                       ].map((s,i)=>(
                         <div key={i} style={{padding:"12px 14px",borderRadius:12,background:"var(--card)",border:"1px solid var(--border)",textAlign:"center"}}>
                           <div style={{fontSize:20,fontWeight:900,color:s.color,fontFamily:"'Space Grotesk',sans-serif"}}>{s.value}</div>
@@ -2679,7 +2689,7 @@ POST3: (제목)|(이유)
                     </div>
                   ):history.map((h,i)=>(
                     <div key={h.id} style={{display:"flex",alignItems:"center",gap:10,padding:"12px 0",borderBottom:"1px solid var(--border)",animationDelay:`${i*.04}s`}}>
-                      <span style={{fontSize:20,flexShrink:0}}>{h.platform==="naver"?"🟢":"🟠"}</span>
+                      <span style={{fontSize:20,flexShrink:0}}>{h.platform==="neighbor"?"🤝":h.platform==="naver"?"🟢":"🟠"}</span>
                       <div style={{flex:1,minWidth:0}}>
                         <div style={{fontSize:13,fontWeight:700,color:"var(--text)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{h.title}</div>
                         <div style={{fontSize:11,color:"var(--text2)",marginTop:2}}>{new Date(h.published_at).toLocaleString("ko-KR")}</div>
@@ -3635,6 +3645,113 @@ POST3: (제목)|(이유)
             {/* ───── 🤝 서이추 ───── */}
             {tab === "neighbor" && (
               <NeighborPage theme={theme} plan="admin" />
+            )}
+
+            {/* ───── 📋 서이추 관리 ───── */}
+            {tab === "neighbor_manage" && (
+              <div style={{animation:"fadeUp .25s ease both"}}>
+                <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:16,flexWrap:"wrap",gap:10}}>
+                  <div>
+                    <div style={{fontSize:20,fontWeight:900,color:"var(--text)"}}>📋 서이추 회원 관리</div>
+                    <div style={{fontSize:13,color:"var(--text3)",marginTop:2}}>전체 회원의 서이추 신청 현황</div>
+                  </div>
+                  <button onClick={()=>{setNeighborLoading(true);getAllNeighborHistory().then(d=>{setNeighborHistory(d);setNeighborLoading(false);});}}
+                    style={{padding:"8px 16px",borderRadius:10,border:"1px solid var(--border)",background:"var(--card2)",color:"var(--text2)",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:"inherit"}}>
+                    🔄 새로고침
+                  </button>
+                </div>
+
+                {/* 요약 카드 */}
+                <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(130px,1fr))",gap:10,marginBottom:16}}>
+                  {[
+                    {label:"전체 신청",value:neighborHistory.length,color:"var(--text)"},
+                    {label:"✅ 성공",value:neighborHistory.filter(h=>h.status==="success").length,color:"var(--success)"},
+                    {label:"❌ 실패",value:neighborHistory.filter(h=>h.status==="fail").length,color:"var(--danger)"},
+                    {label:"⏭️ 스킵",value:neighborHistory.filter(h=>h.status==="skip").length,color:"var(--text3)"},
+                  ].map((s,i)=>(
+                    <div key={i} style={{padding:"14px 16px",borderRadius:14,background:"var(--card)",border:"1px solid var(--border)",textAlign:"center"}}>
+                      <div style={{fontSize:24,fontWeight:900,color:s.color,fontFamily:"'Space Grotesk',sans-serif"}}>{s.value}</div>
+                      <div style={{fontSize:11,color:"var(--text3)",marginTop:4,fontWeight:600}}>{s.label}</div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* 검색 + 필터 */}
+                <div style={{display:"flex",gap:8,marginBottom:12,flexWrap:"wrap"}}>
+                  <input className="inp" placeholder="회원 이름/이메일/블로그ID 검색"
+                    value={neighborSearch} onChange={e=>setNeighborSearch(e.target.value)}
+                    style={{flex:1,minWidth:200,fontSize:13}} />
+                  {(["all","success","fail","skip"] as const).map(f=>(
+                    <button key={f} onClick={()=>setNeighborFilter(f)}
+                      style={{padding:"8px 14px",borderRadius:9,border:`1.5px solid ${neighborFilter===f?"var(--accent)":"var(--border)"}`,background:neighborFilter===f?"var(--accent-bg)":"transparent",color:neighborFilter===f?"var(--accent-text)":"var(--text2)",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:"inherit"}}>
+                      {f==="all"?"전체":f==="success"?"✅ 성공":f==="fail"?"❌ 실패":"⏭️ 스킵"}
+                    </button>
+                  ))}
+                </div>
+
+                {/* 테이블 */}
+                <div className="card" style={{padding:0,overflow:"hidden"}}>
+                  {neighborLoading ? (
+                    <div style={{padding:"40px",textAlign:"center",color:"var(--text3)"}}>
+                      <span className="spinner" style={{marginRight:8}}/>불러오는 중...
+                    </div>
+                  ) : (()=>{
+                    const filtered = neighborHistory
+                      .filter(h => neighborFilter === "all" || h.status === neighborFilter)
+                      .filter(h => !neighborSearch || 
+                        (h.user_name||"").includes(neighborSearch) ||
+                        (h.user_email||"").includes(neighborSearch) ||
+                        h.target_blog_id.includes(neighborSearch) ||
+                        h.keyword.includes(neighborSearch)
+                      );
+                    return filtered.length === 0 ? (
+                      <div style={{padding:"40px",textAlign:"center",color:"var(--text3)",fontSize:14}}>
+                        데이터가 없습니다
+                      </div>
+                    ) : (
+                      <div style={{overflowX:"auto",maxHeight:520,overflowY:"auto"}}>
+                        <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
+                          <thead>
+                            <tr style={{background:"var(--bg2)",position:"sticky",top:0}}>
+                              {["회원","키워드","블로그ID","상태","메시지","일시"].map(h=>(
+                                <th key={h} style={{padding:"10px 12px",textAlign:"left",fontWeight:700,color:"var(--text3)",whiteSpace:"nowrap",borderBottom:"1px solid var(--border)"}}>{h}</th>
+                              ))}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {filtered.map((h,i)=>(
+                              <tr key={h.id} style={{borderBottom:"1px solid var(--border)"}}
+                                onMouseEnter={e=>(e.currentTarget.style.background="var(--card-hover)")}
+                                onMouseLeave={e=>(e.currentTarget.style.background="")}>
+                                <td style={{padding:"10px 12px",whiteSpace:"nowrap"}}>
+                                  <div style={{fontWeight:700,color:"var(--text)",fontSize:12}}>{h.user_name||"-"}</div>
+                                  <div style={{fontSize:10,color:"var(--text3)"}}>{h.user_email||"-"}</div>
+                                </td>
+                                <td style={{padding:"10px 12px",color:"var(--accent-text)",fontWeight:700}}>{h.keyword}</td>
+                                <td style={{padding:"10px 12px"}}>
+                                  <a href={h.target_url} target="_blank" rel="noreferrer"
+                                    style={{color:"var(--info)",textDecoration:"none",fontWeight:600}}>{h.target_blog_id}</a>
+                                </td>
+                                <td style={{padding:"10px 12px",whiteSpace:"nowrap"}}>
+                                  <span style={{fontSize:11,padding:"3px 9px",borderRadius:99,fontWeight:700,
+                                    background:h.status==="success"?"rgba(0,214,143,.12)":h.status==="fail"?"rgba(255,83,99,.12)":"rgba(120,120,120,.12)",
+                                    color:h.status==="success"?"var(--success)":h.status==="fail"?"var(--danger)":"var(--text3)"}}>
+                                    {h.status==="success"?"✅ 성공":h.status==="fail"?"❌ 실패":"⏭️ 스킵"}
+                                  </span>
+                                </td>
+                                <td style={{padding:"10px 12px",color:"var(--text2)",fontSize:11,maxWidth:180,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{h.message||"-"}</td>
+                                <td style={{padding:"10px 12px",color:"var(--text3)",whiteSpace:"nowrap",fontSize:11}}>
+                                  {new Date(h.created_at).toLocaleString("ko-KR")}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    );
+                  })()}
+                </div>
+              </div>
             )}
 
             {/* ───── 🔐 설정 ───── */}
