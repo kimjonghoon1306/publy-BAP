@@ -576,9 +576,9 @@ const TABS = [
   {k:"rank",            i:"📊", l:"블로그 순위"},
   {k:"calendar",        i:"📅", l:"콘텐츠 캘린더"},
   {k:"neighbor",        i:"🤝", l:"서이추"},
-  {k:"neighbor_manage", i:"📋", l:"서이추 관리"},
   {k:"users",           i:"👥", l:"회원관리"},
   {k:"stats",           i:"📈", l:"통계"},
+  {k:"neighbor_manage", i:"📋", l:"서이추 관리"},
   {k:"settings",        i:"🔐", l:"설정"},
 ] as const;
 
@@ -2104,7 +2104,7 @@ POST3: (제목)|(이유)
               </button>
             ))}
             <div className="nav-section" style={{fontSize:10,fontWeight:800,color:"var(--text3)",padding:"10px 12px 4px",letterSpacing:".08em",borderTop:"1px solid var(--border)",marginTop:6}}>🔐 관리자 전용</div>
-            {TABS.filter(t=>["neighbor_manage","users","stats","settings"].includes(t.k)).map(t => (
+            {TABS.filter(t=>["users","stats","neighbor_manage","settings"].includes(t.k)).map(t => (
               <button key={t.k} className={`nav-item ${tab===t.k?"active":""}`} onClick={()=>setTab(t.k as any)}>
                 <span className="nav-ico">{t.i}</span>{t.l}
                 {t.k==="users" && users.length>0 && <span className="nav-badge">{users.length}</span>}
