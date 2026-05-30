@@ -3759,6 +3759,11 @@ POST3: (제목)|(이유)
                       </div>
                     ))}
                     <div className="card-title" style={{marginBottom:4,marginTop:8}}>📊 네이버 DataLab API (공용)</div>
+                    <div style={{fontSize:12,color:"var(--text3)",marginBottom:8,padding:"8px 12px",borderRadius:8,background:"rgba(0,214,143,.08)",border:"1px solid rgba(0,214,143,.2)"}}>
+                      💡 이 키는 <strong style={{color:"var(--success)"}}>서이추 블로그 수집</strong>에 사용됩니다.<br/>
+                      입력해두면 모든 회원이 키 없이 자동으로 수집 가능합니다.<br/>
+                      <span style={{fontSize:11,color:"var(--text3)"}}>네이버 개발자센터 → 앱 등록 → 검색 API 사용 설정</span>
+                    </div>
                     {[
                       {label:"Client ID",key:"naver_datalab_client_id",ph:"Client ID"},
                       {label:"Client Secret",key:"naver_datalab_client_secret",ph:"Client Secret"},
