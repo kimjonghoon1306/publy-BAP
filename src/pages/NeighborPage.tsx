@@ -349,7 +349,7 @@ export default function NeighborPage({ theme, userId, plan = "free" }: Props) {
         </div>
       )}
 
-      <div style={{ display: "grid", gridTemplateColumns: "360px 1fr", gap: 14, alignItems: "start" }}>
+      <div className="neighbor-grid" style={{ display: "grid", gridTemplateColumns: "360px 1fr", gap: 14, alignItems: "start" }}>
 
         {/* ── 왼쪽: 작업 설정 ── */}
         <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
