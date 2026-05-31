@@ -365,6 +365,12 @@ textarea.inp{resize:vertical;line-height:1.75;min-height:80px;}
   .pub-mobile-bar{display:flex !important;}
   .lg-hidden{display:block;}
   .img-split{grid-template-columns:1fr !important;}
+  /* 캘린더 모바일 */
+  .cal-grid{grid-template-columns:1fr !important;}
+  /* 서이추 모바일 */
+  .neighbor-grid{grid-template-columns:1fr !important;}
+  /* 카운터 3분할 유지 */
+  .counter-grid{grid-template-columns:repeat(3,1fr) !important;}
 }
 @media(max-width:480px){
   .header{padding:0 8px;gap:5px;}.user-name{display:none;}.logout-btn{display:none;}.quota-chip{display:none;}
@@ -374,6 +380,9 @@ textarea.inp{resize:vertical;line-height:1.75;min-height:80px;}
   .guide-modal{max-height:calc(100dvh - 12px - env(safe-area-inset-top) - env(safe-area-inset-bottom));border-radius:16px;}.guide-tab{font-size:11px;padding:9px 11px;}
   .acc-form-grid{grid-template-columns:1fr !important;}
   .pub-plat-grid{grid-template-columns:1fr !important;}
+  /* 카카오 버튼 모바일 - 아이콘만 */
+  .kakao-float-text{display:none;}
+  .kakao-float{padding:12px !important;border-radius:50% !important;width:48px;height:48px;justify-content:center;}
 }
 .pub-sticky-bar{position:sticky;top:0;z-index:30;background:var(--card);border-bottom:1px solid var(--border);padding:10px 16px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;backdrop-filter:blur(12px);}
 .toast-wrap{position:fixed;bottom:28px;right:24px;z-index:9999;display:flex;flex-direction:column;gap:8px;pointer-events:none;}
@@ -3600,7 +3609,7 @@ POST3: (제목)|(이유)
                     <textarea className="inp" rows={4} placeholder={"예: 다이어트 방법, 제주도 여행, 강남 맛집\n오징어 젓갈, 홈카페 레시피"}
                       value={calKeywords} onChange={e=>setCalKeywords(e.target.value)} style={{resize:"vertical"}}/>
                   </div>
-                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:14}}>
+                  <div className="cal-grid" style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:14}}>
                     <div>
                       <label className="inp-label">📱 플랫폼</label>
                       <div style={{display:"flex",gap:8}}>
@@ -3828,8 +3837,9 @@ POST3: (제목)|(이유)
 
         {/* ── 카카오 결제문의 플로팅 버튼 ── */}
         <a href="https://open.kakao.com/o/s0lQ66wi" target="_blank" rel="noopener noreferrer"
+          className="kakao-float"
           style={{position:"fixed",bottom:90,right:24,zIndex:500,display:"flex",alignItems:"center",gap:8,padding:"12px 18px",borderRadius:99,background:"#FEE500",color:"#3A1D1D",fontWeight:900,fontSize:13,fontFamily:"'Noto Sans KR',sans-serif",textDecoration:"none",boxShadow:"0 4px 20px rgba(254,229,0,.5)",animation:"float 2.5s ease-in-out infinite",whiteSpace:"nowrap",border:"none",cursor:"pointer"}}>
-          <span style={{fontSize:18}}>💬</span> 결제 문의
+          <span style={{fontSize:18}}>💬</span><span className="kakao-float-text"> 결제 문의</span>
         </a>
 
         <div className="mob-bar">
@@ -3949,3 +3959,4 @@ POST3: (제목)|(이유)
     </>
   );
 }
+
