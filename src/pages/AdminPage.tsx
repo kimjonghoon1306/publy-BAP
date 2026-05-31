@@ -397,6 +397,11 @@ select.field-inp{cursor:pointer;appearance:auto;}
   .mob-tab-ico{font-size:24px;}
   .user-row{padding:14px 12px;}
   .acc-card{flex-wrap:wrap;}
+  /* 캘린더 모바일 */
+  .cal-grid{grid-template-columns:1fr !important;}
+  /* 서이추 모바일 */
+  .neighbor-grid{grid-template-columns:1fr !important;}
+  .neighbor-counter{grid-template-columns:repeat(3,1fr) !important;}
 }
 @media(max-width:480px){
   .header{padding:0 8px;gap:4px;}
