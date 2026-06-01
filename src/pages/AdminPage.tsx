@@ -623,6 +623,10 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
   const [videoUrl, setVideoUrl] = useState("");
   const [videoPosition, setVideoPosition] = useState<"top"|"middle"|"bottom">("middle");
   const [imgPattern, setImgPattern] = useState<"A"|"B"|"C"|"random">("random");
+  const [imgGenType, setImgGenType] = useState<"ai"|"flow">("ai");
+  const [showFlowGuide, setShowFlowGuide] = useState(false);
+  const [flowImgCount, setFlowImgCount] = useState(2);
+  const [flowImgCountAuto, setFlowImgCountAuto] = useState(true);
   const [currentImgPrompt, setCurrentImgPrompt] = useState("");
   const [genImgProgress, setGenImgProgress] = useState(0);
   const [genImgCurrent, setGenImgCurrent] = useState(0);
@@ -655,7 +659,8 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
   // ── 블록 에디터 (tarry 방식) ──
   type TextBlock = {type:"text";id:string;content:string};
   type SingleImageBlock = {type:"image";id:string;src:string;alt:string;position:"left"|"center"|"right";source:"auto"|"manual"};
-  type ContentBlock = TextBlock | SingleImageBlock;
+  type ImagePairBlock = {type:"image-pair";id:string;images:{src:string;alt:string}[]};
+  type ContentBlock = TextBlock | SingleImageBlock | ImagePairBlock;
   function uid(){return Math.random().toString(36).slice(2);}
   const [blocks, setBlocks] = useState<ContentBlock[]>([{type:"text",id:uid(),content:""}]);
   const [thumbnail, setThumbnail] = useState("");
@@ -882,35 +887,91 @@ Output format (JSON array only, no other text):
     const safeTextCount=safeBlocks.filter(b=>b.type==="text").length;
     const imgs=images.filter(img=>img?.src&&img.src.trim()!=="");
     if(imgs.length===0)return;
+
+    const patterns:("A"|"B"|"C")[] = ["A","B","C"];
+    const activePattern:("A"|"B"|"C") = imgPattern==="random"
+      ? patterns[Math.floor(Math.random()*3)]
+      : imgPattern;
+
     const result:ContentBlock[]=[];
     let insertedCount=0;
-    result.push({type:"image",id:uid(),src:imgs[0].src,alt:imgs[0].alt||"이미지 1",position:"center",source:"auto"} as ContentBlock);
-    insertedCount++;
-    const remainingImages=imgs.slice(1);
-    const insertMap=new Map<number,typeof remainingImages>();
-    if(safeTextCount>0&&remainingImages.length>0){
-      remainingImages.forEach((img,index)=>{
-        const targetTextIndex=Math.min(safeTextCount,Math.max(1,Math.ceil(((index+1)*safeTextCount)/remainingImages.length)));
-        const bucket=insertMap.get(targetTextIndex)||[];bucket.push(img);insertMap.set(targetTextIndex,bucket);
-      });
-    }
-    let textCount=0;
-    for(let i=0;i<safeBlocks.length;i++){
-      result.push(safeBlocks[i]);
-      if(safeBlocks[i].type==="text"){
-        textCount++;
-        const toInsert=insertMap.get(textCount)||[];
-        toInsert.forEach((img,idx)=>{result.push({type:"image",id:uid(),src:img.src,alt:img.alt||`이미지 ${insertedCount+idx+1}`,position:"center",source:"auto"} as ContentBlock);});
-        insertedCount+=toInsert.length;
+
+    if(activePattern==="A"){
+      result.push({type:"image",id:uid(),src:imgs[0].src,alt:imgs[0].alt||"이미지 1",position:"center",source:"auto"} as ContentBlock);
+      insertedCount++;
+      const remaining=imgs.slice(1);
+      const midPoint=Math.floor(safeTextCount/2);
+      let textCount=0;
+      for(let i=0;i<safeBlocks.length;i++){
+        result.push(safeBlocks[i]);
+        if(safeBlocks[i].type==="text"){
+          textCount++;
+          if(textCount===midPoint&&remaining.length>0){
+            remaining.forEach((img,idx)=>{result.push({type:"image",id:uid(),src:img.src,alt:img.alt||`이미지 ${insertedCount+idx+1}`,position:"center",source:"auto"} as ContentBlock);});
+            insertedCount+=remaining.length;
+          }
+        }
+      }
+    } else if(activePattern==="B"){
+      result.push({type:"image",id:uid(),src:imgs[0].src,alt:imgs[0].alt||"이미지 1",position:"center",source:"auto"} as ContentBlock);
+      insertedCount++;
+      const remaining=imgs.slice(1);
+      const pairs:typeof remaining[]=[];
+      for(let i=0;i<remaining.length;i+=2) pairs.push(remaining.slice(i,i+2));
+      const insertMap=new Map<number,typeof pairs[0][]>();
+      if(safeTextCount>0&&pairs.length>0){
+        pairs.forEach((pair,index)=>{
+          const targetTextIndex=Math.min(safeTextCount,Math.max(1,Math.ceil(((index+1)*safeTextCount)/pairs.length)));
+          const bucket=insertMap.get(targetTextIndex)||[];bucket.push(pair);insertMap.set(targetTextIndex,bucket);
+        });
+      }
+      let textCount=0;
+      for(let i=0;i<safeBlocks.length;i++){
+        result.push(safeBlocks[i]);
+        if(safeBlocks[i].type==="text"){
+          textCount++;
+          const toInsert=insertMap.get(textCount)||[];
+          toInsert.forEach(pair=>{
+            if(pair.length===2){
+              result.push({type:"image-pair",id:uid(),images:[{src:pair[0].src,alt:pair[0].alt||"이미지"},{src:pair[1].src,alt:pair[1].alt||"이미지"}]} as ContentBlock);
+              insertedCount+=2;
+            } else {
+              result.push({type:"image",id:uid(),src:pair[0].src,alt:pair[0].alt||"이미지",position:"center",source:"auto"} as ContentBlock);
+              insertedCount++;
+            }
+          });
+        }
+      }
+    } else {
+      result.push({type:"image",id:uid(),src:imgs[0].src,alt:imgs[0].alt||"이미지 1",position:"center",source:"auto"} as ContentBlock);
+      insertedCount++;
+      const remainingImages=imgs.slice(1);
+      const insertMap=new Map<number,typeof remainingImages>();
+      if(safeTextCount>0&&remainingImages.length>0){
+        remainingImages.forEach((img,index)=>{
+          const targetTextIndex=Math.min(safeTextCount,Math.max(1,Math.ceil(((index+1)*safeTextCount)/remainingImages.length)));
+          const bucket=insertMap.get(targetTextIndex)||[];bucket.push(img);insertMap.set(targetTextIndex,bucket);
+        });
+      }
+      let textCount=0;
+      for(let i=0;i<safeBlocks.length;i++){
+        result.push(safeBlocks[i]);
+        if(safeBlocks[i].type==="text"){
+          textCount++;
+          const toInsert=insertMap.get(textCount)||[];
+          toInsert.forEach((img,idx)=>{result.push({type:"image",id:uid(),src:img.src,alt:img.alt||`이미지 ${insertedCount+idx+1}`,position:"center",source:"auto"} as ContentBlock);});
+          insertedCount+=toInsert.length;
+        }
+      }
+      if(insertedCount<imgs.length){
+        const remaining=imgs.slice(insertedCount);
+        let lastTextIdx=-1;
+        for(let i=result.length-1;i>=0;i--){if(result[i].type==="text"){lastTextIdx=i;break;}}
+        const insertAt=lastTextIdx>=0?lastTextIdx+1:result.length;
+        remaining.reverse().forEach(img=>{result.splice(insertAt,0,{type:"image",id:uid(),src:img.src,alt:img.alt||"이미지",position:"center",source:"auto"} as ContentBlock);});
       }
     }
-    if(insertedCount<imgs.length){
-      const remaining=imgs.slice(insertedCount);
-      let lastTextIdx=-1;
-      for(let i=result.length-1;i>=0;i--){if(result[i].type==="text"){lastTextIdx=i;break;}}
-      const insertAt=lastTextIdx>=0?lastTextIdx+1:result.length;
-      remaining.reverse().forEach(img=>{result.splice(insertAt,0,{type:"image",id:uid(),src:img.src,alt:img.alt||"이미지",position:"center",source:"auto"} as ContentBlock);});
-    }
+
     for(const b of sectionBlocks)result.push(b);
     setBlocks(result);setAutoInserted(true);
   }
@@ -981,6 +1042,11 @@ Output format (JSON array only, no other text):
       }else if(b.type==="image"&&!afterSection){
         const src=(b as SingleImageBlock).src;const alt=(b as SingleImageBlock).alt;
         if(src)parts.push(`<div style="padding:24px 0"><figure style="margin:0;text-align:center"><img src="${escHtml(src)}" alt="${escHtml(alt||"")}" style="width:100%;border-radius:12px;display:block">${alt?`<figcaption style="font-size:12px;color:#888;text-align:center;margin-top:6px">${inlineFmt(alt)}</figcaption>`:""}</figure></div>`);
+      }else if(b.type==="image-pair"&&!afterSection){
+        const pair=(b as ImagePairBlock).images;
+        if(pair&&pair.length>=2){
+          parts.push(`<div style="padding:24px 0;display:grid;grid-template-columns:1fr 1fr;gap:8px"><figure style="margin:0"><img src="${escHtml(pair[0].src)}" alt="${escHtml(pair[0].alt||"")}" style="width:100%;border-radius:12px;display:block">${pair[0].alt?`<figcaption style="font-size:12px;color:#888;text-align:center;margin-top:6px">${inlineFmt(pair[0].alt)}</figcaption>`:""}</figure><figure style="margin:0"><img src="${escHtml(pair[1].src)}" alt="${escHtml(pair[1].alt||"")}" style="width:100%;border-radius:12px;display:block">${pair[1].alt?`<figcaption style="font-size:12px;color:#888;text-align:center;margin-top:6px">${inlineFmt(pair[1].alt)}</figcaption>`:""}</figure></div>`);
+        }
       }
     });
     if(hashtags.length>0)parts.push(`<p style="margin-top:20px;color:#888;font-size:14px">${hashtags.join(" ")}</p>`);
@@ -1321,8 +1387,10 @@ Output format (JSON array only, no other text):
     {keywords:["애드센스","구글","SEO","검색노출"],prompt:"SEO analytics dashboard on monitor, digital marketing workspace, growth charts, professional setup"},
   ];
 
-  function buildImagePrompt(kw: string, title: string = "", idx: number = 0): string {
-    const k = (kw + " " + title).toLowerCase();
+  function buildImagePrompt(kw: string, title: string = "", idx: number = 0, segmentContent?: string): string {
+    const k = segmentContent
+      ? (kw + " " + title + " " + segmentContent.slice(0, 100)).toLowerCase()
+      : (kw + " " + title).toLowerCase();
     const st = adType === "adpost"
       ? "Korean lifestyle photography, warm emotional, soft natural light"
       : "ultra realistic DSLR 8K magazine editorial photography";
@@ -1406,8 +1474,8 @@ Output format (JSON array only, no other text):
     throw new Error("AI 미선택");
   }
 
-  async function generateImage(kw: string, title: string = "", idx: number = 0): Promise<string> {
-    const imgPrompt = buildImagePrompt(kw, title, idx);
+  async function generateImage(kw: string, title: string = "", idx: number = 0, segmentContent?: string): Promise<string> {
+    const imgPrompt = buildImagePrompt(kw, title, idx, segmentContent);
     const ai = localStorage.getItem("publy_adm_image_ai") || "openai_img";
     if (ai === "openai_img") {
       const key = localStorage.getItem("publy_adm_openai_key") || ""; if (!key) throw new Error("OpenAI 키 없음");
@@ -1426,20 +1494,31 @@ Output format (JSON array only, no other text):
     throw new Error("이미지 AI 미선택");
   }
 
-  function recommendImageCount(content: string): number { return Math.max(1, Math.floor(content.length/200)); }
+  function recommendImageCount(content: string): number { return Math.max(1, Math.min(10, Math.floor(content.length/500))); }
 
-  function buildCaptions(kw: string, count: number): string[] {
+  function buildCaptions(kw: string, count: number, content?: string): string[] {
     const k = kw || "사진";
-    const pool = [`${k} 현장 모습`,`직접 경험한 ${k}`,`${k} 상세 사진`,`${k} 실제 모습`,`${k} 후기 사진`,`${k} 현장 사진`,`${k} 생생 후기`,`${k} 디테일 컷`];
+    if (content && content.length > 100) {
+      const lines = content.split("\n").map((l:string)=>l.trim()).filter((l:string)=>l.length>10&&!l.startsWith("#")&&!l.startsWith("[")&&!l.startsWith("-"));
+      if (lines.length >= count) {
+        const step = Math.floor(lines.length / count);
+        return Array.from({length: count}, (_, i) => {
+          const line = lines[Math.min(i * step, lines.length - 1)];
+          const sentence = line.split(/[.!?]/)[0].trim();
+          return sentence.length > 5 ? sentence.slice(0, 25) : `${k} ${i===0?"대표":`현장 ${i}`} 사진`;
+        });
+      }
+    }
+    const pool = [`${k} 대표 사진`,`${k} 현장 모습`,`${k} 상세 사진`,`${k} 실제 모습`,`${k} 후기 사진`,`${k} 디테일 컷`,`${k} 생생 후기`,`${k} 현장 사진`];
     return Array.from({length: count}, (_, i) => pool[i % pool.length]);
   }
 
   function calcTargetChars(): number {
     if (charMode === "manual") return targetChars;
-    if (platform === "tistory") return Math.floor(Math.random()*1500)+2500;
+    if (platform === "tistory") return Math.floor(Math.random()*1000)+2000;
     if (adType === "adpost" && /체험단|맛집|후기|리뷰|방문|다녀/.test(keywords[0]||""))
-      return Math.floor(Math.random()*1000)+2000;
-    return Math.floor(Math.random()*700)+1800;
+      return Math.floor(Math.random()*700)+1800;
+    return Math.floor(Math.random()*500)+1500;
   }
   function getActiveImages(): string[] { return imgSource === "upload" ? uploadedImages : generatedImages; }
 
@@ -1481,20 +1560,33 @@ Output format (JSON array only, no other text):
     setGenImgLoading(true); setGenImgProgress(0); setGenImgCurrent(0);
     imgAbortRef.current = new AbortController();
     const imgs: string[] = [];
+
+    // 글 내용 구간별 분할
+    const content = genContent || "";
+    const segments: string[] = [];
+    if (content.length > 0 && imgCount > 1) {
+      const lines = content.split("\n").filter((l:string) => l.trim().length > 5);
+      const step = Math.max(1, Math.floor(lines.length / imgCount));
+      for (let i = 0; i < imgCount; i++) {
+        segments.push(lines.slice(i * step, (i + 1) * step).join(" ").slice(0, 150));
+      }
+    }
+
     try {
       for (let i=0;i<imgCount;i++) {
         if (imgAbortRef.current.signal.aborted) break;
         setGenImgCurrent(i+1);
-        const url = await generateImage(keyword||selectedTitle, genTitle||selectedTitle||"", i);
+        const url = await generateImage(keyword||selectedTitle, genTitle||selectedTitle||"", i, segments[i]);
         imgs.push(url); setGeneratedImages([...imgs]);
         setGenImgProgress(Math.round(((i+1)/imgCount)*100));
       }
       // 이미지 완료 시 캡션 자동생성 + 블록 자동배치 + 썸네일 자동지정
-      setCaptions(buildCaptions(keyword||selectedTitle, imgs.length));
+      setCaptions(buildCaptions(keyword||selectedTitle, imgs.length, genContent));
       setCurrentImgPrompt(buildImagePrompt(keyword||selectedTitle, genTitle||selectedTitle||"", 0));
       if(imgs.length>0){
         if(!thumbnail)setThumbnail(imgs[0]);
-        triggerAutoInsert(imgs.map((src,i)=>({id:i,src,alt:`${keyword||selectedTitle} ${i===0?"대표":"현장"} 사진`})));
+        const captionList = buildCaptions(keyword||selectedTitle, imgs.length, genContent);
+        triggerAutoInsert(imgs.map((src,i)=>({id:i,src,alt:captionList[i]||`${keyword||selectedTitle} ${i===0?"대표":"현장"} 사진`})));
         setShowMeta(true);
       }
     } catch(e:any) { if (e.name!=="AbortError") alert("이미지 생성 실패: "+e.message); }
@@ -1648,6 +1740,7 @@ POST3: (제목)|(이유)
       setQualityScore(calcQualityScore(body,keyword));
       const recCount = imgCountManual ?? recommendImageCount(body);
       if (imgCountAuto) setImgCount(recCount);
+      if (flowImgCountAuto) setFlowImgCount(recommendImageCount(body));
       // ── tarry 방식: 블록 자동 분리 + 제목/태그 자동 연동 ──
       const rawBlocks = body.split("\n\n").filter(Boolean).map(p=>({type:"text" as const,id:uid(),content:p}));
       setBlocks(rawBlocks.length>0?rawBlocks:[{type:"text",id:uid(),content:body}]);
@@ -1676,8 +1769,23 @@ POST3: (제목)|(이유)
       blocks:blocks.map((b:any)=>{
         if(b.type==="text")return{type:"text",content:b.content};
         if(b.type==="image")return{type:"image",src:b.src,alt:b.alt||""};
+        if(b.type==="image-pair")return{type:"image-pair",images:b.images};
         return null;
       }).filter(Boolean),
+      useFlow: imgGenType === "flow",
+      flowImgCount: imgGenType === "flow" ? flowImgCount : undefined,
+      flowPrompts: imgGenType === "flow" ? (() => {
+        const c = genContent || "";
+        const lines = c.split("\n").filter((l:string) => l.trim().length > 5);
+        const step = Math.max(1, Math.floor(lines.length / flowImgCount));
+        return Array.from({length: flowImgCount}, (_:any, i:number) => {
+          const seg = lines.slice(i * step, (i + 1) * step).join(" ").slice(0, 150);
+          return `"${pubTitle || keywords[0]}" ${seg} — A high-quality, realistic photographic image. Professional photography, vivid colors, sharp focus, 8K resolution, cinematic lighting.`;
+        });
+      })() : undefined,
+      flowCaptions: imgGenType === "flow"
+        ? buildCaptions(keywords[0]||"", flowImgCount, genContent)
+        : undefined,
     };
     try {
       const r = await fetch(`${BOT}/api/publish-full`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(publishBody)});
@@ -2428,6 +2536,118 @@ POST3: (제목)|(이유)
                     <button className="btn btn-secondary btn-sm" style={{marginLeft:"auto",flexShrink:0}} onClick={()=>setTab("write")}>글 생성하러 가기</button>
                   </div>
                 )}
+
+                {/* ── 이미지 생성 방식 스위치 ── */}
+                <div style={{marginBottom:16,padding:"18px 22px",borderRadius:20,background:"linear-gradient(135deg,rgba(99,102,241,.12),rgba(168,85,247,.12))",border:"1.5px solid rgba(168,85,247,.25)",boxShadow:"0 8px 32px rgba(99,102,241,.15)",animation:"float 3s ease-in-out infinite"}}>
+                  <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:12,flexWrap:"wrap",gap:8}}>
+                    <div>
+                      <div style={{fontSize:14,fontWeight:900,color:"var(--text)"}}>🖼️ 이미지 생성 방식</div>
+                      <div style={{fontSize:11,color:"var(--text3)",marginTop:2}}>원하는 방식을 선택하세요</div>
+                    </div>
+                    <button onClick={()=>setShowFlowGuide(true)} style={{padding:"5px 12px",borderRadius:99,border:"1px solid rgba(168,85,247,.4)",background:"rgba(168,85,247,.1)",color:"#a855f7",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:"inherit"}}>❓ Flow란?</button>
+                  </div>
+                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+                    <button onClick={()=>setImgGenType("ai")} style={{padding:"14px 12px",borderRadius:14,border:`2px solid ${imgGenType==="ai"?"#6366f1":"var(--border)"}`,background:imgGenType==="ai"?"linear-gradient(135deg,rgba(99,102,241,.18),rgba(99,102,241,.06))":"var(--card)",cursor:"pointer",fontFamily:"inherit",textAlign:"left",transition:"all .2s",boxShadow:imgGenType==="ai"?"0 4px 20px rgba(99,102,241,.25)":"none"}}>
+                      <div style={{fontSize:24,marginBottom:5}}>🤖</div>
+                      <div style={{fontSize:13,fontWeight:900,color:imgGenType==="ai"?"#818cf8":"var(--text)",marginBottom:3}}>AI 이미지</div>
+                      <div style={{fontSize:10,color:"var(--text3)",lineHeight:1.5}}>DALL-E · Flux<br/>API 키 필요</div>
+                      {imgGenType==="ai"&&<div style={{marginTop:6,fontSize:10,fontWeight:800,color:"#818cf8",background:"rgba(99,102,241,.15)",padding:"2px 7px",borderRadius:99,display:"inline-block"}}>✓ 선택됨</div>}
+                    </button>
+                    <button onClick={()=>setImgGenType("flow")} style={{padding:"14px 12px",borderRadius:14,border:`2px solid ${imgGenType==="flow"?"#a855f7":"var(--border)"}`,background:imgGenType==="flow"?"linear-gradient(135deg,rgba(168,85,247,.18),rgba(168,85,247,.06))":"var(--card)",cursor:"pointer",fontFamily:"inherit",textAlign:"left",transition:"all .2s",boxShadow:imgGenType==="flow"?"0 4px 20px rgba(168,85,247,.25)":"none",position:"relative",overflow:"hidden"}}>
+                      <div style={{position:"absolute",top:6,right:8,fontSize:9,fontWeight:800,color:"#fff",background:"linear-gradient(135deg,#a855f7,#7c3aed)",padding:"1px 6px",borderRadius:99}}>FREE</div>
+                      <div style={{fontSize:24,marginBottom:5}}>🎨</div>
+                      <div style={{fontSize:13,fontWeight:900,color:imgGenType==="flow"?"#c084fc":"var(--text)",marginBottom:3}}>Flow 이미지</div>
+                      <div style={{fontSize:10,color:"var(--text3)",lineHeight:1.5}}>Google Flow<br/>무료 · 고퀄리티</div>
+                      {imgGenType==="flow"&&<div style={{marginTop:6,fontSize:10,fontWeight:800,color:"#c084fc",background:"rgba(168,85,247,.15)",padding:"2px 7px",borderRadius:99,display:"inline-block"}}>✓ 선택됨</div>}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Flow 가이드 팝업 */}
+                {showFlowGuide&&(
+                  <div style={{position:"fixed",inset:0,zIndex:9999,background:"rgba(0,0,0,.75)",display:"flex",alignItems:"flex-start",justifyContent:"center",padding:"60px 20px 20px"}} onClick={()=>setShowFlowGuide(false)}>
+                    <div style={{width:"100%",maxWidth:480,borderRadius:22,background:"var(--card)",border:"1px solid rgba(168,85,247,.3)",overflow:"hidden",animation:"fadeUp .25s ease"}} onClick={e=>e.stopPropagation()}>
+                      <div style={{padding:"18px 22px 14px",background:"linear-gradient(135deg,#7c3aed,#a855f7)",display:"flex",alignItems:"center",gap:10}}>
+                        <div style={{fontSize:28}}>🎨</div>
+                        <div style={{flex:1}}>
+                          <div style={{fontSize:15,fontWeight:900,color:"#fff"}}>Google Flow 이미지란?</div>
+                          <div style={{fontSize:11,color:"rgba(255,255,255,.8)",marginTop:1}}>무료 고퀄리티 AI 이미지 생성</div>
+                        </div>
+                        <button onClick={()=>setShowFlowGuide(false)} style={{width:26,height:26,borderRadius:7,border:"none",background:"rgba(255,255,255,.2)",color:"#fff",cursor:"pointer",fontSize:15,display:"flex",alignItems:"center",justifyContent:"center"}}>×</button>
+                      </div>
+                      <div style={{padding:"16px 22px"}}>
+                        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:12}}>
+                          <a href="https://accounts.google.com/signup" target="_blank" rel="noreferrer" style={{display:"flex",flexDirection:"column",alignItems:"center",gap:5,padding:"12px 10px",borderRadius:12,border:"1.5px solid rgba(168,85,247,.3)",background:"rgba(168,85,247,.08)",textDecoration:"none"}}>
+                            <span style={{fontSize:20}}>👤</span>
+                            <span style={{fontSize:12,fontWeight:800,color:"#c084fc"}}>구글 회원가입</span>
+                            <span style={{fontSize:10,color:"var(--text3)",textAlign:"center"}}>구글 계정 없으면 먼저 가입</span>
+                          </a>
+                          <a href="https://labs.google/fx/ko/tools/image-fx" target="_blank" rel="noreferrer" style={{display:"flex",flexDirection:"column",alignItems:"center",gap:5,padding:"12px 10px",borderRadius:12,border:"1.5px solid rgba(0,214,143,.3)",background:"rgba(0,214,143,.08)",textDecoration:"none"}}>
+                            <span style={{fontSize:20}}>🔗</span>
+                            <span style={{fontSize:12,fontWeight:800,color:"var(--success)"}}>Flow 설정하기</span>
+                            <span style={{fontSize:10,color:"var(--text3)",textAlign:"center"}}>클릭 후 구글 로그인 완료</span>
+                          </a>
+                        </div>
+                        <div style={{marginBottom:10,padding:"10px 12px",borderRadius:10,background:"rgba(99,102,241,.08)",border:"1px solid rgba(99,102,241,.2)"}}>
+                          <div style={{fontSize:12,fontWeight:800,color:"#818cf8",marginBottom:5}}>🚀 동작 방식</div>
+                          <div style={{fontSize:11,color:"var(--text)",lineHeight:1.9}}>① Flow 선택 → ② 발행 버튼 → ③ 크롬 자동 실행<br/>→ ④ 구간별 프롬프트 자동 입력 → ⑤ 이미지 생성<br/>→ ⑥ 자동 다운로드 → ⑦ 글 사이 자동 삽입 후 발행</div>
+                        </div>
+                        <div style={{padding:"10px 12px",borderRadius:10,background:"rgba(255,159,63,.08)",border:"1px solid rgba(255,159,63,.2)"}}>
+                          <div style={{fontSize:12,fontWeight:800,color:"var(--warn)",marginBottom:5}}>⚠️ 주의사항</div>
+                          <div style={{fontSize:11,color:"var(--text)",lineHeight:1.9}}>장시간 미사용 시 재로그인 필요<br/>발행 시 크롬 창 자동으로 열림 (닫지 마세요)</div>
+                        </div>
+                        <button onClick={()=>setShowFlowGuide(false)} style={{width:"100%",marginTop:12,padding:"11px",borderRadius:10,border:"none",background:"linear-gradient(135deg,#7c3aed,#a855f7)",color:"#fff",cursor:"pointer",fontSize:13,fontWeight:800,fontFamily:"inherit"}}>확인했어요!</button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Flow 선택 시 UI */}
+                {imgGenType==="flow"&&(
+                  <div style={{marginBottom:14,animation:"fadeUp .2s ease both"}}>
+                    <div className="card" style={{padding:"18px 20px",border:"1.5px solid rgba(168,85,247,.25)",background:"linear-gradient(135deg,rgba(168,85,247,.06),rgba(99,102,241,.04))"}}>
+                      <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:14}}>
+                        <div style={{width:36,height:36,borderRadius:10,background:"linear-gradient(135deg,#7c3aed,#a855f7)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,flexShrink:0}}>🎨</div>
+                        <div>
+                          <div style={{fontSize:13,fontWeight:900,color:"var(--text)"}}>Google Flow 자동 생성</div>
+                          <div style={{fontSize:11,color:"var(--text3)"}}>발행 시 크롬이 자동으로 열려 이미지를 생성합니다</div>
+                        </div>
+                      </div>
+                      <div style={{marginBottom:12}}>
+                        <div style={{fontSize:11,fontWeight:700,color:"var(--text3)",marginBottom:6}}>📸 생성할 이미지 수</div>
+                        <div style={{display:"flex",gap:6,marginBottom:6}}>
+                          <button onClick={()=>{setFlowImgCountAuto(true);if(genContent)setFlowImgCount(Math.max(1,Math.min(10,Math.floor(genContent.length/500))));}} style={{flex:1,padding:"7px",borderRadius:8,border:`1.5px solid ${flowImgCountAuto?"#a855f7":"var(--border)"}`,background:flowImgCountAuto?"rgba(168,85,247,.15)":"transparent",cursor:"pointer",fontSize:11,fontWeight:700,color:flowImgCountAuto?"#c084fc":"var(--text2)",fontFamily:"inherit"}}>🤖 자동추천</button>
+                          <button onClick={()=>setFlowImgCountAuto(false)} style={{flex:1,padding:"7px",borderRadius:8,border:`1.5px solid ${!flowImgCountAuto?"#a855f7":"var(--border)"}`,background:!flowImgCountAuto?"rgba(168,85,247,.15)":"transparent",cursor:"pointer",fontSize:11,fontWeight:700,color:!flowImgCountAuto?"#c084fc":"var(--text2)",fontFamily:"inherit"}}>✏️ 직접입력</button>
+                        </div>
+                        {flowImgCountAuto ? (
+                          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"8px 12px",borderRadius:9,background:"rgba(168,85,247,.1)",border:"1px solid rgba(168,85,247,.25)"}}>
+                            <span style={{fontSize:11,color:"#c084fc",fontWeight:600}}>💡 500자당 1장 자동 추천</span>
+                            <span style={{fontSize:20,fontWeight:900,color:"#c084fc",fontFamily:"'Space Grotesk',sans-serif"}}>{flowImgCount}장</span>
+                          </div>
+                        ) : (
+                          <div style={{display:"flex",alignItems:"center",gap:6}}>
+                            <button onClick={()=>setFlowImgCount(Math.max(1,flowImgCount-1))} style={{width:32,height:32,borderRadius:8,border:"1px solid var(--border)",background:"var(--bg2)",cursor:"pointer",fontSize:16,fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center",color:"var(--text)"}}>−</button>
+                            <input type="number" min={1} max={10} value={flowImgCount} onChange={e=>setFlowImgCount(Math.max(1,Math.min(10,Number(e.target.value))))} style={{flex:1,textAlign:"center",padding:"6px",borderRadius:8,border:"1.5px solid rgba(168,85,247,.4)",background:"var(--bg2)",color:"#c084fc",fontSize:18,fontWeight:900,fontFamily:"'Space Grotesk',sans-serif"}}/>
+                            <button onClick={()=>setFlowImgCount(Math.min(10,flowImgCount+1))} style={{width:32,height:32,borderRadius:8,border:"1px solid var(--border)",background:"var(--bg2)",cursor:"pointer",fontSize:16,fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center",color:"var(--text)"}}>+</button>
+                          </div>
+                        )}
+                      </div>
+                      {genTitle&&(
+                        <div style={{padding:"10px 12px",borderRadius:10,background:"var(--bg)",border:"1px solid var(--border)",marginBottom:10}}>
+                          <div style={{fontSize:10,fontWeight:700,color:"var(--text3)",marginBottom:4}}>🔤 자동 생성될 영문 프롬프트</div>
+                          <div style={{fontSize:10,color:"#c084fc",lineHeight:1.8,fontStyle:"italic",wordBreak:"break-word"}}>
+                            "{genTitle}" — A high-quality, realistic photographic image. Professional photography, vivid colors, sharp focus, 8K resolution, cinematic lighting.
+                          </div>
+                        </div>
+                      )}
+                      <div style={{display:"flex",alignItems:"center",gap:6,padding:"10px 12px",borderRadius:10,background:"rgba(168,85,247,.08)",border:"1px solid rgba(168,85,247,.2)"}}>
+                        <div style={{width:7,height:7,borderRadius:"50%",background:"#a855f7",boxShadow:"0 0 6px #a855f7",animation:"float 1.5s ease-in-out infinite",flexShrink:0}}/>
+                        <div style={{fontSize:11,color:"#c084fc",fontWeight:600}}>발행하기 탭에서 🚀 발행 버튼을 누르면 자동으로 시작됩니다</div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
                 <div className="adm-img-split">
 
                   {/* ── 왼쪽 패널 ── */}
@@ -2592,7 +2812,7 @@ POST3: (제목)|(이유)
                           {getActiveImages().length>0&&<span style={{fontWeight:400,color:"var(--text3)",textTransform:"none",letterSpacing:0}}> — {getActiveImages().length}장 · 첫 번째 썸네일</span>}
                         </div>
                         {getActiveImages().length>0&&captions.length===0&&(
-                          <button className="btn btn-sm btn-secondary" onClick={()=>setCaptions(buildCaptions(keyword||selectedTitle,getActiveImages().length))}>💬 캡션 자동생성</button>
+                          <button className="btn btn-sm btn-secondary" onClick={()=>setCaptions(buildCaptions(keyword||selectedTitle,getActiveImages().length,genContent))}>💬 캡션 자동생성</button>
                         )}
                       </div>
 
@@ -2867,13 +3087,14 @@ POST3: (제목)|(이유)
                     {[
                       {label:"제목",ok:!!pubTitle},
                       {label:"본문",ok:blocks.some(b=>b.type==="text"&&(b as TextBlock).content.trim().length>0)},
-                      {label:`이미지 ${blocks.filter(b=>b.type==="image").length}장`,ok:blocks.some(b=>b.type==="image")},
+                      {label:imgGenType==="flow"?`Flow ${flowImgCount}장`:`이미지 ${blocks.filter(b=>b.type==="image"||(b.type==="image-pair")).length}장`,ok:imgGenType==="flow"||blocks.some(b=>b.type==="image"||(b.type==="image-pair"))},
                       {label:pubAccId?connAccs.find(a=>a.id===pubAccId)?.username||"계정":"계정 미선택",ok:!!pubAccId},
                     ].map(c=>(
                       <span key={c.label} className={`pub-ready-chip ${c.ok?"pub-ready-ok":"pub-ready-no"}`}>
                         {c.ok?"✅":"❌"} {c.label}
                       </span>
                     ))}
+                    {imgGenType==="flow"&&<span style={{fontSize:11,padding:"3px 9px",borderRadius:99,background:"rgba(168,85,247,.15)",color:"#c084fc",border:"1px solid rgba(168,85,247,.3)",fontWeight:700}}>🎨 Flow 발행</span>}
                   </div>
                   <div style={{marginLeft:"auto",display:"flex",gap:8,alignItems:"center"}}>
                     <div style={{position:"relative"}}>
