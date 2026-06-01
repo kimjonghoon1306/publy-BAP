@@ -140,6 +140,12 @@ jobs:
         run: npm run electron:build:mac
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+
+      - name: Ad-hoc sign the app
+        run: |
+          find release/mac-arm64 -name "*.app" -exec codesign --force --deep --sign - {} \; 2>/dev/null || true
+          find release/mac -name "*.app" -exec codesign --force --deep --sign - {} \; 2>/dev/null || true
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
