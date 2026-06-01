@@ -2,7 +2,7 @@ import express from "express";
 import cors from "cors";
 import fs from "fs-extra";
 import path from "path";
-import { saveNaverSession, publishNaver, naverSessionExists } from "./naver";
+import { saveNaverSession, publishNaver, naverSessionExists, generateFlowImages } from "./naver";
 import { saveTistorySession, publishTistory, tistorySessionExists } from "./tistory";
 import { fetchPendingJobs, updateJob, addHistory, useQuota } from "./supabase";
 
@@ -69,16 +69,66 @@ app.get("/api/session-status/:userId", (req, res) => {
 
 /* ── 직접 발행 (앱에서 즉시 발행) ── */
 app.post("/api/publish-full", async (req, res) => {
-  const { userId, platform, title, content, tags = [], imageUrl, categoryId, visibility, scheduleTime, blocks } = req.body;
+  const { userId, platform, title, content, tags = [], imageUrl, categoryId, visibility, scheduleTime, blocks,
+    useFlow, flowImgCount, flowPrompts, flowCaptions } = req.body;
   if (!userId || !platform || !title || !content) {
     return res.status(400).json({ error: "userId, platform, title, content 필요" });
   }
 
   await acquireSlot();
   try {
+    let finalBlocks = blocks || [];
+
+    // ── Flow 이미지 생성 ──
+    if (useFlow && flowPrompts?.length > 0 && platform === "naver") {
+      console.log(`[server] Flow 이미지 생성 시작: ${flowImgCount}장`);
+      try {
+        const flowImages = await generateFlowImages({
+          userId,
+          prompts: flowPrompts,
+          captions: flowCaptions || [],
+          onLog: (msg) => console.log(msg),
+        });
+
+        if (flowImages.length > 0) {
+          // 텍스트 블록에 Flow 이미지 균등 삽입
+          const textBlocks = finalBlocks.filter((b: any) => b.type === "text");
+          const result: any[] = [];
+          const step = Math.max(1, Math.floor(textBlocks.length / flowImages.length));
+
+          let imgIdx = 0;
+          let textCount = 0;
+          for (const block of finalBlocks) {
+            result.push(block);
+            if (block.type === "text") {
+              textCount++;
+              if (imgIdx < flowImages.length && textCount % step === 0) {
+                result.push({
+                  type: "image",
+                  src: flowImages[imgIdx].src,
+                  alt: flowImages[imgIdx].alt,
+                });
+                imgIdx++;
+              }
+            }
+          }
+          // 남은 이미지 마지막에 추가
+          while (imgIdx < flowImages.length) {
+            result.push({ type: "image", src: flowImages[imgIdx].src, alt: flowImages[imgIdx].alt });
+            imgIdx++;
+          }
+          finalBlocks = result;
+          console.log(`[server] Flow 이미지 ${flowImages.length}장 블록 삽입 완료`);
+        }
+      } catch (flowErr: any) {
+        console.error("[server] Flow 이미지 생성 실패:", flowErr.message);
+        // Flow 실패해도 이미지 없이 발행 계속
+      }
+    }
+
     let postUrl = "";
     if (platform === "naver") {
-      postUrl = await publishNaver({ userId, title, content, tags, imageUrl, categoryId, visibility, scheduleTime, blocks });
+      postUrl = await publishNaver({ userId, title, content, tags, imageUrl, categoryId, visibility, scheduleTime, blocks: finalBlocks });
     } else if (platform === "tistory") {
       postUrl = await publishTistory({ userId, title, content, tags, categoryId, visibility });
     } else {
