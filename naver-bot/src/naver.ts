@@ -497,18 +497,16 @@ export async function publishNaver(params: {
     }
 
     // 이미지 업로드 헬퍼
-    async function uploadImage(imgUrl: string) {
+    async function uploadImage(imgUrl: string, alt?: string) {
       const tmpFile = await downloadImageToTemp(imgUrl);
       if (!tmpFile) { console.log("[naver] 이미지 다운로드 실패:", imgUrl.slice(0,60)); return; }
       try {
-        // 에디터 포커스
         await clickEditor();
         await page.waitForTimeout(500);
         await page.keyboard.press("End");
         await page.keyboard.press("Enter");
         await page.waitForTimeout(500);
 
-        // 이미지 버튼 클릭 - page 레벨과 frame 레벨 모두 시도
         const imgBtnSels = [
           "button[data-type='image']",
           ".se-toolbar-item-imageUpload button",
@@ -518,7 +516,6 @@ export async function publishNaver(params: {
         ];
         let clicked = false;
 
-        // frame에서 먼저 시도
         for (const sel of imgBtnSels) {
           try {
             await frame.waitForSelector(sel, { timeout: 1000 });
@@ -529,7 +526,6 @@ export async function publishNaver(params: {
           } catch {}
         }
 
-        // page 전체에서도 시도
         if (!clicked) {
           for (const sel of imgBtnSels) {
             try {
@@ -543,12 +539,25 @@ export async function publishNaver(params: {
 
         if (clicked) {
           await page.waitForTimeout(2000);
-          // file input 찾기 - page 전체에서
           const fileInput = await page.$("input[type='file']") || await frame.$("input[type='file']");
           if (fileInput) {
             await fileInput.setInputFiles(tmpFile);
             await page.waitForTimeout(4000);
             console.log("[naver] ✅ 이미지 업로드 완료");
+
+            // 캡션 입력 (alt 있을 때)
+            if (alt && alt.trim()) {
+              try {
+                await clickEditor();
+                await page.waitForTimeout(300);
+                await page.keyboard.press("End");
+                await page.keyboard.press("Enter");
+                await page.waitForTimeout(200);
+                await insertText(alt.trim());
+                await page.waitForTimeout(300);
+                console.log("[naver] ✅ 캡션 입력:", alt.trim());
+              } catch {}
+            }
           } else {
             console.log("[naver] file input 못 찾음");
           }
@@ -567,13 +576,66 @@ export async function publishNaver(params: {
     if (blocks && blocks.length > 0) {
       for (const block of blocks) {
         if (block.type === "text" && block.content) {
-          // 섹션 마커([FAQ시작] 등) 포함 여부와 무관하게 전체 텍스트 입력
           await insertText(block.content);
           await page.waitForTimeout(200);
+        } else if (block.type === "image-pair" && (block as any).images?.length >= 2) {
+          // 2장 동시 업로드 → 한 줄 나란히 배치
+          const pairImages = (block as any).images as {src:string;alt:string}[];
+          const tmp1 = await downloadImageToTemp(pairImages[0].src);
+          const tmp2 = await downloadImageToTemp(pairImages[1].src);
+          if (tmp1 && tmp2) {
+            try {
+              await clickEditor();
+              await page.waitForTimeout(500);
+              await page.keyboard.press("End");
+              await page.keyboard.press("Enter");
+              await page.waitForTimeout(500);
+              const imgBtnSels = [
+                "button[data-type='image']",
+                ".se-toolbar-item-imageUpload button",
+                "button[title='이미지']",
+                "button[aria-label='이미지']",
+              ];
+              let clicked = false;
+              for (const sel of imgBtnSels) {
+                try { await frame.waitForSelector(sel,{timeout:1000}); await frame.click(sel,{timeout:2000}); clicked=true; break; } catch {}
+              }
+              if (!clicked) {
+                for (const sel of imgBtnSels) {
+                  try { await page.waitForSelector(sel,{timeout:1000}); await page.click(sel,{timeout:2000}); clicked=true; break; } catch {}
+                }
+              }
+              if (clicked) {
+                await page.waitForTimeout(2000);
+                const fileInput = await page.$("input[type='file']") || await frame.$("input[type='file']");
+                if (fileInput) {
+                  await fileInput.setInputFiles([tmp1, tmp2]);
+                  await page.waitForTimeout(5000);
+                  console.log("[naver] ✅ 이미지 페어 업로드 완료");
+                  // 페어 캡션 입력 (첫 번째 이미지 alt 사용)
+                  const pairAlt = pairImages[0].alt || pairImages[1].alt;
+                  if (pairAlt && pairAlt.trim()) {
+                    try {
+                      await clickEditor();
+                      await page.waitForTimeout(300);
+                      await page.keyboard.press("End");
+                      await page.keyboard.press("Enter");
+                      await page.waitForTimeout(200);
+                      await insertText(pairAlt.trim());
+                      await page.waitForTimeout(300);
+                    } catch {}
+                  }
+                }
+              }
+            } catch(e) { console.log("[naver] 페어 이미지 업로드 실패:", e); }
+            finally {
+              try { fs.unlinkSync(tmp1); } catch {}
+              try { fs.unlinkSync(tmp2); } catch {}
+            }
+          }
         } else if (block.type === "image" && block.src) {
-          // 썸네일(imageUrl)과 같은 이미지는 이미 상단에 올라가 있으므로 스킵
           if (block.src !== imageUrl) {
-            await uploadImage(block.src);
+            await uploadImage(block.src, block.alt);
           }
         }
       }
