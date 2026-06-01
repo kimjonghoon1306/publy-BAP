@@ -186,7 +186,13 @@ export default function NeighborPage({ theme, userId, plan = "free" }: Props) {
 
     es.onmessage = (e) => {
       const data = JSON.parse(e.data);
-      if (data.type === "log") addLog(data.msg);
+      if (data.type === "log") {
+        addLog(data.msg);
+        if (data.msg.includes("DataLab API 키를 먼저 등록")) {
+          addLog("👉 관리자 페이지 → 설정탭 → 네이버 DataLab API 키를 등록해주세요!");
+          setCrawling(false); es.close();
+        }
+      }
       if (data.type === "quota_info") {
         setQuotaUsed(data.used); setQuotaLimit(data.limit);
         addLog(`📊 오늘 서이추 현황: ${data.used}/${data.limit} (남은 ${data.remaining}명)`);
