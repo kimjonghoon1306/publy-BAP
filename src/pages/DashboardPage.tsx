@@ -1097,9 +1097,9 @@ Output format (JSON array only, no other text):
       const expiry = new Date(q.reset_date);
       const daysLeft = Math.ceil((expiry.getTime() - now.getTime()) / (1000*60*60*24));
 
-      // 만료 알림 (3일 이하)
-      if (daysLeft <= 3 && daysLeft >= 0) {
-        setAlertPopup({ type: "expire", daysLeft });
+      // 만료 알림 (3일 이하 또는 만료됨)
+      if (daysLeft <= 3) {
+        setAlertPopup({ type: "expire", daysLeft: Math.max(0, daysLeft) });
         return;
       }
 
@@ -2322,7 +2322,7 @@ POST3: (제목)|(이유)
                 <div>
                   <div style={{fontSize:16,fontWeight:900,color:"#fff"}}>
                     {alertPopup.type==="expire"
-                      ? alertPopup.daysLeft===0 ? "오늘 만료됩니다!" : `만료 ${alertPopup.daysLeft}일 전`
+                      ? alertPopup.daysLeft===0 ? "오늘 만료됩니다!" : alertPopup.daysLeft! < 0 ? "서비스가 만료됐습니다!" : `만료 ${alertPopup.daysLeft}일 전`
                       : "오늘 발행 한도가 얼마 안 남았어요"}
                   </div>
                   <div style={{fontSize:12,color:"rgba(255,255,255,.85)",marginTop:2}}>
@@ -2334,7 +2334,9 @@ POST3: (제목)|(이유)
               <div style={{padding:"18px 22px"}}>
                 {alertPopup.type==="expire" ? (
                   <div style={{fontSize:14,color:"var(--text)",lineHeight:1.8}}>
-                    {alertPopup.daysLeft===0
+                    {alertPopup.daysLeft! < 0
+                      ? "서비스가 만료됐습니다. 갱신 후 이용 가능합니다."
+                      : alertPopup.daysLeft===0
                       ? "오늘 자정에 서비스가 만료됩니다."
                       : `${alertPopup.daysLeft}일 후 서비스가 만료됩니다.`}
                     <br/>만료 후에는 <strong>모든 기능이 정지</strong>됩니다.
