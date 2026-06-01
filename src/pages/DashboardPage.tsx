@@ -695,6 +695,9 @@ Output format (JSON array only, no other text):
   const [hashtags, setHashtags] = useState<string[]>([]);
   const [newTag, setNewTag] = useState("");
   const [imageMode, setImageMode] = useState<"auto"|"manual">("auto");
+  const [imgGenType, setImgGenType] = useState<"ai"|"flow">("ai");
+  const [showFlowGuide, setShowFlowGuide] = useState(false);
+  const [flowImgCount, setFlowImgCount] = useState(2);
   const [autoInserted, setAutoInserted] = useState(false);
   const [showPreviewModal, setShowPreviewModal] = useState(false);
   const [showNaverMenu, setShowNaverMenu] = useState(false);
@@ -2702,6 +2705,143 @@ POST3: (제목)|(이유)
               <div style={{animation:"fadeUp .25s ease both"}}>
                 {!genContent&&(<div className="alert-box alert-warn">⚠️ 먼저 글 생성 탭에서 글을 생성해주세요!<button className="btn btn-sm btn-secondary" style={{marginLeft:"auto",flexShrink:0}} onClick={()=>setTab("write")}>글 생성하러 가기</button></div>)}
 
+                {/* ── 이미지 생성 방식 스위치 ── */}
+                <div style={{marginBottom:16,padding:"20px 24px",borderRadius:20,background:"linear-gradient(135deg,rgba(99,102,241,.12),rgba(168,85,247,.12))",border:"1.5px solid rgba(168,85,247,.25)",boxShadow:"0 8px 32px rgba(99,102,241,.15)",animation:"float 3s ease-in-out infinite"}}>
+                  <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:14,flexWrap:"wrap",gap:8}}>
+                    <div>
+                      <div style={{fontSize:15,fontWeight:900,color:"var(--text)"}}>🖼️ 이미지 생성 방식</div>
+                      <div style={{fontSize:12,color:"var(--text3)",marginTop:2}}>원하는 방식을 선택하세요</div>
+                    </div>
+                    <button onClick={()=>setShowFlowGuide(true)}
+                      style={{padding:"6px 14px",borderRadius:99,border:"1px solid rgba(168,85,247,.4)",background:"rgba(168,85,247,.1)",color:"#a855f7",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:"inherit"}}>
+                      ❓ Flow란?
+                    </button>
+                  </div>
+                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+                    {/* AI 이미지 */}
+                    <button onClick={()=>setImgGenType("ai")}
+                      style={{padding:"16px 14px",borderRadius:16,border:`2px solid ${imgGenType==="ai"?"#6366f1":"var(--border)"}`,background:imgGenType==="ai"?"linear-gradient(135deg,rgba(99,102,241,.18),rgba(99,102,241,.06))":"var(--card)",cursor:"pointer",fontFamily:"inherit",textAlign:"left",transition:"all .2s",boxShadow:imgGenType==="ai"?"0 4px 20px rgba(99,102,241,.25)":"none"}}>
+                      <div style={{fontSize:28,marginBottom:6}}>🤖</div>
+                      <div style={{fontSize:14,fontWeight:900,color:imgGenType==="ai"?"#818cf8":"var(--text)",marginBottom:4}}>AI 이미지</div>
+                      <div style={{fontSize:11,color:"var(--text3)",lineHeight:1.5}}>DALL-E · Flux<br/>API 키 필요</div>
+                      {imgGenType==="ai"&&<div style={{marginTop:8,fontSize:10,fontWeight:800,color:"#818cf8",background:"rgba(99,102,241,.15)",padding:"3px 8px",borderRadius:99,display:"inline-block"}}>✓ 선택됨</div>}
+                    </button>
+                    {/* Flow 이미지 */}
+                    <button onClick={()=>setImgGenType("flow")}
+                      style={{padding:"16px 14px",borderRadius:16,border:`2px solid ${imgGenType==="flow"?"#a855f7":"var(--border)"}`,background:imgGenType==="flow"?"linear-gradient(135deg,rgba(168,85,247,.18),rgba(168,85,247,.06))":"var(--card)",cursor:"pointer",fontFamily:"inherit",textAlign:"left",transition:"all .2s",boxShadow:imgGenType==="flow"?"0 4px 20px rgba(168,85,247,.25)":"none",position:"relative",overflow:"hidden"}}>
+                      <div style={{position:"absolute",top:8,right:10,fontSize:10,fontWeight:800,color:"#fff",background:"linear-gradient(135deg,#a855f7,#7c3aed)",padding:"2px 8px",borderRadius:99}}>FREE</div>
+                      <div style={{fontSize:28,marginBottom:6}}>🎨</div>
+                      <div style={{fontSize:14,fontWeight:900,color:imgGenType==="flow"?"#c084fc":"var(--text)",marginBottom:4}}>Flow 이미지</div>
+                      <div style={{fontSize:11,color:"var(--text3)",lineHeight:1.5}}>Google Flow<br/>무료 · 고퀄리티</div>
+                      {imgGenType==="flow"&&<div style={{marginTop:8,fontSize:10,fontWeight:800,color:"#c084fc",background:"rgba(168,85,247,.15)",padding:"3px 8px",borderRadius:99,display:"inline-block"}}>✓ 선택됨</div>}
+                    </button>
+                  </div>
+                </div>
+
+                {/* ── Flow 가이드 팝업 ── */}
+                {showFlowGuide&&(
+                  <div style={{position:"fixed",inset:0,zIndex:9999,background:"rgba(0,0,0,.75)",display:"flex",alignItems:"center",justifyContent:"center",padding:20}} onClick={()=>setShowFlowGuide(false)}>
+                    <div style={{width:"100%",maxWidth:440,borderRadius:20,background:"var(--card)",border:"1px solid rgba(168,85,247,.3)",overflow:"hidden",animation:"fadeUp .25s ease",boxShadow:"0 24px 60px rgba(0,0,0,.5)"}} onClick={e=>e.stopPropagation()}>
+                      {/* 헤더 */}
+                      <div style={{padding:"20px 24px 16px",background:"linear-gradient(135deg,#7c3aed,#a855f7)",display:"flex",alignItems:"center",gap:12}}>
+                        <div style={{fontSize:32}}>🎨</div>
+                        <div>
+                          <div style={{fontSize:17,fontWeight:900,color:"#fff"}}>Google Flow 이미지란?</div>
+                          <div style={{fontSize:12,color:"rgba(255,255,255,.8)",marginTop:2}}>무료 고퀄리티 AI 이미지 생성</div>
+                        </div>
+                        <button onClick={()=>setShowFlowGuide(false)}
+                          style={{marginLeft:"auto",width:28,height:28,borderRadius:8,border:"none",background:"rgba(255,255,255,.2)",color:"#fff",cursor:"pointer",fontSize:16,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>×</button>
+                      </div>
+
+                      <div style={{padding:"18px 24px"}}>
+                        {/* 회원가입 + 설정 버튼 */}
+                        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:16}}>
+                          <a href="https://accounts.google.com/signup" target="_blank" rel="noreferrer"
+                            style={{display:"flex",flexDirection:"column",alignItems:"center",gap:6,padding:"14px 12px",borderRadius:14,border:"1.5px solid rgba(168,85,247,.3)",background:"linear-gradient(135deg,rgba(168,85,247,.12),rgba(99,102,241,.08))",textDecoration:"none",transition:"all .2s",cursor:"pointer"}}>
+                            <span style={{fontSize:24}}>👤</span>
+                            <span style={{fontSize:13,fontWeight:800,color:"#c084fc"}}>구글 회원가입</span>
+                            <span style={{fontSize:10,color:"var(--text3)",textAlign:"center"}}>구글 계정이 없다면<br/>먼저 가입하세요</span>
+                          </a>
+                          <a href="https://labs.google/fx/ko/tools/image-fx" target="_blank" rel="noreferrer"
+                            style={{display:"flex",flexDirection:"column",alignItems:"center",gap:6,padding:"14px 12px",borderRadius:14,border:"1.5px solid rgba(0,214,143,.3)",background:"linear-gradient(135deg,rgba(0,214,143,.12),rgba(0,214,143,.04))",textDecoration:"none",transition:"all .2s",cursor:"pointer"}}>
+                            <span style={{fontSize:24}}>🔗</span>
+                            <span style={{fontSize:13,fontWeight:800,color:"var(--success)"}}>Flow 설정하기</span>
+                            <span style={{fontSize:10,color:"var(--text3)",textAlign:"center"}}>클릭 후 구글 로그인<br/>한 번만 하면 완료!</span>
+                          </a>
+                        </div>
+
+                        {/* 동작 방식 */}
+                        <div style={{marginBottom:12,padding:"12px 14px",borderRadius:12,background:"rgba(99,102,241,.08)",border:"1px solid rgba(99,102,241,.2)"}}>
+                          <div style={{fontSize:13,fontWeight:800,color:"#818cf8",marginBottom:6}}>🚀 동작 방식</div>
+                          <div style={{fontSize:13,color:"var(--text)",lineHeight:1.8}}>
+                            발행 버튼 클릭 → 크롬 자동 실행<br/>
+                            → 글 제목 기반 영문 프롬프트 자동 입력<br/>
+                            → 고퀄 이미지 생성 → 블로그에 자동 삽입
+                          </div>
+                        </div>
+
+                        {/* 주의사항 */}
+                        <div style={{marginBottom:16,padding:"12px 14px",borderRadius:12,background:"rgba(255,159,63,.08)",border:"1px solid rgba(255,159,63,.2)"}}>
+                          <div style={{fontSize:13,fontWeight:800,color:"var(--warn)",marginBottom:6}}>⚠️ 주의사항</div>
+                          <div style={{fontSize:13,color:"var(--text)",lineHeight:1.8}}>
+                            장시간 미사용 시 재로그인 필요<br/>
+                            발행 시 크롬 창이 자동으로 열립니다
+                          </div>
+                        </div>
+
+                        <button onClick={()=>setShowFlowGuide(false)}
+                          style={{width:"100%",padding:"13px",borderRadius:12,border:"none",background:"linear-gradient(135deg,#7c3aed,#a855f7)",color:"#fff",cursor:"pointer",fontSize:14,fontWeight:800,fontFamily:"inherit"}}>
+                          확인했어요!
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* ── Flow 선택 시 UI ── */}
+                {imgGenType==="flow"&&(
+                  <div style={{marginBottom:14,animation:"fadeUp .2s ease both"}}>
+                    <div className="card" style={{padding:"20px 22px",border:"1.5px solid rgba(168,85,247,.25)",background:"linear-gradient(135deg,rgba(168,85,247,.06),rgba(99,102,241,.04))"}}>
+                      <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:16}}>
+                        <div style={{width:40,height:40,borderRadius:12,background:"linear-gradient(135deg,#7c3aed,#a855f7)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:20,flexShrink:0}}>🎨</div>
+                        <div>
+                          <div style={{fontSize:15,fontWeight:900,color:"var(--text)"}}>Google Flow 자동 생성</div>
+                          <div style={{fontSize:12,color:"var(--text3)"}}>발행 시 크롬이 자동으로 열려 이미지를 생성합니다</div>
+                        </div>
+                      </div>
+
+                      {/* 생성할 이미지 수 */}
+                      <div style={{marginBottom:16}}>
+                        <div style={{fontSize:12,fontWeight:700,color:"var(--text3)",marginBottom:8}}>📸 생성할 이미지 수</div>
+                        <div style={{display:"flex",gap:8}}>
+                          {[1,2,3].map(n=>(
+                            <button key={n} onClick={()=>setFlowImgCount(n)}
+                              style={{flex:1,padding:"12px",borderRadius:12,border:`2px solid ${flowImgCount===n?"#a855f7":"var(--border)"}`,background:flowImgCount===n?"rgba(168,85,247,.15)":"var(--bg)",color:flowImgCount===n?"#c084fc":"var(--text2)",cursor:"pointer",fontSize:14,fontWeight:800,fontFamily:"inherit",transition:"all .2s"}}>
+                              {n}장
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* 프롬프트 미리보기 */}
+                      {genTitle&&(
+                        <div style={{marginBottom:16,padding:"14px",borderRadius:12,background:"var(--bg)",border:"1px solid var(--border)"}}>
+                          <div style={{fontSize:11,fontWeight:700,color:"var(--text3)",marginBottom:6}}>🔤 자동 생성될 영문 프롬프트 (예시)</div>
+                          <div style={{fontSize:12,color:"#c084fc",lineHeight:1.7,fontStyle:"italic"}}>
+                            "{genTitle}" — A high-quality, realistic and detailed photographic image representing the topic. Professional photography style, vivid colors, sharp focus, cinematic lighting, 8K resolution.
+                          </div>
+                        </div>
+                      )}
+
+                      {/* 상태 안내 */}
+                      <div style={{display:"flex",alignItems:"center",gap:8,padding:"12px 14px",borderRadius:12,background:"rgba(168,85,247,.08)",border:"1px solid rgba(168,85,247,.2)"}}>
+                        <div style={{width:8,height:8,borderRadius:"50%",background:"#a855f7",boxShadow:"0 0 8px #a855f7",animation:"float 1.5s ease-in-out infinite",flexShrink:0}}/>
+                        <div style={{fontSize:12,color:"#c084fc",fontWeight:600}}>발행하기 탭에서 🚀 발행 버튼을 누르면 자동으로 시작됩니다</div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
                 <div className="img-split" style={{display:"grid",gap:14,alignItems:"start"}}>
 
                   {/* ── 왼쪽: 설정 패널 ── */}
@@ -3959,4 +4099,3 @@ POST3: (제목)|(이유)
     </>
   );
 }
-
