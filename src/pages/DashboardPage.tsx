@@ -697,6 +697,7 @@ Output format (JSON array only, no other text):
   const [imgGenType, setImgGenType] = useState<"ai"|"flow">("ai");
   const [showFlowGuide, setShowFlowGuide] = useState(false);
   const [flowImgCount, setFlowImgCount] = useState(2);
+  const [flowImgCountAuto, setFlowImgCountAuto] = useState(true);
   const [autoInserted, setAutoInserted] = useState(false);
   const [showPreviewModal, setShowPreviewModal] = useState(false);
   const [showNaverMenu, setShowNaverMenu] = useState(false);
@@ -1539,6 +1540,7 @@ POST3: (제목)|(이유)
       setGenTitle(title);if(tgm)setGenTags(tgm[1].trim());
       const body=bm?bm[1].trim():cleaned;setGenContent(body);setQualityScore(calcQualityScore(body,keyword));
       if(imgCountAuto)setImgCount(recommendImgCount(body));
+      if(flowImgCountAuto)setFlowImgCount(recommendImgCount(body));
       // ── tarry 방식: 블록 자동 분리 + 제목/태그 자동 연동 ──
       const rawBlocks = body.split("\n\n").filter(Boolean).map(p=>({type:"text" as const,id:uid(),content:p}));
       setBlocks(rawBlocks.length>0?rawBlocks:[{type:"text",id:uid(),content:body}]);
@@ -2820,22 +2822,37 @@ POST3: (제목)|(이유)
                           </a>
                         </div>
 
-                        {/* 동작 방식 */}
+                      {/* 동작 방식 */}
                         <div style={{marginBottom:12,padding:"12px 14px",borderRadius:12,background:"rgba(99,102,241,.08)",border:"1px solid rgba(99,102,241,.2)"}}>
-                          <div style={{fontSize:13,fontWeight:800,color:"#818cf8",marginBottom:6}}>🚀 동작 방식</div>
-                          <div style={{fontSize:13,color:"var(--text)",lineHeight:1.8}}>
-                            발행 버튼 클릭 → 크롬 자동 실행<br/>
-                            → 글 제목 기반 영문 프롬프트 자동 입력<br/>
-                            → 고퀄 이미지 생성 → 블로그에 자동 삽입
+                          <div style={{fontSize:13,fontWeight:800,color:"#818cf8",marginBottom:8}}>🚀 동작 방식</div>
+                          <div style={{fontSize:12,color:"var(--text)",lineHeight:2}}>
+                            ① 이미지 탭에서 <strong style={{color:"#c084fc"}}>Flow 이미지</strong> 선택<br/>
+                            ② 글 생성 후 이미지 수 자동 추천 (500자당 1장)<br/>
+                            ③ 발행하기 탭에서 🚀 발행 버튼 클릭<br/>
+                            ④ 크롬이 자동으로 열려 Google Flow 접속<br/>
+                            ⑤ 글 제목 기반 영문 프롬프트 자동 입력<br/>
+                            ⑥ 이미지 생성 완료 → 자동 다운로드<br/>
+                            ⑦ 글 패턴에 맞게 자동 삽입 후 발행
+                          </div>
+                        </div>
+
+                        {/* 이미지 수 안내 */}
+                        <div style={{marginBottom:12,padding:"12px 14px",borderRadius:12,background:"rgba(168,85,247,.08)",border:"1px solid rgba(168,85,247,.2)"}}>
+                          <div style={{fontSize:13,fontWeight:800,color:"#c084fc",marginBottom:8}}>📸 이미지 수 설정</div>
+                          <div style={{fontSize:12,color:"var(--text)",lineHeight:2}}>
+                            <strong style={{color:"#c084fc"}}>🤖 자동추천</strong> — 글자 수 기준 500자당 1장<br/>
+                            예) 1,500자 → 3장 / 2,000자 → 4장<br/>
+                            <strong style={{color:"#c084fc"}}>✏️ 직접입력</strong> — 원하는 수량 직접 설정 가능
                           </div>
                         </div>
 
                         {/* 주의사항 */}
                         <div style={{marginBottom:16,padding:"12px 14px",borderRadius:12,background:"rgba(255,159,63,.08)",border:"1px solid rgba(255,159,63,.2)"}}>
-                          <div style={{fontSize:13,fontWeight:800,color:"var(--warn)",marginBottom:6}}>⚠️ 주의사항</div>
-                          <div style={{fontSize:13,color:"var(--text)",lineHeight:1.8}}>
-                            장시간 미사용 시 재로그인 필요<br/>
-                            발행 시 크롬 창이 자동으로 열립니다
+                          <div style={{fontSize:13,fontWeight:800,color:"var(--warn)",marginBottom:8}}>⚠️ 주의사항</div>
+                          <div style={{fontSize:12,color:"var(--text)",lineHeight:2}}>
+                            장시간 미사용 시 구글 재로그인 필요<br/>
+                            발행 시 크롬 창이 자동으로 열립니다<br/>
+                            크롬 창을 닫거나 조작하지 마세요
                           </div>
                         </div>
 
@@ -2863,14 +2880,33 @@ POST3: (제목)|(이유)
                       {/* 생성할 이미지 수 */}
                       <div style={{marginBottom:16}}>
                         <div style={{fontSize:12,fontWeight:700,color:"var(--text3)",marginBottom:8}}>📸 생성할 이미지 수</div>
-                        <div style={{display:"flex",gap:8}}>
-                          {[1,2,3].map(n=>(
-                            <button key={n} onClick={()=>setFlowImgCount(n)}
-                              style={{flex:1,padding:"12px",borderRadius:12,border:`2px solid ${flowImgCount===n?"#a855f7":"var(--border)"}`,background:flowImgCount===n?"rgba(168,85,247,.15)":"var(--bg)",color:flowImgCount===n?"#c084fc":"var(--text2)",cursor:"pointer",fontSize:14,fontWeight:800,fontFamily:"inherit",transition:"all .2s"}}>
-                              {n}장
-                            </button>
-                          ))}
+                        <div style={{display:"flex",gap:6,marginBottom:8}}>
+                          <button onClick={()=>{setFlowImgCountAuto(true);if(genContent)setFlowImgCount(recommendImgCount(genContent));}}
+                            style={{flex:1,padding:"8px",borderRadius:9,border:`1.5px solid ${flowImgCountAuto?"#a855f7":"var(--border)"}`,background:flowImgCountAuto?"rgba(168,85,247,.15)":"transparent",cursor:"pointer",fontSize:12,fontWeight:700,color:flowImgCountAuto?"#c084fc":"var(--text2)",fontFamily:"inherit"}}>
+                            🤖 자동추천
+                          </button>
+                          <button onClick={()=>setFlowImgCountAuto(false)}
+                            style={{flex:1,padding:"8px",borderRadius:9,border:`1.5px solid ${!flowImgCountAuto?"#a855f7":"var(--border)"}`,background:!flowImgCountAuto?"rgba(168,85,247,.15)":"transparent",cursor:"pointer",fontSize:12,fontWeight:700,color:!flowImgCountAuto?"#c084fc":"var(--text2)",fontFamily:"inherit"}}>
+                            ✏️ 직접입력
+                          </button>
                         </div>
+
+                        {flowImgCountAuto ? (
+                          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"10px 14px",borderRadius:10,background:"rgba(168,85,247,.1)",border:"1px solid rgba(168,85,247,.25)"}}>
+                            <span style={{fontSize:12,color:"#c084fc",fontWeight:600}}>💡 글자 수 기반 자동 추천 (500자당 1장)</span>
+                            <span style={{fontSize:24,fontWeight:900,color:"#c084fc",fontFamily:"'Space Grotesk',sans-serif"}}>{flowImgCount}장</span>
+                          </div>
+                        ) : (
+                          <div style={{display:"flex",alignItems:"center",gap:8}}>
+                            <button onClick={()=>setFlowImgCount(Math.max(1,flowImgCount-1))}
+                              style={{width:36,height:36,borderRadius:9,border:"1px solid var(--border)",background:"var(--bg2)",cursor:"pointer",fontSize:18,fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center",color:"var(--text)"}}>−</button>
+                            <input type="number" min={1} max={10} value={flowImgCount}
+                              onChange={e=>setFlowImgCount(Math.max(1,Math.min(10,Number(e.target.value))))}
+                              style={{flex:1,textAlign:"center",padding:"8px",borderRadius:9,border:"1.5px solid rgba(168,85,247,.4)",background:"var(--bg2)",color:"#c084fc",fontSize:20,fontWeight:900,fontFamily:"'Space Grotesk',sans-serif"}}/>
+                            <button onClick={()=>setFlowImgCount(Math.min(10,flowImgCount+1))}
+                              style={{width:36,height:36,borderRadius:9,border:"1px solid var(--border)",background:"var(--bg2)",cursor:"pointer",fontSize:18,fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center",color:"var(--text)"}}>+</button>
+                          </div>
+                        )}
                       </div>
 
                       {/* 프롬프트 미리보기 */}
