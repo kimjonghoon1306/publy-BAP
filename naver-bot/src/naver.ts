@@ -873,3 +873,168 @@ export async function publishNaver(params: {
     throw e;
   }
 }
+
+/* ── Google Flow 이미지 생성 ── */
+export async function generateFlowImages(params: {
+  userId: string;
+  prompts: string[];
+  captions: string[];
+  onLog?: (msg: string) => void;
+}): Promise<{src: string; alt: string}[]> {
+  const { userId, prompts, captions, onLog } = params;
+  const log = onLog || console.log;
+  const results: {src: string; alt: string}[] = [];
+
+  const sp = path.join(__dirname, "../sessions", `naver_${userId}.json`);
+  if (!fs.existsSync(sp)) throw new Error("세션 없음 — 먼저 로그인하세요");
+  const saved = JSON.parse(fs.readFileSync(sp, "utf-8"));
+
+  const DOWNLOAD_DIR = path.join(__dirname, "../flow_downloads");
+  if (!fs.existsSync(DOWNLOAD_DIR)) fs.mkdirSync(DOWNLOAD_DIR, { recursive: true });
+
+  const browser = await chromium.launch({
+    headless: false,
+    args: ["--no-sandbox", "--disable-blink-features=AutomationControlled"],
+  });
+
+  const context = await browser.newContext({
+    userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36",
+    viewport: { width: 1280, height: 800 },
+    locale: "ko-KR",
+    acceptDownloads: true,
+  });
+
+  await context.addInitScript(`
+    Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+  `);
+  await context.addCookies(saved.cookies);
+
+  const page = await context.newPage();
+
+  try {
+    for (let i = 0; i < prompts.length; i++) {
+      const prompt = prompts[i];
+      const caption = captions[i] || "";
+      log(`🎨 [Flow] ${i + 1}/${prompts.length} 이미지 생성 중...`);
+
+      await page.goto("https://labs.google/fx/ko/tools/image-fx", {
+        waitUntil: "domcontentloaded",
+        timeout: 30000,
+      });
+      await page.waitForTimeout(3000);
+
+      // 로그인 확인
+      const url = page.url();
+      if (url.includes("accounts.google.com")) {
+        throw new Error("Google 로그인이 필요합니다. 크롬에서 Google에 로그인해주세요.");
+      }
+
+      // 프롬프트 입력창 찾기
+      const promptSelectors = [
+        "textarea[placeholder*='image']",
+        "textarea[placeholder*='이미지']",
+        "textarea[aria-label*='prompt']",
+        ".prompt-input textarea",
+        "textarea",
+      ];
+
+      let promptInput = null;
+      for (const sel of promptSelectors) {
+        try {
+          await page.waitForSelector(sel, { timeout: 5000 });
+          promptInput = await page.$(sel);
+          if (promptInput) break;
+        } catch {}
+      }
+
+      if (!promptInput) {
+        log(`⚠️ [Flow] 프롬프트 입력창 못 찾음 - 스킵`);
+        continue;
+      }
+
+      // 프롬프트 입력
+      await promptInput.click();
+      await page.waitForTimeout(500);
+      await page.keyboard.selectAll();
+      await page.keyboard.press("Backspace");
+      await promptInput.type(prompt, { delay: 20 });
+      await page.waitForTimeout(500);
+
+      log(`  📝 프롬프트: ${prompt.slice(0, 60)}...`);
+
+      // 생성 버튼 클릭
+      const generateBtns = [
+        "button[aria-label*='generate']",
+        "button[aria-label*='생성']",
+        "button:has-text('Create')",
+        "button:has-text('Generate')",
+        "button[type='submit']",
+      ];
+
+      for (const sel of generateBtns) {
+        try {
+          const btn = await page.$(sel);
+          if (btn) { await btn.click(); break; }
+        } catch {}
+      }
+
+      // 이미지 생성 대기 (최대 30초)
+      log(`  ⏳ 이미지 생성 대기...`);
+      await page.waitForTimeout(15000);
+
+      // 생성된 이미지 다운로드
+      const imgSelectors = [
+        ".generated-image img",
+        "[data-testid='generated-image'] img",
+        ".image-result img",
+        ".output-image img",
+        "img[alt*='generated']",
+      ];
+
+      let downloaded = false;
+      for (const sel of imgSelectors) {
+        try {
+          const imgs = await page.$$(sel);
+          if (imgs.length > 0) {
+            // 첫 번째 이미지 다운로드
+            const downloadBtn = await page.$("[aria-label*='download'], button[title*='download'], .download-btn");
+            if (downloadBtn) {
+              const [download] = await Promise.all([
+                page.waitForEvent("download", { timeout: 15000 }),
+                downloadBtn.click(),
+              ]);
+              const filePath = path.join(DOWNLOAD_DIR, `flow_${Date.now()}_${i}.png`);
+              await download.saveAs(filePath);
+              results.push({ src: filePath, alt: caption });
+              log(`  ✅ [Flow] 이미지 ${i + 1} 다운로드 완료`);
+              downloaded = true;
+              break;
+            } else {
+              // 다운로드 버튼 없으면 이미지 URL로 직접 저장
+              const src = await imgs[0].getAttribute("src");
+              if (src && src.startsWith("http")) {
+                results.push({ src, alt: caption });
+                log(`  ✅ [Flow] 이미지 ${i + 1} URL 저장`);
+                downloaded = true;
+                break;
+              }
+            }
+          }
+        } catch {}
+      }
+
+      if (!downloaded) {
+        log(`  ⚠️ [Flow] 이미지 ${i + 1} 다운로드 실패 - 스킵`);
+      }
+
+      await page.waitForTimeout(2000);
+    }
+
+    await browser.close();
+    log(`✅ [Flow] 전체 ${results.length}장 생성 완료`);
+    return results;
+  } catch (e: any) {
+    await browser.close().catch(() => {});
+    throw e;
+  }
+}
