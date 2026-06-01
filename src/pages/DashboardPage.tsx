@@ -768,7 +768,7 @@ Output format (JSON array only, no other text):
     setBlocks(prev=>{const i=prev.findIndex(b=>b.id===afterId);const n=[...prev];n.splice(i+1,0,nb);return n;});
   }
 
-  // ── triggerAutoInsert (tarry 방식 그대로) ──
+  // ── triggerAutoInsert ──
   function triggerAutoInsert(images:{id:number;src:string;alt?:string}[]){
     const textOnly=blocks.filter(b=>b.type==="text"||(b.type==="image"&&(b as SingleImageBlock).source==="manual"));
     const textBlocks=textOnly.filter(b=>b.type==="text");
@@ -784,36 +784,112 @@ Output format (JSON array only, no other text):
     const safeTextCount=safeBlocks.filter(b=>b.type==="text").length;
     const imgs=images.filter(img=>img?.src&&img.src.trim()!=="");
     if(imgs.length===0)return;
+
+    // 실제 패턴 결정 (랜덤이면 A/B/C 중 하나 선택)
+    const patterns:("A"|"B"|"C")[] = ["A","B","C"];
+    const activePattern:("A"|"B"|"C") = imgPattern==="random"
+      ? patterns[Math.floor(Math.random()*3)]
+      : imgPattern;
+
     const result:ContentBlock[]=[];
     let insertedCount=0;
-    // 첫 이미지 맨 앞 삽입 (썸네일)
-    result.push({type:"image",id:uid(),src:imgs[0].src,alt:imgs[0].alt||"이미지 1",position:"center",source:"auto"} as ContentBlock);
-    insertedCount++;
-    const remainingImages=imgs.slice(1);
-    const insertMap=new Map<number,typeof remainingImages>();
-    if(safeTextCount>0&&remainingImages.length>0){
-      remainingImages.forEach((img,index)=>{
-        const targetTextIndex=Math.min(safeTextCount,Math.max(1,Math.ceil(((index+1)*safeTextCount)/remainingImages.length)));
-        const bucket=insertMap.get(targetTextIndex)||[];bucket.push(img);insertMap.set(targetTextIndex,bucket);
-      });
-    }
-    let textCount=0;
-    for(let i=0;i<safeBlocks.length;i++){
-      result.push(safeBlocks[i]);
-      if(safeBlocks[i].type==="text"){
-        textCount++;
-        const toInsert=insertMap.get(textCount)||[];
-        toInsert.forEach((img,idx)=>{result.push({type:"image",id:uid(),src:img.src,alt:img.alt||`이미지 ${insertedCount+idx+1}`,position:"center",source:"auto"} as ContentBlock);});
-        insertedCount+=toInsert.length;
+
+    // ── 패턴 A: 썸네일 + 글 중간에만 배치 ──
+    if(activePattern==="A"){
+      // 첫 이미지 = 썸네일
+      result.push({type:"image",id:uid(),src:imgs[0].src,alt:imgs[0].alt||"이미지 1",position:"center",source:"auto"} as ContentBlock);
+      insertedCount++;
+      const remaining=imgs.slice(1);
+      const midPoint=Math.floor(safeTextCount/2);
+      let textCount=0;
+      for(let i=0;i<safeBlocks.length;i++){
+        result.push(safeBlocks[i]);
+        if(safeBlocks[i].type==="text"){
+          textCount++;
+          // 중간 지점에 나머지 이미지 배치
+          if(textCount===midPoint&&remaining.length>0){
+            remaining.forEach((img,idx)=>{
+              result.push({type:"image",id:uid(),src:img.src,alt:img.alt||`이미지 ${insertedCount+idx+1}`,position:"center",source:"auto"} as ContentBlock);
+            });
+            insertedCount+=remaining.length;
+          }
+        }
       }
     }
-    if(insertedCount<imgs.length){
-      const remaining=imgs.slice(insertedCount);
-      let lastTextIdx=-1;
-      for(let i=result.length-1;i>=0;i--){if(result[i].type==="text"){lastTextIdx=i;break;}}
-      const insertAt=lastTextIdx>=0?lastTextIdx+1:result.length;
-      remaining.reverse().forEach(img=>{result.splice(insertAt,0,{type:"image",id:uid(),src:img.src,alt:img.alt||"이미지",position:"center",source:"auto"} as ContentBlock);});
+
+    // ── 패턴 B: 2장씩 한 줄에 나란히 배치 (pair 블록) ──
+    else if(activePattern==="B"){
+      // 첫 이미지 = 썸네일 단독
+      result.push({type:"image",id:uid(),src:imgs[0].src,alt:imgs[0].alt||"이미지 1",position:"center",source:"auto"} as ContentBlock);
+      insertedCount++;
+      const remaining=imgs.slice(1);
+      // 나머지를 2장씩 pair로 묶기
+      const pairs:typeof remaining[]=[];
+      for(let i=0;i<remaining.length;i+=2){
+        pairs.push(remaining.slice(i,i+2));
+      }
+      // pair를 텍스트 블록 사이에 균등 분산
+      const insertMap=new Map<number,typeof pairs[0][]>();
+      if(safeTextCount>0&&pairs.length>0){
+        pairs.forEach((pair,index)=>{
+          const targetTextIndex=Math.min(safeTextCount,Math.max(1,Math.ceil(((index+1)*safeTextCount)/pairs.length)));
+          const bucket=insertMap.get(targetTextIndex)||[];bucket.push(pair);insertMap.set(targetTextIndex,bucket);
+        });
+      }
+      let textCount=0;
+      for(let i=0;i<safeBlocks.length;i++){
+        result.push(safeBlocks[i]);
+        if(safeBlocks[i].type==="text"){
+          textCount++;
+          const toInsert=insertMap.get(textCount)||[];
+          toInsert.forEach(pair=>{
+            if(pair.length===2){
+              // 2장 → pair 블록 (한 줄 나란히)
+              result.push({type:"image-pair",id:uid(),images:[{src:pair[0].src,alt:pair[0].alt||"이미지"},{src:pair[1].src,alt:pair[1].alt||"이미지"}]} as ContentBlock);
+              insertedCount+=2;
+            } else {
+              // 1장 → 단독 블록
+              result.push({type:"image",id:uid(),src:pair[0].src,alt:pair[0].alt||"이미지",position:"center",source:"auto"} as ContentBlock);
+              insertedCount++;
+            }
+          });
+        }
+      }
     }
+
+    // ── 패턴 C: 썸네일 + 균등 분산 ──
+    else {
+      // 첫 이미지 = 썸네일
+      result.push({type:"image",id:uid(),src:imgs[0].src,alt:imgs[0].alt||"이미지 1",position:"center",source:"auto"} as ContentBlock);
+      insertedCount++;
+      const remainingImages=imgs.slice(1);
+      const insertMap=new Map<number,typeof remainingImages>();
+      if(safeTextCount>0&&remainingImages.length>0){
+        remainingImages.forEach((img,index)=>{
+          const targetTextIndex=Math.min(safeTextCount,Math.max(1,Math.ceil(((index+1)*safeTextCount)/remainingImages.length)));
+          const bucket=insertMap.get(targetTextIndex)||[];bucket.push(img);insertMap.set(targetTextIndex,bucket);
+        });
+      }
+      let textCount=0;
+      for(let i=0;i<safeBlocks.length;i++){
+        result.push(safeBlocks[i]);
+        if(safeBlocks[i].type==="text"){
+          textCount++;
+          const toInsert=insertMap.get(textCount)||[];
+          toInsert.forEach((img,idx)=>{result.push({type:"image",id:uid(),src:img.src,alt:img.alt||`이미지 ${insertedCount+idx+1}`,position:"center",source:"auto"} as ContentBlock);});
+          insertedCount+=toInsert.length;
+        }
+      }
+      // 남은 이미지 마지막에 추가
+      if(insertedCount<imgs.length){
+        const remaining=imgs.slice(insertedCount);
+        let lastTextIdx=-1;
+        for(let i=result.length-1;i>=0;i--){if(result[i].type==="text"){lastTextIdx=i;break;}}
+        const insertAt=lastTextIdx>=0?lastTextIdx+1:result.length;
+        remaining.reverse().forEach(img=>{result.splice(insertAt,0,{type:"image",id:uid(),src:img.src,alt:img.alt||"이미지",position:"center",source:"auto"} as ContentBlock);});
+      }
+    }
+
     for(const b of sectionBlocks)result.push(b);
     setBlocks(result);setAutoInserted(true);
   }
@@ -893,6 +969,11 @@ Output format (JSON array only, no other text):
       }else if(b.type==="image"&&!afterSection){
         const src=(b as SingleImageBlock).src;const alt=(b as SingleImageBlock).alt;
         if(src)parts.push(`<div style="padding:24px 0"><figure style="margin:0;text-align:center"><img src="${escHtml(src)}" alt="${escHtml(alt||"")}" style="width:100%;border-radius:12px;display:block">${alt?`<figcaption style="font-size:12px;color:#888;text-align:center;margin-top:6px">${inlineFmt(alt)}</figcaption>`:""}</figure></div>`);
+      }else if(b.type==="image-pair"&&!afterSection){
+        const pair=(b as ImagePairBlock).images;
+        if(pair&&pair.length>=2){
+          parts.push(`<div style="padding:24px 0;display:grid;grid-template-columns:1fr 1fr;gap:8px"><figure style="margin:0"><img src="${escHtml(pair[0].src)}" alt="${escHtml(pair[0].alt||"")}" style="width:100%;border-radius:12px;display:block">${pair[0].alt?`<figcaption style="font-size:12px;color:#888;text-align:center;margin-top:6px">${inlineFmt(pair[0].alt)}</figcaption>`:""}</figure><figure style="margin:0"><img src="${escHtml(pair[1].src)}" alt="${escHtml(pair[1].alt||"")}" style="width:100%;border-radius:12px;display:block">${pair[1].alt?`<figcaption style="font-size:12px;color:#888;text-align:center;margin-top:6px">${inlineFmt(pair[1].alt)}</figcaption>`:""}</figure></div>`);
+        }
       }
     });
     if(hashtags.length>0)parts.push(`<p style="margin-top:20px;color:#888;font-size:14px">${hashtags.join(" ")}</p>`);
@@ -1624,6 +1705,7 @@ POST3: (제목)|(이유)
       blocks:blocks.map(b=>{
         if(b.type==="text")return{type:"text",content:(b as TextBlock).content};
         if(b.type==="image")return{type:"image",src:(b as SingleImageBlock).src,alt:(b as SingleImageBlock).alt||""};
+        if(b.type==="image-pair")return{type:"image-pair",images:(b as ImagePairBlock).images};
         return null;
       }).filter(Boolean),
     };
@@ -2110,7 +2192,7 @@ POST3: (제목)|(이유)
         {t:"🤖 AI 자동 생성",d:"수량 자동추천 또는 직접 입력 (체험단 15장+ 가능). 생성 중 언제든 ⏹ 중단 가능!"},
         {t:"📁 내 이미지 업로드",d:"직접 찍은 사진이나 저장한 이미지. 여러 장 동시 업로드 가능!"},
         {t:"🚫 이미지 없이 발행",d:"텍스트만 발행할 때 선택."},
-        {t:"📐 이미지 배치 패턴",d:"🎲 랜덤(권장): 매 발행마다 자동 변경 → AI 감지 방지!\nA: 중간 1장 / B: 앞뒤 각 1장 / C: 균등 분산"},
+        {t:"📐 이미지 배치 패턴",d:"🎲 랜덤(권장): 매 발행마다 자동 변경 → AI 감지 방지!\nA: 썸네일 + 글 중간 배치 / B: 2장씩 한 줄 나란히 / C: 균등 분산"},
         {t:"🎬 영상 삽입",d:"네이버TV/유튜브 URL 입력 후 ON. 체험단 영상 필수 업체 대응! 위치(상단/중간/하단) 선택 가능."},
       ].map((item,i)=>(
         <div key={i} style={{padding:"13px 15px",borderRadius:12,background:"rgba(255,255,255,.04)",border:"1px solid rgba(255,255,255,.08)",marginBottom:8}}>
@@ -3072,7 +3154,7 @@ POST3: (제목)|(이유)
                         {([
                           {v:"random",l:"🎲 랜덤",badge:"권장",sub:"매 발행마다 자동으로 패턴 변경",desc:"AI 감지 방지에 가장 효과적이에요",diagram:"🖼️ → 📝 → 🖼️ → 📝"},
                           {v:"A",l:"패턴 A",badge:"",sub:"썸네일 + 중간 이미지 1장",desc:"글 중간에 이미지 1장 배치",diagram:"🖼️썸네일 → 📝글 → 🖼️중간 → 📝글"},
-                          {v:"B",l:"패턴 B",badge:"",sub:"썸네일 + 앞뒤 이미지 각 1장",desc:"글 앞과 뒤에 각각 1장씩",diagram:"🖼️썸네일 → 🖼️앞 → 📝글 → 🖼️뒤"},
+                          {v:"B",l:"패턴 B",badge:"",sub:"이미지 2장씩 한 줄 나란히",desc:"이미지를 2장씩 묶어서 한 줄에 배치",diagram:"🖼️썸네일 → 📝글 → 🖼️🖼️나란히 → 📝글"},
                           {v:"C",l:"패턴 C",badge:"",sub:"썸네일 + 이미지 균등 분산",desc:"이미지를 글 전체에 고르게 배치",diagram:"🖼️썸네일 → 📝 → 🖼️ → 📝 → 🖼️"},
                         ] as const).map(p=>(
                           <button key={p.v} onClick={()=>setImgPattern(p.v)} style={{padding:"11px 13px",borderRadius:10,border:`1.5px solid ${imgPattern===p.v?"var(--accent)":"var(--border)"}`,background:imgPattern===p.v?"var(--accent-bg)":"var(--bg)",cursor:"pointer",fontFamily:"inherit",textAlign:"left",transition:"all .15s"}}>
@@ -3356,7 +3438,7 @@ POST3: (제목)|(이유)
                     {[
                       {label:"제목",ok:!!pubTitle},
                       {label:"본문",ok:blocks.some(b=>b.type==="text"&&(b as TextBlock).content.trim().length>0)},
-                      {label:`이미지 ${blocks.filter(b=>b.type==="image").length}장`,ok:blocks.some(b=>b.type==="image")},
+                      {label:`이미지 ${blocks.filter(b=>b.type==="image"||(b.type==="image-pair"&&(b as ImagePairBlock).images?.length>=2)).length}장`,ok:blocks.some(b=>b.type==="image"||(b.type==="image-pair"))},
                       {label:pubAccId?connAccs.find(a=>a.id===pubAccId)?.username||"계정":"계정 미선택",ok:!!pubAccId},
                     ].map(c=>(
                       <span key={c.label} className={`pub-ready-chip ${c.ok?"pub-ready-ok":"pub-ready-no"}`}>
