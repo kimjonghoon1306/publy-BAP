@@ -1,7 +1,7 @@
 import express from "express";
 import cors from "cors";
 import { saveSession, sessionExists, crawlBlogIds, addNeighbors, NeighborResult, donePath } from "./naver";
-import { checkNeighborQuota, incrementNeighborQuota, getNeighborDailyUsage, getUserPlan, NEIGHBOR_DAILY_LIMIT } from "./supabase";
+import { checkNeighborQuota, incrementNeighborQuota, getNeighborDailyUsage, getUserPlan, NEIGHBOR_DAILY_LIMIT, addNeighborHistory } from "./supabase";
 import fs from "fs";
 
 const app = express();
