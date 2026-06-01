@@ -1749,6 +1749,21 @@ POST3: (제목)|(이유)
         if(b.type==="image-pair")return{type:"image-pair",images:(b as ImagePairBlock).images};
         return null;
       }).filter(Boolean),
+      // Flow 이미지 설정
+      useFlow: imgGenType === "flow",
+      flowImgCount: imgGenType === "flow" ? flowImgCount : undefined,
+      flowPrompts: imgGenType === "flow" ? (() => {
+        const c = genContent || "";
+        const lines = c.split("\n").filter((l:string) => l.trim().length > 5);
+        const step = Math.max(1, Math.floor(lines.length / flowImgCount));
+        return Array.from({length: flowImgCount}, (_, i) => {
+          const seg = lines.slice(i * step, (i + 1) * step).join(" ").slice(0, 150);
+          return buildFlowPrompt(keyword||genTitle, pubTitle, seg, i);
+        });
+      })() : undefined,
+      flowCaptions: imgGenType === "flow"
+        ? buildCaptions(keyword||genTitle, flowImgCount, genContent)
+        : undefined,
     };
     try{
       // 하루 발행 한도 체크
