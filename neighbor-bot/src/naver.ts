@@ -762,7 +762,7 @@ export async function publishNaver(params: {
             try {
               const el = await frame.$(sel);
               if (el) {
-                await frame.triple_click(sel).catch(() => frame.click(sel));
+                await frame.click(sel, { clickCount: 3 }).catch(() => frame.click(sel));
                 await frame.fill(sel, `${year}-${month}-${day}`);
                 await page.waitForTimeout(300);
                 break;
@@ -780,7 +780,7 @@ export async function publishNaver(params: {
             try {
               const el = await frame.$(sel);
               if (el) {
-                await frame.triple_click(sel).catch(() => frame.click(sel));
+                await frame.click(sel, { clickCount: 3 }).catch(() => frame.click(sel));
                 await frame.fill(sel, `${hour}:${min}`);
                 await page.waitForTimeout(300);
                 break;
@@ -851,5 +851,207 @@ export async function publishNaver(params: {
     } catch {}
     await browser.close().catch(() => {});
     throw e;
+  }
+}
+
+/* ── 서이추 전용 함수들 ──────────────────────────────────── */
+
+export interface NeighborResult {
+  keyword: string;
+  blogId: string;
+  status: "success" | "fail" | "skip";
+  message: string;
+}
+
+// server.ts가 사용하는 이름으로 re-export
+export function sessionExists(accountId: string): boolean {
+  return naverSessionExists(accountId);
+}
+
+export async function saveSession(
+  accountId: string, id: string, pw: string
+): Promise<{ blogId: string }> {
+  return saveNaverSession(accountId, id, pw);
+}
+
+export function donePath(accountId: string): string {
+  return path.join(SESSION_DIR, `done_${accountId}.json`);
+}
+
+/* ── 키워드로 블로그 ID 수집 ── */
+const INVALID_BLOG_IDS = ["PostList","BlogHome","FeedList","neighborPostList","TagList","GoBlogWrite","search","Search","blogpeople","people"];
+
+export async function crawlBlogIds(params: {
+  accountId: string;
+  keywords: string[];
+  countPerKeyword: number;
+  onLog?: (msg: string) => void;
+}): Promise<{ keyword: string; blogId: string }[]> {
+  const { keywords, countPerKeyword, onLog } = params;
+  const log = onLog || console.log;
+  const results: { keyword: string; blogId: string }[] = [];
+
+  const browser = await chromium.launch({ headless: true, args: LAUNCH_ARGS });
+  const context = await browser.newContext({ userAgent: UA, locale: "ko-KR" });
+  await applyAntiDetection(context);
+  const page = await context.newPage();
+
+  try {
+    for (const kw of keywords) {
+      log(`[수집] "${kw}" 검색 중...`);
+      const collected = new Set<string>();
+      let pageNum = 1;
+
+      while (collected.size < countPerKeyword && pageNum <= 15) {
+        try {
+          const url = `https://section.blog.naver.com/Search/Post.naver?term=${encodeURIComponent(kw)}&currentPage=${pageNum}`;
+          await page.goto(url, { waitUntil: "domcontentloaded", timeout: 20000 });
+          await page.waitForTimeout(800);
+
+          const hrefs: string[] = await page.$$eval('a[href*="blog.naver.com"]', (els) =>
+            els.map((el) => (el as HTMLAnchorElement).href)
+          );
+
+          let found = 0;
+          for (const href of hrefs) {
+            const m = href.match(/blog\.naver\.com\/([a-zA-Z0-9_-]+)/);
+            if (m && m[1] && !INVALID_BLOG_IDS.includes(m[1])) {
+              if (!collected.has(m[1])) { collected.add(m[1]); found++; }
+            }
+            if (collected.size >= countPerKeyword) break;
+          }
+
+          if (found === 0) break;
+          pageNum++;
+          await page.waitForTimeout(300);
+        } catch { break; }
+      }
+
+      for (const blogId of collected) {
+        results.push({ keyword: kw, blogId });
+      }
+      log(`[수집] "${kw}" → ${collected.size}개 수집 완료`);
+    }
+  } finally {
+    await browser.close().catch(() => {});
+  }
+
+  return results;
+}
+
+/* ── 서이추 신청 ── */
+export async function addNeighbors(params: {
+  accountId: string;
+  targets: { keyword: string; blogId: string }[];
+  message: string;
+  delayMin: number;
+  delayMax: number;
+  dailyLimit: number;
+  skipDone: boolean;
+  onLog?: (msg: string) => void;
+  onResult?: (r: NeighborResult) => Promise<void>;
+  onProgress?: (done: number, fail: number) => void;
+  stopSignal?: () => boolean;
+}): Promise<void> {
+  const { accountId, targets, message, delayMin, delayMax, dailyLimit, skipDone, onLog, onResult, onProgress, stopSignal } = params;
+  const log = onLog || console.log;
+
+  const sp = sessionPath(accountId);
+  if (!fs.existsSync(sp)) throw new Error("세션 없음 — 먼저 로그인하세요");
+  const { cookies } = JSON.parse(fs.readFileSync(sp, "utf-8"));
+
+  const dp = donePath(accountId);
+  let doneSet = new Set<string>();
+  if (skipDone && fs.existsSync(dp)) {
+    try {
+      const list: string[] = JSON.parse(fs.readFileSync(dp, "utf-8"));
+      doneSet = new Set(list);
+    } catch {}
+  }
+
+  const browser = await chromium.launch({ headless: false, args: LAUNCH_ARGS });
+  const context = await browser.newContext({
+    userAgent: UA, viewport: { width: 1280, height: 800 }, locale: "ko-KR",
+  });
+  await applyAntiDetection(context);
+  await context.addCookies(cookies);
+  const page = await context.newPage();
+
+  let done = 0;
+  let fail = 0;
+
+  try {
+    for (const target of targets) {
+      if (done >= dailyLimit) { log("[서이추] 일일 한도 도달"); break; }
+      if (stopSignal?.()) { log("[서이추] 중단 신호 수신"); break; }
+
+      const { keyword, blogId } = target;
+
+      if (skipDone && doneSet.has(blogId)) {
+        await onResult?.({ keyword, blogId, status: "skip", message: "이미 처리됨" });
+        onProgress?.(done, fail);
+        continue;
+      }
+
+      try {
+        log(`[서이추] ${blogId} 신청 시도...`);
+
+        await page.goto(
+          `https://blog.naver.com/BlogAddNeighbor.naver?targetBlogId=${blogId}&neighborType=1`,
+          { waitUntil: "domcontentloaded", timeout: 20000 }
+        );
+        await page.waitForTimeout(1200);
+
+        // 이미 이웃인 경우 또는 나 자신 체크
+        const curUrl = page.url();
+        if (curUrl.includes("error") || curUrl.includes("login")) {
+          throw new Error("세션 만료 — 재로그인 필요");
+        }
+
+        // 메시지 입력
+        const msgSels = ["textarea#sendMessage","textarea[name='message']","textarea.neighbor_message","textarea"];
+        for (const sel of msgSels) {
+          try {
+            const el = await page.$(sel);
+            if (el) { await page.fill(sel, ""); await page.fill(sel, message); break; }
+          } catch {}
+        }
+        await page.waitForTimeout(400);
+
+        // 확인/신청 버튼
+        const confirmSels = [
+          "button.btn_ok","button:has-text('확인')","button:has-text('신청')","button:has-text('추가')","input[type='submit']",
+        ];
+        let submitted = false;
+        for (const sel of confirmSels) {
+          try {
+            const el = await page.$(sel);
+            if (el) { await page.click(sel, { timeout: 3000 }); submitted = true; break; }
+          } catch {}
+        }
+
+        await page.waitForTimeout(800);
+
+        if (submitted) {
+          doneSet.add(blogId);
+          fs.writeFileSync(dp, JSON.stringify([...doneSet], null, 2));
+          done++;
+          await onResult?.({ keyword, blogId, status: "success", message: "서이추 신청 완료" });
+          log(`[서이추] ✅ ${blogId} 완료 (${done}/${dailyLimit})`);
+        } else {
+          throw new Error("신청 버튼을 찾을 수 없음");
+        }
+      } catch (e: any) {
+        fail++;
+        await onResult?.({ keyword, blogId, status: "fail", message: e.message });
+        log(`[서이추] ❌ ${blogId} 실패: ${e.message}`);
+      }
+
+      onProgress?.(done, fail);
+      const delay = (delayMin + Math.random() * (delayMax - delayMin)) * 1000;
+      await page.waitForTimeout(delay);
+    }
+  } finally {
+    await browser.close().catch(() => {});
   }
 }

@@ -162,7 +162,6 @@ ipcMain.handle("open-preview", async (_event, html: string) => {
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
-      webSecurity: false,
     },
   });
   preview.loadURL("data:text/html;charset=utf-8," + encodeURIComponent(html));

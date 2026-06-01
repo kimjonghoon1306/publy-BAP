@@ -10,6 +10,7 @@ const SESSION_DIR = path.join(__dirname, "../sessions");
 if (!fs.existsSync(SESSION_DIR)) fs.mkdirSync(SESSION_DIR, { recursive: true });
 
 const sessionPath = (userId: string) => path.join(SESSION_DIR, `naver_${userId}.json`);
+const googleSessionPath = (userId: string) => path.join(SESSION_DIR, `google_${userId}.json`);
 
 export function naverSessionExists(userId: string): boolean {
   return fs.existsSync(sessionPath(userId));
@@ -782,7 +783,7 @@ export async function publishNaver(params: {
             try {
               const el = await frame.$(sel);
               if (el) {
-                await frame.triple_click(sel).catch(() => frame.click(sel));
+                await frame.click(sel, { clickCount: 3 }).catch(() => frame.click(sel));
                 await frame.fill(sel, `${year}-${month}-${day}`);
                 await page.waitForTimeout(300);
                 break;
@@ -800,7 +801,7 @@ export async function publishNaver(params: {
             try {
               const el = await frame.$(sel);
               if (el) {
-                await frame.triple_click(sel).catch(() => frame.click(sel));
+                await frame.click(sel, { clickCount: 3 }).catch(() => frame.click(sel));
                 await frame.fill(sel, `${hour}:${min}`);
                 await page.waitForTimeout(300);
                 break;
@@ -874,6 +875,36 @@ export async function publishNaver(params: {
   }
 }
 
+/* ── Google 세션 ── */
+export function googleSessionExists(userId: string): boolean {
+  return fs.existsSync(googleSessionPath(userId));
+}
+
+export async function saveGoogleSession(userId: string): Promise<void> {
+  const browser = await chromium.launch({ headless: false, args: LAUNCH_ARGS, slowMo: 50 });
+  const context = await browser.newContext({
+    userAgent: UA, viewport: { width: 1280, height: 800 }, locale: "ko-KR",
+  });
+  await applyAntiDetection(context);
+  const page = await context.newPage();
+  try {
+    await page.goto("https://accounts.google.com/signin", { waitUntil: "domcontentloaded", timeout: 30000 });
+    console.log("[google] Google 로그인 창 열림 — 직접 로그인 후 대기 중...");
+    await page.waitForFunction(
+      () => location.hostname === "myaccount.google.com" || location.hostname.endsWith(".google.com") && !location.pathname.includes("signin"),
+      { timeout: 180000 }
+    );
+    await page.waitForTimeout(2000);
+    const cookies = await context.cookies();
+    fs.writeFileSync(googleSessionPath(userId), JSON.stringify({ cookies }, null, 2));
+    await browser.close();
+    console.log("[google] ✅ Google 세션 저장 완료");
+  } catch (e) {
+    await browser.close().catch(() => {});
+    throw e;
+  }
+}
+
 /* ── Google Flow 이미지 생성 ── */
 export async function generateFlowImages(params: {
   userId: string;
@@ -885,9 +916,9 @@ export async function generateFlowImages(params: {
   const log = onLog || console.log;
   const results: {src: string; alt: string}[] = [];
 
-  const sp = path.join(__dirname, "../sessions", `naver_${userId}.json`);
-  if (!fs.existsSync(sp)) throw new Error("세션 없음 — 먼저 로그인하세요");
-  const saved = JSON.parse(fs.readFileSync(sp, "utf-8"));
+  const gsp = googleSessionPath(userId);
+  if (!fs.existsSync(gsp)) throw new Error("Google 세션 없음 — 계정 관리 탭에서 Google 로그인 먼저 해주세요");
+  const googleSession = JSON.parse(fs.readFileSync(gsp, "utf-8"));
 
   const DOWNLOAD_DIR = path.join(__dirname, "../flow_downloads");
   if (!fs.existsSync(DOWNLOAD_DIR)) fs.mkdirSync(DOWNLOAD_DIR, { recursive: true });
@@ -898,7 +929,7 @@ export async function generateFlowImages(params: {
   });
 
   const context = await browser.newContext({
-    userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36",
+    userAgent: UA,
     viewport: { width: 1280, height: 800 },
     locale: "ko-KR",
     acceptDownloads: true,
@@ -907,7 +938,7 @@ export async function generateFlowImages(params: {
   await context.addInitScript(`
     Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
   `);
-  await context.addCookies(saved.cookies);
+  await context.addCookies(googleSession.cookies);
 
   const page = await context.newPage();
 

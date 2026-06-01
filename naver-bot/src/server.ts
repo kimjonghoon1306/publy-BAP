@@ -2,7 +2,7 @@ import express from "express";
 import cors from "cors";
 import fs from "fs-extra";
 import path from "path";
-import { saveNaverSession, publishNaver, naverSessionExists, generateFlowImages } from "./naver";
+import { saveNaverSession, publishNaver, naverSessionExists, generateFlowImages, getNaverCategories, saveGoogleSession, googleSessionExists } from "./naver";
 import { saveTistorySession, publishTistory, tistorySessionExists } from "./tistory";
 import { fetchPendingJobs, updateJob, addHistory, useQuota } from "./supabase";
 
@@ -52,6 +52,34 @@ app.post("/api/tistory/save-session", async (req, res) => {
   if (!userId || !id || !pw || !blogName) return res.status(400).json({ success: false, error: "userId, id, pw, blogName 필요" });
   try {
     await saveTistorySession(userId, id, pw, blogName);
+    res.json({ success: true });
+  } catch (e: any) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+/* ── 네이버 카테고리 조회 ── */
+app.get("/api/naver/categories/:userId", async (req, res) => {
+  const { userId } = req.params;
+  try {
+    const categories = await getNaverCategories(userId);
+    res.json({ categories });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message, categories: [] });
+  }
+});
+
+/* ── Google 세션 상태 확인 ── */
+app.get("/api/google/session-exists/:userId", (req, res) => {
+  res.json({ exists: googleSessionExists(req.params.userId) });
+});
+
+/* ── Google 로그인 세션 저장 ── */
+app.post("/api/google/save-session", async (req, res) => {
+  const { userId } = req.body;
+  if (!userId) return res.status(400).json({ success: false, error: "userId 필요" });
+  try {
+    await saveGoogleSession(userId);
     res.json({ success: true });
   } catch (e: any) {
     res.status(500).json({ success: false, error: e.message });
@@ -178,9 +206,9 @@ async function processJobs() {
 
         let postUrl = "";
         if (job.platform === "naver") {
-          postUrl = await publishNaver({ userId: job.user_id, title: job.title, content: job.content, tags: job.tags });
+          postUrl = await publishNaver({ userId: job.user_id, title: job.title, content: job.content, tags: job.tags, categoryId: (job as any).category_id, visibility: (job as any).visibility });
         } else if (job.platform === "tistory") {
-          postUrl = await publishTistory({ userId: job.user_id, title: job.title, content: job.content, tags: job.tags });
+          postUrl = await publishTistory({ userId: job.user_id, title: job.title, content: job.content, tags: job.tags, categoryId: (job as any).category_id, visibility: (job as any).visibility });
         }
 
         await updateJob(job.id, { status: "success", result_url: postUrl });

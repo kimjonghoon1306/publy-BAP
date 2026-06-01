@@ -82,8 +82,10 @@ export async function publishTistory(params: {
   title: string;
   content: string;
   tags: string[];
+  categoryId?: string;
+  visibility?: "public" | "private";
 }): Promise<string> {
-  const { userId, title, content, tags } = params;
+  const { userId, title, content, tags, categoryId, visibility = "public" } = params;
   const sp = sessionPath(userId);
   if (!fs.existsSync(sp)) throw new Error("티스토리 세션 없음. 계정 재연결 필요");
 
@@ -166,13 +168,50 @@ export async function publishTistory(params: {
       } catch {}
     }
 
+    // 카테고리 선택
+    if (categoryId) {
+      console.log(`[tistory] 카테고리 선택: ${categoryId}`);
+      try {
+        const catSels = [
+          `select#category option[value='${categoryId}']`,
+          "select#category",
+          "select[name='category']",
+          ".category-select select",
+        ];
+        for (const sel of catSels) {
+          try {
+            const el = await page.$(sel);
+            if (el) {
+              await page.selectOption("select#category, select[name='category']", categoryId);
+              await page.waitForTimeout(400);
+              console.log("[tistory] ✅ 카테고리 선택 완료");
+              break;
+            }
+          } catch {}
+        }
+      } catch (e) { console.log("[tistory] 카테고리 선택 실패 (무시):", e); }
+    }
+
     // 발행
     console.log("[tistory] 발행...");
     await page.click("#publish-layer-btn, button.btn-publish, button:has-text('완료'), button:has-text('발행')", { timeout: 10000 });
     await page.waitForTimeout(2000);
 
+    // 공개 설정
     try {
-      await page.click("#open20, label[for='open20']", { timeout: 5000 }).catch(() => {});
+      if (visibility === "private") {
+        // 비공개
+        const privateSels = ["#open0, label[for='open0']", "input[value='0'] + label", "label:has-text('비공개')"];
+        for (const sel of privateSels) {
+          try {
+            const el = await page.$(sel);
+            if (el) { await page.click(sel, { timeout: 3000 }); break; }
+          } catch {}
+        }
+      } else {
+        // 전체공개 (기본)
+        await page.click("#open20, label[for='open20']", { timeout: 5000 }).catch(() => {});
+      }
       await page.waitForTimeout(500);
       await page.click("#publish-btn, button.btn-publish-confirm, .layer-btn-publish button:has-text('공개 발행')", { timeout: 10000 });
     } catch {

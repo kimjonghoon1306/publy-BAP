@@ -1394,14 +1394,20 @@ Output format (JSON array only, no other text):
     return `A high-quality professional blog photography representing the topic "${title}" about ${kw}, visually compelling and informative composition, Korean lifestyle aesthetic, emotionally engaging scene that perfectly illustrates the content, ${lighting}, ${quality}, editorial magazine style`;
   }
 
+  const BRAND_KEEP_RE = /\b(iPhone|iPad|MacBook|iMac|AirPods|Apple|Android|Galaxy|Samsung|LG|SK|KT|Naver|Kakao|YouTube|Netflix|Instagram|TikTok|Facebook|ChatGPT|Gemini|OpenAI|Google|DALL-E|Replicate|Flux|Grok|Groq|AI|SEO|URL|API|PDF|PC|TV|USB|WiFi|Wi-Fi|MBTI|OOTD|DIY|OTT|IT|CT|MRI|VPN|GPS|NFT|ETF|CPR|RGB|LED|LCD|OLED|SNS|DNA|BMW|Benz|Tesla|Dyson|Nike|Adidas|Zara|IKEA|Costco|GS25|Starbucks|MCM|HP|Dell|Asus|Sony|Panasonic|Canon|Nikon|Fuji|DJI|GPT|Claude|MSI|AMD|Intel|NVIDIA)\b/g;
+
   function stripMarkdown(text:string):string{
-    return text
+    const brands: string[] = [];
+    const preserved = text.replace(BRAND_KEEP_RE, (m) => {
+      brands.push(m); return `__BR${brands.length - 1}__`;
+    });
+    const cleaned = preserved
       // AI 메타 주석 제거 (Self-correction, Character count 등)
       .replace(/<!--[\s\S]*?-->/g,"")
       .replace(/\(Self-correction:[\s\S]*?\)/gi,"")
       .replace(/\(self correction:[\s\S]*?\)/gi,"")
       .replace(/\(.*?character count.*?\)/gi,"")
-      .replace(/\(.*?I've used.*?\)/gi,"")
+      .replace(/\(.*?I\'ve used.*?\)/gi,"")
       .replace(/^#{1,6}\s+/gm,"")
       .replace(/\*{2,3}(.*?)\*{2,3}/g,"$1")
       .replace(/\*(.*?)\*/g,"$1")
@@ -1415,15 +1421,16 @@ Output format (JSON array only, no other text):
       .replace(/\[([^\]]+)\]\([^)]+\)/g,"$1")
       .replace(/^---+$/gm,"")
       .replace(/^\s*\|.*\|.*$/gm,"")
-      .replace(/[一-鿿㐀-䶿]/g,"")
+      .replace(/[\u4E00-\u9FFF\u3400-\u4DBF]/g,"")
       .replace(/[\u3040-\u30FF]/g,"")
-      // 문장 안 영어 단어 제거: 한글 사이에 끼어든 영어 단어 (브랜드명 예외 최소화)
-      .replace(/(^|[\s,.])[A-Za-z]{4,}(?=[\s,.]|$)/g,"$1")
-      // 줄 전체가 영어인 경우 제거
-      .replace(/^[A-Za-z\s\d.,!?'"-]{10,}$/gm,"")
+      // 플레이스홀더가 아닌 순수 영어 단어 제거 (4자 이상)
+      .replace(/(^|[\s,.])(?!__BR\d+__)[A-Za-z]{4,}(?=[\s,.]|$)/g,"$1")
+      // 줄 전체가 영어인 경우 제거 (플레이스홀더 없는 줄만)
+      .replace(/^(?!.*__BR\d+__)[A-Za-z\s\d.,!?\'""-]{10,}$/gm,"")
       .replace(/ {2,}/g," ")
       .replace(/\n{3,}/g,"\n\n")
       .trim();
+    return cleaned.replace(/__BR(\d+)__/g, (_:string,i:string) => brands[parseInt(i)] ?? "");
   }
 
   function getCatGuide(kw:string,title:string):string{
@@ -1465,6 +1472,20 @@ Output format (JSON array only, no other text):
     throw new Error("AI 미선택");
   }
 
+  async function urlToBase64(url:string, signal:AbortSignal):Promise<string>{
+    try{
+      const r=await fetch(url,{signal});
+      if(!r.ok)return url;
+      const blob=await r.blob();
+      return new Promise((resolve)=>{
+        const reader=new FileReader();
+        reader.onloadend=()=>resolve(reader.result as string);
+        reader.onerror=()=>resolve(url);
+        reader.readAsDataURL(blob);
+      });
+    }catch{return url;}
+  }
+
   async function generateOneImage(kw:string,signal:AbortSignal,idx:number=0,segmentContent?:string):Promise<string>{
     const prompt=buildImgPrompt(kw, genTitle||selectedTitle||"", idx, segmentContent);
     const ai=localStorage.getItem("publy_image_ai")||"openai_img";
@@ -1472,7 +1493,11 @@ Output format (JSON array only, no other text):
       const key=localStorage.getItem("publy_openai_key")||"";if(!key)throw new Error("OpenAI 키 없음");
       const r=await fetch("https://api.openai.com/v1/images/generations",{method:"POST",headers:{"Content-Type":"application/json","Authorization":`Bearer ${key}`},body:JSON.stringify({model:"dall-e-3",prompt,n:1,size:"1024x1024"}),signal});
       if(!r.ok){const e=await r.json();throw new Error("DALL-E: "+(e.error?.message||r.status));}
-      const d=await r.json();return d.data?.[0]?.url||"";
+      const d=await r.json();
+      const imgUrl=d.data?.[0]?.url||"";
+      // DALL-E URL은 1시간 후 만료 → 즉시 base64로 변환
+      if(imgUrl)return urlToBase64(imgUrl,signal);
+      return imgUrl;
     }
     if(ai==="replicate"){
       const key=localStorage.getItem("publy_replicate_key")||"";if(!key)throw new Error("Replicate 키 없음");
@@ -1484,7 +1509,11 @@ Output format (JSON array only, no other text):
         if(signal.aborted)throw new DOMException("AbortError","AbortError");
         const res=await fetch(pollUrl,{headers:{"Authorization":`Bearer ${key}`}});
         const data=await res.json();
-        if(data.status==="succeeded")return data.output?.[0]||"";
+        if(data.status==="succeeded"){
+          const imgUrl=data.output?.[0]||"";
+          if(imgUrl)return urlToBase64(imgUrl,signal);
+          return imgUrl;
+        }
         if(data.status==="failed")throw new Error("Replicate 실패");
       }
       throw new Error("Replicate 타임아웃");
