@@ -986,7 +986,7 @@ export async function generateFlowImages(params: {
       // 프롬프트 입력
       await promptInput.click();
       await page.waitForTimeout(500);
-      await page.keyboard.selectAll();
+      await page.keyboard.press("Meta+a");
       await page.keyboard.press("Backspace");
       await promptInput.type(prompt, { delay: 20 });
       await page.waitForTimeout(500);
