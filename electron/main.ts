@@ -24,9 +24,16 @@ async function startBotServer() {
     }
   } catch { return; }
 
+  // macOS에서 node 경로 찾기
+  const nodePath = process.platform === "darwin"
+    ? (require("fs").existsSync("/opt/homebrew/bin/node") ? "/opt/homebrew/bin/node"
+      : require("fs").existsSync("/usr/local/bin/node") ? "/usr/local/bin/node"
+      : "node")
+    : "node";
+
   const startBot = () => {
     console.log("[bot] 봇 서버 시작...");
-    botProcess = spawn("node", ["dist/server.js"], {
+    botProcess = spawn(nodePath, ["dist/server.js"], {
       cwd: botPath,
       stdio: "pipe",
       shell: true,
@@ -69,9 +76,16 @@ async function startNeighborBotServer() {
     return;
   }
 
+  // macOS에서 node 경로 찾기
+  const nodePath = process.platform === "darwin"
+    ? (require("fs").existsSync("/opt/homebrew/bin/node") ? "/opt/homebrew/bin/node"
+      : require("fs").existsSync("/usr/local/bin/node") ? "/usr/local/bin/node"
+      : "node")
+    : "node";
+
   const startBot = () => {
     console.log("[neighbor-bot] 서버 시작...");
-    neighborBotProcess = spawn("node", ["dist/server.js"], {
+    neighborBotProcess = spawn(nodePath, ["dist/server.js"], {
       cwd: botPath,
       stdio: "pipe",
       shell: true,
@@ -162,6 +176,7 @@ ipcMain.handle("open-preview", async (_event, html: string) => {
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
+      webSecurity: false,
     },
   });
   preview.loadURL("data:text/html;charset=utf-8," + encodeURIComponent(html));
