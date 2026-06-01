@@ -1130,12 +1130,35 @@ Output format (JSON array only, no other text):
     return Math.max(1, Math.min(10, Math.floor(content.length / 500)));
   }
 
-  function buildCaptions(kw:string, count:number):string[]{
-    const k=kw||"사진";
-    const pool=[
-      `${k} 현장 모습`,`직접 경험한 ${k}`,`${k} 상세 사진`,
-      `${k} 실제 모습`,`${k} 후기 사진`,`${k} 현장 사진`,
-      `${k} 생생 후기`,`${k} 디테일 컷`,
+  /* ── 글 구간별 캡션 생성 ── */
+  function buildCaptions(kw:string, count:number, content?:string):string[]{
+    const k = kw || "사진";
+
+    // 글 내용이 있으면 구간별로 첫 문장 추출
+    if (content && content.length > 100) {
+      const lines = content
+        .split("\n")
+        .map(l => l.trim())
+        .filter(l => l.length > 10 && !l.startsWith("#") && !l.startsWith("[") && !l.startsWith("-"));
+
+      if (lines.length >= count) {
+        const step = Math.floor(lines.length / count);
+        return Array.from({length: count}, (_, i) => {
+          const line = lines[Math.min(i * step, lines.length - 1)];
+          // 첫 문장만 추출 (마침표/느낌표/물음표 기준, 최대 25자)
+          const sentence = line.split(/[.!?]/)[0].trim();
+          return sentence.length > 5
+            ? sentence.slice(0, 25) + (sentence.length > 25 ? "" : "")
+            : `${k} ${i === 0 ? "대표" : `현장 ${i}`} 사진`;
+        });
+      }
+    }
+
+    // fallback: 키워드 기반
+    const pool = [
+      `${k} 대표 사진`,`${k} 현장 모습`,`${k} 상세 사진`,
+      `${k} 실제 모습`,`${k} 후기 사진`,`${k} 디테일 컷`,
+      `${k} 생생 후기`,`${k} 현장 사진`,
     ];
     return Array.from({length:count},(_,i)=>pool[i%pool.length]);
   }
@@ -1291,8 +1314,11 @@ Output format (JSON array only, no other text):
     {keywords:["반려식물","식물키우기","다육이","관엽식물"],prompt:"lush indoor plant collection, botanical shelf arrangement, morning sunlight through leaves, cozy green aesthetic"},
   ];
 
-  function buildImgPrompt(kw: string, title: string = "", idx: number = 0): string {
-    const k = (kw + " " + title).toLowerCase();
+  function buildImgPrompt(kw: string, title: string = "", idx: number = 0, segmentContent?: string): string {
+    // 구간 내용이 있으면 그걸로 키워드 보강
+    const k = segmentContent
+      ? (kw + " " + title + " " + segmentContent.slice(0, 100)).toLowerCase()
+      : (kw + " " + title).toLowerCase();
     const st = adType === "adpost"
       ? "Korean lifestyle photography, warm emotional, soft natural light"
       : "ultra realistic DSLR 8K magazine editorial photography";
@@ -1439,8 +1465,8 @@ Output format (JSON array only, no other text):
     throw new Error("AI 미선택");
   }
 
-  async function generateOneImage(kw:string,signal:AbortSignal,idx:number=0):Promise<string>{
-    const prompt=buildImgPrompt(kw, genTitle||selectedTitle||"", idx);
+  async function generateOneImage(kw:string,signal:AbortSignal,idx:number=0,segmentContent?:string):Promise<string>{
+    const prompt=buildImgPrompt(kw, genTitle||selectedTitle||"", idx, segmentContent);
     const ai=localStorage.getItem("publy_image_ai")||"openai_img";
     if(ai==="openai_img"){
       const key=localStorage.getItem("publy_openai_key")||"";if(!key)throw new Error("OpenAI 키 없음");
@@ -1642,21 +1668,36 @@ POST3: (제목)|(이유)
     if(!keyword&&!genTitle){alert("먼저 글을 생성해주세요");return;}
     setGenImgLoading(true);setGenImgProgress(0);setGenImgCurrent(0);
     imgAbortRef.current=new AbortController();const imgs:string[]=[];
-    const firstPrompt=buildImgPrompt(keyword||genTitle,genTitle,0);
+
+    // 글 내용을 이미지 수만큼 등분
+    const content = genContent || "";
+    const segments: string[] = [];
+    if (content.length > 0 && imgCount > 1) {
+      const lines = content.split("\n").filter(l => l.trim().length > 5);
+      const step = Math.max(1, Math.floor(lines.length / imgCount));
+      for (let i = 0; i < imgCount; i++) {
+        const start = i * step;
+        const seg = lines.slice(start, start + step).join(" ").slice(0, 150);
+        segments.push(seg);
+      }
+    }
+
+    const firstPrompt=buildImgPrompt(keyword||genTitle,genTitle,0,segments[0]);
     setCurrentImgPrompt(firstPrompt);
     try{
       for(let i=0;i<imgCount;i++){
         if(imgAbortRef.current.signal.aborted)break;
         setGenImgCurrent(i+1);
-        const url=await generateOneImage(keyword||genTitle,imgAbortRef.current.signal,i);
+        const url=await generateOneImage(keyword||genTitle,imgAbortRef.current.signal,i,segments[i]);
         imgs.push(url);setGeneratedImages([...imgs]);setGenImgProgress(Math.round(((i+1)/imgCount)*100));
       }
       // 이미지 생성 완료 시 캡션 자동생성 + 블록 자동배치 + 썸네일 자동지정
-      setCaptions(buildCaptions(keyword||genTitle,imgs.length));
+      setCaptions(buildCaptions(keyword||genTitle, imgs.length, genContent));
       if(imgs.length>0){
+        const captionList = buildCaptions(keyword||genTitle, imgs.length, genContent);
         if(!thumbnail)setThumbnail(imgs[0]);
-        triggerAutoInsert(imgs.map((src,i)=>({id:i,src,alt:`${keyword||genTitle} ${i===0?"대표":"현장"} 사진`})));
-        setShowMeta(true); // 이미지 생성 완료 → 썸네일+인사말 자동 펼침
+        triggerAutoInsert(imgs.map((src,i)=>({id:i,src,alt:captionList[i]||`${keyword||genTitle} ${i===0?"대표":"현장"} 사진`})));
+        setShowMeta(true);
       }
     }catch(e:any){if(e.name!=="AbortError"){showToast("❌ 이미지 생성 실패: "+e.message,"error");setImgGenFailed(true);}}
     finally{setGenImgLoading(false);imgAbortRef.current=null;}
@@ -3179,7 +3220,7 @@ POST3: (제목)|(이유)
                           {getActiveImages().length>0&&<span style={{fontWeight:500,color:"var(--text3)",textTransform:"none",letterSpacing:0}}> — {getActiveImages().length}장 · 첫 번째가 썸네일</span>}
                         </div>
                         {getActiveImages().length>0&&captions.length===0&&(
-                          <button className="btn btn-sm btn-secondary" onClick={()=>setCaptions(buildCaptions(keyword||genTitle,getActiveImages().length))}>💬 캡션 자동생성</button>
+                          <button className="btn btn-sm btn-secondary" onClick={()=>setCaptions(buildCaptions(keyword||genTitle,getActiveImages().length,genContent))}>💬 캡션 자동생성</button>
                         )}
                       </div>
 
