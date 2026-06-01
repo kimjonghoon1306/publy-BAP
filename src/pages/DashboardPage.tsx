@@ -469,14 +469,13 @@ export default function DashboardPage({user, onLogout, onAdminLogin, onThemeTogg
   // 플랫폼/타입별 랜덤 글자수 계산
   function calcTargetChars():number{
     if(charMode==="manual")return targetChars;
-    if(platform==="tistory") return Math.floor(Math.random()*1500)+2500; // 2500~4000
+    if(platform==="tistory") return Math.floor(Math.random()*1000)+2000; // 2000~3000
     if(adType==="adpost"){
-      // 체험단/맛집 키워드 감지
       if(/체험단|맛집|후기|리뷰|방문|다녀/.test(keyword))
-        return Math.floor(Math.random()*1000)+2000; // 2000~3000
-      return Math.floor(Math.random()*700)+1800; // 1800~2500
+        return Math.floor(Math.random()*700)+1800; // 1800~2500
+      return Math.floor(Math.random()*500)+1500; // 1500~2000
     }
-    return Math.floor(Math.random()*700)+1800;
+    return Math.floor(Math.random()*500)+1500; // 1500~2000
   }
   const [titles, setTitles] = useState<string[]>(()=>{try{return JSON.parse(localStorage.getItem("publy_titles")||"[]");}catch{return[];}});
   const [selectedTitle, setSelectedTitle] = useState("");
@@ -1045,7 +1044,9 @@ Output format (JSON array only, no other text):
     return()=>clearInterval(iv);
   },[checkBot,user.id]);
 
-  function recommendImgCount(content:string):number{return Math.max(1,Math.min(10,Math.floor(content.length/200)));}
+  function recommendImgCount(content:string):number{
+    return Math.max(1, Math.min(10, Math.floor(content.length / 500)));
+  }
 
   function buildCaptions(kw:string, count:number):string[]{
     const k=kw||"사진";
@@ -1213,11 +1214,10 @@ Output format (JSON array only, no other text):
     const st = adType === "adpost"
       ? "Korean lifestyle photography, warm emotional, soft natural light"
       : "ultra realistic DSLR 8K magazine editorial photography";
-    // 긴 키워드 먼저 매칭
+
     const sorted = [...PROMPT_DB].sort((a,b) => b.keywords.join("").length - a.keywords.join("").length);
     for (const entry of sorted) {
       if (entry.keywords.some(kw2 => k.includes(kw2))) {
-        // idx에 따라 조명 변주 (기계적 반복 방지)
         let p = entry.prompt;
         if (idx === 1) p = p.replace(/warm natural lighting|morning light|warm lighting/g, "golden hour afternoon light");
         if (idx === 2) p = p.replace(/warm natural lighting|morning light|warm lighting/g, "dramatic blue hour lighting");
@@ -1225,7 +1225,6 @@ Output format (JSON array only, no other text):
         return `${p}, ${NP_TAG}, ${st}`;
       }
     }
-    // fallback: 장르 감지
     if (/먹|맛|식|음|요리|카페|커피/.test(k)) return `beautiful Korean food dining experience, warm restaurant, delicious presentation, ${NP_TAG}, ${st}`;
     if (/여행|travel|관광|투어|trip/.test(k)) return `breathtaking Korean travel destination, scenic landscape, golden hour, ${NP_TAG}, ${st}`;
     if (/돈|금|재|투자|경제|수익|부자/.test(k)) return `financial success growth concept, modern professional aesthetic, ${NP_TAG}, ${st}`;
@@ -1234,6 +1233,57 @@ Output format (JSON array only, no other text):
     if (/기술|tech|AI|컴퓨터|폰|앱/.test(k)) return `modern technology concept, clean digital aesthetic, innovation, ${NP_TAG}, ${st}`;
     if (/봄|여름|가을|겨울|자연|꽃/.test(k)) return `beautiful Korean seasonal landscape, nature photography, golden light, ${NP_TAG}, ${st}`;
     return `beautiful Korean lifestyle blog editorial photography, professional, perfect composition, ${NP_TAG}, ${st}`;
+  }
+
+  /* ── Flow 전용 디테일 프롬프트 ── */
+  function buildFlowPrompt(kw: string, title: string = "", content: string = "", idx: number = 0): string {
+    const k = (kw + " " + title).toLowerCase();
+    const c = content.slice(0, 500).toLowerCase();
+
+    // 카테고리 감지
+    const isFoodCafe = /먹|맛|식|음식|요리|카페|커피|레스토랑|맛집|디저트|베이커리/.test(k+c);
+    const isTravel = /여행|관광|투어|trip|tour|호텔|숙소|제주|부산|서울|경주/.test(k+c);
+    const isHealth = /건강|다이어트|운동|fitness|diet|피부|뷰티|헬스|요가|필라테스/.test(k+c);
+    const isFinance = /재테크|투자|주식|금융|돈|수익|부자|경제|코인|부동산/.test(k+c);
+    const isHome = /인테리어|집|방|home|house|아파트|인테리어|가구|리모델링/.test(k+c);
+    const isTech = /기술|tech|AI|인공지능|컴퓨터|스마트폰|앱|소프트웨어|IT/.test(k+c);
+    const isNature = /봄|여름|가을|겨울|자연|꽃|풍경|숲|바다|산/.test(k+c);
+    const isBaby = /아이|육아|아기|baby|kid|어린이|임신|출산/.test(k+c);
+    const isPet = /강아지|고양이|반려|pet|puppy|kitten|동물/.test(k+c);
+
+    // 조명 변주
+    const lightings = [
+      "soft golden hour natural lighting, warm sunlight filtering through",
+      "bright airy daylight, clean studio-style lighting, crisp shadows",
+      "dramatic cinematic side lighting, deep contrast, moody atmosphere",
+      "soft diffused overcast light, even tones, pastel color palette",
+    ];
+    const lighting = lightings[idx % lightings.length];
+
+    // 공통 품질 태그
+    const quality = "ultra-high resolution 8K, hyperrealistic, award-winning photography, National Geographic quality, razor-sharp focus, perfect composition, rule of thirds";
+
+    // 카테고리별 디테일 프롬프트
+    if (isFoodCafe) return `A stunning food photography scene featuring "${title}", beautifully plated gourmet Korean cuisine with intricate details, vibrant fresh ingredients, professional food styling, bokeh background of cozy cafe or restaurant interior, ${lighting}, ${quality}, appetizing and delicious mood, shallow depth of field`;
+
+    if (isTravel) return `A breathtaking travel photography of "${title}" destination in Korea, majestic scenic landscape with dramatic sky, iconic local architecture and culture, vibrant atmosphere, tourists enjoying the scenery, ${lighting}, ${quality}, wanderlust inspiring composition, wide angle cinematic view`;
+
+    if (isHealth) return `A motivating healthy lifestyle photography representing "${title}", fit and energetic person engaged in wellness activity, fresh organic ingredients and supplements, clean minimal aesthetic, bright and energizing atmosphere, ${lighting}, ${quality}, inspiring and positive mood`;
+
+    if (isFinance) return `A sophisticated financial success concept photo for "${title}", modern professional workspace with charts and graphs, luxury lifestyle elements subtly incorporated, confident business professional, premium aesthetic, ${lighting}, ${quality}, aspirational and trustworthy mood`;
+
+    if (isHome) return `A stunning interior design photography of "${title}", beautifully decorated Korean modern home space, thoughtfully curated furniture and decor, warm inviting atmosphere, architectural details highlighted, ${lighting}, ${quality}, cozy and aspirational living space`;
+
+    if (isTech) return `A cutting-edge technology concept photo representing "${title}", sleek modern devices and interfaces, digital innovation aesthetic, clean minimal design elements, futuristic yet accessible mood, ${lighting}, ${quality}, professional and innovative atmosphere`;
+
+    if (isNature) return `A breathtaking nature photography capturing "${title}", pristine Korean landscape with dramatic natural elements, vivid seasonal colors and textures, peaceful and awe-inspiring atmosphere, ${lighting}, ${quality}, immersive and serene composition`;
+
+    if (isBaby) return `A heartwarming family photography featuring "${title}", adorable baby or child in safe loving environment, soft pastel tones, genuine emotional warmth, candid precious moments, ${lighting}, ${quality}, tender and joyful atmosphere`;
+
+    if (isPet) return `A charming and adorable pet photography of "${title}", fluffy and expressive animal companion, playful and loving moments, soft bokeh background, ${lighting}, ${quality}, heartwarming and joyful mood`;
+
+    // 기본 fallback
+    return `A high-quality professional blog photography representing the topic "${title}" about ${kw}, visually compelling and informative composition, Korean lifestyle aesthetic, emotionally engaging scene that perfectly illustrates the content, ${lighting}, ${quality}, editorial magazine style`;
   }
 
   function stripMarkdown(text:string):string{
@@ -2036,7 +2086,7 @@ POST3: (제목)|(이유)
         {n:"STEP 1",i:"🎯",t:"플랫폼 + 수익화 선택",c:G,d:<>헤더에서 <b>🟢 네이버</b> 또는 <b>🟠 티스토리</b> 선택 후, 글쓰기 탭에서 애드포스트/애드센스 선택!</>},
         {n:"STEP 2",i:"🔍",t:"키워드 입력",c:Y,d:<>예: <b>"강남 맛집"</b> 입력 후 Enter 또는 버튼 클릭! 제목 30개 자동 추천!</>},
         {n:"STEP 3",i:"⭐",t:"제목 클릭해서 선택",c:P,d:<>AI가 추천한 제목 중 마음에 드는 거 클릭! 마음에 안 들면 30개 추가도 가능!</>},
-        {n:"STEP 4",i:"📏",t:"글자수 설정",c:"#8B5CF6",d:<><b>🎲 자동 랜덤</b> 추천! 네이버: 1800~2500자, 체험단: 2000~3000자, 티스토리: 2500~4000자. 매번 달라서 AI 감지 방지!</>},
+        {n:"STEP 4",i:"📏",t:"글자수 설정",c:"#8B5CF6",d:<><b>🎲 자동 랜덤</b> 추천! 네이버: 1500~2000자, 체험단: 1800~2500자, 티스토리: 2000~3000자. 매번 달라서 AI 감지 방지!</>},
         {n:"STEP 5",i:"🤖",t:"글 생성 시작",c:"#F55036",d:<><b>본문 생성 시작</b> 버튼! 인트로·소제목·마무리가 매번 달라져요. 이미지는 다음 탭에서 따로!</>},
       ].map((s,i)=>(
         <div key={i} className="g-step" style={{borderColor:`${s.c}40`,background:`${s.c}08`}}>
@@ -2099,7 +2149,7 @@ POST3: (제목)|(이유)
       {[
         {q:"API 키가 뭐예요?",a:"AI 서비스 비밀번호예요. 처음 한 번만 설정하면 돼요! Gemini는 구글 계정만 있으면 무료 발급!",c:G},
         {q:"글이 얼마나 걸려요?",a:"보통 30초~1분이요. AI가 글을 쓰는 중이라 잠깐 기다려주세요 ☕",c:Y},
-        {q:"글자수는 어떻게 정해요?",a:"🎲 자동 랜덤 추천! 네이버: 1800~2500자, 체험단/맛집: 2000~3000자, 티스토리: 2500~4000자. 직접 설정도 가능해요.",c:P},
+        {q:"글자수는 어떻게 정해요?",a:"🎲 자동 랜덤 추천! 네이버: 1500~2000자, 체험단/맛집: 1800~2500자, 티스토리: 2000~3000자. 직접 설정도 가능해요.",c:P},
         {q:"체험단 이미지 15장 이상도 되나요?",a:"네! 이미지 탭에서 '✏️ 직접입력' 선택 후 숫자를 입력하면 돼요. 최대 30장까지 가능해요.",c:"#8B5CF6"},
         {q:"이미지 설명(캡션)이 뭔가요?",a:"이미지 아래 짧은 설명이에요. 네이버 상위 노출에 도움이 돼요. 자동 생성 후 수정 가능해요.",c:"#4ECDC4"},
         {q:"블로그에 ## 기호가 들어가요",a:"이미 수정됐어요! 마크다운 기호 완전 제거 기능이 적용돼 있어요.",c:P},
@@ -2635,7 +2685,7 @@ POST3: (제목)|(이유)
                       <div style={{padding:"10px 12px",borderRadius:9,background:"var(--accent-bg)",border:"1px solid var(--accent-border)",fontSize:12,color:"var(--accent-text)",fontWeight:600,lineHeight:1.6}}>
                         🎲 생성마다 자동 랜덤<br/>
                         <span style={{fontSize:11,opacity:.8}}>
-                          {platform==="tistory"?"티스토리: 2500~4000자":adType==="adpost"&&/체험단|맛집|후기|리뷰/.test(keyword)?"체험단/맛집: 2000~3000자":"네이버: 1800~2500자"}
+                          {platform==="tistory"?"티스토리: 2000~3000자":adType==="adpost"&&/체험단|맛집|후기|리뷰/.test(keyword)?"체험단/맛집: 1800~2500자":"네이버: 1500~2000자"}
                         </span>
                       </div>
                     ):(
@@ -2740,8 +2790,8 @@ POST3: (제목)|(이유)
 
                 {/* ── Flow 가이드 팝업 ── */}
                 {showFlowGuide&&(
-                  <div style={{position:"fixed",inset:0,zIndex:9999,background:"rgba(0,0,0,.75)",display:"flex",alignItems:"center",justifyContent:"center",padding:20}} onClick={()=>setShowFlowGuide(false)}>
-                    <div style={{width:"100%",maxWidth:440,borderRadius:20,background:"var(--card)",border:"1px solid rgba(168,85,247,.3)",overflow:"hidden",animation:"fadeUp .25s ease",boxShadow:"0 24px 60px rgba(0,0,0,.5)"}} onClick={e=>e.stopPropagation()}>
+                  <div style={{position:"fixed",inset:0,zIndex:9999,background:"rgba(0,0,0,.75)",display:"flex",alignItems:"flex-start",justifyContent:"center",padding:"60px 20px 20px",overflowY:"auto"}} onClick={()=>setShowFlowGuide(false)}>
+                    <div style={{width:"100%",maxWidth:520,borderRadius:24,background:"var(--card)",border:"1px solid rgba(168,85,247,.3)",overflow:"hidden",animation:"fadeUp .25s ease",boxShadow:"0 24px 60px rgba(0,0,0,.6)"}} onClick={e=>e.stopPropagation()}>
                       {/* 헤더 */}
                       <div style={{padding:"20px 24px 16px",background:"linear-gradient(135deg,#7c3aed,#a855f7)",display:"flex",alignItems:"center",gap:12}}>
                         <div style={{fontSize:32}}>🎨</div>
@@ -2826,9 +2876,9 @@ POST3: (제목)|(이유)
                       {/* 프롬프트 미리보기 */}
                       {genTitle&&(
                         <div style={{marginBottom:16,padding:"14px",borderRadius:12,background:"var(--bg)",border:"1px solid var(--border)"}}>
-                          <div style={{fontSize:11,fontWeight:700,color:"var(--text3)",marginBottom:6}}>🔤 자동 생성될 영문 프롬프트 (예시)</div>
-                          <div style={{fontSize:12,color:"#c084fc",lineHeight:1.7,fontStyle:"italic"}}>
-                            "{genTitle}" — A high-quality, realistic and detailed photographic image representing the topic. Professional photography style, vivid colors, sharp focus, cinematic lighting, 8K resolution.
+                          <div style={{fontSize:11,fontWeight:700,color:"var(--text3)",marginBottom:6}}>🔤 자동 생성될 영문 프롬프트</div>
+                          <div style={{fontSize:11,color:"#c084fc",lineHeight:1.8,fontStyle:"italic",wordBreak:"break-word"}}>
+                            {buildFlowPrompt(keyword||genTitle, genTitle, genContent, 0)}
                           </div>
                         </div>
                       )}
