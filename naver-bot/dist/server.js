@@ -46,7 +46,7 @@ const app = (0, express_1.default)();
 const PORT = 3333;
 app.use((0, cors_1.default)());
 app.use(express_1.default.json());
-/* ���� �숈떆 諛쒗뻾 �쒗븳 �� ���� */
+/* ── 동시 발행 제한 큐 ── */
 const MAX_CONCURRENT = 3;
 let running = 0;
 const waitQueue = [];
@@ -65,15 +65,15 @@ function releaseSlot() {
     if (next)
         next();
 }
-/* ���� �ъ뒪泥댄겕 ���� */
+/* ── 헬스체크 ── */
 app.get("/health", (_req, res) => {
     res.json({ ok: true, version: "2.0.0", running, queued: waitQueue.length });
 });
-/* ���� �몄뀡 ���� (怨꾩젙 �곌껐) ���� */
+/* ── 세션 저장 (계정 연결) ── */
 app.post("/api/naver/save-session", async (req, res) => {
     const { userId, id, pw } = req.body;
     if (!userId || !id || !pw)
-        return res.status(400).json({ success: false, error: "userId, id, pw �꾩슂" });
+        return res.status(400).json({ success: false, error: "userId, id, pw 필요" });
     try {
         const result = await (0, naver_1.saveNaverSession)(userId, id, pw);
         res.json({ success: true, blogId: result.blogId });
@@ -85,7 +85,7 @@ app.post("/api/naver/save-session", async (req, res) => {
 app.post("/api/tistory/save-session", async (req, res) => {
     const { userId, id, pw, blogName } = req.body;
     if (!userId || !id || !pw || !blogName)
-        return res.status(400).json({ success: false, error: "userId, id, pw, blogName �꾩슂" });
+        return res.status(400).json({ success: false, error: "userId, id, pw, blogName 필요" });
     try {
         await (0, tistory_1.saveTistorySession)(userId, id, pw, blogName);
         res.json({ success: true });
@@ -94,7 +94,7 @@ app.post("/api/tistory/save-session", async (req, res) => {
         res.status(500).json({ success: false, error: e.message });
     }
 });
-/* ���� �ㅼ씠踰� 移댄뀒怨좊━ 議고쉶 ���� */
+/* ── 네이버 카테고리 조회 ── */
 app.get("/api/naver/categories/:userId", async (req, res) => {
     const { userId } = req.params;
     try {
@@ -105,15 +105,15 @@ app.get("/api/naver/categories/:userId", async (req, res) => {
         res.status(500).json({ error: e.message, categories: [] });
     }
 });
-/* ���� Google �몄뀡 �곹깭 �뺤씤 ���� */
+/* ── Google 세션 상태 확인 ── */
 app.get("/api/google/session-exists/:userId", (req, res) => {
     res.json({ exists: (0, naver_1.googleSessionExists)(req.params.userId) });
 });
-/* ���� Google 濡쒓렇�� �몄뀡 ���� ���� */
+/* ── Google 로그인 세션 저장 ── */
 app.post("/api/google/save-session", async (req, res) => {
     const { userId } = req.body;
     if (!userId)
-        return res.status(400).json({ success: false, error: "userId �꾩슂" });
+        return res.status(400).json({ success: false, error: "userId 필요" });
     try {
         await (0, naver_1.saveGoogleSession)(userId);
         res.json({ success: true });
@@ -122,7 +122,7 @@ app.post("/api/google/save-session", async (req, res) => {
         res.status(500).json({ success: false, error: e.message });
     }
 });
-/* ���� �몄뀡 �곹깭 �뺤씤 ���� */
+/* ── 세션 상태 확인 ── */
 app.get("/api/session-status/:userId", (req, res) => {
     const { userId } = req.params;
     res.json({
@@ -130,18 +130,18 @@ app.get("/api/session-status/:userId", (req, res) => {
         tistory: (0, tistory_1.tistorySessionExists)(userId),
     });
 });
-/* ���� 吏곸젒 諛쒗뻾 (�깆뿉�� 利됱떆 諛쒗뻾) ���� */
+/* ── 직접 발행 (앱에서 즉시 발행) ── */
 app.post("/api/publish-full", async (req, res) => {
     const { userId, platform, title, content, tags = [], imageUrl, categoryId, visibility, scheduleTime, blocks, useFlow, flowImgCount, flowPrompts, flowCaptions } = req.body;
     if (!userId || !platform || !title || !content) {
-        return res.status(400).json({ error: "userId, platform, title, content �꾩슂" });
+        return res.status(400).json({ error: "userId, platform, title, content 필요" });
     }
     await acquireSlot();
     try {
         let finalBlocks = blocks || [];
-        // ���� Flow �대�吏� �앹꽦 ����
+        // ── Flow 이미지 생성 ──
         if (useFlow && flowPrompts?.length > 0 && platform === "naver") {
-            console.log(`[server] Flow �대�吏� �앹꽦 �쒖옉: ${flowImgCount}��`);
+            console.log(`[server] Flow 이미지 생성 시작: ${flowImgCount}장`);
             try {
                 const flowImages = await (0, naver_1.generateFlowImages)({
                     userId,
@@ -150,7 +150,7 @@ app.post("/api/publish-full", async (req, res) => {
                     onLog: (msg) => console.log(msg),
                 });
                 if (flowImages.length > 0) {
-                    // �띿뒪�� 釉붾줉�� Flow �대�吏� 洹좊벑 �쎌엯
+                    // 텍스트 블록에 Flow 이미지 균등 삽입
                     const textBlocks = finalBlocks.filter((b) => b.type === "text");
                     const result = [];
                     const step = Math.max(1, Math.floor(textBlocks.length / flowImages.length));
@@ -170,18 +170,18 @@ app.post("/api/publish-full", async (req, res) => {
                             }
                         }
                     }
-                    // �⑥� �대�吏� 留덉�留됱뿉 異붽�
+                    // 남은 이미지 마지막에 추가
                     while (imgIdx < flowImages.length) {
                         result.push({ type: "image", src: flowImages[imgIdx].src, alt: flowImages[imgIdx].alt });
                         imgIdx++;
                     }
                     finalBlocks = result;
-                    console.log(`[server] Flow �대�吏� ${flowImages.length}�� 釉붾줉 �쎌엯 �꾨즺`);
+                    console.log(`[server] Flow 이미지 ${flowImages.length}장 블록 삽입 완료`);
                 }
             }
             catch (flowErr) {
-                console.error("[server] Flow �대�吏� �앹꽦 �ㅽ뙣:", flowErr.message);
-                // Flow �ㅽ뙣�대룄 �대�吏� �놁씠 諛쒗뻾 怨꾩냽
+                console.error("[server] Flow 이미지 생성 실패:", flowErr.message);
+                // Flow 실패해도 이미지 없이 발행 계속
             }
         }
         let postUrl = "";
@@ -192,14 +192,14 @@ app.post("/api/publish-full", async (req, res) => {
             postUrl = await (0, tistory_1.publishTistory)({ userId, title, content, tags, categoryId, visibility });
         }
         else {
-            return res.status(400).json({ error: "platform�� naver �먮뒗 tistory" });
+            return res.status(400).json({ error: "platform은 naver 또는 tistory" });
         }
         await (0, supabase_1.addHistory)({ user_id: userId, platform, title, post_url: postUrl, status: "success" });
         res.json({ success: true, postUrl });
     }
     catch (e) {
         await (0, supabase_1.addHistory)({ user_id: userId, platform, title, status: "fail", error_message: e.message });
-        if (e.message?.includes("�몄뀡 留뚮즺") || e.message?.includes("�ъ뿰寃�")) {
+        if (e.message?.includes("세션 만료") || e.message?.includes("재연결")) {
             return res.status(401).json({ error: e.message, code: "SESSION_EXPIRED" });
         }
         res.status(500).json({ error: e.message });
@@ -208,12 +208,12 @@ app.post("/api/publish-full", async (req, res) => {
         releaseSlot();
     }
 });
-/* ���� Supabase Job Queue �대쭅 ���� */
+/* ── Supabase Job Queue 폴링 ── */
 let currentUserId = null;
 let isProcessing = false;
 function setCurrentUser(userId) {
     currentUserId = userId;
-    console.log(`[bot] �좎� �ㅼ젙: ${userId}`);
+    console.log(`[bot] 유저 설정: ${userId}`);
 }
 async function processJobs() {
     if (!currentUserId || isProcessing)
@@ -222,13 +222,13 @@ async function processJobs() {
     try {
         const jobs = await (0, supabase_1.fetchPendingJobs)(currentUserId);
         for (const job of jobs) {
-            console.log(`[bot] �묒뾽 �쒖옉: ${job.platform} - ${job.title}`);
+            console.log(`[bot] 작업 시작: ${job.platform} - ${job.title}`);
             await (0, supabase_1.updateJob)(job.id, { status: "running" });
             await acquireSlot();
             try {
                 const ok = await (0, supabase_1.useQuota)(job.user_id);
                 if (!ok) {
-                    await (0, supabase_1.updateJob)(job.id, { status: "fail", error: "荑쇳꽣 珥덇낵" });
+                    await (0, supabase_1.updateJob)(job.id, { status: "fail", error: "쿼터 초과" });
                     continue;
                 }
                 let postUrl = "";
@@ -240,12 +240,12 @@ async function processJobs() {
                 }
                 await (0, supabase_1.updateJob)(job.id, { status: "success", result_url: postUrl });
                 await (0, supabase_1.addHistory)({ user_id: job.user_id, platform: job.platform, title: job.title, post_url: postUrl, status: "success" });
-                console.log(`[bot] 諛쒗뻾 �꾨즺: ${postUrl}`);
+                console.log(`[bot] 발행 완료: ${postUrl}`);
             }
             catch (e) {
                 await (0, supabase_1.updateJob)(job.id, { status: "fail", error: e.message });
                 await (0, supabase_1.addHistory)({ user_id: job.user_id, platform: job.platform, title: job.title, status: "fail", error_message: e.message });
-                console.error(`[bot] 諛쒗뻾 �ㅽ뙣: ${e.message}`);
+                console.error(`[bot] 발행 실패: ${e.message}`);
             }
             finally {
                 releaseSlot();
@@ -257,28 +257,28 @@ async function processJobs() {
     }
 }
 setInterval(processJobs, 10000);
-/* ���� �좎� �깅줉 (Electron�먯꽌 濡쒓렇�� �� �몄텧) ���� */
+/* ── 유저 등록 (Electron에서 로그인 시 호출) ── */
 app.post("/api/register-user", (req, res) => {
     const { userId } = req.body;
     if (!userId)
-        return res.status(400).json({ error: "userId �꾩슂" });
+        return res.status(400).json({ error: "userId 필요" });
     setCurrentUser(userId);
     res.json({ success: true });
 });
-/* ���� �좎� �깅줉 �댁젣 (濡쒓렇�꾩썐 �� �몄텧) ���� */
+/* ── 유저 등록 해제 (로그아웃 시 호출) ── */
 app.post("/api/unregister-user", (req, res) => {
     const { userId } = req.body;
     if (currentUserId === userId) {
         currentUserId = null;
-        console.log(`[bot] �좎� �깅줉 �댁젣: ${userId}`);
+        console.log(`[bot] 유저 등록 해제: ${userId}`);
     }
     res.json({ success: true });
 });
-/* ���� �ㅼ씠踰� 寃��됯킅怨� �ㅼ썙�� API �꾨줉�� ���� */
+/* ── 네이버 검색광고 키워드 API 프록시 ── */
 app.post("/api/naver-keywords", async (req, res) => {
     const { accessLicense, secretKey, customerId, keywords } = req.body;
     if (!accessLicense || !secretKey || !customerId || !keywords?.length)
-        return res.status(400).json({ error: "accessLicense, secretKey, customerId, keywords �꾩슂" });
+        return res.status(400).json({ error: "accessLicense, secretKey, customerId, keywords 필요" });
     try {
         const crypto = await Promise.resolve().then(() => __importStar(require("crypto")));
         const timestamp = Date.now().toString();
@@ -299,7 +299,7 @@ app.post("/api/naver-keywords", async (req, res) => {
         });
         if (!r.ok) {
             const txt = await r.text();
-            return res.status(r.status).json({ error: `�ㅼ씠踰� API �ㅻ쪟 ${r.status}: ${txt}` });
+            return res.status(r.status).json({ error: `네이버 API 오류 ${r.status}: ${txt}` });
         }
         const data = await r.json();
         res.json(data);
@@ -308,11 +308,11 @@ app.post("/api/naver-keywords", async (req, res) => {
         res.status(500).json({ error: e.message });
     }
 });
-/* ���� �ㅼ씠踰� DataLab 寃��됱뼱 �몃젋�� API �꾨줉�� ���� */
+/* ── 네이버 DataLab 검색어 트렌드 API 프록시 ── */
 app.post("/api/naver-datalab", async (req, res) => {
     const { clientId, clientSecret, keyword } = req.body;
     if (!clientId || !clientSecret || !keyword)
-        return res.status(400).json({ error: "clientId, clientSecret, keyword �꾩슂" });
+        return res.status(400).json({ error: "clientId, clientSecret, keyword 필요" });
     try {
         const endDate = new Date().toISOString().slice(0, 10);
         const startDate = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
@@ -331,7 +331,7 @@ app.post("/api/naver-datalab", async (req, res) => {
         });
         if (!r.ok) {
             const txt = await r.text();
-            return res.status(r.status).json({ error: `DataLab API �ㅻ쪟 ${r.status}: ${txt}` });
+            return res.status(r.status).json({ error: `DataLab API 오류 ${r.status}: ${txt}` });
         }
         const data = await r.json();
         res.json({ ok: true, ...data });
@@ -340,11 +340,11 @@ app.post("/api/naver-datalab", async (req, res) => {
         res.status(500).json({ error: e.message });
     }
 });
-/* ���� Gemini �꾨줉�� ���� */
+/* ── Gemini 프록시 ── */
 app.post("/api/gemini-vision", async (req, res) => {
     const { apiKey, parts, prompt } = req.body;
     if (!apiKey || !parts || !prompt)
-        return res.status(400).json({ error: "�뚮씪誘명꽣 �꾨씫" });
+        return res.status(400).json({ error: "파라미터 누락" });
     const models = ["gemini-2.0-flash", "gemini-2.5-flash", "gemini-1.5-flash"];
     const body = {
         contents: [{ parts: [...parts, { text: prompt }] }],
@@ -362,11 +362,11 @@ app.post("/api/gemini-vision", async (req, res) => {
         }
         catch { }
     }
-    return res.status(500).json({ error: "�앹꽦 �ㅽ뙣. Gemini �ㅻ� �뺤씤�섍굅�� �좎떆 �� �ㅼ떆 �쒕룄�댁＜�몄슂." });
+    return res.status(500).json({ error: "생성 실패. Gemini 키를 확인하거나 잠시 후 다시 시도해주세요." });
 });
-/* ���� �쒕쾭 �쒖옉 ���� */
+/* ── 서버 시작 ── */
 app.listen(PORT, () => {
-    console.log(`[bot] Publy 遊� �쒕쾭 v2.0 �� http://localhost:${PORT}`);
+    console.log(`[bot] Publy 봇 서버 v2.0 → http://localhost:${PORT}`);
 });
 exports.default = app;
 //# sourceMappingURL=server.js.map

@@ -26,7 +26,7 @@ const googleSessionPath = (userId) => path_1.default.join(SESSION_DIR, `google_$
 function naverSessionExists(userId) {
     return fs_1.default.existsSync(sessionPath(userId));
 }
-/* ���� 遊� �먯� �고쉶 ���� */
+/* ── 봇 탐지 우회 ── */
 const ANTI_DETECTION_SCRIPT = `
   Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
   if (!window.chrome) {
@@ -57,7 +57,7 @@ const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML,
 async function applyAntiDetection(context) {
     await context.addInitScript(ANTI_DETECTION_SCRIPT);
 }
-/* ���� �대�吏� �ㅼ슫濡쒕뱶 (�몃꽕�쇱슜) ���� */
+/* ── 이미지 다운로드 (썸네일용) ── */
 async function downloadImageToTemp(url) {
     try {
         const ext = url.includes(".png") ? ".png" : ".jpg";
@@ -81,7 +81,7 @@ async function downloadImageToTemp(url) {
         return null;
     }
 }
-/* ���� �ㅼ씠踰� 濡쒓렇�� + blogId 異붿텧 ���� */
+/* ── 네이버 로그인 + blogId 추출 ── */
 async function saveNaverSession(userId, id, pw) {
     const browser = await playwright_1.chromium.launch({ headless: false, args: LAUNCH_ARGS, slowMo: 50 });
     const context = await browser.newContext({
@@ -91,7 +91,7 @@ async function saveNaverSession(userId, id, pw) {
     await applyAntiDetection(context);
     const page = await context.newPage();
     try {
-        console.log("[naver] 濡쒓렇�� �섏씠吏� 吏꾩엯...");
+        console.log("[naver] 로그인 페이지 진입...");
         await page.goto("https://nid.naver.com/nidlogin.login", { waitUntil: "domcontentloaded", timeout: 30000 });
         await page.waitForTimeout(800);
         await page.evaluate((v) => {
@@ -113,17 +113,17 @@ async function saveNaverSession(userId, id, pw) {
         }, pw);
         await page.waitForTimeout(400);
         await page.click(".btn_login").catch(() => page.click("button[type='submit']"));
-        console.log("[naver] 濡쒓렇�� ��湲� 以�... (罹≪감 �덉쑝硫� 吏곸젒 ���댁＜�몄슂)");
+        console.log("[naver] 로그인 대기 중... (캡차 있으면 직접 풀어주세요)");
         try {
             await page.waitForFunction(() => !location.href.includes("nid.naver.com/nidlogin"), { timeout: 90000 });
         }
         catch {
-            throw new Error("濡쒓렇�� �쒓컙 珥덇낵 (90珥�)");
+            throw new Error("로그인 시간 초과 (90초)");
         }
         await page.waitForTimeout(2000);
         if (page.url().includes("nidlogin"))
-            throw new Error("濡쒓렇�� �ㅽ뙣");
-        console.log("[naver] �� 濡쒓렇�� �깃났");
+            throw new Error("로그인 실패");
+        console.log("[naver] ✅ 로그인 성공");
         let blogId = null;
         const INVALID_IDS = ["PostList", "BlogHome", "FeedList", "neighborPostList", "TagList", "GoBlogWrite"];
         try {
@@ -146,9 +146,9 @@ async function saveNaverSession(userId, id, pw) {
         }
         if (!blogId)
             blogId = id;
-        console.log(`[naver] �� blogId: ${blogId}`);
+        console.log(`[naver] ✅ blogId: ${blogId}`);
         const cookies = await context.cookies();
-        // 鍮꾨�踰덊샇 ���� (�먮룞 �щ줈洹몄씤��, base64)
+        // 비밀번호 저장 (자동 재로그인용, base64)
         fs_1.default.writeFileSync(sessionPath(userId), JSON.stringify({
             loginId: id,
             blogId,
@@ -163,7 +163,7 @@ async function saveNaverSession(userId, id, pw) {
         throw e;
     }
 }
-/* ���� �먮룞 �щ줈洹몄씤 (�몄뀡 留뚮즺 ��) ���� */
+/* ── 자동 재로그인 (세션 만료 시) ── */
 async function reloginNaverSilent(userId) {
     const sp = sessionPath(userId);
     if (!fs_1.default.existsSync(sp))
@@ -171,14 +171,14 @@ async function reloginNaverSilent(userId) {
     const session = JSON.parse(fs_1.default.readFileSync(sp, "utf-8"));
     let loginId = session.loginId;
     let pw = null;
-    // 1�쒖쐞: �몄뀡 �뚯씪�� ���λ맂 pw
+    // 1순위: 세션 파일에 저장된 pw
     if (session.pw) {
         try {
             pw = Buffer.from(session.pw, "base64").toString("utf-8");
         }
         catch { }
     }
-    // 2�쒖쐞: Supabase publy_accounts�먯꽌 議고쉶
+    // 2순위: Supabase publy_accounts에서 조회
     if (!pw) {
         const creds = await (0, supabase_1.getAccountCredentials)(userId, "naver").catch(() => null);
         if (creds) {
@@ -187,7 +187,7 @@ async function reloginNaverSilent(userId) {
         }
     }
     if (!pw) {
-        console.log("[naver] �먮룞�щ줈洹몄씤 �ㅽ뙣: 鍮꾨�踰덊샇 �놁쓬");
+        console.log("[naver] 자동재로그인 실패: 비밀번호 없음");
         return false;
     }
     const browser = await playwright_1.chromium.launch({ headless: true, args: LAUNCH_ARGS });
@@ -219,7 +219,7 @@ async function reloginNaverSilent(userId) {
         }, pw);
         await page.waitForTimeout(300);
         await page.click(".btn_login").catch(() => page.click("button[type='submit']"));
-        // 罹≪감媛� �섏삤硫� �ㅽ뙣 (�ㅻ뱶由ъ뒪�� 泥섎━ 遺덇�)
+        // 캡차가 나오면 실패 (헤드리스라 처리 불가)
         await page.waitForFunction(() => !location.href.includes("nid.naver.com/nidlogin"), { timeout: 15000 });
         await page.waitForTimeout(1500);
         if (page.url().includes("nidlogin")) {
@@ -230,7 +230,7 @@ async function reloginNaverSilent(userId) {
         const oldSession = JSON.parse(fs_1.default.readFileSync(sp, "utf-8"));
         fs_1.default.writeFileSync(sp, JSON.stringify({ ...oldSession, cookies }, null, 2));
         await browser.close();
-        console.log("[naver] �� �먮룞 �щ줈洹몄씤 �깃났");
+        console.log("[naver] ✅ 자동 재로그인 성공");
         return true;
     }
     catch {
@@ -238,11 +238,11 @@ async function reloginNaverSilent(userId) {
         return false;
     }
 }
-/* ���� 移댄뀒怨좊━ 紐⑸줉 議고쉶 ���� */
+/* ── 카테고리 목록 조회 ── */
 async function getNaverCategories(userId) {
     const sp = sessionPath(userId);
     if (!fs_1.default.existsSync(sp))
-        throw new Error("�ㅼ씠踰� �몄뀡 �놁쓬");
+        throw new Error("네이버 세션 없음");
     const { blogId, cookies } = JSON.parse(fs_1.default.readFileSync(sp, "utf-8"));
     const browser = await playwright_1.chromium.launch({ headless: true, args: LAUNCH_ARGS });
     const context = await browser.newContext({
@@ -272,11 +272,11 @@ async function getNaverCategories(userId) {
             await browser.close();
             return [];
         }
-        // 諛쒗뻾 �⑤꼸 �닿린
+        // 발행 패널 열기
         const publishSels = [
             "button.publish_btn__Y8C4q",
             "button[class*='publish_btn']",
-            "button:has-text('諛쒗뻾')",
+            "button:has-text('발행')",
         ];
         for (const sel of publishSels) {
             try {
@@ -289,7 +289,7 @@ async function getNaverCategories(userId) {
             catch { }
         }
         await page.waitForTimeout(2500);
-        // 移댄뀒怨좊━ select �듭뀡 異붿텧
+        // 카테고리 select 옵션 추출
         const categories = [];
         const catSels = [
             "select.category_select__YWKIP",
@@ -319,16 +319,16 @@ async function getNaverCategories(userId) {
     }
     catch (e) {
         await browser.close().catch(() => { });
-        console.error("[naver] 移댄뀒怨좊━ 議고쉶 �ㅽ뙣:", e);
+        console.error("[naver] 카테고리 조회 실패:", e);
         return [];
     }
 }
-/* ���� �ㅼ씠踰� 釉붾줈洹� �먮룞諛쒗뻾 ���� */
+/* ── 네이버 블로그 자동발행 ── */
 async function publishNaver(params) {
     const { userId, title, content, tags, imageUrl, categoryId, visibility = "public", scheduleTime, blocks } = params;
     const sp = sessionPath(userId);
     if (!fs_1.default.existsSync(sp))
-        throw new Error("�ㅼ씠踰� �몄뀡 �놁쓬. 怨꾩젙 �ъ뿰寃� �꾩슂");
+        throw new Error("네이버 세션 없음. 계정 재연결 필요");
     const { blogId, cookies } = JSON.parse(fs_1.default.readFileSync(sp, "utf-8"));
     const browser = await playwright_1.chromium.launch({ headless: false, args: LAUNCH_ARGS });
     const context = await browser.newContext({
@@ -340,13 +340,13 @@ async function publishNaver(params) {
     const page = await context.newPage();
     try {
         const writeUrl = `https://blog.naver.com/PostWriteForm.naver?blogId=${blogId}`;
-        console.log(`[naver] 湲��곌린 吏꾩엯: ${writeUrl}`);
+        console.log(`[naver] 글쓰기 진입: ${writeUrl}`);
         await page.goto(writeUrl, { waitUntil: "domcontentloaded", timeout: 60000 });
         if (page.url().includes("nidlogin") || page.url().includes("login.naver")) {
             fs_1.default.unlinkSync(sp);
-            throw new Error("�ㅼ씠踰� �몄뀡 留뚮즺. �ъ뿰寃� �꾩슂");
+            throw new Error("네이버 세션 만료. 재연결 필요");
         }
-        console.log("[naver] SE4 濡쒕뱶 ��湲�...");
+        console.log("[naver] SE4 로드 대기...");
         await page.waitForLoadState("networkidle", { timeout: 30000 }).catch(() => { });
         await page.waitForTimeout(5000);
         const getFrame = () => {
@@ -363,29 +363,29 @@ async function publishNaver(params) {
                 break;
         }
         if (!frame)
-            throw new Error("mainFrame�� 李얠쓣 �� �놁뒿�덈떎");
-        console.log("[naver] mainFrame �띾뱷!");
-        // 蹂듭썝 �앹뾽 泥섎━
+            throw new Error("mainFrame을 찾을 수 없습니다");
+        console.log("[naver] mainFrame 획득!");
+        // 복원 팝업 처리
         try {
             await frame.click(".se-popup-button-cancel", { timeout: 3000 });
             await page.waitForTimeout(1000);
         }
         catch { }
-        // �꾩�留� �リ린
+        // 도움말 닫기
         try {
             const helpVisible = await frame.isVisible(".se-help-panel-close-button");
             if (helpVisible)
                 await frame.click(".se-help-panel-close-button", { timeout: 2000 });
         }
         catch { }
-        // SE4 濡쒕뱶 �꾨즺 ��湲�
+        // SE4 로드 완료 대기
         try {
             await frame.waitForSelector(".se-section-documentTitle, .se-editor, .se-container", { timeout: 40000 });
         }
         catch { }
         await page.waitForTimeout(3000);
-        // ���� �쒕ぉ �낅젰 ����
-        console.log("[naver] �쒕ぉ �낅젰...");
+        // ── 제목 입력 ──
+        console.log("[naver] 제목 입력...");
         const titleSels = [
             ".se-section-documentTitle .se-text-paragraph span[contenteditable='true']",
             ".se-section-documentTitle [contenteditable='true']",
@@ -414,17 +414,17 @@ async function publishNaver(params) {
             await page.waitForTimeout(500);
             await page.keyboard.type(title, { delay: 40 });
         }
-        // ���� �대�吏� �쎌엯 (�몃꽕��) ����
+        // ── 이미지 삽입 (썸네일) ──
         if (imageUrl) {
-            console.log("[naver] �대�吏� �쎌엯 �쒕룄...");
+            console.log("[naver] 이미지 삽입 시도...");
             const tmpFile = await downloadImageToTemp(imageUrl);
             if (tmpFile) {
                 try {
-                    // SE4 �대컮 �대�吏� 踰꾪듉
+                    // SE4 툴바 이미지 버튼
                     const imgBtnSels = [
                         "button[data-type='image']",
                         ".se-toolbar-item-imageUpload button",
-                        "button[title='�대�吏�']",
+                        "button[title='이미지']",
                         "button[class*='image']",
                     ];
                     let imgBtnClicked = false;
@@ -441,17 +441,17 @@ async function publishNaver(params) {
                     }
                     if (imgBtnClicked) {
                         await page.waitForTimeout(1500);
-                        // �뚯씪 �낅줈�� input 李얘린
+                        // 파일 업로드 input 찾기
                         const fileInput = await page.$("input[type='file']");
                         if (fileInput) {
                             await fileInput.setInputFiles(tmpFile);
                             await page.waitForTimeout(3000);
-                            console.log("[naver] �� �대�吏� �낅줈�� �꾨즺");
+                            console.log("[naver] ✅ 이미지 업로드 완료");
                         }
                     }
                 }
                 catch (e) {
-                    console.log("[naver] �대�吏� �쎌엯 �ㅽ뙣 (臾댁떆):", e);
+                    console.log("[naver] 이미지 삽입 실패 (무시):", e);
                 }
                 finally {
                     try {
@@ -461,9 +461,9 @@ async function publishNaver(params) {
                 }
             }
         }
-        // ���� 蹂몃Ц + �대�吏� 釉붾줉 �쒖꽌��濡� �낅젰 ����
-        console.log("[naver] 蹂몃Ц+�대�吏� 釉붾줉 �쒖꽌 諛쒗뻾 �쒖옉...");
-        // SE4 �먮뵒�� �대┃ �ы띁
+        // ── 본문 + 이미지 블록 순서대로 입력 ──
+        console.log("[naver] 본문+이미지 블록 순서 발행 시작...");
+        // SE4 에디터 클릭 헬퍼
         async function clickEditor() {
             const bodySels = [
                 ".se-section-text .se-text-paragraph span[contenteditable='true']",
@@ -484,7 +484,7 @@ async function publishNaver(params) {
             await frame.click(".se-main-container", { timeout: 3000 }).catch(() => { });
             return false;
         }
-        // �띿뒪�� 釉붾줉 �낅젰 �ы띁
+        // 텍스트 블록 입력 헬퍼
         async function insertText(text) {
             const isHtml = /<[a-z][\s\S]*>/i.test(text);
             const plain = isHtml
@@ -510,11 +510,11 @@ async function publishNaver(params) {
                 }
             }
         }
-        // �대�吏� �낅줈�� �ы띁
+        // 이미지 업로드 헬퍼
         async function uploadImage(imgUrl, alt) {
             const tmpFile = await downloadImageToTemp(imgUrl);
             if (!tmpFile) {
-                console.log("[naver] �대�吏� �ㅼ슫濡쒕뱶 �ㅽ뙣:", imgUrl.slice(0, 60));
+                console.log("[naver] 이미지 다운로드 실패:", imgUrl.slice(0, 60));
                 return;
             }
             try {
@@ -526,8 +526,8 @@ async function publishNaver(params) {
                 const imgBtnSels = [
                     "button[data-type='image']",
                     ".se-toolbar-item-imageUpload button",
-                    "button[title='�대�吏�']",
-                    "button[aria-label='�대�吏�']",
+                    "button[title='이미지']",
+                    "button[aria-label='이미지']",
                     ".se-toolbar button[class*='image']",
                 ];
                 let clicked = false;
@@ -536,7 +536,7 @@ async function publishNaver(params) {
                         await frame.waitForSelector(sel, { timeout: 1000 });
                         await frame.click(sel, { timeout: 2000 });
                         clicked = true;
-                        console.log("[naver] �대�吏� 踰꾪듉 �대┃:", sel);
+                        console.log("[naver] 이미지 버튼 클릭:", sel);
                         break;
                     }
                     catch { }
@@ -558,8 +558,8 @@ async function publishNaver(params) {
                     if (fileInput) {
                         await fileInput.setInputFiles(tmpFile);
                         await page.waitForTimeout(4000);
-                        console.log("[naver] �� �대�吏� �낅줈�� �꾨즺");
-                        // 罹≪뀡 �낅젰 (alt �덉쓣 ��)
+                        console.log("[naver] ✅ 이미지 업로드 완료");
+                        // 캡션 입력 (alt 있을 때)
                         if (alt && alt.trim()) {
                             try {
                                 await clickEditor();
@@ -569,21 +569,21 @@ async function publishNaver(params) {
                                 await page.waitForTimeout(200);
                                 await insertText(alt.trim());
                                 await page.waitForTimeout(300);
-                                console.log("[naver] �� 罹≪뀡 �낅젰:", alt.trim());
+                                console.log("[naver] ✅ 캡션 입력:", alt.trim());
                             }
                             catch { }
                         }
                     }
                     else {
-                        console.log("[naver] file input 紐� 李얠쓬");
+                        console.log("[naver] file input 못 찾음");
                     }
                 }
                 else {
-                    console.log("[naver] �대�吏� 踰꾪듉 紐� 李얠쓬 - �대�吏� �ㅽ궢");
+                    console.log("[naver] 이미지 버튼 못 찾음 - 이미지 스킵");
                 }
             }
             catch (e) {
-                console.log("[naver] �대�吏� �낅줈�� �ㅽ뙣:", e);
+                console.log("[naver] 이미지 업로드 실패:", e);
             }
             finally {
                 try {
@@ -593,7 +593,7 @@ async function publishNaver(params) {
             }
             await page.waitForTimeout(1000);
         }
-        // blocks媛� �덉쑝硫� 釉붾줉 �쒖꽌��濡�, �놁쑝硫� 湲곗〈 諛⑹떇
+        // blocks가 있으면 블록 순서대로, 없으면 기존 방식
         if (blocks && blocks.length > 0) {
             for (const block of blocks) {
                 if (block.type === "text" && block.content) {
@@ -601,7 +601,7 @@ async function publishNaver(params) {
                     await page.waitForTimeout(200);
                 }
                 else if (block.type === "image-pair" && block.images?.length >= 2) {
-                    // 2�� �숈떆 �낅줈�� �� �� 以� �섎��� 諛곗튂
+                    // 2장 동시 업로드 → 한 줄 나란히 배치
                     const pairImages = block.images;
                     const tmp1 = await downloadImageToTemp(pairImages[0].src);
                     const tmp2 = await downloadImageToTemp(pairImages[1].src);
@@ -615,8 +615,8 @@ async function publishNaver(params) {
                             const imgBtnSels = [
                                 "button[data-type='image']",
                                 ".se-toolbar-item-imageUpload button",
-                                "button[title='�대�吏�']",
-                                "button[aria-label='�대�吏�']",
+                                "button[title='이미지']",
+                                "button[aria-label='이미지']",
                             ];
                             let clicked = false;
                             for (const sel of imgBtnSels) {
@@ -645,8 +645,8 @@ async function publishNaver(params) {
                                 if (fileInput) {
                                     await fileInput.setInputFiles([tmp1, tmp2]);
                                     await page.waitForTimeout(5000);
-                                    console.log("[naver] �� �대�吏� �섏뼱 �낅줈�� �꾨즺");
-                                    // �섏뼱 罹≪뀡 �낅젰 (泥� 踰덉㎏ �대�吏� alt �ъ슜)
+                                    console.log("[naver] ✅ 이미지 페어 업로드 완료");
+                                    // 페어 캡션 입력 (첫 번째 이미지 alt 사용)
                                     const pairAlt = pairImages[0].alt || pairImages[1].alt;
                                     if (pairAlt && pairAlt.trim()) {
                                         try {
@@ -664,7 +664,7 @@ async function publishNaver(params) {
                             }
                         }
                         catch (e) {
-                            console.log("[naver] �섏뼱 �대�吏� �낅줈�� �ㅽ뙣:", e);
+                            console.log("[naver] 페어 이미지 업로드 실패:", e);
                         }
                         finally {
                             try {
@@ -686,17 +686,17 @@ async function publishNaver(params) {
             }
         }
         else {
-            // fallback: blocks �놁쑝硫� 湲곗〈 �띿뒪�� �낅젰 諛⑹떇
+            // fallback: blocks 없으면 기존 텍스트 입력 방식
             await insertText(content);
         }
         await page.waitForTimeout(1000);
-        // ���� 諛쒗뻾 �⑤꼸 �닿린 ����
-        console.log("[naver] 諛쒗뻾 �⑤꼸 �닿린...");
+        // ── 발행 패널 열기 ──
+        console.log("[naver] 발행 패널 열기...");
         const publishSels = [
             "button.publish_btn__Y8C4q",
             "button[class*='publish_btn']",
             "button[data-testid='seOnePublishBtn']",
-            "button:has-text('諛쒗뻾')",
+            "button:has-text('발행')",
         ];
         let panelOpened = false;
         for (const sel of publishSels) {
@@ -711,12 +711,12 @@ async function publishNaver(params) {
             catch { }
         }
         if (!panelOpened)
-            throw new Error("諛쒗뻾 踰꾪듉�� 李얠쓣 �� �놁뒿�덈떎");
+            throw new Error("발행 버튼을 찾을 수 없습니다");
         await page.waitForTimeout(2500);
-        // ���� �쒓렇 �낅젰 ����
+        // ── 태그 입력 ──
         if (tags.length > 0) {
             try {
-                const tagSel = "input.tag_input__YWKIP, input[class*='tag_input'], input[placeholder*='�쒓렇']";
+                const tagSel = "input.tag_input__YWKIP, input[class*='tag_input'], input[placeholder*='태그']";
                 const tagEl = await frame.$(tagSel);
                 if (tagEl) {
                     await frame.click(tagSel, { timeout: 5000 });
@@ -725,16 +725,16 @@ async function publishNaver(params) {
                         await page.keyboard.press("Enter");
                         await page.waitForTimeout(200);
                     }
-                    console.log(`[naver] �쒓렇 ${tags.length}媛� �낅젰`);
+                    console.log(`[naver] 태그 ${tags.length}개 입력`);
                 }
             }
             catch (e) {
-                console.log("[naver] �쒓렇 �낅젰 �ㅽ뙣 (臾댁떆):", e);
+                console.log("[naver] 태그 입력 실패 (무시):", e);
             }
         }
-        // ���� 移댄뀒怨좊━ �좏깮 ����
+        // ── 카테고리 선택 ──
         if (categoryId) {
-            console.log(`[naver] 移댄뀒怨좊━ �좏깮: ${categoryId}`);
+            console.log(`[naver] 카테고리 선택: ${categoryId}`);
             try {
                 const catSels = [
                     "select.category_select__YWKIP",
@@ -748,7 +748,7 @@ async function publishNaver(params) {
                         if (el) {
                             await frame.selectOption(sel, categoryId);
                             await page.waitForTimeout(500);
-                            console.log("[naver] �� 移댄뀒怨좊━ �좏깮 �꾨즺");
+                            console.log("[naver] ✅ 카테고리 선택 완료");
                             break;
                         }
                     }
@@ -756,17 +756,17 @@ async function publishNaver(params) {
                 }
             }
             catch (e) {
-                console.log("[naver] 移댄뀒怨좊━ �좏깮 �ㅽ뙣 (臾댁떆):", e);
+                console.log("[naver] 카테고리 선택 실패 (무시):", e);
             }
         }
-        // ���� 怨듦컻 �ㅼ젙 ����
-        console.log(`[naver] 怨듦컻 �ㅼ젙: ${visibility}`);
+        // ── 공개 설정 ──
+        console.log(`[naver] 공개 설정: ${visibility}`);
         try {
             if (visibility === "neighbor") {
-                // �댁썐怨듦컻
+                // 이웃공개
                 const neighborSels = [
-                    "button:has-text('�댁썐怨듦컻')",
-                    "label:has-text('�댁썐怨듦컻')",
+                    "button:has-text('이웃공개')",
+                    "label:has-text('이웃공개')",
                     "input[value='1'] + label",
                     ".option_publish [class*='neighbor']",
                 ];
@@ -782,10 +782,10 @@ async function publishNaver(params) {
                 }
             }
             else if (visibility === "private") {
-                // 鍮꾧났媛�
+                // 비공개
                 const privateSels = [
-                    "button:has-text('鍮꾧났媛�')",
-                    "label:has-text('鍮꾧났媛�')",
+                    "button:has-text('비공개')",
+                    "label:has-text('비공개')",
                     "input[value='2'] + label",
                     ".option_publish [class*='private']",
                 ];
@@ -800,20 +800,20 @@ async function publishNaver(params) {
                     catch { }
                 }
             }
-            // public�� 湲곕낯媛믪씠誘�濡� 蹂꾨룄 �대┃ 遺덊븘��
+            // public은 기본값이므로 별도 클릭 불필요
             await page.waitForTimeout(400);
         }
         catch (e) {
-            console.log("[naver] 怨듦컻 �ㅼ젙 �ㅽ뙣 (臾댁떆):", e);
+            console.log("[naver] 공개 설정 실패 (무시):", e);
         }
-        // ���� �덉빟 諛쒗뻾 ����
+        // ── 예약 발행 ──
         if (scheduleTime) {
-            console.log(`[naver] �덉빟 諛쒗뻾 �ㅼ젙: ${scheduleTime}`);
+            console.log(`[naver] 예약 발행 설정: ${scheduleTime}`);
             try {
-                // "�덉빟" �듭뀡 �좏깮
+                // "예약" 옵션 선택
                 const scheduleSels = [
-                    "label:has-text('�덉빟')",
-                    "button:has-text('�덉빟')",
+                    "label:has-text('예약')",
+                    "button:has-text('예약')",
                     "input[value='schedule'] + label",
                     ".se-schedule-button",
                     "[class*='schedule']",
@@ -832,7 +832,7 @@ async function publishNaver(params) {
                 }
                 if (scheduleToggled) {
                     await page.waitForTimeout(1000);
-                    // �좎쭨/�쒓컙 �낅젰
+                    // 날짜/시간 입력
                     // scheduleTime format: "2025-03-15T10:00"
                     const dt = new Date(scheduleTime);
                     const year = dt.getFullYear().toString();
@@ -840,11 +840,11 @@ async function publishNaver(params) {
                     const day = String(dt.getDate()).padStart(2, "0");
                     const hour = String(dt.getHours()).padStart(2, "0");
                     const min = String(dt.getMinutes()).padStart(2, "0");
-                    // �좎쭨 �낅젰
+                    // 날짜 입력
                     const dateSels = [
                         "input[class*='date']",
                         "input[name='publishDate']",
-                        "input[placeholder*='�좎쭨']",
+                        "input[placeholder*='날짜']",
                         "input[type='date']",
                     ];
                     for (const sel of dateSels) {
@@ -859,11 +859,11 @@ async function publishNaver(params) {
                         }
                         catch { }
                     }
-                    // �쒓컙 �낅젰
+                    // 시간 입력
                     const timeSels = [
                         "input[class*='time']",
                         "input[name='publishTime']",
-                        "input[placeholder*='�쒓컙']",
+                        "input[placeholder*='시간']",
                         "input[type='time']",
                     ];
                     for (const sel of timeSels) {
@@ -879,28 +879,28 @@ async function publishNaver(params) {
                         catch { }
                     }
                     await page.waitForTimeout(500);
-                    console.log(`[naver] �� �덉빟 �좎쭨 �ㅼ젙: ${year}-${month}-${day} ${hour}:${min}`);
+                    console.log(`[naver] ✅ 예약 날짜 설정: ${year}-${month}-${day} ${hour}:${min}`);
                 }
             }
             catch (e) {
-                console.log("[naver] �덉빟 諛쒗뻾 �ㅼ젙 �ㅽ뙣 (臾댁떆):", e);
+                console.log("[naver] 예약 발행 설정 실패 (무시):", e);
             }
         }
-        // ���� 理쒖쥌 諛쒗뻾 �먮뒗 �덉빟 �뺤젙 ����
-        console.log("[naver] 理쒖쥌 諛쒗뻾...");
-        const finalLabel = scheduleTime ? "�덉빟" : "諛쒗뻾";
+        // ── 최종 발행 또는 예약 확정 ──
+        console.log("[naver] 최종 발행...");
+        const finalLabel = scheduleTime ? "예약" : "발행";
         const finalSels = scheduleTime
             ? [
-                "button[class*='confirm']:has-text('�덉빟')",
-                "button:has-text('�덉빟 諛쒗뻾')",
-                "button:has-text('�덉빟')",
+                "button[class*='confirm']:has-text('예약')",
+                "button:has-text('예약 발행')",
+                "button:has-text('예약')",
                 "button.confirm_btn__xiHQQ",
                 "button[class*='confirm_btn']",
             ]
             : [
                 "button.confirm_btn__xiHQQ",
                 "button[class*='confirm_btn']",
-                "button:has-text('諛쒗뻾')",
+                "button:has-text('발행')",
             ];
         let finalDone = false;
         for (const sel of finalSels) {
@@ -926,24 +926,24 @@ async function publishNaver(params) {
             }
         }
         await page.waitForTimeout(scheduleTime ? 3000 : 5000);
-        // URL 異붿텧
+        // URL 추출
         let postUrl = page.url();
         const viewMatch = postUrl.match(/blog\.naver\.com\/[^/]+\/(\d+)/) || postUrl.match(/logNo=(\d+)/);
         if (viewMatch)
             postUrl = `https://blog.naver.com/${blogId}/${viewMatch[1]}`;
         if (scheduleTime)
             postUrl = `https://blog.naver.com/${blogId}`;
-        // 荑좏궎 媛깆떊
+        // 쿠키 갱신
         const newCookies = await context.cookies();
         const session = JSON.parse(fs_1.default.readFileSync(sp, "utf-8"));
         session.cookies = newCookies;
         fs_1.default.writeFileSync(sp, JSON.stringify(session, null, 2));
         await browser.close();
-        console.log(`[naver] �� ${scheduleTime ? "�덉빟 �꾨즺" : "諛쒗뻾 �꾨즺"}: ${postUrl}`);
+        console.log(`[naver] ✅ ${scheduleTime ? "예약 완료" : "발행 완료"}: ${postUrl}`);
         return postUrl;
     }
     catch (e) {
-        console.error("[naver] �� �먮윭:", e.message);
+        console.error("[naver] ❌ 에러:", e.message);
         try {
             const debugDir = path_1.default.join(__dirname, "../debug");
             if (!fs_1.default.existsSync(debugDir))
@@ -955,7 +955,7 @@ async function publishNaver(params) {
         throw e;
     }
 }
-/* ���� Google �몄뀡 ���� */
+/* ── Google 세션 ── */
 function googleSessionExists(userId) {
     return fs_1.default.existsSync(googleSessionPath(userId));
 }
@@ -968,27 +968,27 @@ async function saveGoogleSession(userId) {
     const page = await context.newPage();
     try {
         await page.goto("https://accounts.google.com/signin", { waitUntil: "domcontentloaded", timeout: 30000 });
-        console.log("[google] Google 濡쒓렇�� 李� �대┝ �� 吏곸젒 濡쒓렇�� �� ��湲� 以�...");
+        console.log("[google] Google 로그인 창 열림 — 직접 로그인 후 대기 중...");
         await page.waitForFunction(() => location.hostname === "myaccount.google.com" || location.hostname.endsWith(".google.com") && !location.pathname.includes("signin"), { timeout: 180000 });
         await page.waitForTimeout(2000);
         const cookies = await context.cookies();
         fs_1.default.writeFileSync(googleSessionPath(userId), JSON.stringify({ cookies }, null, 2));
         await browser.close();
-        console.log("[google] �� Google �몄뀡 ���� �꾨즺");
+        console.log("[google] ✅ Google 세션 저장 완료");
     }
     catch (e) {
         await browser.close().catch(() => { });
         throw e;
     }
 }
-/* ���� Google Flow �대�吏� �앹꽦 ���� */
+/* ── Google Flow 이미지 생성 ── */
 async function generateFlowImages(params) {
     const { userId, prompts, captions, onLog } = params;
     const log = onLog || console.log;
     const results = [];
     const gsp = googleSessionPath(userId);
     if (!fs_1.default.existsSync(gsp))
-        throw new Error("Google �몄뀡 �놁쓬 �� 怨꾩젙 愿�由� ��뿉�� Google 濡쒓렇�� 癒쇱� �댁＜�몄슂");
+        throw new Error("Google 세션 없음 — 계정 관리 탭에서 Google 로그인 먼저 해주세요");
     const googleSession = JSON.parse(fs_1.default.readFileSync(gsp, "utf-8"));
     const DOWNLOAD_DIR = path_1.default.join(__dirname, "../flow_downloads");
     if (!fs_1.default.existsSync(DOWNLOAD_DIR))
@@ -1012,21 +1012,21 @@ async function generateFlowImages(params) {
         for (let i = 0; i < prompts.length; i++) {
             const prompt = prompts[i];
             const caption = captions[i] || "";
-            log(`�렓 [Flow] ${i + 1}/${prompts.length} �대�吏� �앹꽦 以�...`);
+            log(`🎨 [Flow] ${i + 1}/${prompts.length} 이미지 생성 중...`);
             await page.goto("https://labs.google/fx/ko/tools/image-fx", {
                 waitUntil: "domcontentloaded",
                 timeout: 30000,
             });
             await page.waitForTimeout(3000);
-            // 濡쒓렇�� �뺤씤
+            // 로그인 확인
             const url = page.url();
             if (url.includes("accounts.google.com")) {
-                throw new Error("Google 濡쒓렇�몄씠 �꾩슂�⑸땲��. �щ＼�먯꽌 Google�� 濡쒓렇�명빐二쇱꽭��.");
+                throw new Error("Google 로그인이 필요합니다. 크롬에서 Google에 로그인해주세요.");
             }
-            // �꾨＼�꾪듃 �낅젰李� 李얘린
+            // 프롬프트 입력창 찾기
             const promptSelectors = [
                 "textarea[placeholder*='image']",
-                "textarea[placeholder*='�대�吏�']",
+                "textarea[placeholder*='이미지']",
                 "textarea[aria-label*='prompt']",
                 ".prompt-input textarea",
                 "textarea",
@@ -1042,21 +1042,21 @@ async function generateFlowImages(params) {
                 catch { }
             }
             if (!promptInput) {
-                log(`�좑툘 [Flow] �꾨＼�꾪듃 �낅젰李� 紐� 李얠쓬 - �ㅽ궢`);
+                log(`⚠️ [Flow] 프롬프트 입력창 못 찾음 - 스킵`);
                 continue;
             }
-            // �꾨＼�꾪듃 �낅젰
+            // 프롬프트 입력
             await promptInput.click();
             await page.waitForTimeout(500);
             await page.keyboard.press("Meta+a");
             await page.keyboard.press("Backspace");
             await promptInput.type(prompt, { delay: 20 });
             await page.waitForTimeout(500);
-            log(`  �뱷 �꾨＼�꾪듃: ${prompt.slice(0, 60)}...`);
-            // �앹꽦 踰꾪듉 �대┃
+            log(`  📝 프롬프트: ${prompt.slice(0, 60)}...`);
+            // 생성 버튼 클릭
             const generateBtns = [
                 "button[aria-label*='generate']",
-                "button[aria-label*='�앹꽦']",
+                "button[aria-label*='생성']",
                 "button:has-text('Create')",
                 "button:has-text('Generate')",
                 "button[type='submit']",
@@ -1071,10 +1071,10 @@ async function generateFlowImages(params) {
                 }
                 catch { }
             }
-            // �대�吏� �앹꽦 ��湲� (理쒕� 30珥�)
-            log(`  �� �대�吏� �앹꽦 ��湲�...`);
+            // 이미지 생성 대기 (최대 30초)
+            log(`  ⏳ 이미지 생성 대기...`);
             await page.waitForTimeout(15000);
-            // �앹꽦�� �대�吏� �ㅼ슫濡쒕뱶
+            // 생성된 이미지 다운로드
             const imgSelectors = [
                 ".generated-image img",
                 "[data-testid='generated-image'] img",
@@ -1087,7 +1087,7 @@ async function generateFlowImages(params) {
                 try {
                     const imgs = await page.$$(sel);
                     if (imgs.length > 0) {
-                        // 泥� 踰덉㎏ �대�吏� �ㅼ슫濡쒕뱶
+                        // 첫 번째 이미지 다운로드
                         const downloadBtn = await page.$("[aria-label*='download'], button[title*='download'], .download-btn");
                         if (downloadBtn) {
                             const [download] = await Promise.all([
@@ -1097,16 +1097,16 @@ async function generateFlowImages(params) {
                             const filePath = path_1.default.join(DOWNLOAD_DIR, `flow_${Date.now()}_${i}.png`);
                             await download.saveAs(filePath);
                             results.push({ src: filePath, alt: caption });
-                            log(`  �� [Flow] �대�吏� ${i + 1} �ㅼ슫濡쒕뱶 �꾨즺`);
+                            log(`  ✅ [Flow] 이미지 ${i + 1} 다운로드 완료`);
                             downloaded = true;
                             break;
                         }
                         else {
-                            // �ㅼ슫濡쒕뱶 踰꾪듉 �놁쑝硫� �대�吏� URL濡� 吏곸젒 ����
+                            // 다운로드 버튼 없으면 이미지 URL로 직접 저장
                             const src = await imgs[0].getAttribute("src");
                             if (src && src.startsWith("http")) {
                                 results.push({ src, alt: caption });
-                                log(`  �� [Flow] �대�吏� ${i + 1} URL ����`);
+                                log(`  ✅ [Flow] 이미지 ${i + 1} URL 저장`);
                                 downloaded = true;
                                 break;
                             }
@@ -1116,12 +1116,12 @@ async function generateFlowImages(params) {
                 catch { }
             }
             if (!downloaded) {
-                log(`  �좑툘 [Flow] �대�吏� ${i + 1} �ㅼ슫濡쒕뱶 �ㅽ뙣 - �ㅽ궢`);
+                log(`  ⚠️ [Flow] 이미지 ${i + 1} 다운로드 실패 - 스킵`);
             }
             await page.waitForTimeout(2000);
         }
         await browser.close();
-        log(`�� [Flow] �꾩껜 ${results.length}�� �앹꽦 �꾨즺`);
+        log(`✅ [Flow] 전체 ${results.length}장 생성 완료`);
         return results;
     }
     catch (e) {
