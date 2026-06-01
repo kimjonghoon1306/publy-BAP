@@ -1,87 +1,152 @@
-import { chromium, BrowserContext, Page } from "playwright";
+import { chromium, BrowserContext } from "playwright";
 import fs from "fs";
+import https from "https";
+import http from "http";
+import os from "os";
 import path from "path";
-import { getAdminBlogSearchKeys } from "./supabase";
+import { getAccountCredentials } from "./supabase";
 
 const SESSION_DIR = path.join(__dirname, "../sessions");
 if (!fs.existsSync(SESSION_DIR)) fs.mkdirSync(SESSION_DIR, { recursive: true });
 
-const sessionPath = (accountId: string) =>
-  path.join(SESSION_DIR, `neighbor_${accountId}.json`);
+const sessionPath = (userId: string) => path.join(SESSION_DIR, `naver_${userId}.json`);
 
-const DONE_DIR = path.join(__dirname, "../done");
-if (!fs.existsSync(DONE_DIR)) fs.mkdirSync(DONE_DIR, { recursive: true });
+export function naverSessionExists(userId: string): boolean {
+  return fs.existsSync(sessionPath(userId));
+}
 
-export const donePath = (accountId: string) =>
-  path.join(DONE_DIR, `done_${accountId}.json`);
-
+/* ── 봇 탐지 우회 ── */
 const ANTI_DETECTION_SCRIPT = `
   Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
-  if (!window.chrome) { window.chrome = { runtime: {}, loadTimes: () => {}, csi: () => {} }; }
-  Object.defineProperty(navigator, 'plugins', { get: () => [1,2,3,4,5].map(() => ({ name: 'Chrome PDF Plugin' })) });
-  Object.defineProperty(navigator, 'languages', { get: () => ['ko-KR','ko','en-US','en'] });
+  if (!window.chrome) {
+    window.chrome = { runtime: {}, loadTimes: () => {}, csi: () => {} };
+  }
+  Object.defineProperty(navigator, 'plugins', {
+    get: () => [1,2,3,4,5].map(() => ({ name: 'Chrome PDF Plugin' }))
+  });
+  Object.defineProperty(navigator, 'languages', {
+    get: () => ['ko-KR','ko','en-US','en']
+  });
+  const origQuery = window.navigator.permissions?.query;
+  if (origQuery) {
+    window.navigator.permissions.query = (params) =>
+      params.name === 'notifications'
+        ? Promise.resolve({ state: Notification.permission })
+        : origQuery(params);
+  }
 `;
 
 const LAUNCH_ARGS = [
-  "--no-sandbox","--disable-blink-features=AutomationControlled",
+  "--no-sandbox",
+  "--disable-blink-features=AutomationControlled",
   "--disable-features=IsolateOrigins,site-per-process",
-  "--no-first-run","--no-default-browser-check",
+  "--no-first-run",
+  "--no-default-browser-check",
 ];
+
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
 
 async function applyAntiDetection(context: BrowserContext) {
   await context.addInitScript(ANTI_DETECTION_SCRIPT);
 }
-async function randomDelay(min: number, max: number) {
-  const ms = (Math.random() * (max - min) + min) * 1000;
-  await new Promise((r) => setTimeout(r, ms));
+
+/* ── 이미지 다운로드 (썸네일용) ── */
+async function downloadImageToTemp(url: string): Promise<string | null> {
+  try {
+    const ext = url.includes(".png") ? ".png" : ".jpg";
+    const tmpFile = path.join(os.tmpdir(), `publy_img_${Date.now()}${ext}`);
+    const proto = url.startsWith("https") ? https : http;
+    return new Promise((resolve) => {
+      const file = fs.createWriteStream(tmpFile);
+      proto.get(url, (res) => {
+        res.pipe(file);
+        file.on("finish", () => { file.close(); resolve(tmpFile); });
+      }).on("error", () => {
+        try { fs.unlinkSync(tmpFile); } catch {}
+        resolve(null);
+      });
+    });
+  } catch {
+    return null;
+  }
 }
 
-export function sessionExists(accountId: string): boolean {
-  return fs.existsSync(sessionPath(accountId));
-}
-
-/* ── 로그인 & 세션 저장 ── */
-export async function saveSession(accountId: string, id: string, pw: string): Promise<{ blogId: string }> {
+/* ── 네이버 로그인 + blogId 추출 ── */
+export async function saveNaverSession(
+  userId: string, id: string, pw: string
+): Promise<{ blogId: string }> {
   const browser = await chromium.launch({ headless: false, args: LAUNCH_ARGS, slowMo: 50 });
-  const context = await browser.newContext({ userAgent: UA, viewport: { width: 1280, height: 800 }, locale: "ko-KR", timezoneId: "Asia/Seoul" });
+  const context = await browser.newContext({
+    userAgent: UA, viewport: { width: 1280, height: 800 },
+    locale: "ko-KR", timezoneId: "Asia/Seoul",
+  });
   await applyAntiDetection(context);
   const page = await context.newPage();
+
   try {
+    console.log("[naver] 로그인 페이지 진입...");
     await page.goto("https://nid.naver.com/nidlogin.login", { waitUntil: "domcontentloaded", timeout: 30000 });
     await page.waitForTimeout(800);
-    await page.evaluate((v) => { const el = document.querySelector("#id") as HTMLInputElement; if(el){el.focus();el.value=v;el.dispatchEvent(new Event("input",{bubbles:true}));} }, id);
+
+    await page.evaluate((v) => {
+      const el = document.querySelector("#id") as HTMLInputElement;
+      if (el) { el.focus(); el.value = v; el.dispatchEvent(new Event("input", { bubbles: true })); }
+    }, id);
     await page.waitForTimeout(400);
-    await page.evaluate((v) => { const el = document.querySelector("#pw") as HTMLInputElement; if(el){el.focus();el.value=v;el.dispatchEvent(new Event("input",{bubbles:true}));} }, pw);
+
+    await page.evaluate((v) => {
+      const el = document.querySelector("#pw") as HTMLInputElement;
+      if (el) { el.focus(); el.value = v; el.dispatchEvent(new Event("input", { bubbles: true })); }
+    }, pw);
     await page.waitForTimeout(400);
+
     await page.click(".btn_login").catch(() => page.click("button[type='submit']"));
-    console.log("[neighbor] 로그인 대기... (캡차 있으면 직접 풀어주세요)");
-    await page.waitForFunction(() => !location.href.includes("nid.naver.com/nidlogin"), { timeout: 90000 });
+
+    console.log("[naver] 로그인 대기 중... (캡차 있으면 직접 풀어주세요)");
+    try {
+      await page.waitForFunction(
+        () => !location.href.includes("nid.naver.com/nidlogin"),
+        { timeout: 90000 }
+      );
+    } catch {
+      throw new Error("로그인 시간 초과 (90초)");
+    }
+
     await page.waitForTimeout(2000);
     if (page.url().includes("nidlogin")) throw new Error("로그인 실패");
+    console.log("[naver] ✅ 로그인 성공");
 
     let blogId: string | null = null;
-    const INVALID = ["PostList","BlogHome","FeedList","neighborPostList","TagList","GoBlogWrite"];
+    const INVALID_IDS = ["PostList","BlogHome","FeedList","neighborPostList","TagList","GoBlogWrite"];
+
     try {
       await page.goto("https://blog.naver.com/GoBlogWrite.naver", { waitUntil: "domcontentloaded", timeout: 30000 });
       await page.waitForTimeout(3000);
       const m = page.url().match(/[?&]blogId=([a-zA-Z0-9_-]+)/);
-      if (m && m[1] && !INVALID.includes(m[1])) blogId = m[1];
+      if (m && m[1] && !INVALID_IDS.includes(m[1])) blogId = m[1];
     } catch {}
+
     if (!blogId) {
       try {
         await page.goto("https://m.blog.naver.com", { waitUntil: "domcontentloaded", timeout: 20000 });
         await page.waitForTimeout(2000);
         const m = page.url().match(/blog\.naver\.com\/([a-zA-Z0-9_-]+)/);
-        if (m && m[1] && !INVALID.includes(m[1])) blogId = m[1];
+        if (m && m[1] && !INVALID_IDS.includes(m[1])) blogId = m[1];
       } catch {}
     }
+
     if (!blogId) blogId = id;
+    console.log(`[naver] ✅ blogId: ${blogId}`);
 
     const cookies = await context.cookies();
-    fs.writeFileSync(sessionPath(accountId), JSON.stringify({ loginId: id, blogId, cookies, pw: Buffer.from(pw).toString("base64") }, null, 2));
+    // 비밀번호 저장 (자동 재로그인용, base64)
+    fs.writeFileSync(sessionPath(userId), JSON.stringify({
+      loginId: id,
+      blogId,
+      cookies,
+      pw: Buffer.from(pw).toString("base64"),
+    }, null, 2));
     await browser.close();
-    console.log(`[neighbor] ✅ 세션 저장 완료 blogId=${blogId}`);
     return { blogId };
   } catch (e) {
     await browser.close().catch(() => {});
@@ -89,234 +154,701 @@ export async function saveSession(accountId: string, id: string, pw: string): Pr
   }
 }
 
-/* ── 세션 불러오기 ── */
-async function loadSession(accountId: string) {
-  const sp = sessionPath(accountId);
-  if (!fs.existsSync(sp)) throw new Error("세션 없음 — 먼저 로그인하세요");
-  const saved = JSON.parse(fs.readFileSync(sp, "utf-8"));
+/* ── 자동 재로그인 (세션 만료 시) ── */
+export async function reloginNaverSilent(userId: string): Promise<boolean> {
+  const sp = sessionPath(userId);
+  if (!fs.existsSync(sp)) return false;
+
+  const session = JSON.parse(fs.readFileSync(sp, "utf-8"));
+  let loginId: string = session.loginId;
+  let pw: string | null = null;
+
+  // 1순위: 세션 파일에 저장된 pw
+  if (session.pw) {
+    try { pw = Buffer.from(session.pw, "base64").toString("utf-8"); } catch {}
+  }
+  // 2순위: Supabase publy_accounts에서 조회
+  if (!pw) {
+    const creds = await getAccountCredentials(userId, "naver").catch(() => null);
+    if (creds) { loginId = creds.id; pw = creds.pw; }
+  }
+  if (!pw) { console.log("[naver] 자동재로그인 실패: 비밀번호 없음"); return false; }
+
   const browser = await chromium.launch({ headless: true, args: LAUNCH_ARGS });
-  const context = await browser.newContext({ userAgent: UA, viewport: { width: 1280, height: 800 }, locale: "ko-KR", timezoneId: "Asia/Seoul" });
+  const context = await browser.newContext({
+    userAgent: UA, viewport: { width: 1280, height: 800 },
+    locale: "ko-KR", timezoneId: "Asia/Seoul",
+  });
   await applyAntiDetection(context);
-  await context.addCookies(saved.cookies);
-  return { context, browser, blogId: saved.blogId as string };
-}
-
-/* ── 키워드로 블로그 ID 수집 (네이버 블로그 검색 API) ── */
-export async function crawlBlogIds(params: {
-  accountId: string;
-  keywords: string[];
-  countPerKeyword: number;
-  onLog: (msg: string) => void;
-}): Promise<{ keyword: string; blogId: string }[]> {
-  const { keywords, countPerKeyword, onLog } = params;
-  const results: { keyword: string; blogId: string }[] = [];
-
-  // 관리자 블로그 검색 API 키 조회
-  const keys = await getAdminBlogSearchKeys();
-  if (!keys) {
-    onLog("❌ 관리자 설정탭에서 네이버 DataLab API 키를 먼저 등록해주세요");
-    return results;
-  }
-
-  const INVALID = ["PostView","PostList","BlogHome","FeedList","neighborPostList","TagList","GoBlogWrite","search","api"];
-
-  for (const kw of keywords) {
-    onLog(`🔍 [${kw}] 블로그 검색 API 수집 시작...`);
-    let collected = 0;
-    let start = 1;
-    const display = 100; // 한번에 최대 100개
-
-    while (collected < countPerKeyword) {
-      try {
-        const url = `https://openapi.naver.com/v1/search/blog?query=${encodeURIComponent(kw)}&display=${display}&start=${start}&sort=date`;
-        const res = await fetch(url, {
-          headers: {
-            "X-Naver-Client-Id": keys.clientId,
-            "X-Naver-Client-Secret": keys.clientSecret,
-          },
-        });
-
-        if (!res.ok) {
-          const errText = await res.text();
-          onLog(`❌ [${kw}] API 오류 ${res.status}: ${errText}`);
-          break;
-        }
-
-        const data = await res.json();
-        const items: any[] = data.items || [];
-
-        if (items.length === 0) {
-          onLog(`  ℹ️ [${kw}] 더 이상 결과 없음`);
-          break;
-        }
-
-        for (const item of items) {
-          if (collected >= countPerKeyword) break;
-
-          // bloggerlink: "https://blog.naver.com/blogId" 형식
-          const link: string = item.bloggerlink || item.link || "";
-          const m = link.match(/blog\.naver\.com\/([a-zA-Z0-9_-]+)/);
-          if (!m) continue;
-
-          const blogId = m[1];
-          if (INVALID.some(inv => blogId.toLowerCase().includes(inv.toLowerCase()))) continue;
-          if (blogId.length < 3) continue;
-          // 전체 중복 제거
-          if (results.some(r => r.blogId === blogId)) continue;
-
-          results.push({ keyword: kw, blogId });
-          collected++;
-          onLog(`  📌 [${kw}] ${blogId} (${collected}/${countPerKeyword})`);
-        }
-
-        if (collected >= countPerKeyword) break;
-        // 네이버 API 최대 start = 1000
-        start += display;
-        if (start > 1000) break;
-
-        await new Promise(r => setTimeout(r, 300));
-      } catch (e: any) {
-        onLog(`  ⚠️ [${kw}] 오류: ${e.message}`);
-        break;
-      }
-    }
-    onLog(`✅ [${kw}] 완료: ${collected}개 수집`);
-  }
-
-  return results;
-}
-
-/* ── 서로이웃 신청 ── */
-export interface NeighborResult {
-  keyword: string;
-  blogId: string;
-  status: "success" | "fail" | "skip" | "limit";
-  message: string;
-}
-
-export async function addNeighbors(params: {
-  accountId: string;
-  targets: { keyword: string; blogId: string }[];
-  message: string;
-  delayMin: number;
-  delayMax: number;
-  dailyLimit: number;
-  skipDone: boolean;
-  onLog: (msg: string) => void;
-  onResult: (r: NeighborResult) => void | Promise<void>;
-  onProgress: (done: number, fail: number) => void;
-  stopSignal: () => boolean;
-}): Promise<void> {
-  const { accountId, targets, message, delayMin, delayMax, dailyLimit, skipDone, onLog, onResult, onProgress, stopSignal } = params;
-
-  let doneSet = new Set<string>();
-  const dp = donePath(accountId);
-  if (skipDone && fs.existsSync(dp)) {
-    try { doneSet = new Set(JSON.parse(fs.readFileSync(dp, "utf-8"))); } catch {}
-  }
-
-  let done = 0;
-  let fail = 0;
-  const { context, browser } = await loadSession(accountId);
   const page = await context.newPage();
 
   try {
-    for (const target of targets) {
-      if (stopSignal()) { onLog("⛔ 작업 중단됨"); break; }
-      if (done >= dailyLimit) {
-        onLog(`🚫 일일 한도(${dailyLimit}개) 도달`);
-        onResult({ ...target, status: "limit", message: "일일 한도 도달" });
-        break;
-      }
-      if (skipDone && doneSet.has(target.blogId)) {
-        onLog(`⏭️ [${target.blogId}] 이미 완료 — 스킵`);
-        onResult({ ...target, status: "skip", message: "이미 완료" });
-        continue;
-      }
+    await page.goto("https://nid.naver.com/nidlogin.login", { waitUntil: "domcontentloaded", timeout: 20000 });
+    await page.waitForTimeout(600);
 
-      onLog(`👥 [${target.blogId}] 서로이웃 신청 중...`);
+    await page.evaluate((v) => {
+      const el = document.querySelector("#id") as HTMLInputElement;
+      if (el) { el.focus(); el.value = v; el.dispatchEvent(new Event("input", { bubbles: true })); }
+    }, loginId);
+    await page.waitForTimeout(300);
+    await page.evaluate((v) => {
+      const el = document.querySelector("#pw") as HTMLInputElement;
+      if (el) { el.focus(); el.value = v; el.dispatchEvent(new Event("input", { bubbles: true })); }
+    }, pw);
+    await page.waitForTimeout(300);
+    await page.click(".btn_login").catch(() => page.click("button[type='submit']"));
+
+    // 캡차가 나오면 실패 (헤드리스라 처리 불가)
+    await page.waitForFunction(
+      () => !location.href.includes("nid.naver.com/nidlogin"),
+      { timeout: 15000 }
+    );
+    await page.waitForTimeout(1500);
+
+    if (page.url().includes("nidlogin")) { await browser.close(); return false; }
+
+    const cookies = await context.cookies();
+    const oldSession = JSON.parse(fs.readFileSync(sp, "utf-8"));
+    fs.writeFileSync(sp, JSON.stringify({ ...oldSession, cookies }, null, 2));
+    await browser.close();
+    console.log("[naver] ✅ 자동 재로그인 성공");
+    return true;
+  } catch {
+    await browser.close().catch(() => {});
+    return false;
+  }
+}
+
+/* ── 카테고리 목록 조회 ── */
+export async function getNaverCategories(
+  userId: string
+): Promise<{ id: string; name: string }[]> {
+  const sp = sessionPath(userId);
+  if (!fs.existsSync(sp)) throw new Error("네이버 세션 없음");
+
+  const { blogId, cookies } = JSON.parse(fs.readFileSync(sp, "utf-8"));
+  const browser = await chromium.launch({ headless: true, args: LAUNCH_ARGS });
+  const context = await browser.newContext({
+    userAgent: UA, viewport: { width: 1280, height: 800 },
+    locale: "ko-KR", timezoneId: "Asia/Seoul",
+  });
+  await applyAntiDetection(context);
+  await context.addCookies(cookies);
+  const page = await context.newPage();
+
+  try {
+    await page.goto(
+      `https://blog.naver.com/PostWriteForm.naver?blogId=${blogId}`,
+      { waitUntil: "domcontentloaded", timeout: 30000 }
+    );
+    await page.waitForTimeout(4000);
+
+    const getFrame = () => {
+      const frames = page.frames();
+      return frames.find(f => f.name() === "mainFrame")
+        ?? frames.find(f => f.url().includes("blog.naver.com"))
+        ?? frames[1] ?? null;
+    };
+    let frame = getFrame();
+    for (let i = 0; i < 6; i++) {
+      if (frame) break;
+      await page.waitForTimeout(1000);
+      frame = getFrame();
+    }
+    if (!frame) { await browser.close(); return []; }
+
+    // 발행 패널 열기
+    const publishSels = [
+      "button.publish_btn__Y8C4q",
+      "button[class*='publish_btn']",
+      "button:has-text('발행')",
+    ];
+    for (const sel of publishSels) {
       try {
-        await page.goto(`https://blog.naver.com/${target.blogId}`, { waitUntil: "domcontentloaded", timeout: 20000 });
-        await page.waitForTimeout(1500);
+        const el = await frame.$(sel);
+        if (el) { await frame.click(sel, { timeout: 5000 }); break; }
+      } catch {}
+    }
+    await page.waitForTimeout(2500);
 
-        // 신청 버튼 탐색 (메인 + 모든 iframe)
-        const BTNS = ["a[onclick*='addNeighbor']","a[onclick*='neighbor']",".btn_buddy","a.btn_buddy","#followBtn",".followBtn","a[class*='mutual']","button[class*='neighbor']"];
+    // 카테고리 select 옵션 추출
+    const categories: { id: string; name: string }[] = [];
+    const catSels = [
+      "select.category_select__YWKIP",
+      "select[class*='category_select']",
+      "select[class*='category']",
+      ".publish_panel select",
+      "select[name='categoryNo']",
+    ];
+    for (const sel of catSels) {
+      try {
+        const opts = await frame.$$(sel + " option");
+        if (opts.length > 0) {
+          for (const opt of opts) {
+            const value = await opt.getAttribute("value");
+            const text = await opt.textContent();
+            if (value && value !== "0" && value !== "-1" && text?.trim()) {
+              categories.push({ id: value, name: text.trim() });
+            }
+          }
+          break;
+        }
+      } catch {}
+    }
+    await browser.close();
+    return categories;
+  } catch (e) {
+    await browser.close().catch(() => {});
+    console.error("[naver] 카테고리 조회 실패:", e);
+    return [];
+  }
+}
+
+/* ── 네이버 블로그 자동발행 ── */
+export async function publishNaver(params: {
+  userId: string;
+  title: string;
+  content: string;
+  tags: string[];
+  imageUrl?: string;
+  categoryId?: string;
+  visibility?: "public" | "neighbor" | "private";
+  scheduleTime?: string;
+  blocks?: Array<{type: string; content?: string; src?: string; alt?: string}>;
+}): Promise<string> {
+  const { userId, title, content, tags, imageUrl, categoryId, visibility = "public", scheduleTime, blocks } = params;
+  const sp = sessionPath(userId);
+  if (!fs.existsSync(sp)) throw new Error("네이버 세션 없음. 계정 재연결 필요");
+
+  const { blogId, cookies } = JSON.parse(fs.readFileSync(sp, "utf-8"));
+
+  const browser = await chromium.launch({ headless: false, args: LAUNCH_ARGS });
+  const context = await browser.newContext({
+    userAgent: UA, viewport: { width: 1280, height: 800 },
+    locale: "ko-KR", timezoneId: "Asia/Seoul",
+  });
+  await applyAntiDetection(context);
+  await context.addCookies(cookies);
+  const page = await context.newPage();
+
+  try {
+    const writeUrl = `https://blog.naver.com/PostWriteForm.naver?blogId=${blogId}`;
+    console.log(`[naver] 글쓰기 진입: ${writeUrl}`);
+    await page.goto(writeUrl, { waitUntil: "domcontentloaded", timeout: 60000 });
+
+    if (page.url().includes("nidlogin") || page.url().includes("login.naver")) {
+      fs.unlinkSync(sp);
+      throw new Error("네이버 세션 만료. 재연결 필요");
+    }
+
+    console.log("[naver] SE4 로드 대기...");
+    await page.waitForLoadState("networkidle", { timeout: 30000 }).catch(() => {});
+    await page.waitForTimeout(5000);
+
+    const getFrame = () => {
+      const frames = page.frames();
+      return frames.find(f => f.name() === "mainFrame")
+        ?? frames.find(f => f.url().includes("blog.naver.com"))
+        ?? frames[1] ?? null;
+    };
+
+    let frame = getFrame();
+    for (let i = 0; i < 10; i++) {
+      await page.waitForTimeout(1000);
+      frame = getFrame();
+      if (frame) break;
+    }
+    if (!frame) throw new Error("mainFrame을 찾을 수 없습니다");
+    console.log("[naver] mainFrame 획득!");
+
+    // 복원 팝업 처리
+    try {
+      await frame.click(".se-popup-button-cancel", { timeout: 3000 });
+      await page.waitForTimeout(1000);
+    } catch {}
+
+    // 도움말 닫기
+    try {
+      const helpVisible = await frame.isVisible(".se-help-panel-close-button");
+      if (helpVisible) await frame.click(".se-help-panel-close-button", { timeout: 2000 });
+    } catch {}
+
+    // SE4 로드 완료 대기
+    try {
+      await frame.waitForSelector(".se-section-documentTitle, .se-editor, .se-container", { timeout: 40000 });
+    } catch {}
+    await page.waitForTimeout(3000);
+
+    // ── 제목 입력 ──
+    console.log("[naver] 제목 입력...");
+    const titleSels = [
+      ".se-section-documentTitle .se-text-paragraph span[contenteditable='true']",
+      ".se-section-documentTitle [contenteditable='true']",
+      ".se-section-documentTitle .se-text-paragraph",
+    ];
+    let titleInserted = false;
+    for (const sel of titleSels) {
+      try {
+        const el = await frame.$(sel);
+        if (el) {
+          await frame.click(sel, { timeout: 5000 });
+          await page.waitForTimeout(400);
+          await frame.evaluate((t) => {
+            document.execCommand("selectAll", false);
+            document.execCommand("insertText", false, t);
+          }, title);
+          await page.waitForTimeout(600);
+          titleInserted = true;
+          break;
+        }
+      } catch {}
+    }
+    if (!titleInserted) {
+      await frame.click(".se-section-documentTitle", { timeout: 5000 });
+      await page.waitForTimeout(500);
+      await page.keyboard.type(title, { delay: 40 });
+    }
+
+    // ── 이미지 삽입 (썸네일) ──
+    if (imageUrl) {
+      console.log("[naver] 이미지 삽입 시도...");
+      const tmpFile = await downloadImageToTemp(imageUrl);
+      if (tmpFile) {
+        try {
+          // SE4 툴바 이미지 버튼
+          const imgBtnSels = [
+            "button[data-type='image']",
+            ".se-toolbar-item-imageUpload button",
+            "button[title='이미지']",
+            "button[class*='image']",
+          ];
+          let imgBtnClicked = false;
+          for (const sel of imgBtnSels) {
+            try {
+              const el = await frame.$(sel);
+              if (el) { await frame.click(sel, { timeout: 3000 }); imgBtnClicked = true; break; }
+            } catch {}
+          }
+          if (imgBtnClicked) {
+            await page.waitForTimeout(1500);
+            // 파일 업로드 input 찾기
+            const fileInput = await page.$("input[type='file']");
+            if (fileInput) {
+              await fileInput.setInputFiles(tmpFile);
+              await page.waitForTimeout(3000);
+              console.log("[naver] ✅ 이미지 업로드 완료");
+            }
+          }
+        } catch (e) {
+          console.log("[naver] 이미지 삽입 실패 (무시):", e);
+        } finally {
+          try { fs.unlinkSync(tmpFile); } catch {}
+        }
+      }
+    }
+
+    // ── 본문 + 이미지 블록 순서대로 입력 ──
+    console.log("[naver] 본문+이미지 블록 순서 발행 시작...");
+
+    // SE4 에디터 클릭 헬퍼
+    async function clickEditor() {
+      const bodySels = [
+        ".se-section-text .se-text-paragraph span[contenteditable='true']",
+        ".se-section-text [contenteditable='true']",
+        ".se-main-container .se-section:not(.se-section-documentTitle) [contenteditable='true']",
+        ".se-component-content [contenteditable='true']",
+      ];
+      for (const sel of bodySels) {
+        try {
+          const el = await frame.$(sel);
+          if (el) { await frame.click(sel, { timeout: 3000 }); return true; }
+        } catch {}
+      }
+      await frame.click(".se-main-container", { timeout: 3000 }).catch(() => {});
+      return false;
+    }
+
+    // 텍스트 블록 입력 헬퍼
+    async function insertText(text: string) {
+      const isHtml = /<[a-z][\s\S]*>/i.test(text);
+      const plain = isHtml
+        ? text
+            .replace(/<br\s*\/?>/gi, "\n")
+            .replace(/<\/p>/gi, "\n").replace(/<\/h[1-6]>/gi, "\n").replace(/<\/div>/gi, "\n")
+            .replace(/<hr[^>]*>/gi, "\n---\n")
+            .replace(/<figcaption[^>]*>([\s\S]*?)<\/figcaption>/gi, "[$1]")
+            .replace(/<[^>]+>/g, "")
+            .replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"')
+            .replace(/[\n]{3,}/g, "\n\n").trim()
+        : text;
+
+      await clickEditor();
+      await page.waitForTimeout(300);
+      const lines = plain.split("\n");
+      for (let i = 0; i < lines.length; i++) {
+        if (lines[i].trim()) {
+          await frame.evaluate((t) => { document.execCommand("insertText", false, t); }, lines[i]);
+        }
+        if (i < lines.length - 1) {
+          await page.keyboard.press("Enter");
+          await page.waitForTimeout(20);
+        }
+      }
+    }
+
+    // 이미지 업로드 헬퍼
+    async function uploadImage(imgUrl: string) {
+      const tmpFile = await downloadImageToTemp(imgUrl);
+      if (!tmpFile) { console.log("[naver] 이미지 다운로드 실패:", imgUrl.slice(0,60)); return; }
+      try {
+        // 에디터 포커스
+        await clickEditor();
+        await page.waitForTimeout(500);
+        await page.keyboard.press("End");
+        await page.keyboard.press("Enter");
+        await page.waitForTimeout(500);
+
+        // 이미지 버튼 클릭 - page 레벨과 frame 레벨 모두 시도
+        const imgBtnSels = [
+          "button[data-type='image']",
+          ".se-toolbar-item-imageUpload button",
+          "button[title='이미지']",
+          "button[aria-label='이미지']",
+          ".se-toolbar button[class*='image']",
+        ];
         let clicked = false;
 
-        for (const sel of BTNS) {
-          try { if (await page.$(sel)) { await page.click(sel); clicked = true; break; } } catch {}
-        }
-        if (!clicked) {
-          for (const frame of page.frames()) {
-            for (const sel of BTNS) {
-              try { if (await frame.$(sel)) { await frame.click(sel); clicked = true; break; } } catch {}
-            }
-            if (clicked) break;
-          }
-        }
-        if (!clicked) {
-          // 직접 URL 시도
-          await page.goto(`https://blog.naver.com/${target.blogId}?Redirect=AddBuddy`, { waitUntil: "domcontentloaded", timeout: 15000 });
-          await page.waitForTimeout(1000);
-          for (const sel of BTNS) {
-            try { if (await page.$(sel)) { await page.click(sel); clicked = true; break; } } catch {}
-          }
-        }
-        if (!clicked) throw new Error("신청 버튼을 찾을 수 없음");
-
-        await page.waitForTimeout(1500);
-
-        // 모달 처리
-        const MODALS = [".layer_buddy",".popup_buddy","#neighbor_popup","[class*='AddBuddy']","[class*='addBuddy']","[role='dialog']"];
-        for (const sel of MODALS) {
+        // frame에서 먼저 시도
+        for (const sel of imgBtnSels) {
           try {
-            await page.waitForSelector(sel, { timeout: 3000 });
-            // 서로이웃 라디오 선택
-            for (const ms of ["input[value='mutual']","input[id*='mutual']",".radio_mutual","input[type='radio']:last-child"]) {
-              try { await page.click(ms); break; } catch {}
-            }
-            await page.waitForTimeout(400);
-            // 메시지 입력
-            for (const ts of ["textarea[name='message']","textarea[id*='message']","textarea"]) {
-              try { const ta = await page.$(ts); if(ta){ await ta.fill(""); await ta.type(message, { delay: 30 }); break; } } catch {}
-            }
-            await page.waitForTimeout(400);
-            // 확인
-            for (const cs of ["button[type='submit']",".btn_confirm",".btn_ok","button:has-text('신청')","button:has-text('확인')"]) {
-              try { await page.click(cs); break; } catch {}
-            }
-            await page.waitForTimeout(1000);
+            await frame.waitForSelector(sel, { timeout: 1000 });
+            await frame.click(sel, { timeout: 2000 });
+            clicked = true;
+            console.log("[naver] 이미지 버튼 클릭:", sel);
             break;
           } catch {}
         }
 
-        const bodyText = await page.evaluate(() => document.body.innerText);
-        if (bodyText.includes("이웃수가 5") || bodyText.includes("한도") || bodyText.includes("초과")) {
-          onLog(`🚫 [${target.blogId}] 상대방 이웃 한도 초과`);
-          onResult({ ...target, status: "fail", message: "상대방 이웃 한도 초과" });
-          fail++;
-        } else if (bodyText.includes("이미 이웃") || bodyText.includes("already")) {
-          onLog(`⏭️ [${target.blogId}] 이미 이웃`);
-          onResult({ ...target, status: "skip", message: "이미 이웃" });
-        } else {
-          onLog(`✅ [${target.blogId}] 신청 완료!`);
-          onResult({ ...target, status: "success", message: "신청 완료" });
-          done++;
-          doneSet.add(target.blogId);
-          if (skipDone) fs.writeFileSync(dp, JSON.stringify([...doneSet], null, 2));
+        // page 전체에서도 시도
+        if (!clicked) {
+          for (const sel of imgBtnSels) {
+            try {
+              await page.waitForSelector(sel, { timeout: 1000 });
+              await page.click(sel, { timeout: 2000 });
+              clicked = true;
+              break;
+            } catch {}
+          }
         }
-        onProgress(done, fail);
-      } catch (e: any) {
-        onLog(`❌ [${target.blogId}] 오류: ${e.message}`);
-        onResult({ ...target, status: "fail", message: e.message });
-        fail++;
-        onProgress(done, fail);
-      }
 
-      if (!stopSignal()) await randomDelay(delayMin, delayMax);
+        if (clicked) {
+          await page.waitForTimeout(2000);
+          // file input 찾기 - page 전체에서
+          const fileInput = await page.$("input[type='file']") || await frame.$("input[type='file']");
+          if (fileInput) {
+            await fileInput.setInputFiles(tmpFile);
+            await page.waitForTimeout(4000);
+            console.log("[naver] ✅ 이미지 업로드 완료");
+          } else {
+            console.log("[naver] file input 못 찾음");
+          }
+        } else {
+          console.log("[naver] 이미지 버튼 못 찾음 - 이미지 스킵");
+        }
+      } catch (e) {
+        console.log("[naver] 이미지 업로드 실패:", e);
+      } finally {
+        try { fs.unlinkSync(tmpFile); } catch {}
+      }
+      await page.waitForTimeout(1000);
     }
+
+    // blocks가 있으면 블록 순서대로, 없으면 기존 방식
+    if (blocks && blocks.length > 0) {
+      for (const block of blocks) {
+        if (block.type === "text" && block.content) {
+          await insertText(block.content);
+          await page.waitForTimeout(200);
+        } else if (block.type === "image-pair" && (block as any).images?.length >= 2) {
+          // 2장 동시 업로드 → 한 줄 나란히 배치
+          const pairImages = (block as any).images as {src:string;alt:string}[];
+          const tmp1 = await downloadImageToTemp(pairImages[0].src);
+          const tmp2 = await downloadImageToTemp(pairImages[1].src);
+          if (tmp1 && tmp2) {
+            try {
+              await clickEditor();
+              await page.waitForTimeout(500);
+              await page.keyboard.press("End");
+              await page.keyboard.press("Enter");
+              await page.waitForTimeout(500);
+              const imgBtnSels = [
+                "button[data-type='image']",
+                ".se-toolbar-item-imageUpload button",
+                "button[title='이미지']",
+                "button[aria-label='이미지']",
+              ];
+              let clicked = false;
+              for (const sel of imgBtnSels) {
+                try { await frame.waitForSelector(sel,{timeout:1000}); await frame.click(sel,{timeout:2000}); clicked=true; break; } catch {}
+              }
+              if (!clicked) {
+                for (const sel of imgBtnSels) {
+                  try { await page.waitForSelector(sel,{timeout:1000}); await page.click(sel,{timeout:2000}); clicked=true; break; } catch {}
+                }
+              }
+              if (clicked) {
+                await page.waitForTimeout(2000);
+                const fileInput = await page.$("input[type='file']") || await frame.$("input[type='file']");
+                if (fileInput) {
+                  // 2장 동시 선택
+                  await fileInput.setInputFiles([tmp1, tmp2]);
+                  await page.waitForTimeout(5000);
+                  console.log("[naver] ✅ 이미지 페어 업로드 완료");
+                }
+              }
+            } catch(e) { console.log("[naver] 페어 이미지 업로드 실패:", e); }
+            finally {
+              try { fs.unlinkSync(tmp1); } catch {}
+              try { fs.unlinkSync(tmp2); } catch {}
+            }
+          }
+        } else if (block.type === "image" && block.src) {
+          // 썸네일(imageUrl)과 같은 이미지는 이미 상단에 올라가 있으므로 스킵
+          if (block.src !== imageUrl) {
+            await uploadImage(block.src);
+          }
+        }
+      }
+    } else {
+      // fallback: blocks 없으면 기존 텍스트 입력 방식
+      await insertText(content);
+    }
+
+    await page.waitForTimeout(1000);
+
+    // ── 발행 패널 열기 ──
+    console.log("[naver] 발행 패널 열기...");
+    const publishSels = [
+      "button.publish_btn__Y8C4q",
+      "button[class*='publish_btn']",
+      "button[data-testid='seOnePublishBtn']",
+      "button:has-text('발행')",
+    ];
+    let panelOpened = false;
+    for (const sel of publishSels) {
+      try {
+        const el = await frame.$(sel);
+        if (el) { await frame.click(sel, { timeout: 5000 }); panelOpened = true; break; }
+      } catch {}
+    }
+    if (!panelOpened) throw new Error("발행 버튼을 찾을 수 없습니다");
+    await page.waitForTimeout(2500);
+
+    // ── 태그 입력 ──
+    if (tags.length > 0) {
+      try {
+        const tagSel = "input.tag_input__YWKIP, input[class*='tag_input'], input[placeholder*='태그']";
+        const tagEl = await frame.$(tagSel);
+        if (tagEl) {
+          await frame.click(tagSel, { timeout: 5000 });
+          for (const tag of tags.slice(0, 30)) {
+            await frame.fill(tagSel, tag);
+            await page.keyboard.press("Enter");
+            await page.waitForTimeout(200);
+          }
+          console.log(`[naver] 태그 ${tags.length}개 입력`);
+        }
+      } catch (e) { console.log("[naver] 태그 입력 실패 (무시):", e); }
+    }
+
+    // ── 카테고리 선택 ──
+    if (categoryId) {
+      console.log(`[naver] 카테고리 선택: ${categoryId}`);
+      try {
+        const catSels = [
+          "select.category_select__YWKIP",
+          "select[class*='category_select']",
+          "select[class*='category']",
+          "select[name='categoryNo']",
+        ];
+        for (const sel of catSels) {
+          try {
+            const el = await frame.$(sel);
+            if (el) {
+              await frame.selectOption(sel, categoryId);
+              await page.waitForTimeout(500);
+              console.log("[naver] ✅ 카테고리 선택 완료");
+              break;
+            }
+          } catch {}
+        }
+      } catch (e) { console.log("[naver] 카테고리 선택 실패 (무시):", e); }
+    }
+
+    // ── 공개 설정 ──
+    console.log(`[naver] 공개 설정: ${visibility}`);
+    try {
+      if (visibility === "neighbor") {
+        // 이웃공개
+        const neighborSels = [
+          "button:has-text('이웃공개')",
+          "label:has-text('이웃공개')",
+          "input[value='1'] + label",
+          ".option_publish [class*='neighbor']",
+        ];
+        for (const sel of neighborSels) {
+          try {
+            const el = await frame.$(sel);
+            if (el) { await frame.click(sel, { timeout: 3000 }); break; }
+          } catch {}
+        }
+      } else if (visibility === "private") {
+        // 비공개
+        const privateSels = [
+          "button:has-text('비공개')",
+          "label:has-text('비공개')",
+          "input[value='2'] + label",
+          ".option_publish [class*='private']",
+        ];
+        for (const sel of privateSels) {
+          try {
+            const el = await frame.$(sel);
+            if (el) { await frame.click(sel, { timeout: 3000 }); break; }
+          } catch {}
+        }
+      }
+      // public은 기본값이므로 별도 클릭 불필요
+      await page.waitForTimeout(400);
+    } catch (e) { console.log("[naver] 공개 설정 실패 (무시):", e); }
+
+    // ── 예약 발행 ──
+    if (scheduleTime) {
+      console.log(`[naver] 예약 발행 설정: ${scheduleTime}`);
+      try {
+        // "예약" 옵션 선택
+        const scheduleSels = [
+          "label:has-text('예약')",
+          "button:has-text('예약')",
+          "input[value='schedule'] + label",
+          ".se-schedule-button",
+          "[class*='schedule']",
+        ];
+        let scheduleToggled = false;
+        for (const sel of scheduleSels) {
+          try {
+            const el = await frame.$(sel);
+            if (el) { await frame.click(sel, { timeout: 3000 }); scheduleToggled = true; break; }
+          } catch {}
+        }
+        if (scheduleToggled) {
+          await page.waitForTimeout(1000);
+          // 날짜/시간 입력
+          // scheduleTime format: "2025-03-15T10:00"
+          const dt = new Date(scheduleTime);
+          const year  = dt.getFullYear().toString();
+          const month = String(dt.getMonth() + 1).padStart(2, "0");
+          const day   = String(dt.getDate()).padStart(2, "0");
+          const hour  = String(dt.getHours()).padStart(2, "0");
+          const min   = String(dt.getMinutes()).padStart(2, "0");
+
+          // 날짜 입력
+          const dateSels = [
+            "input[class*='date']",
+            "input[name='publishDate']",
+            "input[placeholder*='날짜']",
+            "input[type='date']",
+          ];
+          for (const sel of dateSels) {
+            try {
+              const el = await frame.$(sel);
+              if (el) {
+                await frame.triple_click(sel).catch(() => frame.click(sel));
+                await frame.fill(sel, `${year}-${month}-${day}`);
+                await page.waitForTimeout(300);
+                break;
+              }
+            } catch {}
+          }
+          // 시간 입력
+          const timeSels = [
+            "input[class*='time']",
+            "input[name='publishTime']",
+            "input[placeholder*='시간']",
+            "input[type='time']",
+          ];
+          for (const sel of timeSels) {
+            try {
+              const el = await frame.$(sel);
+              if (el) {
+                await frame.triple_click(sel).catch(() => frame.click(sel));
+                await frame.fill(sel, `${hour}:${min}`);
+                await page.waitForTimeout(300);
+                break;
+              }
+            } catch {}
+          }
+          await page.waitForTimeout(500);
+          console.log(`[naver] ✅ 예약 날짜 설정: ${year}-${month}-${day} ${hour}:${min}`);
+        }
+      } catch (e) { console.log("[naver] 예약 발행 설정 실패 (무시):", e); }
+    }
+
+    // ── 최종 발행 또는 예약 확정 ──
+    console.log("[naver] 최종 발행...");
+    const finalLabel = scheduleTime ? "예약" : "발행";
+    const finalSels = scheduleTime
+      ? [
+          "button[class*='confirm']:has-text('예약')",
+          "button:has-text('예약 발행')",
+          "button:has-text('예약')",
+          "button.confirm_btn__xiHQQ",
+          "button[class*='confirm_btn']",
+        ]
+      : [
+          "button.confirm_btn__xiHQQ",
+          "button[class*='confirm_btn']",
+          "button:has-text('발행')",
+        ];
+
+    let finalDone = false;
+    for (const sel of finalSels) {
+      try {
+        const el = await frame.$(sel);
+        if (el) { await frame.click(sel, { timeout: 8000 }); finalDone = true; break; }
+      } catch {}
+    }
+    if (!finalDone) {
+      const btns = await frame.$$("button");
+      for (const btn of btns.reverse()) {
+        const txt = await btn.textContent();
+        if (txt?.includes(finalLabel)) { await btn.click(); finalDone = true; break; }
+      }
+    }
+
+    await page.waitForTimeout(scheduleTime ? 3000 : 5000);
+
+    // URL 추출
+    let postUrl = page.url();
+    const viewMatch = postUrl.match(/blog\.naver\.com\/[^/]+\/(\d+)/) || postUrl.match(/logNo=(\d+)/);
+    if (viewMatch) postUrl = `https://blog.naver.com/${blogId}/${viewMatch[1]}`;
+    if (scheduleTime) postUrl = `https://blog.naver.com/${blogId}`;
+
+    // 쿠키 갱신
+    const newCookies = await context.cookies();
+    const session = JSON.parse(fs.readFileSync(sp, "utf-8"));
+    session.cookies = newCookies;
+    fs.writeFileSync(sp, JSON.stringify(session, null, 2));
+
     await browser.close();
-  } catch (e) {
+    console.log(`[naver] ✅ ${scheduleTime ? "예약 완료" : "발행 완료"}: ${postUrl}`);
+    return postUrl;
+  } catch (e: any) {
+    console.error("[naver] ❌ 에러:", e.message);
+    try {
+      const debugDir = path.join(__dirname, "../debug");
+      if (!fs.existsSync(debugDir)) fs.mkdirSync(debugDir, { recursive: true });
+      await page.screenshot({ path: path.join(debugDir, `naver_error_${Date.now()}.png`), fullPage: true });
+    } catch {}
     await browser.close().catch(() => {});
     throw e;
   }
