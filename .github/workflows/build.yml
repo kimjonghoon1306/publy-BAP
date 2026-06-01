@@ -70,3 +70,223 @@ jobs:
           name: Publy-Windows
           path: release/*.exe
           retention-days: 30
+
+      - name: Upload to Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          name: Publy Latest
+          files: release/*.exe
+          prerelease: false
+          make_latest: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  build-mac:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install naver-bot dependencies
+        working-directory: naver-bot
+        run: npm install
+
+      - name: Bundle naver-bot (esbuild)
+        working-directory: naver-bot
+        run: npx esbuild src/server.ts --bundle --platform=node --target=node20 --outfile=dist/server.js --external:playwright
+
+      - name: Install neighbor-bot dependencies
+        working-directory: neighbor-bot
+        run: npm install
+
+      - name: Bundle neighbor-bot (esbuild)
+        working-directory: neighbor-bot
+        run: npx esbuild src/server.ts --bundle --platform=node --target=node20 --outfile=dist/server.js --external:playwright
+        env:
+          NODE_PATH: ../naver-bot/node_modules
+
+      - name: Install Playwright Chromium
+        working-directory: naver-bot
+        run: npx playwright install chromium
+
+      - name: Copy Chromium to bundle path (macOS)
+        run: |
+          CHROMIUM_SRC="$HOME/Library/Caches/ms-playwright"
+          if [ -d "$CHROMIUM_SRC" ]; then
+            echo "Chromium found at: $CHROMIUM_SRC"
+            mkdir -p chromium
+            for dir in "$CHROMIUM_SRC"/chromium-*; do
+              if [ -d "$dir" ]; then
+                cp -r "$dir" chromium/
+                echo "Copied: $(basename $dir)"
+              fi
+            done
+          else
+            echo "Chromium not found, skipping"
+          fi
+
+      - name: Install app dependencies
+        run: npm install
+
+      - name: Build Electron main process
+        run: npx tsc -p electron/tsconfig.json
+
+      - name: Build & Package
+        run: npm run electron:build:mac
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Publy-Mac
+          path: release/*.dmg
+          retention-days: 30
+
+      - name: Upload to Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          name: Publy Latest
+          files: release/*.dmg
+          prerelease: false
+          make_latest: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install naver-bot dependencies
+        working-directory: naver-bot
+        run: npm install
+
+      - name: Bundle naver-bot (esbuild)
+        working-directory: naver-bot
+        run: npx esbuild src/server.ts --bundle --platform=node --target=node20 --outfile=dist/server.js --external:playwright
+
+      - name: Install neighbor-bot dependencies
+        working-directory: neighbor-bot
+        run: npm install
+
+      - name: Bundle neighbor-bot (esbuild)
+        working-directory: neighbor-bot
+        run: npx esbuild src/server.ts --bundle --platform=node --target=node20 --outfile=dist/server.js --external:playwright
+        env:
+          NODE_PATH: ../naver-bot/node_modules
+
+      - name: Install Playwright Chromium
+        working-directory: naver-bot
+        run: npx playwright install chromium
+
+      - name: Copy Chromium to bundle path
+        shell: pwsh
+        run: |
+          $chromiumSrc = $env:LOCALAPPDATA + '\ms-playwright'
+          if (Test-Path $chromiumSrc) {
+            Write-Host "Chromium found at: $chromiumSrc"
+            New-Item -ItemType Directory -Force -Path 'chromium' | Out-Null
+            Get-ChildItem "$chromiumSrc" -Directory | Where-Object { $_.Name -like 'chromium-*' } | ForEach-Object {
+              Copy-Item -Recurse -Force $_.FullName 'chromium/'
+              Write-Host "Copied: $($_.Name)"
+            }
+          } else {
+            Write-Host "Chromium not found at $chromiumSrc, skipping"
+          }
+
+      - name: Install app dependencies
+        run: npm install
+
+      - name: Build Electron main process
+        run: npx tsc -p electron/tsconfig.json
+
+      - name: Build & Package
+        run: npm run electron:build:win
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Publy-Windows
+          path: release/*.exe
+          retention-days: 30
+
+  build-mac:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install naver-bot dependencies
+        working-directory: naver-bot
+        run: npm install
+
+      - name: Bundle naver-bot (esbuild)
+        working-directory: naver-bot
+        run: npx esbuild src/server.ts --bundle --platform=node --target=node20 --outfile=dist/server.js --external:playwright
+
+      - name: Install neighbor-bot dependencies
+        working-directory: neighbor-bot
+        run: npm install
+
+      - name: Bundle neighbor-bot (esbuild)
+        working-directory: neighbor-bot
+        run: npx esbuild src/server.ts --bundle --platform=node --target=node20 --outfile=dist/server.js --external:playwright
+        env:
+          NODE_PATH: ../naver-bot/node_modules
+
+      - name: Install Playwright Chromium
+        working-directory: naver-bot
+        run: npx playwright install chromium
+
+      - name: Copy Chromium to bundle path (macOS)
+        run: |
+          CHROMIUM_SRC="$HOME/Library/Caches/ms-playwright"
+          if [ -d "$CHROMIUM_SRC" ]; then
+            echo "Chromium found at: $CHROMIUM_SRC"
+            mkdir -p chromium
+            for dir in "$CHROMIUM_SRC"/chromium-*; do
+              if [ -d "$dir" ]; then
+                cp -r "$dir" chromium/
+                echo "Copied: $(basename $dir)"
+              fi
+            done
+          else
+            echo "Chromium not found, skipping"
+          fi
+
+      - name: Install app dependencies
+        run: npm install
+
+      - name: Build Electron main process
+        run: npx tsc -p electron/tsconfig.json
+
+      - name: Build & Package
+        run: npm run electron:build:mac
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Publy-Mac
+          path: release/*.dmg
+          retention-days: 30
