@@ -555,9 +555,9 @@ export async function publishNaver(params: {
 
       await clickEditor();
       await page.waitForTimeout(400);
-      // 커서를 맨 끝으로 이동 (중간 삽입 방지)
-      await page.keyboard.press("End");
-      await page.waitForTimeout(200);
+      // 문서 맨 끝으로 이동 - Mac Cmd+End (중간 삽입 완전 방지)
+      await page.keyboard.press("Meta+End");
+      await page.waitForTimeout(300);
       const lines = plain.split("\n");
       for (let i = 0; i < lines.length; i++) {
         if (lines[i].trim()) {
@@ -583,7 +583,7 @@ export async function publishNaver(params: {
       try {
         await clickEditor();
         await page.waitForTimeout(500);
-        await page.keyboard.press("End");
+        await page.keyboard.press("Meta+End");
         await page.keyboard.press("Enter");
         await page.waitForTimeout(500);
 
@@ -593,7 +593,7 @@ export async function publishNaver(params: {
           if (alt?.trim()) {
             try {
               await clickEditor();
-              await page.keyboard.press("End");
+              await page.keyboard.press("Meta+End");
               await page.keyboard.press("Enter");
               await insertText(alt.trim());
               console.log("[naver] ✅ 캡션 입력:", alt.trim());
@@ -625,7 +625,7 @@ export async function publishNaver(params: {
             try {
               await clickEditor();
               await page.waitForTimeout(500);
-              await page.keyboard.press("End");
+              await page.keyboard.press("Meta+End");
               await page.keyboard.press("Enter");
               await page.waitForTimeout(500);
               const ok = await uploadFileToEditor([tmp1, tmp2]);
@@ -635,7 +635,7 @@ export async function publishNaver(params: {
                 if (pairAlt?.trim()) {
                   try {
                     await clickEditor();
-                    await page.keyboard.press("End");
+                    await page.keyboard.press("Meta+End");
                     await page.keyboard.press("Enter");
                     await insertText(pairAlt.trim());
                   } catch {}
@@ -894,77 +894,31 @@ export function googleSessionExists(userId: string): boolean {
 }
 
 export async function saveGoogleSession(userId: string, email?: string, pw?: string): Promise<void> {
-  const browser = await chromium.launch({ headless: false, args: LAUNCH_ARGS, slowMo: 60 });
+  const browser = await chromium.launch({ headless: false, args: LAUNCH_ARGS });
   const context = await browser.newContext({
     userAgent: UA, viewport: { width: 1280, height: 800 }, locale: "ko-KR",
   });
   await applyAntiDetection(context);
   const page = await context.newPage();
   try {
-    // 1단계: labs.google/fx로 바로 이동
-    console.log("[google] ImageFX 로그인 시작...");
-    await page.goto("https://labs.google/fx/ko/tools/image-fx", { waitUntil: "domcontentloaded", timeout: 30000 });
+    console.log("[google] Chrome이 열립니다. Google로 직접 로그인해주세요.");
+    await page.goto("https://labs.google/fx/ko/tools/flow", { waitUntil: "domcontentloaded", timeout: 30000 });
+    await page.waitForTimeout(2000);
+
+    // 로그인 완료까지 대기 (최대 3분) - 로그인 버튼이 사라지면 완료
+    console.log("[google] 로그인 대기 중... (Chrome에서 직접 로그인 후 3분 이내 완료)");
+    await page.waitForFunction(
+      () => {
+        // 로그인 버튼이 없어지면 완료
+        const btn = document.querySelector("button");
+        const hasLoginBtn = btn && (btn.textContent?.includes("로그인") || btn.textContent?.includes("Sign in"));
+        return !hasLoginBtn || document.querySelector("[data-testid='user-avatar'], .user-menu, img[alt*='profile']");
+      },
+      { timeout: 180000 }
+    ).catch(() => {
+      console.log("[google] ⚠️ 로그인 대기 시간 초과 - 현재 상태로 저장");
+    });
     await page.waitForTimeout(3000);
-
-    // 2단계: 로그인 버튼 클릭 → 리다이렉트 또는 팝업 처리
-    const loginBtn = await page.$("button:has-text('로그인'), button:has-text('Sign in')").catch(() => null);
-    if (loginBtn) {
-      console.log("[google] 로그인 버튼 클릭...");
-
-      // 팝업과 리다이렉트 모두 대비
-      const popupPromise = context.waitForEvent("page", { timeout: 5000 }).catch(() => null);
-      await loginBtn.click();
-      await page.waitForTimeout(2000);
-
-      const popup = await popupPromise;
-      const targetPage = popup || page; // 팝업이 없으면 현재 페이지에서 처리
-
-      // Google 로그인 페이지 대기 (팝업 또는 리다이렉트)
-      try {
-        await targetPage.waitForSelector("input[type='email'], input[name='identifier']", { timeout: 15000 });
-      } catch {
-        // 이미 로그인된 경우 또는 다른 페이지
-        console.log("[google] 이메일 입력창 없음 - 이미 로그인 상태일 수 있음");
-      }
-
-      // 이메일 입력
-      if (email) {
-        const emailInput = await targetPage.$("input[type='email'], input[name='identifier']").catch(() => null);
-        if (emailInput) {
-          await emailInput.fill(email);
-          await targetPage.waitForTimeout(600);
-          await targetPage.keyboard.press("Enter");
-          await targetPage.waitForTimeout(3000);
-        }
-      }
-
-      // 비밀번호 입력
-      if (pw) {
-        try {
-          await targetPage.waitForSelector("input[type='password'], input[name='Passwd']", { timeout: 10000 });
-          const pwInput = await targetPage.$("input[type='password'], input[name='Passwd']").catch(() => null);
-          if (pwInput) {
-            await pwInput.fill(pw);
-            await targetPage.waitForTimeout(600);
-            await targetPage.keyboard.press("Enter");
-            await targetPage.waitForTimeout(3000);
-          }
-        } catch {}
-      }
-
-      // 2FA 또는 추가 인증 대기 (최대 90초)
-      console.log("[google] 로그인 완료 대기 중... (2FA 있으면 직접 처리, 90초)");
-      if (popup) {
-        await popup.waitForEvent("close", { timeout: 90000 }).catch(() => {});
-      } else {
-        // 리다이렉트 방식: labs.google/fx로 돌아올 때까지 대기
-        await page.waitForFunction(
-          () => location.hostname === "labs.google" && !location.href.includes("accounts.google"),
-          { timeout: 90000 }
-        ).catch(() => {});
-      }
-      await page.waitForTimeout(4000);
-    }
 
     // 3단계: 로그인 후 storageState 전체 저장 (쿠키 + localStorage + sessionStorage)
     const statePath = googleSessionPath(userId);
@@ -1121,7 +1075,7 @@ export async function generateFlowImages(params: {
         }
       }
       // ImageFX로 돌아가기
-      await page.goto("https://labs.google/fx/ko/tools/image-fx", { waitUntil: "domcontentloaded", timeout: 30000 });
+      await page.goto("https://labs.google/fx/ko/tools/flow", { waitUntil: "domcontentloaded", timeout: 30000 });
     }
     await page.waitForTimeout(3000);
   }
@@ -1262,7 +1216,7 @@ export async function generateFlowImages(params: {
 
   try {
     // 첫 페이지 로드
-    await page.goto("https://labs.google/fx/ko/tools/image-fx", {
+    await page.goto("https://labs.google/fx/ko/tools/flow", {
       waitUntil: "domcontentloaded", timeout: 30000,
     });
     await page.waitForTimeout(4000);
