@@ -317,7 +317,8 @@ export async function publishNaver(params: {
   scheduleTime?: string;
   blocks?: Array<{type: string; content?: string; src?: string; alt?: string}>;
 }): Promise<string> {
-  const { userId, title, content, tags, imageUrl, categoryId, visibility = "public", scheduleTime, blocks } = params;
+  const { userId, title: rawTitle, content, tags, imageUrl, categoryId, visibility = "public", scheduleTime, blocks } = params;
+  const title = rawTitle.slice(0, 100);
   const sp = sessionPath(userId);
   if (!fs.existsSync(sp)) throw new Error("네이버 세션 없음. 계정 재연결 필요");
 
@@ -394,10 +395,9 @@ export async function publishNaver(params: {
         if (el) {
           await frame.click(sel, { timeout: 5000 });
           await page.waitForTimeout(400);
-          await frame.evaluate((t) => {
-            document.execCommand("selectAll", false);
-            document.execCommand("insertText", false, t);
-          }, title);
+          await page.keyboard.type(title, { delay: 30 });
+          await page.waitForTimeout(400);
+          await page.keyboard.press("Tab");
           await page.waitForTimeout(600);
           titleInserted = true;
           break;
@@ -512,11 +512,15 @@ export async function publishNaver(params: {
       const lines = plain.split("\n");
       for (let i = 0; i < lines.length; i++) {
         if (lines[i].trim()) {
-          await frame.evaluate((t) => { document.execCommand("insertText", false, t); }, lines[i]);
+          await page.keyboard.type(lines[i], { delay: 30 });
         }
         if (i < lines.length - 1) {
           await page.keyboard.press("Enter");
-          await page.waitForTimeout(20);
+          await page.waitForTimeout(120);
+          if (!lines[i].trim() && i + 1 < lines.length && lines[i + 1].trim()) {
+            await page.keyboard.press("Enter");
+            await page.waitForTimeout(80);
+          }
         }
       }
     }
