@@ -310,11 +310,29 @@ export async function getNaverCategories(
   }
 }
 
+/* ── 마커 및 영문 섞임 텍스트 정리 ── */
+function cleanContent(text: string): string {
+  return text
+    .replace(/\[FAQ시작\][\s\S]*?\[FAQ끝\]/g, "")
+    .replace(/\[참고자료시작\][\s\S]*?\[참고자료끝\]/g, "")
+    .replace(/\[관련글시작\][\s\S]*?\[관련글끝\]/g, "")
+    .replace(/\[[^\]]*\]/g, "")        // 나머지 [마커] 제거
+    // 자주 쓰이는 영문 → 한국어 표기 변환
+    .replace(/\bQ(\d+)\s*:/g, "Q$1.")   // Q1: → Q1.
+    .replace(/\bA(\d+)\s*:/g, "A$1.")   // A1: → A1.
+    .replace(/\bFAQ\b/g, "자주 묻는 질문")
+    .replace(/\bTIP\b/gi, "팁")
+    .replace(/\bNOTE\b/gi, "참고")
+    .replace(/\n{3,}/g, "\n\n")        // 3줄 이상 공백 → 2줄로
+    .trim();
+}
+
 /* ── 네이버 블로그 자동발행 ── */
 export async function publishNaver(params: {
   userId: string;
   title: string;
   content: string;
+  pubScope?: "body" | "faq" | "full";
   tags: string[];
   imageUrl?: string;
   categoryId?: string;
@@ -322,8 +340,19 @@ export async function publishNaver(params: {
   scheduleTime?: string;
   blocks?: Array<{type: string; content?: string; src?: string; alt?: string}>;
 }): Promise<string> {
-  const { userId, title: rawTitle, content, tags, imageUrl, categoryId, visibility = "public", scheduleTime, blocks } = params;
+  const { userId, title: rawTitle, content, pubScope = "full", tags, imageUrl, categoryId, visibility = "public", scheduleTime, blocks } = params;
   const title = rawTitle.replace(/\n/g, " ").trim().slice(0, 20);
+
+  // pubScope에 따라 블록 필터링 + 마커 제거
+  const processedBlocks = (blocks || []).map(b => {
+    if (b.type !== "text") return b;
+    const text = b.content || "";
+    if (pubScope === "body" && /\[FAQ시작\]|\[참고자료시작\]|\[관련글시작\]/.test(text)) return null;
+    if (pubScope === "faq" && /\[참고자료시작\]|\[관련글시작\]/.test(text)) return null;
+    return { ...b, content: cleanContent(text) };
+  }).filter(Boolean) as typeof blocks;
+
+  const cleanedContent = cleanContent(content);
   const sp = sessionPath(userId);
   if (!fs.existsSync(sp)) throw new Error("네이버 세션 없음. 계정 재연결 필요");
 
@@ -534,7 +563,8 @@ export async function publishNaver(params: {
         if (i < lines.length - 1) {
           await page.keyboard.press("Enter");
           await page.waitForTimeout(120);
-          if (!lines[i].trim() && i + 1 < lines.length && lines[i + 1].trim()) {
+          // 위아래 여백: 내용이 있는 줄 다음에 항상 Enter 한 번 더 (단락 여백)
+          if (lines[i].trim()) {
             await page.keyboard.press("Enter");
             await page.waitForTimeout(80);
           }
@@ -576,9 +606,9 @@ export async function publishNaver(params: {
       await page.waitForTimeout(1000);
     }
 
-    // blocks가 있으면 블록 순서대로, 없으면 기존 방식
-    if (blocks && blocks.length > 0) {
-      for (const block of blocks) {
+    // processedBlocks(필터링+마커제거) 사용, 없으면 cleanedContent
+    if (processedBlocks && processedBlocks.length > 0) {
+      for (const block of processedBlocks) {
         if (block.type === "text" && block.content) {
           await insertText(block.content);
           await page.waitForTimeout(200);
@@ -620,8 +650,8 @@ export async function publishNaver(params: {
         }
       }
     } else {
-      // fallback: blocks 없으면 기존 텍스트 입력 방식
-      await insertText(content);
+      // fallback: blocks 없으면 cleanedContent 입력
+      await insertText(cleanedContent);
     }
 
     await page.waitForTimeout(1000);

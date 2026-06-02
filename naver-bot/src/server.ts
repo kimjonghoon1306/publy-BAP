@@ -109,7 +109,7 @@ app.get("/api/session-status/:userId", (req, res) => {
 
 /* ── 직접 발행 (앱에서 즉시 발행) ── */
 app.post("/api/publish-full", async (req, res) => {
-  const { userId, platform, title, content, tags = [], imageUrl, categoryId, visibility, scheduleTime, blocks,
+  const { userId, platform, title, content, pubScope = "full", tags = [], imageUrl, categoryId, visibility, scheduleTime, blocks,
     useFlow, flowImgCount, flowPrompts, flowCaptions } = req.body;
   if (!userId || !platform || !title || !content) {
     return res.status(400).json({ error: "userId, platform, title, content 필요" });
@@ -168,7 +168,7 @@ app.post("/api/publish-full", async (req, res) => {
 
     let postUrl = "";
     if (platform === "naver") {
-      postUrl = await publishNaver({ userId, title, content, tags, imageUrl, categoryId, visibility, scheduleTime, blocks: finalBlocks });
+      postUrl = await publishNaver({ userId, title, content, pubScope, tags, imageUrl, categoryId, visibility, scheduleTime, blocks: finalBlocks });
     } else if (platform === "tistory") {
       postUrl = await publishTistory({ userId, title, content, tags, categoryId, visibility });
     } else {

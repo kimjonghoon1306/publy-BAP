@@ -1763,6 +1763,7 @@ POST3: (제목)|(이유)
     const tags=hashtags.map((t:string)=>t.replace("#","")).filter(Boolean);
     const publishBody = {
       userId:ADM_UID, platform, title:pubTitle, content,
+      pubScope,
       tags,
       imageUrl:thumbnail||getActiveImages()[0]||undefined,
       categoryId:category||undefined,
