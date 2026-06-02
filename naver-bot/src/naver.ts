@@ -383,32 +383,41 @@ export async function publishNaver(params: {
 
     // ── 제목 입력 ──
     console.log("[naver] 제목 입력...");
-    const titleSels = [
-      ".se-section-documentTitle .se-text-paragraph span[contenteditable='true']",
-      ".se-section-documentTitle [contenteditable='true']",
-      ".se-section-documentTitle .se-text-paragraph",
-    ];
-    let titleInserted = false;
-    for (const sel of titleSels) {
-      try {
-        const el = await frame.$(sel);
-        if (el) {
-          await frame.click(sel, { timeout: 5000 });
-          await page.waitForTimeout(400);
-          await page.keyboard.type(title, { delay: 30 });
-          await page.waitForTimeout(400);
-          await page.keyboard.press("Tab");
-          await page.waitForTimeout(600);
-          titleInserted = true;
-          break;
-        }
-      } catch {}
-    }
-    if (!titleInserted) {
+    // 제목 클릭 후 입력
+    try {
       await frame.click(".se-section-documentTitle", { timeout: 5000 });
-      await page.waitForTimeout(500);
-      await page.keyboard.type(title, { delay: 40 });
+    } catch {
+      await frame.click(".se-main-container", { timeout: 3000 }).catch(() => {});
     }
+    await page.waitForTimeout(500);
+    await page.keyboard.type(title, { delay: 30 });
+    await page.waitForTimeout(500);
+
+    // 본문으로 이동: Tab → 실패시 본문 영역 직접 클릭
+    await page.keyboard.press("Tab");
+    await page.waitForTimeout(800);
+
+    // Tab이 안 됐을 경우 대비: 본문 영역 직접 클릭
+    const bodyMoved = await frame.evaluate(() => {
+      const el = document.activeElement;
+      const title = document.querySelector(".se-section-documentTitle");
+      return !title?.contains(el);
+    }).catch(() => false);
+
+    if (!bodyMoved) {
+      const bodySels = [
+        ".se-main-container .se-section:not(.se-section-documentTitle) .se-text-paragraph",
+        ".se-main-container .se-section:not(.se-section-documentTitle)",
+        ".se-main-container",
+      ];
+      for (const sel of bodySels) {
+        try {
+          const el = await frame.$(sel);
+          if (el) { await frame.click(sel, { timeout: 3000 }); break; }
+        } catch {}
+      }
+    }
+    await page.waitForTimeout(500);
 
     // ── 파일 업로드 헬퍼 (OS 파일 피커 다이얼로그 차단) ──
     const IMG_BTN_SELS = [
@@ -887,11 +896,12 @@ export async function saveGoogleSession(userId: string, email?: string, pw?: str
       await page.waitForTimeout(2000);
     }
 
-    // 4단계: 쿠키 저장
+    // 4단계: 쿠키 + 이메일 + 비밀번호 저장 (Flow 자동 로그인용)
     const cookies = await context.cookies();
     fs.writeFileSync(googleSessionPath(userId), JSON.stringify({
       cookies,
       email: email || "",
+      pw: pw ? Buffer.from(pw).toString("base64") : "",
     }, null, 2));
     await browser.close();
     console.log("[google] ✅ Google Flow 세션 저장 완료");
@@ -926,135 +936,256 @@ export async function generateFlowImages(params: {
 
   const context = await browser.newContext({
     userAgent: UA,
-    viewport: { width: 1280, height: 800 },
+    viewport: { width: 1280, height: 900 },
     locale: "ko-KR",
     acceptDownloads: true,
   });
 
-  await context.addInitScript(`
-    Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
-  `);
+  await applyAntiDetection(context);
   await context.addCookies(googleSession.cookies);
-
   const page = await context.newPage();
 
-  try {
-    for (let i = 0; i < prompts.length; i++) {
-      const prompt = prompts[i];
-      const caption = captions[i] || "";
-      log(`🎨 [Flow] ${i + 1}/${prompts.length} 이미지 생성 중...`);
+  // ── 헬퍼: Google 로그인 처리 ──
+  async function handleGoogleLogin() {
+    const email = googleSession.email || "";
+    const pw = googleSession.pw ? Buffer.from(googleSession.pw, "base64").toString("utf-8") : "";
 
-      await page.goto("https://labs.google/fx/ko/tools/image-fx", {
-        waitUntil: "domcontentloaded",
-        timeout: 30000,
-      });
-      await page.waitForTimeout(3000);
-
-      // 로그인 확인
-      const url = page.url();
-      if (url.includes("accounts.google.com")) {
-        throw new Error("Google 로그인이 필요합니다. 크롬에서 Google에 로그인해주세요.");
-      }
-
-      // 프롬프트 입력창 찾기
-      const promptSelectors = [
-        "textarea[placeholder*='image']",
-        "textarea[placeholder*='이미지']",
-        "textarea[aria-label*='prompt']",
-        ".prompt-input textarea",
-        "textarea",
-      ];
-
-      let promptInput = null;
-      for (const sel of promptSelectors) {
-        try {
-          await page.waitForSelector(sel, { timeout: 5000 });
-          promptInput = await page.$(sel);
-          if (promptInput) break;
-        } catch {}
-      }
-
-      if (!promptInput) {
-        log(`⚠️ [Flow] 프롬프트 입력창 못 찾음 - 스킵`);
-        continue;
-      }
-
-      // 프롬프트 입력
-      await promptInput.click();
-      await page.waitForTimeout(500);
-      await page.keyboard.press("Meta+a");
-      await page.keyboard.press("Backspace");
-      await promptInput.type(prompt, { delay: 20 });
-      await page.waitForTimeout(500);
-
-      log(`  📝 프롬프트: ${prompt.slice(0, 60)}...`);
-
-      // 생성 버튼 클릭
-      const generateBtns = [
-        "button[aria-label*='generate']",
-        "button[aria-label*='생성']",
-        "button:has-text('Create')",
-        "button:has-text('Generate')",
-        "button[type='submit']",
-      ];
-
-      for (const sel of generateBtns) {
-        try {
-          const btn = await page.$(sel);
-          if (btn) { await btn.click(); break; }
-        } catch {}
-      }
-
-      // 이미지 생성 대기 (최대 30초)
-      log(`  ⏳ 이미지 생성 대기...`);
-      await page.waitForTimeout(15000);
-
-      // 생성된 이미지 다운로드
-      const imgSelectors = [
-        ".generated-image img",
-        "[data-testid='generated-image'] img",
-        ".image-result img",
-        ".output-image img",
-        "img[alt*='generated']",
-      ];
-
-      let downloaded = false;
-      for (const sel of imgSelectors) {
-        try {
-          const imgs = await page.$$(sel);
-          if (imgs.length > 0) {
-            // 첫 번째 이미지 다운로드
-            const downloadBtn = await page.$("[aria-label*='download'], button[title*='download'], .download-btn");
-            if (downloadBtn) {
-              const [download] = await Promise.all([
-                page.waitForEvent("download", { timeout: 15000 }),
-                downloadBtn.click(),
-              ]);
-              const filePath = path.join(DOWNLOAD_DIR, `flow_${Date.now()}_${i}.png`);
-              await download.saveAs(filePath);
-              results.push({ src: filePath, alt: caption });
-              log(`  ✅ [Flow] 이미지 ${i + 1} 다운로드 완료`);
-              downloaded = true;
-              break;
-            } else {
-              // 다운로드 버튼 없으면 이미지 URL로 직접 저장
-              const src = await imgs[0].getAttribute("src");
-              if (src && src.startsWith("http")) {
-                results.push({ src, alt: caption });
-                log(`  ✅ [Flow] 이미지 ${i + 1} URL 저장`);
-                downloaded = true;
-                break;
+    // "Google 계정으로 로그인" 버튼 클릭
+    const loginBtnSels = [
+      "button:has-text('Google 계정으로 로그인')",
+      "button:has-text('Sign in with Google')",
+      "a:has-text('Google 계정으로 로그인')",
+      "[aria-label*='Sign in']",
+    ];
+    let clicked = false;
+    for (const sel of loginBtnSels) {
+      try {
+        const btn = await page.$(sel);
+        if (btn) {
+          log("[Flow] Google 로그인 버튼 클릭...");
+          // 팝업 대기
+          const popupPromise = page.context().waitForEvent("page", { timeout: 8000 }).catch(() => null);
+          await btn.click();
+          await page.waitForTimeout(2000);
+          const popup = await popupPromise;
+          if (popup) {
+            await popup.waitForLoadState("domcontentloaded");
+            await popup.waitForTimeout(1500);
+            if (email) {
+              const emailInput = await popup.$("input[type='email'], input[name='identifier']").catch(() => null);
+              if (emailInput) {
+                await emailInput.fill(email);
+                await popup.keyboard.press("Enter");
+                await popup.waitForTimeout(2500);
               }
             }
+            if (pw) {
+              const pwInput = await popup.$("input[type='password'], input[name='Passwd']").catch(() => null);
+              if (pwInput) {
+                await pwInput.fill(pw);
+                await popup.keyboard.press("Enter");
+                await popup.waitForTimeout(3000);
+              }
+            }
+            // 팝업 닫힐 때까지 대기
+            await popup.waitForEvent("close", { timeout: 60000 }).catch(() => {});
           }
-        } catch {}
+          clicked = true;
+          break;
+        }
+      } catch {}
+    }
+    if (!clicked && email && pw) {
+      // 팝업 없이 현재 페이지에서 로그인
+      await page.goto("https://accounts.google.com/signin", { waitUntil: "domcontentloaded", timeout: 20000 });
+      await page.waitForTimeout(1500);
+      const emailInput = await page.$("input[type='email'], input[name='identifier']").catch(() => null);
+      if (emailInput) {
+        await emailInput.fill(email);
+        await page.keyboard.press("Enter");
+        await page.waitForTimeout(2500);
+        const pwInput = await page.$("input[type='password'], input[name='Passwd']").catch(() => null);
+        if (pwInput) {
+          await pwInput.fill(pw);
+          await page.keyboard.press("Enter");
+          await page.waitForTimeout(3000);
+        }
+      }
+      // ImageFX로 돌아가기
+      await page.goto("https://labs.google/fx/ko/tools/image-fx", { waitUntil: "domcontentloaded", timeout: 30000 });
+    }
+    await page.waitForTimeout(3000);
+  }
+
+  // ── 헬퍼: 프롬프트 입력 ──
+  async function enterPrompt(prompt: string): Promise<boolean> {
+    // 1. textarea 찾기 (여러 방법 시도)
+    let input: any = null;
+
+    // 방법1: 일반 textarea
+    try {
+      await page.waitForSelector("textarea", { timeout: 6000 });
+      input = await page.$("textarea");
+    } catch {}
+
+    // 방법2: contenteditable
+    if (!input) {
+      try {
+        input = await page.$("[contenteditable='true']:not([role='combobox'])");
+      } catch {}
+    }
+
+    // 방법3: 입력 가능한 div
+    if (!input) {
+      try {
+        input = await page.$("div[role='textbox']");
+      } catch {}
+    }
+
+    if (!input) {
+      log("⚠️ [Flow] 프롬프트 입력창을 찾을 수 없음");
+      return false;
+    }
+
+    await input.click({ force: true });
+    await page.waitForTimeout(500);
+    await page.keyboard.press("Control+a");
+    await page.waitForTimeout(200);
+    await page.keyboard.press("Backspace");
+    await page.waitForTimeout(200);
+    await page.keyboard.type(prompt, { delay: 25 });
+    await page.waitForTimeout(500);
+    log(`  📝 프롬프트 입력: ${prompt.slice(0, 50)}...`);
+    return true;
+  }
+
+  // ── 헬퍼: 생성 버튼 클릭 ──
+  async function clickGenerate(): Promise<boolean> {
+    // Enter 키 우선 (대부분의 AI 이미지 사이트에서 작동)
+    await page.keyboard.press("Enter");
+    await page.waitForTimeout(500);
+
+    // 버튼 클릭 시도
+    const btns = [
+      "button[aria-label*='generate' i]",
+      "button[aria-label*='create' i]",
+      "button[aria-label*='생성']",
+      "button[aria-label*='만들기']",
+      "button:has-text('Create')",
+      "button:has-text('Generate')",
+      "button:has-text('만들기')",
+      "button:has-text('생성')",
+    ];
+    for (const sel of btns) {
+      try {
+        const btn = await page.$(sel);
+        if (btn) {
+          const visible = await btn.isVisible();
+          if (visible) { await btn.click(); return true; }
+        }
+      } catch {}
+    }
+    return true; // Enter로 이미 시도했음
+  }
+
+  // ── 헬퍼: 생성된 이미지 저장 ──
+  async function saveGeneratedImage(idx: number, caption: string): Promise<boolean> {
+    log("  ⏳ 이미지 생성 대기 (최대 30초)...");
+    await page.waitForTimeout(25000);
+
+    // 생성된 이미지 찾기 - 다양한 방법
+    const imgSrcs: string[] = await page.evaluate(() => {
+      const imgs = Array.from(document.querySelectorAll("img"));
+      return imgs
+        .map(img => img.src)
+        .filter(src =>
+          src && src.length > 100 &&
+          (src.includes("blob:") || src.includes("generativelanguage") ||
+           src.includes("aidemos") || src.includes("googleusercontent") ||
+           src.includes("data:image"))
+        );
+    });
+
+    if (imgSrcs.length > 0) {
+      const src = imgSrcs[0];
+      if (src.startsWith("blob:")) {
+        // blob URL → base64 변환 후 파일 저장
+        const base64 = await page.evaluate(async (blobUrl) => {
+          const res = await fetch(blobUrl);
+          const blob = await res.blob();
+          return new Promise<string>((resolve) => {
+            const reader = new FileReader();
+            reader.onloadend = () => resolve(reader.result as string);
+            reader.readAsDataURL(blob);
+          });
+        }, src);
+        if (base64) {
+          const filePath = path.join(DOWNLOAD_DIR, `flow_${Date.now()}_${idx}.png`);
+          const base64Data = base64.replace(/^data:image\/\w+;base64,/, "");
+          fs.writeFileSync(filePath, Buffer.from(base64Data, "base64"));
+          results.push({ src: filePath, alt: caption });
+          log(`  ✅ [Flow] 이미지 ${idx + 1} 저장 완료`);
+          return true;
+        }
+      } else if (src.startsWith("http")) {
+        results.push({ src, alt: caption });
+        log(`  ✅ [Flow] 이미지 ${idx + 1} URL 저장`);
+        return true;
+      }
+    }
+
+    // 다운로드 버튼 시도
+    try {
+      const [download] = await Promise.all([
+        page.waitForEvent("download", { timeout: 5000 }),
+        page.click("[aria-label*='download' i], [aria-label*='다운로드'], button[title*='download' i]"),
+      ]);
+      const filePath = path.join(DOWNLOAD_DIR, `flow_${Date.now()}_${idx}.png`);
+      await download.saveAs(filePath);
+      results.push({ src: filePath, alt: caption });
+      log(`  ✅ [Flow] 이미지 ${idx + 1} 다운로드 완료`);
+      return true;
+    } catch {}
+
+    log(`  ⚠️ [Flow] 이미지 ${idx + 1} 저장 실패`);
+    return false;
+  }
+
+  try {
+    // 첫 페이지 로드
+    await page.goto("https://labs.google/fx/ko/tools/image-fx", {
+      waitUntil: "domcontentloaded", timeout: 30000,
+    });
+    await page.waitForTimeout(4000);
+
+    // 로그인 버튼 있으면 처리
+    const needLogin = await page.$("button:has-text('Google 계정으로 로그인'), button:has-text('Sign in')").catch(() => null);
+    if (needLogin || page.url().includes("accounts.google.com")) {
+      await handleGoogleLogin();
+      await page.waitForTimeout(3000);
+    }
+
+    // 각 프롬프트별 이미지 생성
+    for (let i = 0; i < prompts.length; i++) {
+      log(`🎨 [Flow] ${i + 1}/${prompts.length} 이미지 생성 중...`);
+
+      // 첫 번째 아니면 페이지 새로고침
+      if (i > 0) {
+        await page.reload({ waitUntil: "domcontentloaded", timeout: 20000 });
+        await page.waitForTimeout(3000);
       }
 
-      if (!downloaded) {
-        log(`  ⚠️ [Flow] 이미지 ${i + 1} 다운로드 실패 - 스킵`);
+      // 로그인 상태 재확인
+      if (page.url().includes("accounts.google.com")) {
+        await handleGoogleLogin();
+        await page.waitForTimeout(3000);
       }
 
-      await page.waitForTimeout(2000);
+      const entered = await enterPrompt(prompts[i]);
+      if (!entered) continue;
+
+      await clickGenerate();
+      await saveGeneratedImage(i, captions[i] || "");
     }
 
     await browser.close();

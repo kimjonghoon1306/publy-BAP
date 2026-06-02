@@ -1743,10 +1743,8 @@ POST3: (제목)|(이유)
   function getActiveImages():string[]{return imgSource==="upload"?uploadedImages:generatedImages;}
 
   function buildPublishContent():string{
-    // tarry 방식: 블록 기반 HTML 빌드
-    if(blocks.some(b=>b.type==="text"&&(b as TextBlock).content.trim()))return buildHtmlContent();
     if(!genContent)return "";
-    // pubScope 기준으로 발행 범위 결정
+    // pubScope 필터 먼저 적용 (블록보다 우선)
     if(pubScope==="body"){
       let t=genContent;
       t=t.replace(/\[FAQ시작\][\s\S]*?\[FAQ끝\]/g,"").replace(/\[참고자료시작\][\s\S]*?\[참고자료끝\]/g,"").replace(/\[관련글시작\][\s\S]*?\[관련글끝\]/g,"").trim();
@@ -1757,6 +1755,8 @@ POST3: (제목)|(이유)
       t=t.replace(/\[참고자료시작\][\s\S]*?\[참고자료끝\]/g,"").replace(/\[관련글시작\][\s\S]*?\[관련글끝\]/g,"").trim();
       return t;
     }
+    // full: 블록 기반 HTML 빌드
+    if(blocks.some(b=>b.type==="text"&&(b as TextBlock).content.trim()))return buildHtmlContent();
     return genContent;
   }
 
