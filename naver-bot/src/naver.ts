@@ -391,33 +391,29 @@ export async function publishNaver(params: {
     }
     await page.waitForTimeout(500);
     await page.keyboard.type(title, { delay: 30 });
-    await page.waitForTimeout(500);
+    await page.waitForTimeout(600);
 
-    // 본문으로 이동: Tab → 실패시 본문 영역 직접 클릭
-    await page.keyboard.press("Tab");
-    await page.waitForTimeout(800);
-
-    // Tab이 안 됐을 경우 대비: 본문 영역 직접 클릭
-    const bodyMoved = await frame.evaluate(() => {
-      const el = document.activeElement;
-      const title = document.querySelector(".se-section-documentTitle");
-      return !title?.contains(el);
-    }).catch(() => false);
-
-    if (!bodyMoved) {
-      const bodySels = [
-        ".se-main-container .se-section:not(.se-section-documentTitle) .se-text-paragraph",
-        ".se-main-container .se-section:not(.se-section-documentTitle)",
-        ".se-main-container",
-      ];
-      for (const sel of bodySels) {
-        try {
-          const el = await frame.$(sel);
-          if (el) { await frame.click(sel, { timeout: 3000 }); break; }
-        } catch {}
+    // 본문으로 이동: 제목 섹션 아래를 마우스로 직접 클릭 (가장 신뢰할 수 있는 방법)
+    console.log("[naver] 본문 영역으로 이동...");
+    const titleEl = await frame.$(".se-section-documentTitle").catch(() => null);
+    if (titleEl) {
+      const box = await titleEl.boundingBox().catch(() => null);
+      if (box) {
+        // 제목 섹션 아래쪽 90px 지점 클릭 → 본문 영역
+        await page.mouse.click(box.x + box.width / 2, box.y + box.height + 90);
+        await page.waitForTimeout(600);
       }
     }
-    await page.waitForTimeout(500);
+    // 혹시 포커스가 아직 제목에 있으면 Enter로 새 단락 생성
+    const stillInTitle = await frame.evaluate(() => {
+      const el = document.activeElement;
+      return !!document.querySelector(".se-section-documentTitle")?.contains(el);
+    }).catch(() => false);
+    if (stillInTitle) {
+      await page.keyboard.press("Enter");
+      await page.waitForTimeout(400);
+    }
+    await page.waitForTimeout(300);
 
     // ── 파일 업로드 헬퍼 (OS 파일 피커 다이얼로그 차단) ──
     const IMG_BTN_SELS = [
@@ -950,12 +946,16 @@ export async function generateFlowImages(params: {
     const email = googleSession.email || "";
     const pw = googleSession.pw ? Buffer.from(googleSession.pw, "base64").toString("utf-8") : "";
 
-    // "Google 계정으로 로그인" 버튼 클릭
+    // 로그인 버튼 클릭 (텍스트 다양하게 시도)
     const loginBtnSels = [
+      "button:has-text('로그인')",
       "button:has-text('Google 계정으로 로그인')",
       "button:has-text('Sign in with Google')",
+      "button:has-text('Sign in')",
+      "a:has-text('로그인')",
       "a:has-text('Google 계정으로 로그인')",
       "[aria-label*='Sign in']",
+      "[aria-label*='로그인']",
     ];
     let clicked = false;
     for (const sel of loginBtnSels) {
@@ -1158,8 +1158,8 @@ export async function generateFlowImages(params: {
     });
     await page.waitForTimeout(4000);
 
-    // 로그인 버튼 있으면 처리
-    const needLogin = await page.$("button:has-text('Google 계정으로 로그인'), button:has-text('Sign in')").catch(() => null);
+    // 로그인 버튼 있으면 처리 ("로그인", "Google 계정으로 로그인" 등)
+    const needLogin = await page.$("button:has-text('로그인'), button:has-text('Sign in'), button:has-text('Google 계정으로 로그인')").catch(() => null);
     if (needLogin || page.url().includes("accounts.google.com")) {
       await handleGoogleLogin();
       await page.waitForTimeout(3000);
