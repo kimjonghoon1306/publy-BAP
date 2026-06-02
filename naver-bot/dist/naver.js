@@ -414,41 +414,70 @@ async function publishNaver(params) {
             await page.waitForTimeout(500);
             await page.keyboard.type(title, { delay: 40 });
         }
+        // ── 파일 업로드 헬퍼 (OS 파일 피커 다이얼로그 차단) ──
+        const IMG_BTN_SELS = [
+            "button[data-type='image']",
+            ".se-toolbar-item-imageUpload button",
+            "button[title='이미지']",
+            "button[aria-label='이미지']",
+            ".se-toolbar button[class*='image']",
+        ];
+        const PC_UPLOAD_SELS = [
+            ".se-popup-button-upload-file",
+            "button:has-text('내 PC에서')",
+            "button:has-text('컴퓨터에서')",
+            ".se-image-select-type-upload button",
+        ];
+        async function uploadFileToEditor(files) {
+            const fileList = Array.isArray(files) ? files : [files];
+            for (const sel of IMG_BTN_SELS) {
+                try {
+                    const btn = await frame.$(sel) ?? await page.$(sel);
+                    if (!btn)
+                        continue;
+                    // filechooser 인터셉션 먼저 등록 → OS 다이얼로그 차단
+                    const chooserPromise = page.waitForEvent("filechooser", { timeout: 8000 }).catch(() => null);
+                    await btn.click();
+                    await page.waitForTimeout(1200);
+                    // 일부 SE4 버전은 모달 → "내 PC에서 올리기" 버튼 필요
+                    for (const pcSel of PC_UPLOAD_SELS) {
+                        try {
+                            const pcBtn = await frame.$(pcSel) ?? await page.$(pcSel);
+                            if (pcBtn) {
+                                await pcBtn.click();
+                                await page.waitForTimeout(500);
+                                break;
+                            }
+                        }
+                        catch { }
+                    }
+                    const chooser = await chooserPromise;
+                    if (chooser) {
+                        await chooser.setFiles(fileList);
+                        await page.waitForTimeout(4000);
+                        return true;
+                    }
+                    // fallback: 숨겨진 file input 직접 세팅
+                    const fi = await page.$("input[type='file']") ?? await frame.$("input[type='file']");
+                    if (fi) {
+                        await fi.setInputFiles(fileList);
+                        await page.waitForTimeout(4000);
+                        return true;
+                    }
+                }
+                catch { }
+            }
+            return false;
+        }
         // ── 이미지 삽입 (썸네일) ──
         if (imageUrl) {
             console.log("[naver] 이미지 삽입 시도...");
             const tmpFile = await downloadImageToTemp(imageUrl);
             if (tmpFile) {
                 try {
-                    // SE4 툴바 이미지 버튼
-                    const imgBtnSels = [
-                        "button[data-type='image']",
-                        ".se-toolbar-item-imageUpload button",
-                        "button[title='이미지']",
-                        "button[class*='image']",
-                    ];
-                    let imgBtnClicked = false;
-                    for (const sel of imgBtnSels) {
-                        try {
-                            const el = await frame.$(sel);
-                            if (el) {
-                                await frame.click(sel, { timeout: 3000 });
-                                imgBtnClicked = true;
-                                break;
-                            }
-                        }
-                        catch { }
-                    }
-                    if (imgBtnClicked) {
-                        await page.waitForTimeout(1500);
-                        // 파일 업로드 input 찾기
-                        const fileInput = await page.$("input[type='file']");
-                        if (fileInput) {
-                            await fileInput.setInputFiles(tmpFile);
-                            await page.waitForTimeout(3000);
-                            console.log("[naver] ✅ 이미지 업로드 완료");
-                        }
-                    }
+                    const ok = await uploadFileToEditor(tmpFile);
+                    if (ok)
+                        console.log("[naver] ✅ 썸네일 이미지 업로드 완료");
                 }
                 catch (e) {
                     console.log("[naver] 이미지 삽입 실패 (무시):", e);
@@ -523,59 +552,18 @@ async function publishNaver(params) {
                 await page.keyboard.press("End");
                 await page.keyboard.press("Enter");
                 await page.waitForTimeout(500);
-                const imgBtnSels = [
-                    "button[data-type='image']",
-                    ".se-toolbar-item-imageUpload button",
-                    "button[title='이미지']",
-                    "button[aria-label='이미지']",
-                    ".se-toolbar button[class*='image']",
-                ];
-                let clicked = false;
-                for (const sel of imgBtnSels) {
-                    try {
-                        await frame.waitForSelector(sel, { timeout: 1000 });
-                        await frame.click(sel, { timeout: 2000 });
-                        clicked = true;
-                        console.log("[naver] 이미지 버튼 클릭:", sel);
-                        break;
-                    }
-                    catch { }
-                }
-                if (!clicked) {
-                    for (const sel of imgBtnSels) {
+                const ok = await uploadFileToEditor(tmpFile);
+                if (ok) {
+                    console.log("[naver] ✅ 이미지 업로드 완료");
+                    if (alt?.trim()) {
                         try {
-                            await page.waitForSelector(sel, { timeout: 1000 });
-                            await page.click(sel, { timeout: 2000 });
-                            clicked = true;
-                            break;
+                            await clickEditor();
+                            await page.keyboard.press("End");
+                            await page.keyboard.press("Enter");
+                            await insertText(alt.trim());
+                            console.log("[naver] ✅ 캡션 입력:", alt.trim());
                         }
                         catch { }
-                    }
-                }
-                if (clicked) {
-                    await page.waitForTimeout(2000);
-                    const fileInput = await page.$("input[type='file']") || await frame.$("input[type='file']");
-                    if (fileInput) {
-                        await fileInput.setInputFiles(tmpFile);
-                        await page.waitForTimeout(4000);
-                        console.log("[naver] ✅ 이미지 업로드 완료");
-                        // 캡션 입력 (alt 있을 때)
-                        if (alt && alt.trim()) {
-                            try {
-                                await clickEditor();
-                                await page.waitForTimeout(300);
-                                await page.keyboard.press("End");
-                                await page.keyboard.press("Enter");
-                                await page.waitForTimeout(200);
-                                await insertText(alt.trim());
-                                await page.waitForTimeout(300);
-                                console.log("[naver] ✅ 캡션 입력:", alt.trim());
-                            }
-                            catch { }
-                        }
-                    }
-                    else {
-                        console.log("[naver] file input 못 찾음");
                     }
                 }
                 else {
@@ -612,54 +600,18 @@ async function publishNaver(params) {
                             await page.keyboard.press("End");
                             await page.keyboard.press("Enter");
                             await page.waitForTimeout(500);
-                            const imgBtnSels = [
-                                "button[data-type='image']",
-                                ".se-toolbar-item-imageUpload button",
-                                "button[title='이미지']",
-                                "button[aria-label='이미지']",
-                            ];
-                            let clicked = false;
-                            for (const sel of imgBtnSels) {
-                                try {
-                                    await frame.waitForSelector(sel, { timeout: 1000 });
-                                    await frame.click(sel, { timeout: 2000 });
-                                    clicked = true;
-                                    break;
-                                }
-                                catch { }
-                            }
-                            if (!clicked) {
-                                for (const sel of imgBtnSels) {
+                            const ok = await uploadFileToEditor([tmp1, tmp2]);
+                            if (ok) {
+                                console.log("[naver] ✅ 이미지 페어 업로드 완료");
+                                const pairAlt = pairImages[0].alt || pairImages[1].alt;
+                                if (pairAlt?.trim()) {
                                     try {
-                                        await page.waitForSelector(sel, { timeout: 1000 });
-                                        await page.click(sel, { timeout: 2000 });
-                                        clicked = true;
-                                        break;
+                                        await clickEditor();
+                                        await page.keyboard.press("End");
+                                        await page.keyboard.press("Enter");
+                                        await insertText(pairAlt.trim());
                                     }
                                     catch { }
-                                }
-                            }
-                            if (clicked) {
-                                await page.waitForTimeout(2000);
-                                const fileInput = await page.$("input[type='file']") || await frame.$("input[type='file']");
-                                if (fileInput) {
-                                    await fileInput.setInputFiles([tmp1, tmp2]);
-                                    await page.waitForTimeout(5000);
-                                    console.log("[naver] ✅ 이미지 페어 업로드 완료");
-                                    // 페어 캡션 입력 (첫 번째 이미지 alt 사용)
-                                    const pairAlt = pairImages[0].alt || pairImages[1].alt;
-                                    if (pairAlt && pairAlt.trim()) {
-                                        try {
-                                            await clickEditor();
-                                            await page.waitForTimeout(300);
-                                            await page.keyboard.press("End");
-                                            await page.keyboard.press("Enter");
-                                            await page.waitForTimeout(200);
-                                            await insertText(pairAlt.trim());
-                                            await page.waitForTimeout(300);
-                                        }
-                                        catch { }
-                                    }
                                 }
                             }
                         }
