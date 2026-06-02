@@ -1556,7 +1556,7 @@ Output format (JSON array only, no other text):
     if(reset)setTitles([]);
     setLoadingTitles(true);abortRef.current=new AbortController();
     const prompt=adType==="adpost"
-      ?`당신은 대한민국 최고의 네이버 블로그 SEO 제목 전문가입니다.\n키워드: "${keyword.trim()}"\n\n제목 30개를 JSON 배열로만 반환하세요.\n- 키워드 반드시 포함\n- 15~25자 이내 (짧고 강렬하게)\n- 숫자 필수 (BEST 5, TOP 3, 7가지 등)\n- 클릭 유발어 ("솔직히","이것만","나만 알던","진짜","꿀팁")\n- 경험 공유형 ("써봤어요","해봤더니","알고보니")\n- 불필요한 수식어 금지\n\nJSON 배열만 반환.`
+      ?`당신은 대한민국 최고의 네이버 블로그 SEO 제목 전문가입니다.\n키워드: "${keyword.trim()}"\n\n제목 30개를 JSON 배열로만 반환하세요.\n- 키워드 반드시 포함\n- 8~12자 이내 (짧고 강렬하게, 검색어 그대로)\n- 숫자 필수 (BEST 5, TOP 3, 7가지 등)\n- 클릭 유발어 ("솔직히","이것만","나만 알던","진짜","꿀팁")\n- 경험 공유형 ("써봤어요","해봤더니","알고보니")\n- 불필요한 수식어 금지\n\nJSON 배열만 반환.`
       :`당신은 구글 애드센스 SEO 전문가입니다.\n키워드: "${keyword.trim()}"\n\n제목 30개를 JSON 배열로만 반환하세요.\n- 키워드 자연스럽게 포함\n- 30~50자, 정보성 톤\n- "완벽 가이드","총정리","이유 5가지"\n\nJSON 배열만 반환.`;
     try{
       const text=await callAI(prompt,abortRef.current.signal);
