@@ -1333,16 +1333,22 @@ Output format (JSON array only, no other text):
     const k = (kw + " " + title).toLowerCase();
     const c = content.slice(0, 500).toLowerCase();
 
-    // 카테고리 감지
-    const isFoodCafe = /먹|맛|식|음식|요리|카페|커피|레스토랑|맛집|디저트|베이커리/.test(k+c);
-    const isTravel = /여행|관광|투어|trip|tour|호텔|숙소|제주|부산|서울|경주/.test(k+c);
-    const isHealth = /건강|다이어트|운동|fitness|diet|피부|뷰티|헬스|요가|필라테스/.test(k+c);
-    const isFinance = /재테크|투자|주식|금융|돈|수익|부자|경제|코인|부동산/.test(k+c);
-    const isHome = /인테리어|집|방|home|house|아파트|인테리어|가구|리모델링/.test(k+c);
-    const isTech = /기술|tech|AI|인공지능|컴퓨터|스마트폰|앱|소프트웨어|IT/.test(k+c);
-    const isNature = /봄|여름|가을|겨울|자연|꽃|풍경|숲|바다|산/.test(k+c);
-    const isBaby = /아이|육아|아기|baby|kid|어린이|임신|출산/.test(k+c);
-    const isPet = /강아지|고양이|반려|pet|puppy|kitten|동물/.test(k+c);
+    // 카테고리 감지 (확장)
+    const isFoodCafe = /먹|맛|식|음식|요리|카페|커피|레스토랑|맛집|디저트|베이커리|밥|국|찌개|반찬|술|맥주|와인|칵테일/.test(k+c);
+    const isTravel = /여행|관광|투어|trip|tour|호텔|숙소|제주|부산|서울|경주|해외|해외여행|유럽|일본|미국|동남아|캠핑|글램핑|아웃도어/.test(k+c);
+    const isHealth = /건강|운동|fitness|diet|헬스|요가|필라테스|수영|러닝|마라톤|자전거|등산|스트레칭|근육|체중/.test(k+c);
+    const isBeauty = /피부|뷰티|스킨케어|화장|메이크업|헤어|네일|미용|미백|주름|세럼|에센스|크림|선크림|향수/.test(k+c);
+    const isFinance = /재테크|투자|주식|금융|돈|수익|부자|경제|코인|부동산|월급|저축|적금|펀드|ETF|배당|절세|애드센스|광고수익|블로그수익|부업|프리랜서/.test(k+c);
+    const isHome = /인테리어|집|방|아파트|가구|리모델링|청소|정리|수납|원룸|오피스텔|빌라|신혼집|셀프인테리어|홈데코/.test(k+c);
+    const isTech = /기술|tech|AI|인공지능|컴퓨터|스마트폰|앱|소프트웨어|IT|아이폰|갤럭시|아이패드|노트북|태블릿|게임|드론|스마트워치|이어폰/.test(k+c);
+    const isFashion = /패션|옷|스타일|코디|착장|ootd|아우터|자켓|청바지|원피스|구두|백|가방|명품|브랜드|쇼핑|하울/.test(k+c);
+    const isCar = /자동차|차|드라이브|차량|전기차|수입차|국산차|SUV|세단|연비|주차|튜닝|오토바이|바이크/.test(k+c);
+    const isSport = /스포츠|운동선수|축구|야구|농구|테니스|골프|스키|스노보드|서핑|클라이밍|배드민턴/.test(k+c);
+    const isNature = /봄|여름|가을|겨울|자연|꽃|풍경|숲|바다|산|나무|식물|원예|정원|꽃집|화훼/.test(k+c);
+    const isBaby = /아이|육아|아기|baby|kid|어린이|임신|출산|신생아|유아|초등|교육|학습|공부|입시/.test(k+c);
+    const isPet = /강아지|고양이|반려|pet|puppy|kitten|동물|햄스터|앵무새|물고기|수족관/.test(k+c);
+    const isWedding = /결혼|웨딩|신혼|허니문|프로포즈|스드메|부케|예식장|혼수|청첩장/.test(k+c);
+    const isFood2 = isFoodCafe; // alias
 
     // 조명 변주
     const lightings = [
@@ -1374,6 +1380,16 @@ Output format (JSON array only, no other text):
     if (isBaby) return `A heartwarming family photography featuring "${title}", adorable baby or child in safe loving environment, soft pastel tones, genuine emotional warmth, candid precious moments, ${lighting}, ${quality}, tender and joyful atmosphere`;
 
     if (isPet) return `A charming and adorable pet photography of "${title}", fluffy and expressive animal companion, playful and loving moments, soft bokeh background, ${lighting}, ${quality}, heartwarming and joyful mood`;
+
+    if (isBeauty) return `A luxurious beauty and skincare flat lay for "${title}", premium cosmetic products elegantly arranged, soft feminine aesthetic, marble or pastel background, dewy glowing skin texture, ${lighting}, ${quality}, aspirational beauty editorial style`;
+
+    if (isFashion) return `A stylish Korean fashion editorial representing "${title}", trendy outfit combination with thoughtful accessories, urban street style backdrop, confident and aesthetic mood, ${lighting}, ${quality}, Vogue-worthy composition`;
+
+    if (isCar) return `A dramatic automotive photography featuring "${title}", sleek vehicle on scenic road or studio setting, dynamic angles highlighting design details, premium lighting on metallic surfaces, ${lighting}, ${quality}, professional car magazine quality`;
+
+    if (isSport) return `An energetic sports action photography representing "${title}", athlete in peak performance moment, motion blur conveying speed and power, stadium or outdoor venue background, ${lighting}, ${quality}, ESPN magazine quality`;
+
+    if (isWedding) return `A romantic wedding photography scene for "${title}", beautifully decorated venue with flowers and soft lighting, elegant bridal details, heartfelt emotional moment, ${lighting}, ${quality}, dreamy and timeless wedding magazine style`;
 
     // 기본 fallback
     return `A high-quality professional blog photography representing the topic "${title}" about ${kw}, visually compelling and informative composition, Korean lifestyle aesthetic, emotionally engaging scene that perfectly illustrates the content, ${lighting}, ${quality}, editorial magazine style`;

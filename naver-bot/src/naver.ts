@@ -955,21 +955,26 @@ export async function saveGoogleSession(userId: string, email?: string, pw?: str
 
 /* ── Flow 이미지 프롬프트 → SEO 캡션 변환 ── */
 function captionFromPrompt(prompt: string, idx: number, total: number): string {
-  const keyword = prompt.split(",")[0].trim();
+  // 프롬프트에서 "제목" 형태로 키워드 추출
+  const titleMatch = prompt.match(/"([^"]+)"/);
+  const keyword = titleMatch ? titleMatch[1] : prompt.split(",")[0].replace(/^A\s+\w+\s+\w+\s+\w+\s+/i, "").trim();
   const p = prompt.toLowerCase();
   let style = "";
-  if (p.includes("product photography") || p.includes("studio lighting")) style = "제품 스튜디오 사진";
-  else if (p.includes("lifestyle") || p.includes("candid")) style = "라이프스타일 현장 사진";
-  else if (p.includes("close-up") || p.includes("macro")) style = "클로즈업 상세 사진";
-  else if (p.includes("flat lay") || p.includes("overhead")) style = "플랫레이 스타일링 사진";
-  else if (p.includes("golden hour") || p.includes("aspirational")) style = "감성 분위기 사진";
-  else if (p.includes("food") || p.includes("gourmet")) style = "음식 스타일링 사진";
-  else if (p.includes("travel") || p.includes("landscape")) style = "여행 풍경 사진";
-  else if (p.includes("health") || p.includes("fitness")) style = "건강 라이프스타일 사진";
-  else if (p.includes("financial") || p.includes("business")) style = "비즈니스 컨셉 사진";
-  else if (p.includes("interior") || p.includes("home")) style = "인테리어 스타일 사진";
-  else if (p.includes("technology") || p.includes("tech")) style = "기술 컨셉 사진";
-  else if (p.includes("nature") || p.includes("scenic")) style = "자연 풍경 사진";
+  if (p.includes("food") || p.includes("gourmet") || p.includes("cuisine")) style = "음식 스타일링 사진";
+  else if (p.includes("travel") || p.includes("landscape") || p.includes("scenic")) style = "여행 풍경 사진";
+  else if (p.includes("financial") || p.includes("business") || p.includes("workspace")) style = "비즈니스 컨셉 사진";
+  else if (p.includes("technology") || p.includes("tech") || p.includes("device")) style = "기술 컨셉 사진";
+  else if (p.includes("interior") || p.includes("home") || p.includes("decor")) style = "인테리어 스타일 사진";
+  else if (p.includes("health") || p.includes("fitness") || p.includes("wellness")) style = "건강 라이프스타일 사진";
+  else if (p.includes("fashion") || p.includes("outfit") || p.includes("style")) style = "패션 스타일 사진";
+  else if (p.includes("car") || p.includes("vehicle") || p.includes("automotive")) style = "자동차 사진";
+  else if (p.includes("sport") || p.includes("athlete") || p.includes("action")) style = "스포츠 액션 사진";
+  else if (p.includes("beauty") || p.includes("skincare") || p.includes("cosmetic")) style = "뷰티 사진";
+  else if (p.includes("nature") || p.includes("outdoor") || p.includes("garden")) style = "자연 풍경 사진";
+  else if (p.includes("family") || p.includes("baby") || p.includes("child")) style = "가족 사진";
+  else if (p.includes("pet") || p.includes("dog") || p.includes("cat")) style = "반려동물 사진";
+  else if (p.includes("education") || p.includes("study") || p.includes("book")) style = "교육 컨셉 사진";
+  else if (p.includes("wedding") || p.includes("couple") || p.includes("romance")) style = "웨딩 사진";
   else style = "관련 사진";
   return total > 1 ? `${keyword} ${style} (${idx + 1}/${total})` : `${keyword} ${style}`;
 }

@@ -1497,6 +1497,46 @@ Output format (JSON array only, no other text):
 
   function recommendImageCount(content: string): number { return Math.max(1, Math.min(10, Math.floor(content.length/500))); }
 
+  function buildAdmFlowPrompt(kw: string, title: string = "", content: string = "", idx: number = 0): string {
+    const k = (kw + " " + title).toLowerCase();
+    const c = content.slice(0, 500).toLowerCase();
+    const isFoodCafe = /먹|맛|식|음식|요리|카페|커피|레스토랑|맛집|디저트|베이커리|밥|술|맥주|와인/.test(k+c);
+    const isTravel = /여행|관광|투어|호텔|숙소|제주|부산|서울|해외|캠핑|아웃도어/.test(k+c);
+    const isHealth = /건강|운동|fitness|헬스|요가|필라테스|수영|러닝|자전거|체중/.test(k+c);
+    const isBeauty = /피부|뷰티|스킨케어|화장|메이크업|헤어|네일|미용|세럼|크림/.test(k+c);
+    const isFinance = /재테크|투자|주식|금융|돈|수익|부자|경제|코인|부동산|애드센스|광고수익|블로그수익|부업/.test(k+c);
+    const isHome = /인테리어|집|방|아파트|가구|리모델링|청소|정리|수납/.test(k+c);
+    const isTech = /기술|tech|AI|인공지능|컴퓨터|스마트폰|앱|IT|아이폰|갤럭시|아이패드|노트북|게임/.test(k+c);
+    const isFashion = /패션|옷|스타일|코디|ootd|아우터|자켓|청바지|원피스|백|가방|명품|쇼핑/.test(k+c);
+    const isCar = /자동차|차|드라이브|전기차|수입차|SUV|세단|연비|오토바이/.test(k+c);
+    const isNature = /봄|여름|가을|겨울|자연|꽃|풍경|숲|바다|산|식물|원예/.test(k+c);
+    const isBaby = /아이|육아|아기|baby|어린이|임신|출산|유아|교육|학습|공부/.test(k+c);
+    const isPet = /강아지|고양이|반려|pet|puppy|동물/.test(k+c);
+    const isWedding = /결혼|웨딩|신혼|프로포즈|부케|예식|혼수/.test(k+c);
+    const lightings = [
+      "soft golden hour natural lighting, warm sunlight filtering through",
+      "bright airy daylight, clean studio-style lighting, crisp shadows",
+      "dramatic cinematic side lighting, deep contrast, moody atmosphere",
+      "soft diffused overcast light, even tones, pastel color palette",
+    ];
+    const lighting = lightings[idx % lightings.length];
+    const quality = "ultra-high resolution 8K, hyperrealistic, award-winning photography, National Geographic quality, razor-sharp focus, perfect composition";
+    if (isFoodCafe) return `A stunning food photography scene featuring "${title}", beautifully plated gourmet Korean cuisine, vibrant fresh ingredients, professional food styling, bokeh background, ${lighting}, ${quality}, appetizing mood`;
+    if (isTravel) return `A breathtaking travel photography of "${title}" destination, majestic scenic landscape with dramatic sky, vibrant atmosphere, ${lighting}, ${quality}, wanderlust inspiring composition`;
+    if (isHealth) return `A motivating healthy lifestyle photography representing "${title}", fit person engaged in wellness activity, clean minimal aesthetic, ${lighting}, ${quality}, inspiring positive mood`;
+    if (isBeauty) return `A luxurious beauty flat lay for "${title}", premium cosmetic products elegantly arranged, soft feminine aesthetic, dewy glowing skin texture, ${lighting}, ${quality}, beauty editorial style`;
+    if (isFinance) return `A sophisticated financial success concept photo for "${title}", modern professional workspace with charts, confident business professional, premium aesthetic, ${lighting}, ${quality}, aspirational mood`;
+    if (isHome) return `A stunning interior design photography of "${title}", beautifully decorated Korean modern home, warm inviting atmosphere, ${lighting}, ${quality}, cozy aspirational living space`;
+    if (isTech) return `A cutting-edge technology concept photo representing "${title}", sleek modern devices and interfaces, futuristic minimal design, ${lighting}, ${quality}, professional innovative atmosphere`;
+    if (isFashion) return `A stylish Korean fashion editorial representing "${title}", trendy outfit with accessories, urban street style, ${lighting}, ${quality}, Vogue-worthy composition`;
+    if (isCar) return `A dramatic automotive photography featuring "${title}", sleek vehicle on scenic road, dynamic angles highlighting design, ${lighting}, ${quality}, car magazine quality`;
+    if (isNature) return `A breathtaking nature photography capturing "${title}", pristine Korean landscape, vivid seasonal colors, ${lighting}, ${quality}, immersive serene composition`;
+    if (isBaby) return `A heartwarming family photography featuring "${title}", genuine emotional warmth, candid precious moments, soft pastel tones, ${lighting}, ${quality}, tender joyful atmosphere`;
+    if (isPet) return `A charming pet photography of "${title}", expressive animal companion, playful loving moments, soft bokeh background, ${lighting}, ${quality}, heartwarming mood`;
+    if (isWedding) return `A romantic wedding photography scene for "${title}", beautifully decorated venue, elegant bridal details, heartfelt moment, ${lighting}, ${quality}, dreamy wedding magazine style`;
+    return `A high-quality professional blog photography representing "${title}" about ${kw}, visually compelling, Korean lifestyle aesthetic, ${lighting}, ${quality}, editorial magazine style`;
+  }
+
   function buildCaptions(kw: string, count: number, content?: string): string[] {
     const k = kw || "사진";
     // 이미지 검색 SEO를 위해 키워드 기반 설명형 캡션 생성
@@ -1783,7 +1823,7 @@ POST3: (제목)|(이유)
         const step = Math.max(1, Math.floor(lines.length / flowImgCount));
         return Array.from({length: flowImgCount}, (_:any, i:number) => {
           const seg = lines.slice(i * step, (i + 1) * step).join(" ").slice(0, 150);
-          return `"${pubTitle || keywords[0]}" ${seg} — A high-quality, realistic photographic image. Professional photography, vivid colors, sharp focus, 8K resolution, cinematic lighting.`;
+          return buildAdmFlowPrompt(keywords[0]||"", pubTitle||"", seg, i);
         });
       })() : undefined,
       flowCaptions: imgGenType === "flow"
