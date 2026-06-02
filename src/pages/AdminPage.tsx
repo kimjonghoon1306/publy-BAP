@@ -1096,7 +1096,7 @@ Output format (JSON array only, no other text):
       const keypointText = photoKeypoints.trim()?`\n\n[작성자 키포인트]\n${photoKeypoints.trim()}`:"";
       const styleGuide = WRITE_STYLE_GUIDE[writeStyle]||"";
       const personaGuide = PERSONA_STYLES.find(p=>p.id===persona)?.prompt||"";
-      const prompt = `당신은 대한민국 최고의 블로그 작가입니다. 첨부된 사진들을 자세히 분석하여 네이버 블로그 글을 작성해주세요.\n사진 속 모든 디테일을 실제로 경험한 것처럼 생생하게 묘사해주세요.${keypointText}\n\n=== 절대 규칙 ===\n⛔ ## 기호 완전 금지\n⛔ ** * 마크다운 기호 금지\n⛔ AI 티 나는 표현 금지\n⛔ 영어 단어 금지\n✅ 사진에서 직접 보이는 것을 구체적으로 묘사\n✅ 독자에게 말 걸듯 친근하게\n✅ 구체적 수치, 가격, 시간 포함\n\n${styleGuide}${personaGuide?`\n[말투]\n${personaGuide}`:""}\n\n=== 출력 형식 ===\n제목: (SEO 최적화 제목, 8~12자)\n태그: 태그1, 태그2, 태그3, 태그4, 태그5\n\n(본문 1500자 이상)\n\n[FAQ시작]\nQ1: (질문)\nA1: (답변)\nQ2: (질문)\nA2: (답변)\n[FAQ끝]\n\n[관련글시작]\nPOST1: (제목)|(이유)\nPOST2: (제목)|(이유)\n[관련글끝]`;
+      const prompt = `당신은 대한민국 최고의 블로그 작가입니다. 첨부된 사진들을 자세히 분석하여 네이버 블로그 글을 작성해주세요.\n사진 속 모든 디테일을 실제로 경험한 것처럼 생생하게 묘사해주세요.${keypointText}\n\n=== 절대 규칙 ===\n⛔ ## 기호 완전 금지\n⛔ ** * 마크다운 기호 금지\n⛔ AI 티 나는 표현 금지\n⛔ 영어 단어 금지\n✅ 사진에서 직접 보이는 것을 구체적으로 묘사\n✅ 독자에게 말 걸듯 친근하게\n✅ 구체적 수치, 가격, 시간 포함\n\n${styleGuide}${personaGuide?`\n[말투]\n${personaGuide}`:""}\n\n=== 출력 형식 ===\n제목: (SEO 최적화 제목, 15~20자)\n태그: 태그1, 태그2, 태그3, 태그4, 태그5\n\n(본문 1500자 이상)\n\n[FAQ시작]\nQ1: (질문)\nA1: (답변)\nQ2: (질문)\nA2: (답변)\n[FAQ끝]\n\n[관련글시작]\nPOST1: (제목)|(이유)\nPOST2: (제목)|(이유)\n[관련글끝]`;
 
       // 서버 프록시 경유 시도 → 실패 시 직접 호출 폴백
       let text = "";
@@ -1619,8 +1619,8 @@ Output format (JSON array only, no other text):
     setLoadingTitles(true);
     const isAdpost = adType === "adpost";
     const prompt = isAdpost
-      ? `당신은 대한민국 최고의 네이버 블로그 SEO 제목 전문가입니다.\n키워드: "${keyword.trim()}"\n목적: 네이버 애드포스트 클릭률 극대화\n\n반드시 제목 30개를 JSON 배열로만 반환하세요.\n- 키워드를 자연스럽게 포함\n- 8~12자, 친근하고 감성적, 검색어 그대로\n- 숫자 필수 (BEST 7, TOP 5 등)\n- "솔직히", "이것만", "나만 알던" 등 클릭 유발\n\nJSON 배열만 반환.`
-      : `당신은 구글 애드센스 최적화 SEO 전문가입니다.\n키워드: "${keyword.trim()}"\n목적: 구글 검색 상위노출 + 애드센스 클릭률 극대화\n\n반드시 제목 30개를 JSON 배열로만 반환하세요.\n- 키워드를 자연스럽게 포함\n- 8~12자, 정보성·전문적 톤, 검색어 그대로\n- "완벽 가이드", "총정리", "이유 5가지" 등\n\nJSON 배열만 반환.`;
+      ? `당신은 대한민국 최고의 네이버 블로그 SEO 제목 전문가입니다.\n키워드: "${keyword.trim()}"\n목적: 네이버 애드포스트 클릭률 극대화\n\n반드시 제목 30개를 JSON 배열로만 반환하세요.\n- 키워드를 자연스럽게 포함\n- 15~20자, 친근하고 감성적, 검색어 포함\n- 숫자 필수 (BEST 7, TOP 5 등)\n- "솔직히", "이것만", "나만 알던" 등 클릭 유발\n\nJSON 배열만 반환.`
+      : `당신은 구글 애드센스 최적화 SEO 전문가입니다.\n키워드: "${keyword.trim()}"\n목적: 구글 검색 상위노출 + 애드센스 클릭률 극대화\n\n반드시 제목 30개를 JSON 배열로만 반환하세요.\n- 키워드를 자연스럽게 포함\n- 15~20자, 정보성·전문적 톤, 검색어 포함\n- "완벽 가이드", "총정리", "이유 5가지" 등\n\nJSON 배열만 반환.`;
     try {
       const text = await callAI(prompt);
       const parsed = parseArr(text);

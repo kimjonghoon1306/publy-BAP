@@ -55,6 +55,11 @@ async function applyAntiDetection(context: BrowserContext) {
 async function downloadImageToTemp(url: string): Promise<string | null> {
   try {
     const ext = url.includes(".png") ? ".png" : ".jpg";
+    // 로컬 파일 경로면 바로 반환 (Flow 이미지)
+    if (!url.startsWith("http")) {
+      if (fs.existsSync(url)) return url;
+      return null;
+    }
     const tmpFile = path.join(os.tmpdir(), `publy_img_${Date.now()}${ext}`);
     const proto = url.startsWith("https") ? https : http;
     return new Promise((resolve) => {
@@ -318,7 +323,7 @@ export async function publishNaver(params: {
   blocks?: Array<{type: string; content?: string; src?: string; alt?: string}>;
 }): Promise<string> {
   const { userId, title: rawTitle, content, tags, imageUrl, categoryId, visibility = "public", scheduleTime, blocks } = params;
-  const title = rawTitle.slice(0, 100);
+  const title = rawTitle.replace(/\n/g, " ").trim().slice(0, 20);
   const sp = sessionPath(userId);
   if (!fs.existsSync(sp)) throw new Error("네이버 세션 없음. 계정 재연결 필요");
 
