@@ -1499,18 +1499,17 @@ Output format (JSON array only, no other text):
 
   function buildCaptions(kw: string, count: number, content?: string): string[] {
     const k = kw || "사진";
-    if (content && content.length > 100) {
-      const lines = content.split("\n").map((l:string)=>l.trim()).filter((l:string)=>l.length>10&&!l.startsWith("#")&&!l.startsWith("[")&&!l.startsWith("-"));
-      if (lines.length >= count) {
-        const step = Math.floor(lines.length / count);
-        return Array.from({length: count}, (_, i) => {
-          const line = lines[Math.min(i * step, lines.length - 1)];
-          const sentence = line.split(/[.!?]/)[0].trim();
-          return sentence.length > 5 ? sentence.slice(0, 25) : `${k} ${i===0?"대표":`현장 ${i}`} 사진`;
-        });
-      }
-    }
-    const pool = [`${k} 대표 사진`,`${k} 현장 모습`,`${k} 상세 사진`,`${k} 실제 모습`,`${k} 후기 사진`,`${k} 디테일 컷`,`${k} 생생 후기`,`${k} 현장 사진`];
+    // 이미지 검색 SEO를 위해 키워드 기반 설명형 캡션 생성
+    const pool = [
+      `${k} 대표 이미지`,
+      `${k} 상세 설명 이미지`,
+      `${k} 실제 예시 이미지`,
+      `${k} 관련 참고 이미지`,
+      `${k} 핵심 내용 이미지`,
+      `${k} 주요 정보 이미지`,
+      `${k} 비교 분석 이미지`,
+      `${k} 활용 예시 이미지`,
+    ];
     return Array.from({length: count}, (_, i) => pool[i % pool.length]);
   }
 

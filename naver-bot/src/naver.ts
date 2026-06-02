@@ -919,6 +919,27 @@ export async function saveGoogleSession(userId: string, email?: string, pw?: str
   }
 }
 
+/* ── Flow 이미지 프롬프트 → SEO 캡션 변환 ── */
+function captionFromPrompt(prompt: string, idx: number, total: number): string {
+  const keyword = prompt.split(",")[0].trim();
+  const p = prompt.toLowerCase();
+  let style = "";
+  if (p.includes("product photography") || p.includes("studio lighting")) style = "제품 스튜디오 사진";
+  else if (p.includes("lifestyle") || p.includes("candid")) style = "라이프스타일 현장 사진";
+  else if (p.includes("close-up") || p.includes("macro")) style = "클로즈업 상세 사진";
+  else if (p.includes("flat lay") || p.includes("overhead")) style = "플랫레이 스타일링 사진";
+  else if (p.includes("golden hour") || p.includes("aspirational")) style = "감성 분위기 사진";
+  else if (p.includes("food") || p.includes("gourmet")) style = "음식 스타일링 사진";
+  else if (p.includes("travel") || p.includes("landscape")) style = "여행 풍경 사진";
+  else if (p.includes("health") || p.includes("fitness")) style = "건강 라이프스타일 사진";
+  else if (p.includes("financial") || p.includes("business")) style = "비즈니스 컨셉 사진";
+  else if (p.includes("interior") || p.includes("home")) style = "인테리어 스타일 사진";
+  else if (p.includes("technology") || p.includes("tech")) style = "기술 컨셉 사진";
+  else if (p.includes("nature") || p.includes("scenic")) style = "자연 풍경 사진";
+  else style = "관련 사진";
+  return total > 1 ? `${keyword} ${style} (${idx + 1}/${total})` : `${keyword} ${style}`;
+}
+
 /* ── Google Flow 이미지 생성 ── */
 export async function generateFlowImages(params: {
   userId: string;
@@ -1197,7 +1218,9 @@ export async function generateFlowImages(params: {
       if (!entered) continue;
 
       await clickGenerate();
-      await saveGeneratedImage(i, captions[i] || "");
+      // 프롬프트 기반 SEO 캡션 생성 (이미지 검색 노출용)
+      const seoCaption = captionFromPrompt(prompts[i], i, prompts.length);
+      await saveGeneratedImage(i, seoCaption);
     }
 
     await browser.close();
