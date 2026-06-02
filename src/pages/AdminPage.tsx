@@ -1405,20 +1405,43 @@ Output format (JSON array only, no other text):
         return `${p}, ${NP_TAG}, ${st}`;
       }
     }
-    if (/먹|맛|식|음|요리|카페|커피|레스토랑|맛집|디저트|밥|술|맥주|와인/.test(k)) return `stunning Korean food photography, beautifully plated gourmet dish, vibrant ingredients, professional food styling, bokeh restaurant interior, ${NP_TAG}, ${st}`;
-    if (/여행|travel|관광|투어|trip|호텔|숙소|제주|해외|캠핑|아웃도어/.test(k)) return `breathtaking travel destination photography, majestic scenic landscape, dramatic sky, golden hour, ${NP_TAG}, ${st}`;
-    if (/돈|금|재|투자|경제|수익|부자|코인|주식|애드센스|블로그수익|부업|프리랜서/.test(k)) return `sophisticated financial success concept, modern professional workspace, premium aesthetic charts, aspirational business environment, ${NP_TAG}, ${st}`;
-    if (/건강|운동|몸|fitness|diet|다이어트|헬스|요가|필라테스|러닝|수영/.test(k)) return `motivating healthy lifestyle, wellness activity in bright clean environment, nutritious ingredients, ${NP_TAG}, ${st}`;
-    if (/피부|뷰티|스킨케어|화장|메이크업|헤어|네일|미용|세럼|크림/.test(k)) return `luxurious beauty skincare flat lay, premium cosmetic products elegantly arranged, marble background, feminine aesthetic, ${NP_TAG}, ${st}`;
-    if (/패션|옷|스타일|코디|ootd|아우터|가방|명품|쇼핑|브랜드/.test(k)) return `stylish fashion editorial flat lay, trendy clothing and accessories artfully arranged, urban chic aesthetic, ${NP_TAG}, ${st}`;
-    if (/자동차|차량|드라이브|전기차|수입차|SUV|오토바이/.test(k)) return `dramatic automotive photography, sleek vehicle design detail, dynamic angles, premium lighting, ${NP_TAG}, ${st}`;
-    if (/스포츠|축구|야구|농구|골프|테니스|스키|서핑/.test(k)) return `energetic sports equipment flat lay, athletic gear artfully arranged, performance aesthetic, ${NP_TAG}, ${st}`;
-    if (/집|방|인테리어|아파트|가구|리모델링|청소|정리|수납/.test(k)) return `stunning Korean modern home interior, thoughtfully curated furniture, warm inviting atmosphere, ${NP_TAG}, ${st}`;
-    if (/기술|tech|AI|컴퓨터|스마트폰|앱|IT|아이폰|갤럭시|아이패드|노트북|게임/.test(k)) return `cutting-edge technology concept, sleek modern device, digital innovation aesthetic, futuristic clean design, ${NP_TAG}, ${st}`;
-    if (/봄|여름|가을|겨울|자연|꽃|풍경|숲|바다|산|식물|원예/.test(k)) return `breathtaking Korean seasonal nature photography, pristine landscape, vivid colors, ${NP_TAG}, ${st}`;
-    if (/아이|육아|아기|어린이|임신|출산|유아|교육|공부/.test(k)) return `warm family concept, cozy child-friendly environment, soft pastel tones, educational items, ${NP_TAG}, ${st}`;
-    if (/강아지|고양이|반려|동물|pet|puppy/.test(k)) return `adorable pet accessories flat lay, pet care products, soft background, ${NP_TAG}, ${st}`;
-    if (/결혼|웨딩|신혼|프로포즈|부케|예식/.test(k)) return `romantic wedding concept flat lay, elegant floral arrangements, soft dreamy lighting, bridal aesthetic, ${NP_TAG}, ${st}`;
+    const CATS: [RegExp, string][] = [
+      [/먹|맛|식당|음식|요리|카페|커피|레스토랑|맛집|디저트|베이커리|밥|국|찌개|술|맥주|와인|소주|막걸리/, `stunning Korean food photography, beautifully plated gourmet dish, vibrant fresh ingredients, professional food styling, ${NP_TAG}`],
+      [/여행|관광|투어|trip|호텔|숙소|제주|부산|해외|유럽|일본|동남아|캠핑|글램핑|아웃도어|트레킹/, `breathtaking travel destination, majestic scenic landscape, dramatic sky, golden hour atmosphere, ${NP_TAG}`],
+      [/주식|펀드|선물|옵션|채권|ETF|코인|암호화폐|트레이딩|차트|증권|배당|퀀트/, `professional financial trading concept, stock market charts, data visualization, clean workspace, ${NP_TAG}`],
+      [/보험|연금|퇴직|적금|예금|저축|재테크|투자|경제|수익|부자|부업|프리랜서|애드센스|블로그수익/, `sophisticated financial planning concept, premium documents and calculator, aspirational wealth aesthetic, ${NP_TAG}`],
+      [/건강|운동|fitness|헬스|요가|필라테스|러닝|수영|자전거|체중|다이어트|diet/, `motivating healthy lifestyle, wellness equipment, energizing fresh ingredients, bright minimal aesthetic, ${NP_TAG}`],
+      [/의료|병원|의사|약|의약품|치료|간호|한의원|제약|바이오|헬스케어/, `clean medical healthcare concept, professional stethoscope and equipment, sterile clinical aesthetic, ${NP_TAG}`],
+      [/피부|뷰티|스킨케어|화장|메이크업|헤어|네일|미용|세럼|크림|화장품/, `luxurious beauty skincare flat lay, premium cosmetic products on marble, dewy glowing texture, ${NP_TAG}`],
+      [/패션|옷|스타일|코디|ootd|아우터|가방|명품|쇼핑|브랜드/, `stylish fashion editorial flat lay, trendy clothing and accessories, urban chic aesthetic, ${NP_TAG}`],
+      [/집|방|인테리어|아파트|가구|리모델링|청소|정리|수납|홈데코/, `stunning modern Korean home interior, thoughtfully curated furniture, warm cozy atmosphere, ${NP_TAG}`],
+      [/건축|건설|부동산|땅|분양|임대|전세|월세|재건축|도시개발/, `professional architecture real estate concept, modern building blueprint, urban development aesthetic, ${NP_TAG}`],
+      [/농업|농장|농촌|농산물|채소|과일|쌀|밀|텃밭|스마트팜|유기농/, `beautiful farm and agriculture photography, fresh organic produce, countryside pastoral aesthetic, ${NP_TAG}`],
+      [/수산업|어업|수산물|생선|해산물|굴|새우|랍스터|참치|연어|양식/, `fresh seafood and fisheries concept, glistening ocean products on ice, coastal market aesthetic, ${NP_TAG}`],
+      [/육류|육가공|정육|소고기|돼지고기|닭고기|햄|소시지|정육점/, `premium meat and butchery concept, quality cuts on wooden board, rustic professional food styling, ${NP_TAG}`],
+      [/유통|물류|배송|창고|SCM|택배|운송|화물|항만|수출|수입|무역/, `modern logistics and supply chain concept, warehouse shelves, delivery and shipping aesthetic, ${NP_TAG}`],
+      [/제조|공장|생산|가공|조립|금속|철강|기계|설비|산업|자동화/, `industrial manufacturing concept, precision machinery and equipment, clean factory aesthetic, ${NP_TAG}`],
+      [/화학|석유|에너지|전력|태양광|풍력|수소|배터리|반도체|원자력|신재생/, `energy and materials science concept, clean technology visualization, innovation aesthetic, ${NP_TAG}`],
+      [/과학|연구|실험|물리|생물|quantum|퀀텀|파동|나노|우주|천문/, `professional scientific research concept, laboratory equipment, precise academic aesthetic, ${NP_TAG}`],
+      [/법률|법무|변호사|소송|계약|세무|회계|감사|컴플라이언스/, `professional legal compliance concept, clean document arrangement, authoritative academic aesthetic, ${NP_TAG}`],
+      [/교육|학원|공부|강의|수업|학습|입시|자격증|직업훈련|온라인교육/, `inspiring education concept, organized study materials and books, clean learning environment, ${NP_TAG}`],
+      [/마케팅|광고|홍보|브랜딩|sns|소셜미디어|콘텐츠|유튜브|인스타|미디어|방송/, `creative marketing and media concept, brand elements on clean workspace, content creation aesthetic, ${NP_TAG}`],
+      [/스타트업|창업|사업|경영|비즈니스|기업|CEO|리더십|벤처|혁신/, `dynamic startup and business concept, innovative workspace, entrepreneurial vision, modern corporate, ${NP_TAG}`],
+      [/자동차|차량|드라이브|전기차|수입차|SUV|오토바이|바이크/, `dramatic automotive photography, sleek vehicle design detail, dynamic angles, premium surfaces, ${NP_TAG}`],
+      [/스포츠|축구|야구|농구|골프|테니스|스키|서핑|클라이밍/, `energetic sports equipment flat lay, athletic gear artfully arranged, performance aesthetic, ${NP_TAG}`],
+      [/기술|tech|AI|인공지능|컴퓨터|스마트폰|앱|IT|아이폰|아이패드|노트북|게임|드론/, `cutting-edge technology concept, sleek device on minimal surface, digital innovation aesthetic, ${NP_TAG}`],
+      [/봄|여름|가을|겨울|자연|꽃|풍경|숲|바다|산|식물|원예|정원/, `breathtaking Korean seasonal nature, pristine landscape, vivid natural colors, serene atmosphere, ${NP_TAG}`],
+      [/환경|친환경|제로웨이스트|탄소중립|ESG|재활용|생태계/, `eco-friendly sustainability concept, green products and plants, earth-tone natural aesthetic, ${NP_TAG}`],
+      [/음악|악기|노래|피아노|기타|드럼|클래식|K팝|밴드/, `artistic music concept, beautiful instrument flat lay, creative studio aesthetic, ${NP_TAG}`],
+      [/미술|그림|디자인|영화|드라마|공연|전시|갤러리|예술|창작/, `creative arts concept, artist tools elegantly arranged, gallery inspirational aesthetic, ${NP_TAG}`],
+      [/종교|불교|기독교|명상|영성|철학|심리|힐링|치유/, `peaceful meditation spiritual concept, serene candles and nature, calm mindful aesthetic, ${NP_TAG}`],
+      [/아이|육아|아기|어린이|임신|출산|유아|초등|교육|공부|입시/, `warm family educational concept, child-friendly environment, soft pastel tones, learning materials, ${NP_TAG}`],
+      [/강아지|고양이|반려동물|pet|puppy|햄스터|앵무새|수족관/, `adorable pet care flat lay, pet accessories and products, soft heartwarming background, ${NP_TAG}`],
+      [/결혼|웨딩|신혼|프로포즈|부케|예식|혼수|청첩장/, `romantic wedding concept, elegant floral arrangement, soft dreamy lighting, bridal aesthetic, ${NP_TAG}`],
+    ];
+    for (const [re, prompt] of CATS) {
+      if (re.test(k)) return `${prompt}, ${st}`;
+    }
     return `beautiful Korean lifestyle blog editorial photography, professional composition, warm aesthetic, ${NP_TAG}, ${st}`;
   }
 
@@ -1507,19 +1530,6 @@ Output format (JSON array only, no other text):
   function buildAdmFlowPrompt(kw: string, title: string = "", content: string = "", idx: number = 0): string {
     const k = (kw + " " + title).toLowerCase();
     const c = content.slice(0, 500).toLowerCase();
-    const isFoodCafe = /먹|맛|식|음식|요리|카페|커피|레스토랑|맛집|디저트|베이커리|밥|술|맥주|와인/.test(k+c);
-    const isTravel = /여행|관광|투어|호텔|숙소|제주|부산|서울|해외|캠핑|아웃도어/.test(k+c);
-    const isHealth = /건강|운동|fitness|헬스|요가|필라테스|수영|러닝|자전거|체중/.test(k+c);
-    const isBeauty = /피부|뷰티|스킨케어|화장|메이크업|헤어|네일|미용|세럼|크림/.test(k+c);
-    const isFinance = /재테크|투자|주식|금융|돈|수익|부자|경제|코인|부동산|애드센스|광고수익|블로그수익|부업/.test(k+c);
-    const isHome = /인테리어|집|방|아파트|가구|리모델링|청소|정리|수납/.test(k+c);
-    const isTech = /기술|tech|AI|인공지능|컴퓨터|스마트폰|앱|IT|아이폰|갤럭시|아이패드|노트북|게임/.test(k+c);
-    const isFashion = /패션|옷|스타일|코디|ootd|아우터|자켓|청바지|원피스|백|가방|명품|쇼핑/.test(k+c);
-    const isCar = /자동차|차|드라이브|전기차|수입차|SUV|세단|연비|오토바이/.test(k+c);
-    const isNature = /봄|여름|가을|겨울|자연|꽃|풍경|숲|바다|산|식물|원예/.test(k+c);
-    const isBaby = /아이|육아|아기|baby|어린이|임신|출산|유아|교육|학습|공부/.test(k+c);
-    const isPet = /강아지|고양이|반려|pet|puppy|동물/.test(k+c);
-    const isWedding = /결혼|웨딩|신혼|프로포즈|부케|예식|혼수/.test(k+c);
     const lightings = [
       "soft golden hour natural lighting, warm sunlight filtering through",
       "bright airy daylight, clean studio-style lighting, crisp shadows",
@@ -1528,19 +1538,43 @@ Output format (JSON array only, no other text):
     ];
     const lighting = lightings[idx % lightings.length];
     const quality = "ultra-high resolution 8K, hyperrealistic, award-winning photography, National Geographic quality, razor-sharp focus, perfect composition";
-    if (isFoodCafe) return `A stunning food photography scene featuring "${title}", beautifully plated gourmet Korean cuisine, vibrant fresh ingredients, professional food styling, bokeh background, ${lighting}, ${quality}, appetizing mood`;
-    if (isTravel) return `A breathtaking travel photography of "${title}" destination, majestic scenic landscape with dramatic sky, vibrant atmosphere, ${lighting}, ${quality}, wanderlust inspiring composition`;
-    if (isHealth) return `A motivating healthy lifestyle photography representing "${title}", fit person engaged in wellness activity, clean minimal aesthetic, ${lighting}, ${quality}, inspiring positive mood`;
-    if (isBeauty) return `A luxurious beauty flat lay for "${title}", premium cosmetic products elegantly arranged, soft feminine aesthetic, dewy glowing skin texture, ${lighting}, ${quality}, beauty editorial style`;
-    if (isFinance) return `A sophisticated financial success concept photo for "${title}", modern professional workspace with charts, confident business professional, premium aesthetic, ${lighting}, ${quality}, aspirational mood`;
-    if (isHome) return `A stunning interior design photography of "${title}", beautifully decorated Korean modern home, warm inviting atmosphere, ${lighting}, ${quality}, cozy aspirational living space`;
-    if (isTech) return `A cutting-edge technology concept photo representing "${title}", sleek modern devices and interfaces, futuristic minimal design, ${lighting}, ${quality}, professional innovative atmosphere`;
-    if (isFashion) return `A stylish Korean fashion editorial representing "${title}", trendy outfit with accessories, urban street style, ${lighting}, ${quality}, Vogue-worthy composition`;
-    if (isCar) return `A dramatic automotive photography featuring "${title}", sleek vehicle on scenic road, dynamic angles highlighting design, ${lighting}, ${quality}, car magazine quality`;
-    if (isNature) return `A breathtaking nature photography capturing "${title}", pristine Korean landscape, vivid seasonal colors, ${lighting}, ${quality}, immersive serene composition`;
-    if (isBaby) return `A heartwarming family photography featuring "${title}", genuine emotional warmth, candid precious moments, soft pastel tones, ${lighting}, ${quality}, tender joyful atmosphere`;
-    if (isPet) return `A charming pet photography of "${title}", expressive animal companion, playful loving moments, soft bokeh background, ${lighting}, ${quality}, heartwarming mood`;
-    if (isWedding) return `A romantic wedding photography scene for "${title}", beautifully decorated venue, elegant bridal details, heartfelt moment, ${lighting}, ${quality}, dreamy wedding magazine style`;
+    const FLOW_CATS: [RegExp, string][] = [
+      [/먹|맛|식당|음식|요리|카페|커피|맛집|디저트|밥|술|맥주|와인|소주/, `A stunning food photography scene featuring "${title}", beautifully plated gourmet Korean cuisine, vibrant fresh ingredients, professional food styling, bokeh restaurant interior`],
+      [/여행|관광|투어|호텔|숙소|제주|해외|유럽|일본|동남아|캠핑|아웃도어/, `A breathtaking travel photography of "${title}", majestic scenic landscape with dramatic sky, vibrant atmosphere, wanderlust inspiring composition`],
+      [/주식|펀드|선물|옵션|채권|ETF|코인|트레이딩|차트|증권|배당|퀀트/, `A sophisticated stock market concept for "${title}", dynamic financial data visualization, trading screens with charts, modern professional workspace`],
+      [/보험|연금|저축|적금|재테크|투자|경제|수익|부자|부업|프리랜서|애드센스|블로그수익/, `A sophisticated financial success concept for "${title}", modern professional workspace, premium business aesthetic, aspirational and trustworthy mood`],
+      [/건강|운동|fitness|헬스|요가|필라테스|러닝|수영|다이어트|diet/, `A motivating healthy lifestyle photography for "${title}", wellness activity, fresh organic ingredients, clean bright atmosphere`],
+      [/의료|병원|약|치료|제약|바이오|헬스케어|한의원/, `A clean medical healthcare concept for "${title}", professional equipment, sterile clinical precision aesthetic`],
+      [/피부|뷰티|스킨케어|화장|메이크업|헤어|네일|화장품|세럼|크림/, `A luxurious beauty editorial for "${title}", premium cosmetic products on marble, dewy glowing texture, feminine elegance`],
+      [/패션|옷|스타일|코디|ootd|아우터|가방|명품|쇼핑|브랜드/, `A stylish fashion editorial for "${title}", trendy outfit with accessories, urban street style, Vogue-worthy composition`],
+      [/집|방|인테리어|아파트|가구|리모델링|청소|정리|수납/, `A stunning interior design photography of "${title}", beautifully decorated Korean modern home, warm cozy atmosphere`],
+      [/건축|건설|부동산|분양|임대|전세|재건축/, `A professional architecture real estate concept for "${title}", modern building, urban development premium aesthetic`],
+      [/농업|농장|농산물|채소|과일|쌀|유기농|스마트팜/, `A beautiful farm and agriculture photography for "${title}", fresh organic produce, countryside pastoral aesthetic`],
+      [/수산업|어업|수산물|생선|해산물|굴|새우|참치|연어/, `A fresh seafood photography for "${title}", glistening ocean products on ice, vibrant coastal market aesthetic`],
+      [/육류|육가공|정육|소고기|돼지고기|닭고기|햄|소시지/, `A premium meat concept for "${title}", quality cuts on rustic wooden board, professional food styling`],
+      [/유통|물류|배송|창고|SCM|택배|운송|화물|무역/, `A modern logistics concept for "${title}", organized warehouse, delivery and shipping aesthetic`],
+      [/제조|공장|생산|가공|철강|기계|설비|산업|자동화/, `An industrial manufacturing concept for "${title}", precision machinery, clean factory aesthetic`],
+      [/화학|에너지|태양광|풍력|수소|배터리|반도체|신재생/, `A clean energy and materials concept for "${title}", innovative technology visualization, sustainable aesthetic`],
+      [/과학|연구|실험|물리|생물|quantum|퀀텀|파동|나노|우주|천문/, `A professional scientific research concept for "${title}", laboratory precision, quantum visualization aesthetic`],
+      [/법률|법무|변호사|소송|계약|세무|회계|컴플라이언스/, `A professional legal concept for "${title}", clean document arrangement, authoritative trustworthy aesthetic`],
+      [/교육|학원|강의|학습|입시|자격증|온라인교육/, `An inspiring education concept for "${title}", organized study materials, clean learning environment`],
+      [/마케팅|광고|홍보|브랜딩|소셜미디어|콘텐츠|유튜브|미디어/, `A creative marketing concept for "${title}", brand elements on workspace, content creation aesthetic`],
+      [/스타트업|창업|사업|경영|비즈니스|기업|리더십|벤처/, `A dynamic startup concept for "${title}", innovative workspace, entrepreneurial vision, modern corporate`],
+      [/자동차|차량|드라이브|전기차|수입차|SUV|오토바이/, `A dramatic automotive photography for "${title}", sleek vehicle design, dynamic angles, premium surfaces`],
+      [/스포츠|축구|야구|농구|골프|테니스|스키|서핑/, `An energetic sports photography for "${title}", peak athletic performance, dynamic action`],
+      [/기술|tech|AI|인공지능|컴퓨터|스마트폰|앱|IT|아이폰|아이패드|노트북|게임|드론/, `A cutting-edge technology concept for "${title}", sleek devices, digital innovation aesthetic`],
+      [/봄|여름|가을|겨울|자연|꽃|풍경|숲|바다|산|식물|원예/, `A breathtaking nature photography for "${title}", pristine landscape, vivid seasonal colors`],
+      [/환경|친환경|제로웨이스트|탄소중립|ESG|재활용/, `An eco-friendly sustainability concept for "${title}", green products, earth-tone natural aesthetic`],
+      [/음악|악기|노래|피아노|기타|드럼|K팝/, `An artistic music concept for "${title}", beautiful instrument flat lay, creative studio aesthetic`],
+      [/미술|그림|디자인|영화|드라마|공연|전시|예술/, `A creative arts concept for "${title}", artist tools elegantly arranged, gallery aesthetic`],
+      [/명상|영성|철학|심리|힐링|치유|종교/, `A peaceful meditation concept for "${title}", serene candles and nature, calm mindful aesthetic`],
+      [/아이|육아|아기|어린이|임신|출산|유아|교육|공부/, `A heartwarming family concept for "${title}", soft pastel tones, child-friendly environment`],
+      [/강아지|고양이|반려동물|pet|puppy/, `A charming pet photography for "${title}", expressive companion, playful moments, soft bokeh`],
+      [/결혼|웨딩|신혼|프로포즈|부케|예식|혼수/, `A romantic wedding photography for "${title}", elegant venue, bridal details, dreamy style`],
+    ];
+    for (const [re, prompt] of FLOW_CATS) {
+      if (re.test(k+c)) return `${prompt}, ${lighting}, ${quality}`;
+    }
     return `A high-quality professional blog photography representing "${title}" about ${kw}, visually compelling, Korean lifestyle aesthetic, ${lighting}, ${quality}, editorial magazine style`;
   }
 
