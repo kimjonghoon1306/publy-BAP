@@ -897,52 +897,56 @@ export async function saveGoogleSession(userId: string, email?: string, pw?: str
   await applyAntiDetection(context);
   const page = await context.newPage();
   try {
-    // 1단계: Google 로그인
-    await page.goto("https://accounts.google.com/signin/v2/identifier", { waitUntil: "domcontentloaded", timeout: 30000 });
-    await page.waitForTimeout(1500);
-
-    if (email) {
-      const emailSel = "input[type='email'], input[name='identifier']";
-      await page.waitForSelector(emailSel, { timeout: 10000 });
-      await page.fill(emailSel, email);
-      await page.waitForTimeout(600);
-      await page.keyboard.press("Enter");
-      await page.waitForTimeout(2500);
-    }
-
-    if (pw) {
-      const pwSel = "input[type='password'], input[name='Passwd']";
-      await page.waitForSelector(pwSel, { timeout: 12000 });
-      await page.fill(pwSel, pw);
-      await page.waitForTimeout(600);
-      await page.keyboard.press("Enter");
-      await page.waitForTimeout(3000);
-    }
-
-    // 2단계: 2FA 등 추가 인증 대기 후 Flow 사이트로 이동
-    console.log("[google] 로그인 후 Flow 사이트 접속 중...");
-    await page.goto("https://labs.google/fx/ko/tools/image-fx", { waitUntil: "domcontentloaded", timeout: 40000 });
+    // 1단계: labs.google/fx로 바로 이동 (여기서 시작해야 NextAuth 세션이 제대로 생성됨)
+    console.log("[google] ImageFX 로그인 시작...");
+    await page.goto("https://labs.google/fx/ko/tools/image-fx", { waitUntil: "domcontentloaded", timeout: 30000 });
     await page.waitForTimeout(3000);
 
-    // 3단계: 아직 Google 로그인 페이지면 2FA 처리 대기 (최대 90초)
-    if (page.url().includes("accounts.google.com")) {
-      console.log("[google] 추가 인증 필요 — Chrome에서 직접 처리해주세요 (90초)");
-      await page.waitForFunction(
-        () => !location.hostname.includes("accounts.google.com"),
-        { timeout: 90000 }
-      );
+    // 2단계: 로그인 버튼 클릭 → OAuth 팝업 처리
+    const loginBtn = await page.$("button:has-text('로그인'), button:has-text('Sign in')").catch(() => null);
+    if (loginBtn) {
+      console.log("[google] 로그인 버튼 클릭...");
+      const popupPromise = context.waitForEvent("page", { timeout: 8000 }).catch(() => null);
+      await loginBtn.click();
       await page.waitForTimeout(2000);
+      const popup = await popupPromise;
+      if (popup) {
+        await popup.waitForLoadState("domcontentloaded");
+        await popup.waitForTimeout(2000);
+        if (email) {
+          const emailInput = await popup.$("input[type='email'], input[name='identifier']").catch(() => null);
+          if (emailInput) {
+            await emailInput.fill(email);
+            await popup.keyboard.press("Enter");
+            await popup.waitForTimeout(3000);
+          }
+        }
+        if (pw) {
+          const pwInput = await popup.$("input[type='password'], input[name='Passwd']").catch(() => null);
+          if (pwInput) {
+            await pwInput.fill(pw);
+            await popup.keyboard.press("Enter");
+            await popup.waitForTimeout(3000);
+          }
+        }
+        console.log("[google] 팝업 로그인 대기 중... (2FA 있으면 직접 처리, 90초)");
+        await popup.waitForEvent("close", { timeout: 90000 }).catch(() => {});
+        await page.waitForTimeout(4000);
+      }
     }
 
-    // 4단계: 쿠키 + 이메일 + 비밀번호 저장 (Flow 자동 로그인용)
-    const cookies = await context.cookies();
-    fs.writeFileSync(googleSessionPath(userId), JSON.stringify({
-      cookies,
-      email: email || "",
-      pw: pw ? Buffer.from(pw).toString("base64") : "",
-    }, null, 2));
+    // 3단계: 로그인 후 storageState 전체 저장 (쿠키 + localStorage + sessionStorage)
+    const statePath = googleSessionPath(userId);
+    await context.storageState({ path: statePath });
+
+    // 이메일/비번도 함께 저장 (재연결용)
+    const saved = JSON.parse(fs.readFileSync(statePath, "utf-8"));
+    saved.email = email || "";
+    saved.pw = pw ? Buffer.from(pw).toString("base64") : "";
+    fs.writeFileSync(statePath, JSON.stringify(saved, null, 2));
+
     await browser.close();
-    console.log("[google] ✅ Google Flow 세션 저장 완료");
+    console.log("[google] ✅ Google Flow 세션 저장 완료 (storageState)");
   } catch (e) {
     await browser.close().catch(() => {});
     throw e;
@@ -993,7 +997,10 @@ export async function generateFlowImages(params: {
     args: ["--no-sandbox", "--disable-blink-features=AutomationControlled"],
   });
 
+  // storageState 방식으로 로드 (쿠키+localStorage+sessionStorage 전체)
+  const hasStorageState = googleSession.origins !== undefined;
   const context = await browser.newContext({
+    ...(hasStorageState ? { storageState: gsp } : {}),
     userAgent: UA,
     viewport: { width: 1280, height: 900 },
     locale: "ko-KR",
@@ -1001,7 +1008,10 @@ export async function generateFlowImages(params: {
   });
 
   await applyAntiDetection(context);
-  await context.addCookies(googleSession.cookies);
+  // 구버전 세션(쿠키만 있는 경우) 호환
+  if (!hasStorageState && googleSession.cookies?.length) {
+    await context.addCookies(googleSession.cookies);
+  }
   const page = await context.newPage();
 
   // ── 헬퍼: Google 로그인 처리 ──
