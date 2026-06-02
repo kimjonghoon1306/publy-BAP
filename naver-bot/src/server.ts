@@ -76,10 +76,10 @@ app.get("/api/google/session-exists/:userId", (req, res) => {
 
 /* ── Google 로그인 세션 저장 ── */
 app.post("/api/google/save-session", async (req, res) => {
-  const { userId } = req.body;
+  const { userId, email, pw } = req.body;
   if (!userId) return res.status(400).json({ success: false, error: "userId 필요" });
   try {
-    await saveGoogleSession(userId);
+    await saveGoogleSession(userId, email, pw);
     res.json({ success: true });
   } catch (e: any) {
     res.status(500).json({ success: false, error: e.message });

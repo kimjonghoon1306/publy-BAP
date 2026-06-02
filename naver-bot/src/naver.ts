@@ -842,7 +842,7 @@ export function googleSessionExists(userId: string): boolean {
   return fs.existsSync(googleSessionPath(userId));
 }
 
-export async function saveGoogleSession(userId: string): Promise<void> {
+export async function saveGoogleSession(userId: string, email?: string, pw?: string): Promise<void> {
   const browser = await chromium.launch({ headless: false, args: LAUNCH_ARGS, slowMo: 50 });
   const context = await browser.newContext({
     userAgent: UA, viewport: { width: 1280, height: 800 }, locale: "ko-KR",
@@ -850,15 +850,41 @@ export async function saveGoogleSession(userId: string): Promise<void> {
   await applyAntiDetection(context);
   const page = await context.newPage();
   try {
-    await page.goto("https://accounts.google.com/signin", { waitUntil: "domcontentloaded", timeout: 30000 });
-    console.log("[google] Google 로그인 창 열림 — 직접 로그인 후 대기 중...");
+    await page.goto("https://accounts.google.com/signin/v2/identifier", { waitUntil: "domcontentloaded", timeout: 30000 });
+    await page.waitForTimeout(1500);
+
+    if (email) {
+      // 이메일 입력
+      const emailSel = "input[type='email'], input[name='identifier']";
+      await page.waitForSelector(emailSel, { timeout: 10000 });
+      await page.fill(emailSel, email);
+      await page.waitForTimeout(500);
+      await page.keyboard.press("Enter");
+      await page.waitForTimeout(2000);
+
+      if (pw) {
+        // 비밀번호 입력
+        const pwSel = "input[type='password'], input[name='Passwd']";
+        await page.waitForSelector(pwSel, { timeout: 10000 });
+        await page.fill(pwSel, pw);
+        await page.waitForTimeout(500);
+        await page.keyboard.press("Enter");
+        await page.waitForTimeout(2000);
+      }
+    }
+
+    // 로그인 완료 대기 (2FA 등 추가 인증 포함, 최대 3분)
+    console.log("[google] 로그인 대기 중... (2FA 있으면 직접 처리해주세요)");
     await page.waitForFunction(
-      () => location.hostname === "myaccount.google.com" || location.hostname.endsWith(".google.com") && !location.pathname.includes("signin"),
+      () => !location.href.includes("accounts.google.com/signin") && !location.href.includes("accounts.google.com/v3/signin"),
       { timeout: 180000 }
     );
     await page.waitForTimeout(2000);
     const cookies = await context.cookies();
-    fs.writeFileSync(googleSessionPath(userId), JSON.stringify({ cookies }, null, 2));
+    fs.writeFileSync(googleSessionPath(userId), JSON.stringify({
+      cookies,
+      email: email || "",
+    }, null, 2));
     await browser.close();
     console.log("[google] ✅ Google 세션 저장 완료");
   } catch (e) {
