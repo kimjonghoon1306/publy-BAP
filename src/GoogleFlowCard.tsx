@@ -22,7 +22,7 @@ export default function GoogleFlowCard({ botOnline, botUrl, userId }: Props) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ userId, email, pw }),
-        signal: AbortSignal.timeout(200000),
+        signal: AbortSignal.timeout(150000),
       });
       const d = await r.json();
       if (d.success) {
