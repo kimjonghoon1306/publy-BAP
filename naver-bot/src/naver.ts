@@ -554,19 +554,23 @@ export async function publishNaver(params: {
         : text;
 
       await clickEditor();
-      await page.waitForTimeout(300);
+      await page.waitForTimeout(400);
+      // 커서를 맨 끝으로 이동 (중간 삽입 방지)
+      await page.keyboard.press("End");
+      await page.waitForTimeout(200);
       const lines = plain.split("\n");
       for (let i = 0; i < lines.length; i++) {
         if (lines[i].trim()) {
-          await page.keyboard.type(lines[i], { delay: 30 });
+          // delay를 높여 SE4가 붙여넣기가 아닌 진짜 타이핑으로 인식
+          await page.keyboard.type(lines[i], { delay: 80 });
+          await page.waitForTimeout(100);
         }
         if (i < lines.length - 1) {
           await page.keyboard.press("Enter");
-          await page.waitForTimeout(120);
-          // 위아래 여백: 내용이 있는 줄 다음에 항상 Enter 한 번 더 (단락 여백)
+          await page.waitForTimeout(200);
           if (lines[i].trim()) {
             await page.keyboard.press("Enter");
-            await page.waitForTimeout(80);
+            await page.waitForTimeout(150);
           }
         }
       }
