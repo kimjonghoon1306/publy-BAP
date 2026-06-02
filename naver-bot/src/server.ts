@@ -79,7 +79,18 @@ app.post("/api/google/save-session", async (req, res) => {
   const { userId, email, pw } = req.body;
   if (!userId) return res.status(400).json({ success: false, error: "userId 필요" });
   try {
-    await saveGoogleSession(userId, email, pw);
+    // 이메일/비번 없으면 기존 세션 파일에서 읽어서 재연결
+    let finalEmail = email;
+    let finalPw = pw;
+    if (!finalEmail || !finalPw) {
+      const gsp = path.join(__dirname, `../sessions/google_${userId}.json`);
+      if (fs.existsSync(gsp)) {
+        const saved = JSON.parse(fs.readFileSync(gsp, "utf-8"));
+        finalEmail = finalEmail || saved.email || "";
+        finalPw = finalPw || (saved.pw ? Buffer.from(saved.pw, "base64").toString("utf-8") : "");
+      }
+    }
+    await saveGoogleSession(userId, finalEmail, finalPw);
     res.json({ success: true });
   } catch (e: any) {
     res.status(500).json({ success: false, error: e.message });
@@ -92,6 +103,7 @@ app.get("/api/session-status/:userId", (req, res) => {
   res.json({
     naver: naverSessionExists(userId),
     tistory: tistorySessionExists(userId),
+    google: googleSessionExists(userId),
   });
 });
 
