@@ -1405,14 +1405,21 @@ Output format (JSON array only, no other text):
         return `${p}, ${NP_TAG}, ${st}`;
       }
     }
-    if (/먹|맛|식|음|요리|카페|커피/.test(k)) return `beautiful Korean food dining experience, warm restaurant, delicious presentation, ${NP_TAG}, ${st}`;
-    if (/여행|travel|관광|투어|trip/.test(k)) return `breathtaking Korean travel destination, scenic landscape, golden hour, ${NP_TAG}, ${st}`;
-    if (/돈|금|재|투자|경제|수익|부자/.test(k)) return `financial success growth concept, modern professional aesthetic, ${NP_TAG}, ${st}`;
-    if (/건강|운동|몸|fitness|diet|다이어트/.test(k)) return `healthy lifestyle motivation, nutritious food, wellness atmosphere, ${NP_TAG}, ${st}`;
-    if (/집|방|인테리어|home|house|아파트/.test(k)) return `beautiful modern Korean home interior, warm cozy atmosphere, ${NP_TAG}, ${st}`;
-    if (/기술|tech|AI|컴퓨터|폰|앱/.test(k)) return `modern technology concept, clean digital aesthetic, innovation, ${NP_TAG}, ${st}`;
-    if (/봄|여름|가을|겨울|자연|꽃/.test(k)) return `beautiful Korean seasonal landscape, nature photography, golden light, ${NP_TAG}, ${st}`;
-    return `beautiful Korean lifestyle blog editorial photography, professional, perfect composition, ${NP_TAG}, ${st}`;
+    if (/먹|맛|식|음|요리|카페|커피|레스토랑|맛집|디저트|밥|술|맥주|와인/.test(k)) return `stunning Korean food photography, beautifully plated gourmet dish, vibrant ingredients, professional food styling, bokeh restaurant interior, ${NP_TAG}, ${st}`;
+    if (/여행|travel|관광|투어|trip|호텔|숙소|제주|해외|캠핑|아웃도어/.test(k)) return `breathtaking travel destination photography, majestic scenic landscape, dramatic sky, golden hour, ${NP_TAG}, ${st}`;
+    if (/돈|금|재|투자|경제|수익|부자|코인|주식|애드센스|블로그수익|부업|프리랜서/.test(k)) return `sophisticated financial success concept, modern professional workspace, premium aesthetic charts, aspirational business environment, ${NP_TAG}, ${st}`;
+    if (/건강|운동|몸|fitness|diet|다이어트|헬스|요가|필라테스|러닝|수영/.test(k)) return `motivating healthy lifestyle, wellness activity in bright clean environment, nutritious ingredients, ${NP_TAG}, ${st}`;
+    if (/피부|뷰티|스킨케어|화장|메이크업|헤어|네일|미용|세럼|크림/.test(k)) return `luxurious beauty skincare flat lay, premium cosmetic products elegantly arranged, marble background, feminine aesthetic, ${NP_TAG}, ${st}`;
+    if (/패션|옷|스타일|코디|ootd|아우터|가방|명품|쇼핑|브랜드/.test(k)) return `stylish fashion editorial flat lay, trendy clothing and accessories artfully arranged, urban chic aesthetic, ${NP_TAG}, ${st}`;
+    if (/자동차|차량|드라이브|전기차|수입차|SUV|오토바이/.test(k)) return `dramatic automotive photography, sleek vehicle design detail, dynamic angles, premium lighting, ${NP_TAG}, ${st}`;
+    if (/스포츠|축구|야구|농구|골프|테니스|스키|서핑/.test(k)) return `energetic sports equipment flat lay, athletic gear artfully arranged, performance aesthetic, ${NP_TAG}, ${st}`;
+    if (/집|방|인테리어|아파트|가구|리모델링|청소|정리|수납/.test(k)) return `stunning Korean modern home interior, thoughtfully curated furniture, warm inviting atmosphere, ${NP_TAG}, ${st}`;
+    if (/기술|tech|AI|컴퓨터|스마트폰|앱|IT|아이폰|갤럭시|아이패드|노트북|게임/.test(k)) return `cutting-edge technology concept, sleek modern device, digital innovation aesthetic, futuristic clean design, ${NP_TAG}, ${st}`;
+    if (/봄|여름|가을|겨울|자연|꽃|풍경|숲|바다|산|식물|원예/.test(k)) return `breathtaking Korean seasonal nature photography, pristine landscape, vivid colors, ${NP_TAG}, ${st}`;
+    if (/아이|육아|아기|어린이|임신|출산|유아|교육|공부/.test(k)) return `warm family concept, cozy child-friendly environment, soft pastel tones, educational items, ${NP_TAG}, ${st}`;
+    if (/강아지|고양이|반려|동물|pet|puppy/.test(k)) return `adorable pet accessories flat lay, pet care products, soft background, ${NP_TAG}, ${st}`;
+    if (/결혼|웨딩|신혼|프로포즈|부케|예식/.test(k)) return `romantic wedding concept flat lay, elegant floral arrangements, soft dreamy lighting, bridal aesthetic, ${NP_TAG}, ${st}`;
+    return `beautiful Korean lifestyle blog editorial photography, professional composition, warm aesthetic, ${NP_TAG}, ${st}`;
   }
 
   function parseArr(text: string): string[] {
