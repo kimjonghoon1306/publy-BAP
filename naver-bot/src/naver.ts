@@ -393,25 +393,32 @@ export async function publishNaver(params: {
     await page.keyboard.type(title, { delay: 30 });
     await page.waitForTimeout(600);
 
-    // 본문으로 이동: 제목 섹션 아래를 마우스로 직접 클릭 (가장 신뢰할 수 있는 방법)
+    // 본문으로 이동 1순위: Enter (SE4 표준 - 제목에서 Enter → 본문 이동)
     console.log("[naver] 본문 영역으로 이동...");
-    const titleEl = await frame.$(".se-section-documentTitle").catch(() => null);
-    if (titleEl) {
-      const box = await titleEl.boundingBox().catch(() => null);
-      if (box) {
-        // 제목 섹션 아래쪽 90px 지점 클릭 → 본문 영역
-        await page.mouse.click(box.x + box.width / 2, box.y + box.height + 90);
-        await page.waitForTimeout(600);
-      }
-    }
-    // 혹시 포커스가 아직 제목에 있으면 Enter로 새 단락 생성
+    await page.keyboard.press("Enter");
+    await page.waitForTimeout(600);
+
+    // 이동됐는지 확인
     const stillInTitle = await frame.evaluate(() => {
       const el = document.activeElement;
       return !!document.querySelector(".se-section-documentTitle")?.contains(el);
     }).catch(() => false);
     if (stillInTitle) {
-      await page.keyboard.press("Enter");
-      await page.waitForTimeout(400);
+      // 2순위: frame.click으로 본문 contenteditable 직접 클릭
+      try {
+        await frame.click(".se-section:not(.se-section-documentTitle) [contenteditable='true']", { timeout: 3000, force: true });
+        await page.waitForTimeout(400);
+      } catch {
+        // 3순위: 마우스로 제목 아래 클릭
+        const titleEl = await frame.$(".se-section-documentTitle").catch(() => null);
+        if (titleEl) {
+          const box = await titleEl.boundingBox().catch(() => null);
+          if (box) {
+            await page.mouse.click(box.x + box.width / 2, box.y + box.height + 100);
+            await page.waitForTimeout(400);
+          }
+        }
+      }
     }
     await page.waitForTimeout(300);
 
