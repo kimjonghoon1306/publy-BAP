@@ -897,42 +897,69 @@ export async function saveGoogleSession(userId: string, email?: string, pw?: str
   await applyAntiDetection(context);
   const page = await context.newPage();
   try {
-    // 1단계: labs.google/fx로 바로 이동 (여기서 시작해야 NextAuth 세션이 제대로 생성됨)
+    // 1단계: labs.google/fx로 바로 이동
     console.log("[google] ImageFX 로그인 시작...");
     await page.goto("https://labs.google/fx/ko/tools/image-fx", { waitUntil: "domcontentloaded", timeout: 30000 });
     await page.waitForTimeout(3000);
 
-    // 2단계: 로그인 버튼 클릭 → OAuth 팝업 처리
+    // 2단계: 로그인 버튼 클릭 → 리다이렉트 또는 팝업 처리
     const loginBtn = await page.$("button:has-text('로그인'), button:has-text('Sign in')").catch(() => null);
     if (loginBtn) {
       console.log("[google] 로그인 버튼 클릭...");
-      const popupPromise = context.waitForEvent("page", { timeout: 8000 }).catch(() => null);
+
+      // 팝업과 리다이렉트 모두 대비
+      const popupPromise = context.waitForEvent("page", { timeout: 5000 }).catch(() => null);
       await loginBtn.click();
       await page.waitForTimeout(2000);
+
       const popup = await popupPromise;
-      if (popup) {
-        await popup.waitForLoadState("domcontentloaded");
-        await popup.waitForTimeout(2000);
-        if (email) {
-          const emailInput = await popup.$("input[type='email'], input[name='identifier']").catch(() => null);
-          if (emailInput) {
-            await emailInput.fill(email);
-            await popup.keyboard.press("Enter");
-            await popup.waitForTimeout(3000);
-          }
+      const targetPage = popup || page; // 팝업이 없으면 현재 페이지에서 처리
+
+      // Google 로그인 페이지 대기 (팝업 또는 리다이렉트)
+      try {
+        await targetPage.waitForSelector("input[type='email'], input[name='identifier']", { timeout: 15000 });
+      } catch {
+        // 이미 로그인된 경우 또는 다른 페이지
+        console.log("[google] 이메일 입력창 없음 - 이미 로그인 상태일 수 있음");
+      }
+
+      // 이메일 입력
+      if (email) {
+        const emailInput = await targetPage.$("input[type='email'], input[name='identifier']").catch(() => null);
+        if (emailInput) {
+          await emailInput.fill(email);
+          await targetPage.waitForTimeout(600);
+          await targetPage.keyboard.press("Enter");
+          await targetPage.waitForTimeout(3000);
         }
-        if (pw) {
-          const pwInput = await popup.$("input[type='password'], input[name='Passwd']").catch(() => null);
+      }
+
+      // 비밀번호 입력
+      if (pw) {
+        try {
+          await targetPage.waitForSelector("input[type='password'], input[name='Passwd']", { timeout: 10000 });
+          const pwInput = await targetPage.$("input[type='password'], input[name='Passwd']").catch(() => null);
           if (pwInput) {
             await pwInput.fill(pw);
-            await popup.keyboard.press("Enter");
-            await popup.waitForTimeout(3000);
+            await targetPage.waitForTimeout(600);
+            await targetPage.keyboard.press("Enter");
+            await targetPage.waitForTimeout(3000);
           }
-        }
-        console.log("[google] 팝업 로그인 대기 중... (2FA 있으면 직접 처리, 90초)");
-        await popup.waitForEvent("close", { timeout: 90000 }).catch(() => {});
-        await page.waitForTimeout(4000);
+        } catch {}
       }
+
+      // 2FA 또는 추가 인증 대기 (최대 90초)
+      console.log("[google] 로그인 완료 대기 중... (2FA 있으면 직접 처리, 90초)");
+      if (popup) {
+        await popup.waitForEvent("close", { timeout: 90000 }).catch(() => {});
+      } else {
+        // 리다이렉트 방식: labs.google/fx로 돌아올 때까지 대기
+        await page.waitForFunction(
+          () => location.hostname === "labs.google" && !location.href.includes("accounts.google"),
+          { timeout: 90000 }
+        ).catch(() => {});
+      }
+      await page.waitForTimeout(4000);
     }
 
     // 3단계: 로그인 후 storageState 전체 저장 (쿠키 + localStorage + sessionStorage)
