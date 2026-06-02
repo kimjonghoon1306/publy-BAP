@@ -341,7 +341,7 @@ export async function publishNaver(params: {
   blocks?: Array<{type: string; content?: string; src?: string; alt?: string}>;
 }): Promise<string> {
   const { userId, title: rawTitle, content, pubScope = "full", tags, imageUrl, categoryId, visibility = "public", scheduleTime, blocks } = params;
-  const title = rawTitle.replace(/\n/g, " ").trim().slice(0, 20);
+  const title = rawTitle.replace(/\n/g, " ").trim().slice(0, 40);
 
   // pubScope에 따라 블록 필터링 + 마커 제거
   const processedBlocks = (blocks || []).map(b => {
@@ -1082,27 +1082,36 @@ export async function generateFlowImages(params: {
 
   // ── 헬퍼: 프롬프트 입력 ──
   async function enterPrompt(prompt: string): Promise<boolean> {
-    // 1. textarea 찾기 (여러 방법 시도)
+    // 팝업 오버레이 재확인 및 제거
+    await page.evaluate(() => {
+      document.querySelectorAll("[data-state='open']").forEach(el => el.remove());
+    }).catch(() => {});
+    await page.waitForTimeout(500);
+
     let input: any = null;
 
-    // 방법1: 일반 textarea
+    // textarea (visible 우선)
     try {
-      await page.waitForSelector("textarea", { timeout: 6000 });
-      input = await page.$("textarea");
+      await page.waitForSelector("textarea:visible", { timeout: 5000 });
+      input = await page.$("textarea:visible");
     } catch {}
 
-    // 방법2: contenteditable
+    // 모든 textarea
     if (!input) {
       try {
-        input = await page.$("[contenteditable='true']:not([role='combobox'])");
+        input = await page.$("textarea");
+        if (input) {
+          await page.evaluate(() => {
+            const ta = document.querySelector("textarea");
+            if (ta) { ta.style.display = "block"; ta.style.visibility = "visible"; }
+          }).catch(() => {});
+        }
       } catch {}
     }
 
-    // 방법3: 입력 가능한 div
+    // contenteditable
     if (!input) {
-      try {
-        input = await page.$("div[role='textbox']");
-      } catch {}
+      try { input = await page.$("[contenteditable='true']:not([role='combobox'])"); } catch {}
     }
 
     if (!input) {
@@ -1221,8 +1230,24 @@ export async function generateFlowImages(params: {
     });
     await page.waitForTimeout(4000);
 
-    // 로그인 버튼 있으면 처리 ("로그인", "Google 계정으로 로그인" 등)
-    const needLogin = await page.$("button:has-text('로그인'), button:has-text('Sign in'), button:has-text('Google 계정으로 로그인')").catch(() => null);
+    // 팝업 오버레이 제거 + 버튼 클릭 (data-state="open" 오버레이가 클릭 차단)
+    const dismissPopups = async () => {
+      await page.evaluate(() => {
+        document.querySelectorAll("[data-state='open']").forEach(el => el.remove());
+        const btns = Array.from(document.querySelectorAll("button"));
+        btns.forEach(btn => {
+          const t = btn.textContent || "";
+          if (t.includes("시작") || t.includes("닫기") || t.includes("동의") || t.includes("started") || t.includes("Get started")) {
+            btn.click();
+          }
+        });
+      }).catch(() => {});
+      await page.waitForTimeout(1500);
+    };
+    await dismissPopups();
+
+    // 로그인 버튼 있으면 처리
+    const needLogin = await page.$("button:has-text('로그인'), button:has-text('Sign in')").catch(() => null);
     if (needLogin || page.url().includes("accounts.google.com")) {
       await handleGoogleLogin();
       await page.waitForTimeout(3000);
@@ -1236,6 +1261,7 @@ export async function generateFlowImages(params: {
       if (i > 0) {
         await page.reload({ waitUntil: "domcontentloaded", timeout: 20000 });
         await page.waitForTimeout(3000);
+        await dismissPopups();
       }
 
       // 로그인 상태 재확인
