@@ -29,19 +29,26 @@ export default function App() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    // 초기화: localStorage에서 세션 복원 후 한 번에 state 업데이트
+    let nextView: View = "login";
+    let nextUser: PublyUser | null = null;
+
     const saved = localStorage.getItem("publy_user");
     if (saved) {
       try {
         const u = JSON.parse(saved);
-        setUser(u);
-        setView("dashboard");
-        // 자동 로그인 시에도 봇 서버에 유저 등록
+        nextUser = u;
+        nextView = "dashboard";
         window.electron?.registerUser(u.id);
       } catch { localStorage.removeItem("publy_user"); }
     }
     if (sessionStorage.getItem("publy_admin_auth")) {
-      setView("admin");
+      nextView = "admin";
     }
+
+    // 한 번에 업데이트 → view 전환 플리커 방지
+    setUser(nextUser);
+    setView(nextView);
     setLoading(false);
   }, []);
 
