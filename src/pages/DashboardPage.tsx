@@ -1843,6 +1843,7 @@ POST3: (제목)|(이유)
         setDailyPublishUsed(p => p + 1);
         setPubMsg(scheduleOn?"✅ 예약 완료! 설정한 시간에 자동 발행돼요.":"✅ 발행 완료!");
         showToast(scheduleOn?"⏰ 예약 완료!":"✅ 발행 완료! 🎉");
+        if(d.warning) setTimeout(()=>showToast("⚠️ "+d.warning,"error"),1500);
       }
       getHistory(user.id).then(setHistory);getQuota(user.id).then((q:PublyQuota|null)=>q&&setQuota(q));
     }catch(e:any){await addHistory({user_id:user.id,platform,title:pubTitle,status:"fail",error_message:e.message});setPubMsg("❌ "+e.message+" (오류가 관리자에게 자동 전달됩니다)");showToast("❌ "+e.message,"error");logError({user_id:user.id,user_name:(user as any).name||"",user_email:user.email||"",feature:"블로그 발행 ("+platform+")",error_message:e.message}).catch(()=>{});}
@@ -3747,10 +3748,18 @@ POST3: (제목)|(이유)
                               <div style={{position:"relative"}}>
                                 <textarea
                                   value={(block as TextBlock).content}
-                                  onChange={e=>updateBlock(block.id,{content:e.target.value})}
+                                  onChange={e=>{
+                                    updateBlock(block.id,{content:e.target.value});
+                                    // 높이 자동 조절 — height:"auto" 리셋 없이 scrollHeight만 적용 (한글 조합 중 커서 튀는 버그 방지)
+                                    const el=e.target as HTMLTextAreaElement;
+                                    const prev=el.style.height;
+                                    el.style.height="0px";
+                                    const next=el.scrollHeight+"px";
+                                    if(prev!==next) el.style.height=next;
+                                    else el.style.height=prev;
+                                  }}
                                   placeholder="내용 입력..."
                                   style={{width:"100%",minHeight:80,padding:"10px 12px",borderRadius:10,border:"1px solid var(--border)",background:"var(--bg)",color:"var(--text)",fontSize:13,lineHeight:1.8,fontFamily:"inherit",resize:"none",outline:"none",boxSizing:"border-box"}}
-                                  onInput={e=>{const el=e.target as HTMLTextAreaElement;el.style.height="auto";el.style.height=el.scrollHeight+"px";}}
                                 />
                                 <div style={{display:"flex",gap:5,marginTop:4,justifyContent:"flex-end"}}>
                                   {imageMode==="manual"&&<button onClick={()=>addManualImageBlock(block.id)} style={{padding:"3px 9px",borderRadius:6,border:"1px solid var(--border)",background:"var(--bg2)",color:"var(--text3)",cursor:"pointer",fontSize:11,fontFamily:"inherit"}}>🖼️</button>}
