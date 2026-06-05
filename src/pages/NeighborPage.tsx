@@ -7,7 +7,7 @@ interface Account { accountId: string; id: string; pw: string; blogId: string; s
 interface Target { keyword: string; blogId: string; }
 interface WorkResult { keyword: string; blogId: string; status: "success"|"fail"|"skip"|"limit"|"pending"|"running"; message: string; }
 interface EngageResult { keyword: string; blogId: string; postUrl: string; liked: boolean; commented: boolean; status: "success"|"fail"|"skip"|"pending"|"running"; message: string; }
-interface Props { theme: "dark"|"light"; userId?: string; plan?: string; initialTab?: "neighbor"|"engage"; }
+interface Props { theme: "dark"|"light"; userId?: string; plan?: string; initialTab?: "neighbor"|"engage"; singleTab?: boolean; }
 
 /* ── 계정 카드 (외부 컴포넌트 — 렌더마다 재생성 방지) ── */
 const AccountCard = React.memo(({ accounts, onLogin, onAdd, onRemove, onChange }: {
@@ -109,7 +109,7 @@ const GuideModal = ({ tab, onClose }: { tab: "neighbor"|"engage"; onClose: () =>
 };
 
 /* ── 메인 컴포넌트 ── */
-export default function NeighborPage({ theme, userId, plan = "free", initialTab }: Props) {
+export default function NeighborPage({ theme, userId, plan = "free", initialTab, singleTab }: Props) {
   const [tab, setTab] = useState<"neighbor"|"engage">(initialTab || "neighbor");
   const [showGuide, setShowGuide] = useState(false);
 
@@ -431,12 +431,12 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab 
 
       {/* 탭 + 사용방법 버튼 */}
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 18 }}>
-        {([{ key: "neighbor", label: "🤝 서이추" }, { key: "engage", label: "❤️ 공감·댓글" }] as const).map(({ key, label }) => (
+        {!singleTab && ([{ key: "neighbor", label: "🤝 서이추" }, { key: "engage", label: "❤️ 공감·댓글" }] as const).map(({ key, label }) => (
           <button key={key} onClick={() => setTab(key)} style={{ padding: "11px 26px", borderRadius: 12, border: `2px solid ${tab === key ? "var(--accent)" : "var(--border)"}`, background: tab === key ? "var(--accent-bg)" : "transparent", color: tab === key ? "var(--accent-text)" : "var(--text2)", cursor: "pointer", fontSize: 14, fontWeight: 800, fontFamily: "inherit", transition: "all .2s" }}>
             {label}
           </button>
         ))}
-        <button onClick={() => setShowGuide(true)} style={{ marginLeft: "auto", padding: "11px 20px", borderRadius: 12, border: "1.5px solid var(--border)", background: "var(--card2)", color: "var(--text2)", cursor: "pointer", fontSize: 13, fontWeight: 700, fontFamily: "inherit", display: "flex", alignItems: "center", gap: 6, transition: "all .2s" }}>
+        <button onClick={() => setShowGuide(true)} style={{ marginLeft: singleTab ? 0 : "auto", padding: "11px 20px", borderRadius: 12, border: "1.5px solid var(--border)", background: "var(--card2)", color: "var(--text2)", cursor: "pointer", fontSize: 13, fontWeight: 700, fontFamily: "inherit", display: "flex", alignItems: "center", gap: 6, transition: "all .2s" }}>
           📖 사용방법
         </button>
       </div>
