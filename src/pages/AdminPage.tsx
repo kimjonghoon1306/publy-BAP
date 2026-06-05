@@ -3985,12 +3985,12 @@ POST3: (제목)|(이유)
 
             {/* ───── 🤝 서이추 ───── */}
             {tab === "neighbor" && (
-              <NeighborPage theme={theme} plan="admin" />
+              <NeighborPage theme={theme} plan="admin" singleTab />
             )}
 
             {/* ───── ❤️ 공감·댓글 ───── */}
             {tab === "engage" && (
-              <NeighborPage theme={theme} plan="admin" initialTab="engage" />
+              <NeighborPage theme={theme} plan="admin" initialTab="engage" singleTab />
             )}
 
             {/* ───── 📋 서이추 관리 ───── */}
