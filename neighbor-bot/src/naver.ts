@@ -46,6 +46,104 @@ const LAUNCH_ARGS = [
 
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
 
+/* ── 멘트 자연 변형 헬퍼 ── */
+function naturalizeMsg(msg: string): string {
+  let result = msg;
+
+  // 1) 끝 이모지 랜덤 교체/추가
+  const emojiPool = ["😊", "🙂", "😄", "👍", "✨", "🌟", "💕", "🤗", "😍", "🙌"];
+  result = result.replace(/[😊🙂😄👍✨🌟💕🤗😍🙌]$/u, () =>
+    emojiPool[Math.floor(Math.random() * emojiPool.length)]
+  );
+
+  // 2) 인삿말 미세 변형
+  const greetings: Record<string, string[]> = {
+    "안녕하세요!": ["안녕하세요~", "안녕하세요 :)", "안녕하세요^^", "안녕하세요!"],
+    "안녕하세요": ["안녕하세요~", "안녕하세요^^", "안녕하세요!"],
+    "좋은 글": ["좋은 글", "유익한 글", "좋은 내용"],
+    "잘 읽고 갑니다": ["잘 읽었습니다", "잘 보고 갑니다", "잘 읽고 갑니다"],
+  };
+  for (const [key, variants] of Object.entries(greetings)) {
+    if (result.includes(key)) {
+      const pick = variants[Math.floor(Math.random() * variants.length)];
+      result = result.replace(key, pick);
+      break;
+    }
+  }
+
+  // 3) 가끔 앞에 감탄사 추가 (15% 확률)
+  const interjections = ["오, ", "와~ ", "정말 ", ""];
+  if (Math.random() < 0.15) {
+    const interj = interjections[Math.floor(Math.random() * (interjections.length - 1))];
+    result = interj + result.charAt(0).toLowerCase() + result.slice(1);
+  }
+
+  // 4) 문장 끝 느낌표 ↔ ~ 랜덤 교체 (20% 확률)
+  if (Math.random() < 0.2) {
+    result = result.replace(/!$/, "~").replace(/~$/, "!");
+  }
+
+  return result;
+}
+
+/* ── 휴먼 딜레이 헬퍼 (정규분포) ── */
+function humanDelay(minSec: number, maxSec: number): number {
+  // 균등 랜덤 대신 정규분포 (중간값에 몰리는 사람 패턴)
+  const mean = (minSec + maxSec) / 2;
+  const std = (maxSec - minSec) / 4;
+  const u = 1 - Math.random();
+  const v = Math.random();
+  const normal = mean + std * Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
+  return Math.min(maxSec, Math.max(minSec, normal)) * 1000;
+}
+
+/* ── 휴먼 타이핑 헬퍼 ── */
+async function humanType(page: any, text: string, opts?: { typoRate?: number }) {
+  const typoRate = opts?.typoRate ?? 0.04; // 4% 확률로 오타
+
+  // 정규분포 난수 (Box-Muller)
+  const randNorm = (mean: number, std: number) => {
+    const u = 1 - Math.random();
+    const v = Math.random();
+    return Math.max(0, mean + std * Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v));
+  };
+
+  const PUNCTUATION = new Set([".", ",", "!", "?", "~", " ", "\n"]);
+  const NEARBY: Record<string, string[]> = {
+    "ㄱ":["ㅂ","ㄴ"],"ㄴ":["ㄱ","ㅇ"],"ㄷ":["ㄹ","ㅅ"],"ㄹ":["ㄷ","ㅎ"],
+    "a":["s","q"],"s":["a","d"],"d":["s","f"],"e":["w","r"],
+  };
+
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+
+    // 오타 삽입 (영문/숫자만)
+    if (typoRate > 0 && Math.random() < typoRate && /[a-zA-Z]/.test(ch)) {
+      const typoPool = NEARBY[ch.toLowerCase()] || ["x"];
+      const typo = typoPool[Math.floor(Math.random() * typoPool.length)];
+      await page.keyboard.type(typo);
+      await page.waitForTimeout(randNorm(120, 40));
+      await page.keyboard.press("Backspace");
+      await page.waitForTimeout(randNorm(80, 20));
+    }
+
+    await page.keyboard.type(ch);
+
+    // 글자마다 랜덤 딜레이
+    if (PUNCTUATION.has(ch)) {
+      // 구두점/공백 뒤: 더 긴 멈춤
+      await page.waitForTimeout(randNorm(220, 60));
+    } else {
+      await page.waitForTimeout(randNorm(75, 30));
+    }
+
+    // 가끔 생각하는 척 멈춤 (7% 확률, 300~700ms)
+    if (Math.random() < 0.07) {
+      await page.waitForTimeout(randNorm(500, 120));
+    }
+  }
+}
+
 async function applyAntiDetection(context: BrowserContext) {
   await context.addInitScript(ANTI_DETECTION_SCRIPT);
 }
@@ -981,7 +1079,30 @@ export async function addNeighbors(params: {
   let fail = 0;
 
   try {
-    for (const target of targets) {
+    // 키워드 교차 셔플 — A키워드1→B키워드1→A키워드2... 패턴으로 자연스럽게
+    const kwMap = new Map<string, typeof targets>();
+    for (const t of targets) {
+      if (!kwMap.has(t.keyword)) kwMap.set(t.keyword, []);
+      kwMap.get(t.keyword)!.push(t);
+    }
+    const shuffled: typeof targets = [];
+    const kwArrays = [...kwMap.values()];
+    const maxLen = Math.max(...kwArrays.map(a => a.length));
+    for (let i = 0; i < maxLen; i++) {
+      for (const arr of kwArrays) {
+        if (i < arr.length) shuffled.push(arr[i]);
+      }
+    }
+    // 같은 키워드 내에서도 순서 랜덤화
+    for (const arr of kwArrays) {
+      for (let i = arr.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [arr[i], arr[j]] = [arr[j], arr[i]];
+      }
+    }
+    log(`[서이추] 🔀 작업 순서 셔플 완료 — ${shuffled.length}개`);
+
+    for (const target of shuffled) {
       if (done >= dailyLimit) { log("[서이추] 일일 한도 도달"); break; }
       if (stopSignal?.()) { log("[서이추] 중단 신호 수신"); break; }
 
@@ -996,6 +1117,34 @@ export async function addNeighbors(params: {
       try {
         log(`[서이추] ${blogId} 신청 시도...`);
 
+        // ── 서이추 전 블로그 먼저 방문 (읽는 척) ──
+        log(`[서이추] 👀 ${blogId} 블로그 방문 중...`);
+        await page.goto(
+          `https://blog.naver.com/${blogId}`,
+          { waitUntil: "domcontentloaded", timeout: 20000 }
+        );
+        await page.waitForTimeout(humanDelay(2, 5));
+
+        // 스크롤 (3~7초에 걸쳐 천천히 읽는 척)
+        const scrollCount = 2 + Math.floor(Math.random() * 3);
+        for (let s = 0; s < scrollCount; s++) {
+          await page.mouse.wheel(0, 200 + Math.random() * 300);
+          await page.waitForTimeout(humanDelay(0.8, 2.5));
+        }
+
+        // 가끔 뒤로가기 후 재진입 (15% 확률)
+        if (Math.random() < 0.15) {
+          log(`[서이추] 🔄 ${blogId} 재방문 중...`);
+          await page.goBack({ waitUntil: "domcontentloaded", timeout: 10000 }).catch(() => {});
+          await page.waitForTimeout(humanDelay(1, 3));
+          await page.goto(
+            `https://blog.naver.com/${blogId}`,
+            { waitUntil: "domcontentloaded", timeout: 20000 }
+          );
+          await page.waitForTimeout(humanDelay(1, 3));
+        }
+
+        // 서이추 신청 페이지로 이동
         await page.goto(
           `https://blog.naver.com/BlogAddNeighbor.naver?targetBlogId=${blogId}&neighborType=1`,
           { waitUntil: "domcontentloaded", timeout: 20000 }
@@ -1008,12 +1157,20 @@ export async function addNeighbors(params: {
           throw new Error("세션 만료 — 재로그인 필요");
         }
 
-        // 메시지 입력
+        // 메시지 입력 (humanType — 사람처럼 타이핑)
         const msgSels = ["textarea#sendMessage","textarea[name='message']","textarea.neighbor_message","textarea"];
         for (const sel of msgSels) {
           try {
             const el = await page.$(sel);
-            if (el) { await page.fill(sel, ""); await page.fill(sel, message); break; }
+            if (el) {
+              await page.click(sel);
+              await page.waitForTimeout(300);
+              await page.fill(sel, ""); // 기존 내용 지우기
+              const naturalMsg = naturalizeMsg(message); // 자연 변형 적용
+              log(`[서이추] 💬 멘트: "${naturalMsg.slice(0, 30)}..."`);
+              await humanType(page, naturalMsg);
+              break;
+            }
           } catch {}
         }
         await page.waitForTimeout(400);
@@ -1048,10 +1205,360 @@ export async function addNeighbors(params: {
       }
 
       onProgress?.(done, fail);
-      const delay = (delayMin + Math.random() * (delayMax - delayMin)) * 1000;
+      const delay = humanDelay(delayMin, delayMax);
+      log(`[서이추] ⏱ 다음 작업까지 ${(delay/1000).toFixed(1)}초 대기...`);
       await page.waitForTimeout(delay);
+      if ((done + fail) % 10 === 0 && (done + fail) > 0) {
+        const longRest = humanDelay(30, 90);
+        log(`[서이추] ☕ ${(longRest/1000).toFixed(0)}초 긴 휴식 중...`);
+        await page.waitForTimeout(longRest);
+      }
     }
   } finally {
     await browser.close().catch(() => {});
   }
+}
+
+
+export interface EngageResult {
+  keyword: string;
+  blogId: string;
+  postUrl: string;
+  liked: boolean;
+  commented: boolean;
+  status: "success" | "fail" | "skip";
+  message: string;
+}
+
+/* ── 공감·댓글 작업 ── */
+export async function engageBlogs(params: {
+  accountId: string;
+  targets: { keyword: string; blogId: string }[];
+  comment: string;
+  doLike: boolean;
+  doComment: boolean;
+  periodDays: number;        // 최근 N일 이내 글만
+  postsPerBlog: number;      // 블로그당 최대 글 수
+  delayMin: number;
+  delayMax: number;
+  dailyLimit: number;
+  skipDone: boolean;
+  onLog?: (msg: string) => void;
+  onResult?: (r: EngageResult) => Promise<void>;
+  onProgress?: (done: number, fail: number) => void;
+  stopSignal?: () => boolean;
+}): Promise<void> {
+  const {
+    accountId, targets, comment, doLike, doComment,
+    periodDays, postsPerBlog, delayMin, delayMax,
+    dailyLimit, skipDone, onLog, onResult, onProgress, stopSignal,
+  } = params;
+  const log = onLog || console.log;
+
+  const sp = sessionPath(accountId);
+  if (!fs.existsSync(sp)) throw new Error("세션 없음 — 먼저 로그인하세요");
+  const { cookies } = JSON.parse(fs.readFileSync(sp, "utf-8"));
+
+  // 완료 기록 (서이추와 별도 파일)
+  const engageDonePath = path.join(SESSION_DIR, `engage_done_${accountId}.json`);
+  let doneSet = new Set<string>();
+  if (skipDone && fs.existsSync(engageDonePath)) {
+    try { doneSet = new Set(JSON.parse(fs.readFileSync(engageDonePath, "utf-8"))); } catch {}
+  }
+
+  const cutoff = Date.now() - periodDays * 24 * 60 * 60 * 1000;
+
+  const browser = await chromium.launch({ headless: false, args: LAUNCH_ARGS });
+  const context = await browser.newContext({
+    userAgent: UA, viewport: { width: 1280, height: 800 }, locale: "ko-KR",
+  });
+  await applyAntiDetection(context);
+  await context.addCookies(cookies);
+  const page = await context.newPage();
+
+  let done = 0;
+  let fail = 0;
+
+  try {
+    // 키워드 교차 셔플
+    const kwMap2 = new Map<string, typeof targets>();
+    for (const t of targets) {
+      if (!kwMap2.has(t.keyword)) kwMap2.set(t.keyword, []);
+      kwMap2.get(t.keyword)!.push(t);
+    }
+    const shuffled2: typeof targets = [];
+    const kwArrays2 = [...kwMap2.values()];
+    for (const arr of kwArrays2) {
+      for (let i = arr.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [arr[i], arr[j]] = [arr[j], arr[i]];
+      }
+    }
+    const maxLen2 = Math.max(...kwArrays2.map(a => a.length));
+    for (let i = 0; i < maxLen2; i++) {
+      for (const arr of kwArrays2) {
+        if (i < arr.length) shuffled2.push(arr[i]);
+      }
+    }
+    log(`[공감·댓글] 🔀 작업 순서 셔플 완료 — ${shuffled2.length}개`);
+
+    for (const target of shuffled2) {
+      if (done >= dailyLimit) { log("[공감·댓글] 일일 한도 도달"); break; }
+      if (stopSignal?.()) { log("[공감·댓글] 중단 신호 수신"); break; }
+
+      const { keyword, blogId } = target;
+
+      if (skipDone && doneSet.has(blogId)) {
+        await onResult?.({ keyword, blogId, postUrl: "", liked: false, commented: false, status: "skip", message: "이미 처리됨" });
+        onProgress?.(done, fail);
+        continue;
+      }
+
+      try {
+        log(`[공감·댓글] ${blogId} 방문 중...`);
+
+        // ── 블로그 최근 글 목록 수집 ──
+        await page.goto(`https://blog.naver.com/PostList.naver?blogId=${blogId}&widgetTypeCall=true`, {
+          waitUntil: "domcontentloaded", timeout: 20000,
+        });
+        await page.waitForTimeout(1500);
+
+        // 글 링크 + 날짜 추출
+        type PostInfo = { url: string; date: number };
+        const posts: PostInfo[] = await page.evaluate((cutoffMs: number) => {
+          const results: { url: string; date: number }[] = [];
+          // 포스트 링크 후보
+          const links = Array.from(document.querySelectorAll("a[href*='blog.naver.com'], a[href*='/PostView']"));
+          for (const link of links) {
+            const href = (link as HTMLAnchorElement).href;
+            if (!href.match(/blog\.naver\.com\/[a-zA-Z0-9_-]+\/\d+/)) continue;
+            // 날짜 텍스트 탐색 (부모 컨테이너 내)
+            const container = link.closest("li,div[class*='post'],div[class*='item'],div[class*='list']");
+            let dateMs = 0;
+            if (container) {
+              const dateEl = container.querySelector("[class*='date'],[class*='time'],span[class*='date']");
+              if (dateEl) {
+                const txt = dateEl.textContent?.trim() || "";
+                // 형식: "2025. 01. 15." or "2025.01.15" or "01-15"
+                const m = txt.match(/(\d{4})[.\-\s]+(\d{1,2})[.\-\s]+(\d{1,2})/);
+                if (m) {
+                  dateMs = new Date(`${m[1]}-${m[2].padStart(2,"0")}-${m[3].padStart(2,"0")}`).getTime();
+                }
+              }
+            }
+            if (dateMs === 0 || dateMs >= cutoffMs) {
+              results.push({ url: href, date: dateMs });
+            }
+            if (results.length >= 10) break;
+          }
+          return results;
+        }, cutoff);
+
+        // 기간 내 글 필터 (날짜 파싱 실패한 글은 일단 포함)
+        const filtered = posts.filter(p => p.date === 0 || p.date >= cutoff).slice(0, postsPerBlog);
+
+        if (filtered.length === 0) {
+          log(`[공감·댓글] ${blogId} — 기간 내 글 없음, 스킵`);
+          await onResult?.({ keyword, blogId, postUrl: "", liked: false, commented: false, status: "skip", message: `최근 ${periodDays}일 내 글 없음` });
+          onProgress?.(done, fail);
+          continue;
+        }
+
+        let liked = false;
+        let commented = false;
+        const targetPost = filtered[0];
+
+        log(`[공감·댓글] ${blogId} → 글 진입: ${targetPost.url}`);
+        await page.goto(targetPost.url, { waitUntil: "domcontentloaded", timeout: 20000 });
+        await page.waitForTimeout(2000);
+
+        // 글 읽는 척 스크롤 (3~8초)
+        const readScrolls = 3 + Math.floor(Math.random() * 4);
+        for (let s = 0; s < readScrolls; s++) {
+          await page.mouse.wheel(0, 150 + Math.random() * 250);
+          await page.waitForTimeout(humanDelay(0.5, 2));
+        }
+        // 가끔 위로 다시 스크롤 (다시 읽는 척, 20% 확률)
+        if (Math.random() < 0.2) {
+          await page.mouse.wheel(0, -(200 + Math.random() * 300));
+          await page.waitForTimeout(humanDelay(0.5, 1.5));
+        }
+
+        // iframe 처리 (네이버 블로그는 mainFrame 안에 있음)
+        const getFrame = () => {
+          const frames = page.frames();
+          return frames.find(f => f.name() === "mainFrame")
+            ?? frames.find(f => f.url().includes("blog.naver.com"))
+            ?? null;
+        };
+        let frame = getFrame();
+        for (let i = 0; i < 5; i++) {
+          await page.waitForTimeout(800);
+          frame = getFrame();
+          if (frame) break;
+        }
+        const ctx = frame ?? page as any;
+
+        // ── 공감 클릭 ──
+        if (doLike) {
+          try {
+            const likeSels = [
+              ".sympathy_toggle_btn",
+              "button[class*='sympathy']",
+              "button[class*='like']",
+              "a[class*='sympathy']",
+              ".btn_like",
+              "[class*='btn_sympathy']",
+            ];
+            for (const sel of likeSels) {
+              try {
+                const el = await ctx.$(sel);
+                if (el) {
+                  // 이미 공감한 경우 체크
+                  const isActive = await ctx.evaluate((s: string) => {
+                    const btn = document.querySelector(s);
+                    return btn ? (btn.classList.contains("on") || btn.classList.contains("active") || btn.getAttribute("aria-pressed") === "true") : false;
+                  }, sel);
+                  if (!isActive) {
+                    await ctx.click(sel, { timeout: 3000 });
+                    await page.waitForTimeout(800);
+                    liked = true;
+                    log(`[공감·댓글] ❤️ ${blogId} 공감 완료`);
+                  } else {
+                    liked = true; // 이미 공감됨
+                    log(`[공감·댓글] ${blogId} 이미 공감됨`);
+                  }
+                  break;
+                }
+              } catch {}
+            }
+          } catch (e: any) {
+            log(`[공감·댓글] ${blogId} 공감 실패: ${e.message}`);
+          }
+        }
+
+        // ── 댓글 작성 ──
+        if (doComment && comment.trim()) {
+          try {
+            await page.waitForTimeout(1000);
+
+            // 댓글 입력창 셀렉터 (네이버 블로그 댓글 구조)
+            const commentSels = [
+              "textarea#commentArea",
+              "textarea[name='comment']",
+              "textarea[placeholder*='댓글']",
+              "textarea[class*='comment']",
+              ".u_cbox_write_wrap textarea",
+              "#naverComment textarea",
+              "iframe#naverComment",
+            ];
+
+            let commentDone = false;
+
+            // 댓글 iframe 처리
+            const commentFrame = page.frames().find(f =>
+              f.url().includes("comment") || f.name().includes("comment")
+            );
+            const commentCtx = commentFrame ?? page as any;
+
+            for (const sel of commentSels) {
+              try {
+                // iframe 안 textarea 처리
+                if (sel === "iframe#naverComment") {
+                  const cf = page.frames().find((f: any) => f.url().includes("comment"));
+                  if (cf) {
+                    const ta = await cf.$("textarea");
+                    if (ta) {
+                      await ta.click();
+                      await page.waitForTimeout(500);
+                      await cf.fill("textarea", "");
+                      const naturalComment = naturalizeMsg(comment);
+                      await humanType(page, naturalComment);
+                      await page.waitForTimeout(500);
+                      const submitSels = ["button[type='submit']","button:has-text('등록')","button[class*='submit']"];
+                      for (const ss of submitSels) {
+                        try {
+                          const sb = await cf.$(ss);
+                          if (sb) { await cf.click(ss, { timeout: 3000 }); commentDone = true; break; }
+                        } catch {}
+                      }
+                      if (commentDone) break;
+                    }
+                  }
+                  continue;
+                }
+
+                const el = await commentCtx.$(sel);
+                if (el) {
+                  await commentCtx.click(sel, { timeout: 3000 });
+                  await page.waitForTimeout(500);
+                  await commentCtx.fill(sel, "");
+                  const naturalComment2 = naturalizeMsg(comment);
+                  await humanType(page, naturalComment2);
+                  await page.waitForTimeout(500);
+                  // 등록 버튼
+                  const submitSels = [
+                    "button[type='submit']",
+                    "button:has-text('등록')",
+                    "button[class*='submit']",
+                    ".u_cbox_btn_upload",
+                    "button.btn_ok",
+                  ];
+                  for (const ss of submitSels) {
+                    try {
+                      const sb = await commentCtx.$(ss);
+                      if (sb) { await commentCtx.click(ss, { timeout: 3000 }); commentDone = true; break; }
+                    } catch {}
+                  }
+                  if (commentDone) break;
+                }
+              } catch {}
+            }
+
+            if (commentDone) {
+              commented = true;
+              await page.waitForTimeout(1000);
+              log(`[공감·댓글] 💬 ${blogId} 댓글 완료`);
+            } else {
+              log(`[공감·댓글] ${blogId} 댓글 입력창 못 찾음`);
+            }
+          } catch (e: any) {
+            log(`[공감·댓글] ${blogId} 댓글 실패: ${e.message}`);
+          }
+        }
+
+        if (liked || commented) {
+          doneSet.add(blogId);
+          fs.writeFileSync(engageDonePath, JSON.stringify([...doneSet], null, 2));
+          done++;
+          await onResult?.({ keyword, blogId, postUrl: targetPost.url, liked, commented, status: "success", message: `${liked ? "공감" : ""}${liked && commented ? "+" : ""}${commented ? "댓글" : ""} 완료` });
+          log(`[공감·댓글] ✅ ${blogId} 완료 (${done}/${dailyLimit})`);
+        } else {
+          throw new Error("공감·댓글 모두 실패");
+        }
+
+      } catch (e: any) {
+        fail++;
+        await onResult?.({ keyword, blogId, postUrl: "", liked: false, commented: false, status: "fail", message: e.message });
+        log(`[공감·댓글] ❌ ${blogId} 실패: ${e.message}`);
+      }
+
+      onProgress?.(done, fail);
+      const delay = humanDelay(delayMin, delayMax);
+      log(`[공감·댓글] ⏱ 다음 작업까지 ${(delay/1000).toFixed(1)}초 대기...`);
+      await page.waitForTimeout(delay);
+      if ((done + fail) % 10 === 0 && (done + fail) > 0) {
+        const longRest = humanDelay(30, 90);
+        log(`[공감·댓글] ☕ ${(longRest/1000).toFixed(0)}초 긴 휴식 중...`);
+        await page.waitForTimeout(longRest);
+      }
+    }
+  } finally {
+    await browser.close().catch(() => {});
+  }
+}
+
+/* ── 공감·댓글용 완료 목록 경로 ── */
+export function engageDonePath(accountId: string): string {
+  return path.join(SESSION_DIR, `engage_done_${accountId}.json`);
 }
