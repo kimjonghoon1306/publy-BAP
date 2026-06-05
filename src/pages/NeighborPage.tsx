@@ -306,7 +306,7 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
     if (!kwList.length) return alert("키워드를 입력하세요");
     setECrawling(true); setETargets([]); setEResults([]); setEDoneCnt(0); setEFailCnt(0);
     addELog(`🔍 수집 시작 — 키워드: ${kwList.join(", ")} / 키워드당 ${eCountPerKw}개`);
-    const es = new EventSource(`${BOT}/api/engage-crawl?keywords=${encodeURIComponent(kwList.join(","))}&countPerKeyword=${eCountPerKw}`);
+    const es = new EventSource(`${BOT}/api/engage-crawl?keywords=${encodeURIComponent(kwList.join(","))}&countPerKeyword=${eCountPerKw}${userId ? `&userId=${userId}` : ""}`);
     eEsRef.current = es;
     es.onmessage = e => {
       const d = JSON.parse(e.data);
@@ -333,7 +333,7 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
     const days = ePeriod === "custom" ? eCustomDays : ePeriod;
     addELog(`🚀 작업 시작 — ${list.length}개 / 최근 ${days}일 / ${eDoLike ? "공감" : ""}${eDoLike && eDoComment ? "+" : ""}${eDoComment ? "댓글" : ""}`);
     const commentText = eCommentMode === "single" ? eComment : eMultiComments.split("\n").filter(l => l.trim()).join("|||");
-    const params = new URLSearchParams({ accountId: acc.accountId, targets: encodeURIComponent(JSON.stringify(list)), comment: commentText, doLike: eDoLike.toString(), doComment: eDoComment.toString(), periodDays: days.toString(), postsPerBlog: ePostsPerBlog.toString(), delayMin: eDelayMin.toString(), delayMax: eDelayMax.toString(), dailyLimit: eDailyLimit.toString(), skipDone: eSkipDone.toString(), jobId: eJobIdRef.current });
+    const params = new URLSearchParams({ accountId: acc.accountId, targets: encodeURIComponent(JSON.stringify(list)), comment: commentText, doLike: eDoLike.toString(), doComment: eDoComment.toString(), periodDays: days.toString(), postsPerBlog: ePostsPerBlog.toString(), delayMin: eDelayMin.toString(), delayMax: eDelayMax.toString(), dailyLimit: eDailyLimit.toString(), skipDone: eSkipDone.toString(), jobId: eJobIdRef.current, ...(userId ? { userId } : {}) });
     const es = new EventSource(`${BOT}/api/engage?${params}`); eEsRef.current = es;
     es.onmessage = e => {
       const d = JSON.parse(e.data);
