@@ -34,8 +34,12 @@ jobs:
         env:
           NODE_PATH: ../naver-bot/node_modules
 
-      - name: Install Playwright Chromium
+      - name: Install Playwright Chromium (naver-bot)
         working-directory: naver-bot
+        run: npx playwright install chromium
+
+      - name: Install Playwright Chromium (neighbor-bot)
+        working-directory: neighbor-bot
         run: npx playwright install chromium
 
       - name: Copy Chromium to bundle path
@@ -45,10 +49,12 @@ jobs:
           if (Test-Path $chromiumSrc) {
             Write-Host "Chromium found at: $chromiumSrc"
             New-Item -ItemType Directory -Force -Path 'chromium' | Out-Null
-            Get-ChildItem "$chromiumSrc" -Directory | Where-Object { $_.Name -like 'chromium-*' } | ForEach-Object {
+            Get-ChildItem "$chromiumSrc" -Directory | Where-Object { $_.Name -like 'chromium-*' -or $_.Name -like 'chromium_headless_shell-*' } | ForEach-Object {
               Copy-Item -Recurse -Force $_.FullName 'chromium/'
               Write-Host "Copied: $($_.Name)"
             }
+            Write-Host "Final chromium dir:"
+            Get-ChildItem 'chromium/' | Select-Object Name
           } else {
             Write-Host "Chromium not found at $chromiumSrc, skipping"
           }
@@ -110,8 +116,12 @@ jobs:
         env:
           NODE_PATH: ../naver-bot/node_modules
 
-      - name: Install Playwright Chromium
+      - name: Install Playwright Chromium (naver-bot)
         working-directory: naver-bot
+        run: npx playwright install chromium
+
+      - name: Install Playwright Chromium (neighbor-bot)
+        working-directory: neighbor-bot
         run: npx playwright install chromium
 
       - name: Copy Chromium to bundle path (macOS)
@@ -120,12 +130,14 @@ jobs:
           if [ -d "$CHROMIUM_SRC" ]; then
             echo "Chromium found at: $CHROMIUM_SRC"
             mkdir -p chromium
-            for dir in "$CHROMIUM_SRC"/chromium-*; do
+            for dir in "$CHROMIUM_SRC"/chromium-* "$CHROMIUM_SRC"/chromium_headless_shell-*; do
               if [ -d "$dir" ]; then
                 cp -r "$dir" chromium/
                 echo "Copied: $(basename $dir)"
               fi
             done
+            echo "Final chromium dir contents:"
+            ls chromium/
           else
             echo "Chromium not found, skipping"
           fi
