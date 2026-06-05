@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import GoogleFlowCard from "../GoogleFlowCard";
-import { supabase, getAccounts, upsertAccount, PublyAccount, getHistory, PublyHistory, addHistory, deleteHistory, deleteAllHistory, setAdminPassword, saveAdminNaverApiKeys, getNaverApiKeys, NaverApiKeys, getNaverDailyUsage, NAVER_DAILY_LIMIT, checkNaverQuota, incrementNaverQuota, getUserNaverApiKeys, getReferrals, getErrorLogs, getUnreadErrorCount, markErrorsAsRead, logError, PLAN_CONFIG, getAllNeighborHistory, NeighborHistory } from "../lib/supabase";
+import { supabase, getAccounts, upsertAccount, PublyAccount, getHistory, PublyHistory, addHistory, deleteHistory, deleteAllHistory, setAdminPassword, saveAdminNaverApiKeys, getNaverApiKeys, NaverApiKeys, getNaverDailyUsage, NAVER_DAILY_LIMIT, checkNaverQuota, incrementNaverQuota, getUserNaverApiKeys, getReferrals, getErrorLogs, getUnreadErrorCount, markErrorsAsRead, logError, PLAN_CONFIG, getAllNeighborHistory, NeighborHistory, getAllEngageHistory, EngageHistory } from "../lib/supabase";
 import NeighborPage from "./NeighborPage";
 
 interface Props {
@@ -582,14 +582,16 @@ const TABS = [
   {k:"rank",            i:"📊", l:"블로그 순위"},
   {k:"calendar",        i:"📅", l:"콘텐츠 캘린더"},
   {k:"neighbor",        i:"🤝", l:"서이추"},
+  {k:"engage",          i:"❤️", l:"공감·댓글"},
   {k:"users",           i:"👥", l:"회원관리"},
   {k:"stats",           i:"📈", l:"통계"},
   {k:"neighbor_manage", i:"📋", l:"서이추 관리"},
+  {k:"engage_manage",   i:"💬", l:"공감·댓글 관리"},
   {k:"settings",        i:"🔐", l:"설정"},
 ] as const;
 
 export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: Props) {
-  const [tab, setTab] = useState<"keyword"|"write"|"image"|"photo"|"publish"|"manage"|"accounts"|"rank"|"calendar"|"neighbor"|"neighbor_manage"|"users"|"stats"|"settings">("keyword");
+  const [tab, setTab] = useState<"keyword"|"write"|"image"|"photo"|"publish"|"manage"|"accounts"|"rank"|"calendar"|"neighbor"|"engage"|"neighbor_manage"|"engage_manage"|"users"|"stats"|"settings">("keyword");
   const [statsSubTab, setStatsSubTab] = useState<"mine"|"all">("mine");
   const [usersSubTab, setUsersSubTab] = useState<"list"|"referral">("list");
   const [referralData, setReferralData] = useState<{referrer:any;referred:any[]}[]>([]);
@@ -598,6 +600,10 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
   const [neighborLoading, setNeighborLoading] = useState(false);
   const [neighborFilter, setNeighborFilter] = useState<"all"|"success"|"fail"|"skip">("all");
   const [neighborSearch, setNeighborSearch] = useState("");
+  const [engageHistory, setEngageHistory] = useState<(EngageHistory & {user_name?:string;user_email?:string})[]>([]);
+  const [engageLoading, setEngageLoading] = useState(false);
+  const [engageFilter, setEngageFilter] = useState<"all"|"success"|"fail"|"skip">("all");
+  const [engageSearch, setEngageSearch] = useState("");
   const [fontMode, setFontMode] = useState<"normal"|"large">(()=>(localStorage.getItem("publy_adm_font_mode")||"normal") as "normal"|"large");
   const [showGuide, setShowGuide] = useState(false);
   const [guideTab, setGuideTab] = useState(0);
@@ -1217,6 +1223,10 @@ Output format (JSON array only, no other text):
     if(tab==="neighbor_manage" && neighborHistory.length === 0){
       setNeighborLoading(true);
       getAllNeighborHistory().then(d=>{ setNeighborHistory(d); setNeighborLoading(false); });
+    }
+    if(tab==="engage_manage" && engageHistory.length === 0){
+      setEngageLoading(true);
+      getAllEngageHistory().then(d=>{ setEngageHistory(d); setEngageLoading(false); });
     }
     if(tab==="settings"){
       // admin_ 접두사 키만 직접 조회
@@ -2295,13 +2305,13 @@ POST3: (제목)|(이유)
           {/* 사이드바 */}
           <div className="sidebar">
             <div className="nav-section" style={{fontSize:10,fontWeight:800,color:"var(--text3)",padding:"8px 12px 4px",letterSpacing:".08em"}}>✍️ 블로그 기능</div>
-            {TABS.filter(t=>["keyword","write","image","photo","publish","manage","accounts","rank","calendar","neighbor"].includes(t.k)).map(t => (
+            {TABS.filter(t=>["keyword","write","image","photo","publish","manage","accounts","rank","calendar","neighbor","engage"].includes(t.k)).map(t => (
               <button key={t.k} className={`nav-item ${tab===t.k?"active":""}`} onClick={()=>{if(t.k==="rank"){window.open("https://rank.xn--zk5biyyw.com/","_blank");return;}setTab(t.k as any);}}>
                 <span className="nav-ico">{t.i}</span>{t.l}
               </button>
             ))}
             <div className="nav-section" style={{fontSize:10,fontWeight:800,color:"var(--text3)",padding:"10px 12px 4px",letterSpacing:".08em",borderTop:"1px solid var(--border)",marginTop:6}}>🔐 관리자 전용</div>
-            {TABS.filter(t=>["users","stats","neighbor_manage","settings"].includes(t.k)).map(t => (
+            {TABS.filter(t=>["users","stats","neighbor_manage","engage_manage","settings"].includes(t.k)).map(t => (
               <button key={t.k} className={`nav-item ${tab===t.k?"active":""}`} onClick={()=>setTab(t.k as any)}>
                 <span className="nav-ico">{t.i}</span>{t.l}
                 {t.k==="users" && users.length>0 && <span className="nav-badge">{users.length}</span>}
@@ -3354,10 +3364,17 @@ POST3: (제목)|(이유)
                               <div style={{position:"relative"}}>
                                 <textarea
                                   value={(block as TextBlock).content}
-                                  onChange={e=>updateBlock(block.id,{content:e.target.value})}
+                                  onChange={e=>{
+                                    updateBlock(block.id,{content:e.target.value});
+                                    const el=e.target as HTMLTextAreaElement;
+                                    const prev=el.style.height;
+                                    el.style.height="0px";
+                                    const next=el.scrollHeight+"px";
+                                    if(prev!==next) el.style.height=next;
+                                    else el.style.height=prev;
+                                  }}
                                   placeholder="내용 입력..."
                                   style={{width:"100%",minHeight:80,padding:"10px 12px",borderRadius:10,border:"1px solid var(--border)",background:"var(--bg)",color:"var(--text)",fontSize:13,lineHeight:1.8,fontFamily:"inherit",resize:"none",outline:"none",boxSizing:"border-box"}}
-                                  onInput={e=>{const el=e.target as HTMLTextAreaElement;el.style.height="auto";el.style.height=el.scrollHeight+"px";}}
                                 />
                                 <div style={{display:"flex",gap:5,marginTop:4,justifyContent:"flex-end"}}>
                                   {imageMode==="manual"&&<button onClick={()=>addManualImageBlock(block.id)} style={{padding:"3px 9px",borderRadius:6,border:"1px solid var(--border)",background:"var(--bg2)",color:"var(--text3)",cursor:"pointer",fontSize:11,fontFamily:"inherit"}}>🖼️</button>}
@@ -3960,6 +3977,11 @@ POST3: (제목)|(이유)
               <NeighborPage theme={theme} plan="admin" />
             )}
 
+            {/* ───── ❤️ 공감·댓글 ───── */}
+            {tab === "engage" && (
+              <NeighborPage theme={theme} plan="admin" initialTab="engage" />
+            )}
+
             {/* ───── 📋 서이추 관리 ───── */}
             {tab === "neighbor_manage" && (
               <div style={{animation:"fadeUp .25s ease both"}}>
@@ -4053,6 +4075,116 @@ POST3: (제목)|(이유)
                                   </span>
                                 </td>
                                 <td style={{padding:"10px 12px",color:"var(--text2)",fontSize:11,maxWidth:180,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{h.message||"-"}</td>
+                                <td style={{padding:"10px 12px",color:"var(--text3)",whiteSpace:"nowrap",fontSize:11}}>
+                                  {new Date(h.created_at).toLocaleString("ko-KR")}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    );
+                  })()}
+                </div>
+              </div>
+            )}
+
+            {/* ───── 💬 공감·댓글 관리 ───── */}
+            {tab === "engage_manage" && (
+              <div style={{animation:"fadeUp .25s ease both"}}>
+                <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:16,flexWrap:"wrap",gap:10}}>
+                  <div>
+                    <div style={{fontSize:20,fontWeight:900,color:"var(--text)"}}>💬 공감·댓글 회원 관리</div>
+                    <div style={{fontSize:13,color:"var(--text3)",marginTop:2}}>전체 회원의 공감·댓글 작업 현황</div>
+                  </div>
+                  <button onClick={()=>{setEngageLoading(true);getAllEngageHistory().then(d=>{setEngageHistory(d);setEngageLoading(false);});}}
+                    style={{padding:"8px 16px",borderRadius:10,border:"1px solid var(--border)",background:"var(--card2)",color:"var(--text2)",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:"inherit"}}>
+                    🔄 새로고침
+                  </button>
+                </div>
+
+                {/* 요약 카드 */}
+                <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(130px,1fr))",gap:10,marginBottom:16}}>
+                  {[
+                    {label:"전체 작업",value:engageHistory.length,color:"var(--text)"},
+                    {label:"✅ 성공",value:engageHistory.filter(h=>h.status==="success").length,color:"var(--success)"},
+                    {label:"❤️ 공감",value:engageHistory.filter(h=>h.liked).length,color:"#ff6b9d"},
+                    {label:"💬 댓글",value:engageHistory.filter(h=>h.commented).length,color:"var(--info)"},
+                    {label:"❌ 실패",value:engageHistory.filter(h=>h.status==="fail").length,color:"var(--danger)"},
+                    {label:"⏭️ 스킵",value:engageHistory.filter(h=>h.status==="skip").length,color:"var(--text3)"},
+                  ].map((s,i)=>(
+                    <div key={i} style={{padding:"14px 16px",borderRadius:14,background:"var(--card)",border:"1px solid var(--border)",textAlign:"center"}}>
+                      <div style={{fontSize:22,fontWeight:900,color:s.color,fontFamily:"'Space Grotesk',sans-serif"}}>{s.value}</div>
+                      <div style={{fontSize:11,color:"var(--text3)",marginTop:4,fontWeight:600}}>{s.label}</div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* 검색 + 필터 */}
+                <div style={{display:"flex",gap:8,marginBottom:12,flexWrap:"wrap"}}>
+                  <input className="inp" placeholder="회원 이름/이메일/블로그ID/키워드 검색"
+                    value={engageSearch} onChange={e=>setEngageSearch(e.target.value)}
+                    style={{flex:1,minWidth:200,fontSize:13}} />
+                  {(["all","success","fail","skip"] as const).map(f=>(
+                    <button key={f} onClick={()=>setEngageFilter(f)}
+                      style={{padding:"8px 14px",borderRadius:9,border:`1.5px solid ${engageFilter===f?"var(--accent)":"var(--border)"}`,background:engageFilter===f?"var(--accent-bg)":"transparent",color:engageFilter===f?"var(--accent-text)":"var(--text2)",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:"inherit"}}>
+                      {f==="all"?"전체":f==="success"?"✅ 성공":f==="fail"?"❌ 실패":"⏭️ 스킵"}
+                    </button>
+                  ))}
+                </div>
+
+                {/* 테이블 */}
+                <div className="card" style={{padding:0,overflow:"hidden"}}>
+                  {engageLoading ? (
+                    <div style={{padding:"40px",textAlign:"center",color:"var(--text3)"}}>
+                      <span className="spinner" style={{marginRight:8}}/>불러오는 중...
+                    </div>
+                  ) : (()=>{
+                    const filtered = engageHistory
+                      .filter(h => engageFilter === "all" || h.status === engageFilter)
+                      .filter(h => !engageSearch ||
+                        (h.user_name||"").includes(engageSearch) ||
+                        (h.user_email||"").includes(engageSearch) ||
+                        h.target_blog_id.includes(engageSearch) ||
+                        h.keyword.includes(engageSearch)
+                      );
+                    return filtered.length === 0 ? (
+                      <div style={{padding:"40px",textAlign:"center",color:"var(--text3)",fontSize:14}}>
+                        데이터가 없습니다
+                      </div>
+                    ) : (
+                      <div style={{overflowX:"auto",maxHeight:520,overflowY:"auto"}}>
+                        <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
+                          <thead>
+                            <tr style={{background:"var(--bg2)",position:"sticky",top:0}}>
+                              {["회원","키워드","블로그ID","공감","댓글","상태","일시"].map(h=>(
+                                <th key={h} style={{padding:"10px 12px",textAlign:"left",fontWeight:700,color:"var(--text3)",whiteSpace:"nowrap",borderBottom:"1px solid var(--border)"}}>{h}</th>
+                              ))}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {filtered.map((h,i)=>(
+                              <tr key={h.id||i} style={{borderBottom:"1px solid var(--border)"}}
+                                onMouseEnter={e=>(e.currentTarget.style.background="var(--card-hover)")}
+                                onMouseLeave={e=>(e.currentTarget.style.background="")}>
+                                <td style={{padding:"10px 12px",whiteSpace:"nowrap"}}>
+                                  <div style={{fontWeight:700,color:"var(--text)",fontSize:12}}>{h.user_name||"-"}</div>
+                                  <div style={{fontSize:10,color:"var(--text3)"}}>{h.user_email||"-"}</div>
+                                </td>
+                                <td style={{padding:"10px 12px",color:"var(--accent-text)",fontWeight:700}}>{h.keyword}</td>
+                                <td style={{padding:"10px 12px"}}>
+                                  <a href={h.post_url||`https://blog.naver.com/${h.target_blog_id}`} target="_blank" rel="noreferrer"
+                                    style={{color:"var(--info)",textDecoration:"none",fontWeight:600}}>{h.target_blog_id}</a>
+                                </td>
+                                <td style={{padding:"10px 12px",textAlign:"center",fontSize:15}}>{h.liked?"❤️":"—"}</td>
+                                <td style={{padding:"10px 12px",textAlign:"center",fontSize:15}}>{h.commented?"💬":"—"}</td>
+                                <td style={{padding:"10px 12px",whiteSpace:"nowrap"}}>
+                                  <span style={{fontSize:11,padding:"3px 9px",borderRadius:99,fontWeight:700,
+                                    background:h.status==="success"?"rgba(0,214,143,.12)":h.status==="fail"?"rgba(255,83,99,.12)":"rgba(120,120,120,.12)",
+                                    color:h.status==="success"?"var(--success)":h.status==="fail"?"var(--danger)":"var(--text3)"}}>
+                                    {h.status==="success"?"✅ 성공":h.status==="fail"?"❌ 실패":"⏭️ 스킵"}
+                                  </span>
+                                </td>
                                 <td style={{padding:"10px 12px",color:"var(--text3)",whiteSpace:"nowrap",fontSize:11}}>
                                   {new Date(h.created_at).toLocaleString("ko-KR")}
                                 </td>
