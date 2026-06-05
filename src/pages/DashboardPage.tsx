@@ -4,7 +4,7 @@ import { PublyUser, getQuota, getHistory, getAccounts, PublyQuota, PublyHistory,
 import { supabase } from "../lib/supabase";
 import NeighborPage from "./NeighborPage";
 
-type MainTab = "keyword" | "write" | "image" | "photo" | "publish" | "manage" | "accounts" | "rank" | "calendar" | "settings" | "neighbor";
+type MainTab = "keyword" | "write" | "image" | "photo" | "publish" | "manage" | "accounts" | "rank" | "calendar" | "settings" | "neighbor" | "engage";
 type PublishConcept = "full" | "body_faq" | "body_only";
 
 const BOT = "http://127.0.0.1:3333";
@@ -71,6 +71,7 @@ const MAIN_TABS = [
   {k:"rank",    i:"📊", l:"블로그 순위"},
   {k:"calendar",i:"📅", l:"콘텐츠 캘린더"},
   {k:"neighbor",i:"🤝", l:"서이추"},
+  {k:"engage",  i:"❤️", l:"공감·댓글"},
   {k:"settings",i:"⚙️", l:"설정"},
 ] as const;
 
@@ -4136,6 +4137,10 @@ POST3: (제목)|(이유)
 
             {tab==="neighbor"&&(
               <NeighborPage theme={theme as "dark"|"light"} userId={user.id} plan={user.plan} />
+            )}
+
+            {tab==="engage"&&(
+              <NeighborPage theme={theme as "dark"|"light"} userId={user.id} plan={user.plan} initialTab="engage" />
             )}
 
             {tab==="settings"&&(
