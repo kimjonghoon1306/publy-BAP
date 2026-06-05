@@ -502,3 +502,68 @@ export async function markErrorsAsRead(ids?: string[]) {
   else query = query.eq("is_read", false);
   await query;
 }
+
+/* ── 공감·댓글 히스토리 ── */
+export interface EngageHistory {
+  id: string;
+  user_id: string;
+  keyword: string;
+  target_blog_id: string;
+  post_url: string;
+  liked: boolean;
+  commented: boolean;
+  status: "success" | "fail" | "skip";
+  message: string;
+  created_at: string;
+}
+
+export async function addEngageHistory(params: {
+  user_id: string;
+  keyword: string;
+  target_blog_id: string;
+  post_url: string;
+  liked: boolean;
+  commented: boolean;
+  status: "success" | "fail" | "skip";
+  message: string;
+}) {
+  try {
+    await supabase.from("publy_engage_history").insert([params]);
+  } catch {}
+}
+
+export async function getEngageHistory(userId: string): Promise<EngageHistory[]> {
+  try {
+    const { data } = await supabase
+      .from("publy_engage_history")
+      .select("*")
+      .eq("user_id", userId)
+      .order("created_at", { ascending: false })
+      .limit(200);
+    return data || [];
+  } catch { return []; }
+}
+
+export async function getAllEngageHistory(): Promise<(EngageHistory & { user_name?: string; user_email?: string })[]> {
+  try {
+    const { data } = await supabase
+      .from("publy_engage_history")
+      .select("*, publy_users(name, email)")
+      .order("created_at", { ascending: false })
+      .limit(500);
+    return (data || []).map((d: Record<string, any>) => ({
+      id: d.id,
+      user_id: d.user_id,
+      keyword: d.keyword,
+      target_blog_id: d.target_blog_id,
+      post_url: d.post_url,
+      liked: d.liked,
+      commented: d.commented,
+      status: d.status,
+      message: d.message,
+      created_at: d.created_at,
+      user_name: d.publy_users?.name,
+      user_email: d.publy_users?.email,
+    }));
+  } catch { return []; }
+}
