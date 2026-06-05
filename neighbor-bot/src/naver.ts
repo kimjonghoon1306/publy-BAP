@@ -1054,6 +1054,11 @@ export async function addNeighbors(params: {
   const { accountId, targets, message, delayMin, delayMax, dailyLimit, skipDone, onLog, onResult, onProgress, stopSignal } = params;
   const log = onLog || console.log;
 
+  // 다중 멘트 파싱 (|||로 구분된 경우 순환 사용)
+  const msgs = message.split("|||").map(m => m.trim()).filter(Boolean);
+  if (msgs.length === 0) msgs.push(message);
+  let msgIdx = 0;
+
   const sp = sessionPath(accountId);
   if (!fs.existsSync(sp)) throw new Error("세션 없음 — 먼저 로그인하세요");
   const { cookies } = JSON.parse(fs.readFileSync(sp, "utf-8"));
@@ -1166,8 +1171,10 @@ export async function addNeighbors(params: {
               await page.click(sel);
               await page.waitForTimeout(300);
               await page.fill(sel, ""); // 기존 내용 지우기
-              const naturalMsg = naturalizeMsg(message); // 자연 변형 적용
-              log(`[서이추] 💬 멘트: "${naturalMsg.slice(0, 30)}..."`);
+              const currentMsg = msgs[msgIdx % msgs.length];
+              msgIdx++;
+              const naturalMsg = naturalizeMsg(currentMsg); // 자연 변형 적용
+              log(`[서이추] 💬 멘트 [${((msgIdx-1) % msgs.length)+1}/${msgs.length}]: "${naturalMsg.slice(0, 30)}..."`);
               await humanType(page, naturalMsg);
               break;
             }
@@ -1254,6 +1261,11 @@ export async function engageBlogs(params: {
     dailyLimit, skipDone, onLog, onResult, onProgress, stopSignal,
   } = params;
   const log = onLog || console.log;
+
+  // 다중 댓글 파싱 (|||로 구분된 경우 순환 사용)
+  const comments = comment.split("|||").map(c => c.trim()).filter(Boolean);
+  if (comments.length === 0 && comment.trim()) comments.push(comment);
+  let commentIdx = 0;
 
   const sp = sessionPath(accountId);
   if (!fs.existsSync(sp)) throw new Error("세션 없음 — 먼저 로그인하세요");
@@ -1472,7 +1484,9 @@ export async function engageBlogs(params: {
                       await ta.click();
                       await page.waitForTimeout(500);
                       await cf.fill("textarea", "");
-                      const naturalComment = naturalizeMsg(comment);
+                      const currentComment = comments[commentIdx % comments.length];
+                      commentIdx++;
+                      const naturalComment = naturalizeMsg(currentComment);
                       await humanType(page, naturalComment);
                       await page.waitForTimeout(500);
                       const submitSels = ["button[type='submit']","button:has-text('등록')","button[class*='submit']"];
@@ -1493,7 +1507,9 @@ export async function engageBlogs(params: {
                   await commentCtx.click(sel, { timeout: 3000 });
                   await page.waitForTimeout(500);
                   await commentCtx.fill(sel, "");
-                  const naturalComment2 = naturalizeMsg(comment);
+                  const currentComment2 = comments[commentIdx % comments.length];
+                  commentIdx++;
+                  const naturalComment2 = naturalizeMsg(currentComment2);
                   await humanType(page, naturalComment2);
                   await page.waitForTimeout(500);
                   // 등록 버튼
