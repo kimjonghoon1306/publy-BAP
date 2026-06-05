@@ -1,6 +1,6 @@
 import express from "express";
 import cors from "cors";
-import { saveSession, sessionExists, crawlBlogIds, addNeighbors, NeighborResult, donePath } from "./naver";
+import { saveSession, sessionExists, crawlBlogIds, addNeighbors, NeighborResult, donePath, engageBlogs, EngageResult, engageDonePath } from "./naver";
 import { checkNeighborQuota, incrementNeighborQuota, getNeighborDailyUsage, getUserPlan, NEIGHBOR_DAILY_LIMIT, addNeighborHistory } from "./supabase";
 import fs from "fs";
 
@@ -181,6 +181,90 @@ app.get("/api/done/:accountId", (req, res) => {
 /* ── 완료 목록 초기화 ── */
 app.delete("/api/done/:accountId", (req, res) => {
   const dp = donePath(req.params.accountId);
+  try { if (fs.existsSync(dp)) fs.unlinkSync(dp); } catch {}
+  res.json({ ok: true });
+});
+
+/* ── 공감·댓글용 키워드 수집 (SSE) ── */
+app.get("/api/engage-crawl", async (req, res) => {
+  const { keywords, countPerKeyword } = req.query as Record<string, string>;
+  if (!keywords) return res.status(400).json({ error: "keywords 필요" });
+
+  sseSetup(res);
+  try {
+    const kwList = keywords.split(",").map((k) => k.trim()).filter(Boolean);
+    const count = parseInt(countPerKeyword || "20", 10);
+    const results = await crawlBlogIds({
+      accountId: "",
+      keywords: kwList,
+      countPerKeyword: count,
+      onLog: (msg) => sseSend(res, { type: "log", msg }),
+    });
+    sseSend(res, { type: "crawl_done", results });
+  } catch (e: any) {
+    sseSend(res, { type: "error", msg: e.message });
+  }
+  res.end();
+});
+
+/* ── 공감·댓글 작업 (SSE) ── */
+app.get("/api/engage", async (req, res) => {
+  const {
+    accountId, targets: targetsRaw, comment,
+    doLike, doComment, periodDays, postsPerBlog,
+    delayMin, delayMax, dailyLimit, skipDone, jobId,
+  } = req.query as Record<string, string>;
+
+  if (!accountId || !targetsRaw)
+    return res.status(400).json({ error: "accountId, targets 필요" });
+
+  sseSetup(res);
+  const jid = jobId || Date.now().toString();
+  stopMap.set(jid, false);
+
+  try {
+    const targets = JSON.parse(decodeURIComponent(targetsRaw));
+    sseSend(res, { type: "start", total: targets.length });
+
+    await engageBlogs({
+      accountId,
+      targets,
+      comment: comment || "",
+      doLike: doLike !== "false",
+      doComment: doComment !== "false" && !!(comment?.trim()),
+      periodDays: parseInt(periodDays || "7", 10),
+      postsPerBlog: parseInt(postsPerBlog || "1", 10),
+      delayMin: parseFloat(delayMin || "5"),
+      delayMax: parseFloat(delayMax || "10"),
+      dailyLimit: parseInt(dailyLimit || "50", 10),
+      skipDone: skipDone === "true",
+      onLog: (msg) => sseSend(res, { type: "log", msg }),
+      onResult: async (r: EngageResult) => {
+        sseSend(res, { type: "result", ...r });
+      },
+      onProgress: (done, fail) => sseSend(res, { type: "progress", done, fail }),
+      stopSignal: () => stopMap.get(jid) === true,
+    });
+
+    sseSend(res, { type: "done" });
+  } catch (e: any) {
+    sseSend(res, { type: "error", msg: e.message });
+  }
+  stopMap.delete(jid);
+  res.end();
+});
+
+/* ── 공감·댓글 완료 목록 조회/초기화 ── */
+app.get("/api/engage-done/:accountId", (req, res) => {
+  const dp = engageDonePath(req.params.accountId);
+  try {
+    const list = fs.existsSync(dp) ? JSON.parse(fs.readFileSync(dp, "utf-8")) : [];
+    res.json({ list });
+  } catch { res.json({ list: [] }); }
+});
+
+app.delete("/api/engage-done/:accountId", (req, res) => {
+  const dp = engageDonePath(req.params.accountId);
   try { if (fs.existsSync(dp)) fs.unlinkSync(dp); } catch {}
   res.json({ ok: true });
 });
