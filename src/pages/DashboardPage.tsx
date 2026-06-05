@@ -452,6 +452,7 @@ interface Props {
 
 export default function DashboardPage({user, onLogout, onAdminLogin, onThemeToggle, theme}: Props) {
   const [tab, setTab] = useState<MainTab>("keyword");
+  const [pageReady, setPageReady] = useState(false);
   const [showGuide, setShowGuide] = useState(false);
   const [guideTab, setGuideTab] = useState(0);
   const [botOnline, setBotOnline] = useState(false);
@@ -1091,7 +1092,7 @@ Output format (JSON array only, no other text):
     getAccounts(user.id).then(setAccounts);
     getHistory(user.id).then(setHistory);
     getQuota(user.id).then(async (q:PublyQuota|null)=>{
-      if(!q) return;
+      if(!q) { setPageReady(true); return; }
       setQuota(q);
 
       // ── 알림 체크 ──
@@ -1117,6 +1118,7 @@ Output format (JSON array only, no other text):
         localStorage.setItem(`publy_alert_20_${now.toISOString().slice(0,10)}`, "1");
         setAlertPopup({ type: "publish", used, limit: config.dailyPublish });
       }
+      setPageReady(true);
     });
     // 임시저장 확인
     try{
@@ -2366,6 +2368,17 @@ POST3: (제목)|(이유)
     <>
       <style>{CSS}</style>
       <div className={`app ${theme} ${fontMode==="large"?"large":""}`}>
+
+        {/* ── 초기 로딩 오버레이 (플리커 방지) ── */}
+        {!pageReady && (
+          <div style={{position:"fixed",inset:0,background:theme==="dark"?"#050a12":"#f0faf4",zIndex:9999,display:"flex",alignItems:"center",justifyContent:"center"}}>
+            <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:16}}>
+              <div style={{width:44,height:44,borderRadius:"50%",border:"3px solid rgba(0,255,136,.2)",borderTopColor:"#00ff88",animation:"spin 1s linear infinite"}}/>
+              <div style={{fontSize:13,color:"var(--text3)",fontWeight:600}}>불러오는 중...</div>
+            </div>
+            <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
+          </div>
+        )}
 
         {/* ── 만료/발행 알림 팝업 ── */}
         {alertPopup&&(
