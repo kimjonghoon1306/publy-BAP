@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import GoogleFlowCard from "../GoogleFlowCard";
-import { PublyUser, getQuota, getHistory, getAccounts, PublyQuota, PublyHistory, PublyAccount, upsertAccount, useQuota, addHistory, deleteHistory, deleteAllHistory, changeUserPassword, getNaverApiKeys, saveNaverApiKeys, NaverApiKeys, checkNaverQuota, incrementNaverQuota, getNaverDailyUsage, NAVER_DAILY_LIMIT, getUserNaverApiKeys, logError, PLAN_CONFIG, checkDailyPublishQuota, incrementDailyPublish, getDailyPublishUsage } from "../lib/supabase";
+import { PublyUser, getQuota, getHistory, getAccounts, PublyQuota, PublyHistory, PublyAccount, upsertAccount, useQuota, addHistory, deleteHistory, deleteAllHistory, changeUserPassword, getNaverApiKeys, saveNaverApiKeys, NaverApiKeys, checkNaverQuota, incrementNaverQuota, getNaverDailyUsage, NAVER_DAILY_LIMIT, getUserNaverApiKeys, logError, PLAN_CONFIG, checkDailyPublishQuota, incrementDailyPublish, getDailyPublishUsage, getNeighborDailyUsage, NEIGHBOR_DAILY_LIMIT, getEngageDailyUsage, ENGAGE_DAILY_LIMIT } from "../lib/supabase";
 import { supabase } from "../lib/supabase";
 import NeighborPage from "./NeighborPage";
 
@@ -459,6 +459,8 @@ export default function DashboardPage({user, onLogout, onAdminLogin, onThemeTogg
   const [botSecret, setBotSecret] = useState<string>("");  // 봇 API 인증 시크릿
   const [quota, setQuota] = useState<PublyQuota|null>(null);
   const [dailyPublishUsed, setDailyPublishUsed] = useState(0);
+  const [neighborUsed, setNeighborUsed] = useState(0);
+  const [engageUsed, setEngageUsed] = useState(0);
   const [alertPopup, setAlertPopup] = useState<{type:"expire"|"publish"; daysLeft?:number; used?:number; limit?:number} | null>(null);
   const [accounts, setAccounts] = useState<PublyAccount[]>([]);
   const [history, setHistory] = useState<PublyHistory[]>([]);
@@ -1091,6 +1093,8 @@ Output format (JSON array only, no other text):
     checkBot();
     getAccounts(user.id).then(setAccounts);
     getHistory(user.id).then(setHistory);
+    getNeighborDailyUsage(user.id).then(setNeighborUsed);
+    getEngageDailyUsage(user.id).then(setEngageUsed);
     getQuota(user.id).then(async (q:PublyQuota|null)=>{
       if(!q) { setPageReady(true); return; }
       setQuota(q);
@@ -2623,7 +2627,46 @@ POST3: (제목)|(이유)
 
           <div className="main">
 
-            {/* ===== 글 생성 ===== */}
+            {/* ── 사용한도 + 만료일 상태바 (항상 표시) ── */}
+            {(()=>{
+              const plan = user.plan;
+              const config = PLAN_CONFIG[plan] ?? PLAN_CONFIG.free;
+              const publishLimit = config.dailyPublish;
+              const neighborLimit = NEIGHBOR_DAILY_LIMIT[plan] ?? 10;
+              const engageLimit = ENGAGE_DAILY_LIMIT[plan] ?? 10;
+              const expiry = quota ? new Date(quota.reset_date) : null;
+              const daysLeft = expiry ? Math.ceil((expiry.getTime() - Date.now()) / (1000*60*60*24)) : null;
+              const dColor = daysLeft === null ? "var(--text3)" : daysLeft <= 3 ? "var(--danger)" : daysLeft <= 7 ? "#ff9f3f" : "var(--success)";
+              const items = [
+                { label:"✍️ 글쓰기", used: dailyPublishUsed, limit: publishLimit, color:"var(--accent)" },
+                { label:"🤝 서이추", used: neighborUsed, limit: neighborLimit, color:"#00c8ff" },
+                { label:"❤️ 공감·댓글", used: engageUsed, limit: engageLimit, color:"#ff6b9d" },
+              ];
+              return (
+                <div style={{display:"flex",gap:10,marginBottom:16,flexWrap:"wrap",alignItems:"center"}}>
+                  {items.map(({label,used,limit,color})=>{
+                    const pct = Math.min(100, (used/limit)*100);
+                    const over = used >= limit;
+                    return (
+                      <div key={label} style={{flex:1,minWidth:120,padding:"10px 14px",borderRadius:14,background:"var(--card)",border:`1px solid ${over?"rgba(255,83,99,.4)":"var(--border)"}`,transition:"border .2s"}}>
+                        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+                          <span style={{fontSize:12,fontWeight:700,color:"var(--text2)"}}>{label}</span>
+                          <span style={{fontSize:12,fontWeight:800,color:over?"var(--danger)":color}}>{used}<span style={{fontSize:11,color:"var(--text3)",fontWeight:500}}>/{limit}</span></span>
+                        </div>
+                        <div style={{height:5,borderRadius:99,background:"var(--border)",overflow:"hidden"}}>
+                          <div style={{height:"100%",borderRadius:99,width:`${pct}%`,background:over?"var(--danger)":color,transition:"width .4s"}}/>
+                        </div>
+                      </div>
+                    );
+                  })}
+                  <div style={{padding:"10px 16px",borderRadius:14,background:"var(--card)",border:`1px solid ${daysLeft!==null&&daysLeft<=3?"rgba(255,83,99,.4)":daysLeft!==null&&daysLeft<=7?"rgba(255,159,63,.3)":"var(--border)"}`,whiteSpace:"nowrap"}}>
+                    <div style={{fontSize:11,color:"var(--text3)",fontWeight:600,marginBottom:3}}>📅 만료일</div>
+                    <div style={{fontSize:13,fontWeight:800,color:dColor}}>{expiry?expiry.toLocaleDateString("ko-KR",{month:"numeric",day:"numeric"}):"—"}</div>
+                    <div style={{fontSize:11,color:dColor,fontWeight:600,marginTop:1}}>{daysLeft===null?"—":daysLeft<=0?"오늘 만료":`D-${daysLeft}`}</div>
+                  </div>
+                </div>
+              );
+            })()}
             {/* ═══ 🔍 키워드/제목 탭 ═══ */}
             {tab==="keyword"&&(
               <div style={{animation:"fadeUp .25s ease both"}}>
@@ -4149,11 +4192,11 @@ POST3: (제목)|(이유)
             )}
 
             {tab==="neighbor"&&(
-              <NeighborPage theme={theme as "dark"|"light"} userId={user.id} plan={user.plan} />
+              <NeighborPage theme={theme as "dark"|"light"} userId={user.id} plan={user.plan} singleTab />
             )}
 
             {tab==="engage"&&(
-              <NeighborPage theme={theme as "dark"|"light"} userId={user.id} plan={user.plan} initialTab="engage" />
+              <NeighborPage theme={theme as "dark"|"light"} userId={user.id} plan={user.plan} initialTab="engage" singleTab />
             )}
 
             {tab==="settings"&&(
