@@ -2089,6 +2089,17 @@ POST3: (제목)|(이유)
       <style>{CSS}</style>
       <div className={`app ${theme} ${fontMode==="large"?"large":""}`}>
 
+        {/* ── 초기 로딩 오버레이 (플리커 방지) ── */}
+        {loading && (
+          <div style={{position:"fixed",inset:0,background:theme==="dark"?"#050a12":"#f0faf4",zIndex:9999,display:"flex",alignItems:"center",justifyContent:"center"}}>
+            <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:16}}>
+              <div style={{width:44,height:44,borderRadius:"50%",border:"3px solid rgba(255,107,107,.2)",borderTopColor:"#ff6b6b",animation:"spin 1s linear infinite"}}/>
+              <div style={{fontSize:13,color:"var(--text3)",fontWeight:600}}>관리자 페이지 로딩 중...</div>
+            </div>
+            <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
+          </div>
+        )}
+
         {/* ── 관리자 사용설명서 모달 ── */}
         {showGuide && (() => {
           const PINK = "#FF6B9D"; const YELLOW = "#FFD93D"; const GREEN = "#00C875"; const RED = "#f85149";
