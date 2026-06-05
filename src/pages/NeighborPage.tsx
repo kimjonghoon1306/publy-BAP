@@ -81,8 +81,8 @@ const GuideModal = ({ tab, onClose }: { tab: "neighbor"|"engage"; onClose: () =>
   const steps = GUIDE[tab];
   const title = tab === "neighbor" ? "🤝 서이추 사용방법" : "❤️ 공감·댓글 사용방법";
   return (
-    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.6)", zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
-      <div onClick={e => e.stopPropagation()} style={{ background: "var(--card)", borderRadius: 20, padding: "28px 32px", maxWidth: 560, width: "100%", maxHeight: "80vh", overflowY: "auto", boxShadow: "0 20px 60px rgba(0,0,0,.4)" }}>
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.6)", zIndex: 9999, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "60px 20px 20px", overflowY: "auto" }}>
+      <div onClick={e => e.stopPropagation()} style={{ background: "var(--card)", borderRadius: 20, padding: "28px 32px", maxWidth: 560, width: "100%", boxShadow: "0 20px 60px rgba(0,0,0,.4)" }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 24 }}>
           <div style={{ fontSize: 18, fontWeight: 900, color: "var(--text)" }}>{title}</div>
           <button onClick={onClose} style={{ width: 32, height: 32, borderRadius: 10, border: "1px solid var(--border)", background: "transparent", color: "var(--text3)", cursor: "pointer", fontSize: 16, display: "flex", alignItems: "center", justifyContent: "center" }}>×</button>
