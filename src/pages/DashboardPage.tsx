@@ -4344,10 +4344,10 @@ POST3: (제목)|(이유)
                     {label:"⏳ 대기중",value:dmTargets.filter(t=>t.status==="pending").length,color:"var(--info)"},
                   ].map((s,i)=>(
                     <div key={i} style={{padding:"16px",borderRadius:14,background:"var(--card)",border:"1px solid var(--border)",textAlign:"center",position:"relative",overflow:"hidden"}}>
-                      {i===0&&s.total>0&&(
-                        <div style={{position:"absolute",bottom:0,left:0,height:3,width:`${Math.min(100,(s.value/s.total)*100)}%`,background:"linear-gradient(90deg,#FF6B9D,#C77DFF)",borderRadius:99,transition:"width .5s"}}/>
+                      {i===0&&(s.total??0)>0&&(
+                        <div style={{position:"absolute",bottom:0,left:0,height:3,width:`${Math.min(100,(s.value/(s.total||1))*100)}%`,background:"linear-gradient(90deg,#FF6B9D,#C77DFF)",borderRadius:99,transition:"width .5s"}}/>
                       )}
-                      <div style={{fontSize:24,fontWeight:900,color:s.color,lineHeight:1,fontFamily:"'Space Grotesk',sans-serif"}}>{s.value}{i===0&&s.total>0?<span style={{fontSize:14,color:"var(--text3)",fontWeight:500}}>/{s.total}</span>:""}</div>
+                      <div style={{fontSize:24,fontWeight:900,color:s.color,lineHeight:1,fontFamily:"'Space Grotesk',sans-serif"}}>{s.value}{i===0&&(s.total??0)>0?<span style={{fontSize:14,color:"var(--text3)",fontWeight:500}}>/{s.total}</span>:""}</div>
                       <div style={{fontSize:10,color:"var(--text3)",marginTop:5,fontWeight:600}}>{s.label}</div>
                     </div>
                   ))}

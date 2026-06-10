@@ -746,7 +746,7 @@ export async function getAllInstaDmQuotas(): Promise<(InstaDmQuota & { user_name
       .from("insta_dm_quota")
       .select("*, publy_users(name, email, plan)")
       .order("created_at", { ascending: false });
-    return (data || []).map((d: Record<string, any>) => ({
+    return (data || []).map((d: Record<string, any>): any => ({
       ...d,
       user_name: d.publy_users?.name,
       user_email: d.publy_users?.email,
