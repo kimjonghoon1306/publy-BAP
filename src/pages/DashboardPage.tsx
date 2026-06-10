@@ -455,6 +455,7 @@ export default function DashboardPage({user, onLogout, onAdminLogin, onThemeTogg
   const [tab, setTab] = useState<MainTab>("keyword");
   const [pageReady, setPageReady] = useState(false);
   const [showGuide, setShowGuide] = useState(false);
+  const [showInstaWarn, setShowInstaWarn] = useState(false);
   const [guideTab, setGuideTab] = useState(0);
   const [botOnline, setBotOnline] = useState(false);
   const [botSecret, setBotSecret] = useState<string>("");  // 봇 API 인증 시크릿
@@ -1104,6 +1105,9 @@ Output format (JSON array only, no other text):
       Promise.all([getInstaDmTargets(user.id),getInstaDmQuota(user.id)]).then(([t,q])=>{
         setDmTargets(t); setDmQuota(q); setDmLoading(false);
       });
+    }
+    if(tab==="insta_dm" && !localStorage.getItem("insta_dm_warn_hide")){
+      setShowInstaWarn(true);
     }
   },[tab,user.id]);
 
@@ -4206,6 +4210,45 @@ POST3: (제목)|(이유)
                     </div>
                   </div>
                 )}
+              </div>
+            )}
+
+            {/* ⚠️ 인스타 DM 안전 수칙 팝업 */}
+            {showInstaWarn&&(
+              <div style={{position:"fixed",inset:0,zIndex:9999,background:"rgba(0,0,0,.78)",backdropFilter:"blur(8px)",display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onClick={()=>setShowInstaWarn(false)}>
+                <div onClick={e=>e.stopPropagation()} style={{width:"100%",maxWidth:440,background:"var(--card)",border:"1px solid var(--border)",borderRadius:18,overflow:"hidden",boxShadow:"0 20px 60px rgba(0,0,0,.4)"}}>
+                  <div style={{padding:"20px 22px",background:"linear-gradient(135deg,#FF6B9D,#C77DFF)",color:"#fff"}}>
+                    <div style={{fontSize:18,fontWeight:900,display:"flex",alignItems:"center",gap:8}}>⚠️ 인스타 DM 안전 수칙</div>
+                    <div style={{fontSize:12,opacity:.92,marginTop:4}}>계정을 지키려면 꼭 읽어주세요</div>
+                  </div>
+                  <div style={{padding:"18px 22px",display:"flex",flexDirection:"column",gap:11}}>
+                    {[
+                      ["🐢","천천히, 소량부터","인스타는 자동 DM을 약관으로 제한하고 봇 탐지가 엄격해요. 처음엔 하루 10~20개로 시작하세요."],
+                      ["🌱","계정 워밍업 필수","만든 지 얼마 안 됐거나 활동이 적은 계정은 차단 위험이 큽니다. 평소처럼 게시·소통을 병행하세요."],
+                      ["⏱️","발송 간격 충분히","봇이 자동으로 수십 초~분 단위 랜덤 딜레이를 줍니다. 간격을 너무 짧게 바꾸지 마세요."],
+                      ["✍️","문구는 조금씩 다르게","똑같은 문구 대량 발송은 스팸으로 분류돼 차단·신고 위험이 커져요."],
+                      ["🛑","제한 오면 즉시 중단","'액션 차단'·로그인 경고가 뜨면 바로 멈추고 며칠 쉬세요."],
+                    ].map(([ic,t,d],i)=>(
+                      <div key={i} style={{display:"flex",gap:11,alignItems:"flex-start"}}>
+                        <span style={{fontSize:18,flexShrink:0}}>{ic}</span>
+                        <div>
+                          <div style={{fontSize:13,fontWeight:800,color:"var(--text)"}}>{t}</div>
+                          <div style={{fontSize:12,color:"var(--text3)",lineHeight:1.5,marginTop:1}}>{d}</div>
+                        </div>
+                      </div>
+                    ))}
+                    <div style={{fontSize:11,color:"var(--text3)",background:"rgba(255,107,157,.07)",border:"1px solid rgba(255,107,157,.2)",borderRadius:8,padding:"9px 11px",lineHeight:1.5}}>
+                      ⓘ 본 기능 사용으로 발생하는 계정 제재의 책임은 사용자에게 있습니다.
+                    </div>
+                    <label style={{display:"flex",alignItems:"center",gap:8,fontSize:12,color:"var(--text2)",cursor:"pointer",marginTop:2}}>
+                      <input type="checkbox" onChange={e=>{if(e.target.checked)localStorage.setItem("insta_dm_warn_hide","1");else localStorage.removeItem("insta_dm_warn_hide");}}/>
+                      다시 보지 않기
+                    </label>
+                    <button onClick={()=>setShowInstaWarn(false)} style={{marginTop:4,padding:"13px",borderRadius:11,border:"none",background:"linear-gradient(135deg,#FF6B9D,#C77DFF)",color:"#fff",fontSize:14,fontWeight:800,fontFamily:"inherit",cursor:"pointer"}}>
+                      확인했어요 👍
+                    </button>
+                  </div>
+                </div>
               </div>
             )}
 
