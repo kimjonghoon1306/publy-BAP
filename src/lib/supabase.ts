@@ -598,3 +598,159 @@ export async function getAllEngageHistory(): Promise<(EngageHistory & { user_nam
     }));
   } catch { return []; }
 }
+
+// ── 인스타 DM ────────────────────────────────────────────
+
+export interface InstaDmTarget {
+  id: string;
+  user_id: string;
+  username: string;
+  followers: number;
+  bio: string;
+  keywords: string;
+  status: "pending" | "sent" | "fail" | "skip";
+  instagram_account: string;
+  created_at: string;
+}
+
+export interface InstaDmHistory {
+  id: string;
+  user_id: string;
+  target_username: string;
+  message: string;
+  instagram_account: string;
+  status: "sent" | "fail";
+  created_at: string;
+}
+
+export interface InstaDmQuota {
+  id: string;
+  user_id: string;
+  daily_limit: number;
+  used_today: number;
+  is_enabled: boolean;
+  reset_date: string;
+}
+
+export const INSTA_DM_DAILY_LIMIT: Record<string, number> = {
+  free: 0,
+  basic: 30,
+  pro: 60,
+  admin: 9999,
+};
+
+export async function getInstaDmTargets(userId: string): Promise<InstaDmTarget[]> {
+  try {
+    const { data } = await supabase
+      .from("insta_dm_targets")
+      .select("*")
+      .eq("user_id", userId)
+      .order("created_at", { ascending: false })
+      .limit(300);
+    return data || [];
+  } catch { return []; }
+}
+
+export async function addInstaDmTarget(params: Omit<InstaDmTarget, "id" | "created_at">) {
+  try {
+    await supabase.from("insta_dm_targets").insert([params]);
+  } catch {}
+}
+
+export async function updateInstaDmTargetStatus(id: string, status: InstaDmTarget["status"]) {
+  try {
+    await supabase.from("insta_dm_targets").update({ status }).eq("id", id);
+  } catch {}
+}
+
+export async function deleteInstaDmTarget(id: string) {
+  try {
+    await supabase.from("insta_dm_targets").delete().eq("id", id);
+  } catch {}
+}
+
+export async function getInstaDmHistory(userId: string): Promise<InstaDmHistory[]> {
+  try {
+    const { data } = await supabase
+      .from("insta_dm_history")
+      .select("*")
+      .eq("user_id", userId)
+      .order("created_at", { ascending: false })
+      .limit(200);
+    return data || [];
+  } catch { return []; }
+}
+
+export async function addInstaDmHistory(params: Omit<InstaDmHistory, "id" | "created_at">) {
+  try {
+    await supabase.from("insta_dm_history").insert([params]);
+  } catch {}
+}
+
+export async function getAllInstaDmHistory(): Promise<(InstaDmHistory & { user_name?: string; user_email?: string })[]> {
+  try {
+    const { data } = await supabase
+      .from("insta_dm_history")
+      .select("*, publy_users(name, email)")
+      .order("created_at", { ascending: false })
+      .limit(500);
+    return (data || []).map((d: Record<string, any>) => ({
+      id: d.id,
+      user_id: d.user_id,
+      target_username: d.target_username,
+      message: d.message,
+      instagram_account: d.instagram_account,
+      status: d.status,
+      created_at: d.created_at,
+      user_name: d.publy_users?.name,
+      user_email: d.publy_users?.email,
+    }));
+  } catch { return []; }
+}
+
+export async function getInstaDmQuota(userId: string): Promise<InstaDmQuota | null> {
+  try {
+    const today = new Date().toISOString().slice(0, 10);
+    const { data } = await supabase
+      .from("insta_dm_quota")
+      .select("*")
+      .eq("user_id", userId)
+      .single();
+    if (!data) return null;
+    if (data.reset_date !== today) {
+      await supabase.from("insta_dm_quota").update({ used_today: 0, reset_date: today }).eq("user_id", userId);
+      return { ...data, used_today: 0, reset_date: today };
+    }
+    return data;
+  } catch { return null; }
+}
+
+export async function upsertInstaDmQuota(userId: string, params: Partial<InstaDmQuota>) {
+  try {
+    const today = new Date().toISOString().slice(0, 10);
+    await supabase.from("insta_dm_quota").upsert([{ user_id: userId, reset_date: today, ...params }], { onConflict: "user_id" });
+  } catch {}
+}
+
+export async function incrementInstaDmUsage(userId: string) {
+  try {
+    const quota = await getInstaDmQuota(userId);
+    if (!quota) return;
+    await supabase.from("insta_dm_quota").update({ used_today: (quota.used_today || 0) + 1 }).eq("user_id", userId);
+  } catch {}
+}
+
+export async function getAllInstaDmQuotas(): Promise<(InstaDmQuota & { user_name?: string; user_email?: string; plan?: string })[]> {
+  try {
+    const { data } = await supabase
+      .from("insta_dm_quota")
+      .select("*, publy_users(name, email, plan)")
+      .order("created_at", { ascending: false });
+    return (data || []).map((d: Record<string, any>) => ({
+      ...d,
+      user_name: d.publy_users?.name,
+      user_email: d.publy_users?.email,
+      plan: d.publy_users?.plan,
+    }));
+  } catch { return []; }
+}

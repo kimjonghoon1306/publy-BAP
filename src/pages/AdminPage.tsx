@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import GoogleFlowCard from "../GoogleFlowCard";
-import { supabase, getAccounts, upsertAccount, PublyAccount, getHistory, PublyHistory, addHistory, deleteHistory, deleteAllHistory, setAdminPassword, saveAdminNaverApiKeys, getNaverApiKeys, NaverApiKeys, getNaverDailyUsage, NAVER_DAILY_LIMIT, checkNaverQuota, incrementNaverQuota, getUserNaverApiKeys, getReferrals, getErrorLogs, getUnreadErrorCount, markErrorsAsRead, logError, PLAN_CONFIG, getAllNeighborHistory, NeighborHistory, getAllEngageHistory, EngageHistory } from "../lib/supabase";
+import { supabase, getAccounts, upsertAccount, PublyAccount, getHistory, PublyHistory, addHistory, deleteHistory, deleteAllHistory, setAdminPassword, saveAdminNaverApiKeys, getNaverApiKeys, NaverApiKeys, getNaverDailyUsage, NAVER_DAILY_LIMIT, checkNaverQuota, incrementNaverQuota, getUserNaverApiKeys, getReferrals, getErrorLogs, getUnreadErrorCount, markErrorsAsRead, logError, PLAN_CONFIG, getAllNeighborHistory, NeighborHistory, getAllEngageHistory, EngageHistory, InstaDmTarget, InstaDmHistory, InstaDmQuota, getInstaDmTargets, addInstaDmTarget, updateInstaDmTargetStatus, deleteInstaDmTarget, getInstaDmHistory, addInstaDmHistory, getAllInstaDmHistory, getInstaDmQuota, upsertInstaDmQuota, getAllInstaDmQuotas, INSTA_DM_DAILY_LIMIT } from "../lib/supabase";
 import NeighborPage from "./NeighborPage";
 
 interface Props {
@@ -581,19 +581,37 @@ const TABS = [
   {k:"accounts",        i:"🔗", l:"계정관리"},
   {k:"rank",            i:"📊", l:"블로그 순위"},
   {k:"calendar",        i:"📅", l:"콘텐츠 캘린더"},
+  {k:"insta_dm",        i:"📱", l:"인스타 DM"},
   {k:"neighbor",        i:"🤝", l:"서이추"},
   {k:"engage",          i:"❤️", l:"공감·댓글"},
   {k:"users",           i:"👥", l:"회원관리"},
   {k:"stats",           i:"📈", l:"통계"},
+  {k:"insta_dm_manage", i:"📊", l:"DM 회원관리"},
   {k:"neighbor_manage", i:"📋", l:"서이추 관리"},
   {k:"engage_manage",   i:"💬", l:"공감·댓글 관리"},
   {k:"settings",        i:"🔐", l:"설정"},
 ] as const;
 
 export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: Props) {
-  const [tab, setTab] = useState<"keyword"|"write"|"image"|"photo"|"publish"|"manage"|"accounts"|"rank"|"calendar"|"neighbor"|"engage"|"neighbor_manage"|"engage_manage"|"users"|"stats"|"settings">("keyword");
+  const [tab, setTab] = useState<"keyword"|"write"|"image"|"photo"|"publish"|"manage"|"accounts"|"rank"|"calendar"|"neighbor"|"engage"|"neighbor_manage"|"engage_manage"|"insta_dm"|"insta_dm_manage"|"users"|"stats"|"settings">("keyword");
   const [statsSubTab, setStatsSubTab] = useState<"mine"|"all">("mine");
   const [usersSubTab, setUsersSubTab] = useState<"list"|"referral">("list");
+  // 인스타 DM 상태
+  const [dmTargets, setDmTargets] = useState<InstaDmTarget[]>([]);
+  const [dmHistory, setDmHistory] = useState<(InstaDmHistory & {user_name?:string;user_email?:string})[]>([]);
+  const [dmQuotas, setDmQuotas] = useState<(InstaDmQuota & {user_name?:string;user_email?:string;plan?:string})[]>([]);
+  const [dmLoading, setDmLoading] = useState(false);
+  const [dmManageLoading, setDmManageLoading] = useState(false);
+  const [dmSubTab, setDmSubTab] = useState<"targets"|"history"|"settings">("targets");
+  const [dmManageSubTab, setDmManageSubTab] = useState<"quotas"|"history">("quotas");
+  const [dmKeyword, setDmKeyword] = useState("");
+  const [dmFollowerMin, setDmFollowerMin] = useState("500");
+  const [dmFollowerMax, setDmFollowerMax] = useState("50000");
+  const [dmMessage, setDmMessage] = useState("");
+  const [dmAccount, setDmAccount] = useState("");
+  const [dmTargetInput, setDmTargetInput] = useState("");
+  const [dmFilter, setDmFilter] = useState<"all"|"pending"|"sent"|"fail"|"skip">("all");
+  const [dmSearch, setDmSearch] = useState("");
   const [referralData, setReferralData] = useState<{referrer:any;referred:any[]}[]>([]);
   const [referralLoading, setReferralLoading] = useState(false);
   const [neighborHistory, setNeighborHistory] = useState<(NeighborHistory & {user_name?:string;user_email?:string})[]>([]);
@@ -1227,6 +1245,16 @@ Output format (JSON array only, no other text):
     if(tab==="engage_manage" && engageHistory.length === 0){
       setEngageLoading(true);
       getAllEngageHistory().then(d=>{ setEngageHistory(d); setEngageLoading(false); });
+    }
+    if(tab==="insta_dm" && dmTargets.length === 0){
+      setDmLoading(true);
+      getInstaDmTargets(ADM_UID).then(d=>{ setDmTargets(d); setDmLoading(false); });
+    }
+    if(tab==="insta_dm_manage" && dmQuotas.length === 0){
+      setDmManageLoading(true);
+      Promise.all([getAllInstaDmHistory(), getAllInstaDmQuotas()]).then(([h,q])=>{
+        setDmHistory(h); setDmQuotas(q); setDmManageLoading(false);
+      });
     }
     if(tab==="settings"){
       // admin_ 접두사 키만 직접 조회
@@ -2316,16 +2344,37 @@ POST3: (제목)|(이유)
           {/* 사이드바 */}
           <div className="sidebar">
             <div className="nav-section" style={{fontSize:10,fontWeight:800,color:"var(--text3)",padding:"8px 12px 4px",letterSpacing:".08em"}}>✍️ 블로그 기능</div>
-            {TABS.filter(t=>["keyword","write","image","photo","publish","manage","accounts","rank","calendar","neighbor","engage"].includes(t.k)).map(t => (
+            {TABS.filter(t=>["keyword","write","image","photo","publish","manage","accounts","rank","calendar"].includes(t.k)).map(t => (
               <button key={t.k} className={`nav-item ${tab===t.k?"active":""}`} onClick={()=>{if(t.k==="rank"){window.open("https://rank.xn--zk5biyyw.com/","_blank");return;}setTab(t.k as any);}}>
                 <span className="nav-ico">{t.i}</span>{t.l}
               </button>
             ))}
+            <div className="nav-section" style={{fontSize:10,fontWeight:800,padding:"10px 12px 4px",letterSpacing:".08em",borderTop:"1px solid var(--border)",marginTop:6,
+              background:"linear-gradient(90deg,rgba(255,107,157,.08),transparent)",
+              color:"#FF6B9D"}}>📱 SNS 자동화</div>
+            <button className={`nav-item ${tab==="insta_dm"?"active":""}`} onClick={()=>setTab("insta_dm")}
+              style={tab==="insta_dm"?{background:"rgba(255,107,157,.1)",color:"#FF6B9D"}:{}}>
+              <span className="nav-ico">📱</span>인스타 DM
+            </button>
+            <div className="nav-section" style={{fontSize:10,fontWeight:800,color:"var(--text3)",padding:"10px 12px 4px",letterSpacing:".08em",borderTop:"1px solid var(--border)",marginTop:6}}>🤝 이웃 활동</div>
+            {TABS.filter(t=>["neighbor","engage"].includes(t.k)).map(t => (
+              <button key={t.k} className={`nav-item ${tab===t.k?"active":""}`} onClick={()=>setTab(t.k as any)}>
+                <span className="nav-ico">{t.i}</span>{t.l}
+              </button>
+            ))}
             <div className="nav-section" style={{fontSize:10,fontWeight:800,color:"var(--text3)",padding:"10px 12px 4px",letterSpacing:".08em",borderTop:"1px solid var(--border)",marginTop:6}}>🔐 관리자 전용</div>
-            {TABS.filter(t=>["users","stats","neighbor_manage","engage_manage","settings"].includes(t.k)).map(t => (
+            {TABS.filter(t=>["users","stats"].includes(t.k)).map(t => (
               <button key={t.k} className={`nav-item ${tab===t.k?"active":""}`} onClick={()=>setTab(t.k as any)}>
                 <span className="nav-ico">{t.i}</span>{t.l}
                 {t.k==="users" && users.length>0 && <span className="nav-badge">{users.length}</span>}
+              </button>
+            ))}
+            <button className={`nav-item ${tab==="insta_dm_manage"?"active":""}`} onClick={()=>setTab("insta_dm_manage")}>
+              <span className="nav-ico">📊</span>DM 회원관리
+            </button>
+            {TABS.filter(t=>["neighbor_manage","engage_manage","settings"].includes(t.k)).map(t => (
+              <button key={t.k} className={`nav-item ${tab===t.k?"active":""}`} onClick={()=>setTab(t.k as any)}>
+                <span className="nav-ico">{t.i}</span>{t.l}
               </button>
             ))}
             <div className="sidebar-stats">
@@ -4207,6 +4256,483 @@ POST3: (제목)|(이유)
                     );
                   })()}
                 </div>
+              </div>
+            )}
+
+            {/* ───── 📱 인스타 DM (관리자 직접 사용) ───── */}
+            {tab === "insta_dm" && (
+              <div style={{animation:"fadeUp .25s ease both"}}>
+
+                {/* 헤더 */}
+                <div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",marginBottom:20,flexWrap:"wrap",gap:12}}>
+                  <div>
+                    <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:6}}>
+                      <div style={{width:44,height:44,borderRadius:14,background:"linear-gradient(135deg,#FF6B9D,#C77DFF)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:22,boxShadow:"0 4px 16px rgba(255,107,157,.35)"}}>📱</div>
+                      <div>
+                        <div style={{fontSize:20,fontWeight:900,color:"var(--text)"}}>인스타그램 DM 발송</div>
+                        <div style={{fontSize:12,color:"var(--text3)",marginTop:2}}>키워드·팔로워 기반 타겟 크롤링 → 체험단 DM 자동 발송</div>
+                      </div>
+                    </div>
+                  </div>
+                  <button onClick={()=>{setDmLoading(true);getInstaDmTargets(ADM_UID).then(d=>{setDmTargets(d);setDmLoading(false);});}}
+                    style={{padding:"8px 16px",borderRadius:10,border:"1px solid var(--border)",background:"var(--card)",color:"var(--text2)",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:"inherit",display:"flex",alignItems:"center",gap:6}}>
+                    🔄 새로고침
+                  </button>
+                </div>
+
+                {/* 사용 가이드 카드 */}
+                <div style={{padding:"16px 20px",borderRadius:16,background:"linear-gradient(135deg,rgba(255,107,157,.08),rgba(199,125,255,.08))",border:"1px solid rgba(255,107,157,.2)",marginBottom:18}}>
+                  <div style={{fontSize:13,fontWeight:800,color:"#FF6B9D",marginBottom:10,display:"flex",alignItems:"center",gap:6}}>💡 사용 방법 &amp; 주의사항</div>
+                  <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(200px,1fr))",gap:10}}>
+                    {[
+                      {step:"STEP 1",ico:"🔍",title:"타겟 크롤링",desc:"키워드와 팔로워 범위를 설정해 인스타 계정을 수집해요. 로컬 봇이 실행 중이어야 해요."},
+                      {step:"STEP 2",ico:"✍️",title:"DM 문구 작성",desc:"AI로 체험단 모집 문구를 생성하거나 직접 입력해요. 1,000자 이내로 작성하세요."},
+                      {step:"STEP 3",ico:"🚀",title:"발송 실행",desc:"하루 계정당 60개 이하 발송. 2~5분 랜덤 간격으로 자동 발송돼요."},
+                      {step:"⚠️",ico:"🛡️",title:"안전 규칙",desc:"동일 메시지 반복 금지. 스팸 신고 누적 시 계정 제한될 수 있어요."},
+                    ].map((s,i)=>(
+                      <div key={i} style={{padding:"12px 14px",borderRadius:12,background:"rgba(255,255,255,.04)",border:"1px solid rgba(255,255,255,.08)"}}>
+                        <div style={{fontSize:10,fontWeight:800,color:"rgba(255,107,157,.7)",marginBottom:4,letterSpacing:".05em"}}>{s.step}</div>
+                        <div style={{fontSize:13,fontWeight:700,color:"var(--text)",marginBottom:4}}>{s.ico} {s.title}</div>
+                        <div style={{fontSize:11,color:"var(--text3)",lineHeight:1.6}}>{s.desc}</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* 오늘 발송 현황 */}
+                <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(110px,1fr))",gap:10,marginBottom:18}}>
+                  {[
+                    {label:"전체 타겟",value:dmTargets.length,color:"var(--text)"},
+                    {label:"⏳ 대기",value:dmTargets.filter(t=>t.status==="pending").length,color:"var(--info)"},
+                    {label:"✅ 발송완료",value:dmTargets.filter(t=>t.status==="sent").length,color:"var(--success)"},
+                    {label:"❌ 실패",value:dmTargets.filter(t=>t.status==="fail").length,color:"var(--danger)"},
+                    {label:"⏭️ 스킵",value:dmTargets.filter(t=>t.status==="skip").length,color:"var(--text3)"},
+                  ].map((s,i)=>(
+                    <div key={i} style={{padding:"14px 16px",borderRadius:14,background:"var(--card)",border:"1px solid var(--border)",textAlign:"center"}}>
+                      <div style={{fontSize:22,fontWeight:900,color:s.color,fontFamily:"'Space Grotesk',sans-serif",lineHeight:1}}>{s.value}</div>
+                      <div style={{fontSize:10,color:"var(--text3)",marginTop:5,fontWeight:600}}>{s.label}</div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* 서브탭 */}
+                <div style={{display:"flex",gap:4,marginBottom:16,background:"var(--card)",border:"1px solid var(--border)",borderRadius:12,padding:4}}>
+                  {([{k:"targets",l:"🎯 타겟 관리"},{k:"history",l:"📨 발송 이력"},{k:"settings",l:"⚙️ 발송 설정"}] as const).map(t=>(
+                    <button key={t.k} onClick={()=>{setDmSubTab(t.k);if(t.k==="history")getInstaDmHistory(ADM_UID).then(setDmHistory as any);}}
+                      style={{flex:1,padding:"9px",borderRadius:9,border:"none",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:"inherit",
+                        background:dmSubTab===t.k?"linear-gradient(135deg,rgba(255,107,157,.15),rgba(199,125,255,.15))":"transparent",
+                        color:dmSubTab===t.k?"#FF6B9D":"var(--text2)",
+                        borderBottom:dmSubTab===t.k?"2px solid #FF6B9D":"2px solid transparent",transition:"all .15s"}}>
+                      {t.l}
+                    </button>
+                  ))}
+                </div>
+
+                {/* 타겟 관리 */}
+                {dmSubTab==="targets" && <>
+                  {/* 타겟 추가 */}
+                  <div className="card" style={{marginBottom:14}}>
+                    <div className="card-title" style={{color:"#FF6B9D"}}>🔍 타겟 크롤링 설정</div>
+                    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:12}}>
+                      <div>
+                        <label className="inp-label">키워드 <span style={{color:"var(--text3)",fontSize:11}}>(예: 맛집 체험단, 뷰티 리뷰어)</span></label>
+                        <input className="inp" placeholder="키워드를 입력하세요" value={dmKeyword} onChange={e=>setDmKeyword(e.target.value)}/>
+                      </div>
+                      <div>
+                        <label className="inp-label">발송 인스타 계정</label>
+                        <input className="inp" placeholder="@계정명" value={dmAccount} onChange={e=>setDmAccount(e.target.value)}/>
+                      </div>
+                    </div>
+                    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:12}}>
+                      <div>
+                        <label className="inp-label">팔로워 최소</label>
+                        <input className="inp" type="number" placeholder="500" value={dmFollowerMin} onChange={e=>setDmFollowerMin(e.target.value)}/>
+                      </div>
+                      <div>
+                        <label className="inp-label">팔로워 최대</label>
+                        <input className="inp" type="number" placeholder="50000" value={dmFollowerMax} onChange={e=>setDmFollowerMax(e.target.value)}/>
+                      </div>
+                    </div>
+                    <button style={{padding:"11px 20px",borderRadius:10,border:"none",background:"linear-gradient(135deg,#FF6B9D,#C77DFF)",color:"#fff",cursor:"pointer",fontSize:13,fontWeight:800,fontFamily:"inherit",display:"flex",alignItems:"center",gap:8,boxShadow:"0 4px 16px rgba(255,107,157,.3)"}}>
+                      🤖 크롤링 시작 <span style={{fontSize:11,opacity:.8}}>(로컬봇 필요)</span>
+                    </button>
+                  </div>
+
+                  {/* 직접 추가 */}
+                  <div className="card" style={{marginBottom:14}}>
+                    <div className="card-title">📝 직접 계정 추가</div>
+                    <div style={{display:"flex",gap:8}}>
+                      <input className="inp" style={{flex:1}} placeholder="@계정명 (쉼표 또는 줄바꿈으로 여러 개 입력)" value={dmTargetInput} onChange={e=>setDmTargetInput(e.target.value)}/>
+                      <button onClick={async()=>{
+                        const list=dmTargetInput.split(/[,\n]/).map(s=>s.trim().replace(/^@/,"")).filter(Boolean);
+                        for(const u of list){
+                          await addInstaDmTarget({user_id:ADM_UID,username:u,followers:0,bio:"",keywords:dmKeyword,status:"pending",instagram_account:dmAccount});
+                        }
+                        setDmTargetInput("");
+                        getInstaDmTargets(ADM_UID).then(setDmTargets);
+                      }} style={{padding:"11px 18px",borderRadius:10,border:"none",background:"var(--accent)",color:"#000",cursor:"pointer",fontSize:13,fontWeight:800,fontFamily:"inherit",whiteSpace:"nowrap"}}>
+                        ➕ 추가
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* 필터 + 목록 */}
+                  <div style={{display:"flex",gap:8,marginBottom:10,flexWrap:"wrap"}}>
+                    <input className="inp" style={{flex:1,minWidth:160,fontSize:12}} placeholder="🔍 계정명 검색" value={dmSearch} onChange={e=>setDmSearch(e.target.value)}/>
+                    {(["all","pending","sent","fail","skip"] as const).map(f=>(
+                      <button key={f} onClick={()=>setDmFilter(f)}
+                        style={{padding:"8px 13px",borderRadius:9,border:`1.5px solid ${dmFilter===f?"#FF6B9D":"var(--border)"}`,background:dmFilter===f?"rgba(255,107,157,.1)":"transparent",color:dmFilter===f?"#FF6B9D":"var(--text2)",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:"inherit"}}>
+                        {f==="all"?"전체":f==="pending"?"⏳ 대기":f==="sent"?"✅ 발송":f==="fail"?"❌ 실패":"⏭️ 스킵"}
+                      </button>
+                    ))}
+                  </div>
+
+                  <div className="card" style={{padding:0,overflow:"hidden"}}>
+                    {dmLoading ? (
+                      <div style={{padding:40,textAlign:"center",color:"var(--text3)"}}><span className="spinner" style={{marginRight:8}}/>불러오는 중...</div>
+                    ) : (()=>{
+                      const filtered = dmTargets
+                        .filter(t=>dmFilter==="all"||t.status===dmFilter)
+                        .filter(t=>!dmSearch||t.username.includes(dmSearch));
+                      return filtered.length===0 ? (
+                        <div style={{padding:40,textAlign:"center",color:"var(--text3)",fontSize:14}}>
+                          <div style={{fontSize:32,marginBottom:8}}>🎯</div>
+                          타겟이 없어요. 크롤링하거나 직접 추가해주세요.
+                        </div>
+                      ) : (
+                        <div style={{overflowX:"auto",maxHeight:480,overflowY:"auto"}}>
+                          <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
+                            <thead>
+                              <tr style={{background:"var(--bg2)",position:"sticky",top:0}}>
+                                {["계정","팔로워","키워드","상태","발송계정","삭제"].map(h=>(
+                                  <th key={h} style={{padding:"10px 12px",textAlign:"left",fontWeight:700,color:"var(--text3)",whiteSpace:"nowrap",borderBottom:"1px solid var(--border)"}}>{h}</th>
+                                ))}
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {filtered.map(t=>(
+                                <tr key={t.id} style={{borderBottom:"1px solid var(--border)"}}
+                                  onMouseEnter={e=>(e.currentTarget.style.background="var(--card-hover)")}
+                                  onMouseLeave={e=>(e.currentTarget.style.background="")}>
+                                  <td style={{padding:"10px 12px"}}>
+                                    <a href={`https://instagram.com/${t.username}`} target="_blank" rel="noreferrer"
+                                      style={{color:"#FF6B9D",fontWeight:700,textDecoration:"none"}}>@{t.username}</a>
+                                  </td>
+                                  <td style={{padding:"10px 12px",color:"var(--text2)"}}>{t.followers>0?t.followers.toLocaleString():"-"}</td>
+                                  <td style={{padding:"10px 12px",color:"var(--accent-text)",fontWeight:600}}>{t.keywords||"-"}</td>
+                                  <td style={{padding:"10px 12px"}}>
+                                    <span style={{fontSize:11,padding:"3px 9px",borderRadius:99,fontWeight:700,
+                                      background:t.status==="sent"?"rgba(0,214,143,.12)":t.status==="fail"?"rgba(255,83,99,.12)":t.status==="pending"?"rgba(88,166,255,.12)":"rgba(120,120,120,.12)",
+                                      color:t.status==="sent"?"var(--success)":t.status==="fail"?"var(--danger)":t.status==="pending"?"var(--info)":"var(--text3)"}}>
+                                      {t.status==="sent"?"✅ 발송":t.status==="fail"?"❌ 실패":t.status==="pending"?"⏳ 대기":"⏭️ 스킵"}
+                                    </span>
+                                  </td>
+                                  <td style={{padding:"10px 12px",color:"var(--text3)",fontSize:11}}>{t.instagram_account||"-"}</td>
+                                  <td style={{padding:"10px 12px"}}>
+                                    <button onClick={async()=>{await deleteInstaDmTarget(t.id);setDmTargets(p=>p.filter(x=>x.id!==t.id));}}
+                                      style={{padding:"4px 10px",borderRadius:7,border:"1px solid rgba(248,81,73,.3)",background:"rgba(248,81,73,.08)",color:"var(--danger)",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:"inherit"}}>삭제</button>
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      );
+                    })()}
+                  </div>
+                </>}
+
+                {/* 발송 이력 */}
+                {dmSubTab==="history" && <>
+                  <div className="card" style={{padding:0,overflow:"hidden"}}>
+                    <div style={{padding:"14px 16px",borderBottom:"1px solid var(--border)",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+                      <div style={{fontWeight:800,fontSize:13}}>📨 발송 이력</div>
+                      <span style={{fontSize:12,color:"var(--text3)"}}>{dmHistory.length}건</span>
+                    </div>
+                    {dmHistory.length===0 ? (
+                      <div style={{padding:40,textAlign:"center",color:"var(--text3)"}}>발송 이력이 없어요</div>
+                    ) : (
+                      <div style={{overflowX:"auto",maxHeight:520,overflowY:"auto"}}>
+                        <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
+                          <thead>
+                            <tr style={{background:"var(--bg2)",position:"sticky",top:0}}>
+                              {["수신 계정","발송 계정","메시지","상태","일시"].map(h=>(
+                                <th key={h} style={{padding:"10px 12px",textAlign:"left",fontWeight:700,color:"var(--text3)",borderBottom:"1px solid var(--border)"}}>{h}</th>
+                              ))}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {dmHistory.map(h=>(
+                              <tr key={h.id} style={{borderBottom:"1px solid var(--border)"}}
+                                onMouseEnter={e=>(e.currentTarget.style.background="var(--card-hover)")}
+                                onMouseLeave={e=>(e.currentTarget.style.background="")}>
+                                <td style={{padding:"10px 12px"}}>
+                                  <a href={`https://instagram.com/${h.target_username}`} target="_blank" rel="noreferrer"
+                                    style={{color:"#FF6B9D",fontWeight:700,textDecoration:"none"}}>@{h.target_username}</a>
+                                </td>
+                                <td style={{padding:"10px 12px",color:"var(--text2)",fontSize:11}}>{h.instagram_account||"-"}</td>
+                                <td style={{padding:"10px 12px",color:"var(--text2)",maxWidth:200,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{h.message}</td>
+                                <td style={{padding:"10px 12px"}}>
+                                  <span style={{fontSize:11,padding:"3px 9px",borderRadius:99,fontWeight:700,
+                                    background:h.status==="sent"?"rgba(0,214,143,.12)":"rgba(255,83,99,.12)",
+                                    color:h.status==="sent"?"var(--success)":"var(--danger)"}}>
+                                    {h.status==="sent"?"✅ 발송":"❌ 실패"}
+                                  </span>
+                                </td>
+                                <td style={{padding:"10px 12px",color:"var(--text3)",fontSize:11,whiteSpace:"nowrap"}}>{new Date(h.created_at).toLocaleString("ko-KR")}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+                </>}
+
+                {/* 발송 설정 */}
+                {dmSubTab==="settings" && <>
+                  <div className="card" style={{marginBottom:14}}>
+                    <div className="card-title" style={{color:"#FF6B9D"}}>⚙️ DM 발송 설정</div>
+                    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16}}>
+                      <div style={{padding:"16px",borderRadius:12,background:"var(--bg)",border:"1px solid var(--border)"}}>
+                        <div style={{fontSize:12,fontWeight:800,color:"var(--text2)",marginBottom:8}}>⏱️ 발송 간격</div>
+                        <div style={{fontSize:13,color:"var(--text)",marginBottom:4}}>최소 <b style={{color:"var(--accent)"}}>2분</b> ~ 최대 <b style={{color:"var(--accent)"}}>5분</b> 랜덤</div>
+                        <div style={{fontSize:11,color:"var(--text3)"}}>일정 간격은 봇 탐지 위험. 랜덤 딜레이로 자연스러운 발송.</div>
+                      </div>
+                      <div style={{padding:"16px",borderRadius:12,background:"var(--bg)",border:"1px solid var(--border)"}}>
+                        <div style={{fontSize:12,fontWeight:800,color:"var(--text2)",marginBottom:8}}>📊 하루 한도</div>
+                        <div style={{fontSize:13,color:"var(--text)",marginBottom:4}}>계정당 최대 <b style={{color:"#FF6B9D"}}>60개</b>/일</div>
+                        <div style={{fontSize:11,color:"var(--text3)"}}>오래된 계정 기준. 신규 계정은 20~30개 권장.</div>
+                      </div>
+                      <div style={{padding:"16px",borderRadius:12,background:"var(--bg)",border:"1px solid var(--border)"}}>
+                        <div style={{fontSize:12,fontWeight:800,color:"var(--text2)",marginBottom:8}}>🔐 DM 문구 원칙</div>
+                        <div style={{fontSize:11,color:"var(--text3)",lineHeight:1.7}}>
+                          ✅ 첫 메시지에 링크 포함 금지<br/>
+                          ✅ 1,000자 이내 작성<br/>
+                          ✅ 스팸성 표현 지양<br/>
+                          ✅ 개인화된 느낌 유지
+                        </div>
+                      </div>
+                      <div style={{padding:"16px",borderRadius:12,background:"rgba(248,81,73,.06)",border:"1px solid rgba(248,81,73,.2)"}}>
+                        <div style={{fontSize:12,fontWeight:800,color:"var(--danger)",marginBottom:8}}>⚠️ 주의사항</div>
+                        <div style={{fontSize:11,color:"var(--text3)",lineHeight:1.7}}>
+                          ❌ 동일 메시지 대량 발송 금지<br/>
+                          ❌ 신고 누적 시 계정 정지<br/>
+                          ❌ 로컬 PC에서만 실행<br/>
+                          ❌ VPN 사용 비권장
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="card">
+                    <div className="card-title">✍️ DM 문구 템플릿</div>
+                    <div style={{marginBottom:8}}>
+                      <label className="inp-label">발송할 DM 메시지 <span style={{color:"var(--text3)",fontSize:11}}>({dmMessage.length}/1000자)</span></label>
+                      <textarea className="inp" rows={6} placeholder={"안녕하세요! 저는 [브랜드명]의 [담당자명]이에요 😊\n\n○○님의 콘텐츠를 보고 연락드렸어요.\n저희 제품 체험단 기회를 드리고 싶어서요!\n\n무료로 제품 보내드리고 솔직한 리뷰만 부탁드려요.\n관심 있으시면 답장 주세요 🙏"}
+                        value={dmMessage} onChange={e=>{if(e.target.value.length<=1000)setDmMessage(e.target.value);}}
+                        style={{resize:"vertical",fontFamily:"inherit"}}/>
+                    </div>
+                    <div style={{display:"flex",gap:8}}>
+                      <button onClick={async()=>{
+                        const key=localStorage.getItem("publy_adm_gemini_key")||"";
+                        if(!key){alert("설정탭에서 Gemini API 키를 먼저 입력해주세요");return;}
+                        const r=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${key}`,
+                          {method:"POST",headers:{"Content-Type":"application/json"},
+                           body:JSON.stringify({contents:[{parts:[{text:`인스타그램 체험단 모집 DM을 작성해줘. 제품 키워드: "${dmKeyword||"뷰티/식품"}". 조건: 1000자 이내, 링크 미포함, 친근한 말투, 자연스럽게, 브랜드명은 [브랜드명]으로 표시. DM 내용만 출력.`}]}],generationConfig:{maxOutputTokens:500}})});
+                        const d=await r.json();
+                        const text=d.candidates?.[0]?.content?.parts?.[0]?.text||"";
+                        if(text)setDmMessage(text.slice(0,1000));
+                      }} style={{padding:"10px 18px",borderRadius:9,border:"none",background:"linear-gradient(135deg,#4285F4,#0F9D58)",color:"#fff",cursor:"pointer",fontSize:12,fontWeight:800,fontFamily:"inherit",display:"flex",alignItems:"center",gap:6}}>
+                        ✨ AI 문구 생성
+                      </button>
+                      <button onClick={()=>setDmMessage("")}
+                        style={{padding:"10px 14px",borderRadius:9,border:"1px solid var(--border)",background:"transparent",color:"var(--text2)",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:"inherit"}}>
+                        초기화
+                      </button>
+                    </div>
+                  </div>
+                </>}
+              </div>
+            )}
+
+            {/* ───── 📊 DM 회원관리 ───── */}
+            {tab === "insta_dm_manage" && (
+              <div style={{animation:"fadeUp .25s ease both"}}>
+
+                <div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",marginBottom:20,flexWrap:"wrap",gap:12}}>
+                  <div>
+                    <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:6}}>
+                      <div style={{width:44,height:44,borderRadius:14,background:"linear-gradient(135deg,#C77DFF,#FF6B9D)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:22,boxShadow:"0 4px 16px rgba(199,125,255,.35)"}}>📊</div>
+                      <div>
+                        <div style={{fontSize:20,fontWeight:900,color:"var(--text)"}}>DM 회원 관리</div>
+                        <div style={{fontSize:12,color:"var(--text3)",marginTop:2}}>회원별 인스타 DM 한도 설정 및 사용량 관리</div>
+                      </div>
+                    </div>
+                  </div>
+                  <button onClick={()=>{setDmManageLoading(true);Promise.all([getAllInstaDmHistory(),getAllInstaDmQuotas()]).then(([h,q])=>{setDmHistory(h);setDmQuotas(q);setDmManageLoading(false);});}}
+                    style={{padding:"8px 16px",borderRadius:10,border:"1px solid var(--border)",background:"var(--card)",color:"var(--text2)",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:"inherit",display:"flex",alignItems:"center",gap:6}}>
+                    🔄 새로고침
+                  </button>
+                </div>
+
+                {/* 기능 설명 */}
+                <div style={{padding:"14px 18px",borderRadius:14,background:"linear-gradient(135deg,rgba(199,125,255,.08),rgba(255,107,157,.08))",border:"1px solid rgba(199,125,255,.2)",marginBottom:18}}>
+                  <div style={{fontSize:12,fontWeight:800,color:"#C77DFF",marginBottom:8}}>📋 관리자 기능 안내</div>
+                  <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))",gap:8}}>
+                    {[
+                      {ico:"🔢",txt:"회원별 하루 DM 발송 한도를 개별 조정할 수 있어요"},
+                      {ico:"🔛",txt:"회원의 DM 기능을 켜고 끌 수 있어요 (플랜과 무관)"},
+                      {ico:"📈",txt:"오늘 사용량과 누적 발송 이력을 실시간으로 확인해요"},
+                      {ico:"🗂️",txt:"전체 회원의 DM 발송 이력을 통합 조회할 수 있어요"},
+                    ].map((item,i)=>(
+                      <div key={i} style={{display:"flex",gap:8,alignItems:"flex-start",padding:"8px 10px",borderRadius:10,background:"rgba(255,255,255,.04)"}}>
+                        <span style={{fontSize:16,flexShrink:0}}>{item.ico}</span>
+                        <span style={{fontSize:11,color:"var(--text2)",lineHeight:1.6}}>{item.txt}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* 서브탭 */}
+                <div style={{display:"flex",gap:4,marginBottom:16,background:"var(--card)",border:"1px solid var(--border)",borderRadius:12,padding:4}}>
+                  {([{k:"quotas",l:"🔢 한도 관리"},{k:"history",l:"📨 전체 발송 이력"}] as const).map(t=>(
+                    <button key={t.k} onClick={()=>setDmManageSubTab(t.k)}
+                      style={{flex:1,padding:"9px",borderRadius:9,border:"none",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:"inherit",
+                        background:dmManageSubTab===t.k?"linear-gradient(135deg,rgba(199,125,255,.15),rgba(255,107,157,.15))":"transparent",
+                        color:dmManageSubTab===t.k?"#C77DFF":"var(--text2)",
+                        borderBottom:dmManageSubTab===t.k?"2px solid #C77DFF":"2px solid transparent",transition:"all .15s"}}>
+                      {t.l}
+                    </button>
+                  ))}
+                </div>
+
+                {/* 한도 관리 */}
+                {dmManageSubTab==="quotas" && <>
+                  {dmManageLoading ? (
+                    <div style={{padding:40,textAlign:"center",color:"var(--text3)"}}><span className="spinner" style={{marginRight:8}}/>불러오는 중...</div>
+                  ) : dmQuotas.length===0 ? (
+                    <div className="card">
+                      <div style={{padding:40,textAlign:"center",color:"var(--text3)"}}>
+                        <div style={{fontSize:32,marginBottom:8}}>📊</div>
+                        DM을 사용한 회원이 없어요
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="card" style={{padding:0,overflow:"hidden"}}>
+                      <div style={{overflowX:"auto"}}>
+                        <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
+                          <thead>
+                            <tr style={{background:"var(--bg2)"}}>
+                              {["회원","플랜","오늘 사용","하루 한도","활성화","한도 조정"].map(h=>(
+                                <th key={h} style={{padding:"11px 14px",textAlign:"left",fontWeight:700,color:"var(--text3)",borderBottom:"1px solid var(--border)",whiteSpace:"nowrap"}}>{h}</th>
+                              ))}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {dmQuotas.map(q=>(
+                              <tr key={q.id} style={{borderBottom:"1px solid var(--border)"}}
+                                onMouseEnter={e=>(e.currentTarget.style.background="var(--card-hover)")}
+                                onMouseLeave={e=>(e.currentTarget.style.background="")}>
+                                <td style={{padding:"11px 14px"}}>
+                                  <div style={{fontWeight:700,color:"var(--text)"}}>{q.user_name||"-"}</div>
+                                  <div style={{fontSize:10,color:"var(--text3)"}}>{q.user_email||"-"}</div>
+                                </td>
+                                <td style={{padding:"11px 14px"}}>
+                                  <span style={{fontSize:11,padding:"3px 9px",borderRadius:99,fontWeight:700,
+                                    background:q.plan==="pro"?"rgba(0,255,136,.1)":q.plan==="basic"?"rgba(88,166,255,.1)":"rgba(120,120,120,.1)",
+                                    color:q.plan==="pro"?"var(--accent)":q.plan==="basic"?"var(--info)":"var(--text3)"}}>
+                                    {(q.plan||"free").toUpperCase()}
+                                  </span>
+                                </td>
+                                <td style={{padding:"11px 14px"}}>
+                                  <div style={{display:"flex",alignItems:"center",gap:6}}>
+                                    <div style={{flex:1,height:6,borderRadius:99,background:"var(--border)",maxWidth:80}}>
+                                      <div style={{height:"100%",borderRadius:99,background:q.used_today>=(q.daily_limit*.8)?"var(--danger)":"#FF6B9D",width:`${Math.min(100,(q.used_today/Math.max(1,q.daily_limit))*100)}%`,transition:"width .3s"}}/>
+                                    </div>
+                                    <span style={{fontSize:12,fontWeight:700,color:"var(--text)"}}>{q.used_today}/{q.daily_limit}</span>
+                                  </div>
+                                </td>
+                                <td style={{padding:"11px 14px",fontWeight:700,color:"var(--text)"}}>{q.daily_limit}개/일</td>
+                                <td style={{padding:"11px 14px"}}>
+                                  <button onClick={async()=>{await upsertInstaDmQuota(q.user_id,{is_enabled:!q.is_enabled});setDmQuotas(p=>p.map(x=>x.id===q.id?{...x,is_enabled:!x.is_enabled}:x));}}
+                                    style={{padding:"5px 12px",borderRadius:99,border:"none",cursor:"pointer",fontSize:11,fontWeight:800,fontFamily:"inherit",
+                                      background:q.is_enabled?"rgba(0,255,136,.1)":"rgba(120,120,120,.1)",
+                                      color:q.is_enabled?"var(--success)":"var(--text3)"}}>
+                                    {q.is_enabled?"🟢 활성":"⚫ 비활성"}
+                                  </button>
+                                </td>
+                                <td style={{padding:"11px 14px"}}>
+                                  <div style={{display:"flex",gap:6,alignItems:"center"}}>
+                                    {[10,30,60,100].map(n=>(
+                                      <button key={n} onClick={async()=>{await upsertInstaDmQuota(q.user_id,{daily_limit:n});setDmQuotas(p=>p.map(x=>x.id===q.id?{...x,daily_limit:n}:x));}}
+                                        style={{padding:"4px 10px",borderRadius:7,border:`1.5px solid ${q.daily_limit===n?"#FF6B9D":"var(--border)"}`,background:q.daily_limit===n?"rgba(255,107,157,.12)":"transparent",color:q.daily_limit===n?"#FF6B9D":"var(--text3)",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:"inherit"}}>
+                                        {n}
+                                      </button>
+                                    ))}
+                                  </div>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )}
+                </>}
+
+                {/* 전체 발송 이력 */}
+                {dmManageSubTab==="history" && <>
+                  <div className="card" style={{padding:0,overflow:"hidden"}}>
+                    <div style={{padding:"14px 16px",borderBottom:"1px solid var(--border)",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+                      <div style={{fontWeight:800,fontSize:13}}>📨 전체 발송 이력</div>
+                      <span style={{fontSize:12,color:"var(--text3)"}}>{dmHistory.length}건</span>
+                    </div>
+                    {dmManageLoading ? (
+                      <div style={{padding:40,textAlign:"center",color:"var(--text3)"}}><span className="spinner" style={{marginRight:8}}/>불러오는 중...</div>
+                    ) : dmHistory.length===0 ? (
+                      <div style={{padding:40,textAlign:"center",color:"var(--text3)"}}>발송 이력이 없어요</div>
+                    ) : (
+                      <div style={{overflowX:"auto",maxHeight:520,overflowY:"auto"}}>
+                        <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
+                          <thead>
+                            <tr style={{background:"var(--bg2)",position:"sticky",top:0}}>
+                              {["회원","수신 계정","발송 계정","메시지","상태","일시"].map(h=>(
+                                <th key={h} style={{padding:"10px 12px",textAlign:"left",fontWeight:700,color:"var(--text3)",borderBottom:"1px solid var(--border)",whiteSpace:"nowrap"}}>{h}</th>
+                              ))}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {dmHistory.map(h=>(
+                              <tr key={h.id} style={{borderBottom:"1px solid var(--border)"}}
+                                onMouseEnter={e=>(e.currentTarget.style.background="var(--card-hover)")}
+                                onMouseLeave={e=>(e.currentTarget.style.background="")}>
+                                <td style={{padding:"10px 12px"}}>
+                                  <div style={{fontWeight:700,fontSize:12}}>{h.user_name||"-"}</div>
+                                  <div style={{fontSize:10,color:"var(--text3)"}}>{h.user_email||"-"}</div>
+                                </td>
+                                <td style={{padding:"10px 12px"}}>
+                                  <a href={`https://instagram.com/${h.target_username}`} target="_blank" rel="noreferrer"
+                                    style={{color:"#FF6B9D",fontWeight:700,textDecoration:"none"}}>@{h.target_username}</a>
+                                </td>
+                                <td style={{padding:"10px 12px",color:"var(--text2)",fontSize:11}}>{h.instagram_account||"-"}</td>
+                                <td style={{padding:"10px 12px",color:"var(--text2)",maxWidth:160,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{h.message}</td>
+                                <td style={{padding:"10px 12px"}}>
+                                  <span style={{fontSize:11,padding:"3px 9px",borderRadius:99,fontWeight:700,
+                                    background:h.status==="sent"?"rgba(0,214,143,.12)":"rgba(255,83,99,.12)",
+                                    color:h.status==="sent"?"var(--success)":"var(--danger)"}}>
+                                    {h.status==="sent"?"✅ 발송":"❌ 실패"}
+                                  </span>
+                                </td>
+                                <td style={{padding:"10px 12px",color:"var(--text3)",fontSize:11,whiteSpace:"nowrap"}}>{new Date(h.created_at).toLocaleString("ko-KR")}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+                </>}
               </div>
             )}
 
