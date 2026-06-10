@@ -3746,8 +3746,18 @@ POST3: (제목)|(이유)
                               <div className="detail-field"><span className="field-label">총 발행 건수</span>
                                 <input className="field-inp" type="number" value={editMap[u.id]?.quota??u.quota?.total_quota??10} onChange={e=>setEditMap(p=>({...p,[u.id]:{...p[u.id],quota:e.target.value}}))}/>
                               </div>
+                              <div className="detail-field"><span className="field-label">현재 만료일</span>
+                                <input className="field-inp" readOnly tabIndex={-1}
+                                  value={u.quota?.reset_date ? `${new Date(u.quota.reset_date).toLocaleDateString("ko-KR")} (${(()=>{const dl=Math.ceil((new Date(u.quota!.reset_date).getTime()-Date.now())/86400000);return dl<0?"만료됨":dl===0?"오늘 만료":"D-"+dl;})()})` : "기간 없음"}
+                                  style={{color:"var(--text3)",cursor:"default"}}/>
+                              </div>
                               <div className="detail-field"><span className="field-label">만료일 연장 (일)</span>
                                 <input className="field-inp" type="number" placeholder="예: 30" value={editMap[u.id]?.days??""} onChange={e=>setEditMap(p=>({...p,[u.id]:{...p[u.id],days:e.target.value}}))}/>
+                                {editMap[u.id]?.days && u.quota?.reset_date && (
+                                  <div style={{fontSize:11,color:"#8B5CF6",fontWeight:700,marginTop:5}}>
+                                    → {(()=>{const d=new Date(u.quota!.reset_date);d.setDate(d.getDate()+Number(editMap[u.id].days||0));return d.toLocaleDateString("ko-KR");})()} 까지 사용 가능
+                                  </div>
+                                )}
                               </div>
                               <div className="detail-field"><span className="field-label">연락처</span>
                                 <input className="field-inp" value={editMap[u.id]?.phone??u.phone??""} onChange={e=>setEditMap(p=>({...p,[u.id]:{...p[u.id],phone:e.target.value}}))} placeholder="010-0000-0000"/>
