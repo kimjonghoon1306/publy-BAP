@@ -46,20 +46,19 @@ CREATE TABLE IF NOT EXISTS insta_dm_quota (
 CREATE INDEX IF NOT EXISTS idx_insta_dm_quota_user_id ON insta_dm_quota(user_id);
 
 -- ══════════════════════════════════════════════
--- RLS 정책 (필요 시 활성화)
+-- RLS
+--   ⚠️ 이 앱은 Supabase Auth를 사용하지 않습니다.
+--   anon 키 + 자체 publy_users(email/password_hash) 인증이라 auth.uid()는 항상 NULL.
+--   따라서 auth.uid() 기반 정책을 켜면 일반 사용자가 본인 데이터까지 전부 차단됩니다
+--   (admin-publy만 동작). 접근 제어는 기존 테이블과 동일하게 앱단(.eq("user_id", ...))에서 처리합니다.
+--   → RLS는 끄고 둡니다.
 -- ══════════════════════════════════════════════
 
--- insta_dm_targets: 본인 데이터만 접근
-ALTER TABLE insta_dm_targets ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "insta_dm_targets_own" ON insta_dm_targets
-  USING (user_id = auth.uid()::text OR user_id = 'admin-publy');
+-- 이전 버전에서 잘못 생성된 정책 제거 (있으면)
+DROP POLICY IF EXISTS "insta_dm_targets_own" ON insta_dm_targets;
+DROP POLICY IF EXISTS "insta_dm_history_own" ON insta_dm_history;
+DROP POLICY IF EXISTS "insta_dm_quota_own"   ON insta_dm_quota;
 
--- insta_dm_history: 본인 데이터만 접근
-ALTER TABLE insta_dm_history ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "insta_dm_history_own" ON insta_dm_history
-  USING (user_id = auth.uid()::text OR user_id = 'admin-publy');
-
--- insta_dm_quota: 본인 + admin 접근
-ALTER TABLE insta_dm_quota ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "insta_dm_quota_own" ON insta_dm_quota
-  USING (user_id = auth.uid()::text OR user_id = 'admin-publy');
+ALTER TABLE insta_dm_targets DISABLE ROW LEVEL SECURITY;
+ALTER TABLE insta_dm_history  DISABLE ROW LEVEL SECURITY;
+ALTER TABLE insta_dm_quota    DISABLE ROW LEVEL SECURITY;
