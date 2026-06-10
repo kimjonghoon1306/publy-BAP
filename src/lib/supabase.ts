@@ -633,9 +633,9 @@ export interface InstaDmQuota {
 }
 
 export const INSTA_DM_DAILY_LIMIT: Record<string, number> = {
-  free: 0,
-  basic: 30,
-  pro: 60,
+  free: 5,
+  basic: 10,
+  pro: 30,
   admin: 9999,
 };
 

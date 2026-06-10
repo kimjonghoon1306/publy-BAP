@@ -9,9 +9,9 @@ export const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
 // 프론트(src/lib/supabase.ts)와 동일하게 유지
 export const INSTA_DM_DAILY_LIMIT: Record<string, number> = {
-  free: 0,
-  basic: 30,
-  pro: 60,
+  free: 5,
+  basic: 10,
+  pro: 30,
   admin: 9999,
 };
 

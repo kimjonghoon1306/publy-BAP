@@ -525,6 +525,8 @@ export default function DashboardPage({user, onLogout, onAdminLogin, onThemeTogg
     if(!dmMessage.trim()){showToast("DM 문구를 입력해주세요","error");return;}
     const pend=dmTargets.filter(t=>t.status==="pending").map(t=>({id:t.id,username:t.username}));
     if(!pend.length){showToast("발송할 '대기중' 타겟이 없어요","error");return;}
+    const igLimit=INSTA_DM_DAILY_LIMIT[user.plan]??5;
+    if(instaUsed>=igLimit){setAlertPopup({type:"insta",used:instaUsed,limit:igLimit});return;}
     setDmRunning(true);setDmLogs([]);
     const url=`${INSTA_BOT}/api/send?userId=${encodeURIComponent(user.id)}&accountId=${encodeURIComponent(acct)}&message=${encodeURIComponent(dmMessage)}&targets=${encodeURIComponent(JSON.stringify(pend))}`;
     const es=new EventSource(url);esDmRef.current=es;
@@ -532,9 +534,9 @@ export default function DashboardPage({user, onLogout, onAdminLogin, onThemeTogg
       const d=JSON.parse(e.data);
       if(d.type==="log")dmLog(d.msg);
       else if(d.type==="quota_info")dmLog(`💎 오늘 남은 한도 ${d.remaining}개`);
-      else if(d.type==="quota_exceeded"){dmLog("🛑 오늘 한도 초과");es.close();setDmRunning(false);}
+      else if(d.type==="quota_exceeded"){dmLog("🛑 오늘 한도 초과");setAlertPopup({type:"insta",used:d.used,limit:d.limit});es.close();setDmRunning(false);}
       else if(d.type==="progress")dmLog(`📊 진행 ${d.done} · 실패 ${d.fail}`);
-      else if(d.type==="done"){dmLog("✅ 발송 작업 완료");getInstaDmTargets(user.id).then(setDmTargets);getInstaDmQuota(user.id).then(setDmQuota);es.close();setDmRunning(false);}
+      else if(d.type==="done"){dmLog("✅ 발송 작업 완료");getInstaDmTargets(user.id).then(setDmTargets);getInstaDmQuota(user.id).then(q=>{setDmQuota(q);const today=new Date().toISOString().slice(0,10);setInstaUsed(q&&q.reset_date===today?(q.used_today||0):0);});es.close();setDmRunning(false);}
       else if(d.type==="error"){dmLog("❌ "+d.msg);es.close();setDmRunning(false);}
     };
     es.onerror=()=>{es.close();setDmRunning(false);dmLog("⚠️ 연결 종료 (로컬 봇 실행 확인)");};
@@ -545,7 +547,8 @@ export default function DashboardPage({user, onLogout, onAdminLogin, onThemeTogg
   const [dailyPublishUsed, setDailyPublishUsed] = useState(0);
   const [neighborUsed, setNeighborUsed] = useState(0);
   const [engageUsed, setEngageUsed] = useState(0);
-  const [alertPopup, setAlertPopup] = useState<{type:"expire"|"publish"; daysLeft?:number; used?:number; limit?:number} | null>(null);
+  const [instaUsed, setInstaUsed] = useState(0);
+  const [alertPopup, setAlertPopup] = useState<{type:"expire"|"publish"|"insta"; daysLeft?:number; used?:number; limit?:number} | null>(null);
   const [accounts, setAccounts] = useState<PublyAccount[]>([]);
   const [history, setHistory] = useState<PublyHistory[]>([]);
   const [adType, setAdType] = useState<"adpost"|"adsense">("adpost");
@@ -1188,6 +1191,7 @@ Output format (JSON array only, no other text):
     getHistory(user.id).then(setHistory);
     getNeighborDailyUsage(user.id).then(setNeighborUsed);
     getEngageDailyUsage(user.id).then(setEngageUsed);
+    getInstaDmQuota(user.id).then(q=>{ const today=new Date().toISOString().slice(0,10); setInstaUsed(q && q.reset_date===today ? (q.used_today||0) : 0); });
     getQuota(user.id).then(async (q:PublyQuota|null)=>{
       if(!q) { setPageReady(true); return; }
       setQuota(q);
@@ -2508,8 +2512,8 @@ POST3: (제목)|(이유)
                   </div>
                 ) : (
                   <div style={{fontSize:14,color:"var(--text)",lineHeight:1.8}}>
-                    오늘 <strong>{alertPopup.used}개</strong> 발행 완료 / 한도 <strong>{alertPopup.limit}개</strong>
-                    <br/>남은 발행 수: <strong style={{color:"var(--warn)"}}>{(alertPopup.limit||0)-(alertPopup.used||0)}개</strong>
+                    오늘 <strong>{alertPopup.used}개</strong> {alertPopup.type==="insta"?"발송":"발행"} 완료 / 한도 <strong>{alertPopup.limit}개</strong>
+                    <br/>남은 {alertPopup.type==="insta"?"발송":"발행"} 수: <strong style={{color:"var(--warn)"}}>{(alertPopup.limit||0)-(alertPopup.used||0)}개</strong>
                     <div style={{marginTop:10,height:6,borderRadius:99,background:"var(--border)",overflow:"hidden"}}>
                       <div style={{height:"100%",borderRadius:99,width:`${Math.min(100,((alertPopup.used||0)/(alertPopup.limit||1))*100)}%`,background:"linear-gradient(90deg,#ff9f3f,#ff6600)",transition:"width .4s"}}/>
                     </div>
@@ -2727,6 +2731,7 @@ POST3: (제목)|(이유)
               const publishLimit = config.dailyPublish;
               const neighborLimit = NEIGHBOR_DAILY_LIMIT[plan] ?? 10;
               const engageLimit = ENGAGE_DAILY_LIMIT[plan] ?? 10;
+              const instaLimit = INSTA_DM_DAILY_LIMIT[plan] ?? 5;
               const expiry = quota ? new Date(quota.reset_date) : null;
               const daysLeft = expiry ? Math.ceil((expiry.getTime() - Date.now()) / (1000*60*60*24)) : null;
               const dColor = daysLeft === null ? "var(--text3)" : daysLeft <= 3 ? "var(--danger)" : daysLeft <= 7 ? "#ff9f3f" : "var(--success)";
@@ -2734,6 +2739,7 @@ POST3: (제목)|(이유)
                 { label:"✍️ 글쓰기", used: dailyPublishUsed, limit: publishLimit, color:"var(--accent)" },
                 { label:"🤝 서이추", used: neighborUsed, limit: neighborLimit, color:"#00c8ff" },
                 { label:"❤️ 공감·댓글", used: engageUsed, limit: engageLimit, color:"#ff6b9d" },
+                { label:"📱 인스타DM", used: instaUsed, limit: instaLimit, color:"#FF6B9D" },
               ];
               return (
                 <div style={{display:"flex",gap:10,marginBottom:16,flexWrap:"wrap",alignItems:"center"}}>
@@ -4338,7 +4344,7 @@ POST3: (제목)|(이유)
                 {/* 사용량 카드 */}
                 <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(130px,1fr))",gap:10,marginBottom:18}}>
                   {[
-                    {label:"오늘 발송",value:dmQuota?.used_today??0,total:dmQuota?.daily_limit??INSTA_DM_DAILY_LIMIT[user.plan]??0,color:"#FF6B9D"},
+                    {label:"오늘 발송",value:instaUsed,total:INSTA_DM_DAILY_LIMIT[user.plan]??5,color:"#FF6B9D"},
                     {label:"전체 타겟",value:dmTargets.length,color:"var(--text)"},
                     {label:"✅ 발송완료",value:dmTargets.filter(t=>t.status==="sent").length,color:"var(--success)"},
                     {label:"⏳ 대기중",value:dmTargets.filter(t=>t.status==="pending").length,color:"var(--info)"},
@@ -4399,7 +4405,7 @@ POST3: (제목)|(이유)
                           {["하루 {limit}개 이하 발송 유지","자연스러운 개인화 문구 사용","첫 메시지에 링크 미포함","2~5분 랜덤 간격 발송 (자동)","응답받은 계정 위주 관리"].map((t,i)=>(
                             <div key={i} style={{fontSize:12,color:"var(--text2)",display:"flex",gap:6,alignItems:"flex-start"}}>
                               <span style={{color:"var(--success)",flexShrink:0}}>✓</span>
-                              {t.replace("{limit}",String(INSTA_DM_DAILY_LIMIT[user.plan]??60))}
+                              {t.replace("{limit}",String(INSTA_DM_DAILY_LIMIT[user.plan]??5))}
                             </div>
                           ))}
                         </div>
