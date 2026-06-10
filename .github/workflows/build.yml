@@ -34,6 +34,16 @@ jobs:
         env:
           NODE_PATH: ../naver-bot/node_modules
 
+      - name: Install insta-bot dependencies
+        working-directory: insta-bot
+        run: npm install
+
+      - name: Bundle insta-bot (esbuild)
+        working-directory: insta-bot
+        run: npx esbuild src/server.ts --bundle --platform=node --target=node20 --outfile=dist/server.js --external:playwright
+        env:
+          NODE_PATH: ../naver-bot/node_modules
+
       - name: Install Playwright Chromium (naver-bot)
         working-directory: naver-bot
         run: npx playwright install chromium
@@ -112,6 +122,16 @@ jobs:
 
       - name: Bundle neighbor-bot (esbuild)
         working-directory: neighbor-bot
+        run: npx esbuild src/server.ts --bundle --platform=node --target=node20 --outfile=dist/server.js --external:playwright
+        env:
+          NODE_PATH: ../naver-bot/node_modules
+
+      - name: Install insta-bot dependencies
+        working-directory: insta-bot
+        run: npm install
+
+      - name: Bundle insta-bot (esbuild)
+        working-directory: insta-bot
         run: npx esbuild src/server.ts --bundle --platform=node --target=node20 --outfile=dist/server.js --external:playwright
         env:
           NODE_PATH: ../naver-bot/node_modules
