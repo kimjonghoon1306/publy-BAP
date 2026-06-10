@@ -8,6 +8,7 @@ type MainTab = "keyword" | "write" | "image" | "photo" | "publish" | "manage" | 
 type PublishConcept = "full" | "body_faq" | "body_only";
 
 const BOT = "http://127.0.0.1:3333";
+const INSTA_BOT = "http://127.0.0.1:3335";
 const EXE_DOWNLOAD_URL = "https://github.com/kimjonghoon13/publy-BAP/releases/latest/download/Publy-Setup.exe";
 const BATCH = 30;
 const MAX_TITLES = 90;
@@ -470,6 +471,76 @@ export default function DashboardPage({user, onLogout, onAdminLogin, onThemeTogg
   const [dmAccount, setDmAccount] = useState("");
   const [dmKeyword, setDmKeyword] = useState("");
   const [dmFilter, setDmFilter] = useState<"all"|"pending"|"sent"|"fail"|"skip">("all");
+  // 인스타 봇 연동
+  const [dmIgPw, setDmIgPw] = useState("");
+  const [dmSessionOk, setDmSessionOk] = useState(false);
+  const [dmConnecting, setDmConnecting] = useState(false);
+  const [dmCrawlKw, setDmCrawlKw] = useState("");
+  const [dmMinFollow, setDmMinFollow] = useState("1000");
+  const [dmMaxFollow, setDmMaxFollow] = useState("50000");
+  const [dmCrawlLimit, setDmCrawlLimit] = useState("30");
+  const [dmLogs, setDmLogs] = useState<string[]>([]);
+  const [dmRunning, setDmRunning] = useState(false);
+  const esDmRef = useRef<EventSource|null>(null);
+  const dmLog = (m:string)=>setDmLogs(p=>[...p.slice(-200), m]);
+
+  const checkDmSession = async(acct:string)=>{
+    if(!acct){setDmSessionOk(false);return;}
+    try{ const r=await fetch(`${INSTA_BOT}/api/session/${encodeURIComponent(acct)}`); const j=await r.json(); setDmSessionOk(!!j.exists); }catch{ setDmSessionOk(false); }
+  };
+
+  const connectIg = async()=>{
+    const acct=dmAccount.trim().replace(/^@/,"");
+    if(!acct||!dmIgPw){showToast("인스타 아이디와 비밀번호를 입력해주세요","error");return;}
+    setDmConnecting(true);
+    try{
+      const r=await fetch(`${INSTA_BOT}/api/login`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({accountId:acct,id:acct,pw:dmIgPw})});
+      const j=await r.json();
+      if(j.success){setDmSessionOk(true);setDmIgPw("");showToast("✅ 인스타 계정 연결 완료!");}
+      else showToast("연결 실패: "+(j.error||""),"error");
+    }catch(e:any){showToast("로컬 봇 서버에 연결 실패 (봇 실행 확인): "+e.message,"error");}
+    setDmConnecting(false);
+  };
+
+  const crawlIg = ()=>{
+    const acct=dmAccount.trim().replace(/^@/,"");
+    if(!acct){showToast("발송 인스타 계정을 먼저 입력/연결해주세요","error");return;}
+    if(!dmCrawlKw.trim()){showToast("검색 키워드를 입력해주세요","error");return;}
+    setDmRunning(true);setDmLogs([]);
+    const url=`${INSTA_BOT}/api/crawl?accountId=${encodeURIComponent(acct)}&keyword=${encodeURIComponent(dmCrawlKw.trim())}&limit=${encodeURIComponent(dmCrawlLimit||"30")}&minFollowers=${encodeURIComponent(dmMinFollow||"0")}&maxFollowers=${encodeURIComponent(dmMaxFollow||"0")}`;
+    const es=new EventSource(url);esDmRef.current=es;
+    es.onmessage=async e=>{
+      const d=JSON.parse(e.data);
+      if(d.type==="log")dmLog(d.msg);
+      else if(d.type==="result"){await addInstaDmTarget({user_id:user.id,username:d.username,followers:d.followers||0,bio:"",keywords:dmCrawlKw,status:"pending",instagram_account:acct});}
+      else if(d.type==="crawl_done"){dmLog(`🎉 ${d.results?.length||0}개 수집 완료`);getInstaDmTargets(user.id).then(setDmTargets);es.close();setDmRunning(false);}
+      else if(d.type==="error"){dmLog("❌ "+d.msg);es.close();setDmRunning(false);}
+    };
+    es.onerror=()=>{es.close();setDmRunning(false);dmLog("⚠️ 연결 종료 (로컬 봇 실행 확인)");};
+  };
+
+  const sendIg = ()=>{
+    const acct=dmAccount.trim().replace(/^@/,"");
+    if(!acct){showToast("발송 인스타 계정을 입력/연결해주세요","error");return;}
+    if(!dmMessage.trim()){showToast("DM 문구를 입력해주세요","error");return;}
+    const pend=dmTargets.filter(t=>t.status==="pending").map(t=>({id:t.id,username:t.username}));
+    if(!pend.length){showToast("발송할 '대기중' 타겟이 없어요","error");return;}
+    setDmRunning(true);setDmLogs([]);
+    const url=`${INSTA_BOT}/api/send?userId=${encodeURIComponent(user.id)}&accountId=${encodeURIComponent(acct)}&message=${encodeURIComponent(dmMessage)}&targets=${encodeURIComponent(JSON.stringify(pend))}`;
+    const es=new EventSource(url);esDmRef.current=es;
+    es.onmessage=e=>{
+      const d=JSON.parse(e.data);
+      if(d.type==="log")dmLog(d.msg);
+      else if(d.type==="quota_info")dmLog(`💎 오늘 남은 한도 ${d.remaining}개`);
+      else if(d.type==="quota_exceeded"){dmLog("🛑 오늘 한도 초과");es.close();setDmRunning(false);}
+      else if(d.type==="progress")dmLog(`📊 진행 ${d.done} · 실패 ${d.fail}`);
+      else if(d.type==="done"){dmLog("✅ 발송 작업 완료");getInstaDmTargets(user.id).then(setDmTargets);getInstaDmQuota(user.id).then(setDmQuota);es.close();setDmRunning(false);}
+      else if(d.type==="error"){dmLog("❌ "+d.msg);es.close();setDmRunning(false);}
+    };
+    es.onerror=()=>{es.close();setDmRunning(false);dmLog("⚠️ 연결 종료 (로컬 봇 실행 확인)");};
+  };
+
+  const stopDm = ()=>{ try{esDmRef.current?.close();}catch{} setDmRunning(false); dmLog("⏹️ 중단됨"); };
   const [quota, setQuota] = useState<PublyQuota|null>(null);
   const [dailyPublishUsed, setDailyPublishUsed] = useState(0);
   const [neighborUsed, setNeighborUsed] = useState(0);
@@ -4363,6 +4434,32 @@ POST3: (제목)|(이유)
                 {/* DM 발송 */}
                 {dmSubTab==="send"&&(
                   <div style={{display:"flex",flexDirection:"column",gap:14}}>
+
+                    {/* 1) 계정 연결 */}
+                    <div className="card">
+                      <div className="card-title" style={{color:"#FF6B9D"}}>🔗 인스타 계정 연결 {dmSessionOk&&<span style={{fontSize:11,color:"var(--success)",fontWeight:700,marginLeft:6}}>● 연결됨</span>}</div>
+                      <div style={{fontSize:11,color:"var(--text3)",marginBottom:10}}>발송·크롤링은 로컬 봇(:3335)에서 실행돼요. 연결 시 창이 뜨면 2단계 인증/캡차는 직접 통과시켜 주세요.</div>
+                      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr auto",gap:8,alignItems:"end"}}>
+                        <div><label className="inp-label">인스타 아이디</label><input className="inp" placeholder="@내계정" value={dmAccount} onChange={e=>setDmAccount(e.target.value)} onBlur={()=>checkDmSession(dmAccount.trim().replace(/^@/,""))}/></div>
+                        <div><label className="inp-label">비밀번호</label><input className="inp" type="password" placeholder="비밀번호" value={dmIgPw} onChange={e=>setDmIgPw(e.target.value)}/></div>
+                        <button onClick={connectIg} disabled={dmConnecting} style={{padding:"11px 18px",borderRadius:10,border:"none",background:dmConnecting?"var(--border)":"linear-gradient(135deg,#FF6B9D,#C77DFF)",color:"#fff",cursor:dmConnecting?"default":"pointer",fontSize:13,fontWeight:800,fontFamily:"inherit",whiteSpace:"nowrap"}}>{dmConnecting?"연결 중...":dmSessionOk?"재연결":"계정 연결"}</button>
+                      </div>
+                    </div>
+
+                    {/* 2) 키워드로 타겟 크롤링 */}
+                    <div className="card">
+                      <div className="card-title" style={{color:"#FF6B9D"}}>🔍 키워드로 타겟 수집 <span style={{fontSize:11,color:"var(--text3)",fontWeight:500}}>(팔로워 수 필터)</span></div>
+                      <div style={{display:"grid",gridTemplateColumns:"1fr",gap:8,marginBottom:8}}>
+                        <div><label className="inp-label">검색 키워드</label><input className="inp" placeholder="예: 뷰티, 다이어트, 캠핑" value={dmCrawlKw} onChange={e=>setDmCrawlKw(e.target.value)}/></div>
+                      </div>
+                      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,marginBottom:12}}>
+                        <div><label className="inp-label">최소 팔로워</label><input className="inp" type="number" inputMode="numeric" placeholder="1000" value={dmMinFollow} onChange={e=>setDmMinFollow(e.target.value)}/></div>
+                        <div><label className="inp-label">최대 팔로워</label><input className="inp" type="number" inputMode="numeric" placeholder="50000" value={dmMaxFollow} onChange={e=>setDmMaxFollow(e.target.value)}/></div>
+                        <div><label className="inp-label">수집 개수</label><input className="inp" type="number" inputMode="numeric" placeholder="30" value={dmCrawlLimit} onChange={e=>setDmCrawlLimit(e.target.value)}/></div>
+                      </div>
+                      <button onClick={crawlIg} disabled={dmRunning} style={{padding:"11px 20px",borderRadius:10,border:"none",background:dmRunning?"var(--border)":"linear-gradient(135deg,#FF6B9D,#C77DFF)",color:"#fff",cursor:dmRunning?"default":"pointer",fontSize:13,fontWeight:800,fontFamily:"inherit"}}>{dmRunning?"수집 중...":"🔍 키워드 수집 시작"}</button>
+                    </div>
+
                     {/* 타겟 추가 */}
                     <div className="card">
                       <div className="card-title" style={{color:"#FF6B9D"}}>🎯 발송 대상 추가</div>
@@ -4460,6 +4557,26 @@ POST3: (제목)|(이유)
                             </div>
                           ))}
                         </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* 발송 실행 + 실시간 로그 (send 탭) */}
+                {dmSubTab==="send"&&(
+                  <div className="card" style={{marginTop:14}}>
+                    <div className="card-title" style={{color:"#FF6B9D"}}>🚀 DM 발송 실행</div>
+                    <div style={{fontSize:11,color:"var(--text3)",marginBottom:10}}>'대기중' 타겟 {dmTargets.filter(t=>t.status==="pending").length}개에게 위 문구로 발송해요. 발송 간격은 봇이 자동으로 랜덤(40~90초) 적용합니다.</div>
+                    <div style={{display:"flex",gap:8,marginBottom:dmLogs.length?12:0}}>
+                      {!dmRunning ? (
+                        <button onClick={sendIg} style={{flex:1,padding:"13px",borderRadius:11,border:"none",background:"linear-gradient(135deg,#FF6B9D,#C77DFF)",color:"#fff",cursor:"pointer",fontSize:14,fontWeight:800,fontFamily:"inherit"}}>🚀 발송 시작</button>
+                      ) : (
+                        <button onClick={stopDm} style={{flex:1,padding:"13px",borderRadius:11,border:"1px solid var(--danger)",background:"rgba(248,81,73,.08)",color:"var(--danger)",cursor:"pointer",fontSize:14,fontWeight:800,fontFamily:"inherit"}}>⏹️ 중단</button>
+                      )}
+                    </div>
+                    {dmLogs.length>0&&(
+                      <div style={{background:"var(--bg)",border:"1px solid var(--border)",borderRadius:10,padding:"10px 12px",maxHeight:220,overflowY:"auto",fontSize:11.5,fontFamily:"monospace",lineHeight:1.7,color:"var(--text2)"}}>
+                        {dmLogs.map((l,i)=>(<div key={i}>{l}</div>))}
                       </div>
                     )}
                   </div>
