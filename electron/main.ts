@@ -5,6 +5,7 @@ import { spawn, ChildProcess } from "child_process";
 let mainWindow: BrowserWindow | null = null;
 let botProcess: ChildProcess | null = null;
 let neighborBotProcess: ChildProcess | null = null;
+let instaBotProcess: ChildProcess | null = null;
 const isDev = !app.isPackaged;
 
 async function startBotServer() {
@@ -109,6 +110,58 @@ async function startNeighborBotServer() {
   startBot();
 }
 
+async function startInstaBotServer() {
+  const botPath = isDev
+    ? path.join(__dirname, "../../insta-bot")
+    : path.join(process.resourcesPath, "insta-bot");
+
+  // playwright는 naver-bot node_modules 공유
+  const naverBotPath = isDev
+    ? path.join(__dirname, "../../naver-bot")
+    : path.join(process.resourcesPath, "naver-bot");
+
+  const chromiumPath = isDev
+    ? path.join(__dirname, "../../chromium")
+    : path.join(process.resourcesPath, "chromium");
+
+  const fs = await import("fs");
+  if (!fs.existsSync(path.join(botPath, "dist", "server.js"))) {
+    console.warn("[insta-bot] dist/server.js 없음:", botPath);
+    return;
+  }
+
+  const nodePath = process.platform === "darwin"
+    ? (require("fs").existsSync("/opt/homebrew/bin/node") ? "/opt/homebrew/bin/node"
+      : require("fs").existsSync("/usr/local/bin/node") ? "/usr/local/bin/node"
+      : "node")
+    : "node";
+
+  const startBot = () => {
+    console.log("[insta-bot] 서버 시작...");
+    instaBotProcess = spawn(nodePath, ["dist/server.js"], {
+      cwd: botPath,
+      stdio: "pipe",
+      shell: true,
+      env: {
+        ...process.env,
+        PLAYWRIGHT_BROWSERS_PATH: chromiumPath,
+        NODE_PATH: path.join(naverBotPath, "node_modules"),
+      },
+    });
+
+    instaBotProcess.stdout?.on("data", d => console.log("[insta-bot]", d.toString().trim()));
+    instaBotProcess.stderr?.on("data", d => console.error("[insta-bot]", d.toString().trim()));
+
+    instaBotProcess.on("exit", (code) => {
+      console.warn(`[insta-bot] 종료 (code: ${code}). 3초 후 재시작...`);
+      instaBotProcess = null;
+      if (!app.isQuitting) setTimeout(startBot, 3000);
+    });
+  };
+
+  startBot();
+}
+
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1400, height: 900, minWidth: 380, minHeight: 600,
@@ -136,6 +189,7 @@ app.isQuitting = false;
 app.whenReady().then(async () => {
   await startBotServer();
   await startNeighborBotServer();
+  await startInstaBotServer();
   createWindow();
   app.on("activate", () => { if (!mainWindow) createWindow(); });
 });
@@ -143,6 +197,8 @@ app.whenReady().then(async () => {
 app.on("window-all-closed", () => {
   app.isQuitting = true;
   botProcess?.kill();
+  neighborBotProcess?.kill();
+  instaBotProcess?.kill();
   if (process.platform !== "darwin") app.quit();
 });
 
