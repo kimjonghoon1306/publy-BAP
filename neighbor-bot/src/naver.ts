@@ -1506,15 +1506,31 @@ export async function engageBlogs(params: {
         }
         const ctx = frame ?? page as any;
 
+        // mainFrame은 높이 800px인 iframe 안에서 자체 문서를 스크롤한다.
+        // frame locator의 scrollIntoViewIfNeeded()는 네이버의 스크롤 동기화와 충돌해
+        // 요소가 y=800 아래에 남을 수 있으므로 내부 scrollingElement를 명시적으로 이동한다.
+        const scrollFrameElementIntoView = async (el: any) => {
+          if (!frame) {
+            await el.scrollIntoViewIfNeeded();
+            return;
+          }
+          await el.evaluate((node: Element) => {
+            const scroller = document.scrollingElement || document.documentElement;
+            const rect = node.getBoundingClientRect();
+            const target = scroller.scrollTop + rect.top - Math.max(120, window.innerHeight * 0.35);
+            scroller.scrollTop = Math.max(0, target);
+            window.scrollTo(0, Math.max(0, target));
+          });
+          await page.waitForTimeout(350);
+        };
+
         // ── 공감 클릭 ──
         //  실측(2026-08): 네이버 공감버튼 = a.u_likeit_list_button (텍스트 "공감"), 이미 눌렀으면 class에 'on'
         if (doLike) {
           try {
             const likeSels = [
-              "a.u_likeit_list_button._button",
-              "a.u_likeit_list_button",
-              ".u_likeit_button._face",
-              "a[class*='u_likeit_list_button']",
+              // 실제 보이는 메인 버튼. list_button은 닫힌 리액션 레이어 안의 0x0 요소다.
+              "a.u_likeit_button._face",
               // 구버전 폴백
               ".sympathy_toggle_btn",
               "a[class*='sympathy']",
@@ -1531,12 +1547,17 @@ export async function engageBlogs(params: {
                     return btn.getAttribute("aria-pressed") === "true" || (/\bon\b/.test(c) && !/\boff\b/.test(c));
                   }, sel);
                   if (!isActive) {
-                    // 버튼이 가려지거나 여러개 → 첫 요소 scrollIntoView + force 클릭
-                    await el.scrollIntoViewIfNeeded().catch(() => {});
-                    await el.click({ force: true, timeout: 4000 });
-                    await page.waitForTimeout(1000);
+                    await scrollFrameElementIntoView(el);
+                    await el.click({ timeout: 6000 });
+                    // 클릭 호출 성공만으로 처리하지 않고 실제 DOM 상태 전환을 확인한다.
+                    await ctx.waitForFunction((s: string) => {
+                      const btn = document.querySelector(s);
+                      if (!btn) return false;
+                      return btn.getAttribute("aria-pressed") === "true" ||
+                        (/\bon\b/.test(btn.className || "") && !/\boff\b/.test(btn.className || ""));
+                    }, sel, { timeout: 5000 });
                     liked = true;
-                    log(`[공감·댓글] ❤️ ${blogId} 공감 완료`);
+                    log(`[공감·댓글] ❤️ ${blogId} 공감 완료 (상태 확인)`);
                   } else {
                     liked = true; // 이미 공감됨
                     log(`[공감·댓글] ${blogId} 이미 공감됨`);
@@ -1561,7 +1582,11 @@ export async function engageBlogs(params: {
               await page.mouse.wheel(0, 3000);
               await page.waitForTimeout(1200);
               const openBtn = await ctx.$("a.btn_comment._cmtList, a.btn_comment, ._cmtList");
-              if (openBtn) { await openBtn.scrollIntoViewIfNeeded().catch(() => {}); await openBtn.click({ force: true, timeout: 3000 }).catch(() => {}); await page.waitForTimeout(1800); }
+              if (openBtn) {
+                await scrollFrameElementIntoView(openBtn);
+                await openBtn.click({ timeout: 5000 });
+                await page.waitForTimeout(1800);
+              }
               // 댓글쓰기 버튼도 시도
               const writeBtn = await ctx.$("a.btn_write_comment, ._naverComment_write");
               if (writeBtn) { await writeBtn.click({ force: true, timeout: 2000 }).catch(() => {}); await page.waitForTimeout(1000); }
