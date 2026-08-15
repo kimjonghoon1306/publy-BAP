@@ -521,6 +521,12 @@ const PUBLY_SERVICE_INFO: Record<ServiceInfoKey,{icon:string;name:string;hook:st
 
 export default function DashboardPage({user, onLogout, onAdminLogin, onThemeToggle, theme}: Props) {
   const [serviceInfo, setServiceInfo] = useState<ServiceInfoKey|null>(null);
+  useEffect(()=>{
+    if(!serviceInfo)return;
+    const close=(e:KeyboardEvent)=>{if(e.key==="Escape")setServiceInfo(null)};
+    window.addEventListener("keydown",close);document.body.style.overflow="hidden";
+    return()=>{window.removeEventListener("keydown",close);document.body.style.overflow=""};
+  },[serviceInfo]);
   const logoTapCount = useRef(0);
   const logoTapTimer = useRef<ReturnType<typeof setTimeout>|null>(null);
   const handleLogoTap = () => {
@@ -5166,8 +5172,6 @@ POST3: (제목)|(이유)
                   </div>
                 </div>
 
-                {serviceInfo&&(()=>{const s=PUBLY_SERVICE_INFO[serviceInfo];return <div className="service-info-overlay" onMouseDown={e=>{if(e.target===e.currentTarget)setServiceInfo(null)}}><section className="service-info-dialog" role="dialog" aria-modal="true" aria-label={`${s.name} 알아보기`}><button className="service-info-close" onClick={()=>setServiceInfo(null)} aria-label="닫기">×</button><div className="service-info-kicker">MORE WITH ONJONGIL</div><h2>{s.name} 알아보기</h2><p className="service-info-hook">{s.hook}</p><div className="service-info-benefits">{s.benefits.map(([title,desc])=><div className="service-info-benefit" key={title}><b>✓ {title}</b><span>{desc}</span></div>)}</div><div className="service-info-flow">{s.flow}</div><div className="service-info-footer">{s.coming?<><button className="service-info-cta" disabled>신청하기</button><span className="service-info-coming">곳 출시됩니다</span></>:<a className="service-info-cta" href={s.url} target="_blank" rel="noopener noreferrer">{s.cta} →</a>}</div></section></div>})()}
-
                 {/* 큰 글씨 모드 */}
                 <div className="card">
                   <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
@@ -5305,7 +5309,7 @@ POST3: (제목)|(이유)
         </div>
       </div>
 
-      
+      {serviceInfo&&(()=>{const s=PUBLY_SERVICE_INFO[serviceInfo];return <div className="service-info-overlay" onMouseDown={e=>{if(e.target===e.currentTarget)setServiceInfo(null)}}><section className="service-info-dialog" role="dialog" aria-modal="true" aria-label={`${s.name} 알아보기`}><button className="service-info-close" type="button" onClick={()=>setServiceInfo(null)} aria-label="닫기">×</button><div className="service-info-kicker">MORE WITH ONJONGIL</div><h2>{s.name} 알아보기</h2><p className="service-info-hook">{s.hook}</p><div className="service-info-benefits">{s.benefits.map(([title,desc])=><div className="service-info-benefit" key={title}><b>✓ {title}</b><span>{desc}</span></div>)}</div><div className="service-info-flow">{s.flow}</div><div className="service-info-footer">{s.coming?<><button className="service-info-cta" disabled>신청하기</button><span className="service-info-coming">곧 출시됩니다</span></>:<a className="service-info-cta" href={s.url} target="_blank" rel="noopener noreferrer">{s.cta} →</a>}</div></section></div>})()}
 
       {/* 블로그 순위 키 안내 팝업 */}
       {showRankInfo&&(
