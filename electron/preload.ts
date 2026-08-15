@@ -5,4 +5,6 @@ contextBridge.exposeInMainWorld("electron", {
   registerUser:    (userId: string) => ipcRenderer.invoke("register-user", userId),
   unregisterUser:  (userId: string) => ipcRenderer.invoke("unregister-user", userId),
   openPreview:     (html: string) => ipcRenderer.invoke("open-preview", html),
+  flowLaunchChrome: () => ipcRenderer.invoke("flow-launch-chrome"),
+  flowStatus:       () => ipcRenderer.invoke("flow-status"),
 });

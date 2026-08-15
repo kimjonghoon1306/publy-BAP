@@ -16,6 +16,8 @@ declare global {
       registerUser: (userId: string) => Promise<boolean>;
       unregisterUser: (userId: string) => Promise<boolean>;
       openPreview: (html: string) => Promise<void>;
+      flowLaunchChrome: () => Promise<{ ok: boolean; already?: boolean; launched?: boolean; error?: string }>;
+      flowStatus: () => Promise<{ ready: boolean }>;
     };
   }
 }

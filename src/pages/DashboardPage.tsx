@@ -788,6 +788,8 @@ Output format (JSON array only, no other text):
   const [imageMode, setImageMode] = useState<"auto"|"manual">("auto");
   const [imgGenType, setImgGenType] = useState<"ai"|"flow">("ai");
   const [showFlowGuide, setShowFlowGuide] = useState(false);
+  const [flowReady, setFlowReady] = useState(false);
+  const [flowLaunching, setFlowLaunching] = useState(false);
   const [flowImgCount, setFlowImgCount] = useState(2);
   const [flowImgCountAuto, setFlowImgCountAuto] = useState(true);
   const [autoInserted, setAutoInserted] = useState(false);
@@ -1842,13 +1844,43 @@ POST3: (제목)|(이유)
     finally{setGenerating(false);}
   }
 
+  // ── Flow 준비: 디버깅 크롬 자동 실행 (Electron) ──
+  async function handleFlowLaunchChrome(){
+    if(!(window as any).electron?.flowLaunchChrome){
+      showToast("PC 앱에서만 Flow 준비가 가능해요. Publy 앱을 실행해주세요.","error");
+      return;
+    }
+    setFlowLaunching(true);
+    try{
+      const r=await (window as any).electron.flowLaunchChrome();
+      if(r.ok){
+        setFlowReady(true);
+        showToast(r.already?"✅ Flow 크롬이 이미 준비돼 있어요!":"✅ Flow 크롬을 열었어요! 크롬 창에서 Google 로그인만 해주세요 (최초 1회)","success");
+      }else{
+        showToast("❌ "+(r.error||"Flow 준비 실패"),"error");
+      }
+    }catch(e:any){ showToast("❌ Flow 준비 실패: "+e.message,"error"); }
+    finally{ setFlowLaunching(false); }
+  }
+  // Flow 선택 시 준비 상태 폴링
+  useEffect(()=>{
+    if(imgGenType!=="flow"||!(window as any).electron?.flowStatus)return;
+    let alive=true;
+    const check=async()=>{ try{ const s=await (window as any).electron.flowStatus(); if(alive)setFlowReady(!!s.ready); }catch{} };
+    check(); const iv=setInterval(check,5000);
+    return ()=>{ alive=false; clearInterval(iv); };
+  },[imgGenType]);
+
   // ── Google Flow 이미지 생성 (봇 CDP 경유, 미리보기까지) ──
   async function handleGenerateFlowImages(){
-    // 1) Flow 준비 상태 확인 (디버깅 크롬 열려있나)
+    // 1) Flow 준비 상태 확인 (디버깅 크롬 열려있나) — Electron 우선, 없으면 봇 API
     let ready=false;
-    try{ const r=await fetch(`${BOT}/api/flow/status`,{signal:AbortSignal.timeout(3000)}); const j=await r.json(); ready=!!j.ready; }catch{}
+    try{
+      if((window as any).electron?.flowStatus){ const s=await (window as any).electron.flowStatus(); ready=!!s.ready; }
+      else{ const r=await fetch(`${BOT}/api/flow/status`,{signal:AbortSignal.timeout(3000)}); const j=await r.json(); ready=!!j.ready; }
+    }catch{}
     if(!ready){
-      showToast("🎨 Flow 준비가 안 됐어요. 계정 관리 탭의 'Flow 준비' 버튼으로 크롬을 먼저 열고 Google 로그인해주세요.","error");
+      showToast("🎨 Flow 준비가 안 됐어요. 위의 '🚀 Flow 준비' 버튼을 먼저 눌러주세요.","error");
       return;
     }
     setGenImgLoading(true);setGenImgProgress(0);setGenImgCurrent(0);setImgGenFailed(false);
@@ -3234,6 +3266,29 @@ POST3: (제목)|(이유)
                               <span style={{fontSize:10,color:"var(--text3)",flexShrink:0}}>{item.weight}점</span>
                             </div>
                           ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* ── Flow 준비 안내 (Flow 선택 시) ── */}
+                    {imgGenType==="flow"&&(
+                      <div style={{marginBottom:14,padding:"14px 16px",borderRadius:14,background:flowReady?"rgba(0,200,120,.08)":"rgba(168,85,247,.08)",border:`1.5px solid ${flowReady?"rgba(0,200,120,.4)":"rgba(168,85,247,.35)"}`}}>
+                        <div style={{display:"flex",alignItems:"center",gap:10}}>
+                          <span style={{fontSize:22}}>{flowReady?"✅":"🎨"}</span>
+                          <div style={{flex:1}}>
+                            <div style={{fontSize:13.5,fontWeight:800,color:flowReady?"var(--success)":"#c084fc"}}>
+                              {flowReady?"Flow 준비 완료! 바로 생성하세요":"Flow 이미지는 먼저 '준비'가 필요해요"}
+                            </div>
+                            <div style={{fontSize:11.5,color:"var(--text3)",marginTop:3,lineHeight:1.5}}>
+                              {flowReady?"이제 아래 '이미지 생성 시작'을 누르면 무료로 이미지가 생성돼요":"버튼을 누르면 크롬이 열려요 → Google 로그인 1회만 하면 계속 자동으로 써요"}
+                            </div>
+                          </div>
+                          {!flowReady&&(
+                            <button onClick={handleFlowLaunchChrome} disabled={flowLaunching}
+                              style={{padding:"10px 18px",borderRadius:10,border:"none",background:"linear-gradient(135deg,#a855f7,#7c3aed)",color:"#fff",cursor:flowLaunching?"wait":"pointer",fontSize:13,fontWeight:800,fontFamily:"inherit",whiteSpace:"nowrap",flexShrink:0,opacity:flowLaunching?.7:1}}>
+                              {flowLaunching?"준비 중...":"🚀 Flow 준비"}
+                            </button>
+                          )}
                         </div>
                       </div>
                     )}

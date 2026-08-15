@@ -250,3 +250,69 @@ ipcMain.handle("unregister-user", async (_event, userId: string) => {
     return res.ok;
   } catch { return false; }
 });
+
+/* ── Google Flow 준비: 디버깅 크롬 자동 실행 ──
+   Flow 이미지를 봇이 조작하려면 사용자 크롬이 디버깅 포트(9222)로 떠 있어야 한다.
+   이 핸들러가 OS별 크롬 경로를 찾아 별도 프로필로 디버깅 크롬을 띄우고 Flow 페이지를 연다.
+   별도 프로필이라 사용자의 평소 크롬과 분리되고, 로그인은 그 프로필에 유지된다. */
+let flowChromeProc: ChildProcess | null = null;
+ipcMain.handle("flow-launch-chrome", async () => {
+  const fs = await import("fs");
+  const os = await import("os");
+
+  // 이미 디버깅 크롬이 떠 있으면 재사용
+  try {
+    const r = await fetch("http://localhost:9222/json/version", { signal: AbortSignal.timeout(1500) });
+    if (r.ok) return { ok: true, already: true };
+  } catch {}
+
+  // OS별 크롬 실행 파일 경로 후보
+  const candidates = process.platform === "darwin"
+    ? ["/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"]
+    : process.platform === "win32"
+    ? [
+        path.join(process.env["PROGRAMFILES"] || "C:\\Program Files", "Google\\Chrome\\Application\\chrome.exe"),
+        path.join(process.env["PROGRAMFILES(X86)"] || "C:\\Program Files (x86)", "Google\\Chrome\\Application\\chrome.exe"),
+        path.join(process.env["LOCALAPPDATA"] || "", "Google\\Chrome\\Application\\chrome.exe"),
+      ]
+    : ["/usr/bin/google-chrome", "/usr/bin/google-chrome-stable", "/usr/bin/chromium-browser"];
+
+  const chromePath = candidates.find(p => { try { return fs.existsSync(p); } catch { return false; } });
+  if (!chromePath) {
+    return { ok: false, error: "크롬을 찾을 수 없어요. Google Chrome을 먼저 설치해주세요." };
+  }
+
+  // 전용 프로필 폴더(사용자 평소 크롬과 분리, 로그인 유지됨)
+  const profileDir = path.join(os.homedir(), ".publy-flow-chrome");
+
+  try {
+    flowChromeProc = spawn(chromePath, [
+      "--remote-debugging-port=9222",
+      `--user-data-dir=${profileDir}`,
+      "--no-first-run",
+      "--no-default-browser-check",
+      "https://labs.google/fx/ko/tools/flow",
+    ], { detached: true, stdio: "ignore" });
+    flowChromeProc.unref();
+  } catch (e: any) {
+    return { ok: false, error: "크롬 실행 실패: " + e.message };
+  }
+
+  // 디버깅 포트가 열릴 때까지 대기(최대 15초)
+  for (let i = 0; i < 15; i++) {
+    await new Promise(r => setTimeout(r, 1000));
+    try {
+      const r = await fetch("http://localhost:9222/json/version", { signal: AbortSignal.timeout(1500) });
+      if (r.ok) return { ok: true, launched: true };
+    } catch {}
+  }
+  return { ok: false, error: "크롬은 실행됐지만 준비 확인에 실패했어요. 잠시 후 다시 시도해주세요." };
+});
+
+/* ── Flow 준비 상태 확인 (디버깅 크롬 떠있나) ── */
+ipcMain.handle("flow-status", async () => {
+  try {
+    const r = await fetch("http://localhost:9222/json/version", { signal: AbortSignal.timeout(1500) });
+    return { ready: r.ok };
+  } catch { return { ready: false }; }
+});
