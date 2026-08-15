@@ -15,7 +15,7 @@ const ONPARTNER_PLACEMENT_INFO:Record<OnPartnerPlacement,{label:string;desc:stri
   after_first:{label:"첫 번째 소제목 뒤",desc:"도입과 첫 설명을 읽은 직후 상품을 빠르게 보여줘요."},
   middle:{label:"본문 정중앙",desc:"정보와 경험이 쌓인 본문 중간에 상품 카드를 배치해요."},
   before_last:{label:"마지막 소제목 앞",desc:"후기 결론으로 넘어가기 직전에 자연스럽게 구매를 안내해요."},
-  bottom:{label:"글 하단",desc:"기존 방식처럼 본문과 FAQ가 시작되기 전 가장 아래에 배치해요."}
+  bottom:{label:"본문 하단 (FAQ·관련글 전)",desc:"글 전체의 맨끝이 아니라 본문이 끝나고 질문답변·관련글·해시태그가 시작되기 직전에 배치해요."}
 };
 
 const BOT = "http://127.0.0.1:3333";
@@ -1833,7 +1833,8 @@ Output format (JSON array only, no other text):
   function placeOnPartnerProduct(generatedBody:string, product:OnPartnerProduct):string{
     const disclosure="※ 이 글에는 제휴 링크가 포함되어 있으며, 구매 시 작성자에게 일정 수수료가 발생할 수 있습니다.";
     const productCard=`🛒 ${product.name}${product.price?`\n가격: ${product.price.toLocaleString("ko-KR")}원`:""}\n직접 확인한 내용과 상품 정보를 함께 비교해보세요.\n\n${product.partnerUrl}`;
-    const marker=generatedBody.search(/\n?\[FAQ시작\]/);
+    // 상품 링크는 어떤 위치 옵션에서도 FAQ·질문답변·관련글·해시태그 아래로 내려가지 않는다.
+    const marker=generatedBody.search(/\n?(?:\[FAQ시작\]|\[관련글시작\]|(?:질문\s*답변|Q&A|큐앤에이|해시태그)\s*:)/i);
     const main=(marker>=0?generatedBody.slice(0,marker):generatedBody).trim();
     const tail=(marker>=0?generatedBody.slice(marker).trim():"");
     const paragraphs=main.split(/\n{2,}/).map(p=>p.trim()).filter(Boolean);
@@ -3247,7 +3248,7 @@ POST3: (제목)|(이유)
                           </select>
                         </div>
                         <div style={{marginTop:7,padding:"8px 10px",borderRadius:9,background:"var(--accent-bg)",color:"var(--text2)",fontSize:10,lineHeight:1.55}}>{ONPARTNER_PLACEMENT_INFO[onPartnerPlacement].desc}</div>
-                        <div style={{marginTop:6,color:"var(--accent-text)",fontSize:10,fontWeight:800}}>상단 제휴 안내 → 선택 위치 상품 카드 → 하단 짧은 구매 안내</div>
+                        <div style={{marginTop:6,color:"var(--accent-text)",fontSize:10,fontWeight:800}}>상단 제휴 안내 → 본문 안 상품 카드 → FAQ·관련글·해시태그 전 구매 안내</div>
                       </div>}
                     </div>
                   )}
