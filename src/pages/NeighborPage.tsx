@@ -41,7 +41,7 @@ const CAMPAIGN_PRESETS = [
   `좋은 글 잘 읽었습니다 ✨ 이웃 신청드려요! 체험단 활동 좋아하시면 온종일체험단(${CAMPAIGN_LINK})도 추천드려요~`,
 ];
 interface EngageResult { keyword: string; blogId: string; postUrl: string; liked: boolean; commented: boolean; status: "success"|"fail"|"skip"|"pending"|"running"; message: string; }
-interface Props { theme: "dark"|"light"; userId?: string; plan?: string; initialTab?: "neighbor"|"engage"; singleTab?: boolean; }
+interface Props { theme: "dark"|"light"; userId?: string; plan?: string; initialTab?: "neighbor"|"engage"; singleTab?: boolean; onEngageUsageChange?: (used:number)=>void; }
 
 /* ── 내 이웃 키워드 분석 카드 (서이추·공감댓글 공용) ── */
 const KeywordAnalyzer = ({ keywords, loading, onAnalyze, onPick }: {
@@ -180,7 +180,7 @@ const GuideModal = ({ tab, onClose }: { tab: "neighbor"|"engage"; onClose: () =>
 };
 
 /* ── 메인 컴포넌트 ── */
-export default function NeighborPage({ theme, userId, plan = "free", initialTab, singleTab }: Props) {
+export default function NeighborPage({ theme, userId, plan = "free", initialTab, singleTab, onEngageUsageChange }: Props) {
   const [tab, setTab] = useState<"neighbor"|"engage">(initialTab || "neighbor");
   const [showGuide, setShowGuide] = useState(false);
 
@@ -465,6 +465,7 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
     es.onmessage = e => {
       const d = JSON.parse(e.data);
       if (d.type === "log") addELog(d.msg);
+      if (d.type === "quota_info" && Number.isFinite(Number(d.used))) onEngageUsageChange?.(Number(d.used));
       if (d.type === "result") setEResults(p => p.map(r => r.blogId === d.blogId ? { ...r, status: d.status, postUrl: d.postUrl || "", liked: d.liked, commented: d.commented, message: d.message } : r));
       if (d.type === "progress") { setEDoneCnt(d.done); setEFailCnt(d.fail); }
       if (d.type === "done") { addELog("🎉 작업 완료!"); setEWorking(false); es.close(); }

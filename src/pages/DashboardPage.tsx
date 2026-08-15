@@ -24,6 +24,12 @@ function daysUntil(dateStr?: string): number | null {
   const today = new Date(); today.setHours(0,0,0,0);
   return Math.round((end.getTime() - today.getTime()) / 86400000);
 }
+function formatDaysLeft(dateStr?: string): string {
+  const days = daysUntil(dateStr);
+  if (days === null) return "—";
+  if (days <= 0) return "오늘 만료";
+  return `D-${days}`;
+}
 
 const WRITE_AI_LIST = [
   {id:"gemini",label:"Gemini Flash",sub:"무료",placeholder:"AIza...",storageKey:"publy_gemini_key",link:"https://aistudio.google.com/app/apikey",color:"#4285F4",logo:"G",free:true},
@@ -47,7 +53,7 @@ const WRITE_STYLE_GUIDE: Record<WriteStyle,string> = {
   "감성일기":`[글의 방향: 감성일기]
 • 목적: 정보 전달이 아니라 '그날의 감정과 경험'을 나누는 개인 에세이.
 • 시작: 그날의 장면·기분으로 훅 (예: "요즘 마음이 복잡했는데, 그날따라…").
-• 구조: 시간 흐름(그날 아침→그 순간→돌아보며). 소제목 최소화, 문단 위주로 잔잔하게.
+• 구조: 시간 흐름(그날 아침→그 순간→돌아보며). 흐름을 끊지 않는 자연스러운 질문형 소제목 4~5개로 구간을 나누기.
 • 초점: 오감·감정·내면의 변화. 수치/스펙 나열 금지. 독자에게 말 걸며 공감 유도.
 • 금지: 번호 목록, 표, 딱딱한 정보 나열.`,
   "정보글":`[글의 방향: 정보글]
@@ -1201,6 +1207,7 @@ Output format (JSON array only, no other text):
     if(tab==="insta_dm" && !localStorage.getItem("insta_dm_warn_hide")){
       setShowInstaWarn(true);
     }
+    if(tab==="engage") getEngageDailyUsage(user.id).then(setEngageUsed);
   },[tab,user.id]);
 
   useEffect(()=>{
@@ -1608,6 +1615,25 @@ Output format (JSON array only, no other text):
     return cleaned.replace(/__BR(\d+)__/g, (_:string,i:string) => brands[parseInt(i)] ?? "");
   }
 
+  function ensureQuestionHeadings(text:string, topic:string):string {
+    const markerIndex=text.search(/\n?\[FAQ시작\]/);
+    const main=markerIndex>=0?text.slice(0,markerIndex).trim():text.trim();
+    const tail=markerIndex>=0?text.slice(markerIndex).trim():"";
+    const questionLines=main.split("\n").filter(line=>/[?？]\s*$/.test(line.trim()));
+    if(questionLines.length>=3)return text;
+    const paragraphs=main.split(/\n{2,}/).map(part=>part.trim()).filter(Boolean);
+    if(paragraphs.length<3)return text;
+    const safeTopic=(topic.trim()||"이 주제").slice(0,18);
+    const candidates=[`${safeTopic}, 왜 주목받을까요?`,`어떻게 고르면 후회가 적을까요?`,`직접 경험하면 무엇이 다를까요?`];
+    const missing=candidates.slice(0,3-questionLines.length);
+    const positions=[1,Math.max(2,Math.floor(paragraphs.length/2)),Math.max(2,paragraphs.length-1)];
+    missing.forEach((heading,index)=>{
+      const position=Math.min(paragraphs.length,positions[index]+index);
+      paragraphs.splice(position,0,heading);
+    });
+    return `${paragraphs.join("\n\n")}${tail?`\n\n${tail}`:""}`;
+  }
+
   function getCatGuide(kw:string,title:string):string{
     const k=(kw+" "+title).toLowerCase();
     if(/맛집|음식|카페|식당|요리|커피/.test(k))return"[맛집/음식] 직접 방문한 것처럼: 분위기, 맛, 가격. 단점도 솔직하게.";
@@ -1875,7 +1901,7 @@ POST3: (제목)|(이유)
       const tgm=cleaned.match(/태그[:\s]*([^\n]+)/);
       const bm=cleaned.match(/태그[^\n]*\n([\s\S]+)/);
       setGenTitle(title);if(tgm)setGenTags(tgm[1].trim());
-      const generatedBody=bm?bm[1].trim():cleaned;
+      const generatedBody=ensureQuestionHeadings(bm?bm[1].trim():cleaned,keyword||title);
       const productBlock=onPartnerProduct?.available
         ?`\n\n${onPartnerProduct.partnerUrl}\n\n🛒 ${onPartnerProduct.name}${onPartnerProduct.price?`\n가격: ${onPartnerProduct.price.toLocaleString("ko-KR")}원`:""}\n온종일팜에서 상품 정보와 구매 조건을 확인해보세요.\n\n※ 이 글에는 제휴 링크가 포함되어 있으며, 구매 시 일정 수수료를 받을 수 있습니다.`
         :"";
@@ -3078,7 +3104,7 @@ POST3: (제목)|(이유)
                 <div className="stat-lbl">오늘 발행</div>
               </div>
               <div className="stat-card" style={{background:"var(--accent-bg)",borderColor:"var(--accent-border)"}}>
-                <div className="stat-num" style={{fontSize:18,color:"var(--accent-text)"}}>{quota?.remaining_quota??"—"}</div>
+                <div className="stat-num" style={{fontSize:18,color:"var(--accent-text)"}}>{formatDaysLeft(quota?.reset_date)}</div>
                 <div className="stat-lbl">만료일 {quota ? new Date(quota.reset_date).toLocaleDateString("ko-KR",{month:"numeric",day:"numeric"}) : "—"}</div>
               </div>
             </div>
@@ -3123,7 +3149,7 @@ POST3: (제목)|(이유)
                   <div style={{padding:"10px 16px",borderRadius:14,background:"var(--card)",border:`1px solid ${daysLeft!==null&&daysLeft<=3?"rgba(255,83,99,.4)":daysLeft!==null&&daysLeft<=7?"rgba(255,159,63,.3)":"var(--border)"}`,whiteSpace:"nowrap"}}>
                     <div style={{fontSize:11,color:"var(--text3)",fontWeight:600,marginBottom:3}}>📅 만료일</div>
                     <div style={{fontSize:13,fontWeight:800,color:dColor}}>{expiry?expiry.toLocaleDateString("ko-KR",{month:"numeric",day:"numeric"}):"—"}</div>
-                    <div style={{fontSize:11,color:dColor,fontWeight:600,marginTop:1}}>{daysLeft===null?"—":daysLeft<=0?"오늘 만료":`D-${daysLeft}`}</div>
+                    <div style={{fontSize:11,color:dColor,fontWeight:600,marginTop:1}}>{formatDaysLeft(quota?.reset_date)}</div>
                   </div>
                 </div>
               );
@@ -5101,7 +5127,7 @@ POST3: (제목)|(이유)
             )}
 
             {tab==="engage"&&(
-              <NeighborPage theme={theme as "dark"|"light"} userId={user.id} plan={user.plan} initialTab="engage" singleTab />
+              <NeighborPage theme={theme as "dark"|"light"} userId={user.id} plan={user.plan} initialTab="engage" singleTab onEngageUsageChange={setEngageUsed} />
             )}
 
             {tab==="settings"&&(
