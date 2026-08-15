@@ -84,17 +84,3 @@ export async function useQuota(userId: string): Promise<boolean> {
 
   return !!(updated && updated.length > 0);
 }
-
-export async function getAccountCredentials(userId: string, platform: string): Promise<{id: string; pw: string} | null> {
-  const { data, error } = await supabase
-    .from("publy_accounts")
-    .select("username, password_encrypted")
-    .eq("user_id", userId)
-    .eq("platform", platform)
-    .single();
-  if (error || !data) return null;
-  try {
-    const pw = Buffer.from(data.password_encrypted || "", "base64").toString("utf-8");
-    return { id: data.username, pw };
-  } catch { return null; }
-}

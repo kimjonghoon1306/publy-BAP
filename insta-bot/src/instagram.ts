@@ -1,6 +1,7 @@
 import { chromium, BrowserContext, Page } from "playwright";
 import fs from "fs";
 import path from "path";
+import { hasSession, readSession, writeSession } from "./session-store";
 
 // ─────────────────────────────────────────────────────────────
 //  insta-bot — 인스타그램 자동화 (기존 naver/neighbor 봇과 동일 패턴)
@@ -10,12 +11,11 @@ import path from "path";
 //     (naver-bot도 동일하게 실측으로 다듬었음).
 // ─────────────────────────────────────────────────────────────
 
-const SESSION_DIR = path.join(__dirname, "../sessions");
-if (!fs.existsSync(SESSION_DIR)) fs.mkdirSync(SESSION_DIR, { recursive: true });
-const sessionPath = (accountId: string) => path.join(SESSION_DIR, `insta_${accountId}.json`);
+const LEGACY_SESSION_DIRS = [path.join(__dirname, "../sessions")];
+const sessionName = (accountId: string) => `insta_${accountId}`;
 
 export function instaSessionExists(accountId: string): boolean {
-  return fs.existsSync(sessionPath(accountId));
+  return hasSession(sessionName(accountId), LEGACY_SESSION_DIRS);
 }
 
 const UA =
@@ -43,7 +43,8 @@ async function newContext(opts: { withSession?: boolean; accountId?: string }): 
     viewport: { width: 1280, height: 900 },
     locale: "ko-KR",
     timezoneId: "Asia/Seoul",
-    storageState: opts.withSession && opts.accountId && instaSessionExists(opts.accountId) ? sessionPath(opts.accountId) : undefined,
+    storageState: opts.withSession && opts.accountId && instaSessionExists(opts.accountId)
+      ? readSession<any>(sessionName(opts.accountId), LEGACY_SESSION_DIRS) : undefined,
   });
   await context.addInitScript(ANTI_DETECTION_SCRIPT);
   return { browser, context };
@@ -108,7 +109,7 @@ export async function saveInstaSession(accountId: string, id: string, pw: string
       throw new Error("로그인 실패 — 2FA/캡차가 있으면 창에서 직접 통과시킨 뒤 다시 시도하세요.");
     }
 
-    await context.storageState({ path: sessionPath(accountId) });
+    writeSession(sessionName(accountId), await context.storageState());
     await browser.close().catch(() => {});
     return { username: id };
   } catch (e) {

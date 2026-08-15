@@ -10,6 +10,15 @@ let instaBotProcess: ChildProcess | null = null;
 const isDev = !app.isPackaged;
 const botAuthToken = randomBytes(32).toString("hex");
 
+function botEnvironment(extra: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
+  return {
+    ...process.env,
+    ...extra,
+    PUBLY_SESSION_DIR: path.join(app.getPath("userData"), "publy-sessions"),
+    BOT_AUTH_TOKEN: botAuthToken,
+  };
+}
+
 async function startBotServer() {
   const botPath = isDev
     ? path.join(__dirname, "../../naver-bot")
@@ -40,11 +49,9 @@ async function startBotServer() {
       cwd: botPath,
       stdio: "pipe",
       shell: true,
-      env: {
-        ...process.env,
+      env: botEnvironment({
         PLAYWRIGHT_BROWSERS_PATH: chromiumPath,
-        BOT_AUTH_TOKEN: botAuthToken,
-      },
+      }),
     });
 
     botProcess.stdout?.on("data", d => console.log("[bot]", d.toString().trim()));
@@ -93,12 +100,10 @@ async function startNeighborBotServer() {
       cwd: botPath,
       stdio: "pipe",
       shell: true,
-      env: {
-        ...process.env,
+      env: botEnvironment({
         PLAYWRIGHT_BROWSERS_PATH: chromiumPath,
         NODE_PATH: path.join(naverBotPath, "node_modules"),
-        BOT_AUTH_TOKEN: botAuthToken,
-      },
+      }),
     });
 
     neighborBotProcess.stdout?.on("data", d => console.log("[neighbor-bot]", d.toString().trim()));
@@ -146,12 +151,10 @@ async function startInstaBotServer() {
       cwd: botPath,
       stdio: "pipe",
       shell: true,
-      env: {
-        ...process.env,
+      env: botEnvironment({
         PLAYWRIGHT_BROWSERS_PATH: chromiumPath,
         NODE_PATH: path.join(naverBotPath, "node_modules"),
-        BOT_AUTH_TOKEN: botAuthToken,
-      },
+      }),
     });
 
     instaBotProcess.stdout?.on("data", d => console.log("[insta-bot]", d.toString().trim()));

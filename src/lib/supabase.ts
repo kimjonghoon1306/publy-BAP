@@ -146,10 +146,16 @@ export async function getAccounts(userId: string): Promise<PublyAccount[]> {
     .from("publy_accounts")
     .select("id, user_id, platform, username, password_encrypted, blog_name, is_connected, connected_at")
     .eq("user_id", userId);
+  // 기존 Base64 값은 한 번만 메모리로 반환하고 DB에서는 즉시 제거한다.
+  if (data?.some((account: any) => account.password_encrypted)) {
+    await supabase.from("publy_accounts").update({ password_encrypted: "" }).eq("user_id", userId);
+  }
   return data || [];
 }
 
-export async function upsertAccount(account: Partial<PublyAccount> & { password_encrypted: string }) {
+export async function upsertAccount(account: Partial<PublyAccount> & { password_encrypted?: string }) {
+  // Legacy NOT NULL schemas accept an empty marker; credentials are never persisted.
+  account.password_encrypted = "";
   const { error } = await supabase.from("publy_accounts").upsert(account);
   if (error) throw new Error(error.message);
 }

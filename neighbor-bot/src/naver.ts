@@ -4,15 +4,14 @@ import https from "https";
 import http from "http";
 import os from "os";
 import path from "path";
-import { getAccountCredentials } from "./supabase";
+import { deleteSession, hasSession, readSession, writeSession, SESSION_DIR } from "./session-store";
 
-const SESSION_DIR = path.join(__dirname, "../sessions");
-if (!fs.existsSync(SESSION_DIR)) fs.mkdirSync(SESSION_DIR, { recursive: true });
-
-const sessionPath = (userId: string) => path.join(SESSION_DIR, `naver_${userId}.json`);
+const LEGACY_SESSION_DIRS = [path.join(__dirname, "../sessions"), path.join(__dirname, "../../naver-bot/sessions")];
+const sessionName = (userId: string) => `naver_${userId}`;
+const loadSession = (userId: string) => readSession<any>(sessionName(userId), LEGACY_SESSION_DIRS);
 
 export function naverSessionExists(userId: string): boolean {
-  return fs.existsSync(sessionPath(userId));
+  return hasSession(sessionName(userId), LEGACY_SESSION_DIRS);
 }
 
 /* ── 봇 탐지 우회 ── */
@@ -238,12 +237,11 @@ export async function saveNaverSession(
 
     const cookies = await context.cookies();
     // 비밀번호 저장 (자동 재로그인용, base64)
-    fs.writeFileSync(sessionPath(userId), JSON.stringify({
+    writeSession(sessionName(userId), {
       loginId: id,
       blogId,
       cookies,
-      pw: Buffer.from(pw).toString("base64"),
-    }, null, 2));
+    });
     await browser.close();
     return { blogId };
   } catch (e) {
@@ -254,10 +252,8 @@ export async function saveNaverSession(
 
 /* ── 자동 재로그인 (세션 만료 시) ── */
 export async function reloginNaverSilent(userId: string): Promise<boolean> {
-  const sp = sessionPath(userId);
-  if (!fs.existsSync(sp)) return false;
-
-  const session = JSON.parse(fs.readFileSync(sp, "utf-8"));
+  if (!naverSessionExists(userId)) return false;
+  const session = loadSession(userId);
   let loginId: string = session.loginId;
   let pw: string | null = null;
 
@@ -265,11 +261,7 @@ export async function reloginNaverSilent(userId: string): Promise<boolean> {
   if (session.pw) {
     try { pw = Buffer.from(session.pw, "base64").toString("utf-8"); } catch {}
   }
-  // 2순위: Supabase publy_accounts에서 조회
-  if (!pw) {
-    const creds = await getAccountCredentials(userId, "naver").catch(() => null);
-    if (creds) { loginId = creds.id; pw = creds.pw; }
-  }
+  // DB 비밀번호 조회는 보안상 지원하지 않는다.
   if (!pw) { console.log("[naver] 자동재로그인 실패: 비밀번호 없음"); return false; }
 
   const browser = await chromium.launch({ headless: true, args: LAUNCH_ARGS });
@@ -306,8 +298,8 @@ export async function reloginNaverSilent(userId: string): Promise<boolean> {
     if (page.url().includes("nidlogin")) { await browser.close(); return false; }
 
     const cookies = await context.cookies();
-    const oldSession = JSON.parse(fs.readFileSync(sp, "utf-8"));
-    fs.writeFileSync(sp, JSON.stringify({ ...oldSession, cookies }, null, 2));
+    const oldSession = loadSession(userId);
+    writeSession(sessionName(userId), { ...oldSession, pw: undefined, cookies });
     await browser.close();
     console.log("[naver] ✅ 자동 재로그인 성공");
     return true;
@@ -321,10 +313,8 @@ export async function reloginNaverSilent(userId: string): Promise<boolean> {
 export async function getNaverCategories(
   userId: string
 ): Promise<{ id: string; name: string }[]> {
-  const sp = sessionPath(userId);
-  if (!fs.existsSync(sp)) throw new Error("네이버 세션 없음");
-
-  const { blogId, cookies } = JSON.parse(fs.readFileSync(sp, "utf-8"));
+  if (!naverSessionExists(userId)) throw new Error("네이버 세션 없음");
+  const { blogId, cookies } = loadSession(userId);
   const browser = await chromium.launch({ headless: true, args: LAUNCH_ARGS });
   const context = await browser.newContext({
     userAgent: UA, viewport: { width: 1280, height: 800 },
@@ -415,10 +405,8 @@ export async function publishNaver(params: {
   blocks?: Array<{type: string; content?: string; src?: string; alt?: string}>;
 }): Promise<string> {
   const { userId, title, content, tags, imageUrl, categoryId, visibility = "public", scheduleTime, blocks } = params;
-  const sp = sessionPath(userId);
-  if (!fs.existsSync(sp)) throw new Error("네이버 세션 없음. 계정 재연결 필요");
-
-  const { blogId, cookies } = JSON.parse(fs.readFileSync(sp, "utf-8"));
+  if (!naverSessionExists(userId)) throw new Error("네이버 세션 없음. 계정 재연결 필요");
+  const { blogId, cookies } = loadSession(userId);
 
   const browser = await chromium.launch({ headless: false, args: LAUNCH_ARGS });
   const context = await browser.newContext({
@@ -435,7 +423,7 @@ export async function publishNaver(params: {
     await page.goto(writeUrl, { waitUntil: "domcontentloaded", timeout: 60000 });
 
     if (page.url().includes("nidlogin") || page.url().includes("login.naver")) {
-      fs.unlinkSync(sp);
+      deleteSession(sessionName(userId), LEGACY_SESSION_DIRS);
       throw new Error("네이버 세션 만료. 재연결 필요");
     }
 
@@ -933,9 +921,9 @@ export async function publishNaver(params: {
 
     // 쿠키 갱신
     const newCookies = await context.cookies();
-    const session = JSON.parse(fs.readFileSync(sp, "utf-8"));
+    const session = loadSession(userId);
     session.cookies = newCookies;
-    fs.writeFileSync(sp, JSON.stringify(session, null, 2));
+    writeSession(sessionName(userId), session);
 
     await browser.close();
     console.log(`[naver] ✅ ${scheduleTime ? "예약 완료" : "발행 완료"}: ${postUrl}`);
@@ -1127,9 +1115,8 @@ export async function addNeighbors(params: {
   if (msgs.length === 0) msgs.push(message);
   let msgIdx = 0;
 
-  const sp = sessionPath(accountId);
-  if (!fs.existsSync(sp)) throw new Error("세션 없음 — 먼저 로그인하세요");
-  const { cookies } = JSON.parse(fs.readFileSync(sp, "utf-8"));
+  if (!naverSessionExists(accountId)) throw new Error("세션 없음 — 먼저 로그인하세요");
+  const { cookies } = loadSession(accountId);
 
   const dp = donePath(accountId);
   let doneSet = new Set<string>();
@@ -1362,9 +1349,8 @@ export async function engageBlogs(params: {
   if (comments.length === 0 && comment.trim()) comments.push(comment);
   let commentIdx = 0;
 
-  const sp = sessionPath(accountId);
-  if (!fs.existsSync(sp)) throw new Error("세션 없음 — 먼저 로그인하세요");
-  const { cookies } = JSON.parse(fs.readFileSync(sp, "utf-8"));
+  if (!naverSessionExists(accountId)) throw new Error("세션 없음 — 먼저 로그인하세요");
+  const { cookies } = loadSession(accountId);
 
   // 완료 기록 (서이추와 별도 파일)
   const engageDonePath = path.join(SESSION_DIR, `engage_done_${accountId}.json`);

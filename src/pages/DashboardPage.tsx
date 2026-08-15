@@ -2223,14 +2223,25 @@ POST3: (제목)|(이유)
       return;
     }
     setAddingAcc(true);
-    try{await upsertAccount({user_id:user.id,platform:newPlat,username:newUser,password_encrypted:btoa(newPw),blog_name:newBlog||undefined,is_connected:false});getAccounts(user.id).then(setAccounts);setNewUser("");setNewPw("");setNewBlog("");}
+    try{
+      if(!botOnline)throw new Error("PC에서 Publy 앱을 먼저 실행해주세요");
+      const r=await botFetch(`${BOT}/api/${newPlat}/save-session`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({userId:user.id,id:newUser,pw:newPw,blogName:newBlog||undefined}),signal:AbortSignal.timeout(120000)});
+      const d=await r.json();if(!d.success)throw new Error(d.error||"연결 실패");
+      await upsertAccount({user_id:user.id,platform:newPlat,username:newUser,blog_name:newBlog||undefined,is_connected:true,connected_at:new Date().toISOString()});
+      await getAccounts(user.id).then(setAccounts);setNewUser("");setNewPw("");setNewBlog("");
+    }
     catch(e:any){alert(e.message);}finally{setAddingAcc(false);}
   }
   async function handleConnect(acc:PublyAccount){
     if(!botOnline){alert("PC에서 Publy 앱을 먼저 실행해주세요");return;}setConnId(acc.id);
     try{
-      const r=await botFetch(`${BOT}/api/${acc.platform}/save-session`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({userId:acc.user_id,id:acc.username,pw:atob((acc as any).password_encrypted||""),blogName:acc.blog_name}),signal:AbortSignal.timeout(120000)});
+      const legacy=(acc as any).password_encrypted||"";
+      let pw="";try{pw=legacy?atob(legacy):"";}catch{}
+      if(!pw)pw=window.prompt("세션이 만료되었습니다. 비밀번호를 다시 입력해주세요.")||"";
+      if(!pw)throw new Error("비밀번호 입력이 필요합니다");
+      const r=await botFetch(`${BOT}/api/${acc.platform}/save-session`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({userId:acc.user_id,id:acc.username,pw,blogName:acc.blog_name}),signal:AbortSignal.timeout(120000)});
       const d=await r.json();if(!d.success)throw new Error(d.error||"연결 실패");
+      await upsertAccount({...acc,password_encrypted:"",is_connected:true,connected_at:new Date().toISOString()});
       getAccounts(user.id).then(setAccounts);
     }catch(e:any){alert("연결 실패: "+e.message);}finally{setConnId(null);}
   }
@@ -2479,6 +2490,8 @@ POST3: (제목)|(이유)
 
   async function handleDeleteAccount(id:string){
     if(!confirm("이 계정을 삭제할까요?"))return;
+    const acc=accounts.find(a=>a.id===id);
+    if(acc)await botFetch(`${BOT}/api/session/${acc.platform}/${acc.user_id}`,{method:"DELETE"}).catch(()=>{});
     await supabase.from("publy_accounts").delete().eq("id",id);getAccounts(user.id).then(setAccounts);
   }
 

@@ -2122,7 +2122,13 @@ POST3: (제목)|(이유)
   async function handleAddAcc() {
     if (!newUser||!newPw) return;
     setAddingAcc(true);
-    try { await upsertAccount({user_id:ADM_UID,platform:newPlat,username:newUser,password_encrypted:btoa(newPw),blog_name:newBlog||undefined,is_connected:false}); getAccounts(ADM_UID).then(setAdmAccs); setNewUser(""); setNewPw(""); setNewBlog(""); }
+    try {
+      if(!botOnline)throw new Error("봇 서버 실행 필요");
+      const r=await botFetch(`${BOT}/api/${newPlat}/save-session`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({userId:ADM_UID,id:newUser,pw:newPw,blogName:newBlog||undefined})});
+      const d=await r.json();if(!d.success)throw new Error(d.error||"연결 실패");
+      await upsertAccount({user_id:ADM_UID,platform:newPlat,username:newUser,blog_name:newBlog||undefined,is_connected:true,connected_at:new Date().toISOString()});
+      await getAccounts(ADM_UID).then(setAdmAccs);setNewUser("");setNewPw("");setNewBlog("");
+    }
     catch(e:any) { alert(e.message); }
     finally { setAddingAcc(false); }
   }
@@ -2131,9 +2137,13 @@ POST3: (제목)|(이유)
     if (!botOnline) { alert("봇 서버 실행 필요"); return; }
     setConnId(acc.id);
     try {
-      const r = await botFetch(`${BOT}/api/${acc.platform}/save-session`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({userId:ADM_UID,id:acc.username,pw:atob((acc as any).password_encrypted||""),blogName:acc.blog_name})});
+      const legacy=(acc as any).password_encrypted||"";let pw="";try{pw=legacy?atob(legacy):"";}catch{}
+      if(!pw)pw=window.prompt("세션이 만료되었습니다. 비밀번호를 다시 입력해주세요.")||"";
+      if(!pw)throw new Error("비밀번호 입력이 필요합니다");
+      const r = await botFetch(`${BOT}/api/${acc.platform}/save-session`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({userId:ADM_UID,id:acc.username,pw,blogName:acc.blog_name})});
       if (!r.ok) { const d = await r.json(); throw new Error(d.error); }
       await supabase.from("publy_accounts").update({is_connected:true,connected_at:new Date().toISOString()}).eq("id",acc.id);
+      await upsertAccount({...acc,password_encrypted:"",is_connected:true,connected_at:new Date().toISOString()});
       getAccounts(ADM_UID).then(setAdmAccs);
     } catch(e:any) { alert("연결 실패: "+e.message); }
     finally { setConnId(null); }
@@ -3590,7 +3600,7 @@ POST3: (제목)|(이유)
                         {connId===a.id?<><span className="spinner spinner-white"/>연결 중...</>:a.is_connected?"재연결":"연결"}
                       </button>
                       <button className="btn btn-sm" style={{background:"rgba(248,81,73,.1)",color:"var(--danger)",border:"1px solid rgba(248,81,73,.3)"}}
-                        onClick={async()=>{if(!confirm("삭제할까요?"))return;await supabase.from("publy_accounts").delete().eq("id",a.id);getAccounts(ADM_UID).then(setAdmAccs);}}>
+                        onClick={async()=>{if(!confirm("삭제할까요?"))return;await botFetch(`${BOT}/api/session/${a.platform}/${ADM_UID}`,{method:"DELETE"}).catch(()=>{});await supabase.from("publy_accounts").delete().eq("id",a.id);getAccounts(ADM_UID).then(setAdmAccs);}}>
                         🗑
                       </button>
                       <button onClick={()=>setEditingCatAccId(editingCatAccId===a.id?null:a.id)} style={{padding:"5px 11px",borderRadius:8,border:"1px solid var(--border)",background:"var(--bg2)",color:"var(--text2)",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:"inherit",flexShrink:0}}>

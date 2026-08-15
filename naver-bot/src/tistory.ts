@@ -1,15 +1,15 @@
 import { chromium, BrowserContext } from "playwright";
 import fs from "fs";
 import path from "path";
+import { deleteSession, hasSession, readSession, writeSession } from "./session-store";
 
-const SESSION_DIR = path.join(__dirname, "../sessions");
-if (!fs.existsSync(SESSION_DIR)) fs.mkdirSync(SESSION_DIR, { recursive: true });
-
-const sessionPath = (userId: string) => path.join(SESSION_DIR, `tistory_${userId}.json`);
+const LEGACY_SESSION_DIRS = [path.join(__dirname, "../sessions")];
+const sessionName = (userId: string) => `tistory_${userId}`;
 
 export function tistorySessionExists(userId: string): boolean {
-  return fs.existsSync(sessionPath(userId));
+  return hasSession(sessionName(userId), LEGACY_SESSION_DIRS);
 }
+export function deleteTistorySession(userId: string): void { deleteSession(sessionName(userId), LEGACY_SESSION_DIRS); }
 
 const ANTI_DETECTION_SCRIPT = `
   Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
@@ -67,7 +67,7 @@ export async function saveTistorySession(userId: string, id: string, pw: string,
     }
 
     const cookies = await context.cookies();
-    fs.writeFileSync(sessionPath(userId), JSON.stringify({ blogName, cookies }, null, 2));
+    writeSession(sessionName(userId), { blogName, cookies });
     await browser.close();
     console.log(`[tistory] ✅ 세션 저장 완료: ${blogName}`);
   } catch (e) {
@@ -86,10 +86,8 @@ export async function publishTistory(params: {
   visibility?: "public" | "private";
 }): Promise<string> {
   const { userId, title, content, tags, categoryId, visibility = "public" } = params;
-  const sp = sessionPath(userId);
-  if (!fs.existsSync(sp)) throw new Error("티스토리 세션 없음. 계정 재연결 필요");
-
-  const { blogName, cookies } = JSON.parse(fs.readFileSync(sp, "utf-8"));
+  if (!tistorySessionExists(userId)) throw new Error("티스토리 세션 없음. 계정 재연결 필요");
+  const { blogName, cookies } = readSession<any>(sessionName(userId), LEGACY_SESSION_DIRS);
   const browser = await chromium.launch({ headless: true, args: LAUNCH_ARGS });
   const context = await browser.newContext({ userAgent: UA, viewport: { width: 1280, height: 800 }, locale: "ko-KR", timezoneId: "Asia/Seoul" });
   await applyAntiDetection(context);
@@ -102,7 +100,7 @@ export async function publishTistory(params: {
     await page.goto(writeUrl, { waitUntil: "domcontentloaded", timeout: 60000 });
 
     if (page.url().includes("kakao.com") || page.url().includes("login")) {
-      fs.unlinkSync(sp);
+      deleteSession(sessionName(userId), LEGACY_SESSION_DIRS);
       throw new Error("티스토리 세션 만료. 계정 재연결 필요");
     }
 
@@ -226,7 +224,7 @@ export async function publishTistory(params: {
 
     // 쿠키 갱신
     const newCookies = await context.cookies();
-    fs.writeFileSync(sp, JSON.stringify({ blogName, cookies: newCookies }, null, 2));
+    writeSession(sessionName(userId), { blogName, cookies: newCookies });
 
     await browser.close();
     console.log(`[tistory] ✅ 발행 완료: ${postUrl}`);

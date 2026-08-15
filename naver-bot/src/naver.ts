@@ -4,17 +4,18 @@ import https from "https";
 import http from "http";
 import os from "os";
 import path from "path";
-import { getAccountCredentials } from "./supabase";
+import { deleteSession, hasSession, readSession, writeSession } from "./session-store";
 
-const SESSION_DIR = path.join(__dirname, "../sessions");
-if (!fs.existsSync(SESSION_DIR)) fs.mkdirSync(SESSION_DIR, { recursive: true });
+const LEGACY_SESSION_DIRS = [path.join(__dirname, "../sessions")];
 
-const sessionPath = (userId: string) => path.join(SESSION_DIR, `naver_${userId}.json`);
-const googleSessionPath = (userId: string) => path.join(SESSION_DIR, `google_${userId}.json`);
+const naverSessionName = (userId: string) => `naver_${userId}`;
+const googleSessionName = (userId: string) => `google_${userId}`;
 
 export function naverSessionExists(userId: string): boolean {
-  return fs.existsSync(sessionPath(userId));
+  return hasSession(naverSessionName(userId), LEGACY_SESSION_DIRS);
 }
+export function deleteNaverSession(userId: string): void { deleteSession(naverSessionName(userId), LEGACY_SESSION_DIRS); }
+export function deleteGoogleSession(userId: string): void { deleteSession(googleSessionName(userId), LEGACY_SESSION_DIRS); }
 
 /* ── 봇 탐지 우회 ── */
 const ANTI_DETECTION_SCRIPT = `
@@ -160,13 +161,11 @@ export async function saveNaverSession(
     console.log(`[naver] ✅ blogId: ${blogId}`);
 
     const cookies = await context.cookies();
-    // 비밀번호 저장 (자동 재로그인용, base64)
-    fs.writeFileSync(sessionPath(userId), JSON.stringify({
+    writeSession(naverSessionName(userId), {
       loginId: id,
       blogId,
       cookies,
-      pw: Buffer.from(pw).toString("base64"),
-    }, null, 2));
+    });
     await browser.close();
     return { blogId };
   } catch (e) {
@@ -177,83 +176,17 @@ export async function saveNaverSession(
 
 /* ── 자동 재로그인 (세션 만료 시) ── */
 export async function reloginNaverSilent(userId: string): Promise<boolean> {
-  const sp = sessionPath(userId);
-  if (!fs.existsSync(sp)) return false;
-
-  const session = JSON.parse(fs.readFileSync(sp, "utf-8"));
-  let loginId: string = session.loginId;
-  let pw: string | null = null;
-
-  // 1순위: 세션 파일에 저장된 pw
-  if (session.pw) {
-    try { pw = Buffer.from(session.pw, "base64").toString("utf-8"); } catch {}
-  }
-  // 2순위: Supabase publy_accounts에서 조회
-  if (!pw) {
-    const creds = await getAccountCredentials(userId, "naver").catch(() => null);
-    if (creds) { loginId = creds.id; pw = creds.pw; }
-  }
-  if (!pw) { console.log("[naver] 자동재로그인 실패: 비밀번호 없음"); return false; }
-
-  const browser = await chromium.launch({ headless: true, args: LAUNCH_ARGS });
-  const context = await browser.newContext({
-    userAgent: UA, viewport: { width: 1280, height: 800 },
-    locale: "ko-KR", timezoneId: "Asia/Seoul",
-  });
-  await applyAntiDetection(context);
-  const page = await context.newPage();
-
-  try {
-    await page.goto("https://nid.naver.com/nidlogin.login", { waitUntil: "domcontentloaded", timeout: 20000 });
-    await page.waitForTimeout(600);
-
-    await page.evaluate((v) => {
-      const el = document.querySelector("#id") as HTMLInputElement;
-      if (el) { el.focus(); el.value = v; el.dispatchEvent(new Event("input", { bubbles: true })); }
-    }, loginId);
-    await page.waitForTimeout(300);
-    await page.evaluate((v) => {
-      const el = document.querySelector("#pw") as HTMLInputElement;
-      if (el) { el.focus(); el.value = v; el.dispatchEvent(new Event("input", { bubbles: true })); }
-    }, pw);
-    await page.waitForTimeout(300);
-    // 로그인 버튼 클릭 (네이버 개편: #loginBtn_row/#loginBtn_column, class btn_done, type=button — 옛 .btn_login 사라짐)
-    let _loginClicked = false;
-    for (const _sel of ["#loginBtn_row", "#loginBtn_column"]) {
-      try { const _el = await page.$(_sel); if (_el && await _el.isVisible()) { await _el.click(); _loginClicked = true; break; } } catch {}
-    }
-    if (!_loginClicked) { try { await page.click(".btn_login", { timeout: 2000 }); _loginClicked = true; } catch {} }
-    if (!_loginClicked) { await page.keyboard.press("Enter"); }
-
-    // 캡차가 나오면 실패 (헤드리스라 처리 불가)
-    await page.waitForFunction(
-      () => !location.href.includes("nid.naver.com/nidlogin"),
-      { timeout: 15000 }
-    );
-    await page.waitForTimeout(1500);
-
-    if (page.url().includes("nidlogin")) { await browser.close(); return false; }
-
-    const cookies = await context.cookies();
-    const oldSession = JSON.parse(fs.readFileSync(sp, "utf-8"));
-    fs.writeFileSync(sp, JSON.stringify({ ...oldSession, cookies }, null, 2));
-    await browser.close();
-    console.log("[naver] ✅ 자동 재로그인 성공");
-    return true;
-  } catch {
-    await browser.close().catch(() => {});
-    return false;
-  }
+  if (!naverSessionExists(userId)) return false;
+  console.log("[naver] 자동재로그인 생략: 저장된 비밀번호 없음");
+  return false;
 }
 
 /* ── 카테고리 목록 조회 ── */
 export async function getNaverCategories(
   userId: string
 ): Promise<{ id: string; name: string }[]> {
-  const sp = sessionPath(userId);
-  if (!fs.existsSync(sp)) throw new Error("네이버 세션 없음");
-
-  const { blogId, cookies } = JSON.parse(fs.readFileSync(sp, "utf-8"));
+  if (!naverSessionExists(userId)) throw new Error("네이버 세션 없음");
+  const { blogId, cookies } = readSession<any>(naverSessionName(userId), LEGACY_SESSION_DIRS);
   const browser = await chromium.launch({ headless: true, args: LAUNCH_ARGS });
   const context = await browser.newContext({
     userAgent: UA, viewport: { width: 1280, height: 800 },
@@ -376,10 +309,8 @@ export async function publishNaver(params: {
   }).filter(Boolean) as typeof blocks;
 
   const cleanedContent = cleanContent(content);
-  const sp = sessionPath(userId);
-  if (!fs.existsSync(sp)) throw new Error("네이버 세션 없음. 계정 재연결 필요");
-
-  const { blogId, cookies } = JSON.parse(fs.readFileSync(sp, "utf-8"));
+  if (!naverSessionExists(userId)) throw new Error("네이버 세션 없음. 계정 재연결 필요");
+  const { blogId, cookies } = readSession<any>(naverSessionName(userId), LEGACY_SESSION_DIRS);
 
   const browser = await chromium.launch({ headless: false, args: LAUNCH_ARGS });
   const context = await browser.newContext({
@@ -396,7 +327,7 @@ export async function publishNaver(params: {
     await page.goto(writeUrl, { waitUntil: "domcontentloaded", timeout: 60000 });
 
     if (page.url().includes("nidlogin") || page.url().includes("login.naver")) {
-      fs.unlinkSync(sp);
+      deleteSession(naverSessionName(userId), LEGACY_SESSION_DIRS);
       throw new Error("네이버 세션 만료. 재연결 필요");
     }
 
@@ -947,9 +878,9 @@ export async function publishNaver(params: {
 
     // 쿠키 갱신
     const newCookies = await context.cookies();
-    const session = JSON.parse(fs.readFileSync(sp, "utf-8"));
+    const session = readSession<any>(naverSessionName(userId), LEGACY_SESSION_DIRS);
     session.cookies = newCookies;
-    fs.writeFileSync(sp, JSON.stringify(session, null, 2));
+    writeSession(naverSessionName(userId), session);
 
     await browser.close();
     console.log(`[naver] ✅ ${scheduleTime ? "예약 완료" : "발행 완료"}: ${postUrl}`);
@@ -968,7 +899,7 @@ export async function publishNaver(params: {
 
 /* ── Google 세션 ── */
 export function googleSessionExists(userId: string): boolean {
-  return fs.existsSync(googleSessionPath(userId));
+  return hasSession(googleSessionName(userId), LEGACY_SESSION_DIRS);
 }
 
 export async function saveGoogleSession(userId: string, email?: string, pw?: string): Promise<void> {
@@ -999,14 +930,8 @@ export async function saveGoogleSession(userId: string, email?: string, pw?: str
     await page.waitForTimeout(3000);
 
     // 3단계: 로그인 후 storageState 전체 저장 (쿠키 + localStorage + sessionStorage)
-    const statePath = googleSessionPath(userId);
-    await context.storageState({ path: statePath });
-
-    // 이메일/비번도 함께 저장 (재연결용)
-    const saved = JSON.parse(fs.readFileSync(statePath, "utf-8"));
-    saved.email = email || "";
-    saved.pw = pw ? Buffer.from(pw).toString("base64") : "";
-    fs.writeFileSync(statePath, JSON.stringify(saved, null, 2));
+    const saved = await context.storageState();
+    writeSession(googleSessionName(userId), saved);
 
     await browser.close();
     console.log("[google] ✅ Google Flow 세션 저장 완료 (storageState)");
@@ -1053,9 +978,8 @@ export async function generateFlowImages(params: {
   const log = onLog || console.log;
   const results: {src: string; alt: string}[] = [];
 
-  const gsp = googleSessionPath(userId);
-  if (!fs.existsSync(gsp)) throw new Error("Google 세션 없음 — 계정 관리 탭에서 Google 로그인 먼저 해주세요");
-  const googleSession = JSON.parse(fs.readFileSync(gsp, "utf-8"));
+  if (!googleSessionExists(userId)) throw new Error("Google 세션 없음 — 계정 관리 탭에서 Google 로그인 먼저 해주세요");
+  const googleSession = readSession<any>(googleSessionName(userId), LEGACY_SESSION_DIRS);
 
   const DOWNLOAD_DIR = path.join(__dirname, "../flow_downloads");
   if (!fs.existsSync(DOWNLOAD_DIR)) fs.mkdirSync(DOWNLOAD_DIR, { recursive: true });
@@ -1068,7 +992,7 @@ export async function generateFlowImages(params: {
   // storageState 방식으로 로드 (쿠키+localStorage+sessionStorage 전체)
   const hasStorageState = googleSession.origins !== undefined;
   const context = await browser.newContext({
-    ...(hasStorageState ? { storageState: gsp } : {}),
+    ...(hasStorageState ? { storageState: googleSession } : {}),
     userAgent: UA,
     viewport: { width: 1280, height: 900 },
     locale: "ko-KR",

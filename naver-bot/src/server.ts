@@ -1,9 +1,7 @@
 import express from "express";
 import cors from "cors";
-import fs from "fs-extra";
-import path from "path";
-import { saveNaverSession, publishNaver, naverSessionExists, generateFlowImages, generateFlowImagesCDP, getNaverCategories, saveGoogleSession, googleSessionExists } from "./naver";
-import { saveTistorySession, publishTistory, tistorySessionExists } from "./tistory";
+import { saveNaverSession, publishNaver, naverSessionExists, generateFlowImages, generateFlowImagesCDP, getNaverCategories, saveGoogleSession, googleSessionExists, deleteNaverSession, deleteGoogleSession } from "./naver";
+import { saveTistorySession, publishTistory, tistorySessionExists, deleteTistorySession } from "./tistory";
 import { fetchPendingJobs, updateJob, addHistory, useQuota } from "./supabase";
 
 const app = express();
@@ -85,18 +83,7 @@ app.post("/api/google/save-session", async (req, res) => {
   const { userId, email, pw } = req.body;
   if (!userId) return res.status(400).json({ success: false, error: "userId 필요" });
   try {
-    // 이메일/비번 없으면 기존 세션 파일에서 읽어서 재연결
-    let finalEmail = email;
-    let finalPw = pw;
-    if (!finalEmail || !finalPw) {
-      const gsp = path.join(__dirname, `../sessions/google_${userId}.json`);
-      if (fs.existsSync(gsp)) {
-        const saved = JSON.parse(fs.readFileSync(gsp, "utf-8"));
-        finalEmail = finalEmail || saved.email || "";
-        finalPw = finalPw || (saved.pw ? Buffer.from(saved.pw, "base64").toString("utf-8") : "");
-      }
-    }
-    await saveGoogleSession(userId, finalEmail, finalPw);
+    await saveGoogleSession(userId, email, pw);
     res.json({ success: true });
   } catch (e: any) {
     res.status(500).json({ success: false, error: e.message });
@@ -111,6 +98,15 @@ app.get("/api/session-status/:userId", (req, res) => {
     tistory: tistorySessionExists(userId),
     google: googleSessionExists(userId),
   });
+});
+
+app.delete("/api/session/:platform/:userId", (req, res) => {
+  const { platform, userId } = req.params;
+  if (platform === "naver") deleteNaverSession(userId);
+  else if (platform === "tistory") deleteTistorySession(userId);
+  else if (platform === "google") deleteGoogleSession(userId);
+  else return res.status(400).json({ error: "지원하지 않는 플랫폼" });
+  res.json({ success: true });
 });
 
 /* ── 직접 발행 (앱에서 즉시 발행) ── */
@@ -259,6 +255,11 @@ app.post("/api/register-user", (req, res) => {
 /* ── 유저 등록 해제 (로그아웃 시 호출) ── */
 app.post("/api/unregister-user", (req, res) => {
   const { userId } = req.body;
+  if (userId) {
+    deleteNaverSession(userId);
+    deleteTistorySession(userId);
+    deleteGoogleSession(userId);
+  }
   if (currentUserId === userId) {
     currentUserId = null;
     console.log(`[bot] 유저 등록 해제: ${userId}`);
