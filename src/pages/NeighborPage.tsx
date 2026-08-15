@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
+import { botFetch, BotEventStream } from "../lib/botApi";
 
 const BOT = "http://127.0.0.1:3334";
 
@@ -165,7 +166,7 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
   const [failCnt, setFailCnt] = useState(0);
   const logRef = useRef<HTMLDivElement>(null);
   const jobIdRef = useRef<string>(Date.now().toString());
-  const esRef = useRef<EventSource|null>(null);
+  const esRef = useRef<BotEventStream|null>(null);
 
   /* 공감·댓글 state */
   const [eKeywords, setEKeywords] = useState("");
@@ -193,12 +194,12 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
   const [eFailCnt, setEFailCnt] = useState(0);
   const eLogRef = useRef<HTMLDivElement>(null);
   const eJobIdRef = useRef<string>(Date.now().toString());
-  const eEsRef = useRef<EventSource|null>(null);
+  const eEsRef = useRef<BotEventStream|null>(null);
 
   /* 봇 상태 체크 */
   useEffect(() => {
     const check = async () => {
-      try { const r = await fetch(`${BOT}/health`, { signal: AbortSignal.timeout(2000) }); setBotOnline(r.ok); }
+      try { const r = await botFetch(`${BOT}/health`, { signal: AbortSignal.timeout(2000) }); setBotOnline(r.ok); }
       catch { setBotOnline(false); }
     };
     check();
@@ -209,7 +210,7 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
   /* 쿼타 로드 */
   useEffect(() => {
     if (!userId) return;
-    fetch(`${BOT}/api/quota/${userId}`).then(r => r.json())
+    botFetch(`${BOT}/api/quota/${userId}`).then(r => r.json())
       .then(d => { if (d.ok) { setQuotaUsed(d.used); setQuotaLimit(d.limit); } }).catch(() => {});
   }, [userId, botOnline]);
 
@@ -231,7 +232,7 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
   useEffect(() => {
     accounts.forEach(acc => {
       if (!acc.id) return;
-      fetch(`${BOT}/api/session/${acc.accountId}`).then(r => r.json())
+      botFetch(`${BOT}/api/session/${acc.accountId}`).then(r => r.json())
         .then(d => { if (d.exists) setAccounts(p => p.map(a => a.accountId === acc.accountId ? { ...a, sessionOk: true } : a)); })
         .catch(() => {});
     });
@@ -243,7 +244,7 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
     if (!acc || !acc.id || !acc.pw) return alert("아이디와 비밀번호를 입력하세요");
     setAccounts(p => p.map(a => a.accountId === accountId ? { ...a, loginLoading: true } : a));
     try {
-      const r = await fetch(`${BOT}/api/login`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ accountId, id: acc.id, pw: acc.pw }) });
+      const r = await botFetch(`${BOT}/api/login`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ accountId, id: acc.id, pw: acc.pw }) });
       const d = await r.json();
       if (d.success) {
         setAccounts(p => p.map(a => a.accountId === accountId ? { ...a, sessionOk: true, blogId: d.blogId, loginLoading: false } : a));
@@ -280,7 +281,7 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
     if (!kwList.length) return alert("키워드를 입력하세요");
     setCrawling(true); setTargets([]); setResults([]); setDoneCnt(0); setFailCnt(0);
     addLog(`🔍 수집 시작 — 키워드: ${kwList.join(", ")} / 키워드당 ${countPerKw}개`);
-    const es = new EventSource(`${BOT}/api/crawl?keywords=${encodeURIComponent(kwList.join(","))}&countPerKeyword=${countPerKw}&orderBy=${orderBy}&activeDays=${activeDays}&excludeMarket=${excludeMarket}${userId ? `&userId=${userId}` : ""}`);
+    const es = new BotEventStream(`${BOT}/api/crawl?keywords=${encodeURIComponent(kwList.join(","))}&countPerKeyword=${countPerKw}&orderBy=${orderBy}&activeDays=${activeDays}&excludeMarket=${excludeMarket}${userId ? `&userId=${userId}` : ""}`);
     esRef.current = es;
     es.onmessage = e => {
       const d = JSON.parse(e.data);
@@ -308,7 +309,7 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
     addLog(`🚀 작업 시작 — ${list.length}개 대상 / 한도 ${dailyLimit}개 / 딜레이 ${delayMin}~${delayMax}초`);
     const msg = msgMode === "single" ? singleMsg : multiMsgs.split("\n").filter(l => l.trim()).join("|||");
     const params = new URLSearchParams({ accountId: acc.accountId, targets: encodeURIComponent(JSON.stringify(list)), message: msg, delayMin: delayMin.toString(), delayMax: delayMax.toString(), skipDone: skipDone.toString(), jobId: jobIdRef.current, ...(userId ? { userId } : {}) });
-    const es = new EventSource(`${BOT}/api/add-neighbor?${params}`); esRef.current = es;
+    const es = new BotEventStream(`${BOT}/api/add-neighbor?${params}`); esRef.current = es;
     es.onmessage = e => {
       const d = JSON.parse(e.data);
       if (d.type === "log") addLog(d.msg);
@@ -324,7 +325,7 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
 
   const handleStop = async () => {
     if (esRef.current) { esRef.current.close(); esRef.current = null; }
-    try { await fetch(`${BOT}/api/stop/${jobIdRef.current}`, { method: "POST" }); } catch {}
+    try { await botFetch(`${BOT}/api/stop/${jobIdRef.current}`, { method: "POST" }); } catch {}
     addLog("⛔ 중단"); setCrawling(false); setWorking(false);
   };
 
@@ -334,7 +335,7 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
     if (!kwList.length) return alert("키워드를 입력하세요");
     setECrawling(true); setETargets([]); setEResults([]); setEDoneCnt(0); setEFailCnt(0);
     addELog(`🔍 수집 시작 — 키워드: ${kwList.join(", ")} / 키워드당 ${eCountPerKw}개`);
-    const es = new EventSource(`${BOT}/api/engage-crawl?keywords=${encodeURIComponent(kwList.join(","))}&countPerKeyword=${eCountPerKw}${userId ? `&userId=${userId}` : ""}`);
+    const es = new BotEventStream(`${BOT}/api/engage-crawl?keywords=${encodeURIComponent(kwList.join(","))}&countPerKeyword=${eCountPerKw}${userId ? `&userId=${userId}` : ""}`);
     eEsRef.current = es;
     es.onmessage = e => {
       const d = JSON.parse(e.data);
@@ -362,7 +363,7 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
     addELog(`🚀 작업 시작 — ${list.length}개 / 최근 ${days}일 / ${eDoLike ? "공감" : ""}${eDoLike && eDoComment ? "+" : ""}${eDoComment ? "댓글" : ""}`);
     const commentText = eCommentMode === "single" ? eComment : eMultiComments.split("\n").filter(l => l.trim()).join("|||");
     const params = new URLSearchParams({ accountId: acc.accountId, targets: encodeURIComponent(JSON.stringify(list)), comment: commentText, doLike: eDoLike.toString(), doComment: eDoComment.toString(), periodDays: days.toString(), postsPerBlog: ePostsPerBlog.toString(), delayMin: eDelayMin.toString(), delayMax: eDelayMax.toString(), dailyLimit: eDailyLimit.toString(), skipDone: eSkipDone.toString(), jobId: eJobIdRef.current, ...(userId ? { userId } : {}) });
-    const es = new EventSource(`${BOT}/api/engage?${params}`); eEsRef.current = es;
+    const es = new BotEventStream(`${BOT}/api/engage?${params}`); eEsRef.current = es;
     es.onmessage = e => {
       const d = JSON.parse(e.data);
       if (d.type === "log") addELog(d.msg);
@@ -376,7 +377,7 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
 
   const handleEngageStop = async () => {
     if (eEsRef.current) { eEsRef.current.close(); eEsRef.current = null; }
-    try { await fetch(`${BOT}/api/stop/${eJobIdRef.current}`, { method: "POST" }); } catch {}
+    try { await botFetch(`${BOT}/api/stop/${eJobIdRef.current}`, { method: "POST" }); } catch {}
     addELog("⛔ 중단"); setECrawling(false); setEWorking(false);
   };
 

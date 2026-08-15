@@ -3,6 +3,7 @@ import GoogleFlowCard from "../GoogleFlowCard";
 import { PublyUser, getQuota, getHistory, getAccounts, PublyQuota, PublyHistory, PublyAccount, upsertAccount, useQuota, addHistory, deleteHistory, deleteAllHistory, changeUserPassword, getNaverApiKeys, saveNaverApiKeys, NaverApiKeys, checkNaverQuota, incrementNaverQuota, getNaverDailyUsage, NAVER_DAILY_LIMIT, getUserNaverApiKeys, logError, PLAN_CONFIG, checkDailyPublishQuota, incrementDailyPublish, getDailyPublishUsage, getNeighborDailyUsage, NEIGHBOR_DAILY_LIMIT, getEngageDailyUsage, ENGAGE_DAILY_LIMIT, InstaDmTarget, InstaDmHistory, InstaDmQuota, getInstaDmTargets, addInstaDmTarget, deleteInstaDmTarget, getInstaDmHistory, addInstaDmHistory, getInstaDmQuota, upsertInstaDmQuota, incrementInstaDmUsage, INSTA_DM_DAILY_LIMIT } from "../lib/supabase";
 import { supabase } from "../lib/supabase";
 import NeighborPage from "./NeighborPage";
+import { botFetch, BotEventStream } from "../lib/botApi";
 
 type MainTab = "keyword" | "write" | "image" | "photo" | "publish" | "manage" | "accounts" | "rank" | "calendar" | "settings" | "neighbor" | "engage" | "insta_dm";
 type PublishConcept = "full" | "body_faq" | "body_only";
@@ -459,7 +460,6 @@ export default function DashboardPage({user, onLogout, onAdminLogin, onThemeTogg
   const [showInstaWarn, setShowInstaWarn] = useState(false);
   const [guideTab, setGuideTab] = useState(0);
   const [botOnline, setBotOnline] = useState(false);
-  const [botSecret, setBotSecret] = useState<string>("");  // 봇 API 인증 시크릿
   // 인스타 DM
   const [dmTargets, setDmTargets] = useState<InstaDmTarget[]>([]);
   const [dmHistory, setDmHistory] = useState<InstaDmHistory[]>([]);
@@ -481,12 +481,12 @@ export default function DashboardPage({user, onLogout, onAdminLogin, onThemeTogg
   const [dmCrawlLimit, setDmCrawlLimit] = useState("30");
   const [dmLogs, setDmLogs] = useState<string[]>([]);
   const [dmRunning, setDmRunning] = useState(false);
-  const esDmRef = useRef<EventSource|null>(null);
+  const esDmRef = useRef<BotEventStream|null>(null);
   const dmLog = (m:string)=>setDmLogs(p=>[...p.slice(-200), m]);
 
   const checkDmSession = async(acct:string)=>{
     if(!acct){setDmSessionOk(false);return;}
-    try{ const r=await fetch(`${INSTA_BOT}/api/session/${encodeURIComponent(acct)}`); const j=await r.json(); setDmSessionOk(!!j.exists); }catch{ setDmSessionOk(false); }
+    try{ const r=await botFetch(`${INSTA_BOT}/api/session/${encodeURIComponent(acct)}`); const j=await r.json(); setDmSessionOk(!!j.exists); }catch{ setDmSessionOk(false); }
   };
 
   const connectIg = async()=>{
@@ -494,7 +494,7 @@ export default function DashboardPage({user, onLogout, onAdminLogin, onThemeTogg
     if(!acct||!dmIgPw){showToast("인스타 아이디와 비밀번호를 입력해주세요","error");return;}
     setDmConnecting(true);
     try{
-      const r=await fetch(`${INSTA_BOT}/api/login`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({accountId:acct,id:acct,pw:dmIgPw})});
+      const r=await botFetch(`${INSTA_BOT}/api/login`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({accountId:acct,id:acct,pw:dmIgPw})});
       const j=await r.json();
       if(j.success){setDmSessionOk(true);setDmIgPw("");showToast("✅ 인스타 계정 연결 완료!");}
       else showToast("연결 실패: "+(j.error||""),"error");
@@ -508,7 +508,7 @@ export default function DashboardPage({user, onLogout, onAdminLogin, onThemeTogg
     if(!dmCrawlKw.trim()){showToast("검색 키워드를 입력해주세요","error");return;}
     setDmRunning(true);setDmLogs([]);
     const url=`${INSTA_BOT}/api/crawl?accountId=${encodeURIComponent(acct)}&keyword=${encodeURIComponent(dmCrawlKw.trim())}&limit=${encodeURIComponent(dmCrawlLimit||"30")}&minFollowers=${encodeURIComponent(dmMinFollow||"0")}&maxFollowers=${encodeURIComponent(dmMaxFollow||"0")}`;
-    const es=new EventSource(url);esDmRef.current=es;
+    const es=new BotEventStream(url);esDmRef.current=es;
     es.onmessage=async e=>{
       const d=JSON.parse(e.data);
       if(d.type==="log")dmLog(d.msg);
@@ -529,7 +529,7 @@ export default function DashboardPage({user, onLogout, onAdminLogin, onThemeTogg
     if(instaUsed>=igLimit){setAlertPopup({type:"insta",used:instaUsed,limit:igLimit});return;}
     setDmRunning(true);setDmLogs([]);
     const url=`${INSTA_BOT}/api/send?userId=${encodeURIComponent(user.id)}&accountId=${encodeURIComponent(acct)}&message=${encodeURIComponent(dmMessage)}&targets=${encodeURIComponent(JSON.stringify(pend))}`;
-    const es=new EventSource(url);esDmRef.current=es;
+    const es=new BotEventStream(url);esDmRef.current=es;
     es.onmessage=e=>{
       const d=JSON.parse(e.data);
       if(d.type==="log")dmLog(d.msg);
@@ -1158,23 +1158,8 @@ Output format (JSON array only, no other text):
     })();
   },[]);
 
-  // 봇 시크릿 로드 (Electron 환경에서만)
-  useEffect(()=>{
-    window.electron?.getBotSecret().then(s=>{if(s) setBotSecret(s);}).catch(()=>{});
-  },[]);
-
-  // 봇 API 인증 헤더 포함 fetch 헬퍼
-  const botFetch = useCallback((url: string, opts: RequestInit = {}) => {
-    const headers: Record<string,string> = {
-      "Content-Type": "application/json",
-      ...(opts.headers as Record<string,string> || {}),
-    };
-    if (botSecret) headers["X-Bot-Secret"] = botSecret;
-    return fetch(url, { ...opts, headers });
-  }, [botSecret]);
-
   const checkBot = useCallback(async()=>{
-    try{const r=await fetch(`${BOT}/health`,{signal:AbortSignal.timeout(3000)});setBotOnline(r.ok);}
+    try{const r=await botFetch(`${BOT}/health`,{signal:AbortSignal.timeout(3000)});setBotOnline(r.ok);}
     catch{setBotOnline(false);}
   },[]);
 
@@ -1595,7 +1580,7 @@ Output format (JSON array only, no other text):
   // CORS 차단되는 외부 AI(OpenAI/Groq 등)는 봇 프록시 경유. 봇 오프라인이면 직접 시도(폴백).
   async function aiProxyFetch(url:string, init:RequestInit, signal?:AbortSignal):Promise<Response>{
     if(botOnline){
-      return fetch(`${BOT}/api/ai-proxy`,{
+      return botFetch(`${BOT}/api/ai-proxy`,{
         method:"POST",
         headers:{"Content-Type":"application/json"},
         body:JSON.stringify({url,method:init.method||"POST",headers:init.headers,body:init.body}),
@@ -1664,7 +1649,7 @@ Output format (JSON array only, no other text):
     if(ai==="replicate"){
       const key=localStorage.getItem("publy_replicate_key")||"";if(!key)throw new Error("Replicate 키 없음");
       // 브라우저 직접 호출은 CORS로 막힘 → 봇 서버 프록시 경유 (생성+폴링+base64 변환까지 서버가 처리)
-      const r=await fetch(`${BOT}/api/replicate-image`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({key,prompt,aspectRatio:"16:9"}),signal});
+      const r=await botFetch(`${BOT}/api/replicate-image`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({key,prompt,aspectRatio:"16:9"}),signal});
       if(!r.ok){const e=await r.json().catch(()=>({}));throw new Error(e.error||("Replicate "+r.status));}
       const d=await r.json();
       return d.image||d.sourceUrl||"";
@@ -1877,7 +1862,7 @@ POST3: (제목)|(이유)
     let ready=false;
     try{
       if((window as any).electron?.flowStatus){ const s=await (window as any).electron.flowStatus(); ready=!!s.ready; }
-      else{ const r=await fetch(`${BOT}/api/flow/status`,{signal:AbortSignal.timeout(3000)}); const j=await r.json(); ready=!!j.ready; }
+      else{ const r=await botFetch(`${BOT}/api/flow/status`,{signal:AbortSignal.timeout(3000)}); const j=await r.json(); ready=!!j.ready; }
     }catch{}
     if(!ready){
       showToast("🎨 Flow 준비가 안 됐어요. 위의 '🚀 Flow 준비' 버튼을 먼저 눌러주세요.","error");
@@ -1895,7 +1880,7 @@ POST3: (제목)|(이유)
     const caps=buildCaptions(keyword||genTitle,imgCount,content);
     try{
       showToast(`🎨 Flow로 이미지 ${imgCount}장 생성 중... (1~2분 소요)`,"info");
-      const r=await fetch(`${BOT}/api/flow-generate`,{
+      const r=await botFetch(`${BOT}/api/flow-generate`,{
         method:"POST",headers:{"Content-Type":"application/json"},
         body:JSON.stringify({prompts,captions:caps}),
         signal:AbortSignal.timeout(imgCount*120000+30000),
@@ -2244,7 +2229,7 @@ POST3: (제목)|(이유)
   async function handleConnect(acc:PublyAccount){
     if(!botOnline){alert("PC에서 Publy 앱을 먼저 실행해주세요");return;}setConnId(acc.id);
     try{
-      const r=await fetch(`${BOT}/api/${acc.platform}/save-session`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({userId:acc.user_id,id:acc.username,pw:atob((acc as any).password_encrypted||""),blogName:acc.blog_name}),signal:AbortSignal.timeout(120000)});
+      const r=await botFetch(`${BOT}/api/${acc.platform}/save-session`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({userId:acc.user_id,id:acc.username,pw:atob((acc as any).password_encrypted||""),blogName:acc.blog_name}),signal:AbortSignal.timeout(120000)});
       const d=await r.json();if(!d.success)throw new Error(d.error||"연결 실패");
       getAccounts(user.id).then(setAccounts);
     }catch(e:any){alert("연결 실패: "+e.message);}finally{setConnId(null);}
@@ -2330,7 +2315,7 @@ POST3: (제목)|(이유)
       // 서버 프록시 경유 시도 → 실패 시 직접 호출 폴백
       let text = "";
       try {
-        const proxyR = await fetch(`${BOT}/api/gemini-vision`, {
+        const proxyR = await botFetch(`${BOT}/api/gemini-vision`, {
           method:"POST",
           headers:{"Content-Type":"application/json"},
           body:JSON.stringify({apiKey:geminiKey, parts:imgParts, prompt}),

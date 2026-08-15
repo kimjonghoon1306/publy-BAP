@@ -6,9 +6,15 @@ import fs from "fs";
 
 const app = express();
 const PORT = 3334;
+const AUTH_TOKEN = process.env.BOT_AUTH_TOKEN || "";
 
-app.use(cors());
+app.use(cors({ origin: ["http://localhost:5173", "http://127.0.0.1:5173", "null"] }));
 app.use(express.json({ limit: "50mb" }));
+app.use((req, res, next) => {
+  if (!AUTH_TOKEN) return next();
+  if (req.get("Authorization") === `Bearer ${AUTH_TOKEN}`) return next();
+  res.status(401).json({ error: "Unauthorized" });
+});
 
 /* ── 헬스체크 ── */
 app.get("/health", (_req, res) => {
@@ -272,7 +278,7 @@ app.delete("/api/engage-done/:accountId", (req, res) => {
   res.json({ ok: true });
 });
 
-app.listen(PORT, () => {
+app.listen(PORT, "127.0.0.1", () => {
   console.log(`[neighbor-bot] 서버 시작 → http://localhost:${PORT}`);
 });
 

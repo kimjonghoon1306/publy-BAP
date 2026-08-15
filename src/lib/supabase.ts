@@ -155,20 +155,15 @@ export async function upsertAccount(account: Partial<PublyAccount> & { password_
 }
 
 // ── 관리자 비밀번호 (publy_settings 테이블) ──────────────
-const ADMIN_DEFAULT_PW = "123456";
-
 export async function verifyAdminPassword(pw: string): Promise<boolean> {
-  try {
-    const { data } = await supabase
+  const { data, error } = await supabase
       .from("publy_settings")
       .select("value")
       .eq("key", "admin_pw_hash")
       .maybeSingle();
-    if (!data?.value) return pw === ADMIN_DEFAULT_PW;
-    return await bcrypt.compare(pw, data.value);
-  } catch {
-    return pw === ADMIN_DEFAULT_PW;
-  }
+  if (error) throw new Error("관리자 인증 설정을 확인할 수 없습니다");
+  if (!data?.value) throw new Error("초기 비밀번호 설정 필요");
+  return await bcrypt.compare(pw, data.value);
 }
 
 export async function setAdminPassword(newPw: string): Promise<void> {

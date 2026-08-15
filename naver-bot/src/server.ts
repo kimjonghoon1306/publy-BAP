@@ -8,9 +8,15 @@ import { fetchPendingJobs, updateJob, addHistory, useQuota } from "./supabase";
 
 const app = express();
 const PORT = 3333;
+const AUTH_TOKEN = process.env.BOT_AUTH_TOKEN || "";
 
-app.use(cors());
+app.use(cors({ origin: ["http://localhost:5173", "http://127.0.0.1:5173", "null"] }));
 app.use(express.json({ limit: "50mb" })); // base64 이미지 포함 발행 대비
+app.use((req, res, next) => {
+  if (!AUTH_TOKEN) return next(); // standalone local development fallback
+  if (req.get("Authorization") === `Bearer ${AUTH_TOKEN}`) return next();
+  res.status(401).json({ error: "Unauthorized" });
+});
 
 /* ── 동시 발행 제한 큐 ── */
 const MAX_CONCURRENT = 3;
@@ -450,7 +456,7 @@ app.post("/api/ai-proxy", async (req, res) => {
 });
 
 /* ── 서버 시작 ── */
-app.listen(PORT, () => {
+app.listen(PORT, "127.0.0.1", () => {
   console.log(`[bot] Publy 봇 서버 v2.0 → http://localhost:${PORT}`);
 });
 

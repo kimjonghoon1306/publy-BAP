@@ -113,20 +113,34 @@ export default function AdminLoginPage({ onAdminAuth, onBack, theme, onThemeTogg
   const [pw, setPw] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [failedAttempts, setFailedAttempts] = useState(() => Number(localStorage.getItem("publy_admin_failed_attempts") || 0));
+  const [lockedUntil, setLockedUntil] = useState(() => Number(localStorage.getItem("publy_admin_locked_until") || 0));
 
   async function handleLogin() {
+    if (Date.now() < lockedUntil) { setError("로그인 시도가 너무 많습니다. 잠시 후 다시 시도해주세요."); return; }
     if (!pw) { setError("비밀번호를 입력하세요"); return; }
     setLoading(true);
     try {
       const ok = await verifyAdminPassword(pw);
       if (ok) {
+        localStorage.removeItem("publy_admin_failed_attempts");
+        localStorage.removeItem("publy_admin_locked_until");
         sessionStorage.setItem("publy_admin_auth", "true");
         onAdminAuth();
       } else {
+        const next = failedAttempts + 1;
+        setFailedAttempts(next);
+        localStorage.setItem("publy_admin_failed_attempts", String(next));
+        if (next >= 5) {
+          const until = Date.now() + 60_000;
+          setLockedUntil(until); setFailedAttempts(0);
+          localStorage.setItem("publy_admin_locked_until", String(until));
+          localStorage.setItem("publy_admin_failed_attempts", "0");
+        }
         setError("비밀번호가 올바르지 않습니다");
       }
-    } catch {
-      setError("서버 연결 오류. 잠시 후 다시 시도해주세요.");
+    } catch (e: any) {
+      setError(e?.message === "초기 비밀번호 설정 필요" ? e.message : "관리자 인증 설정 오류. 잠시 후 다시 시도해주세요.");
     }
     setLoading(false);
   }

@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from "react";
 import GoogleFlowCard from "../GoogleFlowCard";
 import { supabase, getAccounts, upsertAccount, PublyAccount, getHistory, PublyHistory, addHistory, deleteHistory, deleteAllHistory, setAdminPassword, saveAdminNaverApiKeys, getNaverApiKeys, NaverApiKeys, getNaverDailyUsage, NAVER_DAILY_LIMIT, checkNaverQuota, incrementNaverQuota, getUserNaverApiKeys, getReferrals, getErrorLogs, getUnreadErrorCount, markErrorsAsRead, logError, PLAN_CONFIG, getAllNeighborHistory, NeighborHistory, getAllEngageHistory, EngageHistory, InstaDmTarget, InstaDmHistory, InstaDmQuota, getInstaDmTargets, addInstaDmTarget, updateInstaDmTargetStatus, deleteInstaDmTarget, getInstaDmHistory, addInstaDmHistory, getAllInstaDmHistory, getInstaDmQuota, upsertInstaDmQuota, getAllInstaDmQuotas, INSTA_DM_DAILY_LIMIT } from "../lib/supabase";
 import NeighborPage from "./NeighborPage";
+import { botFetch, BotEventStream } from "../lib/botApi";
 
 interface Props {
   onBack: () => void;
@@ -16,7 +17,7 @@ interface UserFull {
   payments?: any[]; notes?: any[]; history_count?: number;
 }
 
-const BOT = "http://localhost:3333";
+const BOT = "http://127.0.0.1:3333";
 const INSTA_BOT = "http://127.0.0.1:3335";
 const ADM_UID = "admin-publy";
 const GEMINI_MODELS_ADM = ["gemini-2.0-flash","gemini-2.0-flash-lite","gemini-2.5-flash","gemini-2.5-flash-lite"];
@@ -619,19 +620,19 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
   const [dmConnecting, setDmConnecting] = useState(false);
   const [dmLogs, setDmLogs] = useState<string[]>([]);
   const [dmRunning, setDmRunning] = useState(false);
-  const esDmRef = useRef<EventSource|null>(null);
+  const esDmRef = useRef<BotEventStream|null>(null);
   const dmLog = (m:string)=>setDmLogs(p=>[...p.slice(-200), m]);
 
   const checkDmSession = async(acct:string)=>{
     if(!acct){setDmSessionOk(false);return;}
-    try{ const r=await fetch(`${INSTA_BOT}/api/session/${encodeURIComponent(acct)}`); const j=await r.json(); setDmSessionOk(!!j.exists); }catch{ setDmSessionOk(false); }
+    try{ const r=await botFetch(`${INSTA_BOT}/api/session/${encodeURIComponent(acct)}`); const j=await r.json(); setDmSessionOk(!!j.exists); }catch{ setDmSessionOk(false); }
   };
   const connectIg = async()=>{
     const acct=dmAccount.trim().replace(/^@/,"");
     if(!acct||!dmIgPw){showToast("인스타 아이디와 비밀번호를 입력해주세요","error");return;}
     setDmConnecting(true);
     try{
-      const r=await fetch(`${INSTA_BOT}/api/login`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({accountId:acct,id:acct,pw:dmIgPw})});
+      const r=await botFetch(`${INSTA_BOT}/api/login`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({accountId:acct,id:acct,pw:dmIgPw})});
       const j=await r.json();
       if(j.success){setDmSessionOk(true);setDmIgPw("");showToast("✅ 인스타 계정 연결 완료!");}
       else showToast("연결 실패: "+(j.error||""),"error");
@@ -644,7 +645,7 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
     if(!dmKeyword.trim()){showToast("검색 키워드를 입력해주세요","error");return;}
     setDmRunning(true);setDmLogs([]);
     const url=`${INSTA_BOT}/api/crawl?accountId=${encodeURIComponent(acct)}&keyword=${encodeURIComponent(dmKeyword.trim())}&limit=30&minFollowers=${encodeURIComponent(dmFollowerMin||"0")}&maxFollowers=${encodeURIComponent(dmFollowerMax||"0")}`;
-    const es=new EventSource(url);esDmRef.current=es;
+    const es=new BotEventStream(url);esDmRef.current=es;
     es.onmessage=async e=>{
       const d=JSON.parse(e.data);
       if(d.type==="log")dmLog(d.msg);
@@ -662,7 +663,7 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
     if(!pend.length){showToast("발송할 '대기중' 타겟이 없어요","error");return;}
     setDmRunning(true);setDmLogs([]);
     const url=`${INSTA_BOT}/api/send?userId=${encodeURIComponent(ADM_UID)}&accountId=${encodeURIComponent(acct)}&message=${encodeURIComponent(dmMessage)}&targets=${encodeURIComponent(JSON.stringify(pend))}`;
-    const es=new EventSource(url);esDmRef.current=es;
+    const es=new BotEventStream(url);esDmRef.current=es;
     es.onmessage=e=>{
       const d=JSON.parse(e.data);
       if(d.type==="log")dmLog(d.msg);
@@ -901,7 +902,7 @@ Output format (JSON array only, no other text):
         showToast("설정탭에서 네이버 검색광고 API 키를 입력해주세요","error");
         setLoadingKw(false);return;
       }
-      const r=await fetch(`${BOT}/api/naver-keywords`,{
+      const r=await botFetch(`${BOT}/api/naver-keywords`,{
         method:"POST",headers:{"Content-Type":"application/json"},
         body:JSON.stringify({accessLicense:keys.naver_access_license,secretKey:keys.naver_secret_key,customerId:keys.naver_customer_id,keywords:[keyword.trim()]}),
       });
@@ -930,7 +931,7 @@ Output format (JSON array only, no other text):
     }
     setLoadingCats(true); setCategories([]); setCategory("");
     try {
-      const r = await fetch(`${BOT}/api/${plat}/categories/${ADM_UID}`, {signal: AbortSignal.timeout(30000)});
+      const r = await botFetch(`${BOT}/api/${plat}/categories/${ADM_UID}`, {signal: AbortSignal.timeout(30000)});
       const d = await r.json();
       if (d.categories && d.categories.length>0) {
         setCategories(d.categories);
@@ -1189,7 +1190,7 @@ Output format (JSON array only, no other text):
       // 서버 프록시 경유 시도 → 실패 시 직접 호출 폴백
       let text = "";
       try {
-        const proxyR = await fetch(`${BOT}/api/gemini-vision`, {
+        const proxyR = await botFetch(`${BOT}/api/gemini-vision`, {
           method:"POST",
           headers:{"Content-Type":"application/json"},
           body:JSON.stringify({apiKey:geminiKey, parts:imgParts, prompt}),
@@ -1287,7 +1288,7 @@ Output format (JSON array only, no other text):
   }
 
   const checkBot = useCallback(async () => {
-    try { const r = await fetch(`${BOT}/health`,{signal:AbortSignal.timeout(3000)}); setBotOnline(r.ok); }
+    try { const r = await botFetch(`${BOT}/health`,{signal:AbortSignal.timeout(3000)}); setBotOnline(r.ok); }
     catch { setBotOnline(false); }
   }, []);
 
@@ -1977,7 +1978,7 @@ POST3: (제목)|(이유)
         : undefined,
     };
     try {
-      const r = await fetch(`${BOT}/api/publish-full`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(publishBody)});
+      const r = await botFetch(`${BOT}/api/publish-full`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(publishBody)});
       const d = await r.json();
       if (r.status===401) { setPubMsg("❌ 세션 만료 — 계정 관리 탭에서 재연결해주세요"); setPublishing(false); return; }
       if (!r.ok) throw new Error(d.error);
@@ -2130,7 +2131,7 @@ POST3: (제목)|(이유)
     if (!botOnline) { alert("봇 서버 실행 필요"); return; }
     setConnId(acc.id);
     try {
-      const r = await fetch(`${BOT}/api/${acc.platform}/save-session`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({userId:ADM_UID,id:acc.username,pw:atob((acc as any).password_encrypted||""),blogName:acc.blog_name})});
+      const r = await botFetch(`${BOT}/api/${acc.platform}/save-session`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({userId:ADM_UID,id:acc.username,pw:atob((acc as any).password_encrypted||""),blogName:acc.blog_name})});
       if (!r.ok) { const d = await r.json(); throw new Error(d.error); }
       await supabase.from("publy_accounts").update({is_connected:true,connected_at:new Date().toISOString()}).eq("id",acc.id);
       getAccounts(ADM_UID).then(setAdmAccs);

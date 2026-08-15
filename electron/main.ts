@@ -1,12 +1,14 @@
 import { app, BrowserWindow, ipcMain, shell } from "electron";
 import path from "path";
 import { spawn, ChildProcess } from "child_process";
+import { randomBytes } from "crypto";
 
 let mainWindow: BrowserWindow | null = null;
 let botProcess: ChildProcess | null = null;
 let neighborBotProcess: ChildProcess | null = null;
 let instaBotProcess: ChildProcess | null = null;
 const isDev = !app.isPackaged;
+const botAuthToken = randomBytes(32).toString("hex");
 
 async function startBotServer() {
   const botPath = isDev
@@ -41,6 +43,7 @@ async function startBotServer() {
       env: {
         ...process.env,
         PLAYWRIGHT_BROWSERS_PATH: chromiumPath,
+        BOT_AUTH_TOKEN: botAuthToken,
       },
     });
 
@@ -94,6 +97,7 @@ async function startNeighborBotServer() {
         ...process.env,
         PLAYWRIGHT_BROWSERS_PATH: chromiumPath,
         NODE_PATH: path.join(naverBotPath, "node_modules"),
+        BOT_AUTH_TOKEN: botAuthToken,
       },
     });
 
@@ -146,6 +150,7 @@ async function startInstaBotServer() {
         ...process.env,
         PLAYWRIGHT_BROWSERS_PATH: chromiumPath,
         NODE_PATH: path.join(naverBotPath, "node_modules"),
+        BOT_AUTH_TOKEN: botAuthToken,
       },
     });
 
@@ -204,18 +209,18 @@ app.on("window-all-closed", () => {
 
 ipcMain.handle("get-bot-status", async () => {
   try {
-    const res = await fetch("http://localhost:3333/health", { signal: AbortSignal.timeout(2000) });
+    const res = await fetch("http://127.0.0.1:3333/health", { headers: { Authorization: `Bearer ${botAuthToken}` }, signal: AbortSignal.timeout(2000) });
     return res.ok ? "online" : "offline";
   } catch { return "offline"; }
 });
 
-ipcMain.handle("get-bot-secret", async () => "");
+ipcMain.handle("get-bot-secret", async () => botAuthToken);
 
 ipcMain.handle("register-user", async (_event, userId: string) => {
   try {
-    const res = await fetch("http://localhost:3333/api/register-user", {
+    const res = await fetch("http://127.0.0.1:3333/api/register-user", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${botAuthToken}` },
       body: JSON.stringify({ userId }),
       signal: AbortSignal.timeout(3000),
     });
@@ -241,9 +246,9 @@ ipcMain.handle("open-preview", async (_event, html: string) => {
 
 ipcMain.handle("unregister-user", async (_event, userId: string) => {
   try {
-    const res = await fetch("http://localhost:3333/api/unregister-user", {
+    const res = await fetch("http://127.0.0.1:3333/api/unregister-user", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${botAuthToken}` },
       body: JSON.stringify({ userId }),
       signal: AbortSignal.timeout(3000),
     });
