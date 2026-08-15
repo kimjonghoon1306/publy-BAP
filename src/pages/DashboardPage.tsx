@@ -7,7 +7,16 @@ import { botFetch, BotEventStream } from "../lib/botApi";
 
 type MainTab = "keyword" | "write" | "image" | "photo" | "publish" | "manage" | "accounts" | "rank" | "calendar" | "settings" | "neighbor" | "engage" | "insta_dm";
 type OnPartnerProduct = {id:string|null;name:string;image:string;price:number|null;available:boolean;partnerUrl:string;shopUrl:string};
+type OnPartnerPlacement = "auto"|"adpost"|"after_first"|"middle"|"before_last"|"bottom";
 type PublishConcept = "full" | "body_faq" | "body_only";
+const ONPARTNER_PLACEMENT_INFO:Record<OnPartnerPlacement,{label:string;desc:string}>={
+  auto:{label:"✨ 자동 추천",desc:"글 흐름을 분석해 구매 관심이 높아지는 본문 약 60% 지점에 배치해요. 애드포스트 선택 중에는 광고 예상 구간 뒤로 자동 조정해요."},
+  adpost:{label:"📰 애드포스트형",desc:"예상 광고 영역과 바로 붙지 않도록 충분한 본문이 지난 약 70% 지점에 상품 카드를 배치해요."},
+  after_first:{label:"첫 번째 소제목 뒤",desc:"도입과 첫 설명을 읽은 직후 상품을 빠르게 보여줘요."},
+  middle:{label:"본문 정중앙",desc:"정보와 경험이 쌓인 본문 중간에 상품 카드를 배치해요."},
+  before_last:{label:"마지막 소제목 앞",desc:"후기 결론으로 넘어가기 직전에 자연스럽게 구매를 안내해요."},
+  bottom:{label:"글 하단",desc:"기존 방식처럼 본문과 FAQ가 시작되기 전 가장 아래에 배치해요."}
+};
 
 const BOT = "http://127.0.0.1:3333";
 const INSTA_BOT = "http://127.0.0.1:3335";
@@ -806,6 +815,7 @@ Output format (JSON array only, no other text):
   const [onPartnerProduct, setOnPartnerProduct] = useState<OnPartnerProduct|null>(null);
   const [onPartnerLoading, setOnPartnerLoading] = useState(false);
   const [onPartnerError, setOnPartnerError] = useState("");
+  const [onPartnerPlacement, setOnPartnerPlacement] = useState<OnPartnerPlacement>(()=>(localStorage.getItem("publy_onpartner_placement") as OnPartnerPlacement)||"auto");
   const [genTags, setGenTags] = useState("");
   const [generating, setGenerating] = useState(false);
   const abortRef = useRef<AbortController|null>(null);
@@ -1820,6 +1830,21 @@ Output format (JSON array only, no other text):
     }finally{setOnPartnerLoading(false);}
   }
 
+  function placeOnPartnerProduct(generatedBody:string, product:OnPartnerProduct):string{
+    const disclosure="※ 이 글에는 제휴 링크가 포함되어 있으며, 구매 시 작성자에게 일정 수수료가 발생할 수 있습니다.";
+    const productCard=`🛒 ${product.name}${product.price?`\n가격: ${product.price.toLocaleString("ko-KR")}원`:""}\n직접 확인한 내용과 상품 정보를 함께 비교해보세요.\n\n${product.partnerUrl}`;
+    const marker=generatedBody.search(/\n?\[FAQ시작\]/);
+    const main=(marker>=0?generatedBody.slice(0,marker):generatedBody).trim();
+    const tail=(marker>=0?generatedBody.slice(marker).trim():"");
+    const paragraphs=main.split(/\n{2,}/).map(p=>p.trim()).filter(Boolean);
+    const effective=onPartnerPlacement==="auto"?(adType==="adpost"?"adpost":"auto"):onPartnerPlacement;
+    const ratio=effective==="adpost"?.72:effective==="after_first"?.3:effective==="middle"?.5:effective==="before_last"?.82:effective==="bottom"?1:.6;
+    const index=Math.max(1,Math.min(paragraphs.length,Math.round(paragraphs.length*ratio)));
+    paragraphs.splice(index,0,productCard);
+    paragraphs.push("상품이 궁금하다면 위 온파트너 상품 링크에서 가격과 상세 구성을 확인해보세요.");
+    return [disclosure,paragraphs.join("\n\n"),tail].filter(Boolean).join("\n\n");
+  }
+
   async function handleGenerate(){
     if(!selectedTitle&&!keyword){alert("키워드와 제목을 먼저 선택해주세요");return;}
     const title=selectedTitle||keyword;
@@ -1933,10 +1958,7 @@ POST3: (제목)|(이유)
       const bm=cleaned.match(/태그[^\n]*\n([\s\S]+)/);
       setGenTitle(title);if(tgm)setGenTags(tgm[1].trim());
       const generatedBody=ensureQuestionHeadings(bm?bm[1].trim():cleaned,keyword||title);
-      const productBlock=onPartnerProduct?.available
-        ?`\n\n${onPartnerProduct.partnerUrl}\n\n🛒 ${onPartnerProduct.name}${onPartnerProduct.price?`\n가격: ${onPartnerProduct.price.toLocaleString("ko-KR")}원`:""}\n온종일팜에서 상품 정보와 구매 조건을 확인해보세요.\n\n※ 이 글에는 제휴 링크가 포함되어 있으며, 구매 시 일정 수수료를 받을 수 있습니다.`
-        :"";
-      const body=(generatedBody+productBlock).trim();setGenContent(body);setQualityScore(calcQualityScore(body,keyword));
+      const body=onPartnerProduct?.available?placeOnPartnerProduct(generatedBody,onPartnerProduct):generatedBody.trim();setGenContent(body);setQualityScore(calcQualityScore(body,keyword));
       if(imgCountAuto)setImgCount(recommendImgCount(body));
       if(flowImgCountAuto)setFlowImgCount(recommendImgCount(body));
       // ── tarry 방식: 블록 자동 분리 + 제목/태그 자동 연동 ──
@@ -3200,21 +3222,33 @@ POST3: (제목)|(이유)
                 {/* 수익화 목적 + 플랫폼 */}
                 <div className="card" style={{borderColor:onPartnerProduct?"rgba(190,255,0,.38)":undefined}}>
                   <div className="card-title" style={{marginBottom:6}}>🌱 온파트너 상품 링크</div>
-                  <div style={{fontSize:11,color:"var(--text3)",lineHeight:1.6,marginBottom:10}}>온파트너에서 발급받은 추천 링크를 넣으면 상품 소개와 제휴 안내가 글 마지막에 자동으로 들어가요.</div>
+                  <div style={{fontSize:11,color:"var(--text3)",lineHeight:1.6,marginBottom:10}}>추천 링크를 넣으면 제휴 안내는 글 상단에 명확하게 표시하고, 상품 소개 카드는 구매 관심이 높아지는 본문 위치에 자동 배치해요.</div>
                   <div style={{display:"flex",gap:7,alignItems:"stretch"}}>
                     <input className="inp" value={onPartnerLink} onChange={e=>{setOnPartnerLink(e.target.value);setOnPartnerProduct(null);setOnPartnerError("");}} placeholder="https://partner.yuanfnb.com/r/추천코드" style={{flex:1,minWidth:0}}/>
                     <button className="btn btn-secondary" onClick={loadOnPartnerProduct} disabled={onPartnerLoading} style={{flexShrink:0}}>{onPartnerLoading?<><span className="spinner"/>확인 중</>:"상품 확인"}</button>
                   </div>
                   {onPartnerError&&<div style={{fontSize:11,color:"var(--danger)",marginTop:7}}>⚠️ {onPartnerError}</div>}
                   {onPartnerProduct&&(
-                    <div style={{display:"flex",gap:12,alignItems:"center",marginTop:12,padding:10,borderRadius:11,background:"var(--card2)",border:"1px solid var(--border)"}}>
-                      {onPartnerProduct.image?<img src={onPartnerProduct.image} alt={onPartnerProduct.name} style={{width:64,height:64,borderRadius:9,objectFit:"cover",flexShrink:0}}/>:<div style={{width:64,height:64,borderRadius:9,background:"var(--bg2)",display:"grid",placeItems:"center",fontSize:24,flexShrink:0}}>🌱</div>}
-                      <div style={{minWidth:0,flex:1}}>
-                        <div style={{fontSize:13,fontWeight:800,color:"var(--text)",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{onPartnerProduct.name}</div>
-                        <div style={{fontSize:12,fontWeight:800,color:"var(--accent-text)",marginTop:4}}>{onPartnerProduct.price?`${onPartnerProduct.price.toLocaleString("ko-KR")}원`:"가격은 상품 페이지에서 확인"}</div>
-                        <div style={{fontSize:10,color:onPartnerProduct.available?"var(--success)":"var(--danger)",marginTop:3}}>{onPartnerProduct.available?"● 판매 중 · 제휴 링크 적용":"● 현재 판매 중지"}</div>
+                    <div style={{marginTop:12,padding:10,borderRadius:11,background:"var(--card2)",border:"1px solid var(--border)"}}>
+                      <div style={{display:"flex",gap:12,alignItems:"center"}}>
+                        {onPartnerProduct.image?<img src={onPartnerProduct.image} alt={onPartnerProduct.name} style={{width:64,height:64,borderRadius:9,objectFit:"cover",flexShrink:0}}/>:<div style={{width:64,height:64,borderRadius:9,background:"var(--bg2)",display:"grid",placeItems:"center",fontSize:24,flexShrink:0}}>🌱</div>}
+                        <div style={{minWidth:0,flex:1}}>
+                          <div style={{fontSize:13,fontWeight:800,color:"var(--text)",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{onPartnerProduct.name}</div>
+                          <div style={{fontSize:12,fontWeight:800,color:"var(--accent-text)",marginTop:4}}>{onPartnerProduct.price?`${onPartnerProduct.price.toLocaleString("ko-KR")}원`:"가격은 상품 페이지에서 확인"}</div>
+                          <div style={{fontSize:10,color:onPartnerProduct.available?"var(--success)":"var(--danger)",marginTop:3}}>{onPartnerProduct.available?"● 판매 중 · 제휴 링크 적용":"● 현재 판매 중지"}</div>
+                        </div>
+                        <button type="button" onClick={()=>{setOnPartnerLink("");setOnPartnerProduct(null);setOnPartnerError("");}} style={{border:0,background:"transparent",color:"var(--text3)",cursor:"pointer",fontSize:16}}>✕</button>
                       </div>
-                      <button type="button" onClick={()=>{setOnPartnerLink("");setOnPartnerProduct(null);setOnPartnerError("");}} style={{border:0,background:"transparent",color:"var(--text3)",cursor:"pointer",fontSize:16}}>✕</button>
+                      {onPartnerProduct.available&&<div style={{marginTop:10,paddingTop:10,borderTop:"1px solid var(--border)"}}>
+                        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,flexWrap:"wrap"}}>
+                          <b style={{fontSize:11,color:"var(--text2)"}}>📍 상품 카드 위치</b>
+                          <select className="inp" value={onPartnerPlacement} onChange={e=>{const v=e.target.value as OnPartnerPlacement;setOnPartnerPlacement(v);localStorage.setItem("publy_onpartner_placement",v)}} style={{width:"min(210px,100%)",padding:"7px 9px",fontSize:11}}>
+                            {Object.entries(ONPARTNER_PLACEMENT_INFO).map(([value,info])=><option key={value} value={value}>{info.label}</option>)}
+                          </select>
+                        </div>
+                        <div style={{marginTop:7,padding:"8px 10px",borderRadius:9,background:"var(--accent-bg)",color:"var(--text2)",fontSize:10,lineHeight:1.55}}>{ONPARTNER_PLACEMENT_INFO[onPartnerPlacement].desc}</div>
+                        <div style={{marginTop:6,color:"var(--accent-text)",fontSize:10,fontWeight:800}}>상단 제휴 안내 → 선택 위치 상품 카드 → 하단 짧은 구매 안내</div>
+                      </div>}
                     </div>
                   )}
                 </div>
