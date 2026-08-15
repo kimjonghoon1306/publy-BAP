@@ -46,6 +46,7 @@ export interface PublyHistory {
   status: "pending" | "success" | "fail";
   error_message?: string;
   published_at: string;
+  content?: any;  // 재발행용: 발행 당시 payload(title/blocks/thumbnail/tags/visibility 등) 전체 저장
 }
 
 // ── 인증 ─────────────────────────────────────────────────

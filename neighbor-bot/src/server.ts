@@ -8,7 +8,7 @@ const app = express();
 const PORT = 3334;
 
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: "50mb" }));
 
 /* ── 헬스체크 ── */
 app.get("/health", (_req, res) => {
@@ -68,7 +68,7 @@ app.post("/api/stop/:jobId", (req, res) => {
 
 /* ── 블로그 수집 (SSE) ── */
 app.get("/api/crawl", async (req, res) => {
-  const { userId, keywords, countPerKeyword } = req.query as Record<string, string>;
+  const { userId, keywords, countPerKeyword, orderBy, activeDays, excludeMarket } = req.query as Record<string, string>;
   if (!keywords)
     return res.status(400).json({ error: "keywords 필요" });
 
@@ -94,6 +94,9 @@ app.get("/api/crawl", async (req, res) => {
       accountId: "",
       keywords: kwList,
       countPerKeyword: count,
+      orderBy: orderBy === "sim" ? "sim" : "recentdate",
+      activeDays: activeDays ? parseInt(activeDays, 10) : 0,
+      excludeMarket: excludeMarket !== "false",
       onLog: (msg) => sseSend(res, { type: "log", msg }),
     });
 

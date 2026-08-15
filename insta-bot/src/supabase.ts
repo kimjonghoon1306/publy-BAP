@@ -1,4 +1,10 @@
 import { createClient } from "@supabase/supabase-js";
+import WebSocket from "ws";
+
+// Node 20 등 native WebSocket 없는 런타임 폴리필 (Supabase Realtime 초기화 크래시 방지)
+if (typeof (globalThis as any).WebSocket === "undefined") {
+  (globalThis as any).WebSocket = WebSocket;
+}
 
 const SUPABASE_URL = "https://qhhoyxexxlimbjrbwrgq.supabase.co";
 // anon 키 (공개용 — RLS 미사용, 접근제어는 앱/봇단 user_id 필터)

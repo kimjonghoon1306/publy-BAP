@@ -976,19 +976,38 @@ export function donePath(accountId: string): string {
   return path.join(SESSION_DIR, `done_${accountId}.json`);
 }
 
-/* ── 키워드로 블로그 ID 수집 ── */
-const INVALID_BLOG_IDS = ["PostList","BlogHome","FeedList","neighborPostList","TagList","GoBlogWrite","search","Search","blogpeople","people"];
+/* ── 키워드로 블로그 수집 (체험단 최적화판) ──
+   네이버 검색이 SPA로 바뀌어 HTML 스크레이핑이 죽음 → ajax JSON API로 전환.
+   추가로 체험단 모집에 맞게: 최신활동 우선 정렬 / 판매·마켓글 제외 / 활동 블로거 필터 / 메타데이터 수집. */
+const INVALID_BLOG_IDS = ["PostList","BlogHome","FeedList","neighborPostList","TagList","GoBlogWrite","search","Search","blogpeople","people","section","recommend","ThemePost","BlogTop"];
+
+export interface BlogTarget {
+  keyword: string;
+  blogId: string;
+  nickName?: string;
+  blogName?: string;
+  addDate?: number;   // 최근 글 작성일(ms) — 활동성 판단용
+  postUrl?: string;
+  thumbnail?: string;
+}
 
 export async function crawlBlogIds(params: {
   accountId: string;
   keywords: string[];
   countPerKeyword: number;
+  orderBy?: "sim" | "recentdate";   // 정렬: 정확도 vs 최신(기본 최신 = 활동중 블로거 우선)
+  activeDays?: number;              // 최근 N일 내 글쓴 블로거만 (0/미지정 = 무제한)
+  excludeMarket?: boolean;          // 판매·마켓 블로거 제외 (기본 true)
   onLog?: (msg: string) => void;
-}): Promise<{ keyword: string; blogId: string }[]> {
+}): Promise<BlogTarget[]> {
   const { keywords, countPerKeyword, onLog } = params;
+  const orderBy = params.orderBy || "recentdate";
+  const activeDays = params.activeDays ?? 0;
+  const excludeMarket = params.excludeMarket !== false;
   const log = onLog || console.log;
-  const results: { keyword: string; blogId: string }[] = [];
+  const activeCutoff = activeDays > 0 ? Date.now() - activeDays * 86400000 : 0;
 
+  const results: BlogTarget[] = [];
   const browser = await chromium.launch({ headless: true, args: LAUNCH_ARGS });
   const context = await browser.newContext({ userAgent: UA, locale: "ko-KR" });
   await applyAntiDetection(context);
@@ -996,45 +1015,94 @@ export async function crawlBlogIds(params: {
 
   try {
     for (const kw of keywords) {
-      log(`[수집] "${kw}" 검색 중...`);
-      const collected = new Set<string>();
-      let pageNum = 1;
+      log(`[수집] "${kw}" 검색 중... (정렬: ${orderBy === "recentdate" ? "최신활동" : "정확도"}${excludeMarket ? ", 판매글 제외" : ""})`);
+      // Referer/쿠키 세팅 위해 검색 페이지 먼저 방문
+      await page.goto(`https://section.blog.naver.com/Search/Post.naver?term=${encodeURIComponent(kw)}`,
+        { waitUntil: "domcontentloaded", timeout: 20000 }).catch(() => {});
+      await page.waitForTimeout(500);
 
-      while (collected.size < countPerKeyword && pageNum <= 15) {
+      const seen = new Set<string>();
+      let got = 0, skippedMarket = 0, skippedStale = 0;
+      const perPage = 10, maxPages = 20;
+
+      for (let pageNum = 1; pageNum <= maxPages && got < countPerKeyword; pageNum++) {
+        const apiUrl = `https://section.blog.naver.com/ajax/SearchList.naver?countPerPage=${perPage}&currentPage=${pageNum}&endDate=&keyword=${encodeURIComponent(kw)}&orderBy=${orderBy}&startDate=&type=post`;
+        let list: any[] = [];
         try {
-          const url = `https://section.blog.naver.com/Search/Post.naver?term=${encodeURIComponent(kw)}&currentPage=${pageNum}`;
-          await page.goto(url, { waitUntil: "domcontentloaded", timeout: 20000 });
-          await page.waitForTimeout(800);
+          const raw = await page.evaluate(async (u) => {
+            const r = await fetch(u, { headers: { Referer: location.href } });
+            return await r.text();
+          }, apiUrl);
+          const data = JSON.parse(raw.replace(/^\)\]\}',?\s*/, ""));
+          list = data?.result?.searchList || [];
+        } catch { list = []; }
 
-          const hrefs: string[] = await page.$$eval('a[href*="blog.naver.com"]', (els) =>
-            els.map((el) => (el as HTMLAnchorElement).href)
-          );
+        if (!list.length) break;
 
-          let found = 0;
-          for (const href of hrefs) {
-            const m = href.match(/blog\.naver\.com\/([a-zA-Z0-9_-]+)/);
-            if (m && m[1] && !INVALID_BLOG_IDS.includes(m[1])) {
-              if (!collected.has(m[1])) { collected.add(m[1]); found++; }
-            }
-            if (collected.size >= countPerKeyword) break;
-          }
-
-          if (found === 0) break;
-          pageNum++;
-          await page.waitForTimeout(300);
-        } catch { break; }
+        for (const item of list) {
+          const blogId = item.domainIdOrBlogId || item.blogId;
+          if (!blogId || INVALID_BLOG_IDS.includes(blogId) || seen.has(blogId)) continue;
+          if (excludeMarket && (item.marketPost || item.product)) { skippedMarket++; continue; }
+          if (activeCutoff && item.addDate && item.addDate < activeCutoff) { skippedStale++; continue; }
+          seen.add(blogId);
+          results.push({
+            keyword: kw,
+            blogId,
+            nickName: item.nickName || undefined,
+            blogName: item.blogName || undefined,
+            addDate: item.addDate || undefined,
+            postUrl: item.postUrl || undefined,
+            thumbnail: item.thumbnails?.[0]?.url || item.profileImgUrl || undefined,
+          });
+          got++;
+          if (got >= countPerKeyword) break;
+        }
+        await page.waitForTimeout(250);
       }
 
-      for (const blogId of collected) {
-        results.push({ keyword: kw, blogId });
+      log(`[수집] "${kw}" → ${got}개 수집` +
+        (skippedMarket ? ` (판매글 ${skippedMarket}개 제외)` : "") +
+        (skippedStale ? ` (오래된 블로그 ${skippedStale}개 제외)` : ""));
+
+      // 폴백: JSON에서 하나도 못 얻으면 모바일 검색 스크레이핑
+      if (got === 0) {
+        log(`[수집] "${kw}" API 0건 → 모바일 검색 폴백...`);
+        try {
+          const fb = await crawlMobileFallback(context, kw, countPerKeyword);
+          for (const b of fb) { if (!seen.has(b.blogId)) { seen.add(b.blogId); results.push(b); } }
+          log(`[수집] "${kw}" 폴백 → ${fb.length}개`);
+        } catch (e: any) { log(`[수집] 폴백 실패: ${e.message}`); }
       }
-      log(`[수집] "${kw}" → ${collected.size}개 수집 완료`);
     }
   } finally {
     await browser.close().catch(() => {});
   }
 
   return results;
+}
+
+/* 모바일 통합검색 블로그탭 폴백 (ajax API가 막혔을 때) */
+async function crawlMobileFallback(context: BrowserContext, keyword: string, limit: number): Promise<BlogTarget[]> {
+  const MUA = "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1";
+  const page = await context.newPage();
+  const out: BlogTarget[] = [];
+  const seen = new Set<string>();
+  try {
+    await page.setExtraHTTPHeaders({ "User-Agent": MUA });
+    await page.goto(`https://m.search.naver.com/search.naver?ssc=tab.m_blog.all&query=${encodeURIComponent(keyword)}`,
+      { waitUntil: "domcontentloaded", timeout: 20000 });
+    await page.waitForTimeout(1200);
+    const hrefs: string[] = await page.$$eval('a[href*="blog.naver.com"]', els => els.map(e => (e as HTMLAnchorElement).href));
+    for (const h of hrefs) {
+      const m = h.match(/blog\.naver\.com\/([a-zA-Z0-9_-]+)/);
+      if (m && m[1] && !INVALID_BLOG_IDS.includes(m[1]) && !seen.has(m[1])) {
+        seen.add(m[1]);
+        out.push({ keyword, blogId: m[1] });
+        if (out.length >= limit) break;
+      }
+    }
+  } finally { await page.close().catch(() => {}); }
+  return out;
 }
 
 /* ── 서이추 신청 ── */

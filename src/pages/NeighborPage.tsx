@@ -4,8 +4,27 @@ const BOT = "http://127.0.0.1:3334";
 
 /* ── 타입 ── */
 interface Account { accountId: string; id: string; pw: string; blogId: string; sessionOk: boolean; loginLoading: boolean; showPw: boolean; }
-interface Target { keyword: string; blogId: string; }
-interface WorkResult { keyword: string; blogId: string; status: "success"|"fail"|"skip"|"limit"|"pending"|"running"; message: string; }
+interface Target { keyword: string; blogId: string; nickName?: string; blogName?: string; addDate?: number; postUrl?: string; thumbnail?: string; }
+interface WorkResult { keyword: string; blogId: string; nickName?: string; blogName?: string; addDate?: number; postUrl?: string; thumbnail?: string; status: "success"|"fail"|"skip"|"limit"|"pending"|"running"; message: string; }
+
+// 최근 글 작성일 → 상대시간 (활동성 한눈에)
+function relTime(ms?: number): string {
+  if (!ms) return "";
+  const d = Math.floor((Date.now() - ms) / 86400000);
+  if (d <= 0) return "오늘";
+  if (d === 1) return "어제";
+  if (d < 30) return `${d}일 전`;
+  if (d < 365) return `${Math.floor(d / 30)}개월 전`;
+  return `${Math.floor(d / 365)}년 전`;
+}
+
+// 체험단 모집용 서이추 멘트 프리셋 — 순환 사용으로 도배·스팸 탐지 회피. pick.온종일.com = 온종일체험단
+const CAMPAIGN_LINK = "pick.온종일.com";
+const CAMPAIGN_PRESETS = [
+  `안녕하세요 😊 블로그 글 잘 보고 있어요! 서로이웃 신청드려요~ 혹시 무료 체험단·협찬에 관심 있으시면 '온종일체험단'(${CAMPAIGN_LINK}) 한번 놀러오세요 🎁`,
+  `포스팅에 정성이 가득하네요 👍 서이추 해요! 맛집·뷰티·생활용품 무료 체험 원하시면 ${CAMPAIGN_LINK} 에서 신청할 수 있어요 :)`,
+  `좋은 글 잘 읽었습니다 ✨ 이웃 신청드려요! 체험단 활동 좋아하시면 온종일체험단(${CAMPAIGN_LINK})도 추천드려요~`,
+];
 interface EngageResult { keyword: string; blogId: string; postUrl: string; liked: boolean; commented: boolean; status: "success"|"fail"|"skip"|"pending"|"running"; message: string; }
 interface Props { theme: "dark"|"light"; userId?: string; plan?: string; initialTab?: "neighbor"|"engage"; singleTab?: boolean; }
 
@@ -129,6 +148,10 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
   const [delayMax, setDelayMax] = useState(10);
   const [skipDone, setSkipDone] = useState(true);
   const [autoStart, setAutoStart] = useState(false);
+  // 체험단 모집 최적화 옵션
+  const [orderBy, setOrderBy] = useState<"recentdate"|"sim">("recentdate");
+  const [activeDays, setActiveDays] = useState<number>(30);
+  const [excludeMarket, setExcludeMarket] = useState(true);
   const [msgMode, setMsgMode] = useState<"single"|"multi">("single");
   const [singleMsg, setSingleMsg] = useState("안녕하세요! 좋은 글 잘 읽고 갑니다. 서이추 신청드려요 😊");
   const [multiMsgs, setMultiMsgs] = useState("안녕하세요! 좋은 글 잘 읽고 갑니다. 서이추 신청드려요 😊\n공감가는 글이 많네요. 서이추 해요!\n좋은 정보 잘 보고 갑니다. 이웃 신청드려요^^");
@@ -247,12 +270,17 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
   , []);
 
   /* 서이추 수집 */
+  const applyCampaignPreset = () => {
+    setMsgMode("multi");
+    setMultiMsgs(CAMPAIGN_PRESETS.join("\n"));
+  };
+
   const handleCrawl = async () => {
     const kwList = keywords.split(",").map(k => k.trim()).filter(Boolean);
     if (!kwList.length) return alert("키워드를 입력하세요");
     setCrawling(true); setTargets([]); setResults([]); setDoneCnt(0); setFailCnt(0);
     addLog(`🔍 수집 시작 — 키워드: ${kwList.join(", ")} / 키워드당 ${countPerKw}개`);
-    const es = new EventSource(`${BOT}/api/crawl?keywords=${encodeURIComponent(kwList.join(","))}&countPerKeyword=${countPerKw}${userId ? `&userId=${userId}` : ""}`);
+    const es = new EventSource(`${BOT}/api/crawl?keywords=${encodeURIComponent(kwList.join(","))}&countPerKeyword=${countPerKw}&orderBy=${orderBy}&activeDays=${activeDays}&excludeMarket=${excludeMarket}${userId ? `&userId=${userId}` : ""}`);
     esRef.current = es;
     es.onmessage = e => {
       const d = JSON.parse(e.data);
@@ -467,6 +495,29 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
                   <input className="inp" type="number" min={1} max={100} value={dailyLimit} onChange={e => setDailyLimit(Number(e.target.value))} style={{ fontSize: 13, padding: "11px 14px" }} />
                 </div>
               </div>
+
+              {/* ── 체험단 모집 최적화 ── */}
+              <div style={{ marginBottom: 12, padding: "14px", borderRadius: 12, background: "var(--accent-bg)", border: "1px solid var(--accent)" }}>
+                <div style={{ fontSize: 12.5, fontWeight: 800, color: "var(--accent-text)", marginBottom: 12, display: "flex", alignItems: "center", gap: 6 }}>
+                  🎯 체험단 모집 최적화
+                </div>
+                <label className="inp-label" style={{ fontSize: 11.5, marginBottom: 6, display: "block", color: "var(--text3)", fontWeight: 600 }}>수집 정렬</label>
+                <div style={{ display: "flex", gap: 6, marginBottom: 14 }}>
+                  {([["recentdate", "최신 활동순"], ["sim", "정확도순"]] as const).map(([v, l]) => (
+                    <button key={v} onClick={() => setOrderBy(v)} style={{ flex: 1, padding: "10px", borderRadius: 9, border: `2px solid ${orderBy === v ? "var(--accent)" : "var(--border)"}`, background: orderBy === v ? "var(--card)" : "transparent", color: orderBy === v ? "var(--accent-text)" : "var(--text2)", cursor: "pointer", fontSize: 12.5, fontWeight: 700, fontFamily: "inherit", transition: "all .15s" }}
+                      onMouseEnter={e => (e.currentTarget.style.transform = "translateY(-1px)")} onMouseLeave={e => (e.currentTarget.style.transform = "")}>{l}</button>
+                  ))}
+                </div>
+                <label className="inp-label" style={{ fontSize: 11.5, marginBottom: 6, display: "block", color: "var(--text3)", fontWeight: 600 }}>최근 글 쓴 블로거만 <span style={{ color: "var(--text3)", fontWeight: 400 }}>(죽은 블로그 제외)</span></label>
+                <div style={{ display: "flex", gap: 6, marginBottom: 14 }}>
+                  {([[0, "전체"], [7, "7일"], [30, "30일"], [90, "90일"]] as const).map(([v, l]) => (
+                    <button key={v} onClick={() => setActiveDays(v)} style={{ flex: 1, padding: "10px", borderRadius: 9, border: `2px solid ${activeDays === v ? "var(--accent)" : "var(--border)"}`, background: activeDays === v ? "var(--card)" : "transparent", color: activeDays === v ? "var(--accent-text)" : "var(--text2)", cursor: "pointer", fontSize: 12.5, fontWeight: 700, fontFamily: "inherit", transition: "all .15s" }}
+                      onMouseEnter={e => (e.currentTarget.style.transform = "translateY(-1px)")} onMouseLeave={e => (e.currentTarget.style.transform = "")}>{l}</button>
+                  ))}
+                </div>
+                <Toggle val={excludeMarket} set={setExcludeMarket} label="판매·마켓 블로거 제외" />
+              </div>
+
               <div style={{ padding: "10px 14px", borderRadius: 10, background: "var(--bg2)", border: "1px solid var(--border)", fontSize: 12, color: "var(--text3)" }}>
                 총 수집 예정: <strong style={{ color: "var(--accent-text)" }}>{keywords.split(",").filter(k => k.trim()).length * countPerKw}개</strong>
               </div>
@@ -488,7 +539,15 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
             </div>
 
             <div className="card" style={{ padding: "18px 20px" }}>
-              <div className="card-title" style={{ marginBottom: 14, fontSize: 15 }}>💬 서이추 멘트</div>
+              <div className="card-title" style={{ marginBottom: 14, fontSize: 15, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                <span>💬 서이추 멘트</span>
+                <button onClick={applyCampaignPreset} title="체험단 모집 문구 3종을 자동으로 채웁니다 (순환 사용)"
+                  style={{ padding: "6px 12px", borderRadius: 8, border: "1px solid var(--accent)", background: "var(--accent-bg)", color: "var(--accent-text)", cursor: "pointer", fontSize: 11.5, fontWeight: 700, fontFamily: "inherit", display: "flex", alignItems: "center", gap: 4, transition: "all .15s" }}
+                  onMouseEnter={e => { e.currentTarget.style.transform = "translateY(-1px)"; e.currentTarget.style.boxShadow = "0 3px 10px var(--accent-bg)"; }}
+                  onMouseLeave={e => { e.currentTarget.style.transform = ""; e.currentTarget.style.boxShadow = ""; }}
+                  onMouseDown={e => (e.currentTarget.style.transform = "scale(.96)")}
+                  onMouseUp={e => (e.currentTarget.style.transform = "translateY(-1px)")}>🎁 체험단 멘트</button>
+              </div>
               <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
                 {(["single", "multi"] as const).map(m => (
                   <button key={m} onClick={() => setMsgMode(m)} style={{ flex: 1, padding: "10px", borderRadius: 10, border: `2px solid ${msgMode === m ? "var(--accent)" : "var(--border)"}`, background: msgMode === m ? "var(--accent-bg)" : "transparent", color: msgMode === m ? "var(--accent-text)" : "var(--text2)", cursor: "pointer", fontSize: 12, fontWeight: 700, fontFamily: "inherit" }}>
@@ -563,12 +622,22 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
                 <div style={{ overflowX: "auto", maxHeight: 380, overflowY: "auto" }}>
                   <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
                     <thead><tr style={{ background: "var(--bg2)", position: "sticky", top: 0 }}>
-                      {["키워드", "블로그 ID", "결과"].map(h => <th key={h} style={{ padding: "10px 14px", textAlign: "left", fontWeight: 700, color: "var(--text3)", borderBottom: "1px solid var(--border)", whiteSpace: "nowrap" }}>{h}</th>)}
+                      {["키워드", "블로거", "결과"].map(h => <th key={h} style={{ padding: "10px 14px", textAlign: "left", fontWeight: 700, color: "var(--text3)", borderBottom: "1px solid var(--border)", whiteSpace: "nowrap" }}>{h}</th>)}
                     </tr></thead>
                     <tbody>{results.map((r, i) => (
                       <tr key={i} style={{ borderBottom: "1px solid var(--border)" }} onMouseEnter={e => (e.currentTarget.style.background = "var(--card-hover)")} onMouseLeave={e => (e.currentTarget.style.background = "")}>
                         <td style={{ padding: "10px 14px", color: "var(--accent-text)", fontWeight: 700 }}>{r.keyword}</td>
-                        <td style={{ padding: "10px 14px" }}><a href={`https://blog.naver.com/${r.blogId}`} target="_blank" rel="noreferrer" style={{ color: "var(--info)", textDecoration: "none" }}>{r.blogId}</a></td>
+                        <td style={{ padding: "10px 14px" }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
+                            {r.thumbnail && <img src={r.thumbnail} alt="" style={{ width: 34, height: 34, borderRadius: 8, objectFit: "cover", flexShrink: 0, border: "1px solid var(--border)" }} onError={e => (e.currentTarget.style.display = "none")} />}
+                            <div style={{ minWidth: 0 }}>
+                              <div style={{ fontWeight: 700, color: "var(--text)", fontSize: 12.5, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: 170 }}>{r.nickName || r.blogName || r.blogId}</div>
+                              <a href={r.postUrl || `https://blog.naver.com/${r.blogId}`} target="_blank" rel="noreferrer" style={{ color: "var(--info)", textDecoration: "none", fontSize: 11 }}>
+                                {r.blogId}{r.addDate ? <span style={{ color: "var(--text3)" }}> · {relTime(r.addDate)}</span> : null}
+                              </a>
+                            </div>
+                          </div>
+                        </td>
                         <td style={{ padding: "10px 14px" }}>
                           <span style={{ fontSize: 12, padding: "4px 10px", borderRadius: 99, background: `${statusColor(r.status)}18`, color: statusColor(r.status), border: `1px solid ${statusColor(r.status)}40`, fontWeight: 700 }}>{statusLabel(r.status)}</span>
                           {r.status === "fail" && <span style={{ fontSize: 11, color: "var(--text3)", marginLeft: 8 }}>{r.message}</span>}

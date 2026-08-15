@@ -13,7 +13,7 @@ const app = express();
 const PORT = 3335;
 
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: "50mb" }));
 
 /* ── 헬스체크 ── */
 app.get("/health", (_req, res) => {

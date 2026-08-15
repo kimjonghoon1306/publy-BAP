@@ -2,7 +2,7 @@ import express from "express";
 import cors from "cors";
 import fs from "fs-extra";
 import path from "path";
-import { saveNaverSession, publishNaver, naverSessionExists, generateFlowImages, getNaverCategories, saveGoogleSession, googleSessionExists } from "./naver";
+import { saveNaverSession, publishNaver, naverSessionExists, generateFlowImages, generateFlowImagesCDP, getNaverCategories, saveGoogleSession, googleSessionExists } from "./naver";
 import { saveTistorySession, publishTistory, tistorySessionExists } from "./tistory";
 import { fetchPendingJobs, updateJob, addHistory, useQuota } from "./supabase";
 
@@ -10,7 +10,7 @@ const app = express();
 const PORT = 3333;
 
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: "50mb" })); // base64 이미지 포함 발행 대비
 
 /* ── 동시 발행 제한 큐 ── */
 const MAX_CONCURRENT = 3;
@@ -110,6 +110,7 @@ app.get("/api/session-status/:userId", (req, res) => {
 /* ── 직접 발행 (앱에서 즉시 발행) ── */
 app.post("/api/publish-full", async (req, res) => {
   const { userId, platform, title, content, pubScope = "full", tags = [], imageUrl, categoryId, visibility, scheduleTime, blocks,
+    videoUrl, videoPosition,
     useFlow, flowImgCount, flowPrompts, flowCaptions } = req.body;
   if (!userId || !platform || !title || !content) {
     return res.status(400).json({ error: "userId, platform, title, content 필요" });
@@ -168,7 +169,7 @@ app.post("/api/publish-full", async (req, res) => {
 
     let postUrl = "";
     if (platform === "naver") {
-      postUrl = await publishNaver({ userId, title, content, pubScope, tags, imageUrl, categoryId, visibility, scheduleTime, blocks: finalBlocks });
+      postUrl = await publishNaver({ userId, title, content, pubScope, tags, imageUrl, categoryId, visibility, scheduleTime, blocks: finalBlocks, videoUrl, videoPosition });
     } else if (platform === "tistory") {
       postUrl = await publishTistory({ userId, title, content, tags, categoryId, visibility });
     } else {
@@ -347,6 +348,105 @@ app.post("/api/gemini-vision", async (req, res) => {
     } catch {}
   }
   return res.status(500).json({ error: "생성 실패. Gemini 키를 확인하거나 잠시 후 다시 시도해주세요." });
+});
+
+/* ── Google Flow 디버깅 크롬 준비 상태 확인 ── */
+app.get("/api/flow/status", async (_req, res) => {
+  try {
+    const r = await fetch("http://localhost:9222/json/version", { signal: AbortSignal.timeout(2000) });
+    if (!r.ok) return res.json({ ready: false, reason: "cdp_not_ok" });
+    // Flow 탭 로그인 여부까지는 생성 시 확인. 여기선 디버깅 포트만.
+    return res.json({ ready: true });
+  } catch {
+    return res.json({ ready: false, reason: "chrome_not_debug" });
+  }
+});
+
+/* ── Google Flow 이미지 생성 (CDP 방식) ── */
+app.post("/api/flow-generate", async (req, res) => {
+  const { prompts, captions } = req.body;
+  if (!Array.isArray(prompts) || prompts.length === 0)
+    return res.status(400).json({ error: "prompts 배열 필요" });
+  try {
+    const images = await generateFlowImagesCDP({
+      prompts,
+      captions: Array.isArray(captions) ? captions : [],
+      cdpPort: 9222,
+      onLog: (m) => console.log(m),
+    });
+    if (images.length === 0) {
+      return res.status(500).json({ error: "이미지가 생성되지 않았어요. Flow 로그인/크레딧을 확인하거나 잠시 후 다시 시도해주세요." });
+    }
+    res.json({ images }); // [{src: dataURL, alt}]
+  } catch (e: any) {
+    const msg = e.message || "";
+    if (msg.includes("CDP_CONNECT_FAIL")) return res.status(503).json({ error: "Flow 준비가 안 됐어요. 'Flow 준비' 버튼으로 크롬을 먼저 열어주세요.", code: "CDP_CONNECT_FAIL" });
+    if (msg.includes("FLOW_NOT_LOGGED_IN")) return res.status(401).json({ error: "크롬에서 Google Flow에 먼저 로그인해주세요.", code: "FLOW_NOT_LOGGED_IN" });
+    res.status(500).json({ error: msg });
+  }
+});
+
+/* ── Replicate 이미지 생성 프록시 (브라우저 CORS 우회) ── */
+app.post("/api/replicate-image", async (req, res) => {
+  const { key, prompt, aspectRatio } = req.body;
+  if (!key || !prompt) return res.status(400).json({ error: "key, prompt 필요" });
+  try {
+    // 1) prediction 생성
+    const cr = await fetch("https://api.replicate.com/v1/models/black-forest-labs/flux-schnell/predictions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": `Bearer ${key}` },
+      body: JSON.stringify({ input: { prompt, num_outputs: 1, aspect_ratio: aspectRatio || "16:9" } }),
+    });
+    if (!cr.ok) {
+      const t = await cr.text();
+      return res.status(cr.status).json({ error: `Replicate ${cr.status}: ${t.slice(0, 300)}` });
+    }
+    let pred: any = await cr.json();
+    const pollUrl = pred?.urls?.get;
+    if (!pollUrl) return res.status(500).json({ error: "Replicate 응답 오류(폴링 URL 없음)" });
+
+    // 2) 완료까지 폴링 (최대 ~90초)
+    for (let i = 0; i < 60 && !["succeeded", "failed", "canceled"].includes(pred.status); i++) {
+      await new Promise(r => setTimeout(r, 1500));
+      const pr = await fetch(pollUrl, { headers: { "Authorization": `Bearer ${key}` } });
+      pred = await pr.json();
+    }
+    if (pred.status !== "succeeded") {
+      return res.status(500).json({ error: `이미지 생성 실패: ${pred.status}${pred.error ? " - " + pred.error : ""}` });
+    }
+    const out = Array.isArray(pred.output) ? pred.output[0] : pred.output;
+    if (!out) return res.status(500).json({ error: "이미지 URL이 비어있음" });
+
+    // 3) 이미지를 base64로 변환해 반환 (replicate.delivery도 브라우저 CORS 걸리므로 서버에서 다운로드)
+    const imgRes = await fetch(out);
+    if (!imgRes.ok) return res.status(500).json({ error: "이미지 다운로드 실패" });
+    const buf = Buffer.from(await imgRes.arrayBuffer());
+    const ct = imgRes.headers.get("content-type") || "image/webp";
+    res.json({ image: `data:${ct};base64,${buf.toString("base64")}`, sourceUrl: out });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+/* ── 범용 AI 프록시 (브라우저 CORS 우회 — OpenAI/Groq 등) ──
+   허용 호스트만 통과시켜 SSRF 방지. 프론트는 이걸 경유해 외부 AI를 호출한다. */
+const PROXY_ALLOW = ["api.openai.com", "api.groq.com", "api.anthropic.com"];
+app.post("/api/ai-proxy", async (req, res) => {
+  const { url, method, headers, body } = req.body || {};
+  try {
+    if (!url || typeof url !== "string") return res.status(400).json({ error: "url 필요" });
+    const host = new URL(url).hostname;
+    if (!PROXY_ALLOW.includes(host)) return res.status(403).json({ error: `허용되지 않은 호스트: ${host}` });
+    const r = await fetch(url, {
+      method: method || "POST",
+      headers: headers || { "Content-Type": "application/json" },
+      body: body ? (typeof body === "string" ? body : JSON.stringify(body)) : undefined,
+    });
+    const text = await r.text();
+    res.status(r.status).type(r.headers.get("content-type") || "application/json").send(text);
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
 /* ── 서버 시작 ── */

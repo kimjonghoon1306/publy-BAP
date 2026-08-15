@@ -54,6 +54,15 @@ async function applyAntiDetection(context: BrowserContext) {
 /* ── 이미지 다운로드 (썸네일용) ── */
 async function downloadImageToTemp(url: string): Promise<string | null> {
   try {
+    // base64 data URL 처리 (AI 생성 이미지 — Replicate/DALL-E 등)
+    if (url.startsWith("data:")) {
+      const m = url.match(/^data:(image\/[\w+.-]+);base64,(.+)$/);
+      if (!m) return null;
+      const dext = m[1].includes("png") ? ".png" : m[1].includes("webp") ? ".webp" : ".jpg";
+      const dtmp = path.join(os.tmpdir(), `publy_img_${Date.now()}_${Math.random().toString(36).slice(2, 7)}${dext}`);
+      fs.writeFileSync(dtmp, Buffer.from(m[2], "base64"));
+      return dtmp;
+    }
     const ext = url.includes(".png") ? ".png" : ".jpg";
     // 로컬 파일 경로면 바로 반환 (Flow 이미지)
     if (!url.startsWith("http")) {
@@ -106,7 +115,13 @@ export async function saveNaverSession(
     }, pw);
     await page.waitForTimeout(400);
 
-    await page.click(".btn_login").catch(() => page.click("button[type='submit']"));
+    // 로그인 버튼 클릭 (네이버 개편: #loginBtn_row/#loginBtn_column, class btn_done, type=button — 옛 .btn_login 사라짐)
+    let _loginClicked = false;
+    for (const _sel of ["#loginBtn_row", "#loginBtn_column"]) {
+      try { const _el = await page.$(_sel); if (_el && await _el.isVisible()) { await _el.click(); _loginClicked = true; break; } } catch {}
+    }
+    if (!_loginClicked) { try { await page.click(".btn_login", { timeout: 2000 }); _loginClicked = true; } catch {} }
+    if (!_loginClicked) { await page.keyboard.press("Enter"); }
 
     console.log("[naver] 로그인 대기 중... (캡차 있으면 직접 풀어주세요)");
     try {
@@ -202,7 +217,13 @@ export async function reloginNaverSilent(userId: string): Promise<boolean> {
       if (el) { el.focus(); el.value = v; el.dispatchEvent(new Event("input", { bubbles: true })); }
     }, pw);
     await page.waitForTimeout(300);
-    await page.click(".btn_login").catch(() => page.click("button[type='submit']"));
+    // 로그인 버튼 클릭 (네이버 개편: #loginBtn_row/#loginBtn_column, class btn_done, type=button — 옛 .btn_login 사라짐)
+    let _loginClicked = false;
+    for (const _sel of ["#loginBtn_row", "#loginBtn_column"]) {
+      try { const _el = await page.$(_sel); if (_el && await _el.isVisible()) { await _el.click(); _loginClicked = true; break; } } catch {}
+    }
+    if (!_loginClicked) { try { await page.click(".btn_login", { timeout: 2000 }); _loginClicked = true; } catch {} }
+    if (!_loginClicked) { await page.keyboard.press("Enter"); }
 
     // 캡차가 나오면 실패 (헤드리스라 처리 불가)
     await page.waitForFunction(
@@ -244,7 +265,7 @@ export async function getNaverCategories(
 
   try {
     await page.goto(
-      `https://blog.naver.com/PostWriteForm.naver?blogId=${blogId}`,
+      `https://blog.naver.com/GoBlogWrite.naver?blogId=${blogId}`,
       { waitUntil: "domcontentloaded", timeout: 30000 }
     );
     await page.waitForTimeout(4000);
@@ -339,8 +360,10 @@ export async function publishNaver(params: {
   visibility?: "public" | "neighbor" | "private";
   scheduleTime?: string;
   blocks?: Array<{type: string; content?: string; src?: string; alt?: string}>;
+  videoUrl?: string;
+  videoPosition?: "top" | "middle" | "bottom";
 }): Promise<string> {
-  const { userId, title: rawTitle, content, pubScope = "full", tags, imageUrl, categoryId, visibility = "public", scheduleTime, blocks } = params;
+  const { userId, title: rawTitle, content, pubScope = "full", tags, imageUrl, categoryId, visibility = "public", scheduleTime, blocks, videoUrl, videoPosition = "middle" } = params;
   const title = rawTitle.replace(/\n/g, " ").trim().slice(0, 40);
 
   // pubScope에 따라 블록 필터링 + 마커 제거
@@ -368,7 +391,7 @@ export async function publishNaver(params: {
   const page = await context.newPage();
 
   try {
-    const writeUrl = `https://blog.naver.com/PostWriteForm.naver?blogId=${blogId}`;
+    const writeUrl = `https://blog.naver.com/GoBlogWrite.naver?blogId=${blogId}`;
     console.log(`[naver] 글쓰기 진입: ${writeUrl}`);
     await page.goto(writeUrl, { waitUntil: "domcontentloaded", timeout: 60000 });
 
@@ -539,8 +562,32 @@ export async function publishNaver(params: {
       return false;
     }
 
+    // ── 커서를 문서 맨 끝(마지막 블록의 끝)으로 확실히 이동 ──
+    //   기존 Meta+End 단독은 Mac에서 '스크롤'만 하고 커서를 안 옮겨 글/이미지가 중간에 끼어들던 근본 버그를 잡음.
+    async function moveCursorToEnd() {
+      // 마지막 편집영역(가장 아래 contenteditable)을 실제 클릭 → 커서가 문서 끝으로.
+      //   ⚠️ frame.evaluate(Selection API)는 이미지 업로드 직후 실제 브라우저에서 무한 대기/페이지 닫힘을
+      //   유발(headless에선 재현 안 됨, 실측으로 확인). Meta+End(Mac)도 페이지 닫힘 유발. → 클릭 방식만 사용.
+      const bodySels = [
+        ".se-section-text:last-of-type [contenteditable='true']",
+        ".se-main-container .se-section:not(.se-section-documentTitle):last-of-type [contenteditable='true']",
+        ".se-section-text [contenteditable='true']",
+        ".se-main-container .se-section:not(.se-section-documentTitle) [contenteditable='true']",
+      ];
+      for (const sel of bodySels) {
+        try {
+          const els = await frame.$$(sel);
+          if (els.length) { await els[els.length - 1].click({ timeout: 3000 }); await page.waitForTimeout(120); return; }
+        } catch {}
+      }
+      await frame.click(".se-main-container", { timeout: 3000 }).catch(() => {});
+      await page.waitForTimeout(120);
+    }
+
     // 텍스트 블록 입력 헬퍼
-    async function insertText(text: string) {
+    //   spacerBefore=true면 앞 내용과 사이에 빈 줄 하나를 먼저 넣어 문단이 붙지 않게(모바일 가독성)
+    let anyBodyWritten = false;
+    async function insertText(text: string, spacerBefore = false) {
       const isHtml = /<[a-z][\s\S]*>/i.test(text);
       const plain = isHtml
         ? text
@@ -553,25 +600,25 @@ export async function publishNaver(params: {
             .replace(/[\n]{3,}/g, "\n\n").trim()
         : text;
 
-      await clickEditor();
-      await page.waitForTimeout(400);
-      // 문서 맨 끝으로 이동 - Mac Cmd+End (중간 삽입 완전 방지)
-      await page.keyboard.press("Meta+End");
-      await page.waitForTimeout(300);
-      const lines = plain.split("\n");
+      await moveCursorToEnd();
+      await page.waitForTimeout(200);
+      // 앞 문단/이미지와 사이에 빈 줄 하나 → 문단이 딱 붙지 않게(모바일 가독성)
+      if (spacerBefore && anyBodyWritten) {
+        await page.keyboard.press("Enter");
+        await page.waitForTimeout(120);
+      }
+      const lines = plain.split("\n").filter(l => l.trim().length > 0); // 빈 줄 정리 후 균일 간격 적용
       for (let i = 0; i < lines.length; i++) {
-        if (lines[i].trim()) {
-          // delay를 높여 SE4가 붙여넣기가 아닌 진짜 타이핑으로 인식
-          await page.keyboard.type(lines[i], { delay: 80 });
-          await page.waitForTimeout(100);
-        }
+        // delay를 높여 SE4가 붙여넣기가 아닌 진짜 타이핑으로 인식
+        await page.keyboard.type(lines[i], { delay: 80 });
+        await page.waitForTimeout(100);
+        anyBodyWritten = true;
         if (i < lines.length - 1) {
+          // 문단 사이: Enter 2번(빈 줄 하나) → 줄글이 빽빽하지 않게
           await page.keyboard.press("Enter");
-          await page.waitForTimeout(200);
-          if (lines[i].trim()) {
-            await page.keyboard.press("Enter");
-            await page.waitForTimeout(150);
-          }
+          await page.waitForTimeout(120);
+          await page.keyboard.press("Enter");
+          await page.waitForTimeout(120);
         }
       }
     }
@@ -581,9 +628,7 @@ export async function publishNaver(params: {
       const tmpFile = await downloadImageToTemp(imgUrl);
       if (!tmpFile) { console.log("[naver] 이미지 다운로드 실패:", imgUrl.slice(0,60)); return; }
       try {
-        await clickEditor();
-        await page.waitForTimeout(500);
-        await page.keyboard.press("Meta+End");
+        await moveCursorToEnd();
         await page.keyboard.press("Enter");
         await page.waitForTimeout(500);
 
@@ -592,8 +637,7 @@ export async function publishNaver(params: {
           console.log("[naver] ✅ 이미지 업로드 완료");
           if (alt?.trim()) {
             try {
-              await clickEditor();
-              await page.keyboard.press("Meta+End");
+              await moveCursorToEnd();
               await page.keyboard.press("Enter");
               await insertText(alt.trim());
               console.log("[naver] ✅ 캡션 입력:", alt.trim());
@@ -610,12 +654,44 @@ export async function publishNaver(params: {
       await page.waitForTimeout(1000);
     }
 
+    // ── 영상 임베드 헬퍼 ──
+    //   네이버 블로그는 본문에 유튜브/네이버TV URL을 타이핑+Enter하면 자동 임베드됨(실측 확인).
+    async function embedVideo(url: string) {
+      const u = (url || "").trim();
+      if (!u || !/^https?:\/\//.test(u)) return;
+      try {
+        console.log(`[naver] 영상 임베드: ${u.slice(0, 60)}`);
+        await moveCursorToEnd();
+        await page.keyboard.press("Enter");
+        await page.waitForTimeout(200);
+        await page.keyboard.type(u, { delay: 40 });
+        await page.keyboard.press("Enter");
+        await page.waitForTimeout(3500); // 임베드 변환 대기
+        console.log("[naver] ✅ 영상 임베드 완료");
+      } catch (e: any) {
+        console.log("[naver] 영상 임베드 실패(무시):", e.message);
+      }
+    }
+
+    // 영상을 상단에 넣는 경우: 본문 시작 전에 먼저
+    if (videoUrl && videoPosition === "top") await embedVideo(videoUrl);
+
+    // 영상 middle 위치용: 텍스트 블록 중간 지점 계산
+    const totalTextBlocks = (processedBlocks || []).filter(b => b.type === "text").length;
+    const videoMidPoint = Math.max(1, Math.floor(totalTextBlocks / 2));
+    let textSeen = 0, videoMidDone = false;
+
     // processedBlocks(필터링+마커제거) 사용, 없으면 cleanedContent
     if (processedBlocks && processedBlocks.length > 0) {
       for (const block of processedBlocks) {
         if (block.type === "text" && block.content) {
-          await insertText(block.content);
+          await insertText(block.content, true); // 앞 블록과 빈 줄 간격
           await page.waitForTimeout(200);
+          // 영상 middle: 중간 문단 뒤에 삽입
+          if (videoUrl && videoPosition === "middle" && !videoMidDone) {
+            textSeen++;
+            if (textSeen >= videoMidPoint) { await embedVideo(videoUrl); videoMidDone = true; }
+          }
         } else if (block.type === "image-pair" && (block as any).images?.length >= 2) {
           // 2장 동시 업로드 → 한 줄 나란히 배치
           const pairImages = (block as any).images as {src:string;alt:string}[];
@@ -623,9 +699,7 @@ export async function publishNaver(params: {
           const tmp2 = await downloadImageToTemp(pairImages[1].src);
           if (tmp1 && tmp2) {
             try {
-              await clickEditor();
-              await page.waitForTimeout(500);
-              await page.keyboard.press("Meta+End");
+              await moveCursorToEnd();
               await page.keyboard.press("Enter");
               await page.waitForTimeout(500);
               const ok = await uploadFileToEditor([tmp1, tmp2]);
@@ -634,8 +708,7 @@ export async function publishNaver(params: {
                 const pairAlt = pairImages[0].alt || pairImages[1].alt;
                 if (pairAlt?.trim()) {
                   try {
-                    await clickEditor();
-                    await page.keyboard.press("Meta+End");
+                    await moveCursorToEnd();
                     await page.keyboard.press("Enter");
                     await insertText(pairAlt.trim());
                   } catch {}
@@ -656,6 +729,11 @@ export async function publishNaver(params: {
     } else {
       // fallback: blocks 없으면 cleanedContent 입력
       await insertText(cleanedContent);
+    }
+
+    // 영상 bottom(끝) + middle이 못 들어간 경우(텍스트 적음) 폴백으로 끝에 삽입
+    if (videoUrl && (videoPosition === "bottom" || (videoPosition === "middle" && !videoMidDone))) {
+      await embedVideo(videoUrl);
     }
 
     await page.waitForTimeout(1000);
@@ -1281,6 +1359,205 @@ export async function generateFlowImages(params: {
 
     await browser.close();
     log(`✅ [Flow] 전체 ${results.length}장 생성 완료`);
+    return results;
+  } catch (e: any) {
+    await browser.close().catch(() => {});
+    throw e;
+  }
+}
+
+/* ── Google Flow 이미지 생성 (CDP 방식 · 사용자 실크롬 연결) ──────────
+   구글이 자동화 브라우저 로그인을 차단하므로, 사용자가 로그인해둔 실제 크롬을
+   디버깅 포트(--remote-debugging-port)로 띄우고 봇이 CDP로 붙어 Flow를 조작한다.
+   별도 브라우저를 열지 않아 구글 봇 감지를 우회한다. (2026-08 실측 검증)      */
+export async function generateFlowImagesCDP(params: {
+  prompts: string[];
+  captions?: string[];
+  cdpPort?: number;
+  onLog?: (msg: string) => void;
+}): Promise<{ src: string; alt: string }[]> {
+  const { prompts, captions = [], cdpPort = 9222, onLog } = params;
+  const log = onLog || console.log;
+  const results: { src: string; alt: string }[] = [];
+
+  // 0) 백업 폴더 준비: 바탕화면/Publy_Flow이미지_YYYY-MM-DD (생성 이미지 자동 보관)
+  let backupDir = "";
+  try {
+    const today = new Date().toISOString().slice(0, 10);
+    backupDir = path.join(os.homedir(), "Desktop", `Publy_Flow이미지_${today}`);
+    if (!fs.existsSync(backupDir)) fs.mkdirSync(backupDir, { recursive: true });
+  } catch { backupDir = ""; }
+
+  // 1) 사용자 실크롬(디버깅 포트)에 연결
+  let browser;
+  try {
+    browser = await chromium.connectOverCDP(`http://localhost:${cdpPort}`);
+  } catch (e: any) {
+    throw new Error(`CDP_CONNECT_FAIL: 크롬이 디버깅 모드로 열려있지 않습니다 (포트 ${cdpPort}). Flow 준비 버튼을 먼저 눌러주세요.`);
+  }
+
+  try {
+    const ctx = browser.contexts()[0];
+    if (!ctx) throw new Error("크롬 컨텍스트를 찾을 수 없습니다");
+
+    // 2) Flow 탭 찾기(없으면 새로 열기)
+    let page = ctx.pages().find(p => p.url().includes("labs.google/fx"));
+    if (!page) {
+      log("[Flow] Flow 탭이 없어 새로 엽니다");
+      page = await ctx.newPage();
+      await page.goto("https://labs.google/fx/ko/tools/flow", { waitUntil: "domcontentloaded", timeout: 30000 });
+      await page.waitForTimeout(4000);
+    }
+    await page.bringToFront();
+    await page.waitForTimeout(1500);
+
+    // 3) 로그인 상태 확인
+    const loggedIn = await page.evaluate(() => {
+      const t = document.body.innerText;
+      const hasLoginBtn = [...document.querySelectorAll("button,a")].some(e => /sign in with google|Google 계정으로 로그인/i.test(e.textContent || ""));
+      return !hasLoginBtn && /Flow|프로젝트|크레딧|안녕하세요/.test(t);
+    });
+    if (!loggedIn) throw new Error("FLOW_NOT_LOGGED_IN: 크롬에서 Google Flow에 먼저 로그인해주세요");
+
+    // 4) ★항상 새 프로젝트로 시작 (이전 작업 컨텍스트/텍스트가 이미지에 섞이는 것 방지)
+    //    기존 프로젝트에 있으면 홈으로 나갔다가 새로 생성한다.
+    log("[Flow] 새 프로젝트 생성(이전 컨텍스트 초기화)...");
+    if (page.url().includes("/project/")) {
+      await page.goto("https://labs.google/fx/ko/tools/flow", { waitUntil: "domcontentloaded", timeout: 30000 });
+      await page.waitForTimeout(3500);
+    }
+    try {
+      await page.click("text=새 프로젝트", { timeout: 8000 });
+    } catch {
+      // 폴백: '만들기'/'프로젝트' 계열 버튼
+      try { await page.locator("button:has-text('프로젝트')").first().click({ timeout: 4000 }); } catch {}
+    }
+    await page.waitForTimeout(5000);
+    if (!page.url().includes("/project/")) {
+      log("[Flow] ⚠️ 새 프로젝트 진입 실패 — 현재 화면에서 진행");
+    }
+
+    // 5) 프롬프트별 생성
+    for (let i = 0; i < prompts.length; i++) {
+      // 텍스트 오염 방지 안전장치(어떤 경로로 온 프롬프트든 글자 없이 순수 이미지)
+      let prompt = prompts[i];
+      if (!/no text|no letters|글자 ?없/i.test(prompt)) {
+        prompt += ", (photo only, absolutely no text, no letters, no words, no watermark, no logo)";
+      }
+      log(`[Flow] (${i + 1}/${prompts.length}) 프롬프트 입력: ${prompt.slice(0, 40)}...`);
+
+      // 입력창(보이는 contenteditable/textarea)에 입력
+      let entered = false;
+      const editables = await page.$$("[contenteditable=true], textarea");
+      for (const el of editables) {
+        try {
+          if (await el.isVisible()) {
+            await el.click();
+            await page.waitForTimeout(400);
+            await page.keyboard.press(process.platform === "darwin" ? "Meta+A" : "Control+A");
+            await page.keyboard.press("Backspace");
+            await page.keyboard.type(prompt, { delay: 15 });
+            entered = true;
+            break;
+          }
+        } catch {}
+      }
+      if (!entered) { log("[Flow] ⚠️ 입력창을 못 찾음, 건너뜀"); continue; }
+      await page.waitForTimeout(1500); // 입력 반영 + 전송버튼 활성화 대기
+
+      // 전송 전 이미지 URL 집합 기록(개수가 아닌 URL diff로 새 이미지 판별 → 견고)
+      const beforeSrcs: string[] = await page.evaluate(() =>
+        [...document.querySelectorAll('img[src*="media.getMediaUrlRedirect"]')]
+          .filter(im => (im as HTMLImageElement).naturalWidth >= 500)
+          .map(im => (im as HTMLImageElement).src)
+      );
+
+      // 전송 버튼 클릭. ⚠️ React앱은 DOM .click()을 무시할 수 있어 Playwright 실제 마우스클릭 사용.
+      //  '만들기' 버튼 2개(add_2만들기=업로드, arrow_forward만들기=전송) → 정확 텍스트로 구분.
+      let sent = false;
+      try {
+        // 정확히 "arrow_forward만들기" 버튼. force:true + scrollIntoView 필수(가려짐 방지).
+        const submitBtn = page.locator("button").filter({ hasText: /^arrow_forward만들기$/ }).first();
+        if (await submitBtn.count() > 0) {
+          await submitBtn.scrollIntoViewIfNeeded().catch(() => {});
+          await submitBtn.click({ force: true, timeout: 5000 });
+          sent = true;
+        }
+      } catch {}
+      if (!sent) {
+        // 폴백: 입력창 포커스 후 Cmd/Ctrl+Enter
+        const inp = await page.$("[contenteditable=true]:visible, textarea:visible");
+        if (inp) { await inp.click(); await page.waitForTimeout(200); await page.keyboard.press(process.platform === "darwin" ? "Meta+Enter" : "Control+Enter"); }
+      }
+      await page.waitForTimeout(2000);
+
+      // 생성 대기(최대 165초): beforeSet에 없던 "새 URL"이 나타나면 성공(개수비교보다 견고).
+      log("[Flow] ⏳ 이미지 생성 대기...");
+      let freshSrcs: string[] = [];
+      for (let t = 0; t < 55; t++) {
+        await page.waitForTimeout(3000);
+        const snap = await page.evaluate((beforeArr: string[]) => {
+          const before = new Set(beforeArr);
+          const fresh: string[] = [];
+          document.querySelectorAll('img[src*="media.getMediaUrlRedirect"]').forEach(im => {
+            const el = im as HTMLImageElement;
+            if (el.naturalWidth >= 500 && !before.has(el.src)) fresh.push(el.src);
+          });
+          const generating = /생성 중|만들고 있|이미지를 생성|generating|creating|thinking/i.test(document.body.innerText);
+          return { fresh, generating };
+        }, beforeSrcs);
+        if (snap.fresh.length > 0) {
+          freshSrcs = snap.fresh;
+          if (!snap.generating) { await page.waitForTimeout(2500); break; } // 생성완료 확정
+        }
+      }
+
+      // 최종 새 URL 재수집(마지막 스냅샷 기준)
+      freshSrcs = await page.evaluate((beforeArr: string[]) => {
+        const before = new Set(beforeArr);
+        const fresh: string[] = [];
+        document.querySelectorAll('img[src*="media.getMediaUrlRedirect"]').forEach(im => {
+          const el = im as HTMLImageElement;
+          if (el.naturalWidth >= 500 && !before.has(el.src)) fresh.push(el.src);
+        });
+        return fresh;
+      }, beforeSrcs);
+
+      if (freshSrcs.length === 0) { log(`[Flow] ⚠️ (${i + 1}) 이미지 생성 실패/타임아웃`); continue; }
+
+      // 새로 생긴 이미지 1장 다운로드(가장 최근 것 = 배열 마지막)
+      const targetSrc = freshSrcs[freshSrcs.length - 1];
+      const dataUrl: string = await page.evaluate(async (src) => {
+        try {
+          const res = await fetch(src);
+          if (!res.ok) return "ERR:" + res.status;
+          const blob = await res.blob();
+          return await new Promise<string>(r => { const rd = new FileReader(); rd.onloadend = () => r(rd.result as string); rd.readAsDataURL(blob); });
+        } catch (e: any) { return "ERR:" + e.message; }
+      }, targetSrc);
+
+      if (dataUrl.startsWith("data:image")) {
+        results.push({ src: dataUrl, alt: captions[i] || "" });
+        // 바탕화면 날짜 폴더에 자동 백업
+        if (backupDir) {
+          try {
+            const safeName = (captions[i] || prompts[i] || `flow_${i + 1}`).slice(0, 30).replace(/[\/\\:*?"<>|]/g, "_").trim();
+            const ts = new Date().toISOString().replace(/[:T]/g, "-").slice(0, 19);
+            const file = path.join(backupDir, `${safeName}_${ts}.png`);
+            fs.writeFileSync(file, Buffer.from(dataUrl.split(",")[1], "base64"));
+            log(`[Flow] 💾 백업: ${file}`);
+          } catch {}
+        }
+        log(`[Flow] ✅ (${i + 1}) 이미지 다운로드 완료`);
+      } else {
+        log(`[Flow] ⚠️ (${i + 1}) 다운로드 실패: ${dataUrl.slice(0, 40)}`);
+      }
+      await page.waitForTimeout(1000);
+    }
+
+    // CDP는 연결만 끊고 사용자 크롬은 유지
+    await browser.close().catch(() => {});
+    log(`✅ [Flow] 전체 ${results.length}장 생성/다운로드 완료`);
     return results;
   } catch (e: any) {
     await browser.close().catch(() => {});

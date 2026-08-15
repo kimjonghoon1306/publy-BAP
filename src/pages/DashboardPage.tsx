@@ -860,6 +860,20 @@ Output format (JSON array only, no other text):
     setBlocks(prev=>{const i=prev.findIndex(b=>b.id===afterId);const n=[...prev];n.splice(i+1,0,nb);return n;});
   }
 
+  // 텍스트 블록들 사이사이에 이미지 블록을 균등하게 끼워넣기 (발행 직전 보정용)
+  function interleave(textBlocks:ContentBlock[], imgBlocks:ContentBlock[]):ContentBlock[]{
+    if(imgBlocks.length===0)return textBlocks;
+    const out:ContentBlock[]=[];
+    const step=Math.max(1,Math.floor(textBlocks.length/(imgBlocks.length+1)));
+    let imgIdx=0;
+    for(let i=0;i<textBlocks.length;i++){
+      out.push(textBlocks[i]);
+      if(imgIdx<imgBlocks.length && (i+1)%step===0){ out.push(imgBlocks[imgIdx]); imgIdx++; }
+    }
+    while(imgIdx<imgBlocks.length){ out.push(imgBlocks[imgIdx]); imgIdx++; }
+    return out;
+  }
+
   // ── triggerAutoInsert ──
   function triggerAutoInsert(images:{id:number;src:string;alt?:string}[]){
     const textOnly=blocks.filter(b=>b.type==="text"||(b.type==="image"&&(b as SingleImageBlock).source==="manual"));
@@ -1204,6 +1218,7 @@ Output format (JSON array only, no other text):
       // 만료 알림 (3일 이하 또는 만료됨)
       if (daysLeft <= 3) {
         setAlertPopup({ type: "expire", daysLeft: Math.max(0, daysLeft) });
+        setPageReady(true);   // ⬅️ 페이지는 정상 표시 (예전엔 여기서 return해 무한로딩 유발)
         return;
       }
 
@@ -1220,7 +1235,7 @@ Output format (JSON array only, no other text):
         setAlertPopup({ type: "publish", used, limit: config.dailyPublish });
       }
       setPageReady(true);
-    });
+    }).catch(()=>setPageReady(true));
     // 임시저장 확인
     try{
       const d=localStorage.getItem("publy_draft");
@@ -1479,7 +1494,8 @@ Output format (JSON array only, no other text):
       "soft diffused overcast light, even tones, pastel color palette",
     ];
     const lighting = lightings[idx % lightings.length];
-    const quality = "ultra-high resolution 8K, hyperrealistic, award-winning photography, National Geographic quality, razor-sharp focus, perfect composition, rule of thirds";
+    // 품질 + 텍스트 오염 방지(글자/워터마크/로고 없이 순수 이미지만) — 모든 주제 공통
+    const quality = "ultra-high resolution 8K, hyperrealistic, award-winning photography, National Geographic quality, razor-sharp focus, perfect composition, rule of thirds, absolutely no text, no letters, no words, no captions, no watermark, no logo, no typography";
 
     const FLOW_CATS: [RegExp, string][] = [
       [/먹|맛|식당|음식|요리|카페|커피|레스토랑|맛집|디저트|베이커리|밥|술|맥주|와인|소주|막걸리/, `A stunning food photography scene featuring "${title}", beautifully plated gourmet Korean cuisine, vibrant fresh ingredients, professional food styling, bokeh restaurant interior, appetizing shallow depth of field`],
@@ -1490,7 +1506,7 @@ Output format (JSON array only, no other text):
       [/의료|병원|의약품|치료|제약|바이오|헬스케어|한의원/, `A clean medical healthcare concept for "${title}", professional equipment, sterile clinical precision, trustworthy medical aesthetic`],
       [/피부|뷰티|스킨케어|화장|메이크업|헤어|네일|화장품|세럼|크림/, `A luxurious beauty editorial for "${title}", premium cosmetic products on marble surface, dewy glowing skin texture, feminine elegance, aspirational beauty`],
       [/패션|옷|스타일|코디|ootd|아우터|가방|명품|쇼핑|브랜드/, `A stylish fashion editorial representing "${title}", trendy outfit with accessories, urban street style, Vogue-worthy confident composition`],
-      [/집|방|인테리어|아파트|가구|리모델링|청소|정리|수납|홈데코/, `A stunning interior design photography of "${title}", beautifully decorated Korean modern home, warm inviting atmosphere, cozy aspirational living space`],
+      [/인테리어|아파트|가구|리모델링|셀프인테리어|수납정리|홈데코|원룸|집꾸미기|방꾸미기|홈스타일링|가구배치/, `A stunning interior design photography of "${title}", beautifully decorated Korean modern home, warm inviting atmosphere, cozy aspirational living space`],
       [/건축|건설|부동산|분양|임대|전세|재건축|도시개발/, `A professional architecture and real estate concept for "${title}", modern building with clean lines, urban development premium aesthetic`],
       [/농업|농장|농촌|농산물|채소|과일|쌀|유기농|스마트팜/, `A beautiful farm and agriculture photography for "${title}", fresh organic produce artfully arranged, countryside pastoral golden hour aesthetic`],
       [/수산업|어업|수산물|생선|해산물|굴|새우|참치|연어|양식/, `A fresh seafood photography for "${title}", glistening ocean products on ice, vibrant coastal market aesthetic`],
@@ -1500,7 +1516,7 @@ Output format (JSON array only, no other text):
       [/화학|에너지|태양광|풍력|수소|배터리|반도체|신재생/, `A clean energy and technology concept for "${title}", innovative visualization, sustainable futuristic aesthetic`],
       [/과학|연구|실험|물리|생물|quantum|퀀텀|파동|나노|우주|천문/, `A professional scientific research concept for "${title}", laboratory precision, quantum visualization, academic excellence aesthetic`],
       [/법률|법무|변호사|소송|계약|세무|회계|컴플라이언스/, `A professional legal and compliance concept for "${title}", clean document arrangement, authoritative and trustworthy aesthetic`],
-      [/교육|학원|강의|학습|입시|자격증|온라인교육/, `An inspiring education concept for "${title}", organized study materials and books, clean learning environment, knowledge aesthetic`],
+      [/교육|학원|강의|학습|입시|자격증|온라인교육|공부|시험|토익|토플|영어|수능|자격|어학|독서|스터디/, `An inspiring education concept for "${title}", organized study materials and books, clean learning environment, knowledge aesthetic`],
       [/마케팅|광고|홍보|브랜딩|소셜미디어|콘텐츠|유튜브|미디어|방송/, `A creative marketing and media concept for "${title}", brand elements on workspace, digital content creation aesthetic`],
       [/스타트업|창업|사업|경영|비즈니스|기업|리더십|벤처|혁신/, `A dynamic startup and business concept for "${title}", innovative workspace, entrepreneurial vision, modern corporate aesthetic`],
       [/자동차|차량|드라이브|전기차|수입차|SUV|오토바이/, `A dramatic automotive photography featuring "${title}", sleek vehicle design, dynamic angles, premium metallic surfaces, car magazine quality`],
@@ -1511,10 +1527,14 @@ Output format (JSON array only, no other text):
       [/음악|악기|노래|피아노|기타|드럼|K팝|클래식/, `An artistic music concept for "${title}", beautiful instrument or vinyl records, creative studio aesthetic`],
       [/미술|그림|디자인|영화|드라마|공연|전시|예술|창작/, `A creative arts concept for "${title}", artist tools elegantly arranged, gallery inspirational aesthetic`],
       [/명상|영성|철학|심리|힐링|치유|종교/, `A peaceful meditation concept for "${title}", serene candles and nature elements, calm mindful aesthetic`],
-      [/아이|육아|아기|어린이|임신|출산|유아|교육|공부/, `A heartwarming family concept for "${title}", soft pastel tones, child-friendly environment, tender joyful atmosphere`],
+      [/육아|아기|어린이|임신|출산|유아|신생아|이유식|기저귀|어린이집|아이키우기/, `A heartwarming family concept for "${title}", soft pastel tones, child-friendly environment, tender joyful atmosphere`],
       [/강아지|고양이|반려동물|pet|puppy|햄스터/, `A charming pet photography for "${title}", expressive animal companion, playful moments, soft bokeh, heartwarming mood`],
       [/결혼|웨딩|신혼|프로포즈|부케|예식|혼수/, `A romantic wedding photography for "${title}", beautifully decorated venue, elegant bridal details, dreamy timeless style`],
     ];
+    // "인테리어/꾸미기"가 명시되면 음식(카페)보다 인테리어 우선 (홈카페 인테리어 등 오매칭 방지)
+    if (/인테리어|꾸미기|홈스타일링|공간연출/.test(k+c)) {
+      return `A stunning interior design photography of "${title}", beautifully decorated Korean modern space, warm inviting atmosphere, cozy aspirational aesthetic, ${lighting}, ${quality}`;
+    }
     for (const [re, prompt] of FLOW_CATS) {
       if (re.test(k+c)) return `${prompt}, ${lighting}, ${quality}`;
     }
@@ -1570,6 +1590,19 @@ Output format (JSON array only, no other text):
     return"[정보/일상] 독자가 몰랐던 새 정보, 실용 팁.";
   }
 
+  // CORS 차단되는 외부 AI(OpenAI/Groq 등)는 봇 프록시 경유. 봇 오프라인이면 직접 시도(폴백).
+  async function aiProxyFetch(url:string, init:RequestInit, signal?:AbortSignal):Promise<Response>{
+    if(botOnline){
+      return fetch(`${BOT}/api/ai-proxy`,{
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({url,method:init.method||"POST",headers:init.headers,body:init.body}),
+        signal:signal||(init as any).signal,
+      });
+    }
+    return fetch(url, init);
+  }
+
   async function callAI(prompt:string,signal?:AbortSignal):Promise<string>{
     const ai=localStorage.getItem("publy_write_ai")||"gemini";
     if(ai==="gemini"){
@@ -1586,13 +1619,13 @@ Output format (JSON array only, no other text):
     }
     if(ai==="groq"){
       const key=localStorage.getItem("publy_groq_key")||"";if(!key)throw new Error("Groq API 키 없음");
-      const r=await fetch("https://api.groq.com/openai/v1/chat/completions",{method:"POST",headers:{"Content-Type":"application/json","Authorization":`Bearer ${key}`},body:JSON.stringify({model:"llama-3.3-70b-versatile",max_tokens:8000,messages:[{role:"user",content:prompt}]}),signal:signal||AbortSignal.timeout(90000)});
+      const r=await aiProxyFetch("https://api.groq.com/openai/v1/chat/completions",{method:"POST",headers:{"Content-Type":"application/json","Authorization":`Bearer ${key}`},body:JSON.stringify({model:"llama-3.3-70b-versatile",max_tokens:8000,messages:[{role:"user",content:prompt}]})},signal||AbortSignal.timeout(90000));
       if(!r.ok){const e=await r.json();throw new Error(e.error?.message||"Groq 오류");}
       const d=await r.json();return d.choices?.[0]?.message?.content||"";
     }
     if(ai==="openai"){
       const key=localStorage.getItem("publy_openai_key")||"";if(!key)throw new Error("OpenAI API 키 없음");
-      const r=await fetch("https://api.openai.com/v1/chat/completions",{method:"POST",headers:{"Content-Type":"application/json","Authorization":`Bearer ${key}`},body:JSON.stringify({model:"gpt-4o",max_tokens:8000,messages:[{role:"user",content:prompt}]}),signal:signal||AbortSignal.timeout(90000)});
+      const r=await aiProxyFetch("https://api.openai.com/v1/chat/completions",{method:"POST",headers:{"Content-Type":"application/json","Authorization":`Bearer ${key}`},body:JSON.stringify({model:"gpt-4o",max_tokens:8000,messages:[{role:"user",content:prompt}]})},signal||AbortSignal.timeout(90000));
       if(!r.ok){const e=await r.json();throw new Error(e.error?.message||"OpenAI 오류");}
       const d=await r.json();return d.choices?.[0]?.message?.content||"";
     }
@@ -1618,7 +1651,7 @@ Output format (JSON array only, no other text):
     const ai=localStorage.getItem("publy_image_ai")||"openai_img";
     if(ai==="openai_img"){
       const key=localStorage.getItem("publy_openai_key")||"";if(!key)throw new Error("OpenAI 키 없음");
-      const r=await fetch("https://api.openai.com/v1/images/generations",{method:"POST",headers:{"Content-Type":"application/json","Authorization":`Bearer ${key}`},body:JSON.stringify({model:"dall-e-3",prompt,n:1,size:"1024x1024"}),signal});
+      const r=await aiProxyFetch("https://api.openai.com/v1/images/generations",{method:"POST",headers:{"Content-Type":"application/json","Authorization":`Bearer ${key}`},body:JSON.stringify({model:"dall-e-3",prompt,n:1,size:"1024x1024"})},signal);
       if(!r.ok){const e=await r.json();throw new Error("DALL-E: "+(e.error?.message||r.status));}
       const d=await r.json();
       const imgUrl=d.data?.[0]?.url||"";
@@ -1628,22 +1661,11 @@ Output format (JSON array only, no other text):
     }
     if(ai==="replicate"){
       const key=localStorage.getItem("publy_replicate_key")||"";if(!key)throw new Error("Replicate 키 없음");
-      const pr=await fetch("https://api.replicate.com/v1/models/black-forest-labs/flux-schnell/predictions",{method:"POST",headers:{"Content-Type":"application/json","Authorization":`Bearer ${key}`},body:JSON.stringify({input:{prompt,num_outputs:1,aspect_ratio:"16:9"}}),signal});
-      if(!pr.ok){const e=await pr.json();throw new Error("Replicate: "+(e.detail||pr.status));}
-      const pred=await pr.json();const pollUrl=pred.urls?.get;if(!pollUrl)throw new Error("Replicate 응답 오류");
-      for(let i=0;i<30;i++){
-        await new Promise(r=>setTimeout(r,2000));
-        if(signal.aborted)throw new DOMException("AbortError","AbortError");
-        const res=await fetch(pollUrl,{headers:{"Authorization":`Bearer ${key}`}});
-        const data=await res.json();
-        if(data.status==="succeeded"){
-          const imgUrl=data.output?.[0]||"";
-          if(imgUrl)return urlToBase64(imgUrl,signal);
-          return imgUrl;
-        }
-        if(data.status==="failed")throw new Error("Replicate 실패");
-      }
-      throw new Error("Replicate 타임아웃");
+      // 브라우저 직접 호출은 CORS로 막힘 → 봇 서버 프록시 경유 (생성+폴링+base64 변환까지 서버가 처리)
+      const r=await fetch(`${BOT}/api/replicate-image`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({key,prompt,aspectRatio:"16:9"}),signal});
+      if(!r.ok){const e=await r.json().catch(()=>({}));throw new Error(e.error||("Replicate "+r.status));}
+      const d=await r.json();
+      return d.image||d.sourceUrl||"";
     }
     throw new Error("이미지 AI 미선택");
   }
@@ -1820,8 +1842,67 @@ POST3: (제목)|(이유)
     finally{setGenerating(false);}
   }
 
+  // ── Google Flow 이미지 생성 (봇 CDP 경유, 미리보기까지) ──
+  async function handleGenerateFlowImages(){
+    // 1) Flow 준비 상태 확인 (디버깅 크롬 열려있나)
+    let ready=false;
+    try{ const r=await fetch(`${BOT}/api/flow/status`,{signal:AbortSignal.timeout(3000)}); const j=await r.json(); ready=!!j.ready; }catch{}
+    if(!ready){
+      showToast("🎨 Flow 준비가 안 됐어요. 계정 관리 탭의 'Flow 준비' 버튼으로 크롬을 먼저 열고 Google 로그인해주세요.","error");
+      return;
+    }
+    setGenImgLoading(true);setGenImgProgress(0);setGenImgCurrent(0);setImgGenFailed(false);
+    // 2) 글 내용 기반 프롬프트 + 캡션 구성 (imgCount 장)
+    const content=genContent||"";
+    const lines=content.split("\n").filter(l=>l.trim().length>5);
+    const step=Math.max(1,Math.floor(lines.length/Math.max(1,imgCount)));
+    const prompts=Array.from({length:imgCount},(_,i)=>{
+      const seg=lines.slice(i*step,(i+1)*step).join(" ").slice(0,150);
+      return buildFlowPrompt(keyword||genTitle,pubTitle||genTitle,seg,i);
+    });
+    const caps=buildCaptions(keyword||genTitle,imgCount,content);
+    try{
+      showToast(`🎨 Flow로 이미지 ${imgCount}장 생성 중... (1~2분 소요)`,"info");
+      const r=await fetch(`${BOT}/api/flow-generate`,{
+        method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({prompts,captions:caps}),
+        signal:AbortSignal.timeout(imgCount*120000+30000),
+      });
+      const d=await r.json();
+      if(!r.ok){
+        if(d.code==="FLOW_NOT_LOGGED_IN") showToast("크롬에서 Google Flow에 먼저 로그인해주세요.","error");
+        else if(d.code==="CDP_CONNECT_FAIL") showToast("Flow 준비 버튼으로 크롬을 먼저 열어주세요.","error");
+        else showToast("❌ Flow 생성 실패: "+(d.error||r.status),"error");
+        setImgGenFailed(true);setGenImgLoading(false);return;
+      }
+      const imgs:string[]=(d.images||[]).map((x:any)=>x.src).filter(Boolean);
+      if(imgs.length===0){ showToast("❌ 이미지가 생성되지 않았어요","error");setImgGenFailed(true);setGenImgLoading(false);return; }
+      setGeneratedImages(imgs);
+      const captionList=(d.images||[]).map((x:any,i:number)=>x.alt||caps[i]||`${keyword||genTitle} 사진 ${i+1}`);
+      setCaptions(captionList);
+      if(!thumbnail)setThumbnail(imgs[0]);
+      triggerAutoInsert(imgs.map((src,i)=>({id:i,src,alt:captionList[i]||`${keyword||genTitle} 사진`})));
+      setShowMeta(true);
+      showToast(`✅ Flow 이미지 ${imgs.length}장 생성 완료! (바탕화면에도 백업됨)`,"success");
+    }catch(e:any){
+      if(e.name!=="AbortError"){ showToast("❌ Flow 생성 실패: "+e.message,"error");setImgGenFailed(true); }
+    }finally{ setGenImgLoading(false); }
+  }
+
   async function handleGenerateImages(){
     if(!keyword&&!genTitle){alert("먼저 글을 생성해주세요");return;}
+    // ── Flow 이미지 생성 (Google Flow, CDP 방식) ──
+    if(imgGenType==="flow"){ await handleGenerateFlowImages(); return; }
+    // 이미지 AI 키 사전 체크 — 없으면 조용히 실패하지 않고 명확히 안내
+    const imageAi=localStorage.getItem("publy_image_ai")||"openai_img";
+    if(imageAi==="replicate"&&!localStorage.getItem("publy_replicate_key")){
+      showToast("⚠️ Replicate 키가 없어요. 설정 탭에서 Replicate API 키를 입력하거나, 'Flow 이미지(무료)' 또는 '내 이미지 업로드'를 선택하세요.","error");
+      return;
+    }
+    if(imageAi==="openai_img"&&!localStorage.getItem("publy_openai_key")){
+      showToast("⚠️ OpenAI 키가 없어요. 설정 탭에서 키를 입력하거나, 'Flow 이미지(무료)' 또는 '내 이미지 업로드'를 선택하세요.","error");
+      return;
+    }
     setGenImgLoading(true);setGenImgProgress(0);setGenImgCurrent(0);
     imgAbortRef.current=new AbortController();const imgs:string[]=[];
 
@@ -1863,7 +1944,11 @@ POST3: (제목)|(이유)
 
   function handleImageUpload(e:React.ChangeEvent<HTMLInputElement>){
     const files=e.target.files;if(!files)return;
-    Array.from(files).forEach(file=>{const reader=new FileReader();reader.onload=ev=>{if(ev.target?.result)setUploadedImages(prev=>[...prev,ev.target!.result as string]);};reader.readAsDataURL(file as Blob);});
+    Array.from(files).forEach(async file=>{
+      if(!file.type.startsWith("image/"))return;
+      const src=await resizeImage(file); // 업로드 이미지도 리사이즈(발행 속도)
+      setUploadedImages(prev=>[...prev,src]);
+    });
   }
 
   function getActiveImages():string[]{return imgSource==="upload"?uploadedImages:generatedImages;}
@@ -1892,15 +1977,30 @@ POST3: (제목)|(이유)
     if(scheduleOn&&!scheduleTime){alert("예약 날짜와 시간을 선택해주세요");return;}
     setPublishing(true);showToast(scheduleOn?"예약 설정 중...":"발행 중...","info");
     const tags=hashtags.map(t=>t.replace("#","")).filter(Boolean);
+    // ── blocks 이미지 보정: 선택된 이미지(업로드/AI)가 blocks에 안 들어가 있으면 자동 배치 ──
+    //    (직접 업로드는 triggerAutoInsert를 안 거쳐 blocks에 이미지가 없던 문제 방지)
+    const activeImgs=getActiveImages();
+    const blocksHaveImg=blocks.some(b=>b.type==="image"||b.type==="image-pair");
+    let effectiveBlocks=blocks;
+    if(imgSource!=="none" && activeImgs.length>0 && !blocksHaveImg){
+      triggerAutoInsert(activeImgs.map((src,i)=>({id:i,src,alt:captions[i]||`${keyword||genTitle||pubTitle} ${i===0?"대표":"사진"} ${i+1}`})));
+      // triggerAutoInsert는 setBlocks(비동기)라 이번 발행엔 로컬로 즉시 구성
+      const imgBlocks=activeImgs.map((src,i)=>({type:"image" as const,id:uid(),src,alt:captions[i]||`${keyword||genTitle||pubTitle} 사진 ${i+1}`,position:"center" as const,source:(imgSource==="upload"?"manual":"auto") as any}));
+      const textBlocks=blocks.filter(b=>b.type==="text");
+      effectiveBlocks=textBlocks.length>0?[imgBlocks[0],...interleave(textBlocks,imgBlocks.slice(1))]:[...imgBlocks];
+      if(!thumbnail && activeImgs[0]) setThumbnail(activeImgs[0]);
+    }
     const publishBody={
       userId:user.id,platform,title:pubTitle,content,
       pubScope,
       tags,
-      imageUrl:thumbnail||getActiveImages()[0]||undefined,
+      imageUrl:thumbnail||activeImgs[0]||undefined,
       categoryId:category||undefined,
       visibility,
       scheduleTime:scheduleOn?scheduleTime:undefined,
-      blocks:blocks.map(b=>{
+      videoUrl:(videoOn&&videoUrl.trim())?videoUrl.trim():undefined,
+      videoPosition,
+      blocks:effectiveBlocks.map(b=>{
         if(b.type==="text")return{type:"text",content:(b as TextBlock).content};
         if(b.type==="image")return{type:"image",src:(b as SingleImageBlock).src,alt:(b as SingleImageBlock).alt||""};
         if(b.type==="image-pair")return{type:"image-pair",images:(b as ImagePairBlock).images};
@@ -1942,7 +2042,9 @@ POST3: (제목)|(이유)
         const d=await r.json();
         if(r.status===401){showToast("❌ 세션 만료 — 계정 관리 탭에서 재연결해주세요","error");setPublishing(false);return;}
         if(!r.ok)throw new Error(d.error);
-        await addHistory({user_id:user.id,platform,title:pubTitle,post_url:d.postUrl,status:"success"});
+        await addHistory({user_id:user.id,platform,title:pubTitle,post_url:d.postUrl,status:"success",
+          content:{title:pubTitle,content,pubScope,tags,imageUrl:thumbnail||getActiveImages()[0]||undefined,categoryId:category||undefined,visibility,blocks:publishBody.blocks,platform}})
+          .catch(async()=>{ await addHistory({user_id:user.id,platform,title:pubTitle,post_url:d.postUrl,status:"success"}).catch(()=>{}); });
         await incrementDailyPublish(user.id);
         setDailyPublishUsed(p => p + 1);
         setPubMsg(scheduleOn?"✅ 예약 완료! 설정한 시간에 자동 발행돼요.":"✅ 발행 완료!");
@@ -2139,7 +2241,8 @@ ${photoKeypoints.trim()}`
       const styleGuide = WRITE_STYLE_GUIDE[writeStyle]||"";
       const personaGuide = PERSONA_STYLES.find(p=>p.id===persona)?.prompt||"";
 
-      const prompt = `당신은 대한민국 최고의 블로그 작가입니다. 첨부된 사진들을 자세히 분석하여 네이버 블로그 글을 작성해주세요.
+      const photoCount = Math.min(photoFiles.length, 10);
+      const prompt = `당신은 대한민국 최고의 블로그 작가입니다. 첨부된 ${photoCount}장의 사진을 순서대로 자세히 분석하여 네이버 블로그 글을 작성해주세요.
 
 사진 속 모든 디테일(색상, 분위기, 장소, 음식, 사람, 배경 등)을 실제로 경험한 것처럼 생생하게 묘사해주세요.${keypointText}
 
@@ -2153,6 +2256,13 @@ ${photoKeypoints.trim()}`
 ✅ 구체적 수치, 가격, 시간 포함
 ✅ 문장 끝: ~해요, ~거든요, ~더라고요 다양하게
 
+=== ⭐ 사진 배치 규칙 (가장 중요) ===
+✅ 각 사진은 그 사진을 설명하는 문단 "바로 앞"에 [사진N] 마커로 넣어주세요 (N은 1부터, 첨부 순서 그대로).
+✅ 예: [사진1] 뒤에는 1번 사진에 대한 이야기, [사진2] 뒤에는 2번 사진 이야기.
+✅ ${photoCount}개의 마커 [사진1]~[사진${photoCount}]를 본문에 빠짐없이, 순서대로, 각각 한 번씩만 넣으세요.
+✅ 마커는 반드시 문단 맨 앞에 단독 줄로. 마커 바로 다음 문단은 그 사진에 실제로 보이는 것을 구체적으로 묘사.
+✅ 각 사진 문단은 최소 3~4문장 이상, 사진끼리 내용이 겹치지 않게.
+
 ${styleGuide}
 ${personaGuide?`
 [말투]
@@ -2162,7 +2272,13 @@ ${personaGuide}`:""}
 제목: (SEO 최적화 제목, 15~25자)
 태그: 태그1, 태그2, 태그3, 태그4, 태그5
 
-(본문 1500자 이상 - 사진 묘사 기반 자연스러운 글)
+[사진1]
+(1번 사진을 보고 쓴 문단)
+
+[사진2]
+(2번 사진을 보고 쓴 문단)
+
+... (첨부한 ${photoCount}장 전부, 사진마다 마커+문단)
 
 [FAQ시작]
 Q1: (질문)
@@ -2213,14 +2329,12 @@ POST3: (제목)|(이유)
       }
       if(!text) throw new Error("생성 실패. Gemini 키를 확인하거나 잠시 후 다시 시도해주세요.");
 
-      const titleM = text.match(/제목[^\n]+/);
-      const tagM = text.match(/태그[^\n]+/);
+      const titleM = text.match(/제목[:\s]*([^\n]+)/);
+      const tagM = text.match(/태그[:\s]*([^\n]+)/);
       const bodyM = text.match(/태그[^\n]*\n([\s\S]+)/);
 
-
-
       const title = titleM?.[1]?.trim()||"사진으로 작성된 글";
-      if(tagM){
+      if(tagM?.[1]){
         setHashtags(tagM[1].trim().split(",").map((t:string)=>{
           const clean=t.trim().replace(/\s+/g,"");
           return clean.startsWith("#")?clean:"#"+clean;
@@ -2228,23 +2342,40 @@ POST3: (제목)|(이유)
       }
 
       const body2 = bodyM?.[1]?.trim()||text;
-      setGenContent(body2);
+      setGenContent(body2.replace(/\[사진\d+\]/g,"").replace(/\n{3,}/g,"\n\n").trim());
       setGenTitle(title);
       setPubTitle(title);
 
-      // 블록 구성
-      const rawBlocks = body2.split("\n\n").filter(Boolean).map((p:string)=>({type:"text" as const,id:uid(),content:p}));
-
-
-      setBlocks(rawBlocks.length>0?rawBlocks:[{type:"text",id:uid(),content:body2}]);
-
-      // 사진을 블록에 삽입 (패턴에 따라)
-      if(photoFiles.length>0){
-        const imgs = photoFiles.map((f,i)=>({id:i,src:f.src,alt:f.name.replace(/\.[^.]+$/,"")}));
-        triggerAutoInsert(imgs);
-        // 첫 번째 사진을 썸네일로
-        setThumbnail(photoFiles[0].src);
+      // ── ⭐ [사진N] 마커 기반 정밀 배치 ──
+      //   AI가 각 사진을 설명하는 문단 앞에 [사진N]을 넣음 → 그 위치에 실제 사진 블록을 꽂아
+      //   글 흐름과 사진이 정확히 매칭되게 한다. (기존 균등배치는 글-사진 불일치)
+      const usedPhoto = new Set<number>();
+      const finalBlocks: ContentBlock[] = [];
+      // 문단 단위로 쪼개되 [사진N] 마커를 경계로 처리
+      const paragraphs = body2.split(/\n\n+/).map(s=>s.trim()).filter(Boolean);
+      for(const para of paragraphs){
+        // 문단 안의 모든 [사진N] 마커를 찾아 사진 블록으로, 나머지 텍스트는 텍스트 블록으로
+        const parts = para.split(/(\[사진\d+\])/g).filter(s=>s.trim());
+        for(const part of parts){
+          const m = part.match(/^\[사진(\d+)\]$/);
+          if(m){
+            const idx = parseInt(m[1],10)-1;
+            if(idx>=0 && idx<photoFiles.length && !usedPhoto.has(idx)){
+              usedPhoto.add(idx);
+              finalBlocks.push({type:"image",id:uid(),src:photoFiles[idx].src,alt:photoFiles[idx].name.replace(/\.[^.]+$/,"")||`사진 ${idx+1}`,position:"center",source:"manual"} as ContentBlock);
+            }
+          } else {
+            finalBlocks.push({type:"text",id:uid(),content:part.trim()} as ContentBlock);
+          }
+        }
       }
+      // AI가 마커를 빠뜨린 사진은 글 뒤에 순서대로 보충 (누락 방지)
+      photoFiles.forEach((f,i)=>{
+        if(!usedPhoto.has(i)) finalBlocks.push({type:"image",id:uid(),src:f.src,alt:f.name.replace(/\.[^.]+$/,"")||`사진 ${i+1}`,position:"center",source:"manual"} as ContentBlock);
+      });
+
+      setBlocks(finalBlocks.length>0?finalBlocks:[{type:"text",id:uid(),content:body2}]);
+      if(photoFiles.length>0) setThumbnail(photoFiles[0].src);
 
       setQualityScore(calcQualityScore(body2, photoKeypoints.split(/[\s,]/)[0]||""));
       setPhotoGenDone(true);
@@ -2257,20 +2388,42 @@ POST3: (제목)|(이유)
     }
   }
 
+  // 업로드 이미지 리사이즈: 긴 변 최대 1600px, JPEG 82% → 발행 속도↑(폰 원본 5MB→~300KB), 화질 충분
+  function resizeImage(file: File, maxSide=1600, quality=0.82): Promise<string> {
+    return new Promise((resolve)=>{
+      const reader=new FileReader();
+      reader.onload=ev=>{
+        const dataUrl=ev.target?.result as string;
+        const img=new Image();
+        img.onload=()=>{
+          let {width,height}=img;
+          if(width<=maxSide && height<=maxSide){ resolve(dataUrl); return; } // 이미 작으면 그대로
+          if(width>height){ height=Math.round(height*maxSide/width); width=maxSide; }
+          else { width=Math.round(width*maxSide/height); height=maxSide; }
+          const canvas=document.createElement("canvas");
+          canvas.width=width; canvas.height=height;
+          const ctx=canvas.getContext("2d");
+          if(!ctx){ resolve(dataUrl); return; }
+          ctx.drawImage(img,0,0,width,height);
+          try{ resolve(canvas.toDataURL("image/jpeg",quality)); }catch{ resolve(dataUrl); }
+        };
+        img.onerror=()=>resolve(dataUrl);
+        img.src=dataUrl;
+      };
+      reader.readAsDataURL(file);
+    });
+  }
+
   function handlePhotoUpload(files: FileList|null) {
     if(!files)return;
     const arr = Array.from(files).slice(0, 20 - photoFiles.length);
-    arr.forEach(file=>{
+    arr.forEach(async file=>{
       if(!file.type.startsWith("image/"))return;
-      const reader = new FileReader();
-      reader.onload = ev=>{
-        const src = ev.target?.result as string;
-        setPhotoFiles(prev=>{
-          if(prev.length>=20)return prev;
-          return [...prev,{id:uid(),src,name:file.name}];
-        });
-      };
-      reader.readAsDataURL(file);
+      const src = await resizeImage(file);
+      setPhotoFiles(prev=>{
+        if(prev.length>=20)return prev;
+        return [...prev,{id:uid(),src,name:file.name}];
+      });
     });
   }
 
@@ -3615,6 +3768,8 @@ POST3: (제목)|(이유)
                 {photoGenerating&&(
                   <button onClick={()=>{setPhotoGenerating(false);}} style={{width:"100%",marginTop:8,padding:"10px",borderRadius:12,border:"1px solid var(--border)",background:"var(--bg2)",color:"var(--text2)",cursor:"pointer",fontSize:13,fontWeight:700,fontFamily:"inherit"}}>⏹️ 생성 취소</button>
                 )}
+                {/* 결제문의 플로팅에 생성 버튼이 가리지 않게 하단 여백 */}
+                {!photoGenDone&&<div style={{height:90}} aria-hidden="true" />}
 
                 {/* 생성 완료 후 발행 패널 */}
                 {photoGenDone&&genContent&&(
@@ -4051,7 +4206,7 @@ POST3: (제목)|(이유)
                     <div className="card-title">📋 발행 기록</div>
                     <div style={{display:"flex",gap:8,alignItems:"center"}}>
                       <span style={{fontSize:13,color:"var(--text2)"}}>총 {history.length}건</span>
-                      {history.length>0&&<button className="btn btn-danger btn-sm" onClick={async()=>{if(!confirm("전체 삭제할까요?"))return;await deleteAllHistory(user.id);setHistory([]);}}>🗑 전체삭제</button>}
+                      {history.length>0&&<button className="btn btn-danger btn-sm" onClick={async()=>{if(!window.confirm(`발행 기록 ${history.length}건을 정말 모두 삭제할까요?\n(되돌릴 수 없습니다)`))return;if(!window.confirm("한 번 더 확인할게요. 전체 삭제를 진행할까요?"))return;await deleteAllHistory(user.id);setHistory([]);showToast("🗑 발행 기록 전체 삭제 완료","success");}}>🗑 전체삭제</button>}
                     </div>
                   </div>
                   {history.length===0?(
@@ -4075,11 +4230,29 @@ POST3: (제목)|(이유)
                       {h.post_url&&<a href={h.post_url} target="_blank" rel="noopener noreferrer" className="view-link">보기</a>}
                       <button style={{padding:"4px 10px",borderRadius:7,border:"1px solid rgba(255,71,87,.3)",background:"transparent",color:"var(--danger)",cursor:"pointer",fontSize:12,fontWeight:700,flexShrink:0}} onClick={async()=>{await deleteHistory(h.id);setHistory(prev=>prev.filter(x=>x.id!==h.id));}}>삭제</button>
                           {h.status!=="fail"&&(
-                            <button onClick={()=>{setPubTitle(h.title||"");setTab("publish");showToast("✅ 발행하기 탭으로 이동했어요","success");}} style={{padding:"4px 10px",borderRadius:7,border:"1px solid rgba(0,200,120,.3)",background:"transparent",color:"var(--success)",cursor:"pointer",fontSize:12,fontWeight:700,flexShrink:0}}>🔄 재발행</button>
+                            <button onClick={()=>{
+                              const c=(h as any).content;
+                              if(c){
+                                setPubTitle(c.title||h.title||"");
+                                if(c.content)setGenContent(c.content);
+                                if(Array.isArray(c.blocks))setBlocks(c.blocks.map((b:any)=>b.type==="text"?{type:"text",id:uid(),content:b.content}:b.type==="image"?{type:"image",id:uid(),src:b.src,alt:b.alt||"",position:"center",source:"auto"}:b.type==="image-pair"?{type:"image-pair",id:uid(),images:b.images}:null).filter(Boolean) as any);
+                                if(c.imageUrl)setThumbnail(c.imageUrl);
+                                if(Array.isArray(c.tags))setHashtags(c.tags.map((t:string)=>t.startsWith("#")?t:"#"+t));
+                                if(c.visibility)setVisibility(c.visibility);
+                                if(c.pubScope)setPubScope(c.pubScope);
+                                setTab("publish");
+                                showToast("✅ 글·이미지 통째로 복원 완료! 발행 버튼만 누르면 돼요","success");
+                              }else{
+                                setPubTitle(h.title||"");setTab("publish");
+                                showToast("제목만 복원됐어요 (이전 발행은 내용 미저장)","info");
+                              }
+                            }} style={{padding:"4px 10px",borderRadius:7,border:"1px solid rgba(0,200,120,.3)",background:"transparent",color:"var(--success)",cursor:"pointer",fontSize:12,fontWeight:700,flexShrink:0}}>🔄 재발행</button>
                           )}
                     </div>
                   ))}
                 </div>
+                {/* 하단 여백: 마지막 기록의 삭제/재발행 버튼이 '결제 문의' 플로팅·모바일바에 가리지 않게 */}
+                <div style={{height:120}} aria-hidden="true" />
               </div>
             )}
 
