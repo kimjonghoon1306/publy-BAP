@@ -1140,9 +1140,11 @@ export async function addNeighbors(params: {
     } catch {}
   }
 
+  // 서이추 신청 페이지가 모바일(m.blog.naver.com)만 작동 → 모바일 UA/뷰포트로 실행
+  const MOBILE_UA = "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1";
   const browser = await chromium.launch({ headless: false, args: LAUNCH_ARGS });
   const context = await browser.newContext({
-    userAgent: UA, viewport: { width: 1280, height: 800 }, locale: "ko-KR",
+    userAgent: MOBILE_UA, viewport: { width: 390, height: 844 }, locale: "ko-KR", isMobile: true, hasTouch: true,
   });
   await applyAntiDetection(context);
   await context.addCookies(cookies);
@@ -1218,41 +1220,60 @@ export async function addNeighbors(params: {
         }
 
         // 서이추 신청 페이지로 이동
+        //  ⚠️ 네이버가 PC용 BlogAddNeighbor.naver URL 폐기 → 모바일 BuddyAddForm.naver만 작동(2026-08 실측)
         await page.goto(
-          `https://blog.naver.com/BlogAddNeighbor.naver?targetBlogId=${blogId}&neighborType=1`,
+          `https://m.blog.naver.com/BuddyAddForm.naver?blogId=${blogId}`,
           { waitUntil: "domcontentloaded", timeout: 20000 }
         );
-        await page.waitForTimeout(1200);
+        await page.waitForTimeout(1500);
 
-        // 이미 이웃인 경우 또는 나 자신 체크
+        // 페이지 유효성 확인 (폐기/에러/로그인 튕김)
+        const bodyTxt = await page.evaluate(() => document.body.innerText).catch(() => "");
         const curUrl = page.url();
-        if (curUrl.includes("error") || curUrl.includes("login")) {
-          throw new Error("세션 만료 — 재로그인 필요");
+        if (curUrl.includes("login") || /사라졌거나|주소를 확인|페이지를 찾을/.test(bodyTxt)) {
+          throw new Error("신청 페이지 접근 불가(비공개 블로그이거나 세션 만료)");
+        }
+        if (/이미 이웃|이웃입니다|나와의 관계/.test(bodyTxt)) {
+          throw new Error("이미 이웃이거나 신청 불가");
         }
 
-        // 메시지 입력 (humanType — 사람처럼 타이핑)
-        const msgSels = ["textarea#sendMessage","textarea[name='message']","textarea.neighbor_message","textarea"];
+        // 서로이웃 라디오 선택 (#bothBuddyRadio = relation 1). 없으면 이웃추가로 진행.
+        try {
+          const bothRadio = await page.$("#bothBuddyRadio, input[name='relation'][value='1']");
+          if (bothRadio) {
+            await bothRadio.click({ timeout: 2000 }).catch(() => page.evaluate(() => {
+              const r = document.querySelector("#bothBuddyRadio, input[name='relation'][value='1']") as HTMLInputElement;
+              if (r) { r.checked = true; r.click(); }
+            }));
+            await page.waitForTimeout(400);
+          }
+        } catch {}
+
+        // 메시지 입력 (모바일: textarea.textarea_t1)
+        const msgSels = ["textarea.textarea_t1", "textarea[name='message']", "textarea#sendMessage", "textarea"];
+        let msgFilled = false;
         for (const sel of msgSels) {
           try {
             const el = await page.$(sel);
             if (el) {
               await page.click(sel);
               await page.waitForTimeout(300);
-              await page.fill(sel, ""); // 기존 내용 지우기
+              await page.fill(sel, "");
               const currentMsg = msgs[msgIdx % msgs.length];
               msgIdx++;
-              const naturalMsg = naturalizeMsg(currentMsg); // 자연 변형 적용
+              const naturalMsg = naturalizeMsg(currentMsg);
               log(`[서이추] 💬 멘트 [${((msgIdx-1) % msgs.length)+1}/${msgs.length}]: "${naturalMsg.slice(0, 30)}..."`);
               await humanType(page, naturalMsg);
+              msgFilled = true;
               break;
             }
           } catch {}
         }
         await page.waitForTimeout(400);
 
-        // 확인/신청 버튼
+        // 확인 버튼 (모바일: a.btn_ok)
         const confirmSels = [
-          "button.btn_ok","button:has-text('확인')","button:has-text('신청')","button:has-text('추가')","input[type='submit']",
+          "a.btn_ok", "button.btn_ok", "a:has-text('확인')", "button:has-text('확인')", "button:has-text('신청')", "input[type='submit']",
         ];
         let submitted = false;
         for (const sel of confirmSels) {
@@ -1262,7 +1283,13 @@ export async function addNeighbors(params: {
           } catch {}
         }
 
-        await page.waitForTimeout(800);
+        await page.waitForTimeout(1000);
+
+        // 신청 후 결과 확인 (한도 초과/실패 팝업)
+        const afterTxt = await page.evaluate(() => document.body.innerText).catch(() => "");
+        if (/하루 최대|신청 한도|초과하여|더 이상 신청/.test(afterTxt)) {
+          throw new Error("네이버 일일 서이추 한도 도달");
+        }
 
         if (submitted) {
           doneSet.add(blogId);
@@ -1480,28 +1507,34 @@ export async function engageBlogs(params: {
         const ctx = frame ?? page as any;
 
         // ── 공감 클릭 ──
+        //  실측(2026-08): 네이버 공감버튼 = a.u_likeit_list_button (텍스트 "공감"), 이미 눌렀으면 class에 'on'
         if (doLike) {
           try {
             const likeSels = [
+              "a.u_likeit_list_button._button",
+              "a.u_likeit_list_button",
+              ".u_likeit_button._face",
+              "a[class*='u_likeit_list_button']",
+              // 구버전 폴백
               ".sympathy_toggle_btn",
-              "button[class*='sympathy']",
-              "button[class*='like']",
               "a[class*='sympathy']",
-              ".btn_like",
-              "[class*='btn_sympathy']",
             ];
             for (const sel of likeSels) {
               try {
                 const el = await ctx.$(sel);
                 if (el) {
-                  // 이미 공감한 경우 체크
+                  // 이미 공감했는지: class에 'on'(off가 없음)이면 눌린 상태
                   const isActive = await ctx.evaluate((s: string) => {
                     const btn = document.querySelector(s);
-                    return btn ? (btn.classList.contains("on") || btn.classList.contains("active") || btn.getAttribute("aria-pressed") === "true") : false;
+                    if (!btn) return false;
+                    const c = btn.className || "";
+                    return btn.getAttribute("aria-pressed") === "true" || (/\bon\b/.test(c) && !/\boff\b/.test(c));
                   }, sel);
                   if (!isActive) {
-                    await ctx.click(sel, { timeout: 3000 });
-                    await page.waitForTimeout(800);
+                    // 버튼이 가려지거나 여러개 → 첫 요소 scrollIntoView + force 클릭
+                    await el.scrollIntoViewIfNeeded().catch(() => {});
+                    await el.click({ force: true, timeout: 4000 });
+                    await page.waitForTimeout(1000);
                     liked = true;
                     log(`[공감·댓글] ❤️ ${blogId} 공감 완료`);
                   } else {
@@ -1512,6 +1545,7 @@ export async function engageBlogs(params: {
                 }
               } catch {}
             }
+            if (!liked) log(`[공감·댓글] ${blogId} 공감 버튼 못 찾음`);
           } catch (e: any) {
             log(`[공감·댓글] ${blogId} 공감 실패: ${e.message}`);
           }
@@ -1522,24 +1556,37 @@ export async function engageBlogs(params: {
           try {
             await page.waitForTimeout(1000);
 
-            // 댓글 입력창 셀렉터 (네이버 블로그 댓글 구조)
+            // ★ 실측(2026-08): 댓글 영역은 글 하단에 lazy-load → 스크롤 후 .btn_comment 클릭해야 입력창 나타남
+            try {
+              await page.mouse.wheel(0, 3000);
+              await page.waitForTimeout(1200);
+              const openBtn = await ctx.$("a.btn_comment._cmtList, a.btn_comment, ._cmtList");
+              if (openBtn) { await openBtn.scrollIntoViewIfNeeded().catch(() => {}); await openBtn.click({ force: true, timeout: 3000 }).catch(() => {}); await page.waitForTimeout(1800); }
+              // 댓글쓰기 버튼도 시도
+              const writeBtn = await ctx.$("a.btn_write_comment, ._naverComment_write");
+              if (writeBtn) { await writeBtn.click({ force: true, timeout: 2000 }).catch(() => {}); await page.waitForTimeout(1000); }
+            } catch {}
+
+            // 댓글 입력창 셀렉터 (u_cbox = 네이버 공용 댓글 위젯)
             const commentSels = [
+              ".u_cbox_text",
+              "textarea.u_cbox_text",
+              ".u_cbox_write_wrap textarea",
               "textarea#commentArea",
               "textarea[name='comment']",
               "textarea[placeholder*='댓글']",
               "textarea[class*='comment']",
-              ".u_cbox_write_wrap textarea",
               "#naverComment textarea",
               "iframe#naverComment",
             ];
 
             let commentDone = false;
 
-            // 댓글 iframe 처리
+            // 댓글은 보통 mainFrame(ctx) 안에 있음. iframe도 대비.
             const commentFrame = page.frames().find(f =>
               f.url().includes("comment") || f.name().includes("comment")
             );
-            const commentCtx = commentFrame ?? page as any;
+            const commentCtx = commentFrame ?? ctx;
 
             for (const sel of commentSels) {
               try {
@@ -1574,18 +1621,22 @@ export async function engageBlogs(params: {
                 if (el) {
                   await commentCtx.click(sel, { timeout: 3000 });
                   await page.waitForTimeout(500);
-                  await commentCtx.fill(sel, "");
+                  // contenteditable(.u_cbox_text)은 fill 안됨 → 전체선택 후 삭제로 비우기
+                  await page.keyboard.press(process.platform === "darwin" ? "Meta+A" : "Control+A").catch(() => {});
+                  await page.keyboard.press("Backspace").catch(() => {});
                   const currentComment2 = comments[commentIdx % comments.length];
                   commentIdx++;
                   const naturalComment2 = naturalizeMsg(currentComment2);
                   await humanType(page, naturalComment2);
-                  await page.waitForTimeout(500);
-                  // 등록 버튼
+                  await page.waitForTimeout(600);
+                  // 등록 버튼 (u_cbox_btn_upload = 네이버 댓글 등록)
                   const submitSels = [
-                    "button[type='submit']",
-                    "button:has-text('등록')",
-                    "button[class*='submit']",
                     ".u_cbox_btn_upload",
+                    "button.u_cbox_btn_upload",
+                    "a.u_cbox_btn_upload",
+                    "button:has-text('등록')",
+                    "button[type='submit']",
+                    "button[class*='submit']",
                     "button.btn_ok",
                   ];
                   for (const ss of submitSels) {
@@ -1594,7 +1645,7 @@ export async function engageBlogs(params: {
                       if (sb) { await commentCtx.click(ss, { timeout: 3000 }); commentDone = true; break; }
                     } catch {}
                   }
-                  if (commentDone) break;
+                  if (commentDone) { log(`[공감·댓글] 💬 ${blogId} 댓글 등록`); break; }
                 }
               } catch {}
             }
