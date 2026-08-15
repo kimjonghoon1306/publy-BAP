@@ -445,9 +445,10 @@ textarea.inp{resize:vertical;line-height:1.75;min-height:80px;}
   .kakao-float{padding:12px !important;border-radius:50% !important;width:48px;height:48px;justify-content:center;}
 }
 .on-service-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;}
-.on-service-card{min-width:0;padding:14px;border-radius:14px;border:1px solid var(--border);background:var(--bg);color:var(--text);text-decoration:none;transition:transform .18s,border-color .18s;}
+.on-service-card{min-width:0;padding:14px;border-radius:14px;border:1px solid var(--border);background:var(--bg);color:var(--text);text-align:left;font-family:inherit;cursor:pointer;transition:transform .18s,border-color .18s;}
 .on-service-card:hover{transform:translateY(-2px);border-color:var(--accent);}.on-service-card b{display:block;font-size:13px;margin:8px 0 4px}.on-service-card small{display:block;color:var(--text3);font-size:10px;line-height:1.55}.on-service-card em{display:block;color:var(--accent-text);font-size:10px;font-style:normal;font-weight:800;margin-top:9px}
-@media(max-width:640px){.on-service-grid{grid-template-columns:1fr}.on-service-card{display:grid;grid-template-columns:auto 1fr;column-gap:10px}.on-service-card>span{grid-row:1/4}.on-service-card b{margin:0 0 3px}.on-service-card em{margin-top:5px}}
+.service-info-overlay{position:fixed;inset:0;z-index:9998;display:grid;place-items:center;padding:18px;background:rgba(0,0,0,.72);backdrop-filter:blur(7px)}.service-info-dialog{position:relative;width:min(590px,100%);max-height:88vh;overflow:auto;box-sizing:border-box;padding:27px;border:1px solid rgba(0,214,143,.38);border-radius:23px;background:var(--card);box-shadow:0 24px 80px rgba(0,0,0,.48)}.service-info-close{position:absolute;right:14px;top:10px;border:0;background:transparent;color:var(--text3);font-size:27px;cursor:pointer}.service-info-kicker{color:var(--accent-text);font-size:10px;font-weight:900;letter-spacing:.08em}.service-info-dialog h2{margin:7px 35px 8px 0;font-size:24px}.service-info-hook{color:var(--text2);font-size:14px;line-height:1.65}.service-info-benefits{display:grid;gap:8px;margin:18px 0}.service-info-benefit{padding:12px;border:1px solid var(--border);border-radius:12px;background:var(--bg)}.service-info-benefit b,.service-info-benefit span{display:block}.service-info-benefit b{font-size:13px}.service-info-benefit span{margin-top:3px;color:var(--text3);font-size:11px;line-height:1.5}.service-info-flow{padding:12px;border-radius:12px;background:rgba(0,214,143,.09);color:var(--accent-text);font-size:11px;font-weight:800;line-height:1.6}.service-info-footer{display:flex;align-items:center;gap:9px;margin-top:18px}.service-info-cta{flex:1;display:flex;justify-content:center;padding:13px;border:0;border-radius:12px;background:var(--accent);color:#02170f;font-size:13px;font-weight:900;text-decoration:none}.service-info-cta:disabled{opacity:.48}.service-info-coming{padding:8px 10px;border:1px solid rgba(255,80,150,.4);border-radius:999px;color:#ff5a9f;font-size:10px;font-weight:900;white-space:nowrap}
+@media(max-width:640px){.on-service-grid{display:flex;gap:8px;overflow-x:auto;margin:0 -2px;padding:2px 2px 7px;scrollbar-width:none;scroll-snap-type:x proximity}.on-service-grid::-webkit-scrollbar{display:none}.on-service-card{flex:0 0 150px;min-height:80px;padding:10px;display:grid;grid-template-columns:30px 1fr;column-gap:8px;scroll-snap-align:start}.on-service-card>span{grid-row:1/4;font-size:19px !important}.on-service-card b{font-size:12px;margin:0 0 2px}.on-service-card small{font-size:10px;line-height:1.35;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}.on-service-card em{font-size:10px;margin-top:4px}.service-info-dialog{padding:22px 16px;border-radius:19px}.service-info-dialog h2{font-size:21px}.service-info-footer{align-items:stretch;flex-direction:column}.service-info-cta{width:100%;box-sizing:border-box}.service-info-coming{text-align:center}}
 .pub-sticky-bar{position:sticky;top:0;z-index:30;background:var(--card);border-bottom:1px solid var(--border);padding:10px 16px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;backdrop-filter:blur(12px);}
 .toast-wrap{position:fixed;bottom:28px;right:24px;z-index:9999;display:flex;flex-direction:column;gap:8px;pointer-events:none;}
 .toast{padding:12px 18px;border-radius:12px;font-size:13px;font-weight:700;font-family:'Noto Sans KR',sans-serif;box-shadow:0 4px 24px rgba(0,0,0,.35);animation:toastIn .25s ease;pointer-events:all;display:flex;align-items:center;gap:8px;max-width:320px;}
@@ -511,8 +512,15 @@ interface Props {
   onThemeToggle: () => void;
   theme: string;
 }
+type ServiceInfoKey = "farm"|"trial"|"partner";
+const PUBLY_SERVICE_INFO: Record<ServiceInfoKey,{icon:string;name:string;hook:string;summary:string;benefits:[string,string][];flow:string;cta:string;url?:string;coming?:boolean}> = {
+  farm:{icon:"🌱",name:"온종일팜",hook:"홍보할 상품을 찾는 시간부터 줄이세요. 신선한 산지 상품이 콘텐츠의 소재와 구매 전환으로 이어집니다.",summary:"홍보할 산지 상품을 빠르게 찾아보세요.",benefits:[["신선한 상품 발견","제철 먹거리와 산지 상품을 한곳에서 고릅니다."],["콘텐츠가 구매로 연결","상품 상세 정보와 구매 흐름이 자연스럽게 이어집니다."],["온파트너와 수익화","고른 상품으로 추천 링크를 만들어 판매 성과를 쌓습니다."]],flow:"온종일팜 상품 선택 → 온파트너 링크 발급 → 퍼블리 홍보글 작성 → 구매 전환",cta:"온종일팜 이용하기",url:"https://app.yuanfnb.com"},
+  trial:{icon:"🎁",name:"온종일 체험단",hook:"좋아하는 상품과 매장을 먼저 경험하고, 진짜 경험이 담긴 리뷰로 콘텐츠의 신뢰도를 키우세요.",summary:"상품을 체험하고 리뷰 경쟁력을 키워보세요.",benefits:[["상품·매장 직접 체험","관심 있는 캠페인을 골라 직접 경험합니다."],["리뷰 소재 확보","사진과 경험이 쌓여 블로그·SNS 글이 더 풍성해집니다."],["크리에이터 성장","포트폴리오와 브랜드 협업 기회를 넓힙니다."]],flow:"캠페인 발견 → 체험 신청 → 상품·매장 경험 → 리뷰 발행",cta:"신청하기",coming:true},
+  partner:{icon:"🔗",name:"온파트너",hook:"내가 소개한 상품이 팔릴 때마다 링크가 수익이 됩니다. 플랫폼 제약 없이 내 콘텐츠가 있는 곳이면 시작할 수 있어요.",summary:"추천 링크를 퍼블리 글에 넣고 판매 수익을 만드세요.",benefits:[["링크 하나로 수익 추적","클릭·구매·수익을 회원 대시보드에서 확인합니다."],["사이트 제약 없음","네이버 블로그, 틱톡, 유튜브, 인스타그램, 개인 홈페이지 등 어디서든 활용합니다."],["퍼블리와 바로 연결","상품 링크를 넣으면 제품 소개와 제휴 안내가 글에 자동 반영됩니다."]],flow:"온종일팜 상품 선택 → 내 추천 링크 생성 → 퍼블리·SNS 홍보 → 판매 수익",cta:"온파트너 신청하기",url:"https://partner.yuanfnb.com/pages/signup.html"}
+};
 
 export default function DashboardPage({user, onLogout, onAdminLogin, onThemeToggle, theme}: Props) {
+  const [serviceInfo, setServiceInfo] = useState<ServiceInfoKey|null>(null);
   const logoTapCount = useRef(0);
   const logoTapTimer = useRef<ReturnType<typeof setTimeout>|null>(null);
   const handleLogoTap = () => {
@@ -5154,13 +5162,11 @@ POST3: (제목)|(이유)
                   <div className="card-title" style={{marginBottom:5}}>🌐 퍼블리와 함께 쓰는 온종일 서비스</div>
                   <div style={{fontSize:11,color:"var(--text3)",marginBottom:13}}>상품 선택부터 체험 리뷰와 판매 수익까지 자연스럽게 이어보세요.</div>
                   <div className="on-service-grid">
-                    {[
-                      {icon:"🌱",name:"온종일팜",desc:"홍보할 신선한 산지 상품을 찾아보세요.",cta:"상품 보러가기",url:"https://app.yuanfnb.com"},
-                      {icon:"🎁",name:"온종일 체험단",desc:"상품과 매장을 직접 체험하고 리뷰를 만들어보세요.",cta:"체험단 알아보기",url:"https://pick.xn--zk5biyyw.com"},
-                      {icon:"🔗",name:"온파트너",desc:"퍼블리 글에 추천 링크를 넣고 판매 수익을 연결하세요.",cta:"파트너 시작하기",url:"https://partner.yuanfnb.com"},
-                    ].map(s=><a key={s.name} className="on-service-card" href={s.url} target="_blank" rel="noopener noreferrer"><span style={{fontSize:24}}>{s.icon}</span><b>{s.name}</b><small>{s.desc}</small><em>{s.cta} →</em></a>)}
+                    {(Object.keys(PUBLY_SERVICE_INFO) as ServiceInfoKey[]).map(key=>{const s=PUBLY_SERVICE_INFO[key];return <button key={key} className="on-service-card" type="button" onClick={()=>setServiceInfo(key)}><span style={{fontSize:24}}>{s.icon}</span><b>{s.name}</b><small>{s.summary}</small><em>{s.coming?"곳 출시 · 자세히":"기능·혜택 자세히"} →</em></button>})}
                   </div>
                 </div>
+
+                {serviceInfo&&(()=>{const s=PUBLY_SERVICE_INFO[serviceInfo];return <div className="service-info-overlay" onMouseDown={e=>{if(e.target===e.currentTarget)setServiceInfo(null)}}><section className="service-info-dialog" role="dialog" aria-modal="true" aria-label={`${s.name} 알아보기`}><button className="service-info-close" onClick={()=>setServiceInfo(null)} aria-label="닫기">×</button><div className="service-info-kicker">MORE WITH ONJONGIL</div><h2>{s.name} 알아보기</h2><p className="service-info-hook">{s.hook}</p><div className="service-info-benefits">{s.benefits.map(([title,desc])=><div className="service-info-benefit" key={title}><b>✓ {title}</b><span>{desc}</span></div>)}</div><div className="service-info-flow">{s.flow}</div><div className="service-info-footer">{s.coming?<><button className="service-info-cta" disabled>신청하기</button><span className="service-info-coming">곳 출시됩니다</span></>:<a className="service-info-cta" href={s.url} target="_blank" rel="noopener noreferrer">{s.cta} →</a>}</div></section></div>})()}
 
                 {/* 큰 글씨 모드 */}
                 <div className="card">
