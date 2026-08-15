@@ -373,7 +373,8 @@ select.field-inp{cursor:pointer;appearance:auto;}
   .layout{padding-left:0;}
 }
 @media(max-width:768px){
-  .server-badge{display:none;}.adm-badge{display:none;}
+  .header-mid{display:none;}.server-badge{display:none;}.adm-badge{display:none;}
+  .header{height:auto;min-height:60px;padding:8px;gap:6px;overflow:hidden;}.logo-text{font-size:13px;letter-spacing:.08em;}.header-right{min-width:0;margin-left:auto;gap:4px;overflow-x:auto;scrollbar-width:none;}.header-right::-webkit-scrollbar{display:none}.adm-guide-text,.back-text{display:none}.adm-guide-btn,.back-btn,.icon-btn{flex-shrink:0;padding:8px 10px;}
   .main{padding:14px 12px calc(84px + env(safe-area-inset-bottom));}
   .plat-grid{grid-template-columns:1fr 1fr;}
   .title-grid{grid-template-columns:1fr;}
@@ -405,6 +406,7 @@ select.field-inp{cursor:pointer;appearance:auto;}
   /* 서이추 모바일 */
   .neighbor-grid{grid-template-columns:1fr !important;}
   .neighbor-counter{grid-template-columns:repeat(3,1fr) !important;}
+  .main,.card,.detail-panel,.user-table,.info-table{min-width:0;max-width:100%;overflow-wrap:anywhere;}.user-row,.info-row,.detail-header{flex-wrap:wrap}.user-email-row{white-space:normal;word-break:break-all}.key-row-input{flex-wrap:wrap}.key-row-input .inp{min-width:0}.preview-inner{width:calc(100vw - 20px);padding:20px 14px}.stats-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
 }
 @media(max-width:480px){
   .header{padding:0 8px;gap:4px;}

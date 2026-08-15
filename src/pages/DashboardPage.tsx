@@ -406,7 +406,7 @@ textarea.inp{resize:vertical;line-height:1.75;min-height:80px;}
 }
 @media(max-width:900px){.sidebar{display:none;}.mob-bar{display:flex;}.main{padding-bottom:130px;}.layout{padding-left:0;}}
 @media(max-width:768px){
-  .server-chip{display:none;}.quota-chip{display:none;}.dl-btn{display:none;}.main{padding:14px 12px calc(80px + env(safe-area-inset-bottom));}.card{padding:16px 14px;}
+  .header-mid{display:none;}.server-chip{display:none;}.quota-chip{display:none;}.dl-btn{display:none;}.main{padding:14px 12px calc(80px + env(safe-area-inset-bottom));}.card{padding:16px 14px;}
   .adtype-row{grid-template-columns:1fr 1fr;}.title-grid{grid-template-columns:1fr;}.ai-grid{flex-direction:column;}
   .btn-xl{padding:18px 22px;font-size:17px;}.btn{font-size:15px;padding:13px 18px;}.inp{font-size:16px;}.inp.lg{font-size:18px;}
   .concept-grid{grid-template-columns:1fr;}.steps .step-n{display:none;}.step-item{font-size:13px;padding:13px 6px;}
@@ -427,6 +427,10 @@ textarea.inp{resize:vertical;line-height:1.75;min-height:80px;}
   .neighbor-grid{grid-template-columns:1fr !important;}
   /* 카운터 3분할 유지 */
   .counter-grid{grid-template-columns:repeat(3,1fr) !important;}
+  .pub-sticky-bar{padding:10px 12px;overflow:hidden;}
+  .pub-actions{width:100%;margin-left:0 !important;display:grid !important;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px !important;}
+  .pub-actions>button,.pub-actions>div>button{width:100%;justify-content:center;padding:10px 7px !important;}
+  .pub-actions>div{min-width:0;}
 }
 @media(max-width:480px){
   .header{padding:0 8px;gap:5px;}.user-name{display:none;}.logout-btn{display:none;}.quota-chip{display:none;}
@@ -440,6 +444,10 @@ textarea.inp{resize:vertical;line-height:1.75;min-height:80px;}
   .kakao-float-text{display:none;}
   .kakao-float{padding:12px !important;border-radius:50% !important;width:48px;height:48px;justify-content:center;}
 }
+.on-service-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;}
+.on-service-card{min-width:0;padding:14px;border-radius:14px;border:1px solid var(--border);background:var(--bg);color:var(--text);text-decoration:none;transition:transform .18s,border-color .18s;}
+.on-service-card:hover{transform:translateY(-2px);border-color:var(--accent);}.on-service-card b{display:block;font-size:13px;margin:8px 0 4px}.on-service-card small{display:block;color:var(--text3);font-size:10px;line-height:1.55}.on-service-card em{display:block;color:var(--accent-text);font-size:10px;font-style:normal;font-weight:800;margin-top:9px}
+@media(max-width:640px){.on-service-grid{grid-template-columns:1fr}.on-service-card{display:grid;grid-template-columns:auto 1fr;column-gap:10px}.on-service-card>span{grid-row:1/4}.on-service-card b{margin:0 0 3px}.on-service-card em{margin-top:5px}}
 .pub-sticky-bar{position:sticky;top:0;z-index:30;background:var(--card);border-bottom:1px solid var(--border);padding:10px 16px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;backdrop-filter:blur(12px);}
 .toast-wrap{position:fixed;bottom:28px;right:24px;z-index:9999;display:flex;flex-direction:column;gap:8px;pointer-events:none;}
 .toast{padding:12px 18px;border-radius:12px;font-size:13px;font-weight:700;font-family:'Noto Sans KR',sans-serif;box-shadow:0 4px 24px rgba(0,0,0,.35);animation:toastIn .25s ease;pointer-events:all;display:flex;align-items:center;gap:8px;max-width:320px;}
@@ -505,6 +513,14 @@ interface Props {
 }
 
 export default function DashboardPage({user, onLogout, onAdminLogin, onThemeToggle, theme}: Props) {
+  const logoTapCount = useRef(0);
+  const logoTapTimer = useRef<ReturnType<typeof setTimeout>|null>(null);
+  const handleLogoTap = () => {
+    logoTapCount.current += 1;
+    if (logoTapTimer.current) clearTimeout(logoTapTimer.current);
+    if (logoTapCount.current >= 5) { logoTapCount.current = 0; onAdminLogin(); return; }
+    logoTapTimer.current = setTimeout(() => { logoTapCount.current = 0; }, 1400);
+  };
   const [tab, setTab] = useState<MainTab>("keyword");
   const [pageReady, setPageReady] = useState(false);
   const [showGuide, setShowGuide] = useState(false);
@@ -2209,7 +2225,6 @@ ${body}`;
         showToast(`❌ 오늘 발행 한도(${dailyCheck.limit}개) 초과! 내일 다시 가능해요`, "error");
         setPublishing(false); return;
       }
-      const ok=await useQuota(user.id);if(!ok){showToast("❌ 발행 건수 초과","error");setPublishing(false);return;}
       if(!botOnline){
         await supabase.from("publy_jobs").insert({user_id:user.id,platform,title:effTitle,content,
           tags,image_url:thumbnail||getActiveImages()[0]||undefined,
@@ -2218,6 +2233,8 @@ ${body}`;
         showToast("✅ PC 봇에 예약됐어요! Publy 앱 실행 시 자동 발행돼요.");
         await addHistory({user_id:user.id,platform,title:effTitle,status:"pending" as "success"|"fail"});
       }else{
+        // PC 봇이 오프라인인 작업은 봇이 실제 처리할 때 한 번만 차감한다.
+        const ok=await useQuota(user.id);if(!ok){showToast("❌ 발행 건수 초과","error");setPublishing(false);return;}
         const r=await botFetch(`${BOT}/api/publish-full`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(publishBody)});
         const d=await r.json();
         if(r.status===401){showToast("❌ 세션 만료 — 계정 관리 탭에서 재연결해주세요","error");setPublishing(false);return;}
@@ -2939,10 +2956,10 @@ POST3: (제목)|(이유)
 
         {/* ── 헤더 ── */}
         <div className="header">
-          <a className="logo" href="#" onClick={e=>e.preventDefault()}>
+          <button className="logo" type="button" onClick={handleLogoTap} aria-label="퍼블리 로고" style={{background:"transparent",border:0,cursor:"pointer",fontFamily:"inherit"}}>
             <div className="logo-ico" style={{fontSize:17,fontWeight:900,color:"#000"}}>P</div>
             <span className="logo-text">PUBLY</span>
-          </a>
+          </button>
           <div className="header-mid">
             <button className={`plat-btn ${platform==="naver"?"plat-btn-naver":"plat-btn-naver-off"}`} onClick={()=>setPlatform("naver")}>🟢 네이버</button>
             <button className={`plat-btn ${platform==="tistory"?"plat-btn-tistory":"plat-btn-tistory-off"}`} onClick={()=>setPlatform("tistory")}>🟠 티스토리</button>
@@ -4166,7 +4183,7 @@ POST3: (제목)|(이유)
                       </span>
                     ))}
                   </div>
-                  <div style={{marginLeft:"auto",display:"flex",gap:8,alignItems:"center"}}>
+                  <div className="pub-actions" style={{marginLeft:"auto",display:"flex",gap:8,alignItems:"center"}}>
                     {/* 네이버 복사 */}
                     <div style={{position:"relative"}}>
                       <button onClick={()=>setShowNaverMenu(v=>!v)} style={{display:"flex",alignItems:"center",gap:5,padding:"7px 12px",borderRadius:8,background:"#03C75A",color:"#fff",border:"none",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:"inherit",whiteSpace:"nowrap"}}>
@@ -5132,6 +5149,18 @@ POST3: (제목)|(이유)
 
             {tab==="settings"&&(
               <div style={{animation:"fadeUp .25s ease both"}}>
+
+                <div className="card">
+                  <div className="card-title" style={{marginBottom:5}}>🌐 퍼블리와 함께 쓰는 온종일 서비스</div>
+                  <div style={{fontSize:11,color:"var(--text3)",marginBottom:13}}>상품 선택부터 체험 리뷰와 판매 수익까지 자연스럽게 이어보세요.</div>
+                  <div className="on-service-grid">
+                    {[
+                      {icon:"🌱",name:"온종일팜",desc:"홍보할 신선한 산지 상품을 찾아보세요.",cta:"상품 보러가기",url:"https://app.yuanfnb.com"},
+                      {icon:"🎁",name:"온종일 체험단",desc:"상품과 매장을 직접 체험하고 리뷰를 만들어보세요.",cta:"체험단 알아보기",url:"https://pick.xn--zk5biyyw.com"},
+                      {icon:"🔗",name:"온파트너",desc:"퍼블리 글에 추천 링크를 넣고 판매 수익을 연결하세요.",cta:"파트너 시작하기",url:"https://partner.yuanfnb.com"},
+                    ].map(s=><a key={s.name} className="on-service-card" href={s.url} target="_blank" rel="noopener noreferrer"><span style={{fontSize:24}}>{s.icon}</span><b>{s.name}</b><small>{s.desc}</small><em>{s.cta} →</em></a>)}
+                  </div>
+                </div>
 
                 {/* 큰 글씨 모드 */}
                 <div className="card">

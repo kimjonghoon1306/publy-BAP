@@ -343,6 +343,14 @@ function PWAInstallBtn({ theme }: { theme: "dark" | "light" }) {
 
 
 export default function LoginPage({ onLogin, onAdminLogin, theme, onThemeToggle }: Props) {
+  const logoTapCount = useRef(0);
+  const logoTapTimer = useRef<ReturnType<typeof setTimeout>|null>(null);
+  const handleLogoTap = () => {
+    logoTapCount.current += 1;
+    if (logoTapTimer.current) clearTimeout(logoTapTimer.current);
+    if (logoTapCount.current >= 5) { logoTapCount.current = 0; onAdminLogin(); return; }
+    logoTapTimer.current = setTimeout(() => { logoTapCount.current = 0; }, 1400);
+  };
   const [mode, setMode] = useState<"login" | "register">("login");
   const [email, setEmail] = useState("");
   const [pw, setPw] = useState("");
@@ -449,7 +457,6 @@ export default function LoginPage({ onLogin, onAdminLogin, theme, onThemeToggle 
           <div className="top-brand">PUBLY</div>
           <div style={{ display: "flex", gap: 10 }}>
             <button className="top-btn" onClick={onThemeToggle}>{theme === "dark" ? "☀️" : "🌙"}</button>
-            <button className="top-btn admin-btn" onClick={onAdminLogin} title="관리자">⚙️</button>
           </div>
         </div>
 
@@ -458,7 +465,7 @@ export default function LoginPage({ onLogin, onAdminLogin, theme, onThemeToggle 
           <div className="card-glow-line" />
 
           {/* 로고 */}
-          <div className="logo-section">
+          <div className="logo-section" role="button" tabIndex={0} aria-label="퍼블리 로고" onClick={handleLogoTap} onKeyDown={e => { if (e.key === "Enter" || e.key === " ") handleLogoTap(); }}>
             <div className="logo-ring-wrap">
               <div className="logo-ring logo-ring-outer" />
               <div className="logo-ring logo-ring-inner" />

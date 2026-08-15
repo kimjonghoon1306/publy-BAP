@@ -18,6 +18,7 @@ export interface PublyJob {
   content: string;
   tags: string[];
   image_prompt?: string;
+  schedule_time?: string | null;
   status: "pending" | "running" | "success" | "fail";
   result_url?: string;
   error?: string;
@@ -25,11 +26,13 @@ export interface PublyJob {
 }
 
 export async function fetchPendingJobs(userId: string): Promise<PublyJob[]> {
+  const now = new Date().toISOString();
   const { data, error } = await supabase
     .from("publy_jobs")
     .select("*")
     .eq("user_id", userId)
     .eq("status", "pending")
+    .or(`schedule_time.is.null,schedule_time.lte.${now}`)
     .order("created_at", { ascending: true })
     .limit(5);
   if (error) return [];
@@ -38,11 +41,13 @@ export async function fetchPendingJobs(userId: string): Promise<PublyJob[]> {
 
 export async function fetchAllPendingJobs(userIds: string[]): Promise<PublyJob[]> {
   if (!userIds.length) return [];
+  const now = new Date().toISOString();
   const { data, error } = await supabase
     .from("publy_jobs")
     .select("*")
     .in("user_id", userIds)
     .eq("status", "pending")
+    .or(`schedule_time.is.null,schedule_time.lte.${now}`)
     .order("created_at", { ascending: true })
     .limit(10);
   if (error) return [];

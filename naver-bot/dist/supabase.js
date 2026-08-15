@@ -18,11 +18,13 @@ const SUPABASE_URL = "https://qhhoyxexxlimbjrbwrgq.supabase.co";
 const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFoaG95eGV4eGxpbWJqcmJ3cmdxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzczMTMzOTQsImV4cCI6MjA5Mjg4OTM5NH0.pw_qUR0oOxgt82S_DA6GTka3WP0JBu2vmWuKZ9VvTKM";
 exports.supabase = (0, supabase_js_1.createClient)(SUPABASE_URL, SUPABASE_KEY);
 async function fetchPendingJobs(userId) {
+    const now = new Date().toISOString();
     const { data, error } = await exports.supabase
         .from("publy_jobs")
         .select("*")
         .eq("user_id", userId)
         .eq("status", "pending")
+        .or(`schedule_time.is.null,schedule_time.lte.${now}`)
         .order("created_at", { ascending: true })
         .limit(5);
     if (error)
@@ -32,11 +34,13 @@ async function fetchPendingJobs(userId) {
 async function fetchAllPendingJobs(userIds) {
     if (!userIds.length)
         return [];
+    const now = new Date().toISOString();
     const { data, error } = await exports.supabase
         .from("publy_jobs")
         .select("*")
         .in("user_id", userIds)
         .eq("status", "pending")
+        .or(`schedule_time.is.null,schedule_time.lte.${now}`)
         .order("created_at", { ascending: true })
         .limit(10);
     if (error)
