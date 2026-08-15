@@ -9,14 +9,13 @@ exports.fetchAllPendingJobs = fetchAllPendingJobs;
 exports.updateJob = updateJob;
 exports.addHistory = addHistory;
 exports.useQuota = useQuota;
-exports.getAccountCredentials = getAccountCredentials;
 const supabase_js_1 = require("@supabase/supabase-js");
 const ws_1 = __importDefault(require("ws"));
 if (typeof globalThis.WebSocket === "undefined") {
     globalThis.WebSocket = ws_1.default;
 }
 const SUPABASE_URL = "https://qhhoyxexxlimbjrbwrgq.supabase.co";
-const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFoaG95eGV4eGxpbWJqcmJ3cmdxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDU4MzA5NzcsImV4cCI6MjA2MTQwNjk3N30.bHtF5g_cJjlcLLFH5JaTzqOeD03j6fNXQYhYkVvTKM";
+const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFoaG95eGV4eGxpbWJqcmJ3cmdxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzczMTMzOTQsImV4cCI6MjA5Mjg4OTM5NH0.pw_qUR0oOxgt82S_DA6GTka3WP0JBu2vmWuKZ9VvTKM";
 exports.supabase = (0, supabase_js_1.createClient)(SUPABASE_URL, SUPABASE_KEY);
 async function fetchPendingJobs(userId) {
     const { data, error } = await exports.supabase
@@ -68,22 +67,5 @@ async function useQuota(userId) {
         .eq("used_quota", data.used_quota)
         .select("id");
     return !!(updated && updated.length > 0);
-}
-async function getAccountCredentials(userId, platform) {
-    const { data, error } = await exports.supabase
-        .from("publy_accounts")
-        .select("username, password_encrypted")
-        .eq("user_id", userId)
-        .eq("platform", platform)
-        .single();
-    if (error || !data)
-        return null;
-    try {
-        const pw = Buffer.from(data.password_encrypted || "", "base64").toString("utf-8");
-        return { id: data.username, pw };
-    }
-    catch {
-        return null;
-    }
 }
 //# sourceMappingURL=supabase.js.map

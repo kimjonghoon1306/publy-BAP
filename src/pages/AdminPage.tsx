@@ -3759,7 +3759,7 @@ POST3: (제목)|(이유)
                               </div>
                               <div className="detail-field"><span className="field-label">현재 만료일</span>
                                 <input className="field-inp" readOnly tabIndex={-1}
-                                  value={u.quota?.reset_date ? `${new Date(u.quota.reset_date).toLocaleDateString("ko-KR")} (${(()=>{const dl=Math.ceil((new Date(u.quota!.reset_date).getTime()-Date.now())/86400000);return dl<0?"만료됨":dl===0?"오늘 만료":"D-"+dl;})()})` : "기간 없음"}
+                                  value={u.quota?.reset_date ? `${new Date(u.quota.reset_date).toLocaleDateString("ko-KR")} (${(()=>{const e=new Date(u.quota!.reset_date);e.setHours(0,0,0,0);const t=new Date();t.setHours(0,0,0,0);const dl=Math.round((e.getTime()-t.getTime())/86400000);return dl<0?"만료됨":dl===0?"오늘 만료":"D-"+dl;})()})` : "기간 없음"}
                                   style={{color:"var(--text3)",cursor:"default"}}/>
                               </div>
                               <div className="detail-field"><span className="field-label">만료일 연장 (일)</span>

@@ -46,11 +46,24 @@ const LAUNCH_ARGS = [
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
 
 /* ── 멘트 자연 변형 헬퍼 ── */
+// ★ 네이버 서이추/댓글 메시지 필드는 4바이트 이모지(😊)를 "?"로 저장함 → 텍스트 이모티콘으로 치환
+function emojiToSafeText(s: string): string {
+  const map: Record<string, string> = {
+    "😊":"^^", "🙂":"^^", "😄":"^^", "😍":"^^", "🤗":"^^", "😆":"^^", "☺️":"^^", "☺":"^^",
+    "👍":" 👍", "🙌":"~", "✨":"~", "🌟":"~", "💕":" ♥", "❤️":" ♥", "❤":" ♥", "🎁":"", "🙏":"",
+  };
+  let out = s;
+  for (const [e, t] of Object.entries(map)) out = out.split(e).join(t);
+  // 👍/♥ 같은 BMP·이미 안전한 기호는 두되, 남은 4바이트 이모지(😀류)는 제거
+  out = out.replace(/[\u{1F000}-\u{1FAFF}\u{1F300}-\u{1F9FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}\u{FE00}-\u{FE0F}\u{200D}]/gu, "");
+  return out.replace(/ {2,}/g, " ").trim();
+}
+
 function naturalizeMsg(msg: string): string {
   let result = msg;
 
-  // 1) 끝 이모지 랜덤 교체/추가
-  const emojiPool = ["😊", "🙂", "😄", "👍", "✨", "🌟", "💕", "🤗", "😍", "🙌"];
+  // 1) 끝 이모티콘 랜덤 교체/추가 (네이버 안전한 텍스트 이모티콘)
+  const emojiPool = ["^^", "~", " :)", " ^^*", "^^~", "!"];
   result = result.replace(/[😊🙂😄👍✨🌟💕🤗😍🙌]$/u, () =>
     emojiPool[Math.floor(Math.random() * emojiPool.length)]
   );
@@ -82,7 +95,8 @@ function naturalizeMsg(msg: string): string {
     result = result.replace(/!$/, "~").replace(/~$/, "!");
   }
 
-  return result;
+  // 5) ★ 유니코드 이모지 → 네이버 안전 텍스트 (메시지 어디에 있든 "?" 방지)
+  return emojiToSafeText(result);
 }
 
 /* ── 휴먼 딜레이 헬퍼 (정규분포) ── */
@@ -113,9 +127,8 @@ async function humanType(page: any, text: string, opts?: { typoRate?: number }) 
     "a":["s","q"],"s":["a","d"],"d":["s","f"],"e":["w","r"],
   };
 
-  for (let i = 0; i < text.length; i++) {
-    const ch = text[i];
-
+  // ★ 스프레드로 순회 = 코드포인트 단위 → 이모지(😊)가 반토막 안 남
+  for (const ch of text) {
     // 오타 삽입 (영문/숫자만)
     if (typoRate > 0 && Math.random() < typoRate && /[a-zA-Z]/.test(ch)) {
       const typoPool = NEARBY[ch.toLowerCase()] || ["x"];
@@ -126,7 +139,12 @@ async function humanType(page: any, text: string, opts?: { typoRate?: number }) 
       await page.waitForTimeout(randNorm(80, 20));
     }
 
-    await page.keyboard.type(ch);
+    // 이모지 등 BMP 밖 문자는 keyboard.type이 "?"로 깨짐 → insertText로 직접 삽입
+    if ((ch.codePointAt(0) || 0) > 0xFFFF) {
+      await page.keyboard.insertText(ch);
+    } else {
+      await page.keyboard.type(ch);
+    }
 
     // 글자마다 랜덤 딜레이
     if (PUNCTUATION.has(ch)) {
@@ -197,7 +215,14 @@ export async function saveNaverSession(
     }, pw);
     await page.waitForTimeout(400);
 
-    await page.click(".btn_login").catch(() => page.click("button[type='submit']"));
+    // 로그인 버튼 클릭 (네이버 개편: #loginBtn_row/#loginBtn_column, 옛 .btn_login 사라짐)
+    let _loginClicked = false;
+    for (const _sel of ["#loginBtn_row", "#loginBtn_column"]) {
+      try { const _el = await page.$(_sel); if (_el && await _el.isVisible()) { await _el.click(); _loginClicked = true; break; } } catch {}
+    }
+    if (!_loginClicked) { try { await page.click(".btn_login", { timeout: 2000 }); _loginClicked = true; } catch {} }
+    if (!_loginClicked) { try { await page.click("button[type='submit']", { timeout: 2000 }); _loginClicked = true; } catch {} }
+    if (!_loginClicked) { await page.keyboard.press("Enter"); }
 
     console.log("[naver] 로그인 대기 중... (캡차 있으면 직접 풀어주세요)");
     try {
@@ -286,7 +311,14 @@ export async function reloginNaverSilent(userId: string): Promise<boolean> {
       if (el) { el.focus(); el.value = v; el.dispatchEvent(new Event("input", { bubbles: true })); }
     }, pw);
     await page.waitForTimeout(300);
-    await page.click(".btn_login").catch(() => page.click("button[type='submit']"));
+    // 로그인 버튼 (네이버 개편: #loginBtn_row/#loginBtn_column)
+    {
+      let _c = false;
+      for (const _s of ["#loginBtn_row", "#loginBtn_column"]) { try { const _e = await page.$(_s); if (_e && await _e.isVisible()) { await _e.click(); _c = true; break; } } catch {} }
+      if (!_c) { try { await page.click(".btn_login", { timeout: 2000 }); _c = true; } catch {} }
+      if (!_c) { try { await page.click("button[type='submit']", { timeout: 2000 }); _c = true; } catch {} }
+      if (!_c) { await page.keyboard.press("Enter"); }
+    }
 
     // 캡차가 나오면 실패 (헤드리스라 처리 불가)
     await page.waitForFunction(
@@ -954,6 +986,11 @@ export function sessionExists(accountId: string): boolean {
   return naverSessionExists(accountId);
 }
 
+// 계정 로그인 세션 삭제 (계정 삭제 시)
+export function removeSession(accountId: string): void {
+  try { deleteSession(sessionName(accountId), LEGACY_SESSION_DIRS); } catch {}
+}
+
 export async function saveSession(
   accountId: string, id: string, pw: string
 ): Promise<{ blogId: string }> {
@@ -996,6 +1033,7 @@ export async function crawlBlogIds(params: {
   const activeCutoff = activeDays > 0 ? Date.now() - activeDays * 86400000 : 0;
 
   const results: BlogTarget[] = [];
+  const seen = new Set<string>();   // ★ 키워드 전체에 걸쳐 중복 블로그 제거(루프 밖에서 유지)
   const browser = await chromium.launch({ headless: true, args: LAUNCH_ARGS });
   const context = await browser.newContext({ userAgent: UA, locale: "ko-KR" });
   await applyAntiDetection(context);
@@ -1009,7 +1047,6 @@ export async function crawlBlogIds(params: {
         { waitUntil: "domcontentloaded", timeout: 20000 }).catch(() => {});
       await page.waitForTimeout(500);
 
-      const seen = new Set<string>();
       let got = 0, skippedMarket = 0, skippedStale = 0;
       const perPage = 10, maxPages = 20;
 
@@ -1067,6 +1104,124 @@ export async function crawlBlogIds(params: {
   }
 
   return results;
+}
+
+/* ── 내 이웃새글 수집 (키워드 대신 "내 서로이웃들의 최근 글") ──
+   네이버 이웃새글 API(BuddyPostList.naver)를 세션으로 호출 → 이웃 블로거 중복제거해 반환.
+   실측: blogId/nickName/postUrl/addDate/sympathyEnable/commentEnable 제공. */
+export async function crawlBuddyPosts(params: {
+  accountId: string;
+  maxCount: number;
+  onLog?: (msg: string) => void;
+}): Promise<BlogTarget[]> {
+  const { accountId, maxCount, onLog } = params;
+  const log = onLog || console.log;
+  if (!sessionExists(accountId)) throw new Error("세션 없음 — 먼저 계정을 연결하세요");
+  const { cookies } = loadSession(accountId);
+
+  const results: BlogTarget[] = [];
+  const seen = new Set<string>();
+  const browser = await chromium.launch({ headless: true, args: LAUNCH_ARGS });
+  const context = await browser.newContext({ userAgent: UA, locale: "ko-KR" });
+  await applyAntiDetection(context);
+  await context.addCookies(cookies);
+  const page = await context.newPage();
+  try {
+    await page.goto("https://section.blog.naver.com/BlogHome.naver", { waitUntil: "domcontentloaded", timeout: 20000 }).catch(() => {});
+    await page.waitForTimeout(800);
+    log("[이웃새글] 내 서로이웃 최근 글 수집 중...");
+
+    const maxPages = 30;
+    for (let pageNum = 1; pageNum <= maxPages && results.length < maxCount; pageNum++) {
+      const apiUrl = `https://section.blog.naver.com/ajax/BuddyPostList.naver?page=${pageNum}&groupId=0`;
+      let list: any[] = [];
+      try {
+        const raw = await page.evaluate(async (u) => {
+          const r = await fetch(u, { headers: { Referer: "https://section.blog.naver.com/BlogHome.naver" } });
+          return await r.text();
+        }, apiUrl);
+        const data = JSON.parse(raw.replace(/^\)\]\}',?\s*/, ""));
+        list = data?.result?.buddyPostList || data?.result?.postList || data?.result?.list || [];
+      } catch { list = []; }
+      if (!list.length) break;
+
+      for (const item of list) {
+        const blogId = item.domainIdOrBlogId || item.blogId;
+        if (!blogId || INVALID_BLOG_IDS.includes(blogId) || seen.has(blogId)) continue;
+        // 공감/댓글 둘 다 막힌 글은 스킵
+        if (item.sympathyEnable === false && item.commentEnable === false) continue;
+        seen.add(blogId);
+        results.push({
+          keyword: "이웃새글",
+          blogId,
+          nickName: item.nickName || undefined,
+          blogName: item.blogName || item.nickName || undefined,
+          addDate: item.addDate || undefined,
+          postUrl: item.postUrl || undefined,
+          thumbnail: item.thumbnails?.[0]?.url || item.profileUrl || undefined,
+        });
+        if (results.length >= maxCount) break;
+      }
+      await page.waitForTimeout(250);
+    }
+    log(`[이웃새글] ✅ 이웃 블로거 ${results.length}명 수집 완료`);
+  } finally {
+    await browser.close().catch(() => {});
+  }
+  return results;
+}
+
+/* ── 내 이웃새글 제목·내용에서 "자주 나오는 키워드" 추출 (이웃들이 뭘 쓰는지 분석) ── */
+export async function analyzeBuddyKeywords(params: {
+  accountId: string;
+  scanCount?: number;   // 스캔할 이웃글 수(기본 100)
+  onLog?: (msg: string) => void;
+}): Promise<{ word: string; count: number }[]> {
+  const { accountId, scanCount = 100, onLog } = params;
+  const log = onLog || console.log;
+  if (!sessionExists(accountId)) throw new Error("세션 없음 — 먼저 계정을 연결하세요");
+  const { cookies } = loadSession(accountId);
+  const browser = await chromium.launch({ headless: true, args: LAUNCH_ARGS });
+  const context = await browser.newContext({ userAgent: UA, locale: "ko-KR" });
+  await applyAntiDetection(context);
+  await context.addCookies(cookies);
+  const page = await context.newPage();
+  const texts: string[] = [];
+  try {
+    await page.goto("https://section.blog.naver.com/BlogHome.naver", { waitUntil: "domcontentloaded", timeout: 20000 }).catch(() => {});
+    await page.waitForTimeout(800);
+    log("[키워드분석] 내 이웃새글 스캔 중...");
+    for (let pageNum = 1; pageNum <= 30 && texts.length < scanCount; pageNum++) {
+      const apiUrl = `https://section.blog.naver.com/ajax/BuddyPostList.naver?page=${pageNum}&groupId=0`;
+      let list: any[] = [];
+      try {
+        const raw = await page.evaluate(async (u) => {
+          const r = await fetch(u, { headers: { Referer: "https://section.blog.naver.com/BlogHome.naver" } });
+          return await r.text();
+        }, apiUrl);
+        list = JSON.parse(raw.replace(/^\)\]\}',?\s*/, ""))?.result?.buddyPostList || [];
+      } catch { list = []; }
+      if (!list.length) break;
+      for (const it of list) texts.push(`${it.title || ""} ${it.briefContents || ""}`);
+      await page.waitForTimeout(200);
+    }
+  } finally {
+    await browser.close().catch(() => {});
+  }
+  // 한글 2글자+ 단어 빈도 (조사·인삿말·불용어 제거)
+  const STOP = new Set(["안녕하세요","있는","합니다","입니다","그리고","하는","이번","오늘","저는","제가","너무","정말","진짜","우리","그것","이것","해서","에서","으로","까지","부터","했습니다","같은","위해","통해","대한","관련","경우","때문","많이","다시","바로","여기","거기","하지만","그런","이런","저런","하고","했어요","합니다만","입니다만","보고","보다","되는","되어","있어요","없이도","없는","위한","때는","면서"]);
+  const freq: Record<string, number> = {};
+  const joined = texts.join(" ");
+  for (const w of joined.match(/[가-힣]{2,}/g) || []) {
+    if (STOP.has(w)) continue;
+    freq[w] = (freq[w] || 0) + 1;
+  }
+  const top = Object.entries(freq)
+    .filter(([, c]) => c >= 2)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 25)
+    .map(([word, count]) => ({ word, count }));
+  return top;
 }
 
 /* 모바일 통합검색 블로그탭 폴백 (ajax API가 막혔을 때) */
@@ -1139,6 +1294,7 @@ export async function addNeighbors(params: {
 
   let done = 0;
   let fail = 0;
+  const runSeen = new Set<string>();   // 이번 실행에서 이미 처리한 blogId (중복 신청 방지)
 
   try {
     // 키워드 교차 셔플 — A키워드1→B키워드1→A키워드2... 패턴으로 자연스럽게
@@ -1170,11 +1326,12 @@ export async function addNeighbors(params: {
 
       const { keyword, blogId } = target;
 
-      if (skipDone && doneSet.has(blogId)) {
-        await onResult?.({ keyword, blogId, status: "skip", message: "이미 처리됨" });
+      if ((skipDone && doneSet.has(blogId)) || runSeen.has(blogId)) {
+        await onResult?.({ keyword, blogId, status: "skip", message: doneSet.has(blogId) ? "이미 처리됨" : "중복(이번 목록)" });
         onProgress?.(done, fail);
         continue;
       }
+      runSeen.add(blogId);   // 이번 실행 내 중복 방지
 
       try {
         log(`[서이추] ${blogId} 신청 시도...`);
@@ -1459,6 +1616,8 @@ export async function engageBlogs(params: {
 
         let liked = false;
         let commented = false;
+        let likeReason = "";     // 공감 못한 이유 (결과 표시용)
+        let commentReason = "";  // 댓글 못단 이유 (결과 표시용)
         const targetPost = filtered[0];
 
         log(`[공감·댓글] ${blogId} → 글 진입: ${targetPost.url}`);
@@ -1552,7 +1711,7 @@ export async function engageBlogs(params: {
                 }
               } catch {}
             }
-            if (!liked) log(`[공감·댓글] ${blogId} 공감 버튼 못 찾음`);
+            if (!liked) { likeReason = "공감 버튼 없음(막힘/비공개)"; log(`[공감·댓글] ${blogId} 공감 버튼 못 찾음`); }
           } catch (e: any) {
             log(`[공감·댓글] ${blogId} 공감 실패: ${e.message}`);
           }
@@ -1563,19 +1722,28 @@ export async function engageBlogs(params: {
           try {
             await page.waitForTimeout(1000);
 
-            // ★ 실측(2026-08): 댓글 영역은 글 하단에 lazy-load → 스크롤 후 .btn_comment 클릭해야 입력창 나타남
+            // ★ 실측(2026-08): 댓글 입력창은 lazy-load. 순서=①끝까지 스크롤 ②'댓글 쓰기'(_cmtList) 클릭해 위젯 로드
+            //    ③'댓글쓰기' 화살표버튼(a.btn_write_comment._naverCommentWriteBtn) 클릭해야 u_cbox_text 입력칸이 펼쳐짐
             try {
-              await page.mouse.wheel(0, 3000);
+              // 여러 단계로 끝까지 스크롤(긴 글도 댓글 위젯 로드되게)
+              for (let s = 0; s < 4; s++) { await page.mouse.wheel(0, 2500); await page.waitForTimeout(500); }
+              await ctx.evaluate(() => { const sc = document.scrollingElement || document.documentElement; sc.scrollTop = sc.scrollHeight; }).catch(() => {});
               await page.waitForTimeout(1200);
-              const openBtn = await ctx.$("a.btn_comment._cmtList, a.btn_comment, ._cmtList");
-              if (openBtn) {
-                await scrollFrameElementIntoView(openBtn);
-                await openBtn.click({ timeout: 5000 });
-                await page.waitForTimeout(1800);
+              // ① 댓글 영역 열기(위젯 로드) — btn_comment/_cmtList/플로팅
+              for (const os of ["a.btn_comment._cmtList", "a._cmtList", "a.btn_comment", "a._floating_bottom_btn_comment"]) {
+                const ob = await ctx.$(os);
+                if (ob) { await scrollFrameElementIntoView(ob); await ob.click({ timeout: 4000 }).catch(() => {}); await page.waitForTimeout(1500); break; }
               }
-              // 댓글쓰기 버튼도 시도
-              const writeBtn = await ctx.$("a.btn_write_comment, ._naverComment_write");
-              if (writeBtn) { await writeBtn.click({ force: true, timeout: 2000 }).catch(() => {}); await page.waitForTimeout(1000); }
+              // ② ★'댓글쓰기' 버튼(화살표) 클릭 → 입력칸 펼쳐짐 (실측 클래스 _naverCommentWriteBtn)
+              for (const ws of ["a.btn_write_comment._naverCommentWriteBtn", "a._naverCommentWriteBtn", "a.btn_write_comment"]) {
+                const wb = await ctx.$(ws);
+                if (wb) { await scrollFrameElementIntoView(wb); await wb.click({ force: true, timeout: 3000 }).catch(() => {}); await page.waitForTimeout(1500); break; }
+              }
+              // ③ u_cbox 입력칸이 뜰 때까지 대기(최대 6초)
+              await ctx.waitForSelector(".u_cbox_text, .u_cbox_write_wrap textarea", { timeout: 6000 }).catch(() => {});
+              // 접힌 작성영역(beforeClickWriteBox) 한 번 더 클릭해 포커스
+              const writeArea = await ctx.$(".u_cbox_write, .u_cbox_write_wrap");
+              if (writeArea) { await scrollFrameElementIntoView(writeArea); await writeArea.click({ timeout: 2000 }).catch(() => {}); await page.waitForTimeout(600); }
             } catch {}
 
             // 댓글 입력창 셀렉터 (u_cbox = 네이버 공용 댓글 위젯)
@@ -1630,22 +1798,32 @@ export async function engageBlogs(params: {
 
                 const el = await commentCtx.$(sel);
                 if (el) {
-                  await commentCtx.click(sel, { timeout: 3000 });
-                  await page.waitForTimeout(500);
+                  // ★ 안내문(.u_cbox_guide placeholder)이 입력칸 클릭을 가로챔 → 안내문 먼저 클릭해 활성화
+                  const guide = await commentCtx.$(".u_cbox_guide");
+                  if (guide) { await guide.click({ timeout: 3000 }).catch(() => {}); await page.waitForTimeout(400); }
+                  // force 클릭(오버레이 무시) + 좌표 폴백
+                  try { await el.click({ force: true, timeout: 3000 }); }
+                  catch { const b = await el.boundingBox(); if (b) await page.mouse.click(b.x + b.width / 2, b.y + b.height / 2); }
+                  await page.waitForTimeout(400);
                   // contenteditable(.u_cbox_text)은 fill 안됨 → 전체선택 후 삭제로 비우기
                   await page.keyboard.press(process.platform === "darwin" ? "Meta+A" : "Control+A").catch(() => {});
                   await page.keyboard.press("Backspace").catch(() => {});
                   const currentComment2 = comments[commentIdx % comments.length];
-                  commentIdx++;
                   const naturalComment2 = naturalizeMsg(currentComment2);
                   await humanType(page, naturalComment2);
                   await page.waitForTimeout(600);
+                  // ★ 실제로 입력됐는지 확인 (안됐으면 다음 셀렉터 시도, commentIdx는 성공시에만 증가)
+                  const typedOk = await commentCtx.evaluate((s: string) => {
+                    const t = document.querySelector(s) as any;
+                    return !!t && (t.value || t.textContent || "").trim().length > 0;
+                  }, sel).catch(() => false);
+                  if (!typedOk) { continue; }
+                  commentIdx++;
                   // 등록 버튼 (u_cbox_btn_upload = 네이버 댓글 등록)
                   const submitSels = [
                     ".u_cbox_btn_upload",
                     "button.u_cbox_btn_upload",
                     "a.u_cbox_btn_upload",
-                    "button:has-text('등록')",
                     "button[type='submit']",
                     "button[class*='submit']",
                     "button.btn_ok",
@@ -1653,7 +1831,7 @@ export async function engageBlogs(params: {
                   for (const ss of submitSels) {
                     try {
                       const sb = await commentCtx.$(ss);
-                      if (sb) { await commentCtx.click(ss, { timeout: 3000 }); commentDone = true; break; }
+                      if (sb) { await sb.click({ force: true, timeout: 3000 }); commentDone = true; break; }
                     } catch {}
                   }
                   if (commentDone) { log(`[공감·댓글] 💬 ${blogId} 댓글 등록`); break; }
@@ -1666,21 +1844,33 @@ export async function engageBlogs(params: {
               await page.waitForTimeout(1000);
               log(`[공감·댓글] 💬 ${blogId} 댓글 완료`);
             } else {
+              commentReason = "댓글 입력창 못 찾음(댓글 막힘 가능)";
               log(`[공감·댓글] ${blogId} 댓글 입력창 못 찾음`);
             }
           } catch (e: any) {
+            commentReason = `댓글 오류(${(e.message || "").slice(0, 20)})`;
             log(`[공감·댓글] ${blogId} 댓글 실패: ${e.message}`);
           }
         }
 
-        if (liked || commented) {
+        // ★ 목표 달성 기준: 댓글 작업이면 "댓글이 실제로 써졌는가"가 핵심(공감만 된 건 완료 아님 → 다음에 댓글 재시도)
+        const goalMet = doComment ? commented : liked;
+        if (goalMet) {
+          // 목표 달성한 것만 "완료 목록"에 기록(다음번 '이미 처리됨' 대상)
           doneSet.add(blogId);
           fs.writeFileSync(engageDonePath, JSON.stringify([...doneSet], null, 2));
           done++;
-          await onResult?.({ keyword, blogId, postUrl: targetPost.url, liked, commented, status: "success", message: `${liked ? "공감" : ""}${liked && commented ? "+" : ""}${commented ? "댓글" : ""} 완료` });
-          log(`[공감·댓글] ✅ ${blogId} 완료 (${done}/${dailyLimit})`);
+          const msg = commented ? "통과 (댓글 작성)" : "공감 완료";
+          await onResult?.({ keyword, blogId, postUrl: targetPost.url, liked, commented, status: "success", message: msg });
+          log(`[공감·댓글] ✅ ${blogId} ${msg} (${done}/${dailyLimit})`);
         } else {
-          throw new Error("공감·댓글 모두 실패");
+          // 목표 미달 → 완료기록 안 함(재시도 가능) + 결과에 "사실" 그대로 표시
+          const parts: string[] = [];
+          if (doLike) parts.push(liked ? "공감됨" : `공감 ${likeReason || "실패"}`);
+          if (doComment) parts.push(commented ? "댓글됨" : `댓글 ${commentReason || "실패"}`);
+          const msg = parts.join(" / ") || "대상 아님";
+          await onResult?.({ keyword, blogId, postUrl: targetPost.url, liked, commented, status: "skip", message: msg });
+          log(`[공감·댓글] ⏭ ${blogId} 스킵: ${msg}`);
         }
 
       } catch (e: any) {

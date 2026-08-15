@@ -1,7 +1,7 @@
 import express from "express";
 import cors from "cors";
-import { saveSession, sessionExists, crawlBlogIds, addNeighbors, NeighborResult, donePath, engageBlogs, EngageResult, engageDonePath } from "./naver";
-import { checkNeighborQuota, incrementNeighborQuota, getNeighborDailyUsage, getUserPlan, NEIGHBOR_DAILY_LIMIT, addNeighborHistory } from "./supabase";
+import { saveSession, sessionExists, removeSession, crawlBlogIds, crawlBuddyPosts, analyzeBuddyKeywords, addNeighbors, NeighborResult, donePath, engageBlogs, EngageResult, engageDonePath } from "./naver";
+import { checkNeighborQuota, incrementNeighborQuota, getNeighborDailyUsage, incrementEngageQuota, getEngageDailyUsage, getUserPlan, NEIGHBOR_DAILY_LIMIT, addNeighborHistory } from "./supabase";
 import fs from "fs";
 
 const app = express();
@@ -25,6 +25,24 @@ app.get("/health", (_req, res) => {
 app.get("/api/session/:accountId", (req, res) => {
   const { accountId } = req.params;
   res.json({ exists: sessionExists(accountId) });
+});
+
+/* ── 세션 삭제 (계정 삭제) ── */
+app.delete("/api/session/:accountId", (req, res) => {
+  try { removeSession(req.params.accountId); res.json({ ok: true }); }
+  catch (e: any) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+/* ── 내 이웃 키워드 분석 (이웃들이 자주 쓰는 주제) ── */
+app.get("/api/buddy-keywords/:accountId", async (req, res) => {
+  const { accountId } = req.params;
+  if (!sessionExists(accountId)) return res.status(400).json({ error: "계정 연결 필요" });
+  try {
+    const keywords = await analyzeBuddyKeywords({ accountId, scanCount: 120 });
+    res.json({ ok: true, keywords });
+  } catch (e: any) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
 });
 
 /* ── 로그인 (세션 저장) ── */
@@ -67,6 +85,28 @@ function sseSend(res: express.Response, data: object) {
 /* ── 작업 중단 신호 맵 ── */
 const stopMap = new Map<string, boolean>();
 
+/* ── 자동 정리: 한 번에 작업 하나만. 새 작업 시작 시 이전 작업 전부 중단(브라우저는 각 job의 finally에서 닫힘) ── */
+const activeJobs = new Set<string>();
+function stopAllActiveJobs(exceptJid?: string) {
+  for (const j of activeJobs) {
+    if (j !== exceptJid) stopMap.set(j, true);
+  }
+  activeJobs.clear();
+}
+// SSE 작업 시작 등록: 이전 작업 자동 중단 + 클라이언트 연결 끊기면 자동 중단(기능 전환/탭이동에도 안전)
+//   ★ req.on("close")는 POST body 수신 완료 시점에도 발동 → 자기 작업을 즉시 중단시키는 버그.
+//     실제 "연결 끊김"은 res.on("close")로 감지해야 함.
+function beginJob(jid: string, res: express.Response) {
+  stopAllActiveJobs();          // 서이추→공감댓글 등 전환 시 이전 작업 클린 종료
+  stopMap.set(jid, false);
+  activeJobs.add(jid);
+  res.on("close", () => { stopMap.set(jid, true); activeJobs.delete(jid); }); // 화면 벗어남/전환 시 자동 중단
+}
+function endJob(jid: string) {
+  activeJobs.delete(jid);
+  stopMap.delete(jid);
+}
+
 app.post("/api/stop/:jobId", (req, res) => {
   stopMap.set(req.params.jobId, true);
   res.json({ ok: true });
@@ -78,6 +118,7 @@ app.get("/api/crawl", async (req, res) => {
   if (!keywords)
     return res.status(400).json({ error: "keywords 필요" });
 
+  stopAllActiveJobs();   // 새 수집 시작 → 이전 작업(서이추/공감댓글) 자동 중단
   sseSetup(res);
 
   try {
@@ -114,11 +155,11 @@ app.get("/api/crawl", async (req, res) => {
 });
 
 /* ── 서이추 신청 (SSE) ── */
-app.get("/api/add-neighbor", async (req, res) => {
+app.post("/api/add-neighbor", async (req, res) => {
   const {
     userId, accountId, targets: targetsRaw, message,
     delayMin, delayMax, skipDone, jobId,
-  } = req.query as Record<string, string>;
+  } = req.body as Record<string, any>;
 
   if (!accountId || !targetsRaw)
     return res.status(400).json({ error: "accountId, targets 필요" });
@@ -126,10 +167,11 @@ app.get("/api/add-neighbor", async (req, res) => {
   sseSetup(res);
 
   const jid = jobId || Date.now().toString();
-  stopMap.set(jid, false);
+  beginJob(jid, res);   // 이전 작업 자동 중단 + 연결 끊기면 자동 정리
 
   try {
-    const targets = JSON.parse(decodeURIComponent(targetsRaw));
+    // targets는 이제 body로 배열째 옴 (문자열이면 파싱 폴백)
+    const targets = Array.isArray(targetsRaw) ? targetsRaw : JSON.parse(decodeURIComponent(targetsRaw));
 
     // 쿼타 체크 (userId 있을 때)
     let dailyLimit = 100;
@@ -149,10 +191,10 @@ app.get("/api/add-neighbor", async (req, res) => {
       accountId,
       targets,
       message: message || "안녕하세요! 좋은 글 잘 읽고 갑니다. 서이추 신청드려요 😊",
-      delayMin: parseFloat(delayMin || "5"),
-      delayMax: parseFloat(delayMax || "10"),
+      delayMin: parseFloat(String(delayMin ?? "5")),
+      delayMax: parseFloat(String(delayMax ?? "10")),
       dailyLimit,
-      skipDone: skipDone === "true",
+      skipDone: skipDone === true || skipDone === "true",
       onLog: (msg) => sseSend(res, { type: "log", msg }),
       onResult: async (r: NeighborResult) => {
         sseSend(res, { type: "result", ...r });
@@ -172,7 +214,7 @@ app.get("/api/add-neighbor", async (req, res) => {
   } catch (e: any) {
     sseSend(res, { type: "error", msg: e.message });
   }
-  stopMap.delete(jid);
+  endJob(jid);
   res.end();
 });
 
@@ -194,21 +236,34 @@ app.delete("/api/done/:accountId", (req, res) => {
   res.json({ ok: true });
 });
 
-/* ── 공감·댓글용 키워드 수집 (SSE) ── */
+/* ── 공감·댓글용 수집 (SSE) — source=keyword(기본) | buddy(내 이웃새글) ── */
 app.get("/api/engage-crawl", async (req, res) => {
-  const { keywords, countPerKeyword } = req.query as Record<string, string>;
-  if (!keywords) return res.status(400).json({ error: "keywords 필요" });
+  const { keywords, countPerKeyword, source, accountId } = req.query as Record<string, string>;
+  const isBuddy = source === "buddy";
+  if (!isBuddy && !keywords) return res.status(400).json({ error: "keywords 필요" });
+  if (isBuddy && !accountId) return res.status(400).json({ error: "accountId 필요(이웃새글)" });
 
+  stopAllActiveJobs();   // 새 수집 시작 → 이전 작업(서이추/공감댓글) 자동 중단
   sseSetup(res);
   try {
-    const kwList = keywords.split(",").map((k) => k.trim()).filter(Boolean);
     const count = parseInt(countPerKeyword || "20", 10);
-    const results = await crawlBlogIds({
-      accountId: "",
-      keywords: kwList,
-      countPerKeyword: count,
-      onLog: (msg) => sseSend(res, { type: "log", msg }),
-    });
+    let results;
+    if (isBuddy) {
+      // 내 서로이웃들의 최근 글 → 이웃 블로거 수집 (키워드 불필요)
+      results = await crawlBuddyPosts({
+        accountId,
+        maxCount: Math.max(count, 30),
+        onLog: (msg) => sseSend(res, { type: "log", msg }),
+      });
+    } else {
+      const kwList = keywords.split(",").map((k) => k.trim()).filter(Boolean);
+      results = await crawlBlogIds({
+        accountId: "",
+        keywords: kwList,
+        countPerKeyword: count,
+        onLog: (msg) => sseSend(res, { type: "log", msg }),
+      });
+    }
     sseSend(res, { type: "crawl_done", results });
   } catch (e: any) {
     sseSend(res, { type: "error", msg: e.message });
@@ -217,39 +272,45 @@ app.get("/api/engage-crawl", async (req, res) => {
 });
 
 /* ── 공감·댓글 작업 (SSE) ── */
-app.get("/api/engage", async (req, res) => {
+app.post("/api/engage", async (req, res) => {
   const {
-    accountId, targets: targetsRaw, comment,
+    userId, accountId, targets: targetsRaw, comment,
     doLike, doComment, periodDays, postsPerBlog,
     delayMin, delayMax, dailyLimit, skipDone, jobId,
-  } = req.query as Record<string, string>;
+  } = req.body as Record<string, any>;
 
   if (!accountId || !targetsRaw)
     return res.status(400).json({ error: "accountId, targets 필요" });
 
   sseSetup(res);
   const jid = jobId || Date.now().toString();
-  stopMap.set(jid, false);
+  beginJob(jid, res);   // 이전 작업(서이추 등) 자동 중단 + 연결 끊기면 자동 정리
 
   try {
-    const targets = JSON.parse(decodeURIComponent(targetsRaw));
+    const targets = Array.isArray(targetsRaw) ? targetsRaw : JSON.parse(decodeURIComponent(targetsRaw));
     sseSend(res, { type: "start", total: targets.length });
 
     await engageBlogs({
       accountId,
       targets,
       comment: comment || "",
-      doLike: doLike !== "false",
-      doComment: doComment !== "false" && !!(comment?.trim()),
-      periodDays: parseInt(periodDays || "7", 10),
-      postsPerBlog: parseInt(postsPerBlog || "1", 10),
-      delayMin: parseFloat(delayMin || "5"),
-      delayMax: parseFloat(delayMax || "10"),
-      dailyLimit: parseInt(dailyLimit || "50", 10),
-      skipDone: skipDone === "true",
+      doLike: doLike !== false && doLike !== "false",
+      doComment: doComment !== false && doComment !== "false" && !!(comment?.trim()),
+      periodDays: parseInt(String(periodDays ?? "7"), 10),
+      postsPerBlog: parseInt(String(postsPerBlog ?? "1"), 10),
+      delayMin: parseFloat(String(delayMin ?? "5")),
+      delayMax: parseFloat(String(delayMax ?? "10")),
+      dailyLimit: parseInt(String(dailyLimit ?? "50"), 10),
+      skipDone: skipDone === true || skipDone === "true",
       onLog: (msg) => sseSend(res, { type: "log", msg }),
       onResult: async (r: EngageResult) => {
         sseSend(res, { type: "result", ...r });
+        // ★ 통과(성공)한 것만 상단 하루 카운트 증가
+        if (r.status === "success" && userId) {
+          await incrementEngageQuota(userId);
+          const used = await getEngageDailyUsage(userId);
+          sseSend(res, { type: "quota_info", used });
+        }
       },
       onProgress: (done, fail) => sseSend(res, { type: "progress", done, fail }),
       stopSignal: () => stopMap.get(jid) === true,
@@ -259,7 +320,7 @@ app.get("/api/engage", async (req, res) => {
   } catch (e: any) {
     sseSend(res, { type: "error", msg: e.message });
   }
-  stopMap.delete(jid);
+  endJob(jid);
   res.end();
 });
 

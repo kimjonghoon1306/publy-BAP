@@ -72,6 +72,23 @@ export async function incrementNeighborQuota(userId: string): Promise<void> {
     .upsert({ key, value: String(used + 1) }, { onConflict: "key" });
 }
 
+/* ── 공감·댓글 일일 한도(서이추와 동일 등급 한도) + 사용량/증가 ── */
+function engageQuotaKey(userId: string): string {
+  const today = new Date().toISOString().slice(0, 10);
+  return `engage_daily_${userId}_${today}`;
+}
+export async function getEngageDailyUsage(userId: string): Promise<number> {
+  try {
+    const { data } = await supabase.from("publy_settings").select("value").eq("key", engageQuotaKey(userId)).maybeSingle();
+    return data?.value ? parseInt(data.value) || 0 : 0;
+  } catch { return 0; }
+}
+export async function incrementEngageQuota(userId: string): Promise<void> {
+  const key = engageQuotaKey(userId);
+  const used = await getEngageDailyUsage(userId);
+  await supabase.from("publy_settings").upsert({ key, value: String(used + 1) }, { onConflict: "key" });
+}
+
 /* ── 회원 플랜 조회 ── */
 export async function getUserPlan(userId: string): Promise<string> {
   try {

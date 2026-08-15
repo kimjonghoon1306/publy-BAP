@@ -3,6 +3,20 @@ import { botFetch, BotEventStream } from "../lib/botApi";
 
 const BOT = "http://127.0.0.1:3334";
 
+/* ── 숫자 입력 헬퍼: 앞자리 0 고정/첫 숫자 안지워짐 버그 방지 (빈 값 허용, blur 시 기본값 복원) ── */
+function numProps(val: number, set: (n: number) => void, min: number, max: number, def: number) {
+  return {
+    value: val === 0 ? "" : val,
+    onChange: (e: React.ChangeEvent<HTMLInputElement>) => {
+      const v = e.target.value.replace(/[^0-9]/g, "");
+      set(v === "" ? 0 : Math.min(max, Number(v)));
+    },
+    onBlur: (e: React.FocusEvent<HTMLInputElement>) => {
+      if (!e.target.value || Number(e.target.value) < min) set(def);
+    },
+  };
+}
+
 /* ── 타입 ── */
 interface Account { accountId: string; id: string; pw: string; blogId: string; sessionOk: boolean; loginLoading: boolean; showPw: boolean; }
 interface Target { keyword: string; blogId: string; nickName?: string; blogName?: string; addDate?: number; postUrl?: string; thumbnail?: string; }
@@ -29,6 +43,40 @@ const CAMPAIGN_PRESETS = [
 interface EngageResult { keyword: string; blogId: string; postUrl: string; liked: boolean; commented: boolean; status: "success"|"fail"|"skip"|"pending"|"running"; message: string; }
 interface Props { theme: "dark"|"light"; userId?: string; plan?: string; initialTab?: "neighbor"|"engage"; singleTab?: boolean; }
 
+/* ── 내 이웃 키워드 분석 카드 (서이추·공감댓글 공용) ── */
+const KeywordAnalyzer = ({ keywords, loading, onAnalyze, onPick }: {
+  keywords: { word: string; count: number }[];
+  loading: boolean;
+  onAnalyze: () => void;
+  onPick: (word: string) => void;
+}) => {
+  const maxC = keywords[0]?.count || 1;
+  return (
+    <div style={{ marginBottom: 14, padding: "12px 14px", borderRadius: 12, background: "var(--bg2)", border: "1px solid var(--border)" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: keywords.length ? 10 : 0 }}>
+        <span style={{ fontSize: 13, fontWeight: 700, color: "var(--text2)" }}>🔎 내 이웃 관심 키워드</span>
+        <button onClick={onAnalyze} disabled={loading}
+          style={{ marginLeft: "auto", padding: "5px 12px", borderRadius: 8, border: "1px solid var(--accent)", background: loading ? "var(--card2)" : "var(--accent-bg)", color: "var(--accent-text)", cursor: loading ? "default" : "pointer", fontSize: 12, fontWeight: 700, fontFamily: "inherit" }}>
+          {loading ? "분석 중..." : "분석하기"}
+        </button>
+      </div>
+      {keywords.length > 0 && (
+        <>
+          <div style={{ fontSize: 11, color: "var(--text3)", marginBottom: 8 }}>이웃들이 자주 쓰는 주제예요. 클릭하면 키워드에 추가됩니다.</div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+            {keywords.map(k => (
+              <button key={k.word} onClick={() => onPick(k.word)}
+                style={{ padding: "5px 10px", borderRadius: 99, border: "1px solid var(--border)", background: `rgba(255,107,157,${0.06 + 0.18 * (k.count / maxC)})`, color: "var(--text)", cursor: "pointer", fontSize: 12, fontWeight: 600, fontFamily: "inherit" }}>
+                {k.word} <span style={{ color: "var(--text3)", fontSize: 10 }}>{k.count}</span>
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+};
+
 /* ── 계정 카드 (외부 컴포넌트 — 렌더마다 재생성 방지) ── */
 const AccountCard = React.memo(({ accounts, onLogin, onAdd, onRemove, onChange }: {
   accounts: Account[];
@@ -46,17 +94,20 @@ const AccountCard = React.memo(({ accounts, onLogin, onAdd, onRemove, onChange }
           <span style={{ fontSize: 13, fontWeight: 700, color: "var(--text2)" }}>계정 {i + 1}</span>
           {acc.blogId && <span style={{ fontSize: 12, color: "var(--success)", fontWeight: 600 }}>• {acc.blogId}</span>}
           {acc.sessionOk && <span style={{ fontSize: 11, color: "var(--success)", marginLeft: 2 }}>연결됨 ✓</span>}
-          {accounts.length > 1 && (
-            <button onClick={() => onRemove(acc.accountId)} style={{ marginLeft: "auto", width: 24, height: 24, borderRadius: 7, border: "1px solid var(--border)", background: "transparent", color: "var(--text3)", cursor: "pointer", fontSize: 14, display: "flex", alignItems: "center", justifyContent: "center" }}>×</button>
-          )}
+          <button onClick={() => { if (window.confirm("이 계정을 삭제할까요? (저장된 로그인도 함께 삭제됩니다)")) onRemove(acc.accountId); }}
+            style={{ marginLeft: "auto", padding: "4px 10px", borderRadius: 7, border: "1px solid rgba(255,71,87,.4)", background: "rgba(255,71,87,.08)", color: "var(--danger)", cursor: "pointer", fontSize: 12, fontWeight: 700, display: "flex", alignItems: "center", gap: 3 }}>
+            🗑 삭제
+          </button>
         </div>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 10 }}>
           <input className="inp" placeholder="네이버 아이디" value={acc.id}
             onChange={e => onChange(acc.accountId, "id", e.target.value)}
+            onKeyDown={e => { if (e.key === "Enter" && acc.id && acc.pw && !acc.loginLoading) onLogin(acc.accountId); }}
             style={{ fontSize: 13, padding: "10px 12px" }} />
           <div style={{ position: "relative" }}>
             <input className="inp" type={acc.showPw ? "text" : "password"} placeholder="비밀번호" value={acc.pw}
               onChange={e => onChange(acc.accountId, "pw", e.target.value)}
+              onKeyDown={e => { if (e.key === "Enter" && acc.id && acc.pw && !acc.loginLoading) onLogin(acc.accountId); }}
               style={{ fontSize: 13, padding: "10px 36px 10px 12px", width: "100%" }} />
             <button onClick={() => onChange(acc.accountId, "showPw", !acc.showPw)}
               style={{ position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)", background: "transparent", border: "none", cursor: "pointer", fontSize: 15, color: "var(--text3)", padding: 2 }}>
@@ -134,9 +185,14 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
   const [showGuide, setShowGuide] = useState(false);
 
   /* 공통: 계정 */
-  const [accounts, setAccounts] = useState<Account[]>([
-    { accountId: "acc_1", id: "", pw: "", blogId: "", sessionOk: false, loginLoading: false, showPw: false },
-  ]);
+  const [accounts, setAccounts] = useState<Account[]>(() => {
+    // 저장된 계정 복원 (한 번 연결하면 매번 안 넣게)
+    try {
+      const saved = JSON.parse(localStorage.getItem("publy_neighbor_accounts") || "null");
+      if (Array.isArray(saved) && saved.length) return saved.map((a: any) => ({ accountId: a.accountId, id: a.id || "", pw: a.pw || "", blogId: a.blogId || "", sessionOk: !!a.sessionOk, loginLoading: false, showPw: false }));
+    } catch {}
+    return [{ accountId: "acc_1", id: "", pw: "", blogId: "", sessionOk: false, loginLoading: false, showPw: false }];
+  });
   const [botOnline, setBotOnline] = useState(false);
 
   /* 서이추 state */
@@ -149,6 +205,9 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
   const [delayMax, setDelayMax] = useState(10);
   const [skipDone, setSkipDone] = useState(true);
   const [autoStart, setAutoStart] = useState(false);
+  // 내 이웃 키워드 분석 (서이추·공감댓글 공용)
+  const [buddyKw, setBuddyKw] = useState<{ word: string; count: number }[]>([]);
+  const [buddyKwLoading, setBuddyKwLoading] = useState(false);
   // 체험단 모집 최적화 옵션
   const [orderBy, setOrderBy] = useState<"recentdate"|"sim">("recentdate");
   const [activeDays, setActiveDays] = useState<number>(30);
@@ -170,6 +229,7 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
 
   /* 공감·댓글 state */
   const [eKeywords, setEKeywords] = useState("");
+  const [eSource, setESource] = useState<"keyword" | "buddy">("keyword");  // 수집 소스: 키워드 검색 vs 내 이웃새글
   const [eCountPerKw, setECountPerKw] = useState(20);
   const [ePeriod, setEPeriod] = useState<7|14|30|"custom">(7);
   const [eCustomDays, setECustomDays] = useState(3);
@@ -217,6 +277,10 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
   /* 로그 스크롤 */
   useEffect(() => { if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight; }, [logs]);
   useEffect(() => { if (eLogRef.current) eLogRef.current.scrollTop = eLogRef.current.scrollHeight; }, [eLogs]);
+  // 계정 목록 자동 저장 (id/pw/연결상태 유지 → 매번 재입력 불필요)
+  useEffect(() => {
+    try { localStorage.setItem("publy_neighbor_accounts", JSON.stringify(accounts.map(a => ({ accountId: a.accountId, id: a.id, pw: a.pw, blogId: a.blogId, sessionOk: a.sessionOk })))); } catch {}
+  }, [accounts]);
 
   const addLog = useCallback((msg: string) => {
     const t = new Date().toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
@@ -262,13 +326,33 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
     setAccounts(p => [...p, { accountId: `acc_${Date.now()}`, id: "", pw: "", blogId: "", sessionOk: false, loginLoading: false, showPw: false }])
   , []);
 
-  const handleRemoveAccount = useCallback((id: string) =>
-    setAccounts(p => p.filter(a => a.accountId !== id))
+  const handleRemoveAccount = useCallback((id: string) => {
+    // 봇에 저장된 로그인 세션도 함께 삭제
+    botFetch(`${BOT}/api/session/${encodeURIComponent(id)}`, { method: "DELETE" }).catch(() => {});
+    setAccounts(p => {
+      const next = p.filter(a => a.accountId !== id);
+      return next.length ? next : [{ accountId: `acc_${Date.now()}`, id: "", pw: "", blogId: "", sessionOk: false, loginLoading: false, showPw: false }];
+    });
+  }
   , []);
 
   const handleAccountChange = useCallback((accountId: string, field: keyof Account, value: any) =>
     setAccounts(p => p.map(a => a.accountId === accountId ? { ...a, [field]: value, ...(field === "id" || field === "pw" ? { sessionOk: false } : {}) } : a))
   , []);
+
+  /* 내 이웃 키워드 분석 — 이웃들이 자주 쓰는 주제 TOP (서이추·공감댓글 공용) */
+  const analyzeBuddyKeywords = async () => {
+    const acc = accounts.find(a => a.sessionOk);
+    if (!acc) return alert("먼저 계정을 연결하세요 (내 이웃 분석은 로그인 필요)");
+    setBuddyKwLoading(true); setBuddyKw([]);
+    try {
+      const r = await botFetch(`${BOT}/api/buddy-keywords/${encodeURIComponent(acc.accountId)}`, { signal: AbortSignal.timeout(60000) } as any);
+      const d = await r.json();
+      if (d.ok && Array.isArray(d.keywords)) setBuddyKw(d.keywords);
+      else alert("키워드 분석 실패: " + (d.error || "이웃새글이 없어요"));
+    } catch (e: any) { alert("키워드 분석 오류: " + e.message); }
+    finally { setBuddyKwLoading(false); }
+  };
 
   /* 서이추 수집 */
   const applyCampaignPreset = () => {
@@ -308,8 +392,9 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
     jobIdRef.current = Date.now().toString();
     addLog(`🚀 작업 시작 — ${list.length}개 대상 / 한도 ${dailyLimit}개 / 딜레이 ${delayMin}~${delayMax}초`);
     const msg = msgMode === "single" ? singleMsg : multiMsgs.split("\n").filter(l => l.trim()).join("|||");
-    const params = new URLSearchParams({ accountId: acc.accountId, targets: encodeURIComponent(JSON.stringify(list)), message: msg, delayMin: delayMin.toString(), delayMax: delayMax.toString(), skipDone: skipDone.toString(), jobId: jobIdRef.current, ...(userId ? { userId } : {}) });
-    const es = new BotEventStream(`${BOT}/api/add-neighbor?${params}`); esRef.current = es;
+    // ★ targets(수십~수백개)를 GET URL에 실으면 길이 초과로 연결 실패 → POST body로 전송
+    const body = JSON.stringify({ accountId: acc.accountId, targets: list, message: msg, delayMin, delayMax, skipDone, jobId: jobIdRef.current, ...(userId ? { userId } : {}) });
+    const es = new BotEventStream(`${BOT}/api/add-neighbor`, { method: "POST", headers: { "Content-Type": "application/json" }, body }); esRef.current = es;
     es.onmessage = e => {
       const d = JSON.parse(e.data);
       if (d.type === "log") addLog(d.msg);
@@ -320,7 +405,8 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
       if (d.type === "done") { addLog("🎉 작업 완료!"); setWorking(false); es.close(); }
       if (d.type === "error") { addLog(`❌ 오류: ${d.msg}`); setWorking(false); es.close(); }
     };
-    es.onerror = () => { addLog("❌ 작업 연결 오류"); setWorking(false); es.close(); };
+    es.onerror = () => { addLog("❌ 작업 연결 오류 (다시 '서이추 시작'을 누르면 재시도합니다)"); setWorking(false); es.close(); };
+    es.onclose = () => setWorking(false);  // 어떤 식으로 끝나도 버튼 잠금 해제
   };
 
   const handleStop = async () => {
@@ -331,11 +417,22 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
 
   /* 공감·댓글 수집 */
   const handleEngageCrawl = async () => {
-    const kwList = eKeywords.split(",").map(k => k.trim()).filter(Boolean);
-    if (!kwList.length) return alert("키워드를 입력하세요");
-    setECrawling(true); setETargets([]); setEResults([]); setEDoneCnt(0); setEFailCnt(0);
-    addELog(`🔍 수집 시작 — 키워드: ${kwList.join(", ")} / 키워드당 ${eCountPerKw}개`);
-    const es = new BotEventStream(`${BOT}/api/engage-crawl?keywords=${encodeURIComponent(kwList.join(","))}&countPerKeyword=${eCountPerKw}${userId ? `&userId=${userId}` : ""}`);
+    let crawlUrl: string;
+    if (eSource === "buddy") {
+      // 내 이웃새글 모드 — 연결된 계정 세션으로 내 서로이웃 최근글 수집 (키워드 불필요)
+      const acc = accounts.find(a => a.sessionOk);
+      if (!acc) return alert("먼저 계정을 연결하세요 (내 이웃 목록을 불러오려면 로그인 필요)");
+      setECrawling(true); setETargets([]); setEResults([]); setEDoneCnt(0); setEFailCnt(0);
+      addELog(`👥 내 이웃새글 수집 시작 — 최대 ${eCountPerKw}명`);
+      crawlUrl = `${BOT}/api/engage-crawl?source=buddy&accountId=${encodeURIComponent(acc.accountId)}&countPerKeyword=${eCountPerKw}${userId ? `&userId=${userId}` : ""}`;
+    } else {
+      const kwList = eKeywords.split(",").map(k => k.trim()).filter(Boolean);
+      if (!kwList.length) return alert("키워드를 입력하세요");
+      setECrawling(true); setETargets([]); setEResults([]); setEDoneCnt(0); setEFailCnt(0);
+      addELog(`🔍 수집 시작 — 키워드: ${kwList.join(", ")} / 키워드당 ${eCountPerKw}개`);
+      crawlUrl = `${BOT}/api/engage-crawl?keywords=${encodeURIComponent(kwList.join(","))}&countPerKeyword=${eCountPerKw}${userId ? `&userId=${userId}` : ""}`;
+    }
+    const es = new BotEventStream(crawlUrl);
     eEsRef.current = es;
     es.onmessage = e => {
       const d = JSON.parse(e.data);
@@ -362,8 +459,9 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
     const days = ePeriod === "custom" ? eCustomDays : ePeriod;
     addELog(`🚀 작업 시작 — ${list.length}개 / 최근 ${days}일 / ${eDoLike ? "공감" : ""}${eDoLike && eDoComment ? "+" : ""}${eDoComment ? "댓글" : ""}`);
     const commentText = eCommentMode === "single" ? eComment : eMultiComments.split("\n").filter(l => l.trim()).join("|||");
-    const params = new URLSearchParams({ accountId: acc.accountId, targets: encodeURIComponent(JSON.stringify(list)), comment: commentText, doLike: eDoLike.toString(), doComment: eDoComment.toString(), periodDays: days.toString(), postsPerBlog: ePostsPerBlog.toString(), delayMin: eDelayMin.toString(), delayMax: eDelayMax.toString(), dailyLimit: eDailyLimit.toString(), skipDone: eSkipDone.toString(), jobId: eJobIdRef.current, ...(userId ? { userId } : {}) });
-    const es = new BotEventStream(`${BOT}/api/engage?${params}`); eEsRef.current = es;
+    // ★ targets를 POST body로 (URL 길이 초과 방지)
+    const body = JSON.stringify({ accountId: acc.accountId, targets: list, comment: commentText, doLike: eDoLike, doComment: eDoComment, periodDays: days, postsPerBlog: ePostsPerBlog, delayMin: eDelayMin, delayMax: eDelayMax, dailyLimit: eDailyLimit, skipDone: eSkipDone, jobId: eJobIdRef.current, ...(userId ? { userId } : {}) });
+    const es = new BotEventStream(`${BOT}/api/engage`, { method: "POST", headers: { "Content-Type": "application/json" }, body }); eEsRef.current = es;
     es.onmessage = e => {
       const d = JSON.parse(e.data);
       if (d.type === "log") addELog(d.msg);
@@ -372,7 +470,8 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
       if (d.type === "done") { addELog("🎉 작업 완료!"); setEWorking(false); es.close(); }
       if (d.type === "error") { addELog(`❌ 오류: ${d.msg}`); setEWorking(false); es.close(); }
     };
-    es.onerror = () => { addELog("❌ 작업 연결 오류"); setEWorking(false); es.close(); };
+    es.onerror = () => { addELog("❌ 작업 연결 오류 (다시 '작업 시작'을 누르면 재시도합니다)"); setEWorking(false); es.close(); };
+    es.onclose = () => setEWorking(false);
   };
 
   const handleEngageStop = async () => {
@@ -482,6 +581,8 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
 
             <div className="card" style={{ padding: "18px 20px" }}>
               <div className="card-title" style={{ marginBottom: 14, fontSize: 15 }}>🔍 추출 설정</div>
+              <KeywordAnalyzer keywords={buddyKw} loading={buddyKwLoading} onAnalyze={analyzeBuddyKeywords}
+                onPick={w => setKeywords(prev => { const list = prev.split(",").map(s => s.trim()).filter(Boolean); if (!list.includes(w)) list.push(w); return list.join(", "); })} />
               <div style={{ marginBottom: 14 }}>
                 <label className="inp-label" style={{ fontSize: 12, marginBottom: 6, display: "block" }}>키워드 (쉼표로 구분)</label>
                 <input className="inp" placeholder="예: 원주맛집, 강원도여행, 육아일기" value={keywords} onChange={e => setKeywords(e.target.value)} style={{ fontSize: 13, padding: "11px 14px" }} />
@@ -489,11 +590,11 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 10 }}>
                 <div>
                   <label className="inp-label" style={{ fontSize: 12, marginBottom: 6, display: "block" }}>키워드당 추출 수</label>
-                  <input className="inp" type="number" min={1} max={300} value={countPerKw} onChange={e => setCountPerKw(Number(e.target.value))} style={{ fontSize: 13, padding: "11px 14px" }} />
+                  <input className="inp" type="number" min={1} max={300} {...numProps(countPerKw, setCountPerKw, 1, 300, 34)} style={{ fontSize: 13, padding: "11px 14px" }} />
                 </div>
                 <div>
                   <label className="inp-label" style={{ fontSize: 12, marginBottom: 6, display: "block" }}>하루 신청 한도</label>
-                  <input className="inp" type="number" min={1} max={100} value={dailyLimit} onChange={e => setDailyLimit(Number(e.target.value))} style={{ fontSize: 13, padding: "11px 14px" }} />
+                  <input className="inp" type="number" min={1} max={100} {...numProps(dailyLimit, setDailyLimit, 1, 100, 100)} style={{ fontSize: 13, padding: "11px 14px" }} />
                 </div>
               </div>
 
@@ -529,9 +630,9 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
               <div style={{ marginBottom: 12 }}>
                 <label className="inp-label" style={{ fontSize: 12, marginBottom: 6, display: "block" }}>딜레이 (초) — 너무 짧으면 봇 탐지될 수 있어요</label>
                 <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                  <input className="inp" type="number" min={1} max={60} value={delayMin} onChange={e => setDelayMin(Number(e.target.value))} style={{ flex: 1, fontSize: 13, padding: "11px 14px" }} />
+                  <input className="inp" type="number" min={1} max={60} {...numProps(delayMin, setDelayMin, 1, 60, 5)} style={{ flex: 1, fontSize: 13, padding: "11px 14px" }} />
                   <span style={{ color: "var(--text3)", fontSize: 14, fontWeight: 700 }}>~</span>
-                  <input className="inp" type="number" min={1} max={120} value={delayMax} onChange={e => setDelayMax(Number(e.target.value))} style={{ flex: 1, fontSize: 13, padding: "11px 14px" }} />
+                  <input className="inp" type="number" min={1} max={120} {...numProps(delayMax, setDelayMax, 1, 120, 10)} style={{ flex: 1, fontSize: 13, padding: "11px 14px" }} />
                   <span style={{ color: "var(--text3)", fontSize: 13 }}>초</span>
                 </div>
               </div>
@@ -641,7 +742,7 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
                         </td>
                         <td style={{ padding: "10px 14px" }}>
                           <span style={{ fontSize: 12, padding: "4px 10px", borderRadius: 99, background: `${statusColor(r.status)}18`, color: statusColor(r.status), border: `1px solid ${statusColor(r.status)}40`, fontWeight: 700 }}>{statusLabel(r.status)}</span>
-                          {r.status === "fail" && <span style={{ fontSize: 11, color: "var(--text3)", marginLeft: 8 }}>{r.message}</span>}
+                          {(r.status === "fail" || r.status === "skip") && r.message && <span style={{ fontSize: 11, color: "var(--text3)", marginLeft: 8 }}>{r.message}</span>}
                         </td>
                       </tr>
                     ))}</tbody>
@@ -663,18 +764,39 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
 
             <div className="card" style={{ padding: "18px 20px" }}>
               <div className="card-title" style={{ marginBottom: 14, fontSize: 15 }}>🔍 추출 설정</div>
-              <div style={{ marginBottom: 14 }}>
-                <label className="inp-label" style={{ fontSize: 12, marginBottom: 6, display: "block" }}>키워드 (쉼표로 구분)</label>
-                <input className="inp" placeholder="예: 맛집, 육아, 인테리어" value={eKeywords} onChange={e => setEKeywords(e.target.value)} style={{ fontSize: 13, padding: "11px 14px" }} />
+              {/* 수집 소스 선택: 키워드 검색 vs 내 이웃새글 */}
+              <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
+                <button onClick={() => setESource("keyword")}
+                  style={{ flex: 1, padding: "10px", borderRadius: 10, border: `1.5px solid ${eSource === "keyword" ? "var(--accent)" : "var(--border)"}`, background: eSource === "keyword" ? "var(--accent-bg)" : "transparent", color: eSource === "keyword" ? "var(--accent-text)" : "var(--text2)", cursor: "pointer", fontSize: 12.5, fontWeight: 700, fontFamily: "inherit" }}>
+                  🔍 키워드로 찾기
+                </button>
+                <button onClick={() => setESource("buddy")}
+                  style={{ flex: 1, padding: "10px", borderRadius: 10, border: `1.5px solid ${eSource === "buddy" ? "var(--accent)" : "var(--border)"}`, background: eSource === "buddy" ? "var(--accent-bg)" : "transparent", color: eSource === "buddy" ? "var(--accent-text)" : "var(--text2)", cursor: "pointer", fontSize: 12.5, fontWeight: 700, fontFamily: "inherit" }}>
+                  👥 내 이웃새글
+                </button>
               </div>
+              {eSource === "keyword" ? (
+                <>
+                  <KeywordAnalyzer keywords={buddyKw} loading={buddyKwLoading} onAnalyze={analyzeBuddyKeywords}
+                    onPick={w => setEKeywords(prev => { const list = prev.split(",").map(s => s.trim()).filter(Boolean); if (!list.includes(w)) list.push(w); return list.join(", "); })} />
+                  <div style={{ marginBottom: 14 }}>
+                    <label className="inp-label" style={{ fontSize: 12, marginBottom: 6, display: "block" }}>키워드 (쉼표로 구분)</label>
+                    <input className="inp" placeholder="예: 맛집, 육아, 인테리어" value={eKeywords} onChange={e => setEKeywords(e.target.value)} style={{ fontSize: 13, padding: "11px 14px" }} />
+                  </div>
+                </>
+              ) : (
+                <div style={{ marginBottom: 14, padding: "12px 14px", borderRadius: 10, background: "var(--accent-bg)", border: "1px solid var(--border)", fontSize: 12.5, color: "var(--text2)", lineHeight: 1.6 }}>
+                  👥 연결된 계정의 <b>내 서로이웃들 최근 글</b>을 자동으로 불러와 공감·댓글을 남깁니다. 키워드 없이 아래 <b>추출 시작</b>만 누르세요.
+                </div>
+              )}
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
                 <div>
-                  <label className="inp-label" style={{ fontSize: 12, marginBottom: 6, display: "block" }}>키워드당 추출 수</label>
-                  <input className="inp" type="number" min={1} max={200} value={eCountPerKw} onChange={e => setECountPerKw(Number(e.target.value))} style={{ fontSize: 13, padding: "11px 14px" }} />
+                  <label className="inp-label" style={{ fontSize: 12, marginBottom: 6, display: "block" }}>{eSource === "buddy" ? "가져올 이웃 수 (최대)" : "키워드당 추출 수"}</label>
+                  <input className="inp" type="number" min={1} max={200} {...numProps(eCountPerKw, setECountPerKw, 1, 200, 20)} style={{ fontSize: 13, padding: "11px 14px" }} />
                 </div>
                 <div>
                   <label className="inp-label" style={{ fontSize: 12, marginBottom: 6, display: "block" }}>하루 작업 한도</label>
-                  <input className="inp" type="number" min={1} max={200} value={eDailyLimit} onChange={e => setEDailyLimit(Number(e.target.value))} style={{ fontSize: 13, padding: "11px 14px" }} />
+                  <input className="inp" type="number" min={1} max={200} {...numProps(eDailyLimit, setEDailyLimit, 1, 200, 50)} style={{ fontSize: 13, padding: "11px 14px" }} />
                 </div>
               </div>
             </div>
@@ -690,13 +812,13 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
               </div>
               {ePeriod === "custom" && (
                 <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
-                  <input className="inp" type="number" min={1} max={365} value={eCustomDays} onChange={e => setECustomDays(Number(e.target.value))} style={{ flex: 1, fontSize: 13, padding: "11px 14px" }} />
+                  <input className="inp" type="number" min={1} max={365} {...numProps(eCustomDays, setECustomDays, 1, 365, 7)} style={{ flex: 1, fontSize: 13, padding: "11px 14px" }} />
                   <span style={{ fontSize: 13, color: "var(--text3)" }}>일 이내 글</span>
                 </div>
               )}
               <div>
                 <label className="inp-label" style={{ fontSize: 12, marginBottom: 6, display: "block" }}>블로그당 작업할 글 수 (최대 5개)</label>
-                <input className="inp" type="number" min={1} max={5} value={ePostsPerBlog} onChange={e => setEPostsPerBlog(Number(e.target.value))} style={{ fontSize: 13, padding: "11px 14px" }} />
+                <input className="inp" type="number" min={1} max={5} {...numProps(ePostsPerBlog, setEPostsPerBlog, 1, 5, 1)} style={{ fontSize: 13, padding: "11px 14px" }} />
               </div>
             </div>
 
@@ -710,9 +832,9 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
               <div style={{ marginBottom: 12 }}>
                 <label className="inp-label" style={{ fontSize: 12, marginBottom: 6, display: "block" }}>딜레이 (초)</label>
                 <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                  <input className="inp" type="number" min={1} max={60} value={eDelayMin} onChange={e => setEDelayMin(Number(e.target.value))} style={{ flex: 1, fontSize: 13, padding: "11px 14px" }} />
+                  <input className="inp" type="number" min={1} max={60} {...numProps(eDelayMin, setEDelayMin, 1, 60, 5)} style={{ flex: 1, fontSize: 13, padding: "11px 14px" }} />
                   <span style={{ color: "var(--text3)", fontSize: 14, fontWeight: 700 }}>~</span>
-                  <input className="inp" type="number" min={1} max={120} value={eDelayMax} onChange={e => setEDelayMax(Number(e.target.value))} style={{ flex: 1, fontSize: 13, padding: "11px 14px" }} />
+                  <input className="inp" type="number" min={1} max={120} {...numProps(eDelayMax, setEDelayMax, 1, 120, 10)} style={{ flex: 1, fontSize: 13, padding: "11px 14px" }} />
                   <span style={{ color: "var(--text3)", fontSize: 13 }}>초</span>
                 </div>
               </div>
@@ -791,7 +913,7 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
                         <td style={{ padding: "10px 14px", textAlign: "center", fontSize: 16 }}>{r.status === "pending" || r.status === "running" ? <span style={{ color: "var(--text3)" }}>—</span> : r.commented ? "💬" : <span style={{ color: "var(--text3)" }}>✗</span>}</td>
                         <td style={{ padding: "10px 14px" }}>
                           <span style={{ fontSize: 12, padding: "4px 10px", borderRadius: 99, background: `${eStatusColor(r.status)}18`, color: eStatusColor(r.status), border: `1px solid ${eStatusColor(r.status)}40`, fontWeight: 700 }}>{eStatusLabel(r.status)}</span>
-                          {r.status === "fail" && <span style={{ fontSize: 11, color: "var(--text3)", marginLeft: 8 }}>{r.message}</span>}
+                          {r.status !== "pending" && r.status !== "running" && r.message && <span style={{ fontSize: 11, color: r.status === "success" ? "var(--success)" : "var(--text3)", marginLeft: 8 }}>{r.message}</span>}
                         </td>
                       </tr>
                     ))}</tbody>

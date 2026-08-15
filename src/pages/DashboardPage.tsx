@@ -16,6 +16,13 @@ const MAX_TITLES = 90;
 const MAX_KW = 90;
 const GEMINI_MODELS = ["gemini-2.0-flash","gemini-2.0-flash-lite","gemini-2.5-flash","gemini-2.5-flash-lite"];
 const PLAN_LABELS: Record<string,string> = {free:"FREE",basic:"BASIC",pro:"PRO"};
+// 만료일까지 남은 일수 — 자정 기준으로 계산해 시각과 무관하게 항상 동일한 값(상단/하단 D-day 일치)
+function daysUntil(dateStr?: string): number | null {
+  if (!dateStr) return null;
+  const end = new Date(dateStr); end.setHours(0,0,0,0);
+  const today = new Date(); today.setHours(0,0,0,0);
+  return Math.round((end.getTime() - today.getTime()) / 86400000);
+}
 
 const WRITE_AI_LIST = [
   {id:"gemini",label:"Gemini Flash",sub:"무료",placeholder:"AIza...",storageKey:"publy_gemini_key",link:"https://aistudio.google.com/app/apikey",color:"#4285F4",logo:"G",free:true},
@@ -33,11 +40,40 @@ const WRITE_STYLES = [
   {id:"여행기",  i:"✈️", desc:"일정·팁·감성 여행 스토리"},
 ] as const;
 type WriteStyle = typeof WRITE_STYLES[number]["id"];
+// ★ 스타일마다 글의 "방향"이 확실히 달라지게 — 구조·어조·시작·초점·문장끝을 서로 다르게 지정.
+//   (endTone은 아래 프롬프트의 공통 문장끝 규칙을 스타일별로 덮어씀 → 정보글이 감성글로 끌려가지 않게)
 const WRITE_STYLE_GUIDE: Record<WriteStyle,string> = {
-  "감성일기":"[스타일] 개인 감정·경험 중심의 따뜻한 에세이체. 독자에게 말 걸듯 친근하게. 감성적 표현 풍부하게.",
-  "정보글":  "[스타일] 명확한 정보 전달. 번호 목록·수치·비교 표현 적극 활용. SEO 키워드 자연스럽게 반복.",
-  "맛집후기":"[스타일] 맛·향·식감 생생하게 묘사. 가격·위치·웨이팅·주차 정보 포함. 재방문 의향 솔직하게.",
-  "여행기":  "[스타일] 여행지 분위기·감성 묘사. 일정·비용·교통 팁 포함. 포토스팟·현지 맛집 자연스럽게 언급.",
+  "감성일기":`[글의 방향: 감성일기]
+• 목적: 정보 전달이 아니라 '그날의 감정과 경험'을 나누는 개인 에세이.
+• 시작: 그날의 장면·기분으로 훅 (예: "요즘 마음이 복잡했는데, 그날따라…").
+• 구조: 시간 흐름(그날 아침→그 순간→돌아보며). 소제목 최소화, 문단 위주로 잔잔하게.
+• 초점: 오감·감정·내면의 변화. 수치/스펙 나열 금지. 독자에게 말 걸며 공감 유도.
+• 금지: 번호 목록, 표, 딱딱한 정보 나열.`,
+  "정보글":`[글의 방향: 정보글]
+• 목적: 독자가 '검색해서 답을 얻으러 온' 실용 정보 제공. 감성 최소.
+• 시작: 문제 정의/핵심 결론 먼저 (예: "결론부터 말하면 …").
+• 구조: 소제목으로 논리 구획 + 번호 목록(1. 2. 3.) 적극 사용. 비교·기준·수치·표현 위주.
+• 초점: 정확한 정보·근거·주의사항·자주 묻는 질문. SEO 키워드 자연 반복.
+• 어조: 담백하고 신뢰감 있게. 과한 감탄사·이모지 자제. (감성 회고 금지)`,
+  "맛집후기":`[글의 방향: 맛집후기]
+• 목적: 실제 다녀온 사람의 생생한 방문기. 먹고 싶게 만드는 게 핵심.
+• 시작: 방문 계기/첫인상 (예: "웨이팅 30분 감수하고 다녀왔어요").
+• 구조: 위치·분위기 → 주문한 메뉴 → 맛/식감/향 묘사 → 가격 → 총평·재방문 의향.
+• 초점: 맛·비주얼·식감을 오감으로 묘사 + 가격/주차/웨이팅/영업시간 실정보 반드시.
+• 금지: 안 먹어본 듯한 두루뭉술. 구체 메뉴명·가격 필수.`,
+  "여행기":`[글의 방향: 여행기]
+• 목적: 따라 떠나고 싶게 만드는 여정 스토리 + 실전 팁.
+• 시작: 떠난 이유/설렘 (예: "훌쩍 떠난 1박2일, 여기 진짜였어요").
+• 구조: 여행지 소개 → 이동/교통·비용 → 코스 순서대로(일정) → 포토스팟·맛집 → 숙소 → 꿀팁/총평.
+• 초점: 현장 분위기 감성 묘사 + 교통비·입장료·숙박비 등 실비용, 포토스팟 위치.
+• 금지: 정보만 나열(감성 없이)하거나, 감성만 있고 팁 없는 글.`,
+};
+// 스타일별 문장끝/어조 — 공통 규칙(~해요,~거든요…)이 정보글까지 감성체로 만들지 않도록 덮어씀
+const WRITE_STYLE_ENDTONE: Record<WriteStyle,string> = {
+  "감성일기":"문장 끝: ~했어요, ~더라고요, ~거든요, ~잖아요 를 섞어 잔잔하고 다정하게.",
+  "정보글":  "문장 끝: ~합니다, ~입니다 중심의 담백한 정보체. 감성 회고·과한 감탄 금지.",
+  "맛집후기":"문장 끝: ~했어요, ~더라고요, ~네요 로 생생하게. 맛 표현은 구체적으로.",
+  "여행기":  "문장 끝: ~했어요, ~더라고요, ~거든요 로 여정을 들려주듯.",
 };
 
 const BLOG_TEMPLATES = [
@@ -549,6 +585,12 @@ export default function DashboardPage({user, onLogout, onAdminLogin, onThemeTogg
   const [engageUsed, setEngageUsed] = useState(0);
   const [instaUsed, setInstaUsed] = useState(0);
   const [alertPopup, setAlertPopup] = useState<{type:"expire"|"publish"|"insta"; daysLeft?:number; used?:number; limit?:number} | null>(null);
+  // 재연결 비밀번호 입력 모달 (window.prompt는 Electron에서 안 뜸 → 커스텀 모달)
+  const [pwPrompt, setPwPrompt] = useState<{acc:PublyAccount; value:string} | null>(null);
+  const pwPromptResolve = useRef<((pw:string|null)=>void)|null>(null);
+  function askPassword(acc:PublyAccount):Promise<string|null>{
+    return new Promise((resolve)=>{ pwPromptResolve.current=resolve; setPwPrompt({acc,value:""}); });
+  }
   const [accounts, setAccounts] = useState<PublyAccount[]>([]);
   const [history, setHistory] = useState<PublyHistory[]>([]);
   const [adType, setAdType] = useState<"adpost"|"adsense">("adpost");
@@ -596,9 +638,18 @@ export default function DashboardPage({user, onLogout, onAdminLogin, onThemeTogg
     const charOk=content.length>=1200;
     items.push({label:"글자수",pass:charOk,detail:`${content.length.toLocaleString()}자 (권장 1,200자+)`,weight:20});
 
-    // 2. 질문형 소제목 비율
-    const headings=(content.match(/^## .+/gm)||[]);
-    const qHeadings=headings.filter(h=>/[?？]/.test(h)||/하는법|방법|이유|이란|할까|될까|인가|인지|는지/.test(h));
+    // 2. 질문형 소제목 비율 — ★네이버는 ## 금지라 "짧은 독립 줄"도 소제목으로 인정
+    const qWords=/하는법|방법|이유|이란|할까|될까|인가|인지|는지|어떻게|왜|무엇|뭐|어디|언제|누구|얼마|추천|고르는|좋을까|괜찮을까/;
+    const headings=content.split("\n").map(l=>l.trim()).filter(l=>{
+      const t=l.replace(/^#+\s*/,"");                       // ## 접두 제거
+      if(t.length<3||t.length>45)return false;              // 소제목 길이대(3~45자)
+      if(t.startsWith("[")||/^(Q\d|A\d|POST\d|태그|제목)/.test(t))return false; // 메타/FAQ/태그 제외
+      if(l.startsWith("##"))return true;                    // 마크다운 소제목
+      if(/[?？]$/.test(t))return true;                       // 물음표로 끝 = 질문 소제목
+      // 순수텍스트 소제목: 서술형 종결어미로 끝나지 않는 짧은 줄(제목성)
+      return !/[.]$/.test(t)&&!/(요|다|죠|네|까요|습니다|았어|였어|더라고요|거든요|잖아요)$/.test(t);
+    });
+    const qHeadings=headings.filter(h=>/[?？]/.test(h)||qWords.test(h));
     const headingOk=headings.length>=3&&qHeadings.length>=Math.ceil(headings.length*0.5);
     items.push({label:"질문형 소제목",pass:headingOk,detail:`${headings.length}개 중 ${qHeadings.length}개 질문형`,weight:25});
 
@@ -786,7 +837,7 @@ Output format (JSON array only, no other text):
   const [hashtags, setHashtags] = useState<string[]>([]);
   const [newTag, setNewTag] = useState("");
   const [imageMode, setImageMode] = useState<"auto"|"manual">("auto");
-  const [imgGenType, setImgGenType] = useState<"ai"|"flow">("ai");
+  const [imgGenType, setImgGenType] = useState<"ai"|"flow">(()=>(localStorage.getItem("publy_img_gen_type") as "ai"|"flow")||"flow");
   const [showFlowGuide, setShowFlowGuide] = useState(false);
   const [flowReady, setFlowReady] = useState(false);
   const [flowLaunching, setFlowLaunching] = useState(false);
@@ -899,102 +950,54 @@ Output format (JSON array only, no other text):
       ? patterns[Math.floor(Math.random()*3)]
       : imgPattern;
 
-    const result:ContentBlock[]=[];
-    let insertedCount=0;
+    // ★ 모든 패턴 공통: 이미지가 글 문단 사이에 "균등 분산"되도록 배치 계산
+    //   (예전 패턴 A가 나머지를 한 곳에 몰아넣어 이미지가 다 붙던 버그를 근본 차단)
+    //   B는 2장 나란히(pair) 섞고, A/C는 단독 배치 — 다양성은 유지하되 항상 균등.
+    const mkImg=(img:{src:string;alt?:string},n:number):ContentBlock=>
+      ({type:"image",id:uid(),src:img.src,alt:img.alt||`이미지 ${n}`,position:"center",source:"auto"} as ContentBlock);
 
-    // ── 패턴 A: 썸네일 + 글 중간에만 배치 ──
-    if(activePattern==="A"){
-      // 첫 이미지 = 썸네일
-      result.push({type:"image",id:uid(),src:imgs[0].src,alt:imgs[0].alt||"이미지 1",position:"center",source:"auto"} as ContentBlock);
-      insertedCount++;
-      const remaining=imgs.slice(1);
-      const midPoint=Math.floor(safeTextCount/2);
-      let textCount=0;
-      for(let i=0;i<safeBlocks.length;i++){
-        result.push(safeBlocks[i]);
-        if(safeBlocks[i].type==="text"){
-          textCount++;
-          // 중간 지점에 나머지 이미지 배치
-          if(textCount===midPoint&&remaining.length>0){
-            remaining.forEach((img,idx)=>{
-              result.push({type:"image",id:uid(),src:img.src,alt:img.alt||`이미지 ${insertedCount+idx+1}`,position:"center",source:"auto"} as ContentBlock);
-            });
-            insertedCount+=remaining.length;
+    const result:ContentBlock[]=[];
+    // 1) 첫 이미지 = 썸네일 (맨 위 단독)
+    result.push(mkImg(imgs[0],1));
+    const rest=imgs.slice(1);
+
+    // 2) 나머지 이미지를 "묶음(unit)"으로 구성: 패턴 B면 2장 pair도 섞음, 아니면 전부 단독
+    type Unit = {kind:"single";img:{src:string;alt?:string}} | {kind:"pair";imgs:{src:string;alt?:string}[]};
+    const units:Unit[]=[];
+    if(activePattern==="B"){
+      for(let i=0;i<rest.length;i+=2){
+        if(i+1<rest.length) units.push({kind:"pair",imgs:[rest[i],rest[i+1]]});
+        else units.push({kind:"single",img:rest[i]});
+      }
+    }else{
+      rest.forEach(img=>units.push({kind:"single",img}));
+    }
+
+    // 3) 텍스트 블록 사이 "간격(gap)"에 units를 균등 분배
+    //    gap 개수 = safeTextCount (각 텍스트 문단 뒤). units를 gap에 라운드로빈으로 고르게.
+    const gaps=Math.max(1,safeTextCount);
+    const perGap:Unit[][]=Array.from({length:gaps},()=>[]);
+    units.forEach((u,i)=>{
+      // 앞쪽 문단부터 고르게: i번째 unit은 (i * gaps / units.length) 위치 gap에
+      const g=units.length<=gaps ? Math.min(gaps-1, Math.round((i+1)*gaps/(units.length+1))) : (i%gaps);
+      perGap[Math.max(0,Math.min(gaps-1,g))].push(u);
+    });
+
+    // 4) 텍스트 블록 순회하며 각 문단 뒤에 배정된 units 삽입
+    let textCount=0, imgN=1;
+    for(const b of safeBlocks){
+      result.push(b);
+      if(b.type==="text"){
+        const bucket=perGap[textCount]||[];
+        for(const u of bucket){
+          if(u.kind==="pair"){
+            result.push({type:"image-pair",id:uid(),images:[{src:u.imgs[0].src,alt:u.imgs[0].alt||"이미지"},{src:u.imgs[1].src,alt:u.imgs[1].alt||"이미지"}]} as ContentBlock);
+            imgN+=2;
+          }else{
+            result.push(mkImg(u.img,++imgN));
           }
         }
-      }
-    }
-
-    // ── 패턴 B: 2장씩 한 줄에 나란히 배치 (pair 블록) ──
-    else if(activePattern==="B"){
-      // 첫 이미지 = 썸네일 단독
-      result.push({type:"image",id:uid(),src:imgs[0].src,alt:imgs[0].alt||"이미지 1",position:"center",source:"auto"} as ContentBlock);
-      insertedCount++;
-      const remaining=imgs.slice(1);
-      // 나머지를 2장씩 pair로 묶기
-      const pairs:typeof remaining[]=[];
-      for(let i=0;i<remaining.length;i+=2){
-        pairs.push(remaining.slice(i,i+2));
-      }
-      // pair를 텍스트 블록 사이에 균등 분산
-      const insertMap=new Map<number,typeof pairs[0][]>();
-      if(safeTextCount>0&&pairs.length>0){
-        pairs.forEach((pair,index)=>{
-          const targetTextIndex=Math.min(safeTextCount,Math.max(1,Math.ceil(((index+1)*safeTextCount)/pairs.length)));
-          const bucket=insertMap.get(targetTextIndex)||[];bucket.push(pair);insertMap.set(targetTextIndex,bucket);
-        });
-      }
-      let textCount=0;
-      for(let i=0;i<safeBlocks.length;i++){
-        result.push(safeBlocks[i]);
-        if(safeBlocks[i].type==="text"){
-          textCount++;
-          const toInsert=insertMap.get(textCount)||[];
-          toInsert.forEach(pair=>{
-            if(pair.length===2){
-              // 2장 → pair 블록 (한 줄 나란히)
-              result.push({type:"image-pair",id:uid(),images:[{src:pair[0].src,alt:pair[0].alt||"이미지"},{src:pair[1].src,alt:pair[1].alt||"이미지"}]} as ContentBlock);
-              insertedCount+=2;
-            } else {
-              // 1장 → 단독 블록
-              result.push({type:"image",id:uid(),src:pair[0].src,alt:pair[0].alt||"이미지",position:"center",source:"auto"} as ContentBlock);
-              insertedCount++;
-            }
-          });
-        }
-      }
-    }
-
-    // ── 패턴 C: 썸네일 + 균등 분산 ──
-    else {
-      // 첫 이미지 = 썸네일
-      result.push({type:"image",id:uid(),src:imgs[0].src,alt:imgs[0].alt||"이미지 1",position:"center",source:"auto"} as ContentBlock);
-      insertedCount++;
-      const remainingImages=imgs.slice(1);
-      const insertMap=new Map<number,typeof remainingImages>();
-      if(safeTextCount>0&&remainingImages.length>0){
-        remainingImages.forEach((img,index)=>{
-          const targetTextIndex=Math.min(safeTextCount,Math.max(1,Math.ceil(((index+1)*safeTextCount)/remainingImages.length)));
-          const bucket=insertMap.get(targetTextIndex)||[];bucket.push(img);insertMap.set(targetTextIndex,bucket);
-        });
-      }
-      let textCount=0;
-      for(let i=0;i<safeBlocks.length;i++){
-        result.push(safeBlocks[i]);
-        if(safeBlocks[i].type==="text"){
-          textCount++;
-          const toInsert=insertMap.get(textCount)||[];
-          toInsert.forEach((img,idx)=>{result.push({type:"image",id:uid(),src:img.src,alt:img.alt||`이미지 ${insertedCount+idx+1}`,position:"center",source:"auto"} as ContentBlock);});
-          insertedCount+=toInsert.length;
-        }
-      }
-      // 남은 이미지 마지막에 추가
-      if(insertedCount<imgs.length){
-        const remaining=imgs.slice(insertedCount);
-        let lastTextIdx=-1;
-        for(let i=result.length-1;i>=0;i--){if(result[i].type==="text"){lastTextIdx=i;break;}}
-        const insertAt=lastTextIdx>=0?lastTextIdx+1:result.length;
-        remaining.reverse().forEach(img=>{result.splice(insertAt,0,{type:"image",id:uid(),src:img.src,alt:img.alt||"이미지",position:"center",source:"auto"} as ContentBlock);});
+        textCount++;
       }
     }
 
@@ -1199,8 +1202,7 @@ Output format (JSON array only, no other text):
 
       // ── 알림 체크 ──
       const now = new Date();
-      const expiry = new Date(q.reset_date);
-      const daysLeft = Math.ceil((expiry.getTime() - now.getTime()) / (1000*60*60*24));
+      const daysLeft = daysUntil(q.reset_date) ?? 0;
 
       // 만료 알림 (3일 이하 또는 만료됨)
       if (daysLeft <= 3) {
@@ -1234,7 +1236,9 @@ Output format (JSON array only, no other text):
   },[checkBot,user.id]);
 
   function recommendImgCount(content:string):number{
-    return Math.max(1, Math.min(10, Math.floor(content.length / 500)));
+    // 글 길이에 맞춰 이미지 수 추천 — 약 700자당 1장, 최소 2장 최대 8장.
+    // (1500자→2장, 2800자→4장, 4200자→6장, 5600자+→8장) 배치는 균등분산이라 많아도 안 붙음.
+    return Math.max(2, Math.min(8, Math.round(content.length / 700)));
   }
 
   /* ── 글 구간별 캡션 생성 ── */
@@ -1481,8 +1485,20 @@ Output format (JSON array only, no other text):
       "soft diffused overcast light, even tones, pastel color palette",
     ];
     const lighting = lightings[idx % lightings.length];
+    // ★ 구도(shot) 변주 — 같은 주제라도 이미지마다 다른 앵글/거리로 (탁자 굴비만 반복되는 문제 방지)
+    const shots = [
+      "extreme close-up macro shot, shallow depth of field, focus on texture and detail",
+      "wide establishing shot showing the full scene and surroundings, environmental context",
+      "45-degree angle overhead flat-lay composition, top-down perspective",
+      "eye-level medium shot with soft bokeh background, natural framing",
+      "dramatic low-angle shot, dynamic perspective, cinematic depth",
+      "side-profile shot with negative space, minimalist editorial framing",
+      "over-the-shoulder lifestyle shot, candid moment, human context (no visible faces)",
+      "detail vignette shot highlighting a single key element, artistic focus",
+    ];
+    const shot = shots[idx % shots.length];
     // 품질 + 텍스트 오염 방지(글자/워터마크/로고 없이 순수 이미지만) — 모든 주제 공통
-    const quality = "ultra-high resolution 8K, hyperrealistic, award-winning photography, National Geographic quality, razor-sharp focus, perfect composition, rule of thirds, absolutely no text, no letters, no words, no captions, no watermark, no logo, no typography";
+    const quality = `${shot}, ultra-high resolution 8K, hyperrealistic, award-winning photography, National Geographic quality, razor-sharp focus, absolutely no text, no letters, no words, no captions, no watermark, no logo, no typography`;
 
     const FLOW_CATS: [RegExp, string][] = [
       [/먹|맛|식당|음식|요리|카페|커피|레스토랑|맛집|디저트|베이커리|밥|술|맥주|와인|소주|막걸리/, `A stunning food photography scene featuring "${title}", beautifully plated gourmet Korean cuisine, vibrant fresh ingredients, professional food styling, bokeh restaurant interior, appetizing shallow depth of field`],
@@ -1561,6 +1577,17 @@ Output format (JSON array only, no other text):
       .replace(/(^|[\s,.])(?!__BR\d+__)[A-Za-z]{4,}(?=[\s,.]|$)/g,"$1")
       // 줄 전체가 영어인 경우 제거 (플레이스홀더 없는 줄만)
       .replace(/^(?!.*__BR\d+__)[A-Za-z\s\d.,!?\'""-]{10,}$/gm,"")
+      // ── AI 티 나는 상투어 → 자연스러운 구어체로 자동 치환 (SEO 'AI 패턴 차단' 점수 확보) ──
+      .replace(/소개해\s*드리겠습니다/g,"소개할게요").replace(/소개하겠습니다/g,"소개할게요")
+      .replace(/알아보겠습니다/g,"알아볼게요").replace(/살펴보겠습니다/g,"살펴볼게요")
+      .replace(/정리해\s*보겠습니다/g,"정리해볼게요").replace(/정리하겠습니다/g,"정리해볼게요")
+      .replace(/해\s*보겠습니다/g,"해볼게요").replace(/해보도록\s*하겠습니다/g,"해볼게요")
+      .replace(/말씀드리겠습니다/g,"말할게요").replace(/설명드리겠습니다/g,"설명할게요")
+      .replace(/결론적으로/g,"그래서").replace(/무엇보다도/g,"무엇보다").replace(/뿐만\s*아니라/g,"게다가")
+      .replace(/중요합니다/g,"중요해요").replace(/필수적으로/g,"꼭").replace(/필수적인/g,"꼭 필요한")
+      .replace(/효과적인/g,"괜찮은").replace(/효과적으로/g,"제대로").replace(/다양한/g,"여러")
+      .replace(/것을\s*추천드립니다/g,"걸 추천해요").replace(/추천드립니다/g,"추천해요")
+      .replace(/하는 것이 좋습니다/g,"하면 좋아요").replace(/하시기 바랍니다/g,"하세요")
       .replace(/ {2,}/g," ")
       .replace(/\n{3,}/g,"\n\n")
       .trim();
@@ -1752,9 +1779,10 @@ Output format (JSON array only, no other text):
     const catGuide=getCatGuide(keyword,title);
     const adGuide=adType==="adpost"?"[수익] 애드포스트: 체류시간 늘리는 감성 스토리.":"[수익] 애드센스: 클릭 유도, 키워드 밀도 높게.";
     const platGuide=platform==="naver"
-      ?"[플랫폼] 네이버: ## 기호 절대 금지. 순수 텍스트. 감성적 경험담."
-      :"[플랫폼] 티스토리: 정보성 중심. 내부링크 2개 자연스럽게 포함.";
+      ?"[플랫폼] 네이버: ## 기호 절대 금지. 순수 텍스트로 작성. (글의 방향은 아래 스타일 지침을 최우선으로 따를 것)"
+      :"[플랫폼] 티스토리: 내부링크 2개 자연스럽게 포함. (글의 방향은 아래 스타일 지침을 최우선으로 따를 것)";
     const styleGuide=WRITE_STYLE_GUIDE[writeStyle]||"";
+    const endTone=WRITE_STYLE_ENDTONE[writeStyle]||"문장 끝: ~해요, ~거든요, ~더라고요, ~잖아요 다양하게.";
     const personaGuide=PERSONA_STYLES.find(p=>p.id===persona)?.prompt||"";
     const templateGuide=BLOG_TEMPLATES.find(t=>t.id===blogTemplate)?.guide||"";
     const prompt=`당신은 대한민국 최고의 블로그 작가입니다.
@@ -1769,12 +1797,19 @@ ${catGuide}
 ⛔ ** * - + 마크다운 기호 전부 금지
 ⛔ 한자,중국어,일본어 금지
 ⛔ 영어 단어 절대 금지 — 브랜드명·제품명 제외 100% 순수 한국어로만 작성
-⛔ AI 티 나는 표현 금지 (중요합니다, 다양한, 효과적인, 필수적으로 등)
-✅ 독자에게 직접 말 걸기
+⛔ AI 티 나는 상투어 절대 금지: "~해보겠습니다/알아보겠습니다/살펴보겠습니다/소개해드리겠습니다/정리해보겠습니다", "결론적으로", "중요합니다", "다양한", "효과적인", "필수적으로", "무엇보다도", "뿐만 아니라", "~하는 것이 좋습니다", "추천드립니다" → 전부 실제 사람 말투(~해볼게요, 여러, 꼭, 그래서, 추천해요)로
 ✅ 구체적 수치, 가격, 기간 포함
-✅ 문장 끝: ~해요, ~거든요, ~더라고요, ~잖아요 다양하게
+✅ ${endTone}
 ✅ 키워드 3~4회 자연스럽게 (동의어 활용)
 ✅ 반드시 ${chars-100}~${chars+100}자 사이로 작성
+
+=== 🔍 검색 최적화(SEO) 규칙 — 반드시 지킬 것 ===
+✅ 본문을 4~6개 구간으로 나누고, 각 구간 맨 앞에 "소제목"을 한 줄 단독으로 넣기 (## 없이 순수 텍스트)
+✅ 그 소제목 중 최소 절반 이상을 "검색되는 질문형"으로 — 물음표(?)로 끝나거나 왜/어떻게/무엇/어디/언제/추천/고르는법 같은 검색어를 담기
+   예) "${keyword||title} 어떻게 고를까요?"  "왜 ${keyword||title}가 인기일까요?"  "${keyword||title} 추천 이유는?"
+✅ 소제목은 짧게(10~30자), 서술형 종결어미(~요/~다)로 끝내지 말 것 (제목처럼)
+✅ 키워드 "${keyword||title}"를 본문에 2~6회 자연스럽게 반복 (검색 노출)
+★ 아래 [글의 방향] 지침이 이 글의 성격을 결정한다 — 구조·어조·시작·초점을 그대로 따를 것 (다른 규칙과 충돌하면 [글의 방향] 우선)
 
 === 글 패턴 가이드 (매번 다르게) ===
 인트로: "${intro}"
@@ -1856,8 +1891,37 @@ POST3: (제목)|(이유)
     return ()=>{ alive=false; clearInterval(iv); };
   },[imgGenType]);
 
+  // ── 글을 읽고 "장면이 서로 다른" 이미지 프롬프트 N개 생성 (Gemini) ──
+  //   6하원칙(언제/어디서/무엇을/어떻게/왜)에 맞춰 이미지만 봐도 스토리가 읽히게.
+  async function buildStoryPrompts(title:string, content:string, n:number):Promise<{prompts:string[];captions:string[]}>{
+    const body=(content||"").slice(0,3000);
+    const ask=`너는 블로그 사진 디렉터야. 아래 글을 읽고, 이 글에 어울리는 ${n}장의 사진을 기획해줘.
+핵심: ${n}장이 서로 완전히 다른 "장면"이어야 해. 영화처럼 사진만 봐도 글의 흐름과 감정이 읽히게.
+예) 음식 후기라면: 원산지(바다/산지) → 재료 원물 → 손질/조리 과정 → 완성 요리 클로즈업 → 먹는 순간/상차림 → 곁들임/디테일. 절대 6장 다 "완성된 접시"만 반복하지 마.
+장면은 글 내용(언제/어디서/무엇을/어떻게/왜)에 근거해서 구체적으로.
+
+각 사진마다 아래 형식으로 정확히 ${n}줄 출력(다른 말 금지):
+장면설명(한국어 10~20자) | 영문 이미지 프롬프트(사진 스타일, 구체적 장면, 조명, 사실적, 글자/워터마크 없이)
+
+글 제목: ${title}
+글 본문:
+${body}`;
+    const text=await callAI(ask);
+    const prompts:string[]=[]; const captions:string[]=[];
+    for(const line of text.split("\n")){
+      const t=line.trim(); if(!t||!t.includes("|"))continue;
+      const [cap,...rest]=t.replace(/^\d+[).\s]*/,"").split("|");
+      const eng=rest.join("|").trim();
+      if(eng.length<10)continue;
+      captions.push(cap.trim().replace(/[*#-]/g,"").slice(0,30));
+      prompts.push(`${eng}, ultra realistic 8K photography, natural lighting, absolutely no text, no letters, no watermark, no logo`);
+    }
+    return { prompts, captions };
+  }
+
   // ── Google Flow 이미지 생성 (봇 CDP 경유, 미리보기까지) ──
-  async function handleGenerateFlowImages(){
+  //   append=true 면 기존 이미지에 "이어붙임"(1장 지운 자리 채우기 등), false 면 전체 새로 생성(교체)
+  async function handleGenerateFlowImages(append:boolean=false){
     // 1) Flow 준비 상태 확인 (디버깅 크롬 열려있나) — Electron 우선, 없으면 봇 API
     let ready=false;
     try{
@@ -1869,17 +1933,29 @@ POST3: (제목)|(이유)
       return;
     }
     setGenImgLoading(true);setGenImgProgress(0);setGenImgCurrent(0);setImgGenFailed(false);
-    // 2) 글 내용 기반 프롬프트 + 캡션 구성 (imgCount 장)
+    // 2) 글 내용 기반 프롬프트 + 캡션 구성 (★flowImgCount 사용)
+    const n=Math.max(1,flowImgCount);
     const content=genContent||"";
-    const lines=content.split("\n").filter(l=>l.trim().length>5);
-    const step=Math.max(1,Math.floor(lines.length/Math.max(1,imgCount)));
-    const prompts=Array.from({length:imgCount},(_,i)=>{
-      const seg=lines.slice(i*step,(i+1)*step).join(" ").slice(0,150);
-      return buildFlowPrompt(keyword||genTitle,pubTitle||genTitle,seg,i);
-    });
-    const caps=buildCaptions(keyword||genTitle,imgCount,content);
+    // ★ Gemini가 글을 읽고 "장면이 서로 다른"(6하원칙: 언제/어디서/무엇을/어떻게/왜) 이미지 프롬프트 N개 생성.
+    //   이미지만 봐도 스토리가 읽히게. 실패 시 기존 고정 템플릿으로 폴백.
+    let prompts:string[]=[];
+    let caps:string[]=[];
     try{
-      showToast(`🎨 Flow로 이미지 ${imgCount}장 생성 중... (1~2분 소요)`,"info");
+      const sceneResult=await buildStoryPrompts(pubTitle||genTitle, content, n);
+      if(sceneResult.prompts.length>=n){ prompts=sceneResult.prompts.slice(0,n); caps=sceneResult.captions.slice(0,n); }
+    }catch{}
+    if(prompts.length<n){
+      // 폴백: 기존 방식 (구간별 고정 템플릿)
+      const lines=content.split("\n").filter(l=>l.trim().length>5);
+      const step=Math.max(1,Math.floor(lines.length/n));
+      prompts=Array.from({length:n},(_,i)=>{
+        const seg=lines.slice(i*step,(i+1)*step).join(" ").slice(0,150);
+        return buildFlowPrompt(keyword||genTitle,pubTitle||genTitle,seg,i);
+      });
+      caps=buildCaptions(keyword||genTitle,n,content);
+    }
+    try{
+      showToast(`🎨 Flow로 이미지 ${n}장 생성 중... (1~2분 소요)`,"info");
       const r=await botFetch(`${BOT}/api/flow-generate`,{
         method:"POST",headers:{"Content-Type":"application/json"},
         body:JSON.stringify({prompts,captions:caps}),
@@ -1894,13 +1970,16 @@ POST3: (제목)|(이유)
       }
       const imgs:string[]=(d.images||[]).map((x:any)=>x.src).filter(Boolean);
       if(imgs.length===0){ showToast("❌ 이미지가 생성되지 않았어요","error");setImgGenFailed(true);setGenImgLoading(false);return; }
-      setGeneratedImages(imgs);
-      const captionList=(d.images||[]).map((x:any,i:number)=>x.alt||caps[i]||`${keyword||genTitle} 사진 ${i+1}`);
-      setCaptions(captionList);
-      if(!thumbnail)setThumbnail(imgs[0]);
-      triggerAutoInsert(imgs.map((src,i)=>({id:i,src,alt:captionList[i]||`${keyword||genTitle} 사진`})));
+      const newCaps=(d.images||[]).map((x:any,i:number)=>x.alt||caps[i]||`${keyword||genTitle} 사진 ${i+1}`);
+      // ★ append면 기존 이미지 뒤에 이어붙이기(1장 지운 자리 채우기), 아니면 교체(전체 새로)
+      const finalImgs = append ? [...generatedImages, ...imgs] : imgs;
+      const finalCaps = append ? [...captions, ...newCaps] : newCaps;
+      setGeneratedImages(finalImgs);
+      setCaptions(finalCaps);
+      if(!thumbnail)setThumbnail(finalImgs[0]);
+      triggerAutoInsert(finalImgs.map((src,i)=>({id:i,src,alt:finalCaps[i]||`${keyword||genTitle} 사진`})));
       setShowMeta(true);
-      showToast(`✅ Flow 이미지 ${imgs.length}장 생성 완료! (바탕화면에도 백업됨)`,"success");
+      showToast(append?`✅ ${imgs.length}장 추가! (총 ${finalImgs.length}장)`:`✅ Flow 이미지 ${imgs.length}장 생성 완료! (바탕화면에도 백업됨)`,"success");
     }catch(e:any){
       if(e.name!=="AbortError"){ showToast("❌ Flow 생성 실패: "+e.message,"error");setImgGenFailed(true); }
     }finally{ setGenImgLoading(false); }
@@ -1970,27 +2049,51 @@ POST3: (제목)|(이유)
 
   function getActiveImages():string[]{return imgSource==="upload"?uploadedImages:generatedImages;}
 
-  function buildPublishContent():string{
-    if(!genContent)return "";
+  // 발행 가능 여부 — state가 비어도 draft에 글/제목 있으면 발행 가능(탭 이동 대응)
+  function hasPublishableContent():boolean{
+    if(pubTitle && (genContent || blocks.some(b=>b.type==="text"&&(b as TextBlock).content.trim()))) return true;
+    try{ const d=JSON.parse(localStorage.getItem("publy_draft")||"{}"); return !!(d.title && d.content); }catch{ return false; }
+  }
+  function buildPublishContent():string{ return buildPublishContentWith(genContent); }
+  function buildPublishContentWith(gc:string):string{
+    if(!gc)return "";
     // pubScope 필터 먼저 적용 (블록보다 우선)
     if(pubScope==="body"){
-      let t=genContent;
+      let t=gc;
       t=t.replace(/\[FAQ시작\][\s\S]*?\[FAQ끝\]/g,"").replace(/\[참고자료시작\][\s\S]*?\[참고자료끝\]/g,"").replace(/\[관련글시작\][\s\S]*?\[관련글끝\]/g,"").trim();
       return t;
     }
     if(pubScope==="faq"){
-      let t=genContent;
+      let t=gc;
       t=t.replace(/\[참고자료시작\][\s\S]*?\[참고자료끝\]/g,"").replace(/\[관련글시작\][\s\S]*?\[관련글끝\]/g,"").trim();
       return t;
     }
-    // full: 블록 기반 HTML 빌드
+    // full: 블록에 텍스트 있으면 블록 HTML, 없으면 gc 그대로
     if(blocks.some(b=>b.type==="text"&&(b as TextBlock).content.trim()))return buildHtmlContent();
-    return genContent;
+    return gc;
   }
 
   async function handlePublish(){
-    if(!pubAccId||!pubTitle){alert("계정과 제목을 확인해주세요");return;}
-    const content=buildPublishContent();if(!content){alert("발행할 내용이 없어요");return;}
+    // ★ 탭 이동/계정 변경으로 state가 비어도 발행되게 — draft(localStorage)에서 자동 복원.
+    //   준비만 됐으면(제목·본문 어딘가에 존재) 몇 번을 오가든 무조건 발행 가능하게.
+    let effTitle = pubTitle || genTitle;
+    let effGenContent = genContent;
+    if(!effTitle || !effGenContent){
+      try{
+        const d = JSON.parse(localStorage.getItem("publy_draft")||"{}");
+        if(!effTitle && d.title) effTitle = d.title;
+        if(!effGenContent && d.content) effGenContent = d.content;
+      }catch{}
+    }
+    // 복원된 값을 state에도 반영(다음 렌더/블록 계산 일관성)
+    if(effTitle && effTitle!==pubTitle) setPubTitle(effTitle);
+    if(effGenContent && effGenContent!==genContent) setGenContent(effGenContent);
+
+    if(!pubAccId){alert("발행할 계정을 선택해주세요 (계정 관리에서 연결)");return;}
+    if(!effTitle){alert("제목이 없어요. 글 생성 또는 키워드/제목에서 제목을 만들어주세요");return;}
+    // content 계산 (state 대신 복원값 기준)
+    const content = buildPublishContentWith(effGenContent);
+    if(!content){alert("발행할 본문이 없어요. 글 생성 탭에서 글을 만들어주세요");return;}
     if(scheduleOn&&!scheduleTime){alert("예약 날짜와 시간을 선택해주세요");return;}
     setPublishing(true);showToast(scheduleOn?"예약 설정 중...":"발행 중...","info");
     const tags=hashtags.map(t=>t.replace("#","")).filter(Boolean);
@@ -2008,7 +2111,7 @@ POST3: (제목)|(이유)
       if(!thumbnail && activeImgs[0]) setThumbnail(activeImgs[0]);
     }
     const publishBody={
-      userId:user.id,platform,title:pubTitle,content,
+      userId:user.id,platform,title:effTitle,content,
       pubScope,
       tags,
       imageUrl:thumbnail||activeImgs[0]||undefined,
@@ -2048,20 +2151,20 @@ POST3: (제목)|(이유)
       }
       const ok=await useQuota(user.id);if(!ok){showToast("❌ 발행 건수 초과","error");setPublishing(false);return;}
       if(!botOnline){
-        await supabase.from("publy_jobs").insert({user_id:user.id,platform,title:pubTitle,content,
+        await supabase.from("publy_jobs").insert({user_id:user.id,platform,title:effTitle,content,
           tags,image_url:thumbnail||getActiveImages()[0]||undefined,
           category_id:category||undefined,visibility,
           schedule_time:scheduleOn?scheduleTime:undefined,status:"pending"});
         showToast("✅ PC 봇에 예약됐어요! Publy 앱 실행 시 자동 발행돼요.");
-        await addHistory({user_id:user.id,platform,title:pubTitle,status:"pending" as "success"|"fail"});
+        await addHistory({user_id:user.id,platform,title:effTitle,status:"pending" as "success"|"fail"});
       }else{
-        const r=await botFetch(`${BOT}/api/publish-full`,{method:"POST",body:JSON.stringify(publishBody)});
+        const r=await botFetch(`${BOT}/api/publish-full`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(publishBody)});
         const d=await r.json();
         if(r.status===401){showToast("❌ 세션 만료 — 계정 관리 탭에서 재연결해주세요","error");setPublishing(false);return;}
         if(!r.ok)throw new Error(d.error);
-        await addHistory({user_id:user.id,platform,title:pubTitle,post_url:d.postUrl,status:"success",
-          content:{title:pubTitle,content,pubScope,tags,imageUrl:thumbnail||getActiveImages()[0]||undefined,categoryId:category||undefined,visibility,blocks:publishBody.blocks,platform}})
-          .catch(async()=>{ await addHistory({user_id:user.id,platform,title:pubTitle,post_url:d.postUrl,status:"success"}).catch(()=>{}); });
+        await addHistory({user_id:user.id,platform,title:effTitle,post_url:d.postUrl,status:"success",
+          content:{title:effTitle,content,pubScope,tags,imageUrl:thumbnail||getActiveImages()[0]||undefined,categoryId:category||undefined,visibility,blocks:publishBody.blocks,platform}})
+          .catch(async()=>{ await addHistory({user_id:user.id,platform,title:effTitle,post_url:d.postUrl,status:"success"}).catch(()=>{}); });
         await incrementDailyPublish(user.id);
         setDailyPublishUsed(p => p + 1);
         setPubMsg(scheduleOn?"✅ 예약 완료! 설정한 시간에 자동 발행돼요.":"✅ 발행 완료!");
@@ -2069,7 +2172,7 @@ POST3: (제목)|(이유)
         if(d.warning) setTimeout(()=>showToast("⚠️ "+d.warning,"error"),1500);
       }
       getHistory(user.id).then(setHistory);getQuota(user.id).then((q:PublyQuota|null)=>q&&setQuota(q));
-    }catch(e:any){await addHistory({user_id:user.id,platform,title:pubTitle,status:"fail",error_message:e.message});setPubMsg("❌ "+e.message+" (오류가 관리자에게 자동 전달됩니다)");showToast("❌ "+e.message,"error");logError({user_id:user.id,user_name:(user as any).name||"",user_email:user.email||"",feature:"블로그 발행 ("+platform+")",error_message:e.message}).catch(()=>{});}
+    }catch(e:any){await addHistory({user_id:user.id,platform,title:effTitle,status:"fail",error_message:e.message});setPubMsg("❌ "+e.message+" (오류가 관리자에게 자동 전달됩니다)");showToast("❌ "+e.message,"error");logError({user_id:user.id,user_name:(user as any).name||"",user_email:user.email||"",feature:"블로그 발행 ("+platform+")",error_message:e.message}).catch(()=>{});}
     finally{setPublishing(false);}
   }
 
@@ -2188,7 +2291,7 @@ POST3: (제목)|(이유)
       </div>
 
       {/* 발행 버튼 */}
-      <button onClick={handlePublish} disabled={publishing||!pubAccId||!pubTitle||!buildPublishContent()||(quota!==null&&(quota.remaining_quota||0)<=0)||(scheduleOn&&!scheduleTime)} className="btn btn-primary btn-full btn-xl pub-submit-btn">
+      <button onClick={handlePublish} disabled={publishing||!pubAccId||!hasPublishableContent()||(quota!==null&&(quota.remaining_quota||0)<=0)||(scheduleOn&&!scheduleTime)} className="btn btn-primary btn-full btn-xl pub-submit-btn">
         {publishing
           ?<><span className="spinner"/>{scheduleOn?"예약 중...":"발행 중..."}</>
           :scheduleOn?<>⏰ 예약 발행 설정하기</>:<>🚀 블로그 자동 발행</>
@@ -2237,7 +2340,7 @@ POST3: (제목)|(이유)
     try{
       const legacy=(acc as any).password_encrypted||"";
       let pw="";try{pw=legacy?atob(legacy):"";}catch{}
-      if(!pw)pw=window.prompt("세션이 만료되었습니다. 비밀번호를 다시 입력해주세요.")||"";
+      if(!pw){ const entered=await askPassword(acc); if(entered===null){setConnId(null);return;} pw=entered; }
       if(!pw)throw new Error("비밀번호 입력이 필요합니다");
       const r=await botFetch(`${BOT}/api/${acc.platform}/save-session`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({userId:acc.user_id,id:acc.username,pw,blogName:acc.blog_name}),signal:AbortSignal.timeout(120000)});
       const d=await r.json();if(!d.success)throw new Error(d.error||"연결 실패");
@@ -2252,8 +2355,8 @@ POST3: (제목)|(이유)
     setPhotoGenerating(true);setPhotoGenDone(false);
 
     try {
-      // 이미지 parts 구성 (최대 10장만 Vision에 전송 - API 제한)
-      const imgParts = photoFiles.slice(0,10).map(f=>{
+      // 이미지 parts 구성 (최대 20장 Vision 전송 - 체험단 실무 기준. 리사이즈로 용량 적음)
+      const imgParts = photoFiles.slice(0,20).map(f=>{
         const b64 = f.src.split(",")[1]||f.src;
         const mime = f.src.startsWith("data:image/png")?"image/png":"image/jpeg";
         return {inlineData:{mimeType:mime,data:b64}};
@@ -2267,9 +2370,10 @@ ${photoKeypoints.trim()}`
         : "";
 
       const styleGuide = WRITE_STYLE_GUIDE[writeStyle]||"";
+      const endTone = WRITE_STYLE_ENDTONE[writeStyle]||"문장 끝: ~해요, ~거든요, ~더라고요 다양하게.";
       const personaGuide = PERSONA_STYLES.find(p=>p.id===persona)?.prompt||"";
 
-      const photoCount = Math.min(photoFiles.length, 10);
+      const photoCount = Math.min(photoFiles.length, 20);
       const prompt = `당신은 대한민국 최고의 블로그 작가입니다. 첨부된 ${photoCount}장의 사진을 순서대로 자세히 분석하여 네이버 블로그 글을 작성해주세요.
 
 사진 속 모든 디테일(색상, 분위기, 장소, 음식, 사람, 배경 등)을 실제로 경험한 것처럼 생생하게 묘사해주세요.${keypointText}
@@ -2277,12 +2381,12 @@ ${photoKeypoints.trim()}`
 === 절대 규칙 ===
 ⛔ ## 기호 완전 금지 (소제목은 그냥 텍스트로)
 ⛔ ** * 마크다운 기호 전부 금지
-⛔ AI 티 나는 표현 금지 (다양한, 효과적인, 중요합니다 등)
+⛔ AI 티 나는 상투어 절대 금지 (다양한, 효과적인, 중요합니다, 필수적으로, 결론적으로, ~해보겠습니다, 추천드립니다 등) → 실제 사람 말투로
 ⛔ 영어 단어 금지 (브랜드명 제외)
 ✅ 사진에서 직접 보이는 것을 구체적으로 묘사
-✅ 독자에게 말 걸듯 친근하게
 ✅ 구체적 수치, 가격, 시간 포함
-✅ 문장 끝: ~해요, ~거든요, ~더라고요 다양하게
+✅ ${endTone}
+★ 아래 [글의 방향] 지침이 이 글의 성격을 결정한다 — 구조·어조·초점을 그대로 따를 것 (충돌 시 [글의 방향] 우선)
 
 === ⭐ 사진 배치 규칙 (가장 중요) ===
 ✅ 각 사진은 그 사진을 설명하는 문단 "바로 앞"에 [사진N] 마커로 넣어주세요 (N은 1부터, 첨부 순서 그대로).
@@ -2665,6 +2769,33 @@ POST3: (제목)|(이유)
         )}
 
         {/* ── 만료/발행 알림 팝업 ── */}
+        {/* ── 재연결 비밀번호 입력 모달 (window.prompt 대체) ── */}
+        {pwPrompt&&(
+          <div style={{position:"fixed",inset:0,zIndex:10000,background:"rgba(0,0,0,.75)",display:"flex",alignItems:"center",justifyContent:"center",padding:20}}
+            onClick={()=>{ pwPromptResolve.current?.(null); pwPromptResolve.current=null; setPwPrompt(null); }}>
+            <div style={{width:"100%",maxWidth:400,borderRadius:20,background:"var(--card)",border:"1px solid var(--accent-border)",overflow:"hidden",animation:"fadeUp .25s ease",boxShadow:"0 24px 60px rgba(0,0,0,.5)"}} onClick={e=>e.stopPropagation()}>
+              <div style={{padding:"18px 22px 14px",background:"linear-gradient(135deg,var(--accent),#00cc80)",display:"flex",alignItems:"center",gap:10}}>
+                <span style={{fontSize:24}}>🔒</span>
+                <div><div style={{fontSize:16,fontWeight:900,color:"#000"}}>세션이 만료되었어요</div>
+                <div style={{fontSize:12,color:"rgba(0,0,0,.7)",marginTop:2}}>{pwPrompt.acc.platform==="naver"?"네이버":"티스토리"} 비밀번호를 다시 입력해주세요</div></div>
+              </div>
+              <div style={{padding:"20px 22px"}}>
+                <div style={{fontSize:12,color:"var(--text3)",marginBottom:6}}>계정: <b style={{color:"var(--text)"}}>{pwPrompt.acc.username}</b></div>
+                <input type="password" autoFocus className="inp" placeholder="비밀번호" value={pwPrompt.value}
+                  onChange={e=>setPwPrompt(p=>p?{...p,value:e.target.value}:p)}
+                  onKeyDown={e=>{ if(e.key==="Enter"&&pwPrompt.value){ pwPromptResolve.current?.(pwPrompt.value); pwPromptResolve.current=null; setPwPrompt(null); } }}
+                  style={{fontSize:14,padding:"12px 14px",marginBottom:14}}/>
+                <div style={{display:"flex",gap:8}}>
+                  <button onClick={()=>{ pwPromptResolve.current?.(null); pwPromptResolve.current=null; setPwPrompt(null); }}
+                    style={{flex:1,padding:"11px",borderRadius:10,border:"1px solid var(--border)",background:"var(--bg2)",color:"var(--text2)",cursor:"pointer",fontSize:13,fontWeight:700,fontFamily:"inherit"}}>취소</button>
+                  <button disabled={!pwPrompt.value} onClick={()=>{ pwPromptResolve.current?.(pwPrompt.value); pwPromptResolve.current=null; setPwPrompt(null); }}
+                    style={{flex:2,padding:"11px",borderRadius:10,border:"none",background:pwPrompt.value?"var(--accent)":"var(--border)",color:pwPrompt.value?"#000":"var(--text3)",cursor:pwPrompt.value?"pointer":"not-allowed",fontSize:13,fontWeight:800,fontFamily:"inherit"}}>🔗 재연결</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
         {alertPopup&&(
           <div style={{position:"fixed",inset:0,zIndex:9999,background:"rgba(0,0,0,.75)",display:"flex",alignItems:"center",justifyContent:"center",padding:20}} onClick={()=>setAlertPopup(null)}>
             <div style={{width:"100%",maxWidth:400,borderRadius:20,background:"var(--card)",border:`1px solid ${alertPopup.type==="expire"?"rgba(255,83,99,.4)":"rgba(255,159,63,.4)"}`,overflow:"hidden",animation:"fadeUp .25s ease",boxShadow:"0 24px 60px rgba(0,0,0,.5)"}} onClick={e=>e.stopPropagation()}>
@@ -2916,7 +3047,7 @@ POST3: (제목)|(이유)
               const engageLimit = ENGAGE_DAILY_LIMIT[plan] ?? 10;
               const instaLimit = INSTA_DM_DAILY_LIMIT[plan] ?? 5;
               const expiry = quota ? new Date(quota.reset_date) : null;
-              const daysLeft = expiry ? Math.ceil((expiry.getTime() - Date.now()) / (1000*60*60*24)) : null;
+              const daysLeft = quota ? daysUntil(quota.reset_date) : null;
               const dColor = daysLeft === null ? "var(--text3)" : daysLeft <= 3 ? "var(--danger)" : daysLeft <= 7 ? "#ff9f3f" : "var(--success)";
               const items = [
                 { label:"✍️ 글쓰기", used: dailyPublishUsed, limit: publishLimit, color:"var(--accent)" },
@@ -3327,7 +3458,7 @@ POST3: (제목)|(이유)
                   </div>
                   <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
                     {/* AI 이미지 */}
-                    <button onClick={()=>setImgGenType("ai")}
+                    <button onClick={()=>{setImgGenType("ai");localStorage.setItem("publy_img_gen_type","ai");}}
                       style={{padding:"16px 14px",borderRadius:16,border:`2px solid ${imgGenType==="ai"?"#6366f1":"var(--border)"}`,background:imgGenType==="ai"?"linear-gradient(135deg,rgba(99,102,241,.18),rgba(99,102,241,.06))":"var(--card)",cursor:"pointer",fontFamily:"inherit",textAlign:"left",transition:"all .2s",boxShadow:imgGenType==="ai"?"0 4px 20px rgba(99,102,241,.25)":"none"}}>
                       <div style={{fontSize:28,marginBottom:6}}>🤖</div>
                       <div style={{fontSize:14,fontWeight:900,color:imgGenType==="ai"?"#818cf8":"var(--text)",marginBottom:4}}>AI 이미지</div>
@@ -3335,7 +3466,7 @@ POST3: (제목)|(이유)
                       {imgGenType==="ai"&&<div style={{marginTop:8,fontSize:10,fontWeight:800,color:"#818cf8",background:"rgba(99,102,241,.15)",padding:"3px 8px",borderRadius:99,display:"inline-block"}}>✓ 선택됨</div>}
                     </button>
                     {/* Flow 이미지 */}
-                    <button onClick={()=>setImgGenType("flow")}
+                    <button onClick={()=>{setImgGenType("flow");localStorage.setItem("publy_img_gen_type","flow");}}
                       style={{padding:"16px 14px",borderRadius:16,border:`2px solid ${imgGenType==="flow"?"#a855f7":"var(--border)"}`,background:imgGenType==="flow"?"linear-gradient(135deg,rgba(168,85,247,.18),rgba(168,85,247,.06))":"var(--card)",cursor:"pointer",fontFamily:"inherit",textAlign:"left",transition:"all .2s",boxShadow:imgGenType==="flow"?"0 4px 20px rgba(168,85,247,.25)":"none",position:"relative",overflow:"hidden"}}>
                       <div style={{position:"absolute",top:8,right:10,fontSize:10,fontWeight:800,color:"#fff",background:"linear-gradient(135deg,#a855f7,#7c3aed)",padding:"2px 8px",borderRadius:99}}>FREE</div>
                       <div style={{fontSize:28,marginBottom:6}}>🎨</div>
@@ -3565,6 +3696,13 @@ POST3: (제목)|(이유)
                             </button>
                             {genImgLoading&&<button className="btn-stop" style={{width:"100%",justifyContent:"center"}} onClick={stopImageGen}>⏹ 생성 중단</button>}
                             {imgGenFailed&&!genImgLoading&&<button className="btn btn-sm" onClick={()=>{setImgGenFailed(false);handleGenerateImages();}} style={{background:"var(--warn)",color:"#fff",border:"none",cursor:"pointer",width:"100%",justifyContent:"center",marginTop:4}}>🔄 재시도</button>}
+                            {imgGenType==="flow"&&generatedImages.length>0&&!genImgLoading&&(
+                              <button className="btn btn-full btn-sm" onClick={()=>handleGenerateFlowImages(true)} disabled={genImgLoading||!genContent}
+                                style={{background:"rgba(16,185,129,.15)",color:"#10b981",border:"1.5px solid #10b981",cursor:"pointer",width:"100%",justifyContent:"center",fontWeight:800}}
+                                title="지운 자리 채우기 — 기존 이미지에 이어붙여요">
+                                ➕ {Math.max(1,flowImgCount)}장 추가 생성 (기존에 이어붙임)
+                              </button>
+                            )}
                             {generatedImages.length>0&&!genImgLoading&&<button className="btn btn-danger btn-full btn-sm" onClick={()=>{setGeneratedImages([]);setCaptions([]);}}>🗑 이미지 초기화</button>}
                           </div>
                         </>
@@ -3681,9 +3819,20 @@ POST3: (제목)|(이유)
                                 {i===0&&<span style={{position:"absolute",top:-7,left:-4,fontSize:9,fontWeight:800,padding:"2px 7px",borderRadius:99,background:"var(--accent)",color:"#000",whiteSpace:"nowrap"}}>썸네일</span>}
                                 <button style={{position:"absolute",top:-8,right:-8,width:28,height:28,borderRadius:"50%",background:"var(--danger)",border:"2px solid var(--bg)",color:"#fff",cursor:"pointer",fontSize:12,display:"flex",alignItems:"center",justifyContent:"center",boxShadow:"0 2px 6px rgba(0,0,0,.3)"}}
                                   onClick={()=>{
+                                    const delSrc=getActiveImages()[i];
+                                    const newImgs=getActiveImages().filter((_,j)=>j!==i);
+                                    const newCaps=captions.filter((_,j)=>j!==i);
                                     if(imgSource==="ai")setGeneratedImages(p=>p.filter((_,j)=>j!==i));
                                     else setUploadedImages(p=>p.filter((_,j)=>j!==i));
-                                    setCaptions(p=>p.filter((_,j)=>j!==i));
+                                    setCaptions(newCaps);
+                                    // ★ 발행에 쓰이는 blocks도 다시 배치 — 지운 이미지가 발행에 남지 않게
+                                    if(newImgs.length>0){
+                                      triggerAutoInsert(newImgs.map((src,k)=>({id:k,src,alt:newCaps[k]||`${keyword||genTitle||pubTitle} 사진`})));
+                                    }else{
+                                      setBlocks(prev=>prev.filter(b=>b.type==="text"));
+                                    }
+                                    // 지운 게 썸네일이었으면 썸네일도 갱신
+                                    if(thumbnail===delSrc)setThumbnail(newImgs[0]||"");
                                   }}>✕</button>
                               </div>
                               {/* 캡션 입력창 - 필수 */}
@@ -3955,7 +4104,7 @@ POST3: (제목)|(이유)
                       ⚙️ 발행 설정 {showPublishPanel?"▲":"▼"}
                     </button>
                     {/* 발행 버튼 */}
-                    <button onClick={handlePublish} disabled={publishing||!pubAccId||!pubTitle||!buildPublishContent()||(quota!==null&&(quota.remaining_quota||0)<=0)||(scheduleOn&&!scheduleTime)}
+                    <button onClick={handlePublish} disabled={publishing||!pubAccId||!hasPublishableContent()||(quota!==null&&(quota.remaining_quota||0)<=0)||(scheduleOn&&!scheduleTime)}
                       style={{display:"flex",alignItems:"center",gap:5,padding:"7px 16px",borderRadius:8,border:"none",background:scheduleOn?"var(--warn)":"var(--accent)",color:"#000",cursor:"pointer",fontSize:13,fontWeight:800,fontFamily:"inherit",whiteSpace:"nowrap",opacity:(publishing||!pubAccId||!pubTitle)?.5:1}}>
                       {publishing?(scheduleOn?"예약 중...":"발행 중..."):scheduleOn?"⏰ 예약":"🚀 발행"}
                     </button>

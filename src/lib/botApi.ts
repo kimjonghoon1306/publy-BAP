@@ -17,15 +17,21 @@ export async function botFetch(input: RequestInfo | URL, init: RequestInit = {})
 export class BotEventStream {
   onmessage: ((event: MessageEvent<string>) => void) | null = null;
   onerror: (() => void) | null = null;
+  onclose: (() => void) | null = null;   // 스트림이 어떤 식으로든 끝나면 호출(버튼 잠금 해제용)
   private controller = new AbortController();
 
-  constructor(url: string) {
-    void this.connect(url);
+  constructor(url: string, init?: RequestInit) {
+    void this.connect(url, init);
   }
 
-  private async connect(url: string) {
+  private async connect(url: string, init?: RequestInit) {
     try {
-      const response = await botFetch(url, { signal: this.controller.signal, headers: { Accept: "text/event-stream" } });
+      const response = await botFetch(url, {
+        signal: this.controller.signal,
+        method: init?.method,
+        body: init?.body,
+        headers: { Accept: "text/event-stream", ...(init?.headers as Record<string,string> || {}) },
+      });
       if (!response.ok || !response.body) throw new Error(`SSE HTTP ${response.status}`);
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
@@ -44,6 +50,8 @@ export class BotEventStream {
       }
     } catch (error) {
       if (!this.controller.signal.aborted) this.onerror?.();
+    } finally {
+      if (!this.controller.signal.aborted) this.onclose?.();
     }
   }
 

@@ -534,7 +534,10 @@ export async function publishNaver(params: {
       await moveCursorToEnd();
       await page.waitForTimeout(200);
       // 앞 문단/이미지와 사이에 빈 줄 하나 → 문단이 딱 붙지 않게(모바일 가독성)
+      //   블록 사이도 "엔터 2번(빈 줄 하나)"으로 통일 — 블록 안 문단 간격과 동일하게 숨통 트이게.
       if (spacerBefore && anyBodyWritten) {
+        await page.keyboard.press("Enter");
+        await page.waitForTimeout(120);
         await page.keyboard.press("Enter");
         await page.waitForTimeout(120);
       }
@@ -554,6 +557,33 @@ export async function publishNaver(params: {
       }
     }
 
+    // ★ 올린 이미지의 "네이버 전용 캡션칸"에 설명 직접 입력 (실측 DOM: .se-caption / placeholder "사진 설명을 입력하세요.")
+    //   fromEnd=0 이면 가장 최근 이미지, 1이면 그 앞 이미지(페어의 첫 장 등)
+    async function fillLastImageCaption(text: string, fromEnd: number = 0): Promise<boolean> {
+      const cap = (text || "").trim();
+      if (!cap) return false;
+      try {
+        // 대상 이미지 컴포넌트 선택
+        const comps = await frame.$$(".se-component.se-image");
+        const comp = comps[comps.length - 1 - fromEnd];
+        if (!comp) return false;
+        await comp.scrollIntoViewIfNeeded().catch(() => {});
+        // ★ 이미지를 먼저 클릭해 컴포넌트 활성화 → 빈 캡션(height 0)이 열림 (실측 확인)
+        const imgRes = await comp.$(".se-image-resource") ?? await comp.$("img");
+        if (imgRes) { await imgRes.click({ force: true }).catch(() => {}); await page.waitForTimeout(500); }
+        // 캡션 문단 클릭 → 타이핑 (force 실패 시 좌표 클릭 폴백)
+        const capMod = await comp.$(".se-caption");
+        if (!capMod) return false;
+        const p = await capMod.$(".se-text-paragraph") ?? capMod;
+        try { await p.click({ timeout: 5000, force: true }); }
+        catch { const r = await p.boundingBox(); if (r) await page.mouse.click(r.x + r.width / 2, r.y + r.height / 2); }
+        await page.waitForTimeout(300);
+        await page.keyboard.type(cap, { delay: 25 });
+        await page.waitForTimeout(200);
+        return true;
+      } catch { return false; }
+    }
+
     // 이미지 업로드 헬퍼
     async function uploadImage(imgUrl: string, alt?: string) {
       const tmpFile = await downloadImageToTemp(imgUrl);
@@ -567,12 +597,19 @@ export async function publishNaver(params: {
         if (ok) {
           console.log("[naver] ✅ 이미지 업로드 완료");
           if (alt?.trim()) {
-            try {
-              await moveCursorToEnd();
-              await page.keyboard.press("Enter");
-              await insertText(alt.trim());
-              console.log("[naver] ✅ 캡션 입력:", alt.trim());
-            } catch {}
+            // 1순위: 네이버 전용 캡션칸에 직접 입력
+            const capOk = await fillLastImageCaption(alt.trim());
+            if (capOk) {
+              console.log("[naver] ✅ 이미지 캡션(설명칸) 입력:", alt.trim());
+            } else {
+              // 폴백: 캡션칸을 못 찾으면 이미지 밑 문단으로 설명 추가
+              try {
+                await moveCursorToEnd();
+                await page.keyboard.press("Enter");
+                await insertText(alt.trim());
+                console.log("[naver] ✅ 캡션(문단 폴백) 입력:", alt.trim());
+              } catch {}
+            }
           }
         } else {
           console.log("[naver] 이미지 버튼 못 찾음 - 이미지 스킵");
@@ -636,13 +673,16 @@ export async function publishNaver(params: {
               const ok = await uploadFileToEditor([tmp1, tmp2]);
               if (ok) {
                 console.log("[naver] ✅ 이미지 페어 업로드 완료");
-                const pairAlt = pairImages[0].alt || pairImages[1].alt;
-                if (pairAlt?.trim()) {
-                  try {
-                    await moveCursorToEnd();
-                    await page.keyboard.press("Enter");
-                    await insertText(pairAlt.trim());
-                  } catch {}
+                // 두 장 각각의 캡션칸에 입력 (fromEnd 0=둘째장, 1=첫째장)
+                let capDone = false;
+                if (pairImages[1].alt?.trim()) capDone = await fillLastImageCaption(pairImages[1].alt.trim(), 0) || capDone;
+                if (pairImages[0].alt?.trim()) capDone = await fillLastImageCaption(pairImages[0].alt.trim(), 1) || capDone;
+                // 캡션칸을 못 찾으면 문단 폴백
+                if (!capDone) {
+                  const pairAlt = pairImages[0].alt || pairImages[1].alt;
+                  if (pairAlt?.trim()) {
+                    try { await moveCursorToEnd(); await page.keyboard.press("Enter"); await insertText(pairAlt.trim()); } catch {}
+                  }
                 }
               }
             } catch(e) { console.log("[naver] 페어 이미지 업로드 실패:", e); }
@@ -1361,8 +1401,14 @@ export async function generateFlowImagesCDP(params: {
       log("[Flow] ⚠️ 새 프로젝트 진입 실패 — 현재 화면에서 진행");
     }
 
-    // 5) 프롬프트별 생성
-    for (let i = 0; i < prompts.length; i++) {
+    // 5) 프롬프트별 생성 — ★ 큐 방식: 실패한 프롬프트는 다시 시도(최대 3회)해서 "요청한 개수 정확히" 채운다.
+    const target = prompts.length;              // 요청한 총 장수
+    const queue: number[] = prompts.map((_, i) => i);
+    const attemptsById: Record<number, number> = {};
+    while (queue.length > 0 && results.length < target) {
+      const i = queue.shift()!;
+      attemptsById[i] = (attemptsById[i] || 0) + 1;
+      const requeue = () => { if (attemptsById[i] < 3) { queue.push(i); log(`[Flow] 🔁 (${i + 1}) 재시도 예약 (${attemptsById[i]}/3)`); } else { log(`[Flow] ⛔ (${i + 1}) 3회 실패 — 이 장은 포기`); } };
       // 텍스트 오염 방지 안전장치(어떤 경로로 온 프롬프트든 글자 없이 순수 이미지)
       let prompt = prompts[i];
       if (!/no text|no letters|글자 ?없/i.test(prompt)) {
@@ -1386,7 +1432,7 @@ export async function generateFlowImagesCDP(params: {
           }
         } catch {}
       }
-      if (!entered) { log("[Flow] ⚠️ 입력창을 못 찾음, 건너뜀"); continue; }
+      if (!entered) { log("[Flow] ⚠️ 입력창을 못 찾음"); requeue(); continue; }
       await page.waitForTimeout(1500); // 입력 반영 + 전송버튼 활성화 대기
 
       // 전송 전 이미지 URL 집합 기록(개수가 아닌 URL diff로 새 이미지 판별 → 견고)
@@ -1396,24 +1442,72 @@ export async function generateFlowImagesCDP(params: {
           .map(im => (im as HTMLImageElement).src)
       );
 
-      // 전송 버튼 클릭. ⚠️ React앱은 DOM .click()을 무시할 수 있어 Playwright 실제 마우스클릭 사용.
-      //  '만들기' 버튼 2개(add_2만들기=업로드, arrow_forward만들기=전송) → 정확 텍스트로 구분.
-      let sent = false;
-      try {
-        // 정확히 "arrow_forward만들기" 버튼. force:true + scrollIntoView 필수(가려짐 방지).
-        const submitBtn = page.locator("button").filter({ hasText: /^arrow_forward만들기$/ }).first();
-        if (await submitBtn.count() > 0) {
-          await submitBtn.scrollIntoViewIfNeeded().catch(() => {});
-          await submitBtn.click({ force: true, timeout: 5000 });
-          sent = true;
+      // 클릭 API가 성공해도 React가 이벤트를 놓칠 수 있으므로, 반드시 UI의 "전송 성공 신호"를
+      // 확인한다. 실패하면 매번 다른 방식으로 다시 보내고, 전부 실패해도 생성 대기에는 진입하지 않는다.
+      // '만들기' 버튼 2개(add_2만들기=업로드, arrow_forward만들기=전송) → 정확 텍스트로 구분.
+      const submissionStarted = async (): Promise<boolean> => page.evaluate((expectedPrompt: string) => {
+        const visible = (el: Element) => {
+          const r = el.getBoundingClientRect();
+          const s = getComputedStyle(el);
+          return r.width > 0 && r.height > 0 && s.visibility !== "hidden" && s.display !== "none";
+        };
+        const values = [...document.querySelectorAll("[contenteditable=true], textarea")]
+          .filter(visible)
+          .map(el => el instanceof HTMLTextAreaElement ? el.value : (el.textContent || ""));
+        // Flow는 제출 때 입력 노드를 비우거나 통째로 재렌더한다. 페이지의 다른
+        // contenteditable을 잘못 집지 않도록, 방금 입력한 프롬프트의 잔존 여부로 판단한다.
+        const inputCleared = !values.some(value => value.includes(expectedPrompt));
+        // 완료형인 '이미지를 생성했습니다'는 일부러 포함하지 않는다.
+        const generating = /생성\s*중|만들고\s*있|생성하고\s*있|generating|creating\b|thinking/i.test(document.body.innerText);
+        return inputCleared || generating;
+      }, prompt).catch(() => false);
+
+      const waitForSubmission = async (): Promise<boolean> => {
+        for (let check = 0; check < 6; check++) {
+          await page.waitForTimeout(500);
+          if (await submissionStarted()) return true;
         }
-      } catch {}
-      if (!sent) {
-        // 폴백: 입력창 포커스 후 Cmd/Ctrl+Enter
-        const inp = await page.$("[contenteditable=true]:visible, textarea:visible");
-        if (inp) { await inp.click(); await page.waitForTimeout(200); await page.keyboard.press(process.platform === "darwin" ? "Meta+Enter" : "Control+Enter"); }
+        return false;
+      };
+
+      let sent = false;
+      for (let attempt = 1; attempt <= 4 && !sent; attempt++) {
+        log(`[Flow] 📤 전송 시도 ${attempt}/4`);
+        try {
+          if (attempt === 1) {
+            const btn = page.locator("button").filter({ hasText: /^arrow_forward만들기$/ }).first();
+            await btn.scrollIntoViewIfNeeded({ timeout: 3000 }).catch(() => {});
+            await btn.click({ force: true, timeout: 5000 });
+          } else if (attempt === 2) {
+            // DOM에서 정확 텍스트 버튼을 다시 찾아 native click 이벤트 발생.
+            await page.evaluate(() => {
+              const btn = [...document.querySelectorAll("button")]
+                .find(el => (el.textContent || "").trim() === "arrow_forward만들기") as HTMLButtonElement | undefined;
+              if (!btn) throw new Error("submit button not found");
+              btn.click();
+            });
+          } else if (attempt === 3) {
+            const inp = page.locator("[contenteditable=true]:visible, textarea:visible").first();
+            await inp.click({ timeout: 3000 });
+            await page.keyboard.press(process.platform === "darwin" ? "Meta+Enter" : "Control+Enter");
+          } else {
+            // UI가 재렌더된 뒤의 최신 버튼을 다시 resolve해 일반 실제 클릭.
+            const btn = page.locator("button").filter({ hasText: /^arrow_forward만들기$/ }).first();
+            await btn.waitFor({ state: "visible", timeout: 4000 });
+            await btn.click({ timeout: 5000 });
+          }
+        } catch (e: any) {
+          log(`[Flow] ⚠️ 전송 시도 ${attempt} 동작 실패: ${String(e?.message || e).split("\n")[0]}`);
+        }
+        sent = await waitForSubmission();
+        if (sent) log(`[Flow] ✅ 전송 확인 (${attempt}번째 시도)`);
+        else if (attempt < 4) log(`[Flow] ⚠️ 전송 신호 없음 — 다른 방식으로 재시도`);
       }
-      await page.waitForTimeout(2000);
+      if (!sent) {
+        log(`[Flow] ❌ (${i + 1}/${prompts.length}) 4회 전송 실패`);
+        requeue();
+        continue;
+      }
 
       // 생성 대기(최대 165초): beforeSet에 없던 "새 URL"이 나타나면 성공(개수비교보다 견고).
       log("[Flow] ⏳ 이미지 생성 대기...");
@@ -1427,12 +1521,16 @@ export async function generateFlowImagesCDP(params: {
             const el = im as HTMLImageElement;
             if (el.naturalWidth >= 500 && !before.has(el.src)) fresh.push(el.src);
           });
-          const generating = /생성 중|만들고 있|이미지를 생성|generating|creating|thinking/i.test(document.body.innerText);
+          // ⚠️ '이미지를 생성했습니다'(완료) 오탐 방지 — 진행중 표현만 (~중/~ing만)
+          const generating = /생성\s*중|만들고\s*있|생성하고\s*있|generating|creating\b|thinking/i.test(document.body.innerText);
           return { fresh, generating };
         }, beforeSrcs);
         if (snap.fresh.length > 0) {
           freshSrcs = snap.fresh;
-          if (!snap.generating) { await page.waitForTimeout(2500); break; } // 생성완료 확정
+          // 새 이미지가 잡혔으면: 생성중 문구 없으면 바로, 있어도 안전하게 진행
+          if (!snap.generating) { await page.waitForTimeout(2500); break; }
+          // 생성중이어도 새 이미지가 이미 목표 수만큼 나왔으면 완료로 간주(오탐 대비)
+          if (freshSrcs.length >= 1) { await page.waitForTimeout(4000); break; }
         }
       }
 
@@ -1447,7 +1545,7 @@ export async function generateFlowImagesCDP(params: {
         return fresh;
       }, beforeSrcs);
 
-      if (freshSrcs.length === 0) { log(`[Flow] ⚠️ (${i + 1}) 이미지 생성 실패/타임아웃`); continue; }
+      if (freshSrcs.length === 0) { log(`[Flow] ⚠️ (${i + 1}) 이미지 생성 실패/타임아웃`); requeue(); continue; }
 
       // 새로 생긴 이미지 1장 다운로드(가장 최근 것 = 배열 마지막)
       const targetSrc = freshSrcs[freshSrcs.length - 1];
@@ -1475,9 +1573,11 @@ export async function generateFlowImagesCDP(params: {
         log(`[Flow] ✅ (${i + 1}) 이미지 다운로드 완료`);
       } else {
         log(`[Flow] ⚠️ (${i + 1}) 다운로드 실패: ${dataUrl.slice(0, 40)}`);
+        requeue();
       }
       await page.waitForTimeout(1000);
     }
+    if (results.length < target) log(`[Flow] ⚠️ 목표 ${target}장 중 ${results.length}장만 확보 (일부 프롬프트 3회 실패)`);
 
     // CDP는 연결만 끊고 사용자 크롬은 유지
     await browser.close().catch(() => {});
