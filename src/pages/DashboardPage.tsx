@@ -6,6 +6,7 @@ import NeighborPage from "./NeighborPage";
 import { botFetch, BotEventStream } from "../lib/botApi";
 
 type MainTab = "keyword" | "write" | "image" | "photo" | "publish" | "manage" | "accounts" | "rank" | "calendar" | "settings" | "neighbor" | "engage" | "insta_dm";
+type OnPartnerProduct = {id:string|null;name:string;image:string;price:number|null;available:boolean;partnerUrl:string;shopUrl:string};
 type PublishConcept = "full" | "body_faq" | "body_only";
 
 const BOT = "http://127.0.0.1:3333";
@@ -108,9 +109,9 @@ const MAIN_TABS = [
   {k:"accounts",i:"🔗", l:"계정 관리"},
   {k:"rank",    i:"📊", l:"블로그 순위"},
   {k:"calendar",i:"📅", l:"콘텐츠 캘린더"},
-  {k:"insta_dm",i:"📱", l:"인스타 DM"},
   {k:"neighbor",i:"🤝", l:"서이추"},
   {k:"engage",  i:"❤️", l:"공감·댓글"},
+  {k:"insta_dm",i:"📱", l:"인스타 DM"},
   {k:"settings",i:"⚙️", l:"설정"},
 ] as const;
 
@@ -755,6 +756,10 @@ Output format (JSON array only, no other text):
   }
   const [genContent, setGenContent] = useState("");
   const [genTitle, setGenTitle] = useState("");
+  const [onPartnerLink, setOnPartnerLink] = useState("");
+  const [onPartnerProduct, setOnPartnerProduct] = useState<OnPartnerProduct|null>(null);
+  const [onPartnerLoading, setOnPartnerLoading] = useState(false);
+  const [onPartnerError, setOnPartnerError] = useState("");
   const [genTags, setGenTags] = useState("");
   const [generating, setGenerating] = useState(false);
   const abortRef = useRef<AbortController|null>(null);
@@ -1733,6 +1738,22 @@ Output format (JSON array only, no other text):
     finally{setLoadingTitles(false);}
   }
 
+  async function loadOnPartnerProduct(){
+    const link=onPartnerLink.trim();
+    if(!link){setOnPartnerError("온파트너 상품 링크를 입력해주세요.");return;}
+    setOnPartnerLoading(true);setOnPartnerError("");setOnPartnerProduct(null);
+    try{
+      const response=await fetch(`https://partner.yuanfnb.com/api/product-card?url=${encodeURIComponent(link)}`,{signal:AbortSignal.timeout(10000)});
+      const data=await response.json().catch(()=>({}));
+      if(!response.ok||!data.ok||!data.product)throw new Error(data.error==="link_not_found"?"사용할 수 없는 링크예요.":"상품 정보를 불러오지 못했어요.");
+      setOnPartnerProduct(data.product as OnPartnerProduct);
+      setOnPartnerLink(data.product.partnerUrl);
+      showToast("✅ 온파트너 상품을 불러왔어요.","success");
+    }catch(e:any){
+      setOnPartnerError(e.name==="TimeoutError"?"상품 확인 시간이 초과됐어요. 다시 시도해주세요.":e.message||"상품 정보를 불러오지 못했어요.");
+    }finally{setOnPartnerLoading(false);}
+  }
+
   async function handleGenerate(){
     if(!selectedTitle&&!keyword){alert("키워드와 제목을 먼저 선택해주세요");return;}
     const title=selectedTitle||keyword;
@@ -1845,7 +1866,11 @@ POST3: (제목)|(이유)
       const tgm=cleaned.match(/태그[:\s]*([^\n]+)/);
       const bm=cleaned.match(/태그[^\n]*\n([\s\S]+)/);
       setGenTitle(title);if(tgm)setGenTags(tgm[1].trim());
-      const body=bm?bm[1].trim():cleaned;setGenContent(body);setQualityScore(calcQualityScore(body,keyword));
+      const generatedBody=bm?bm[1].trim():cleaned;
+      const productBlock=onPartnerProduct?.available
+        ?`\n\n${onPartnerProduct.partnerUrl}\n\n🛒 ${onPartnerProduct.name}${onPartnerProduct.price?`\n가격: ${onPartnerProduct.price.toLocaleString("ko-KR")}원`:""}\n온종일팜에서 상품 정보와 구매 조건을 확인해보세요.\n\n※ 이 글에는 제휴 링크가 포함되어 있으며, 구매 시 일정 수수료를 받을 수 있습니다.`
+        :"";
+      const body=(generatedBody+productBlock).trim();setGenContent(body);setQualityScore(calcQualityScore(body,keyword));
       if(imgCountAuto)setImgCount(recommendImgCount(body));
       if(flowImgCountAuto)setFlowImgCount(recommendImgCount(body));
       // ── tarry 방식: 블록 자동 분리 + 제목/태그 자동 연동 ──
@@ -3092,6 +3117,27 @@ POST3: (제목)|(이유)
                 </div>
 
                 {/* 수익화 목적 + 플랫폼 */}
+                <div className="card" style={{borderColor:onPartnerProduct?"rgba(190,255,0,.38)":undefined}}>
+                  <div className="card-title" style={{marginBottom:6}}>🌱 온파트너 상품 링크</div>
+                  <div style={{fontSize:11,color:"var(--text3)",lineHeight:1.6,marginBottom:10}}>온파트너에서 발급받은 추천 링크를 넣으면 상품 소개와 제휴 안내가 글 마지막에 자동으로 들어가요.</div>
+                  <div style={{display:"flex",gap:7,alignItems:"stretch"}}>
+                    <input className="inp" value={onPartnerLink} onChange={e=>{setOnPartnerLink(e.target.value);setOnPartnerProduct(null);setOnPartnerError("");}} placeholder="https://partner.yuanfnb.com/r/추천코드" style={{flex:1,minWidth:0}}/>
+                    <button className="btn btn-secondary" onClick={loadOnPartnerProduct} disabled={onPartnerLoading} style={{flexShrink:0}}>{onPartnerLoading?<><span className="spinner"/>확인 중</>:"상품 확인"}</button>
+                  </div>
+                  {onPartnerError&&<div style={{fontSize:11,color:"var(--danger)",marginTop:7}}>⚠️ {onPartnerError}</div>}
+                  {onPartnerProduct&&(
+                    <div style={{display:"flex",gap:12,alignItems:"center",marginTop:12,padding:10,borderRadius:11,background:"var(--card2)",border:"1px solid var(--border)"}}>
+                      {onPartnerProduct.image?<img src={onPartnerProduct.image} alt={onPartnerProduct.name} style={{width:64,height:64,borderRadius:9,objectFit:"cover",flexShrink:0}}/>:<div style={{width:64,height:64,borderRadius:9,background:"var(--bg2)",display:"grid",placeItems:"center",fontSize:24,flexShrink:0}}>🌱</div>}
+                      <div style={{minWidth:0,flex:1}}>
+                        <div style={{fontSize:13,fontWeight:800,color:"var(--text)",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{onPartnerProduct.name}</div>
+                        <div style={{fontSize:12,fontWeight:800,color:"var(--accent-text)",marginTop:4}}>{onPartnerProduct.price?`${onPartnerProduct.price.toLocaleString("ko-KR")}원`:"가격은 상품 페이지에서 확인"}</div>
+                        <div style={{fontSize:10,color:onPartnerProduct.available?"var(--success)":"var(--danger)",marginTop:3}}>{onPartnerProduct.available?"● 판매 중 · 제휴 링크 적용":"● 현재 판매 중지"}</div>
+                      </div>
+                      <button type="button" onClick={()=>{setOnPartnerLink("");setOnPartnerProduct(null);setOnPartnerError("");}} style={{border:0,background:"transparent",color:"var(--text3)",cursor:"pointer",fontSize:16}}>✕</button>
+                    </div>
+                  )}
+                </div>
+
                 <div className="card">
                   <div className="card-header">
                     <div className="card-title">🎯 수익화 목적 선택</div>
