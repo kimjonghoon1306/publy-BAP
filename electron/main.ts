@@ -219,6 +219,47 @@ ipcMain.handle("get-bot-status", async () => {
 
 ipcMain.handle("get-bot-secret", async () => botAuthToken);
 
+/* ── GitHub Latest 설치 파일 기준 업데이트 확인 ── */
+function compareVersions(a: string, b: string) {
+  const av = a.split(".").map(Number), bv = b.split(".").map(Number);
+  for (let i = 0; i < Math.max(av.length, bv.length); i++) {
+    const diff = (av[i] || 0) - (bv[i] || 0);
+    if (diff) return diff;
+  }
+  return 0;
+}
+
+ipcMain.handle("check-app-update", async () => {
+  if (!app.isPackaged) return { available: false, currentVersion: app.getVersion() };
+  try {
+    const response = await fetch("https://api.github.com/repos/kimjonghoon1306/publy-BAP/releases/tags/latest", {
+      headers: { "User-Agent": `Publy/${app.getVersion()}`, Accept: "application/vnd.github+json" },
+      signal: AbortSignal.timeout(7000),
+    });
+    if (!response.ok) throw new Error(`GitHub ${response.status}`);
+    const release: any = await response.json();
+    const versions = (release.assets || []).flatMap((asset: any) =>
+      [...String(asset.name || "").matchAll(/(\d+\.\d+\.\d+)/g)].map(match => match[1])
+    );
+    const latestVersion = versions.sort(compareVersions).at(-1) || app.getVersion();
+    return {
+      available: compareVersions(latestVersion, app.getVersion()) > 0,
+      currentVersion: app.getVersion(),
+      latestVersion,
+      url: release.html_url,
+    };
+  } catch (error: any) {
+    console.warn("[update] 확인 실패:", error.message);
+    return { available: false, currentVersion: app.getVersion() };
+  }
+});
+
+ipcMain.handle("open-app-update", async (_event, url: string) => {
+  if (!/^https:\/\/github\.com\/kimjonghoon1306\/publy-BAP\/releases\//.test(url)) return false;
+  await shell.openExternal(url);
+  return true;
+});
+
 ipcMain.handle("register-user", async (_event, userId: string) => {
   try {
     const res = await fetch("http://127.0.0.1:3333/api/register-user", {

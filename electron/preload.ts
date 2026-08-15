@@ -7,4 +7,6 @@ contextBridge.exposeInMainWorld("electron", {
   openPreview:     (html: string) => ipcRenderer.invoke("open-preview", html),
   flowLaunchChrome: () => ipcRenderer.invoke("flow-launch-chrome"),
   flowStatus:       () => ipcRenderer.invoke("flow-status"),
+  checkAppUpdate:   () => ipcRenderer.invoke("check-app-update"),
+  openAppUpdate:    (url: string) => ipcRenderer.invoke("open-app-update", url),
 });
