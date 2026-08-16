@@ -1477,32 +1477,20 @@ export async function addNeighbors(params: {
             }).catch(() => {});
           };
 
-          // ★진단 로그: 내 계정의 그룹 컨트롤 구조(셀렉트/옵션/입력칸/그룹 관련 요소)를 남겨 정확히 파악
-          const dom: any = await page.evaluate(() => {
-            const selects = Array.from(document.querySelectorAll("select")).map((s: any) => ({
-              id: s.id, name: s.name, cls: s.className,
-              opts: Array.from(s.options).map((o: any) => ({ t: (o.text || "").trim(), v: o.value, sel: o.selected })),
-            }));
-            const inputs = Array.from(document.querySelectorAll("input:not([type=hidden])")).map((i: any) => ({
-              type: i.type, id: i.id, name: i.name, cls: i.className, ph: i.placeholder, val: (i.value || "").slice(0, 20),
-            }));
-            const groupEls = Array.from(document.querySelectorAll("a,button,li,span,div"))
-              .filter((e: any) => /그룹|만들|추가/.test(e.textContent || "") && (e.textContent || "").trim().length < 16)
-              .slice(0, 20).map((e: any) => ({ tag: e.tagName, id: e.id, cls: e.className, t: (e.textContent || "").trim() }));
-            return { selects, inputs, groupEls };
-          }).catch(() => ({ selects: [], inputs: [], groupEls: [] }));
-          log(`[그룹DOM] selects=${JSON.stringify(dom.selects)}`);
-          log(`[그룹DOM] inputs=${JSON.stringify(dom.inputs)}`);
-          log(`[그룹DOM] groupEls=${JSON.stringify(dom.groupEls)}`);
+          //  ★실측(테리 로그): 폼 그룹 드롭다운 id="buddyGroupSelect", 옵션=기존 그룹뿐("새 그룹","new"…).
+          //   '새 그룹 만들기' 항목은 폼에 없음 → 폼 안에선 그룹 신규 생성 불가. 안 찬 기존 그룹을 골라 재신청.
+          const sel: any = await page.evaluate(() => {
+            const s: any = document.querySelector("#buddyGroupSelect") || document.querySelector("select");
+            if (!s) return null;
+            return { id: s.id, name: s.name, opts: Array.from(s.options).map((o: any) => ({ t: (o.text || "").trim(), v: o.value, sel: o.selected })) };
+          }).catch(() => null);
 
-          // 그룹 select 추정: 옵션이 2개 이상인 첫 select
-          const sel = (dom.selects as any[]).find(s => (s.opts || []).length > 1);
           let recovered = false;
-          if (sel) {
-            const selSelector = sel.name ? `select[name="${sel.name}"]` : (sel.id ? `#${sel.id}` : "select");
-            for (const o of sel.opts) {
-              if (!o.v || o.sel) continue;                        // 값 없거나 현재 선택된 것 skip
-              if (/^\s*(그룹\s*선택|선택하세요|선택)/.test(o.t)) continue;   // 안내 옵션 skip
+          if (sel && sel.opts.length > 1) {
+            const selSelector = sel.id ? `#${sel.id}` : (sel.name ? `select[name="${sel.name}"]` : "select");
+            //  마지막(최근 생성) 그룹이 가장 여유 있을 확률이 높아 뒤에서부터 시도
+            const cands = [...sel.opts].reverse().filter((o: any) => o.v && !o.sel && !/^\s*(그룹\s*선택|선택하세요|선택)$/.test(o.t));
+            for (const o of cands) {
               try {
                 await dismissPopup(); await page.waitForTimeout(400);
                 await page.selectOption(selSelector, o.v).catch(() => {});   // 다른 그룹 선택
@@ -1510,16 +1498,15 @@ export async function addNeighbors(params: {
                 await page.click("a.btn_ok").catch(() => clickConfirm());     // 폼 재신청
                 await page.waitForTimeout(1500);
                 afterTxt = await readBody();
-                log(`[그룹시도] '${o.t}' → ${afterTxt.replace(/\s+/g, " ").slice(0, 80)}`);
                 if (SUCCESS_RE.test(afterTxt)) { log(`[서이추] ✅ '${o.t}' 그룹으로 신청`); recovered = true; break; }
-                if (!GROUP_FULL_RE.test(afterTxt)) { recovered = true; break; }  // 팝업 사라짐(그룹 성공 추정)
-              } catch (e: any) { log(`[그룹시도] '${o.t}' 오류: ${e.message}`); }
+              } catch {}
             }
+            if (!recovered) log(`[서이추] ⛔ ${blogId} 모든 그룹(${cands.length}개) 가득참`);
           } else {
-            log(`[그룹DOM] ⚠️ 그룹 select를 못 찾음 — 위 DOM 로그로 구조 확인 필요`);
+            log(`[서이추] ⛔ ${blogId} 그룹 목록을 못 읽음`);
           }
           submitted = recovered;
-          if (!recovered) throw new Error("빈 그룹 못 찾음 — 건너뜀([그룹DOM] 로그 확인)");
+          if (!recovered) throw new Error("모든 이웃 그룹이 가득 참 — 건너뜀(네이버 블로그에서 빈 이웃 그룹을 하나 만들어 주세요)");
         }
 
         if (LIMIT_RE.test(afterTxt)) {

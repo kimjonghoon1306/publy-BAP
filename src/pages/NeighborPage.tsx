@@ -539,7 +539,7 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
         <div className="card-title" style={{ margin: 0 }}>📟 작업 로그</div>
         <button onClick={onClear} style={{ padding: "5px 12px", borderRadius: 8, border: "1px solid var(--border)", background: "transparent", color: "var(--text3)", cursor: "pointer", fontSize: 12, fontFamily: "inherit" }}>지우기</button>
       </div>
-      <div ref={logRef} style={{ height: 200, overflowY: "auto", padding: "12px 16px", fontFamily: "'JetBrains Mono', monospace", fontSize: 11, lineHeight: 1.8, background: "#050a0f" }}>
+      <div ref={logRef} style={{ height: "min(62vh, 720px)", minHeight: 360, overflowY: "auto", padding: "14px 18px", fontFamily: "'JetBrains Mono', monospace", fontSize: 12.5, lineHeight: 1.85, background: "#050a0f" }}>
         {logs.length === 0 ? <span style={{ color: "#3a5a7a" }}>대기 중...</span> : logs.map((l, i) => (
           <div key={i} style={{ color: l.includes("✅")||l.includes("🎉")||l.includes("❤️")||l.includes("💬") ? "#00d68f" : l.includes("❌")||l.includes("🚫") ? "#ff5363" : l.includes("⏭️") ? "#7a9ab5" : "#00c8ff" }}>{l}</div>
         ))}
