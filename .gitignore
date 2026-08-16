@@ -14,6 +14,7 @@ dist-electron/
 release/
 */dist/
 .vite/
+chromium/
 
 # 환경변수/키
 .env

@@ -1419,19 +1419,68 @@ export async function addNeighbors(params: {
         const confirmSels = [
           "a.btn_ok", "button.btn_ok", "a:has-text('확인')", "button:has-text('확인')", "button:has-text('신청')", "input[type='submit']",
         ];
-        let submitted = false;
-        for (const sel of confirmSels) {
-          try {
-            const el = await page.$(sel);
-            if (el) { await page.click(sel, { timeout: 3000 }); submitted = true; break; }
-          } catch {}
+        const clickConfirm = async () => {
+          for (const sel of confirmSels) {
+            try { const el = await page.$(sel); if (el) { await page.click(sel, { timeout: 3000 }); return true; } } catch {}
+          }
+          return false;
+        };
+        const readBody = async () => (await page.evaluate(() => document.body.innerText).catch(() => ""));
+
+        let submitted = await clickConfirm();
+        await page.waitForTimeout(1200);
+        let afterTxt = await readBody();
+
+        // 신청 후 결과 확인
+        const LIMIT_RE = /하루 최대|신청 한도|초과하여|더 이상 신청/;
+        //  ★"선택 그룹의 이웃수가 초과되어 … 다른 그룹을 선택해주세요" 팝업 = 그룹당 500명 한도.
+        //   기존 코드는 이 팝업을 못 잡아 '확인 클릭=성공'으로 잘못 카운트했음 → 아래에서 감지·재시도.
+        const GROUP_FULL_RE = /이웃\s*수가\s*초과|다른\s*그룹을?\s*선택|그룹의\s*이웃/;
+
+        if (GROUP_FULL_RE.test(afterTxt)) {
+          log(`[서이추] ⚠️ ${blogId} 선택 그룹 가득참 → 다른 그룹으로 재시도`);
+          await clickConfirm().catch(() => {});   // 경고 팝업 닫기
+          await page.waitForTimeout(500);
+          const groups = await page.$$eval("select option", (opts: any[]) =>
+            opts.map((o) => ({ text: (o.text || "").trim(), value: o.value }))
+          ).catch(() => [] as { text: string; value: string }[]);
+
+          let recovered = false;
+          // 1) 기존 그룹 중 안 찬 그룹으로 순차 전환
+          for (const g of groups) {
+            if (!g.value || /새\s*그룹|그룹.*선택|^선택|그룹\s*추가|새로\s*만들/.test(g.text)) continue;
+            try {
+              await page.selectOption("select", g.value).catch(() => {});
+              await page.waitForTimeout(400);
+              await clickConfirm();
+              await page.waitForTimeout(1200);
+              afterTxt = await readBody();
+              if (!GROUP_FULL_RE.test(afterTxt)) { log(`[서이추] ✅ 그룹 '${g.text}'(으)로 전환`); recovered = true; submitted = true; break; }
+              await clickConfirm().catch(() => {});   // 여전히 가득참 → 팝업 닫고 다음 그룹
+              await page.waitForTimeout(400);
+            } catch {}
+          }
+          // 2) 그래도 실패 → '새 그룹' 만들어 고유 이름으로 시도 (best-effort)
+          if (!recovered) {
+            try {
+              const newOpt = groups.find(g => g.value && /새\s*그룹|그룹\s*추가|새로\s*만들/.test(g.text));
+              if (newOpt) {
+                await page.selectOption("select", newOpt.value).catch(() => {});
+                await page.waitForTimeout(500);
+                const gname = `퍼블리${new Date().toISOString().slice(2, 10).replace(/-/g, "")}-${Math.floor(Math.random() * 900 + 100)}`;
+                const nameInput = await page.$("input[name='groupName'], input#groupName, input#addGroupName, input.txt_group, input[placeholder*='그룹']");
+                if (nameInput) { await nameInput.fill(gname).catch(() => {}); await page.waitForTimeout(300); }
+                await clickConfirm();
+                await page.waitForTimeout(1200);
+                afterTxt = await readBody();
+                if (!GROUP_FULL_RE.test(afterTxt)) { log(`[서이추] ✅ 새 그룹 '${gname}' 생성 후 신청`); recovered = true; submitted = true; }
+              }
+            } catch {}
+          }
+          if (!recovered) throw new Error("모든 이웃 그룹이 가득 참 — 네이버에서 그룹 정리(또는 새 그룹 생성) 필요");
         }
 
-        await page.waitForTimeout(1000);
-
-        // 신청 후 결과 확인 (한도 초과/실패 팝업)
-        const afterTxt = await page.evaluate(() => document.body.innerText).catch(() => "");
-        if (/하루 최대|신청 한도|초과하여|더 이상 신청/.test(afterTxt)) {
+        if (LIMIT_RE.test(afterTxt)) {
           throw new Error("네이버 일일 서이추 한도 도달");
         }
 
