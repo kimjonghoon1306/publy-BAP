@@ -210,6 +210,13 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
   const [qualityFilter, setQualityFilter] = useState(true);   // 죽은/광고 블로그 자동 스킵
   const [retryDays, setRetryDays] = useState(30);             // 실패/무응답 재신청 대기일
   const [autoStart, setAutoStart] = useState(false);
+  // 예약·분산 실행 (기존 '한번에'와 별개 모드)
+  const [spreadMode, setSpreadMode] = useState(false);      // 분산 실행 켜기
+  const [spreadBatches, setSpreadBatches] = useState(3);    // 몇 번에 나눠서
+  const [spreadGapMin, setSpreadGapMin] = useState(90);     // 배치 사이 간격(분)
+  const [spreadRunning, setSpreadRunning] = useState(false);
+  const [spreadInfo, setSpreadInfo] = useState<{ total: number; cur: number; nextAt: number | null }>({ total: 0, cur: 0, nextAt: null });
+  const spreadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // 내 이웃 키워드 분석 (서이추·공감댓글 공용)
   const [buddyKw, setBuddyKw] = useState<{ word: string; count: number }[]>([]);
   const [buddyKwLoading, setBuddyKwLoading] = useState(false);
@@ -392,32 +399,78 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
     es.onerror = () => { addLog("❌ 수집 연결 오류"); setCrawling(false); es.close(); };
   };
 
-  /* 서이추 작업 */
-  const startWork = async (targetList?: Target[]) => {
+  /* 서이추 작업 — 완료(done/error/한도)시 resolve하는 Promise 반환(분산 실행에서 배치 대기용) */
+  const startWork = (targetList?: Target[]): Promise<"done" | "limit" | "error"> => {
     const list = targetList || targets;
-    if (!list.length) return alert("수집된 블로그가 없습니다");
+    if (!list.length) { alert("수집된 블로그가 없습니다"); return Promise.resolve("error"); }
     const acc = accounts.find(a => a.sessionOk);
-    if (!acc) return alert("먼저 계정을 연결하세요");
+    if (!acc) { alert("먼저 계정을 연결하세요"); return Promise.resolve("error"); }
     setWorking(true); setDoneCnt(0); setFailCnt(0);
     jobIdRef.current = Date.now().toString();
     addLog(`🚀 작업 시작 — ${list.length}개 대상 / 한도 ${dailyLimit}개 / 딜레이 ${delayMin}~${delayMax}초`);
     const msg = msgMode === "single" ? singleMsg : multiMsgs.split("\n").filter(l => l.trim()).join("|||");
     // ★ targets(수십~수백개)를 GET URL에 실으면 길이 초과로 연결 실패 → POST body로 전송
     const body = JSON.stringify({ accountId: acc.accountId, targets: list, message: msg, delayMin, delayMax, skipDone, qualityFilter, retryDays, jobId: jobIdRef.current, ...(userId ? { userId } : {}) });
-    const es = new BotEventStream(`${BOT}/api/add-neighbor`, { method: "POST", headers: { "Content-Type": "application/json" }, body }); esRef.current = es;
-    es.onmessage = e => {
-      const d = JSON.parse(e.data);
-      if (d.type === "log") addLog(d.msg);
-      if (d.type === "quota_info") { setQuotaUsed(d.used); setQuotaLimit(d.limit); }
-      if (d.type === "quota_exceeded") { addLog("🚫 오늘 한도 초과!"); setWorking(false); es.close(); return; }
-      if (d.type === "result") { setResults(p => p.map(r => r.blogId === d.blogId ? { ...r, status: d.status, message: d.message } : r)); if (d.status === "success") setQuotaUsed(q => q + 1); }
-      if (d.type === "daily_limit") { setDailyDone(d.count); if (d.count >= d.limit) { addLog(`🛑 오늘 안전 한도(${d.limit}건) 도달 — 계정 보호를 위해 자동 정지했어요. 자정 지나면 다시 돌릴 수 있어요.`); setWorking(false); } }
-      if (d.type === "progress") { setDoneCnt(d.done); setFailCnt(d.fail); }
-      if (d.type === "done") { addLog("🎉 작업 완료!"); setWorking(false); es.close(); }
-      if (d.type === "error") { addLog(`❌ 오류: ${d.msg}`); setWorking(false); es.close(); }
-    };
-    es.onerror = () => { addLog("❌ 작업 연결 오류 (다시 '서이추 시작'을 누르면 재시도합니다)"); setWorking(false); es.close(); };
-    es.onclose = () => setWorking(false);  // 어떤 식으로 끝나도 버튼 잠금 해제
+    return new Promise<"done" | "limit" | "error">((resolve) => {
+      let outcome: "done" | "limit" | "error" = "done";
+      const es = new BotEventStream(`${BOT}/api/add-neighbor`, { method: "POST", headers: { "Content-Type": "application/json" }, body }); esRef.current = es;
+      es.onmessage = e => {
+        const d = JSON.parse(e.data);
+        if (d.type === "log") addLog(d.msg);
+        if (d.type === "quota_info") { setQuotaUsed(d.used); setQuotaLimit(d.limit); }
+        if (d.type === "quota_exceeded") { addLog("🚫 오늘 한도 초과!"); outcome = "limit"; setWorking(false); es.close(); return; }
+        if (d.type === "result") { setResults(p => p.map(r => r.blogId === d.blogId ? { ...r, status: d.status, message: d.message } : r)); if (d.status === "success") setQuotaUsed(q => q + 1); }
+        if (d.type === "daily_limit") { setDailyDone(d.count); if (d.count >= d.limit) { addLog(`🛑 오늘 안전 한도(${d.limit}건) 도달 — 계정 보호를 위해 자동 정지했어요. 자정 지나면 다시 돌릴 수 있어요.`); outcome = "limit"; setWorking(false); } }
+        if (d.type === "progress") { setDoneCnt(d.done); setFailCnt(d.fail); }
+        if (d.type === "done") { addLog("🎉 작업 완료!"); setWorking(false); es.close(); }
+        if (d.type === "error") { addLog(`❌ 오류: ${d.msg}`); outcome = "error"; setWorking(false); es.close(); }
+      };
+      es.onerror = () => { addLog("❌ 작업 연결 오류 (다시 '서이추 시작'을 누르면 재시도합니다)"); outcome = "error"; setWorking(false); es.close(); };
+      es.onclose = () => { setWorking(false); resolve(outcome); };  // 어떤 식으로 끝나도 해제+배치 resolve
+    });
+  };
+
+  /* 예약·분산 실행 — 대상을 여러 배치로 나눠 간격을 두고 자동 실행 (앱 켜둔 상태) */
+  const startSpread = async () => {
+    const list = targets;
+    if (!list.length) return alert("수집된 블로그가 없습니다");
+    const acc = accounts.find(a => a.sessionOk);
+    if (!acc) return alert("먼저 계정을 연결하세요");
+    const n = Math.max(2, Math.min(10, spreadBatches));
+    const gapMs = Math.max(1, spreadGapMin) * 60 * 1000;
+    // 대상을 n개 배치로 균등 분할
+    const batches: Target[][] = Array.from({ length: n }, () => []);
+    list.forEach((t, i) => batches[i % n].push(t));
+    const nonEmpty = batches.filter(b => b.length);
+    setSpreadRunning(true);
+    setSpreadInfo({ total: nonEmpty.length, cur: 0, nextAt: null });
+    addLog(`📅 분산 실행 시작 — ${list.length}개를 ${nonEmpty.length}회로 나눠 ${spreadGapMin}분 간격으로 진행합니다.`);
+    for (let i = 0; i < nonEmpty.length; i++) {
+      if (!spreadRunningRef.current) { addLog("⏹ 분산 실행 중단됨"); break; }
+      setSpreadInfo({ total: nonEmpty.length, cur: i + 1, nextAt: null });
+      addLog(`📦 [${i + 1}/${nonEmpty.length}회차] ${nonEmpty[i].length}개 신청 시작`);
+      const r = await startWork(nonEmpty[i]);
+      if (r === "limit") { addLog("🛑 한도 도달로 분산 실행을 멈춥니다. 자정 이후 다시 시작해 주세요."); break; }
+      // 마지막 배치가 아니면 다음 회차까지 대기
+      if (i < nonEmpty.length - 1) {
+        const nextAt = Date.now() + gapMs;
+        setSpreadInfo({ total: nonEmpty.length, cur: i + 1, nextAt });
+        addLog(`⏳ 다음 회차까지 ${spreadGapMin}분 대기 (예정: ${new Date(nextAt).toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" })})`);
+        await new Promise<void>(res => { spreadTimerRef.current = setTimeout(res, gapMs); });
+      }
+    }
+    setSpreadRunning(false);
+    setSpreadInfo({ total: 0, cur: 0, nextAt: null });
+    addLog("✅ 분산 실행 종료");
+  };
+  const spreadRunningRef = useRef(false);
+  useEffect(() => { spreadRunningRef.current = spreadRunning; }, [spreadRunning]);
+  const stopSpread = () => {
+    spreadRunningRef.current = false;
+    setSpreadRunning(false);
+    if (spreadTimerRef.current) clearTimeout(spreadTimerRef.current);
+    esRef.current?.close();
+    addLog("⏹ 분산 실행을 중단했습니다.");
   };
 
   const handleStop = async () => {
@@ -688,20 +741,52 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
               )}
             </div>
 
+            {/* 예약·분산 실행 (기존 '한번에'와 별개) */}
+            <div className="card" style={{ padding: "16px 18px" }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: spreadMode ? 12 : 0 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <span style={{ fontSize: 15 }}>📅</span>
+                  <span style={{ fontSize: 14, fontWeight: 800, color: "var(--text)" }}>예약 분산 실행</span>
+                  <span style={{ fontSize: 11, color: "var(--text3)" }}>사람처럼 나눠서</span>
+                </div>
+                <Toggle val={spreadMode} set={setSpreadMode} label="" />
+              </div>
+              {spreadMode && (
+                <>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", fontSize: 13, color: "var(--text2)", fontWeight: 600 }}>
+                    <input className="inp" type="number" min={2} max={10} {...numProps(spreadBatches, setSpreadBatches, 2, 10, 3)} style={{ width: 60, fontSize: 13, padding: "9px 10px", textAlign: "center" }} />
+                    <span>회로 나눠서</span>
+                    <input className="inp" type="number" min={1} max={720} {...numProps(spreadGapMin, setSpreadGapMin, 1, 720, 90)} style={{ width: 72, fontSize: 13, padding: "9px 10px", textAlign: "center" }} />
+                    <span>분 간격으로</span>
+                  </div>
+                  {spreadRunning && (
+                    <div style={{ marginTop: 12, padding: "10px 14px", borderRadius: 12, background: "var(--accent-bg)", border: "1px solid var(--accent)", fontSize: 12.5, color: "var(--accent-text)", fontWeight: 700 }}>
+                      진행 {spreadInfo.cur}/{spreadInfo.total}회차
+                      {spreadInfo.nextAt && <span> · 다음 {new Date(spreadInfo.nextAt).toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" })} 예정</span>}
+                      <div style={{ fontSize: 11, fontWeight: 500, color: "var(--text3)", marginTop: 3 }}>앱을 켜둔 채로 기다려 주세요.</div>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-              <button className="btn btn-primary btn-full" onClick={handleCrawl} disabled={crawling || working || !botOnline} style={{ padding: "14px", fontSize: 14, borderRadius: 12 }}>
+              <button className="btn btn-primary btn-full" onClick={handleCrawl} disabled={crawling || working || spreadRunning || !botOnline} style={{ padding: "14px", fontSize: 14, borderRadius: 12 }}>
                 {crawling ? <><span className="spinner" />블로그 추출 중...</> : "🔍 블로그 추출 시작"}
               </button>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-                <button className="btn btn-secondary" onClick={() => startWork()} disabled={crawling || working || !targets.length || !botOnline} style={{ padding: "13px", fontSize: 13, borderRadius: 12 }}>
-                  {working ? <><span className="spinner" />작업 중...</> : "🚀 서이추 시작"}
+                <button className="btn btn-secondary" onClick={() => spreadMode ? startSpread() : startWork()} disabled={crawling || working || spreadRunning || !targets.length || !botOnline} style={{ padding: "13px", fontSize: 13, borderRadius: 12 }}>
+                  {working || spreadRunning ? <><span className="spinner" />작업 중...</> : spreadMode ? "📅 분산 실행 시작" : "🚀 서이추 시작"}
                 </button>
-                <button className="btn btn-secondary" onClick={() => handleLoadList(false)} disabled={crawling || working} style={{ padding: "13px", fontSize: 13, borderRadius: 12 }}>
+                <button className="btn btn-secondary" onClick={() => handleLoadList(false)} disabled={crawling || working || spreadRunning} style={{ padding: "13px", fontSize: 13, borderRadius: 12 }}>
                   📂 리스트 불러오기
                 </button>
               </div>
-              {(crawling || working) && (
+              {(crawling || working) && !spreadRunning && (
                 <button className="btn-stop" onClick={handleStop} style={{ width: "100%", justifyContent: "center", padding: "13px", borderRadius: 12, fontSize: 13 }}>⛔ 작업 중단</button>
+              )}
+              {spreadRunning && (
+                <button className="btn-stop" onClick={stopSpread} style={{ width: "100%", justifyContent: "center", padding: "13px", borderRadius: 12, fontSize: 13 }}>⛔ 분산 실행 중단</button>
               )}
             </div>
           </div>
