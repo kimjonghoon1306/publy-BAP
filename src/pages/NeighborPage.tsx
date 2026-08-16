@@ -241,6 +241,8 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
   const [ePostsPerBlog, setEPostsPerBlog] = useState(1);
   const [eDoLike, setEDoLike] = useState(true);
   const [eDoComment, setEDoComment] = useState(true);
+  const [eLikeRate, setELikeRate] = useState(100);      // 공감 확률 %
+  const [eCommentRate, setECommentRate] = useState(40); // 댓글 확률 % (도배 회피 기본 40)
   const [eComment, setEComment] = useState("좋은 글 잘 읽고 갑니다 😊 자주 놀러올게요!");
   const [eCommentMode, setECommentMode] = useState<"single"|"multi">("single");
   const [eMultiComments, setEMultiComments] = useState("좋은 글 잘 읽고 갑니다 😊 자주 놀러올게요!\n유익한 정보 감사해요! 구독하고 갑니다 🙌\n정말 도움이 됐어요! 앞으로도 좋은 글 부탁드려요 ✨");
@@ -469,7 +471,7 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
     addELog(`🚀 작업 시작 — ${list.length}개 / 최근 ${days}일 / ${eDoLike ? "공감" : ""}${eDoLike && eDoComment ? "+" : ""}${eDoComment ? "댓글" : ""}`);
     const commentText = eCommentMode === "single" ? eComment : eMultiComments.split("\n").filter(l => l.trim()).join("|||");
     // ★ targets를 POST body로 (URL 길이 초과 방지)
-    const body = JSON.stringify({ accountId: acc.accountId, targets: list, comment: commentText, doLike: eDoLike, doComment: eDoComment, periodDays: days, postsPerBlog: ePostsPerBlog, delayMin: eDelayMin, delayMax: eDelayMax, dailyLimit: eDailyLimit, skipDone: eSkipDone, jobId: eJobIdRef.current, ...(userId ? { userId } : {}) });
+    const body = JSON.stringify({ accountId: acc.accountId, targets: list, comment: commentText, doLike: eDoLike, doComment: eDoComment, likeRate: eLikeRate, commentRate: eCommentRate, periodDays: days, postsPerBlog: ePostsPerBlog, delayMin: eDelayMin, delayMax: eDelayMax, dailyLimit: eDailyLimit, skipDone: eSkipDone, jobId: eJobIdRef.current, ...(userId ? { userId } : {}) });
     const es = new BotEventStream(`${BOT}/api/engage`, { method: "POST", headers: { "Content-Type": "application/json" }, body }); eEsRef.current = es;
     es.onmessage = e => {
       const d = JSON.parse(e.data);
@@ -877,7 +879,22 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
               <div style={{ padding: "12px 16px", borderRadius: 12, background: "var(--bg2)", border: "1px solid var(--border)", marginBottom: 12 }}>
                 <div style={{ fontSize: 12, color: "var(--text3)", marginBottom: 8, fontWeight: 600 }}>작업 종류 선택</div>
                 <Toggle val={eDoLike} set={setEDoLike} label="❤️ 공감 클릭하기" />
+                {eDoLike && (
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, margin: "2px 0 8px 6px" }}>
+                    <span style={{ fontSize: 12.5, color: "var(--text2)", fontWeight: 600 }}>글마다 공감 확률</span>
+                    <input className="inp" type="number" min={10} max={100} step={10} {...numProps(eLikeRate, setELikeRate, 10, 100, 100)} style={{ width: 64, fontSize: 13, padding: "8px 10px", textAlign: "center" }} />
+                    <span style={{ fontSize: 12.5, color: "var(--text2)", fontWeight: 600 }}>%</span>
+                  </div>
+                )}
                 <Toggle val={eDoComment} set={setEDoComment} label="💬 댓글 작성하기" />
+                {eDoComment && (
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, margin: "2px 0 0 6px", flexWrap: "wrap" }}>
+                    <span style={{ fontSize: 12.5, color: "var(--text2)", fontWeight: 600 }}>글마다 댓글 확률</span>
+                    <input className="inp" type="number" min={10} max={100} step={10} {...numProps(eCommentRate, setECommentRate, 10, 100, 40)} style={{ width: 64, fontSize: 13, padding: "8px 10px", textAlign: "center" }} />
+                    <span style={{ fontSize: 12.5, color: "var(--text2)", fontWeight: 600 }}>%</span>
+                    <span style={{ fontSize: 11, color: "var(--text3)" }}>낮출수록 자연스러움(도배 방지)</span>
+                  </div>
+                )}
               </div>
               <div style={{ marginBottom: 12 }}>
                 <label className="inp-label" style={{ fontSize: 12, marginBottom: 6, display: "block" }}>딜레이 (초)</label>

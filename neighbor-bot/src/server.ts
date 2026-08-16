@@ -285,7 +285,7 @@ app.post("/api/engage", async (req, res) => {
   const {
     userId, accountId, targets: targetsRaw, comment,
     doLike, doComment, periodDays, postsPerBlog,
-    delayMin, delayMax, dailyLimit, skipDone, jobId,
+    delayMin, delayMax, dailyLimit, skipDone, commentRate, likeRate, jobId,
   } = req.body as Record<string, any>;
 
   if (!accountId || !targetsRaw)
@@ -311,6 +311,8 @@ app.post("/api/engage", async (req, res) => {
       delayMax: parseFloat(String(delayMax ?? "10")),
       dailyLimit: parseInt(String(dailyLimit ?? "50"), 10),
       skipDone: skipDone === true || skipDone === "true",
+      commentRate: commentRate === undefined ? 100 : parseInt(String(commentRate), 10),
+      likeRate: likeRate === undefined ? 100 : parseInt(String(likeRate), 10),
       onLog: (msg) => sseSend(res, { type: "log", msg }),
       onResult: async (r: EngageResult) => {
         sseSend(res, { type: "result", ...r });

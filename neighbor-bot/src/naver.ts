@@ -1659,6 +1659,8 @@ export async function engageBlogs(params: {
   delayMax: number;
   dailyLimit: number;
   skipDone: boolean;
+  commentRate?: number;   // 댓글 확률 % (0~100, 기본 100). 도배 감지 회피용
+  likeRate?: number;      // 공감 확률 % (0~100, 기본 100)
   onLog?: (msg: string) => void;
   onResult?: (r: EngageResult) => Promise<void>;
   onProgress?: (done: number, fail: number) => void;
@@ -1667,7 +1669,7 @@ export async function engageBlogs(params: {
   const {
     accountId, targets, comment, doLike, doComment,
     periodDays, postsPerBlog, delayMin, delayMax,
-    dailyLimit, skipDone, onLog, onResult, onProgress, stopSignal,
+    dailyLimit, skipDone, commentRate = 100, likeRate = 100, onLog, onResult, onProgress, stopSignal,
   } = params;
   const log = onLog || console.log;
 
@@ -1839,9 +1841,15 @@ export async function engageBlogs(params: {
           await page.waitForTimeout(350);
         };
 
+        // 확률 게이트: 이 글에 공감/댓글을 실제로 할지 매번 주사위 (도배 감지 회피)
+        const rollLike = doLike && (likeRate >= 100 || Math.random() * 100 < likeRate);
+        const rollComment = doComment && comment.trim() !== "" && (commentRate >= 100 || Math.random() * 100 < commentRate);
+        if (doLike && !rollLike) log(`[공감·댓글] ${blogId} 공감 건너뜀(확률 ${likeRate}%)`);
+        if (doComment && comment.trim() && !rollComment) log(`[공감·댓글] ${blogId} 댓글 건너뜀(확률 ${commentRate}%)`);
+
         // ── 공감 클릭 ──
         //  실측(2026-08): 네이버 공감버튼 = a.u_likeit_list_button (텍스트 "공감"), 이미 눌렀으면 class에 'on'
-        if (doLike) {
+        if (rollLike) {
           try {
             const likeSels = [
               // 실제 보이는 메인 버튼. list_button은 닫힌 리액션 레이어 안의 0x0 요소다.
@@ -1888,7 +1896,7 @@ export async function engageBlogs(params: {
         }
 
         // ── 댓글 작성 ──
-        if (doComment && comment.trim()) {
+        if (rollComment) {
           try {
             await page.waitForTimeout(1000);
 
