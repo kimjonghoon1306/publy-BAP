@@ -1426,10 +1426,32 @@ export async function addNeighbors(params: {
           return false;
         };
         const readBody = async () => (await page.evaluate(() => document.body.innerText).catch(() => ""));
+        // 팝업(레이어) 안의 '확인' 버튼을 눌러 닫기(폼 헤더의 '확인'과 구분). 눌렀으면 true.
+        const clickPopupConfirm = async () => await page.evaluate(() => {
+          const els = Array.from(document.querySelectorAll("a,button,span")) as HTMLElement[];
+          const vis = (el: HTMLElement) => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+          const b = [...els].reverse().find(el => (el.textContent || "").replace(/\s+/g, "") === "확인" && vis(el) &&
+            el.closest('[class*="pop"],[class*="layer"],[class*="lyr"],[class*="alert"],[class*="modal"],[role="dialog"]'));
+          if (b) { ((b.closest("a,button") as HTMLElement) || b).click(); return true; }
+          return false;
+        }).catch(() => false);
 
         let submitted = await clickConfirm();
         await page.waitForTimeout(1200);
         let afterTxt = await readBody();
+
+        // ★"이미 추가한 이웃입니다" 팝업 → 확인 눌러 닫고 이 블로그는 건너뜀(이미 이웃)
+        const ALREADY_RE = /이미\s*추가한?\s*이웃|이미\s*(서로)?이웃|이미\s*신청/;
+        if (ALREADY_RE.test(afterTxt)) {
+          await clickPopupConfirm();
+          doneSet.add(blogId);
+          fs.writeFileSync(dp, JSON.stringify([...doneSet], null, 2));
+          await onResult?.({ keyword, blogId, status: "skip", message: "이미 추가한 이웃" });
+          log(`[서이추] ⏭ ${blogId} 이미 이웃 — 건너뜀`);
+          onProgress?.(done, fail);
+          await page.waitForTimeout(humanDelay(delayMin, delayMax));
+          continue;
+        }
 
         // 신청 후 결과 확인
         const LIMIT_RE = /하루 최대|신청 한도|초과하여|더 이상 신청/;
@@ -1440,35 +1462,64 @@ export async function addNeighbors(params: {
         const SUCCESS_RE = /신청.{0,4}(완료|되었습니다|하였습니다|했습니다)|이웃.{0,4}(추가되었|추가하였|추가\s*완료)/;
 
         if (GROUP_FULL_RE.test(afterTxt)) {
-          //  ★네이버 실제 동작(테리 실측): 그룹이 가득 차면 "다른 그룹을 선택" 경고 팝업이 뜸.
-          //   팝업 '확인'을 누르면 다음 그룹으로 넘어가 재시도함. 그룹 개수(1~8개+, 사람마다 랜덤)와
-          //   팝업 반복 횟수는 예측 불가 → 횟수를 고정하지 않고 '팝업이 있는 한' 계속 확인을 누름.
-          //   빈 그룹을 만나면 신청 완료(성공 문구 확인), 팝업이 더 안 뜨면(모든 그룹 소진) 이 블로그는 건너뜀.
-          //   봇이 이 '확인'을 안 눌러 타임아웃으로 그냥 넘어갔던 것(=패스)이 원래 문제였음.
-          log(`[서이추] ⚠️ ${blogId} 그룹 가득참 → 팝업 '확인' 반복 클릭(빈 그룹 찾을 때까지)`);
-          let recovered = false;
-          let clickCount = 0;
-          for (let i = 0; i < 40; i++) {   // 안전 상한(무한루프 방지)일 뿐, 실제 종료는 '팝업 없음/성공'으로 판단
-            const clicked = await page.evaluate(() => {
-              const norm = (s: string) => (s || "").replace(/\s+/g, "");
+          //  ★네이버는 수동: 팝업 '확인'만 눌러선 그룹이 안 넘어감(무한반복). 팝업 닫고 → 그룹 목록에서
+          //   '다른 그룹'을 직접 선택 → 재신청 을 반복해야 함. 빈 그룹 만나면 신청완료, 다 차면 건너뜀.
+          log(`[서이추] ⚠️ ${blogId} 그룹 가득참 → 다른 그룹 선택 후 재신청 반복`);
+
+          // 경고 팝업(레이어)의 '확인'을 눌러 닫기(폼의 '확인'과 구분)
+          const dismissPopup = async () => {
+            await page.evaluate(() => {
               const els = Array.from(document.querySelectorAll("a,button,span")) as HTMLElement[];
-              const visible = (el: HTMLElement) => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
-              const inPopup = (el: HTMLElement) => !!el.closest('[class*="pop"],[class*="layer"],[class*="lyr"],[class*="alert"],[class*="modal"],[role="dialog"]');
-              // 경고 팝업(레이어) 안의 '확인'을 우선 클릭(폼 헤더의 '확인'과 구분)
-              let btn = els.find(el => norm(el.textContent || "") === "확인" && visible(el) && inPopup(el));
-              if (!btn) btn = [...els].reverse().find(el => norm(el.textContent || "") === "확인" && visible(el));
-              if (btn) { ((btn.closest("a,button") as HTMLElement) || btn).click(); return true; }
-              return false;
-            }).catch(() => false);
-            if (clicked) clickCount++;
-            await page.waitForTimeout(1000);
-            afterTxt = await readBody();
-            if (SUCCESS_RE.test(afterTxt)) { recovered = true; break; }  // 빈 그룹 찾아 '신청 완료'
-            if (!clicked) break;   // 더 이상 누를 팝업 '확인'이 없음(모든 그룹 소진) → 건너뜀
+              const vis = (el: HTMLElement) => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+              const b = [...els].reverse().find(el => (el.textContent || "").replace(/\s+/g, "") === "확인" && vis(el) &&
+                el.closest('[class*="pop"],[class*="layer"],[class*="lyr"],[class*="alert"],[class*="modal"],[role="dialog"]'));
+              if (b) ((b.closest("a,button") as HTMLElement) || b).click();
+            }).catch(() => {});
+          };
+
+          // ★진단 로그: 내 계정의 그룹 컨트롤 구조(셀렉트/옵션/입력칸/그룹 관련 요소)를 남겨 정확히 파악
+          const dom: any = await page.evaluate(() => {
+            const selects = Array.from(document.querySelectorAll("select")).map((s: any) => ({
+              id: s.id, name: s.name, cls: s.className,
+              opts: Array.from(s.options).map((o: any) => ({ t: (o.text || "").trim(), v: o.value, sel: o.selected })),
+            }));
+            const inputs = Array.from(document.querySelectorAll("input:not([type=hidden])")).map((i: any) => ({
+              type: i.type, id: i.id, name: i.name, cls: i.className, ph: i.placeholder, val: (i.value || "").slice(0, 20),
+            }));
+            const groupEls = Array.from(document.querySelectorAll("a,button,li,span,div"))
+              .filter((e: any) => /그룹|만들|추가/.test(e.textContent || "") && (e.textContent || "").trim().length < 16)
+              .slice(0, 20).map((e: any) => ({ tag: e.tagName, id: e.id, cls: e.className, t: (e.textContent || "").trim() }));
+            return { selects, inputs, groupEls };
+          }).catch(() => ({ selects: [], inputs: [], groupEls: [] }));
+          log(`[그룹DOM] selects=${JSON.stringify(dom.selects)}`);
+          log(`[그룹DOM] inputs=${JSON.stringify(dom.inputs)}`);
+          log(`[그룹DOM] groupEls=${JSON.stringify(dom.groupEls)}`);
+
+          // 그룹 select 추정: 옵션이 2개 이상인 첫 select
+          const sel = (dom.selects as any[]).find(s => (s.opts || []).length > 1);
+          let recovered = false;
+          if (sel) {
+            const selSelector = sel.name ? `select[name="${sel.name}"]` : (sel.id ? `#${sel.id}` : "select");
+            for (const o of sel.opts) {
+              if (!o.v || o.sel) continue;                        // 값 없거나 현재 선택된 것 skip
+              if (/^\s*(그룹\s*선택|선택하세요|선택)/.test(o.t)) continue;   // 안내 옵션 skip
+              try {
+                await dismissPopup(); await page.waitForTimeout(400);
+                await page.selectOption(selSelector, o.v).catch(() => {});   // 다른 그룹 선택
+                await page.waitForTimeout(400);
+                await page.click("a.btn_ok").catch(() => clickConfirm());     // 폼 재신청
+                await page.waitForTimeout(1500);
+                afterTxt = await readBody();
+                log(`[그룹시도] '${o.t}' → ${afterTxt.replace(/\s+/g, " ").slice(0, 80)}`);
+                if (SUCCESS_RE.test(afterTxt)) { log(`[서이추] ✅ '${o.t}' 그룹으로 신청`); recovered = true; break; }
+                if (!GROUP_FULL_RE.test(afterTxt)) { recovered = true; break; }  // 팝업 사라짐(그룹 성공 추정)
+              } catch (e: any) { log(`[그룹시도] '${o.t}' 오류: ${e.message}`); }
+            }
+          } else {
+            log(`[그룹DOM] ⚠️ 그룹 select를 못 찾음 — 위 DOM 로그로 구조 확인 필요`);
           }
           submitted = recovered;
-          if (recovered) log(`[서이추] ✅ ${blogId} 빈 그룹 찾아 신청(확인 ${clickCount}회)`);
-          else throw new Error(`모든 이웃 그룹이 가득 참 — 건너뜀(확인 ${clickCount}회 시도, 네이버에 빈 이웃 그룹 필요)`);
+          if (!recovered) throw new Error("빈 그룹 못 찾음 — 건너뜀([그룹DOM] 로그 확인)");
         }
 
         if (LIMIT_RE.test(afterTxt)) {
