@@ -1438,46 +1438,43 @@ export async function addNeighbors(params: {
         const GROUP_FULL_RE = /이웃\s*수가\s*초과|다른\s*그룹을?\s*선택|그룹의\s*이웃/;
 
         if (GROUP_FULL_RE.test(afterTxt)) {
-          log(`[서이추] ⚠️ ${blogId} 선택 그룹 가득참 → 다른 그룹으로 재시도`);
-          await clickConfirm().catch(() => {});   // 경고 팝업 닫기
+          //  ★네이버는 자동 처리가 전혀 없음 — 전부 수동: 경고 팝업의 '확인'을 눌러 닫은 뒤
+          //   그룹 목록에서 '다른(안 찬) 그룹'을 사람이 직접 골라 다시 신청해야 함.
+          //   → 봇이 이 수동 절차(①팝업 닫기 → ②다른 그룹 선택 → ③재신청)를 대신 반복 수행.
+          log(`[서이추] ⚠️ ${blogId} 그룹 가득참 → 팝업 닫고 다른 그룹 선택 후 재신청`);
+          // 경고 팝업(레이어)의 '확인' 클릭해 닫기 (폼 헤더의 '확인' submit과 구분)
+          const dismissPopup = async () => {
+            await page.evaluate(() => {
+              const els = Array.from(document.querySelectorAll("a,button")) as HTMLElement[];
+              const visible = (el: HTMLElement) => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+              const btn = els.reverse().find(el => (el.textContent || "").trim() === "확인" && visible(el) &&
+                el.closest('[class*="pop"],[class*="layer"],[class*="lyr"],[class*="alert"],[class*="modal"],[role="dialog"]'));
+              if (btn) (btn as HTMLElement).click();
+            }).catch(() => {});
+          };
+          await dismissPopup();
           await page.waitForTimeout(500);
+
+          // 그룹 드롭다운 옵션 수집 (가득 찬 '새 그룹'/안내 옵션 제외)
           const groups = await page.$$eval("select option", (opts: any[]) =>
             opts.map((o) => ({ text: (o.text || "").trim(), value: o.value }))
           ).catch(() => [] as { text: string; value: string }[]);
 
           let recovered = false;
-          // 1) 기존 그룹 중 안 찬 그룹으로 순차 전환
           for (const g of groups) {
-            if (!g.value || /새\s*그룹|그룹.*선택|^선택|그룹\s*추가|새로\s*만들/.test(g.text)) continue;
+            if (!g.value || /새\s*그룹|그룹.*선택|^선택/.test(g.text)) continue; // 기본/가득 찬 그룹 건너뜀
             try {
-              await page.selectOption("select", g.value).catch(() => {});
+              await page.selectOption("select", g.value).catch(() => {}); // 다른 그룹 직접 선택
               await page.waitForTimeout(400);
-              await clickConfirm();
+              await clickConfirm();                    // 재신청(폼 확인)
               await page.waitForTimeout(1200);
               afterTxt = await readBody();
-              if (!GROUP_FULL_RE.test(afterTxt)) { log(`[서이추] ✅ 그룹 '${g.text}'(으)로 전환`); recovered = true; submitted = true; break; }
-              await clickConfirm().catch(() => {});   // 여전히 가득참 → 팝업 닫고 다음 그룹
+              if (!GROUP_FULL_RE.test(afterTxt)) { log(`[서이추] ✅ '${g.text}' 그룹으로 신청`); recovered = true; submitted = true; break; }
+              await dismissPopup();                    // 이 그룹도 가득참 → 팝업 닫고 다음 그룹
               await page.waitForTimeout(400);
             } catch {}
           }
-          // 2) 그래도 실패 → '새 그룹' 만들어 고유 이름으로 시도 (best-effort)
-          if (!recovered) {
-            try {
-              const newOpt = groups.find(g => g.value && /새\s*그룹|그룹\s*추가|새로\s*만들/.test(g.text));
-              if (newOpt) {
-                await page.selectOption("select", newOpt.value).catch(() => {});
-                await page.waitForTimeout(500);
-                const gname = `퍼블리${new Date().toISOString().slice(2, 10).replace(/-/g, "")}-${Math.floor(Math.random() * 900 + 100)}`;
-                const nameInput = await page.$("input[name='groupName'], input#groupName, input#addGroupName, input.txt_group, input[placeholder*='그룹']");
-                if (nameInput) { await nameInput.fill(gname).catch(() => {}); await page.waitForTimeout(300); }
-                await clickConfirm();
-                await page.waitForTimeout(1200);
-                afterTxt = await readBody();
-                if (!GROUP_FULL_RE.test(afterTxt)) { log(`[서이추] ✅ 새 그룹 '${gname}' 생성 후 신청`); recovered = true; submitted = true; }
-              }
-            } catch {}
-          }
-          if (!recovered) throw new Error("모든 이웃 그룹이 가득 참 — 네이버에서 그룹 정리(또는 새 그룹 생성) 필요");
+          if (!recovered) throw new Error("모든 이웃 그룹이 가득 참 — 네이버 블로그에서 빈 이웃 그룹을 하나 만들어 주세요");
         }
 
         if (LIMIT_RE.test(afterTxt)) {

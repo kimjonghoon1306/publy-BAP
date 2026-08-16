@@ -1,6 +1,6 @@
 import { app, BrowserWindow, ipcMain, shell } from "electron";
 import path from "path";
-import { spawn, ChildProcess } from "child_process";
+import { spawn, execSync, ChildProcess } from "child_process";
 import { randomBytes } from "crypto";
 
 let mainWindow: BrowserWindow | null = null;
@@ -9,6 +9,24 @@ let neighborBotProcess: ChildProcess | null = null;
 let instaBotProcess: ChildProcess | null = null;
 const isDev = !app.isPackaged;
 const botAuthToken = randomBytes(32).toString("hex");
+
+// 이전 실행에서 남은(orphan) 봇 프로세스가 포트를 물고 있으면 새 봇이 못 뜨고
+// 토큰이 어긋나 "Unauthorized/봇 오프라인"이 남 → 앱 시작 시 해당 포트를 강제 정리.
+function killPort(port: number) {
+  try {
+    if (process.platform === "win32") {
+      const out = execSync(`netstat -ano -p tcp | findstr :${port}`, { encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"] });
+      const pids = new Set(
+        out.split(/\r?\n/).map(l => l.trim().split(/\s+/).pop() || "").filter(p => /^\d+$/.test(p) && p !== "0")
+      );
+      pids.forEach(pid => { try { execSync(`taskkill /PID ${pid} /F`, { stdio: "ignore" }); } catch {} });
+    } else {
+      const out = execSync(`lsof -ti tcp:${port}`, { encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"] });
+      out.split(/\s+/).filter(Boolean).forEach(pid => { try { process.kill(Number(pid), "SIGKILL"); } catch {} });
+    }
+    console.log(`[bot] 포트 ${port} 정리 완료`);
+  } catch { /* 점유 프로세스 없으면 명령이 비정상 종료 → 무시 */ }
+}
 
 function botEnvironment(extra: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
   return {
@@ -45,10 +63,10 @@ async function startBotServer() {
 
   const startBot = () => {
     console.log("[bot] 봇 서버 시작...");
+    killPort(3333);
     botProcess = spawn(nodePath, ["dist/server.js"], {
       cwd: botPath,
       stdio: "pipe",
-      shell: true,
       env: botEnvironment({
         PLAYWRIGHT_BROWSERS_PATH: chromiumPath,
       }),
@@ -96,10 +114,10 @@ async function startNeighborBotServer() {
 
   const startBot = () => {
     console.log("[neighbor-bot] 서버 시작...");
+    killPort(3334);
     neighborBotProcess = spawn(nodePath, ["dist/server.js"], {
       cwd: botPath,
       stdio: "pipe",
-      shell: true,
       env: botEnvironment({
         PLAYWRIGHT_BROWSERS_PATH: chromiumPath,
         NODE_PATH: path.join(naverBotPath, "node_modules"),
@@ -147,10 +165,10 @@ async function startInstaBotServer() {
 
   const startBot = () => {
     console.log("[insta-bot] 서버 시작...");
+    killPort(3335);
     instaBotProcess = spawn(nodePath, ["dist/server.js"], {
       cwd: botPath,
       stdio: "pipe",
-      shell: true,
       env: botEnvironment({
         PLAYWRIGHT_BROWSERS_PATH: chromiumPath,
         NODE_PATH: path.join(naverBotPath, "node_modules"),
@@ -202,13 +220,20 @@ app.whenReady().then(async () => {
   app.on("activate", () => { if (!mainWindow) createWindow(); });
 });
 
-app.on("window-all-closed", () => {
+function shutdownBots() {
   app.isQuitting = true;
   botProcess?.kill();
   neighborBotProcess?.kill();
   instaBotProcess?.kill();
+  // .kill()이 놓친 프로세스가 있어도 포트를 확실히 비워 다음 실행이 깨끗하게 시작되도록.
+  killPort(3333); killPort(3334); killPort(3335);
+}
+
+app.on("window-all-closed", () => {
+  shutdownBots();
   if (process.platform !== "darwin") app.quit();
 });
+app.on("before-quit", shutdownBots);
 
 ipcMain.handle("get-bot-status", async () => {
   try {
