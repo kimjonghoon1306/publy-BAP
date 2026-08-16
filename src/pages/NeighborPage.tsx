@@ -207,6 +207,7 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
   const [delayMin, setDelayMin] = useState(5);
   const [delayMax, setDelayMax] = useState(10);
   const [skipDone, setSkipDone] = useState(true);
+  const [qualityFilter, setQualityFilter] = useState(true);   // 죽은/광고 블로그 자동 스킵
   const [autoStart, setAutoStart] = useState(false);
   // 내 이웃 키워드 분석 (서이추·공감댓글 공용)
   const [buddyKw, setBuddyKw] = useState<{ word: string; count: number }[]>([]);
@@ -399,7 +400,7 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
     addLog(`🚀 작업 시작 — ${list.length}개 대상 / 한도 ${dailyLimit}개 / 딜레이 ${delayMin}~${delayMax}초`);
     const msg = msgMode === "single" ? singleMsg : multiMsgs.split("\n").filter(l => l.trim()).join("|||");
     // ★ targets(수십~수백개)를 GET URL에 실으면 길이 초과로 연결 실패 → POST body로 전송
-    const body = JSON.stringify({ accountId: acc.accountId, targets: list, message: msg, delayMin, delayMax, skipDone, jobId: jobIdRef.current, ...(userId ? { userId } : {}) });
+    const body = JSON.stringify({ accountId: acc.accountId, targets: list, message: msg, delayMin, delayMax, skipDone, qualityFilter, jobId: jobIdRef.current, ...(userId ? { userId } : {}) });
     const es = new BotEventStream(`${BOT}/api/add-neighbor`, { method: "POST", headers: { "Content-Type": "application/json" }, body }); esRef.current = es;
     es.onmessage = e => {
       const d = JSON.parse(e.data);
@@ -645,6 +646,7 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
                 </div>
               </div>
               <Toggle val={skipDone} set={setSkipDone} label="이미 처리된 블로그 건너뛰기" />
+              <Toggle val={qualityFilter} set={setQualityFilter} label="죽은·광고 블로그 자동 거르기 (헛신청 방지)" />
               <Toggle val={autoStart} set={setAutoStart} label="추출 완료 후 바로 신청 시작" />
             </div>
 

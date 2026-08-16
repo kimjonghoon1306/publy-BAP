@@ -1281,13 +1281,14 @@ export async function addNeighbors(params: {
   delayMax: number;
   dailyLimit: number;
   skipDone: boolean;
+  qualityFilter?: boolean;   // 죽은/광고/서이추불가 블로그 자동 스킵 (기본 ON)
   onLog?: (msg: string) => void;
   onResult?: (r: NeighborResult) => Promise<void>;
   onProgress?: (done: number, fail: number) => void;
   onLimit?: (info: { count: number; limit: number }) => void;
   stopSignal?: () => boolean;
 }): Promise<void> {
-  const { accountId, targets, message, delayMin, delayMax, dailyLimit, skipDone, onLog, onResult, onProgress, onLimit, stopSignal } = params;
+  const { accountId, targets, message, delayMin, delayMax, dailyLimit, skipDone, qualityFilter = true, onLog, onResult, onProgress, onLimit, stopSignal } = params;
   const log = onLog || console.log;
 
   // 다중 멘트 파싱 (|||로 구분된 경우 순환 사용)
@@ -1377,6 +1378,34 @@ export async function addNeighbors(params: {
           { waitUntil: "domcontentloaded", timeout: 20000 }
         );
         await page.waitForTimeout(humanDelay(2, 5));
+
+        // ── ★품질 필터: 죽은/광고/마켓 블로그 자동 스킵(헛신청 방지, 한도 절약) ──
+        if (qualityFilter) {
+          const q = await page.evaluate(() => {
+            const txt = document.body.innerText || "";
+            const title = document.title || "";
+            // 최근 글 날짜 흔적 (모바일/PC 공통 상대·절대 시간 표기)
+            const hasRecent = /방금 전|분 전|시간 전|일 전|어제|오늘|20\d\d\.\s?\d{1,2}\.\s?\d{1,2}/.test(txt);
+            // 마켓/광고/판매 블로그 신호
+            const isMarket = /블로그마켓|마켓 바로가기|스토어 바로가기|공동구매|공구 진행|판매중|구매하기|장바구니|가격문의|DM문의|비즈니스/.test(txt + title);
+            return { hasRecent, isMarket, len: txt.length };
+          }).catch(() => ({ hasRecent: true, isMarket: false, len: 999 }));
+
+          if (q.isMarket) {
+            await onResult?.({ keyword, blogId, status: "skip", message: "마켓·광고 블로그(자동 스킵)" });
+            log(`[서이추] ⏭ ${blogId} 마켓·광고 블로그 → 스킵`);
+            onProgress?.(done, fail);
+            await page.waitForTimeout(humanDelay(1, 2));
+            continue;
+          }
+          if (!q.hasRecent && q.len < 4000) {
+            await onResult?.({ keyword, blogId, status: "skip", message: "최근 글 없는 휴면 블로그(자동 스킵)" });
+            log(`[서이추] ⏭ ${blogId} 휴면(최근 글 없음) → 스킵`);
+            onProgress?.(done, fail);
+            await page.waitForTimeout(humanDelay(1, 2));
+            continue;
+          }
+        }
 
         // 스크롤 (3~7초에 걸쳐 천천히 읽는 척)
         const scrollCount = 2 + Math.floor(Math.random() * 3);

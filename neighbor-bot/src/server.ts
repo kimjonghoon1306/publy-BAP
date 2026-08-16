@@ -158,7 +158,7 @@ app.get("/api/crawl", async (req, res) => {
 app.post("/api/add-neighbor", async (req, res) => {
   const {
     userId, accountId, targets: targetsRaw, message,
-    delayMin, delayMax, skipDone, jobId,
+    delayMin, delayMax, skipDone, qualityFilter, jobId,
   } = req.body as Record<string, any>;
 
   if (!accountId || !targetsRaw)
@@ -195,6 +195,7 @@ app.post("/api/add-neighbor", async (req, res) => {
       delayMax: parseFloat(String(delayMax ?? "10")),
       dailyLimit,
       skipDone: skipDone === true || skipDone === "true",
+      qualityFilter: qualityFilter !== false && qualityFilter !== "false",   // 기본 ON
       onLog: (msg) => sseSend(res, { type: "log", msg }),
       onResult: async (r: NeighborResult) => {
         sseSend(res, { type: "result", ...r });
