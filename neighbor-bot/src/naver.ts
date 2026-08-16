@@ -1436,17 +1436,19 @@ export async function addNeighbors(params: {
         //  ★"선택 그룹의 이웃수가 초과되어 … 다른 그룹을 선택해주세요" 팝업 = 그룹당 500명 한도.
         //   기존 코드는 이 팝업을 못 잡아 '확인 클릭=성공'으로 잘못 카운트했음 → 아래에서 감지·재시도.
         const GROUP_FULL_RE = /이웃\s*수가\s*초과|다른\s*그룹을?\s*선택|그룹의\s*이웃/;
+        // 실제 '신청 완료'를 나타내는 문구(폼 라벨 "서로이웃을 신청합니다"와 구분 — 완료/되었/했만 매칭)
+        const SUCCESS_RE = /신청.{0,4}(완료|되었습니다|하였습니다|했습니다)|이웃.{0,4}(추가되었|추가하였|추가\s*완료)/;
 
         if (GROUP_FULL_RE.test(afterTxt)) {
           //  ★네이버 실제 동작(테리 실측): 그룹이 가득 차면 "다른 그룹을 선택" 경고 팝업이 뜸.
-          //   팝업의 '확인'을 누르면 네이버가 다음 그룹으로 넘어가 재시도함. 그룹이 여러 개 다 차 있으면
-          //   팝업이 그룹 수만큼(때로 그 배수로) 여러 번 반복해서 뜸. 확인을 계속 눌러주면 빈 그룹을
-          //   만나 신청이 완료됨. 봇이 이 '확인'을 안 눌러 타임아웃으로 그냥 넘어갔던 것(=패스)이 문제.
-          //   → 팝업의 '확인'을 몇 번이든 반복 클릭해 빈 그룹까지 진행. 끝까지 없으면 이 블로그는 건너뜀.
+          //   팝업 '확인'을 누르면 다음 그룹으로 넘어가 재시도함. 그룹 개수(1~8개+, 사람마다 랜덤)와
+          //   팝업 반복 횟수는 예측 불가 → 횟수를 고정하지 않고 '팝업이 있는 한' 계속 확인을 누름.
+          //   빈 그룹을 만나면 신청 완료(성공 문구 확인), 팝업이 더 안 뜨면(모든 그룹 소진) 이 블로그는 건너뜀.
+          //   봇이 이 '확인'을 안 눌러 타임아웃으로 그냥 넘어갔던 것(=패스)이 원래 문제였음.
           log(`[서이추] ⚠️ ${blogId} 그룹 가득참 → 팝업 '확인' 반복 클릭(빈 그룹 찾을 때까지)`);
           let recovered = false;
           let clickCount = 0;
-          for (let i = 0; i < 24; i++) {   // 그룹 다수(최대 12개)×팝업 반복 여유
+          for (let i = 0; i < 40; i++) {   // 안전 상한(무한루프 방지)일 뿐, 실제 종료는 '팝업 없음/성공'으로 판단
             const clicked = await page.evaluate(() => {
               const norm = (s: string) => (s || "").replace(/\s+/g, "");
               const els = Array.from(document.querySelectorAll("a,button,span")) as HTMLElement[];
@@ -1459,14 +1461,14 @@ export async function addNeighbors(params: {
               return false;
             }).catch(() => false);
             if (clicked) clickCount++;
-            await page.waitForTimeout(900);
+            await page.waitForTimeout(1000);
             afterTxt = await readBody();
-            if (!GROUP_FULL_RE.test(afterTxt)) { recovered = true; break; }  // 빈 그룹으로 넘어가 신청 완료
-            if (!clicked) break;   // 더 이상 누를 팝업 '확인'이 없음
+            if (SUCCESS_RE.test(afterTxt)) { recovered = true; break; }  // 빈 그룹 찾아 '신청 완료'
+            if (!clicked) break;   // 더 이상 누를 팝업 '확인'이 없음(모든 그룹 소진) → 건너뜀
           }
           submitted = recovered;
           if (recovered) log(`[서이추] ✅ ${blogId} 빈 그룹 찾아 신청(확인 ${clickCount}회)`);
-          if (!recovered) throw new Error("모든 이웃 그룹이 가득 참 — 건너뜀(네이버에 빈 이웃 그룹 필요)");
+          else throw new Error(`모든 이웃 그룹이 가득 참 — 건너뜀(확인 ${clickCount}회 시도, 네이버에 빈 이웃 그룹 필요)`);
         }
 
         if (LIMIT_RE.test(afterTxt)) {
