@@ -1011,6 +1011,18 @@ function todayKST(): string {
   // KST(UTC+9) 기준 날짜 문자열 YYYY-MM-DD
   return new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(0, 10);
 }
+/* ── 재신청 방지 기간: 실패/무응답 건은 마지막 시도일 기록 → N일 지나면 재시도 허용 ── */
+function attemptsPath(accountId: string): string {
+  return path.join(SESSION_DIR, `attempts_${accountId}.json`);
+}
+export function loadAttempts(accountId: string): Record<string, number> {
+  try { return JSON.parse(fs.readFileSync(attemptsPath(accountId), "utf-8")) || {}; } catch { return {}; }
+}
+export function saveAttempt(accountId: string, blogId: string, map: Record<string, number>): void {
+  map[blogId] = Date.now();
+  try { fs.writeFileSync(attemptsPath(accountId), JSON.stringify(map)); } catch {}
+}
+
 export function getNeighborDailyCount(accountId: string): { date: string; count: number } {
   try {
     const raw = JSON.parse(fs.readFileSync(dailyCountPath(accountId), "utf-8"));
@@ -1282,13 +1294,14 @@ export async function addNeighbors(params: {
   dailyLimit: number;
   skipDone: boolean;
   qualityFilter?: boolean;   // 죽은/광고/서이추불가 블로그 자동 스킵 (기본 ON)
+  retryDays?: number;        // 실패/무응답 건 재시도까지 대기일 (기본 30, 0=영구 스킵)
   onLog?: (msg: string) => void;
   onResult?: (r: NeighborResult) => Promise<void>;
   onProgress?: (done: number, fail: number) => void;
   onLimit?: (info: { count: number; limit: number }) => void;
   stopSignal?: () => boolean;
 }): Promise<void> {
-  const { accountId, targets, message, delayMin, delayMax, dailyLimit, skipDone, qualityFilter = true, onLog, onResult, onProgress, onLimit, stopSignal } = params;
+  const { accountId, targets, message, delayMin, delayMax, dailyLimit, skipDone, qualityFilter = true, retryDays = 30, onLog, onResult, onProgress, onLimit, stopSignal } = params;
   const log = onLog || console.log;
 
   // 다중 멘트 파싱 (|||로 구분된 경우 순환 사용)
@@ -1307,6 +1320,11 @@ export async function addNeighbors(params: {
       doneSet = new Set(list);
     } catch {}
   }
+  // 재신청 방지: 실패/무응답 시도 이력 (blogId → 마지막 시도 ms)
+  const attempts = loadAttempts(accountId);
+  const retryMs = (retryDays > 0 ? retryDays : 0) * 86400 * 1000;
+  const attemptedRecently = (blogId: string) =>
+    retryMs > 0 && attempts[blogId] && (Date.now() - attempts[blogId]) < retryMs;
 
   // 서이추 신청 페이지가 모바일(m.blog.naver.com)만 작동 → 모바일 UA/뷰포트로 실행
   const MOBILE_UA = "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1";
@@ -1363,6 +1381,13 @@ export async function addNeighbors(params: {
 
       if ((skipDone && doneSet.has(blogId)) || runSeen.has(blogId)) {
         await onResult?.({ keyword, blogId, status: "skip", message: doneSet.has(blogId) ? "이미 처리됨" : "중복(이번 목록)" });
+        onProgress?.(done, fail);
+        continue;
+      }
+      // 최근 실패/무응답 → 재신청 대기기간(retryDays) 안이면 스킵
+      if (skipDone && attemptedRecently(blogId)) {
+        const daysAgo = Math.floor((Date.now() - attempts[blogId]) / 86400000);
+        await onResult?.({ keyword, blogId, status: "skip", message: `최근 시도(${daysAgo}일 전) — ${retryDays}일 후 재시도` });
         onProgress?.(done, fail);
         continue;
       }
@@ -1589,6 +1614,8 @@ export async function addNeighbors(params: {
         }
       } catch (e: any) {
         fail++;
+        // 실패/무응답 시도일 기록 → retryDays 동안 재신청 안 함(무한 헛시도 방지)
+        if (skipDone && retryMs > 0) saveAttempt(accountId, blogId, attempts);
         await onResult?.({ keyword, blogId, status: "fail", message: e.message });
         log(`[서이추] ❌ ${blogId} 실패: ${e.message}`);
       }

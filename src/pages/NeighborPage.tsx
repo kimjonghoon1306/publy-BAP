@@ -208,6 +208,7 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
   const [delayMax, setDelayMax] = useState(10);
   const [skipDone, setSkipDone] = useState(true);
   const [qualityFilter, setQualityFilter] = useState(true);   // 죽은/광고 블로그 자동 스킵
+  const [retryDays, setRetryDays] = useState(30);             // 실패/무응답 재신청 대기일
   const [autoStart, setAutoStart] = useState(false);
   // 내 이웃 키워드 분석 (서이추·공감댓글 공용)
   const [buddyKw, setBuddyKw] = useState<{ word: string; count: number }[]>([]);
@@ -400,7 +401,7 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
     addLog(`🚀 작업 시작 — ${list.length}개 대상 / 한도 ${dailyLimit}개 / 딜레이 ${delayMin}~${delayMax}초`);
     const msg = msgMode === "single" ? singleMsg : multiMsgs.split("\n").filter(l => l.trim()).join("|||");
     // ★ targets(수십~수백개)를 GET URL에 실으면 길이 초과로 연결 실패 → POST body로 전송
-    const body = JSON.stringify({ accountId: acc.accountId, targets: list, message: msg, delayMin, delayMax, skipDone, qualityFilter, jobId: jobIdRef.current, ...(userId ? { userId } : {}) });
+    const body = JSON.stringify({ accountId: acc.accountId, targets: list, message: msg, delayMin, delayMax, skipDone, qualityFilter, retryDays, jobId: jobIdRef.current, ...(userId ? { userId } : {}) });
     const es = new BotEventStream(`${BOT}/api/add-neighbor`, { method: "POST", headers: { "Content-Type": "application/json" }, body }); esRef.current = es;
     es.onmessage = e => {
       const d = JSON.parse(e.data);
@@ -647,6 +648,14 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
               </div>
               <Toggle val={skipDone} set={setSkipDone} label="이미 처리된 블로그 건너뛰기" />
               <Toggle val={qualityFilter} set={setQualityFilter} label="죽은·광고 블로그 자동 거르기 (헛신청 방지)" />
+              {skipDone && (
+                <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "6px 2px 2px", flexWrap: "wrap" }}>
+                  <span style={{ fontSize: 13, color: "var(--text2)", fontWeight: 600 }}>거절·무응답은</span>
+                  <input className="inp" type="number" min={0} max={365} {...numProps(retryDays, setRetryDays, 0, 365, 30)} style={{ width: 74, fontSize: 13, padding: "9px 12px", textAlign: "center" }} />
+                  <span style={{ fontSize: 13, color: "var(--text2)", fontWeight: 600 }}>일 뒤 다시 신청</span>
+                  <span style={{ fontSize: 11.5, color: "var(--text3)" }}>{retryDays === 0 ? "(0=영구 제외)" : "(성공한 곳은 계속 제외)"}</span>
+                </div>
+              )}
               <Toggle val={autoStart} set={setAutoStart} label="추출 완료 후 바로 신청 시작" />
             </div>
 
