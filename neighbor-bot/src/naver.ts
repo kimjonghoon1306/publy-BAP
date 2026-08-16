@@ -1001,6 +1001,30 @@ export function donePath(accountId: string): string {
   return path.join(SESSION_DIR, `done_${accountId}.json`);
 }
 
+/* ── 계정 보호용 하루 서이추 한도 (네이버 계정당 하루 100건 안전선) ──
+   Supabase 플랜 quota(구독제한)와 별개로, 계정별 로컬 카운터를 자정 기준으로 관리한다. */
+export const NEIGHBOR_SAFE_DAILY_LIMIT = 100;
+function dailyCountPath(accountId: string): string {
+  return path.join(SESSION_DIR, `daily_${accountId}.json`);
+}
+function todayKST(): string {
+  // KST(UTC+9) 기준 날짜 문자열 YYYY-MM-DD
+  return new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(0, 10);
+}
+export function getNeighborDailyCount(accountId: string): { date: string; count: number } {
+  try {
+    const raw = JSON.parse(fs.readFileSync(dailyCountPath(accountId), "utf-8"));
+    if (raw && raw.date === todayKST()) return { date: raw.date, count: raw.count || 0 };
+  } catch {}
+  return { date: todayKST(), count: 0 };   // 파일 없음/날짜 지남 → 0으로 리셋
+}
+export function incNeighborDailyCount(accountId: string): number {
+  const cur = getNeighborDailyCount(accountId);
+  const next = { date: cur.date, count: cur.count + 1 };
+  try { fs.writeFileSync(dailyCountPath(accountId), JSON.stringify(next)); } catch {}
+  return next.count;
+}
+
 /* ── 키워드로 블로그 수집 (체험단 최적화판) ──
    네이버 검색이 SPA로 바뀌어 HTML 스크레이핑이 죽음 → ajax JSON API로 전환.
    추가로 체험단 모집에 맞게: 최신활동 우선 정렬 / 판매·마켓글 제외 / 활동 블로거 필터 / 메타데이터 수집. */
@@ -1260,9 +1284,10 @@ export async function addNeighbors(params: {
   onLog?: (msg: string) => void;
   onResult?: (r: NeighborResult) => Promise<void>;
   onProgress?: (done: number, fail: number) => void;
+  onLimit?: (info: { count: number; limit: number }) => void;
   stopSignal?: () => boolean;
 }): Promise<void> {
-  const { accountId, targets, message, delayMin, delayMax, dailyLimit, skipDone, onLog, onResult, onProgress, stopSignal } = params;
+  const { accountId, targets, message, delayMin, delayMax, dailyLimit, skipDone, onLog, onResult, onProgress, onLimit, stopSignal } = params;
   const log = onLog || console.log;
 
   // 다중 멘트 파싱 (|||로 구분된 경우 순환 사용)
@@ -1322,6 +1347,15 @@ export async function addNeighbors(params: {
 
     for (const target of shuffled) {
       if (done >= dailyLimit) { log("[서이추] 일일 한도 도달"); break; }
+      // ★계정 보호: 오늘 이 계정으로 이미 100건 성공했으면 자동 정지(네이버 제재 예방)
+      {
+        const daily = getNeighborDailyCount(accountId);
+        if (daily.count >= NEIGHBOR_SAFE_DAILY_LIMIT) {
+          log(`[서이추] 🛑 오늘 이 계정 서이추 ${daily.count}건 — 안전 한도(${NEIGHBOR_SAFE_DAILY_LIMIT}건) 도달, 자동 정지(자정 이후 재개)`);
+          onLimit?.({ count: daily.count, limit: NEIGHBOR_SAFE_DAILY_LIMIT });
+          break;
+        }
+      }
       if (stopSignal?.()) { log("[서이추] 중단 신호 수신"); break; }
 
       const { keyword, blogId } = target;
@@ -1517,8 +1551,10 @@ export async function addNeighbors(params: {
           doneSet.add(blogId);
           fs.writeFileSync(dp, JSON.stringify([...doneSet], null, 2));
           done++;
+          const todayCount = incNeighborDailyCount(accountId);   // 계정 하루 누적 +1
           await onResult?.({ keyword, blogId, status: "success", message: "서이추 신청 완료" });
-          log(`[서이추] ✅ ${blogId} 완료 (${done}/${dailyLimit})`);
+          onLimit?.({ count: todayCount, limit: NEIGHBOR_SAFE_DAILY_LIMIT });
+          log(`[서이추] ✅ ${blogId} 완료 (오늘 ${todayCount}/${NEIGHBOR_SAFE_DAILY_LIMIT}건)`);
         } else {
           throw new Error("신청 버튼을 찾을 수 없음");
         }

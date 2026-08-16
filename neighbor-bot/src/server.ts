@@ -1,6 +1,6 @@
 import express from "express";
 import cors from "cors";
-import { saveSession, sessionExists, removeSession, crawlBlogIds, crawlBuddyPosts, analyzeBuddyKeywords, addNeighbors, NeighborResult, donePath, engageBlogs, EngageResult, engageDonePath } from "./naver";
+import { saveSession, sessionExists, removeSession, crawlBlogIds, crawlBuddyPosts, analyzeBuddyKeywords, addNeighbors, NeighborResult, donePath, engageBlogs, EngageResult, engageDonePath, getNeighborDailyCount, NEIGHBOR_SAFE_DAILY_LIMIT } from "./naver";
 import { checkNeighborQuota, incrementNeighborQuota, getNeighborDailyUsage, incrementEngageQuota, getEngageDailyUsage, getUserPlan, NEIGHBOR_DAILY_LIMIT, addNeighborHistory } from "./supabase";
 import fs from "fs";
 
@@ -207,6 +207,7 @@ app.post("/api/add-neighbor", async (req, res) => {
         }
       },
       onProgress: (done, fail) => sseSend(res, { type: "progress", done, fail }),
+      onLimit: (info) => sseSend(res, { type: "daily_limit", count: info.count, limit: info.limit }),
       stopSignal: () => stopMap.get(jid) === true,
     });
 
@@ -216,6 +217,12 @@ app.post("/api/add-neighbor", async (req, res) => {
   }
   endJob(jid);
   res.end();
+});
+
+/* ── 오늘 서이추 안전 한도 현황 (계정 보호용, 자정 리셋) ── */
+app.get("/api/daily/:accountId", (req, res) => {
+  const d = getNeighborDailyCount(req.params.accountId);
+  res.json({ ...d, limit: NEIGHBOR_SAFE_DAILY_LIMIT });
 });
 
 /* ── 완료 목록 조회 ── */

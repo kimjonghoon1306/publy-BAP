@@ -198,6 +198,9 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
   /* 서이추 state */
   const [quotaUsed, setQuotaUsed] = useState(0);
   const [quotaLimit, setQuotaLimit] = useState(0);
+  /* 계정 보호용 오늘 서이추 안전 한도(자정 리셋, 100건) */
+  const [dailyDone, setDailyDone] = useState(0);
+  const SAFE_DAILY = 100;
   const [keywords, setKeywords] = useState("");
   const [countPerKw, setCountPerKw] = useState(34);
   const [dailyLimit, setDailyLimit] = useState(100);
@@ -292,7 +295,7 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
     setELogs(p => [...p.slice(-200), `${t} :: ${msg}`]);
   }, []);
 
-  /* 세션 상태 확인 */
+  /* 세션 상태 확인 + 오늘 서이추 안전 한도 현황 로드 */
   useEffect(() => {
     accounts.forEach(acc => {
       if (!acc.id) return;
@@ -300,6 +303,9 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
         .then(d => { if (d.exists) setAccounts(p => p.map(a => a.accountId === acc.accountId ? { ...a, sessionOk: true } : a)); })
         .catch(() => {});
     });
+    const first = accounts[0];
+    if (first) botFetch(`${BOT}/api/daily/${first.accountId}`).then(r => r.json())
+      .then(d => { if (typeof d.count === "number") setDailyDone(d.count); }).catch(() => {});
   }, []);
 
   /* 계정 핸들러 */
@@ -401,6 +407,7 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
       if (d.type === "quota_info") { setQuotaUsed(d.used); setQuotaLimit(d.limit); }
       if (d.type === "quota_exceeded") { addLog("🚫 오늘 한도 초과!"); setWorking(false); es.close(); return; }
       if (d.type === "result") { setResults(p => p.map(r => r.blogId === d.blogId ? { ...r, status: d.status, message: d.message } : r)); if (d.status === "success") setQuotaUsed(q => q + 1); }
+      if (d.type === "daily_limit") { setDailyDone(d.count); if (d.count >= d.limit) { addLog(`🛑 오늘 안전 한도(${d.limit}건) 도달 — 계정 보호를 위해 자동 정지했어요. 자정 지나면 다시 돌릴 수 있어요.`); setWorking(false); } }
       if (d.type === "progress") { setDoneCnt(d.done); setFailCnt(d.fail); }
       if (d.type === "done") { addLog("🎉 작업 완료!"); setWorking(false); es.close(); }
       if (d.type === "error") { addLog(`❌ 오류: ${d.msg}`); setWorking(false); es.close(); }
@@ -688,6 +695,37 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
 
           {/* 오른쪽 */}
           <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+            {/* ★계정 보호용 오늘 안전 한도 (자정 리셋, 100건). 하루종일 보는 화면이라 크게·직관적으로 */}
+            {(() => {
+              const pct = Math.min(100, (dailyDone / SAFE_DAILY) * 100);
+              const danger = dailyDone >= SAFE_DAILY;
+              const warn = dailyDone >= SAFE_DAILY * 0.8;
+              const bar = danger ? "#ff5363" : warn ? "#ffb020" : "#00d68f";
+              return (
+                <div style={{ padding: "20px 24px", borderRadius: 20, background: "var(--card)", border: `1.5px solid ${danger ? "rgba(255,83,99,.45)" : warn ? "rgba(255,176,32,.4)" : "var(--border)"}`, boxShadow: "0 2px 14px rgba(0,0,0,.04)" }}>
+                  <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", marginBottom: 14 }}>
+                    <div>
+                      <div style={{ fontSize: 13, color: "var(--text3)", fontWeight: 700, marginBottom: 6, display: "flex", alignItems: "center", gap: 6 }}>
+                        🛡️ 오늘 계정 안전 한도 <span style={{ fontSize: 11, fontWeight: 600, color: "var(--text3)", opacity: .8 }}>(자정 자동 리셋)</span>
+                      </div>
+                      <div style={{ fontSize: 40, fontWeight: 900, color: bar, fontFamily: "'Space Grotesk',sans-serif", lineHeight: 1 }}>
+                        {dailyDone}<span style={{ fontSize: 20, color: "var(--text3)", fontWeight: 600 }}> / {SAFE_DAILY}건</span>
+                      </div>
+                    </div>
+                    <div style={{ textAlign: "right" }}>
+                      <div style={{ fontSize: 26, fontWeight: 900, color: bar, fontFamily: "'Space Grotesk',sans-serif", lineHeight: 1 }}>{danger ? "마감" : `${SAFE_DAILY - dailyDone}건`}</div>
+                      <div style={{ fontSize: 12, color: "var(--text3)", fontWeight: 600, marginTop: 4 }}>{danger ? "자정까지 대기" : "남음"}</div>
+                    </div>
+                  </div>
+                  <div style={{ height: 12, borderRadius: 99, background: "var(--border)", overflow: "hidden" }}>
+                    <div style={{ height: "100%", borderRadius: 99, width: `${pct}%`, background: `linear-gradient(90deg, ${bar}, ${bar}cc)`, transition: "width .5s ease" }} />
+                  </div>
+                  {danger && <div style={{ fontSize: 12.5, color: "var(--danger)", fontWeight: 700, marginTop: 10 }}>오늘 한도에 도달해 자동 정지했어요. 계정 보호를 위해 자정 이후 다시 돌려주세요.</div>}
+                  {!danger && warn && <div style={{ fontSize: 12.5, color: "#c88010", fontWeight: 600, marginTop: 10 }}>거의 다 찼어요. 조금만 더 하면 오늘은 쉬는 게 안전해요.</div>}
+                </div>
+              );
+            })()}
+
             {userId && quotaLimit > 0 && (
               <div style={{ padding: "16px 20px", borderRadius: 16, background: "var(--card)", border: `1.5px solid ${quotaUsed >= quotaLimit ? "rgba(255,83,99,.4)" : "var(--border)"}`, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
                 <div>
