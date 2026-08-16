@@ -174,10 +174,48 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CSC_IDENTITY_AUTO_DISCOVERY: false
 
-      - name: Ad-hoc sign the app
+      - name: Ad-hoc sign apps and repackage DMGs (fix "damaged")
         run: |
-          find release/mac-arm64 -name "*.app" -exec codesign --force --deep --sign - {} \; 2>/dev/null || true
-          find release/mac -name "*.app" -exec codesign --force --deep --sign - {} \; 2>/dev/null || true
+          set -e
+          # 1) electron-builder가 만든 앱은 서명이 깨져있음(linker stub) → 유효 ad-hoc으로 재서명
+          for app in release/mac-arm64/*.app release/mac-x64/*.app release/mac/*.app; do
+            [ -d "$app" ] || continue
+            echo "signing: $app"
+            codesign --force --deep --sign - "$app"
+            codesign --verify --deep --strict "$app"
+            echo "  valid signature: $app"
+          done
+          # 2) DMG는 서명 '전'에 만들어졌으므로, 서명된 앱으로 DMG를 다시 굽는다
+          repack() {
+            appdir="$1"; dmg="$2"
+            app=$(ls -d "$appdir"/*.app 2>/dev/null | head -1)
+            [ -n "$app" ] && [ -d "$app" ] || return 0
+            [ -f "$dmg" ] || return 0
+            echo "repacking $dmg  <=  $app"
+            rm -f "$dmg"
+            stage=$(mktemp -d)
+            cp -R "$app" "$stage/"
+            ln -s /Applications "$stage/Applications"
+            hdiutil create -volname "Publy" -srcfolder "$stage" -ov -format UDZO "$dmg"
+            rm -rf "$stage"
+          }
+          for dmg in release/*-arm64.dmg; do [ -f "$dmg" ] && repack release/mac-arm64 "$dmg"; done
+          for dmg in release/*.dmg; do
+            case "$dmg" in
+              *-arm64.dmg) : ;;
+              *) if [ -d release/mac-x64 ]; then repack release/mac-x64 "$dmg"; else repack release/mac "$dmg"; fi ;;
+            esac
+          done
+          # 3) 검증: DMG 안 앱이 유효 서명이어야 다운로드시 "손상됨" 대신 "확인할 수 없음(그래도 열기 가능)"으로 뜸
+          for dmg in release/*.dmg; do
+            hdiutil attach "$dmg" -nobrowse -mountpoint /tmp/vchk >/dev/null 2>&1 || continue
+            if codesign --verify --deep --strict /tmp/vchk/*.app >/dev/null 2>&1; then
+              echo "DMG OK (valid signature): $dmg"
+            else
+              echo "DMG STILL BROKEN: $dmg"; hdiutil detach /tmp/vchk >/dev/null 2>&1 || true; exit 1
+            fi
+            hdiutil detach /tmp/vchk >/dev/null 2>&1 || true
+          done
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
