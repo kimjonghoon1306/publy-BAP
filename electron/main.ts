@@ -34,6 +34,8 @@ function botEnvironment(extra: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
     ...extra,
     PUBLY_SESSION_DIR: path.join(app.getPath("userData"), "publy-sessions"),
     BOT_AUTH_TOKEN: botAuthToken,
+    // ★ Electron 내장 Node로 봇 실행 → 사용자 맥에 Node.js 미설치여도 봇이 뜬다("서버 오프라인" 근본해결)
+    ELECTRON_RUN_AS_NODE: "1",
   };
 }
 
@@ -54,12 +56,8 @@ async function startBotServer() {
     }
   } catch { return; }
 
-  // macOS에서 node 경로 찾기
-  const nodePath = process.platform === "darwin"
-    ? (require("fs").existsSync("/opt/homebrew/bin/node") ? "/opt/homebrew/bin/node"
-      : require("fs").existsSync("/usr/local/bin/node") ? "/usr/local/bin/node"
-      : "node")
-    : "node";
+  // ★ Electron 내장 Node로 봇 실행(시스템 node 불필요) — 모든 OS·회원PC에서 봇이 확실히 뜬다
+  const nodePath = process.execPath;
 
   const startBot = () => {
     console.log("[bot] 봇 서버 시작...");
@@ -105,12 +103,8 @@ async function startNeighborBotServer() {
     return;
   }
 
-  // macOS에서 node 경로 찾기
-  const nodePath = process.platform === "darwin"
-    ? (require("fs").existsSync("/opt/homebrew/bin/node") ? "/opt/homebrew/bin/node"
-      : require("fs").existsSync("/usr/local/bin/node") ? "/usr/local/bin/node"
-      : "node")
-    : "node";
+  // ★ Electron 내장 Node로 봇 실행(시스템 node 불필요) — 모든 OS·회원PC에서 봇이 확실히 뜬다
+  const nodePath = process.execPath;
 
   const startBot = () => {
     console.log("[neighbor-bot] 서버 시작...");
@@ -157,11 +151,8 @@ async function startInstaBotServer() {
     return;
   }
 
-  const nodePath = process.platform === "darwin"
-    ? (require("fs").existsSync("/opt/homebrew/bin/node") ? "/opt/homebrew/bin/node"
-      : require("fs").existsSync("/usr/local/bin/node") ? "/usr/local/bin/node"
-      : "node")
-    : "node";
+  // ★ Electron 내장 Node로 봇 실행(시스템 node 불필요) — 모든 OS·회원PC에서 봇이 확실히 뜬다
+  const nodePath = process.execPath;
 
   const startBot = () => {
     console.log("[insta-bot] 서버 시작...");
