@@ -1438,43 +1438,35 @@ export async function addNeighbors(params: {
         const GROUP_FULL_RE = /이웃\s*수가\s*초과|다른\s*그룹을?\s*선택|그룹의\s*이웃/;
 
         if (GROUP_FULL_RE.test(afterTxt)) {
-          //  ★네이버는 자동 처리가 전혀 없음 — 전부 수동: 경고 팝업의 '확인'을 눌러 닫은 뒤
-          //   그룹 목록에서 '다른(안 찬) 그룹'을 사람이 직접 골라 다시 신청해야 함.
-          //   → 봇이 이 수동 절차(①팝업 닫기 → ②다른 그룹 선택 → ③재신청)를 대신 반복 수행.
-          log(`[서이추] ⚠️ ${blogId} 그룹 가득참 → 팝업 닫고 다른 그룹 선택 후 재신청`);
-          // 경고 팝업(레이어)의 '확인' 클릭해 닫기 (폼 헤더의 '확인' submit과 구분)
-          const dismissPopup = async () => {
-            await page.evaluate(() => {
-              const els = Array.from(document.querySelectorAll("a,button")) as HTMLElement[];
-              const visible = (el: HTMLElement) => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
-              const btn = els.reverse().find(el => (el.textContent || "").trim() === "확인" && visible(el) &&
-                el.closest('[class*="pop"],[class*="layer"],[class*="lyr"],[class*="alert"],[class*="modal"],[role="dialog"]'));
-              if (btn) (btn as HTMLElement).click();
-            }).catch(() => {});
-          };
-          await dismissPopup();
-          await page.waitForTimeout(500);
-
-          // 그룹 드롭다운 옵션 수집 (가득 찬 '새 그룹'/안내 옵션 제외)
-          const groups = await page.$$eval("select option", (opts: any[]) =>
-            opts.map((o) => ({ text: (o.text || "").trim(), value: o.value }))
-          ).catch(() => [] as { text: string; value: string }[]);
-
+          //  ★네이버 실제 동작(테리 실측): 그룹이 가득 차면 "다른 그룹을 선택" 경고 팝업이 뜸.
+          //   팝업의 '확인'을 누르면 네이버가 다음 그룹으로 넘어가 재시도함. 그룹이 여러 개 다 차 있으면
+          //   팝업이 그룹 수만큼(때로 그 배수로) 여러 번 반복해서 뜸. 확인을 계속 눌러주면 빈 그룹을
+          //   만나 신청이 완료됨. 봇이 이 '확인'을 안 눌러 타임아웃으로 그냥 넘어갔던 것(=패스)이 문제.
+          //   → 팝업의 '확인'을 몇 번이든 반복 클릭해 빈 그룹까지 진행. 끝까지 없으면 이 블로그는 건너뜀.
+          log(`[서이추] ⚠️ ${blogId} 그룹 가득참 → 팝업 '확인' 반복 클릭(빈 그룹 찾을 때까지)`);
           let recovered = false;
-          for (const g of groups) {
-            if (!g.value || /새\s*그룹|그룹.*선택|^선택/.test(g.text)) continue; // 기본/가득 찬 그룹 건너뜀
-            try {
-              await page.selectOption("select", g.value).catch(() => {}); // 다른 그룹 직접 선택
-              await page.waitForTimeout(400);
-              await clickConfirm();                    // 재신청(폼 확인)
-              await page.waitForTimeout(1200);
-              afterTxt = await readBody();
-              if (!GROUP_FULL_RE.test(afterTxt)) { log(`[서이추] ✅ '${g.text}' 그룹으로 신청`); recovered = true; submitted = true; break; }
-              await dismissPopup();                    // 이 그룹도 가득참 → 팝업 닫고 다음 그룹
-              await page.waitForTimeout(400);
-            } catch {}
+          let clickCount = 0;
+          for (let i = 0; i < 24; i++) {   // 그룹 다수(최대 12개)×팝업 반복 여유
+            const clicked = await page.evaluate(() => {
+              const norm = (s: string) => (s || "").replace(/\s+/g, "");
+              const els = Array.from(document.querySelectorAll("a,button,span")) as HTMLElement[];
+              const visible = (el: HTMLElement) => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+              const inPopup = (el: HTMLElement) => !!el.closest('[class*="pop"],[class*="layer"],[class*="lyr"],[class*="alert"],[class*="modal"],[role="dialog"]');
+              // 경고 팝업(레이어) 안의 '확인'을 우선 클릭(폼 헤더의 '확인'과 구분)
+              let btn = els.find(el => norm(el.textContent || "") === "확인" && visible(el) && inPopup(el));
+              if (!btn) btn = [...els].reverse().find(el => norm(el.textContent || "") === "확인" && visible(el));
+              if (btn) { ((btn.closest("a,button") as HTMLElement) || btn).click(); return true; }
+              return false;
+            }).catch(() => false);
+            if (clicked) clickCount++;
+            await page.waitForTimeout(900);
+            afterTxt = await readBody();
+            if (!GROUP_FULL_RE.test(afterTxt)) { recovered = true; break; }  // 빈 그룹으로 넘어가 신청 완료
+            if (!clicked) break;   // 더 이상 누를 팝업 '확인'이 없음
           }
-          if (!recovered) throw new Error("모든 이웃 그룹이 가득 참 — 네이버 블로그에서 빈 이웃 그룹을 하나 만들어 주세요");
+          submitted = recovered;
+          if (recovered) log(`[서이추] ✅ ${blogId} 빈 그룹 찾아 신청(확인 ${clickCount}회)`);
+          if (!recovered) throw new Error("모든 이웃 그룹이 가득 참 — 건너뜀(네이버에 빈 이웃 그룹 필요)");
         }
 
         if (LIMIT_RE.test(afterTxt)) {
