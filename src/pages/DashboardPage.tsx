@@ -5190,11 +5190,11 @@ POST3: (제목)|(이유)
             )}
 
             {tab==="neighbor"&&(
-              <NeighborPage theme={theme as "dark"|"light"} userId={user.id} plan={user.plan} singleTab />
+              <NeighborPage theme={theme as "dark"|"light"} userId={user.id} plan={user.plan} singleTab initialNeighborUsed={neighborUsed} />
             )}
 
             {tab==="engage"&&(
-              <NeighborPage theme={theme as "dark"|"light"} userId={user.id} plan={user.plan} initialTab="engage" singleTab onEngageUsageChange={setEngageUsed} />
+              <NeighborPage theme={theme as "dark"|"light"} userId={user.id} plan={user.plan} initialTab="engage" singleTab onEngageUsageChange={setEngageUsed} initialEngageUsed={engageUsed} />
             )}
 
             {tab==="settings"&&(

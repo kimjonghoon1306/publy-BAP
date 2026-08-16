@@ -39,9 +39,22 @@ const CAMPAIGN_PRESETS = [
   `안녕하세요 😊 블로그 글 잘 보고 있어요! 서로이웃 신청드려요~ 혹시 무료 체험단·협찬에 관심 있으시면 '온종일체험단'(${CAMPAIGN_LINK}) 한번 놀러오세요 🎁`,
   `포스팅에 정성이 가득하네요 👍 서이추 해요! 맛집·뷰티·생활용품 무료 체험 원하시면 ${CAMPAIGN_LINK} 에서 신청할 수 있어요 :)`,
   `좋은 글 잘 읽었습니다 ✨ 이웃 신청드려요! 체험단 활동 좋아하시면 온종일체험단(${CAMPAIGN_LINK})도 추천드려요~`,
+  `반가워요~ 글 잘 보고 갑니다 😊 서로이웃해요! 무료 체험단 관심 있으시면 ${CAMPAIGN_LINK} 놀러오세요~`,
+  `블로그 분위기가 참 좋네요 🌿 이웃 신청할게요! 협찬·체험단 활동은 온종일체험단(${CAMPAIGN_LINK})에서 만나요 :)`,
+  `유익한 정보 감사합니다 🙌 서이추 신청드려요! 무료 체험 제품 받아보고 싶으시면 ${CAMPAIGN_LINK} 확인해보세요~`,
+  `꾸준한 포스팅 멋져요 👏 서로이웃 해요! 맛집·뷰티 체험단 찾으시면 온종일체험단(${CAMPAIGN_LINK}) 추천해요 🎁`,
+  `글 잘 보고 이웃 신청드려요 😄 혹시 체험단·협찬에 관심 있으신가요? ${CAMPAIGN_LINK} 에서 무료로 신청 가능해요!`,
+  `안녕하세요! 자주 들를게요 ☺️ 서이추 신청드립니다~ 무료 체험단 소식은 온종일체험단(${CAMPAIGN_LINK})에서 받아보세요`,
+  `포스팅 잘 봤어요 💕 서로이웃 신청해요! 협찬 제품 무료로 받고 싶으시면 ${CAMPAIGN_LINK} 놀러오세요~`,
+  `좋은 이웃이 되고 싶어 신청드려요 🤝 체험단 활동 관심 있으시면 온종일체험단(${CAMPAIGN_LINK})도 함께해요!`,
 ];
+// 기본 멘트(복원용) — 사용자가 수정해도 이 값으로 되돌릴 수 있게 상수로 보관
+const DEFAULT_SINGLE_MSG = "안녕하세요! 좋은 글 잘 읽고 갑니다. 서이추 신청드려요 😊";
+const DEFAULT_MULTI_MSGS = "안녕하세요! 좋은 글 잘 읽고 갑니다. 서이추 신청드려요 😊\n공감가는 글이 많네요. 서이추 해요!\n좋은 정보 잘 보고 갑니다. 이웃 신청드려요^^";
 interface EngageResult { keyword: string; blogId: string; postUrl: string; liked: boolean; commented: boolean; status: "success"|"fail"|"skip"|"pending"|"running"; message: string; }
-interface Props { theme: "dark"|"light"; userId?: string; plan?: string; initialTab?: "neighbor"|"engage"; singleTab?: boolean; onEngageUsageChange?: (used:number)=>void; }
+// 상단·사이드바 배지와 동일한 플랜별 하루 한도 (lib/supabase.ts의 NEIGHBOR/ENGAGE_DAILY_LIMIT와 일치)
+const DAILY_LIMIT_BY_PLAN: Record<string, number> = { free: 10, basic: 50, pro: 100, admin: 9999 };
+interface Props { theme: "dark"|"light"; userId?: string; plan?: string; initialTab?: "neighbor"|"engage"; singleTab?: boolean; onEngageUsageChange?: (used:number)=>void; initialNeighborUsed?: number; initialEngageUsed?: number; }
 
 /* ── 내 이웃 키워드 분석 카드 (서이추·공감댓글 공용) ── */
 const KeywordAnalyzer = ({ keywords, loading, onAnalyze, onPick }: {
@@ -180,7 +193,7 @@ const GuideModal = ({ tab, onClose }: { tab: "neighbor"|"engage"; onClose: () =>
 };
 
 /* ── 메인 컴포넌트 ── */
-export default function NeighborPage({ theme, userId, plan = "free", initialTab, singleTab, onEngageUsageChange }: Props) {
+export default function NeighborPage({ theme, userId, plan = "free", initialTab, singleTab, onEngageUsageChange, initialNeighborUsed = 0, initialEngageUsed = 0 }: Props) {
   const [tab, setTab] = useState<"neighbor"|"engage">(initialTab || "neighbor");
   const [showGuide, setShowGuide] = useState(false);
 
@@ -196,11 +209,11 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
   const [botOnline, setBotOnline] = useState(false);
 
   /* 서이추 state */
-  const [quotaUsed, setQuotaUsed] = useState(0);
-  const [quotaLimit, setQuotaLimit] = useState(0);
-  /* 계정 보호용 오늘 서이추 안전 한도(자정 리셋, 100건) */
-  const [dailyDone, setDailyDone] = useState(0);
-  const SAFE_DAILY = 100;
+  const [quotaUsed, setQuotaUsed] = useState(initialNeighborUsed);
+  const [quotaLimit, setQuotaLimit] = useState(DAILY_LIMIT_BY_PLAN[plan] ?? 10);
+  // 공감·댓글 사용량 (상단 배지 engageUsed와 동일 소스)
+  const [eUsed, setEUsed] = useState(initialEngageUsed);
+  const eLimit = DAILY_LIMIT_BY_PLAN[plan] ?? 10;
   const [keywords, setKeywords] = useState("");
   const [countPerKw, setCountPerKw] = useState(34);
   const [dailyLimit, setDailyLimit] = useState(100);
@@ -225,8 +238,8 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
   const [activeDays, setActiveDays] = useState<number>(30);
   const [excludeMarket, setExcludeMarket] = useState(true);
   const [msgMode, setMsgMode] = useState<"single"|"multi">("single");
-  const [singleMsg, setSingleMsg] = useState("안녕하세요! 좋은 글 잘 읽고 갑니다. 서이추 신청드려요 😊");
-  const [multiMsgs, setMultiMsgs] = useState("안녕하세요! 좋은 글 잘 읽고 갑니다. 서이추 신청드려요 😊\n공감가는 글이 많네요. 서이추 해요!\n좋은 정보 잘 보고 갑니다. 이웃 신청드려요^^");
+  const [singleMsg, setSingleMsg] = useState(DEFAULT_SINGLE_MSG);
+  const [multiMsgs, setMultiMsgs] = useState(DEFAULT_MULTI_MSGS);
   const [msgIndex, setMsgIndex] = useState(0);
   const [targets, setTargets] = useState<Target[]>([]);
   const [results, setResults] = useState<WorkResult[]>([]);
@@ -314,9 +327,9 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
         .then(d => { if (d.exists) setAccounts(p => p.map(a => a.accountId === acc.accountId ? { ...a, sessionOk: true } : a)); })
         .catch(() => {});
     });
-    const first = accounts[0];
-    if (first) botFetch(`${BOT}/api/daily/${first.accountId}`).then(r => r.json())
-      .then(d => { if (typeof d.count === "number") setDailyDone(d.count); }).catch(() => {});
+    // 상단·사이드바와 같은 원래 서이추 한도(플랜별)를 초기 로드 → 게이지 연동
+    if (userId) botFetch(`${BOT}/api/quota/${userId}`).then(r => r.json())
+      .then(d => { if (d.ok) { setQuotaUsed(d.used); setQuotaLimit(d.limit); } }).catch(() => {});
   }, []);
 
   /* 계정 핸들러 */
@@ -372,9 +385,17 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
   };
 
   /* 서이추 수집 */
-  const applyCampaignPreset = () => {
-    setMsgMode("multi");
-    setMultiMsgs(CAMPAIGN_PRESETS.join("\n"));
+  // 체험단 멘트 채우기 — 매번 무작위로 섞어 채움 (도배 회피)
+  //  단일 멘트 모드: 랜덤 1개를 넣음 / 여러 멘트 모드: count개를 넣음
+  const applyCampaignPreset = (count = 5) => {
+    const shuffled = [...CAMPAIGN_PRESETS].sort(() => Math.random() - 0.5);
+    if (msgMode === "single") setSingleMsg(shuffled[0]);
+    else setMultiMsgs(shuffled.slice(0, count).join("\n"));
+  };
+  // 기본 멘트로 되돌리기 (수정한 걸 원래대로)
+  const restoreDefaultMsg = () => {
+    if (msgMode === "single") setSingleMsg(DEFAULT_SINGLE_MSG);
+    else setMultiMsgs(DEFAULT_MULTI_MSGS);
   };
 
   const handleCrawl = async () => {
@@ -420,7 +441,6 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
         if (d.type === "quota_info") { setQuotaUsed(d.used); setQuotaLimit(d.limit); }
         if (d.type === "quota_exceeded") { addLog("🚫 오늘 한도 초과!"); outcome = "limit"; setWorking(false); es.close(); return; }
         if (d.type === "result") { setResults(p => p.map(r => r.blogId === d.blogId ? { ...r, status: d.status, message: d.message } : r)); if (d.status === "success") setQuotaUsed(q => q + 1); }
-        if (d.type === "daily_limit") { setDailyDone(d.count); if (d.count >= d.limit) { addLog(`🛑 오늘 안전 한도(${d.limit}건) 도달 — 계정 보호를 위해 자동 정지했어요. 자정 지나면 다시 돌릴 수 있어요.`); outcome = "limit"; setWorking(false); } }
         if (d.type === "progress") { setDoneCnt(d.done); setFailCnt(d.fail); }
         if (d.type === "done") { addLog("🎉 작업 완료!"); setWorking(false); es.close(); }
         if (d.type === "error") { addLog(`❌ 오류: ${d.msg}`); outcome = "error"; setWorking(false); es.close(); }
@@ -529,7 +549,7 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
     es.onmessage = e => {
       const d = JSON.parse(e.data);
       if (d.type === "log") addELog(d.msg);
-      if (d.type === "quota_info" && Number.isFinite(Number(d.used))) onEngageUsageChange?.(Number(d.used));
+      if (d.type === "quota_info" && Number.isFinite(Number(d.used))) { setEUsed(Number(d.used)); onEngageUsageChange?.(Number(d.used)); }
       if (d.type === "result") setEResults(p => p.map(r => r.blogId === d.blogId ? { ...r, status: d.status, postUrl: d.postUrl || "", liked: d.liked, commented: d.commented, message: d.message } : r));
       if (d.type === "progress") { setEDoneCnt(d.done); setEFailCnt(d.fail); }
       if (d.type === "done") { addELog("🎉 작업 완료!"); setEWorking(false); es.close(); }
@@ -639,7 +659,7 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
 
       {/* ═══════════ 서이추 탭 ═══════════ */}
       {tab === "neighbor" && (
-        <div style={{ display: "grid", gridTemplateColumns: "380px 1fr", gap: 16, alignItems: "start" }}>
+        <div style={{ display: "grid", gridTemplateColumns: "400px 1fr", gap: 20, alignItems: "start" }}>
           {/* 왼쪽 */}
           <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
             <AccountCard accounts={accounts} onLogin={handleLogin} onAdd={handleAddAccount} onRemove={handleRemoveAccount} onChange={handleAccountChange} />
@@ -715,14 +735,14 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
             </div>
 
             <div className="card" style={{ padding: "18px 20px" }}>
-              <div className="card-title" style={{ marginBottom: 14, fontSize: 15, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+              <div className="card-title" style={{ marginBottom: 14, fontSize: 15, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
                 <span>💬 서이추 멘트</span>
-                <button onClick={applyCampaignPreset} title="체험단 모집 문구 3종을 자동으로 채웁니다 (순환 사용)"
-                  style={{ padding: "6px 12px", borderRadius: 8, border: "1px solid var(--accent)", background: "var(--accent-bg)", color: "var(--accent-text)", cursor: "pointer", fontSize: 11.5, fontWeight: 700, fontFamily: "inherit", display: "flex", alignItems: "center", gap: 4, transition: "all .15s" }}
-                  onMouseEnter={e => { e.currentTarget.style.transform = "translateY(-1px)"; e.currentTarget.style.boxShadow = "0 3px 10px var(--accent-bg)"; }}
-                  onMouseLeave={e => { e.currentTarget.style.transform = ""; e.currentTarget.style.boxShadow = ""; }}
+                <button onClick={restoreDefaultMsg} title="수정한 멘트를 처음 기본 멘트로 되돌립니다"
+                  style={{ padding: "6px 12px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--card2)", color: "var(--text2)", cursor: "pointer", fontSize: 11.5, fontWeight: 700, fontFamily: "inherit", display: "flex", alignItems: "center", gap: 4, transition: "all .15s" }}
+                  onMouseEnter={e => (e.currentTarget.style.borderColor = "var(--accent)")}
+                  onMouseLeave={e => (e.currentTarget.style.borderColor = "var(--border)")}
                   onMouseDown={e => (e.currentTarget.style.transform = "scale(.96)")}
-                  onMouseUp={e => (e.currentTarget.style.transform = "translateY(-1px)")}>🎁 체험단 멘트</button>
+                  onMouseUp={e => (e.currentTarget.style.transform = "")}>↩︎ 기본값 복원</button>
               </div>
               <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
                 {(["single", "multi"] as const).map(m => (
@@ -731,12 +751,35 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
                   </button>
                 ))}
               </div>
+              {/* 체험단 멘트 채우기 — 색상 강조 박스. 단일=1개 넣기/다른문구, 여러=개수선택+섞기 */}
+              <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 10, flexWrap: "wrap", padding: "10px 12px", borderRadius: 12, background: "var(--accent-bg)", border: "1px solid var(--accent-border)" }}>
+                <span style={{ fontSize: 12, color: "var(--accent-text)", fontWeight: 800, marginRight: 2, display: "flex", alignItems: "center", gap: 4 }}>🎁 체험단 멘트</span>
+                {msgMode === "single" ? (
+                  <>
+                    <button onClick={() => applyCampaignPreset()} title="체험단 홍보 멘트를 넣습니다"
+                      style={{ padding: "6px 14px", borderRadius: 8, border: "none", background: "var(--accent)", color: "#000", cursor: "pointer", fontSize: 11.5, fontWeight: 800, fontFamily: "inherit", transition: "all .15s" }}
+                      onMouseDown={e => (e.currentTarget.style.transform = "scale(.94)")} onMouseUp={e => (e.currentTarget.style.transform = "")} onMouseLeave={e => (e.currentTarget.style.transform = "")}>넣기</button>
+                    <button onClick={() => applyCampaignPreset()} title="다른 문구로 바꾸기"
+                      style={{ padding: "6px 12px", borderRadius: 8, border: "1px solid var(--accent)", background: "transparent", color: "var(--accent-text)", cursor: "pointer", fontSize: 11.5, fontWeight: 700, fontFamily: "inherit" }}>🔀 다른 문구</button>
+                  </>
+                ) : (
+                  <>
+                    {[3, 5, 8].map(n => (
+                      <button key={n} onClick={() => applyCampaignPreset(n)} title={`체험단 멘트 ${n}개를 무작위로 골라 채웁니다`}
+                        style={{ padding: "6px 13px", borderRadius: 8, border: "none", background: "var(--accent)", color: "#000", cursor: "pointer", fontSize: 11.5, fontWeight: 800, fontFamily: "inherit", transition: "all .15s" }}
+                        onMouseDown={e => (e.currentTarget.style.transform = "scale(.94)")} onMouseUp={e => (e.currentTarget.style.transform = "")} onMouseLeave={e => (e.currentTarget.style.transform = "")}>{n}개</button>
+                    ))}
+                    <button onClick={() => applyCampaignPreset(5)} title="다른 조합으로 다시 섞기"
+                      style={{ padding: "6px 12px", borderRadius: 8, border: "1px solid var(--accent)", background: "transparent", color: "var(--accent-text)", cursor: "pointer", fontSize: 11.5, fontWeight: 700, fontFamily: "inherit" }}>🔀 섞기</button>
+                  </>
+                )}
+              </div>
               {msgMode === "single" ? (
                 <textarea className="inp" rows={3} value={singleMsg} onChange={e => setSingleMsg(e.target.value)} style={{ resize: "vertical", fontSize: 13, lineHeight: 1.7, padding: "12px 14px" }} />
               ) : (
                 <>
-                  <textarea className="inp" rows={5} value={multiMsgs} onChange={e => setMultiMsgs(e.target.value)} style={{ resize: "vertical", fontSize: 13, lineHeight: 1.7, padding: "12px 14px" }} placeholder="줄바꿈으로 구분 → 순서대로 사용됩니다" />
-                  <div style={{ fontSize: 11, color: "var(--text3)", marginTop: 6 }}>총 {multiMsgs.split("\n").filter(l => l.trim()).length}개 멘트 등록됨</div>
+                  <textarea className="inp" rows={6} value={multiMsgs} onChange={e => setMultiMsgs(e.target.value)} style={{ resize: "vertical", fontSize: 13, lineHeight: 1.7, padding: "12px 14px" }} placeholder="줄바꿈으로 구분 → 순서대로 사용됩니다" />
+                  <div style={{ fontSize: 11, color: "var(--text3)", marginTop: 6 }}>총 {multiMsgs.split("\n").filter(l => l.trim()).length}개 멘트 등록됨 · 전체 체험단 멘트 {CAMPAIGN_PRESETS.length}종</div>
                 </>
               )}
             </div>
@@ -793,59 +836,42 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
 
           {/* 오른쪽 */}
           <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-            {/* ★계정 보호용 오늘 안전 한도 (자정 리셋, 100건). 하루종일 보는 화면이라 크게·직관적으로 */}
-            {(() => {
-              const pct = Math.min(100, (dailyDone / SAFE_DAILY) * 100);
-              const danger = dailyDone >= SAFE_DAILY;
-              const warn = dailyDone >= SAFE_DAILY * 0.8;
+            {/* 오늘 서이추 사용량 — 상단·사이드바 배지와 동일한 원래 한도(플랜별). 크게·직관적으로 */}
+            {userId && quotaLimit > 0 && (() => {
+              const pct = Math.min(100, (quotaUsed / quotaLimit) * 100);
+              const danger = quotaUsed >= quotaLimit;
+              const warn = quotaUsed >= quotaLimit * 0.8;
               const bar = danger ? "#ff5363" : warn ? "#ffb020" : "#00d68f";
               return (
                 <div style={{ padding: "20px 24px", borderRadius: 20, background: "var(--card)", border: `1.5px solid ${danger ? "rgba(255,83,99,.45)" : warn ? "rgba(255,176,32,.4)" : "var(--border)"}`, boxShadow: "0 2px 14px rgba(0,0,0,.04)" }}>
                   <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", marginBottom: 14 }}>
                     <div>
                       <div style={{ fontSize: 13, color: "var(--text3)", fontWeight: 700, marginBottom: 6, display: "flex", alignItems: "center", gap: 6 }}>
-                        🛡️ 오늘 계정 안전 한도 <span style={{ fontSize: 11, fontWeight: 600, color: "var(--text3)", opacity: .8 }}>(자정 자동 리셋)</span>
+                        🛡️ 오늘 서이추 사용량 <span style={{ fontSize: 11, fontWeight: 600, color: "var(--text3)", opacity: .8 }}>(자정 자동 리셋)</span>
                       </div>
                       <div style={{ fontSize: 40, fontWeight: 900, color: bar, fontFamily: "'Space Grotesk',sans-serif", lineHeight: 1 }}>
-                        {dailyDone}<span style={{ fontSize: 20, color: "var(--text3)", fontWeight: 600 }}> / {SAFE_DAILY}건</span>
+                        {quotaUsed}<span style={{ fontSize: 20, color: "var(--text3)", fontWeight: 600 }}> / {quotaLimit}건</span>
                       </div>
                     </div>
                     <div style={{ textAlign: "right" }}>
-                      <div style={{ fontSize: 26, fontWeight: 900, color: bar, fontFamily: "'Space Grotesk',sans-serif", lineHeight: 1 }}>{danger ? "마감" : `${SAFE_DAILY - dailyDone}건`}</div>
+                      <div style={{ fontSize: 26, fontWeight: 900, color: bar, fontFamily: "'Space Grotesk',sans-serif", lineHeight: 1 }}>{danger ? "마감" : `${quotaLimit - quotaUsed}건`}</div>
                       <div style={{ fontSize: 12, color: "var(--text3)", fontWeight: 600, marginTop: 4 }}>{danger ? "자정까지 대기" : "남음"}</div>
                     </div>
                   </div>
                   <div style={{ height: 12, borderRadius: 99, background: "var(--border)", overflow: "hidden" }}>
                     <div style={{ height: "100%", borderRadius: 99, width: `${pct}%`, background: `linear-gradient(90deg, ${bar}, ${bar}cc)`, transition: "width .5s ease" }} />
                   </div>
-                  {danger && <div style={{ fontSize: 12.5, color: "var(--danger)", fontWeight: 700, marginTop: 10 }}>오늘 한도에 도달해 자동 정지했어요. 계정 보호를 위해 자정 이후 다시 돌려주세요.</div>}
+                  {danger && <div style={{ fontSize: 12.5, color: "var(--danger)", fontWeight: 700, marginTop: 10 }}>오늘 한도에 도달했어요. 계정 보호를 위해 자정 이후 다시 돌려주세요.</div>}
                   {!danger && warn && <div style={{ fontSize: 12.5, color: "#c88010", fontWeight: 600, marginTop: 10 }}>거의 다 찼어요. 조금만 더 하면 오늘은 쉬는 게 안전해요.</div>}
                 </div>
               );
             })()}
 
-            {userId && quotaLimit > 0 && (
-              <div style={{ padding: "16px 20px", borderRadius: 16, background: "var(--card)", border: `1.5px solid ${quotaUsed >= quotaLimit ? "rgba(255,83,99,.4)" : "var(--border)"}`, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                <div>
-                  <div style={{ fontSize: 12, color: "var(--text3)", fontWeight: 600, marginBottom: 4 }}>오늘 서이추 사용량</div>
-                  <div style={{ fontSize: 24, fontWeight: 900, color: quotaUsed >= quotaLimit ? "var(--danger)" : "var(--accent-text)", fontFamily: "'Space Grotesk',sans-serif" }}>
-                    {quotaUsed} <span style={{ fontSize: 14, color: "var(--text3)", fontWeight: 500 }}>/ {quotaLimit}명</span>
-                  </div>
-                </div>
-                <div style={{ width: 70 }}>
-                  <div style={{ height: 8, borderRadius: 99, background: "var(--border)", overflow: "hidden" }}>
-                    <div style={{ height: "100%", borderRadius: 99, width: `${Math.min(100, (quotaUsed / quotaLimit) * 100)}%`, background: quotaUsed >= quotaLimit ? "var(--danger)" : "var(--accent)", transition: "width .4s" }} />
-                  </div>
-                  <div style={{ fontSize: 11, color: "var(--text3)", textAlign: "center", marginTop: 4 }}>{quotaUsed >= quotaLimit ? "오늘 마감" : `${quotaLimit - quotaUsed}명 남음`}</div>
-                </div>
-              </div>
-            )}
-
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
               {[{ label: "수집된 블로그", val: targets.length, color: "var(--info)" }, { label: "신청 완료", val: doneCnt, color: "var(--success)" }, { label: "실패", val: failCnt, color: "var(--danger)" }].map(({ label, val, color }) => (
-                <div key={label} style={{ padding: "18px", borderRadius: 16, background: "var(--card)", border: "1px solid var(--border)", textAlign: "center" }}>
-                  <div style={{ fontSize: 32, fontWeight: 900, color, fontFamily: "'Space Grotesk',sans-serif", lineHeight: 1 }}>{val}</div>
-                  <div style={{ fontSize: 12, color: "var(--text3)", marginTop: 6, fontWeight: 600 }}>{label}</div>
+                <div key={label} style={{ padding: "24px 18px", borderRadius: 18, background: "var(--card)", border: "1px solid var(--border)", textAlign: "center", boxShadow: "0 2px 10px rgba(0,0,0,.03)" }}>
+                  <div style={{ fontSize: 40, fontWeight: 900, color, fontFamily: "'Space Grotesk',sans-serif", lineHeight: 1 }}>{val}</div>
+                  <div style={{ fontSize: 12.5, color: "var(--text3)", marginTop: 8, fontWeight: 600 }}>{label}</div>
                 </div>
               ))}
             </div>
@@ -856,9 +882,13 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
                 {results.length > 0 && <button onClick={handleSaveHistory} style={{ padding: "6px 14px", borderRadius: 9, border: "1px solid var(--border)", background: "var(--card2)", color: "var(--text2)", cursor: "pointer", fontSize: 12, fontWeight: 700, fontFamily: "inherit" }}>💾 저장</button>}
               </div>
               {results.length === 0 ? (
-                <div style={{ padding: "48px 0", textAlign: "center", color: "var(--text3)", fontSize: 14 }}>추출 후 결과가 여기에 표시됩니다</div>
+                <div style={{ padding: "72px 20px", textAlign: "center", color: "var(--text3)" }}>
+                  <div style={{ fontSize: 44, marginBottom: 12, opacity: .5 }}>📋</div>
+                  <div style={{ fontSize: 15, fontWeight: 600, color: "var(--text2)" }}>아직 작업 내역이 없어요</div>
+                  <div style={{ fontSize: 13, marginTop: 6 }}>블로그를 추출하고 서이추를 시작하면 여기에 실시간으로 표시됩니다</div>
+                </div>
               ) : (
-                <div style={{ overflowX: "auto", maxHeight: 380, overflowY: "auto" }}>
+                <div style={{ overflowX: "auto", maxHeight: 520, overflowY: "auto" }}>
                   <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
                     <thead><tr style={{ background: "var(--bg2)", position: "sticky", top: 0 }}>
                       {["키워드", "블로거", "결과"].map(h => <th key={h} style={{ padding: "10px 14px", textAlign: "left", fontWeight: 700, color: "var(--text3)", borderBottom: "1px solid var(--border)", whiteSpace: "nowrap" }}>{h}</th>)}
@@ -894,7 +924,7 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
 
       {/* ═══════════ 공감·댓글 탭 ═══════════ */}
       {tab === "engage" && (
-        <div style={{ display: "grid", gridTemplateColumns: "380px 1fr", gap: 16, alignItems: "start" }}>
+        <div style={{ display: "grid", gridTemplateColumns: "400px 1fr", gap: 20, alignItems: "start" }}>
           {/* 왼쪽 */}
           <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
             <AccountCard accounts={accounts} onLogin={handleLogin} onAdd={handleAddAccount} onRemove={handleRemoveAccount} onChange={handleAccountChange} />
@@ -1035,11 +1065,42 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
 
           {/* 오른쪽 */}
           <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+            {/* 오늘 공감·댓글 사용량 — 상단·사이드바 배지와 동일한 원래 한도(플랜별) */}
+            {userId && eLimit > 0 && (() => {
+              const pct = Math.min(100, (eUsed / eLimit) * 100);
+              const danger = eUsed >= eLimit;
+              const warn = eUsed >= eLimit * 0.8;
+              const bar = danger ? "#ff5363" : warn ? "#ffb020" : "#00d68f";
+              return (
+                <div style={{ padding: "20px 24px", borderRadius: 20, background: "var(--card)", border: `1.5px solid ${danger ? "rgba(255,83,99,.45)" : warn ? "rgba(255,176,32,.4)" : "var(--border)"}`, boxShadow: "0 2px 14px rgba(0,0,0,.04)" }}>
+                  <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", marginBottom: 14 }}>
+                    <div>
+                      <div style={{ fontSize: 13, color: "var(--text3)", fontWeight: 700, marginBottom: 6, display: "flex", alignItems: "center", gap: 6 }}>
+                        ❤️ 오늘 공감·댓글 사용량 <span style={{ fontSize: 11, fontWeight: 600, color: "var(--text3)", opacity: .8 }}>(자정 자동 리셋)</span>
+                      </div>
+                      <div style={{ fontSize: 40, fontWeight: 900, color: bar, fontFamily: "'Space Grotesk',sans-serif", lineHeight: 1 }}>
+                        {eUsed}<span style={{ fontSize: 20, color: "var(--text3)", fontWeight: 600 }}> / {eLimit}건</span>
+                      </div>
+                    </div>
+                    <div style={{ textAlign: "right" }}>
+                      <div style={{ fontSize: 26, fontWeight: 900, color: bar, fontFamily: "'Space Grotesk',sans-serif", lineHeight: 1 }}>{danger ? "마감" : `${eLimit - eUsed}건`}</div>
+                      <div style={{ fontSize: 12, color: "var(--text3)", fontWeight: 600, marginTop: 4 }}>{danger ? "자정까지 대기" : "남음"}</div>
+                    </div>
+                  </div>
+                  <div style={{ height: 12, borderRadius: 99, background: "var(--border)", overflow: "hidden" }}>
+                    <div style={{ height: "100%", borderRadius: 99, width: `${pct}%`, background: `linear-gradient(90deg, ${bar}, ${bar}cc)`, transition: "width .5s ease" }} />
+                  </div>
+                  {danger && <div style={{ fontSize: 12.5, color: "var(--danger)", fontWeight: 700, marginTop: 10 }}>오늘 한도에 도달했어요. 계정 보호를 위해 자정 이후 다시 돌려주세요.</div>}
+                  {!danger && warn && <div style={{ fontSize: 12.5, color: "#c88010", fontWeight: 600, marginTop: 10 }}>거의 다 찼어요. 조금만 더 하면 오늘은 쉬는 게 안전해요.</div>}
+                </div>
+              );
+            })()}
+
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
               {[{ label: "수집된 블로그", val: eTargets.length, color: "var(--info)" }, { label: "작업 완료", val: eDoneCnt, color: "var(--success)" }, { label: "실패", val: eFailCnt, color: "var(--danger)" }].map(({ label, val, color }) => (
-                <div key={label} style={{ padding: "18px", borderRadius: 16, background: "var(--card)", border: "1px solid var(--border)", textAlign: "center" }}>
-                  <div style={{ fontSize: 32, fontWeight: 900, color, fontFamily: "'Space Grotesk',sans-serif", lineHeight: 1 }}>{val}</div>
-                  <div style={{ fontSize: 12, color: "var(--text3)", marginTop: 6, fontWeight: 600 }}>{label}</div>
+                <div key={label} style={{ padding: "24px 18px", borderRadius: 18, background: "var(--card)", border: "1px solid var(--border)", textAlign: "center", boxShadow: "0 2px 10px rgba(0,0,0,.03)" }}>
+                  <div style={{ fontSize: 40, fontWeight: 900, color, fontFamily: "'Space Grotesk',sans-serif", lineHeight: 1 }}>{val}</div>
+                  <div style={{ fontSize: 12.5, color: "var(--text3)", marginTop: 8, fontWeight: 600 }}>{label}</div>
                 </div>
               ))}
             </div>
@@ -1050,9 +1111,13 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
                 {eResults.length > 0 && <button onClick={handleEngageSaveHistory} style={{ padding: "6px 14px", borderRadius: 9, border: "1px solid var(--border)", background: "var(--card2)", color: "var(--text2)", cursor: "pointer", fontSize: 12, fontWeight: 700, fontFamily: "inherit" }}>💾 저장</button>}
               </div>
               {eResults.length === 0 ? (
-                <div style={{ padding: "48px 0", textAlign: "center", color: "var(--text3)", fontSize: 14 }}>추출 후 결과가 여기에 표시됩니다</div>
+                <div style={{ padding: "72px 20px", textAlign: "center", color: "var(--text3)" }}>
+                  <div style={{ fontSize: 44, marginBottom: 12, opacity: .5 }}>❤️</div>
+                  <div style={{ fontSize: 15, fontWeight: 600, color: "var(--text2)" }}>아직 작업 내역이 없어요</div>
+                  <div style={{ fontSize: 13, marginTop: 6 }}>블로그를 추출하고 공감·댓글을 시작하면 여기에 실시간으로 표시됩니다</div>
+                </div>
               ) : (
-                <div style={{ overflowX: "auto", maxHeight: 400, overflowY: "auto" }}>
+                <div style={{ overflowX: "auto", maxHeight: 520, overflowY: "auto" }}>
                   <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
                     <thead><tr style={{ background: "var(--bg2)", position: "sticky", top: 0 }}>
                       {["키워드", "블로그 ID", "공감", "댓글", "결과"].map(h => <th key={h} style={{ padding: "10px 14px", textAlign: "left", fontWeight: 700, color: "var(--text3)", borderBottom: "1px solid var(--border)", whiteSpace: "nowrap" }}>{h}</th>)}
