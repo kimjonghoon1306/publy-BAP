@@ -47,7 +47,7 @@ const WRITE_AI_LIST = [
 ];
 const IMAGE_AI_LIST = [
   {id:"openai_img",label:"DALL-E 3",         sub:"유료",placeholder:"sk-...", storageKey:"publy_openai_key",   link:"https://platform.openai.com/api-keys",     color:"#10A37F",logo:"O"},
-  {id:"replicate", label:"Flux (Replicate)", sub:"유료",placeholder:"r8_...", storageKey:"publy_replicate_key",link:"https://replicate.com/account/api-tokens", color:"#8B5CF6",logo:"R"},
+  {id:"replicate", label:"Flux (Replicate)", sub:"유료",placeholder:"r8_...", storageKey:"publy_replicate_key",link:"https://replicate.com/account", color:"#8B5CF6",logo:"R"},
 ];
 const WRITE_STYLES = [
   {id:"감성일기", i:"📔", desc:"감성·경험 중심 에세이체"},

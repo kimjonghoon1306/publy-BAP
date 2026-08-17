@@ -32,7 +32,7 @@ const ADM_WRITE_AI = [
 ];
 const ADM_IMAGE_AI = [
   {id:"openai_img",label:"DALL-E 3",sub:"유료",placeholder:"sk-...",storageKey:"publy_adm_openai_key",link:"https://platform.openai.com/api-keys",color:"#10A37F",logo:"O"},
-  {id:"replicate",label:"Flux (Replicate)",sub:"유료",placeholder:"r8_...",storageKey:"publy_adm_replicate_key",link:"https://replicate.com/account/api-tokens",color:"#8B5CF6",logo:"R"},
+  {id:"replicate",label:"Flux (Replicate)",sub:"유료",placeholder:"r8_...",storageKey:"publy_adm_replicate_key",link:"https://replicate.com/account",color:"#8B5CF6",logo:"R"},
 ];
 const PLAN_QUOTA: Record<string,number> = {
   free:  PLAN_CONFIG.free.dailyPublish,
