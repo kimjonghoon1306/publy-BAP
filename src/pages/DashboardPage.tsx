@@ -1129,13 +1129,23 @@ Output format (JSON array only, no other text):
         const cleaned=(b as TextBlock).content
           .replace(/\[FAQ시작\][\s\S]*?\[FAQ끝\]/g,"").replace(/\[참고자료시작\][\s\S]*?\[참고자료끝\]/g,"").replace(/\[관련글시작\][\s\S]*?\[관련글끝\]/g,"").trim();
         if(cleaned){
-          const html=cleaned.split("\n").map(line=>{
-            const t=line.trim();if(!t)return"";
-            if(/^##\s+/.test(t))return`<h2 style="font-size:20px;font-weight:800;margin:28px 0 12px;color:#111;border-bottom:2px solid #eee;padding-bottom:8px">${inlineFmt(t.replace(/^##\s+/,""))}</h2>`;
-            if(/^###\s+/.test(t))return`<h3 style="font-size:17px;font-weight:700;margin:20px 0 8px;color:#1a1a1a;border-left:4px solid #2563eb;padding-left:10px">${inlineFmt(t.replace(/^###\s+/,""))}</h3>`;
-            if(/^---+$/.test(t))return`<hr style="border:none;border-top:2px solid #eee;margin:20px 0">`;
-            return`<p style="line-height:1.9;margin:0 0 14px;color:#333;font-size:16px">${inlineFmt(t)}</p>`;
-          }).filter(Boolean).join("\n");
+          // 모바일 가독성: 긴 문단은 2문장씩 끊어 별도 <p>로 나누고, 문단 간격을 넉넉히 준다
+          const splitForReadability=(t:string):string[]=>{
+            if(t.length<=130)return[t];
+            const sents=t.match(/[^.!?。！？]+[.!?。！？]+["'”’)\]]*\s*|[^.!?。！？]+$/g)||[t];
+            const groups:string[]=[];
+            for(let i=0;i<sents.length;i+=2)groups.push(sents.slice(i,i+2).join("").trim());
+            return groups.filter(Boolean);
+          };
+          const htmlLines:string[]=[];
+          cleaned.split("\n").forEach(line=>{
+            const t=line.trim();if(!t)return;
+            if(/^##\s+/.test(t)){htmlLines.push(`<h2 style="font-size:20px;font-weight:800;margin:36px 0 14px;color:#111;border-bottom:2px solid #eee;padding-bottom:8px">${inlineFmt(t.replace(/^##\s+/,""))}</h2>`);return;}
+            if(/^###\s+/.test(t)){htmlLines.push(`<h3 style="font-size:17px;font-weight:700;margin:24px 0 10px;color:#1a1a1a;border-left:4px solid #2563eb;padding-left:10px">${inlineFmt(t.replace(/^###\s+/,""))}</h3>`);return;}
+            if(/^---+$/.test(t)){htmlLines.push(`<hr style="border:none;border-top:2px solid #eee;margin:24px 0">`);return;}
+            splitForReadability(t).forEach(p=>htmlLines.push(`<p style="line-height:1.95;margin:0 0 24px;color:#333;font-size:16px">${inlineFmt(p)}</p>`));
+          });
+          const html=htmlLines.join("\n");
           if(html)parts.push(html);
         }
       }else if(b.type==="image"&&!afterSection){
@@ -1832,7 +1842,8 @@ Output format (JSON array only, no other text):
 
   function placeOnPartnerProduct(generatedBody:string, product:OnPartnerProduct):string{
     const disclosure="※ 이 글에는 제휴 링크가 포함되어 있으며, 구매 시 작성자에게 일정 수수료가 발생할 수 있습니다.";
-    const productCard=`🛒 ${product.name}${product.price?`\n가격: ${product.price.toLocaleString("ko-KR")}원`:""}\n직접 확인한 내용과 상품 정보를 함께 비교해보세요.\n\n${product.partnerUrl}`;
+    // OG 카드가 상품 이미지·이름·가격을 보여주므로 본문엔 짧은 안내 + 링크만(문맥 안 끊기게 자체 문단으로).
+    const productCard=`👀 이 글에서 소개한 '${product.name}', 여기서 바로 확인할 수 있어요 👇\n${product.partnerUrl}`;
     // 상품 링크는 어떤 위치 옵션에서도 FAQ·질문답변·관련글·해시태그 아래로 내려가지 않는다.
     const marker=generatedBody.search(/\n?(?:\[FAQ시작\]|\[관련글시작\]|(?:질문\s*답변|Q&A|큐앤에이|해시태그)\s*:)/i);
     const main=(marker>=0?generatedBody.slice(0,marker):generatedBody).trim();
@@ -2070,15 +2081,22 @@ ${body}`;
     }
     try{
       showToast(`🎨 Flow로 이미지 ${n}장 생성 중... (1~2분 소요)`,"info");
-      const r=await botFetch(`${BOT}/api/flow-generate`,{
+      const postOnce=()=>botFetch(`${BOT}/api/flow-generate`,{
         method:"POST",headers:{"Content-Type":"application/json"},
         body:JSON.stringify({prompts,captions:caps}),
         signal:AbortSignal.timeout(imgCount*120000+30000),
       });
-      const d=await r.json();
+      let r=await postOnce();
+      let d=await r.json();
+      // ★자동치유: 크롬이 좀비라 못 붙은 경우(CDP_CONNECT_FAIL) 크롬을 자동으로 다시 준비(좀비 정리+재실행)하고 1회 재시도
+      if(!r.ok && d.code==="CDP_CONNECT_FAIL" && (window as any).electron?.flowLaunchChrome){
+        showToast("🔧 Flow 크롬을 다시 준비하는 중...","info");
+        try{ const lr=await (window as any).electron.flowLaunchChrome(); if(lr?.ok)setFlowReady(true); }catch{}
+        r=await postOnce(); d=await r.json();
+      }
       if(!r.ok){
-        if(d.code==="FLOW_NOT_LOGGED_IN") showToast("크롬에서 Google Flow에 먼저 로그인해주세요.","error");
-        else if(d.code==="CDP_CONNECT_FAIL") showToast("Flow 준비 버튼으로 크롬을 먼저 열어주세요.","error");
+        if(d.code==="FLOW_NOT_LOGGED_IN") showToast("크롬 창에서 Google Flow 로그인을 먼저 해주세요.","error");
+        else if(d.code==="CDP_CONNECT_FAIL") showToast("Flow 크롬 준비에 실패했어요. 'Flow 준비'를 다시 눌러주세요.","error");
         else showToast("❌ Flow 생성 실패: "+(d.error||r.status),"error");
         setImgGenFailed(true);setGenImgLoading(false);return;
       }
@@ -3470,6 +3488,15 @@ POST3: (제목)|(이유)
                     }} style={{width:"100%",padding:"9px 12px",borderRadius:10,border:"1px solid var(--border)",background:"var(--bg)",color:"var(--text)",fontSize:13,fontFamily:"inherit",outline:"none",cursor:"pointer"}}>
                       {BLOG_TEMPLATES.map(t=><option key={t.id} value={t.id}>{t.label}</option>)}
                     </select>
+                    {/* 템플릿 기능설명 */}
+                    <div style={{marginTop:8,padding:"10px 12px",borderRadius:10,background:"var(--card2)",border:"1px solid var(--border)",fontSize:12,color:"var(--text2)",lineHeight:1.6}}>
+                      💡 <b>템플릿이란?</b> 글의 <b>구성 순서(뼈대)</b>를 미리 잡아주는 도우미예요.
+                      {blogTemplate!=="none"?(
+                        <><br/><span style={{color:"var(--text3)"}}>지금은 <b style={{color:"var(--accent-text)"}}>{BLOG_TEMPLATES.find(t=>t.id===blogTemplate)?.label}</b> 순서로 짜임새 있게 써줘요. (스타일·말투도 자동으로 맞춰졌어요)</span></>
+                      ):(
+                        <><br/><span style={{color:"var(--text3)"}}><b>필수는 아니에요.</b> 안 골라도(=템플릿 없음) 아래 스타일·말투대로 글은 정상 생성돼요.</span></>
+                      )}
+                    </div>
                   </div>
 
                   {/* 글 스타일 프리셋 */}
@@ -3854,24 +3881,26 @@ POST3: (제목)|(이유)
 
                           {/* ── Flow 준비 안내/버튼 (Flow 방식 선택 시, 생성 버튼 바로 위) ── */}
                           {imgGenType==="flow"&&(
-                            <div style={{marginBottom:10,padding:"12px 14px",borderRadius:12,background:flowReady?"rgba(0,200,120,.08)":"rgba(168,85,247,.08)",border:`1.5px solid ${flowReady?"rgba(0,200,120,.4)":"rgba(168,85,247,.35)"}`}}>
-                              <div style={{display:"flex",alignItems:"center",gap:10}}>
-                                <span style={{fontSize:20}}>{flowReady?"✅":"🎨"}</span>
+                            <div style={{marginBottom:12,padding:"14px 16px",borderRadius:14,background:flowReady?"rgba(0,200,120,.08)":"rgba(168,85,247,.1)",border:`2px solid ${flowReady?"rgba(0,200,120,.45)":"rgba(168,85,247,.45)"}`}}>
+                              <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:flowReady?0:12}}>
+                                <span style={{fontSize:22}}>{flowReady?"✅":"🎨"}</span>
                                 <div style={{flex:1,minWidth:0}}>
-                                  <div style={{fontSize:12.5,fontWeight:800,color:flowReady?"var(--success)":"#c084fc"}}>
-                                    {flowReady?"Flow 준비 완료!":"먼저 'Flow 준비'가 필요해요"}
+                                  <div style={{fontSize:13.5,fontWeight:800,color:flowReady?"var(--success)":"#c084fc"}}>
+                                    {flowReady?"Flow 준비 완료! 이제 아래 '이미지 생성 시작'을 누르세요":"이미지를 만들려면 먼저 'Flow 준비'가 필요해요"}
                                   </div>
-                                  <div style={{fontSize:11,color:"var(--text3)",marginTop:2,lineHeight:1.5}}>
-                                    {flowReady?"아래 '이미지 생성 시작'을 누르면 무료로 생성돼요":"크롬이 열리면 Google 로그인 1회만 (이후 자동)"}
-                                  </div>
+                                  {!flowReady&&(
+                                    <div style={{fontSize:11.5,color:"var(--text2)",marginTop:4,lineHeight:1.6}}>
+                                      아래 파란 버튼을 누르면 <b>크롬 창이 열려요</b> → 그 창에서 <b>구글 로그인 1회만</b> 하면 → 다시 여기서 '이미지 생성 시작'을 누르면 됩니다. (로그인은 처음 한 번만)
+                                    </div>
+                                  )}
                                 </div>
-                                {!flowReady&&(
-                                  <button onClick={handleFlowLaunchChrome} disabled={flowLaunching}
-                                    style={{padding:"10px 16px",borderRadius:10,border:"none",background:"linear-gradient(135deg,#a855f7,#7c3aed)",color:"#fff",cursor:flowLaunching?"wait":"pointer",fontSize:13,fontWeight:800,fontFamily:"inherit",whiteSpace:"nowrap",flexShrink:0,opacity:flowLaunching?.7:1}}>
-                                    {flowLaunching?"준비 중...":"🚀 Flow 준비"}
-                                  </button>
-                                )}
                               </div>
+                              {!flowReady&&(
+                                <button onClick={handleFlowLaunchChrome} disabled={flowLaunching}
+                                  style={{width:"100%",padding:"14px",borderRadius:12,border:"2px solid #7c3aed",background:flowLaunching?"#a855f7":"linear-gradient(135deg,#a855f7,#7c3aed)",color:"#fff",cursor:flowLaunching?"wait":"pointer",fontSize:15,fontWeight:900,fontFamily:"inherit",boxShadow:"0 4px 16px rgba(124,58,237,.4)",opacity:flowLaunching?.8:1,display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>
+                                  {flowLaunching?<><span className="spinner"/>크롬 여는 중...</>:<>👉 여기 눌러 Flow 준비하기 (크롬 열림)</>}
+                                </button>
+                              )}
                             </div>
                           )}
 

@@ -357,12 +357,18 @@ app.post("/api/gemini-vision", async (req, res) => {
   return res.status(500).json({ error: "생성 실패. Gemini 키를 확인하거나 잠시 후 다시 시도해주세요." });
 });
 
-/* ── Google Flow 디버깅 크롬 준비 상태 확인 ── */
+/* ── Google Flow 디버깅 크롬 준비 상태 확인 ──
+   좀비 크롬(포트는 응답해도 page 타겟이 0개 → 봇이 못 붙음)을 걸러내기 위해
+   /json/version(포트)뿐 아니라 실제 page 타겟 존재까지 확인한다. */
 app.get("/api/flow/status", async (_req, res) => {
   try {
-    const r = await fetch("http://localhost:9222/json/version", { signal: AbortSignal.timeout(2000) });
-    if (!r.ok) return res.json({ ready: false, reason: "cdp_not_ok" });
-    // Flow 탭 로그인 여부까지는 생성 시 확인. 여기선 디버깅 포트만.
+    const v = await fetch("http://localhost:9222/json/version", { signal: AbortSignal.timeout(2000) });
+    if (!v.ok) return res.json({ ready: false, reason: "cdp_not_ok" });
+    const listRes = await fetch("http://localhost:9222/json", { signal: AbortSignal.timeout(2000) });
+    if (!listRes.ok) return res.json({ ready: false, reason: "cdp_no_targets" });
+    const targets = await listRes.json();
+    const hasPage = Array.isArray(targets) && targets.some((t: any) => t && t.type === "page");
+    if (!hasPage) return res.json({ ready: false, reason: "zombie_no_page" });
     return res.json({ ready: true });
   } catch {
     return res.json({ ready: false, reason: "chrome_not_debug" });

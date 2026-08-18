@@ -321,15 +321,52 @@ ipcMain.handle("unregister-user", async (_event, userId: string) => {
    이 핸들러가 OS별 크롬 경로를 찾아 별도 프로필로 디버깅 크롬을 띄우고 Flow 페이지를 연다.
    별도 프로필이라 사용자의 평소 크롬과 분리되고, 로그인은 그 프로필에 유지된다. */
 let flowChromeProc: ChildProcess | null = null;
+const FLOW_CDP_PORT = 9222;
+function flowProfileDir() { return path.join(app.getPath("home"), ".publy-flow-chrome"); }
+
+/* ── Flow 크롬 "건강검진" ──
+   좀비 크롬은 /json/version(포트)엔 응답해도 실제 조작할 페이지 타겟이 0개라
+   봇의 Playwright가 못 붙는다(Browser context management is not supported).
+   그래서 단순 포트 확인이 아니라 "쓸 수 있는 page 타겟이 실제로 있는지"까지 확인한다. */
+async function flowChromeHealthy(): Promise<boolean> {
+  try {
+    const v = await fetch(`http://localhost:${FLOW_CDP_PORT}/json/version`, { signal: AbortSignal.timeout(1500) });
+    if (!v.ok) return false;
+    const listRes = await fetch(`http://localhost:${FLOW_CDP_PORT}/json`, { signal: AbortSignal.timeout(1500) });
+    if (!listRes.ok) return false;
+    const targets = await listRes.json();
+    return Array.isArray(targets) && targets.some((t: any) => t && t.type === "page");
+  } catch { return false; }
+}
+
+/* ── 좀비/잔여 Flow 크롬 강제 정리 ── (재실행 전에 깨끗이 청소) */
+async function killStaleFlowChrome() {
+  const dir = flowProfileDir();
+  try { if (flowChromeProc && flowChromeProc.pid) { try { process.kill(-flowChromeProc.pid, "SIGKILL"); } catch {} try { flowChromeProc.kill("SIGKILL"); } catch {} } } catch {}
+  flowChromeProc = null;
+  try {
+    if (process.platform === "win32") {
+      try { execSync(`wmic process where "commandline like '%.publy-flow-chrome%'" call terminate`, { stdio: "ignore" }); } catch {}
+    } else {
+      try { execSync(`pkill -9 -f "user-data-dir=${dir}"`, { stdio: "ignore" }); } catch {}
+    }
+  } catch {}
+  // 싱글턴 락 제거(프로필 재사용 시 새 인스턴스가 깨끗하게 뜨도록)
+  try {
+    const fs = await import("fs");
+    ["SingletonLock", "SingletonSocket", "SingletonCookie"].forEach(f => { try { fs.unlinkSync(path.join(dir, f)); } catch {} });
+  } catch {}
+  await new Promise(r => setTimeout(r, 800));
+}
+
 ipcMain.handle("flow-launch-chrome", async () => {
   const fs = await import("fs");
-  const os = await import("os");
 
-  // 이미 디버깅 크롬이 떠 있으면 재사용
-  try {
-    const r = await fetch("http://localhost:9222/json/version", { signal: AbortSignal.timeout(1500) });
-    if (r.ok) return { ok: true, already: true };
-  } catch {}
+  // 이미 "건강한" 디버깅 크롬이 떠 있으면 재사용 (좀비면 재사용 안 하고 아래에서 재생성)
+  if (await flowChromeHealthy()) return { ok: true, already: true };
+
+  // 포트는 응답해도 좀비(타겟 0개)이거나 죽은 크롬일 수 있음 → 깨끗이 정리 후 새로 띄운다
+  await killStaleFlowChrome();
 
   // OS별 크롬 실행 파일 경로 후보
   const candidates = process.platform === "darwin"
@@ -348,14 +385,16 @@ ipcMain.handle("flow-launch-chrome", async () => {
   }
 
   // 전용 프로필 폴더(사용자 평소 크롬과 분리, 로그인 유지됨)
-  const profileDir = path.join(os.homedir(), ".publy-flow-chrome");
+  const profileDir = flowProfileDir();
 
   try {
     flowChromeProc = spawn(chromePath, [
-      "--remote-debugging-port=9222",
+      `--remote-debugging-port=${FLOW_CDP_PORT}`,
+      "--remote-allow-origins=*",
       `--user-data-dir=${profileDir}`,
       "--no-first-run",
       "--no-default-browser-check",
+      "--disable-features=Translate",
       "https://labs.google/fx/ko/tools/flow",
     ], { detached: true, stdio: "ignore" });
     flowChromeProc.unref();
@@ -363,21 +402,15 @@ ipcMain.handle("flow-launch-chrome", async () => {
     return { ok: false, error: "크롬 실행 실패: " + e.message };
   }
 
-  // 디버깅 포트가 열릴 때까지 대기(최대 15초)
-  for (let i = 0; i < 15; i++) {
+  // 단순 포트 응답이 아니라 "실제 쓸 수 있는(page 타겟 존재)" 상태가 될 때까지 대기(최대 20초)
+  for (let i = 0; i < 20; i++) {
     await new Promise(r => setTimeout(r, 1000));
-    try {
-      const r = await fetch("http://localhost:9222/json/version", { signal: AbortSignal.timeout(1500) });
-      if (r.ok) return { ok: true, launched: true };
-    } catch {}
+    if (await flowChromeHealthy()) return { ok: true, launched: true };
   }
   return { ok: false, error: "크롬은 실행됐지만 준비 확인에 실패했어요. 잠시 후 다시 시도해주세요." };
 });
 
-/* ── Flow 준비 상태 확인 (디버깅 크롬 떠있나) ── */
+/* ── Flow 준비 상태 확인 ── 포트만 보지 않고 "봇이 실제로 붙을 수 있는지"까지 확인(좀비 방지) */
 ipcMain.handle("flow-status", async () => {
-  try {
-    const r = await fetch("http://localhost:9222/json/version", { signal: AbortSignal.timeout(1500) });
-    return { ready: r.ok };
-  } catch { return { ready: false }; }
+  return { ready: await flowChromeHealthy() };
 });
