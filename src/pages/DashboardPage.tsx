@@ -3852,6 +3852,29 @@ POST3: (제목)|(이유)
                             </div>
                           )}
 
+                          {/* ── Flow 준비 안내/버튼 (Flow 방식 선택 시, 생성 버튼 바로 위) ── */}
+                          {imgGenType==="flow"&&(
+                            <div style={{marginBottom:10,padding:"12px 14px",borderRadius:12,background:flowReady?"rgba(0,200,120,.08)":"rgba(168,85,247,.08)",border:`1.5px solid ${flowReady?"rgba(0,200,120,.4)":"rgba(168,85,247,.35)"}`}}>
+                              <div style={{display:"flex",alignItems:"center",gap:10}}>
+                                <span style={{fontSize:20}}>{flowReady?"✅":"🎨"}</span>
+                                <div style={{flex:1,minWidth:0}}>
+                                  <div style={{fontSize:12.5,fontWeight:800,color:flowReady?"var(--success)":"#c084fc"}}>
+                                    {flowReady?"Flow 준비 완료!":"먼저 'Flow 준비'가 필요해요"}
+                                  </div>
+                                  <div style={{fontSize:11,color:"var(--text3)",marginTop:2,lineHeight:1.5}}>
+                                    {flowReady?"아래 '이미지 생성 시작'을 누르면 무료로 생성돼요":"크롬이 열리면 Google 로그인 1회만 (이후 자동)"}
+                                  </div>
+                                </div>
+                                {!flowReady&&(
+                                  <button onClick={handleFlowLaunchChrome} disabled={flowLaunching}
+                                    style={{padding:"10px 16px",borderRadius:10,border:"none",background:"linear-gradient(135deg,#a855f7,#7c3aed)",color:"#fff",cursor:flowLaunching?"wait":"pointer",fontSize:13,fontWeight:800,fontFamily:"inherit",whiteSpace:"nowrap",flexShrink:0,opacity:flowLaunching?.7:1}}>
+                                    {flowLaunching?"준비 중...":"🚀 Flow 준비"}
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                          )}
+
                           <div style={{display:"flex",flexDirection:"column",gap:8}}>
                             <button className="btn btn-primary btn-full" onClick={handleGenerateImages} disabled={genImgLoading||!genContent}>
                               {genImgLoading?<><span className="spinner"/>생성 중...</>:<>🎨 이미지 생성 시작</>}
