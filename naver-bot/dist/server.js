@@ -171,33 +171,41 @@ app.post("/api/publish-full", async (req, res) => {
                     onLog: (msg) => console.log(msg),
                 });
                 if (flowImages.length > 0) {
-                    // 텍스트 블록에 Flow 이미지 균등 삽입
-                    const textBlocks = finalBlocks.filter((b) => b.type === "text");
+                    // ★Q&A/해시태그/FAQ/관련글 경계 계산 — 이미지는 이 "위"에만 들어가야 함(경계 아래로 내려가면 안 됨)
+                    const isBoundary = (b) => b.type === "text" && /\[FAQ시작\]|\[관련글시작\]|질문\s*답변|Q\s*&\s*A|큐앤에이|해시태그|자주\s*묻는/i.test(b.content || "");
+                    let boundaryIdx = finalBlocks.findIndex(isBoundary);
+                    if (boundaryIdx < 0)
+                        boundaryIdx = finalBlocks.length;
+                    // 경계 앞 구간의 텍스트 블록 개수로 균등 분할
+                    const safeTextCount = finalBlocks.slice(0, boundaryIdx).filter((b) => b.type === "text").length || 1;
+                    const step = Math.max(1, Math.floor(safeTextCount / flowImages.length));
                     const result = [];
-                    const step = Math.max(1, Math.floor(textBlocks.length / flowImages.length));
                     let imgIdx = 0;
                     let textCount = 0;
-                    for (const block of finalBlocks) {
-                        result.push(block);
-                        if (block.type === "text") {
-                            textCount++;
-                            if (imgIdx < flowImages.length && textCount % step === 0) {
-                                result.push({
-                                    type: "image",
-                                    src: flowImages[imgIdx].src,
-                                    alt: flowImages[imgIdx].alt,
-                                });
+                    finalBlocks.forEach((block, i) => {
+                        // 경계 직전(경계 블록 바로 앞)에서 남은 이미지를 전부 소진 → 경계 아래로 안 내려감
+                        if (i === boundaryIdx) {
+                            while (imgIdx < flowImages.length) {
+                                result.push({ type: "image", src: flowImages[imgIdx].src, alt: flowImages[imgIdx].alt });
                                 imgIdx++;
                             }
                         }
-                    }
-                    // 남은 이미지 마지막에 추가
+                        result.push(block);
+                        if (i < boundaryIdx && block.type === "text") {
+                            textCount++;
+                            if (imgIdx < flowImages.length && textCount % step === 0) {
+                                result.push({ type: "image", src: flowImages[imgIdx].src, alt: flowImages[imgIdx].alt });
+                                imgIdx++;
+                            }
+                        }
+                    });
+                    // 경계가 없던(맨 끝) 경우 남은 이미지 소진
                     while (imgIdx < flowImages.length) {
                         result.push({ type: "image", src: flowImages[imgIdx].src, alt: flowImages[imgIdx].alt });
                         imgIdx++;
                     }
                     finalBlocks = result;
-                    console.log(`[server] Flow 이미지 ${flowImages.length}장 블록 삽입 완료`);
+                    console.log(`[server] Flow 이미지 ${flowImages.length}장 블록 삽입 완료(경계 위)`);
                 }
             }
             catch (flowErr) {

@@ -812,10 +812,14 @@ Output format (JSON array only, no other text):
   const [genContent, setGenContent] = useState("");
   const [genTitle, setGenTitle] = useState("");
   const [onPartnerLink, setOnPartnerLink] = useState("");
-  const [onPartnerProduct, setOnPartnerProduct] = useState<OnPartnerProduct|null>(null);
   const [onPartnerLoading, setOnPartnerLoading] = useState(false);
   const [onPartnerError, setOnPartnerError] = useState("");
   const [onPartnerPlacement, setOnPartnerPlacement] = useState<OnPartnerPlacement>(()=>(localStorage.getItem("publy_onpartner_placement") as OnPartnerPlacement)||"auto");
+  // 온파트너 상품 최대 3개 (banner=서버 /api/banner 가로 배너 URL)
+  type OnPartnerItem = { product:OnPartnerProduct; banner:string };
+  const [onPartnerItems, setOnPartnerItems] = useState<OnPartnerItem[]>([]);
+  const [onPartnerPreview, setOnPartnerPreview] = useState<OnPartnerItem|null>(null); // 조회한 상품(아직 추가 전)
+  const MAX_ONPARTNER = 3;
   const [genTags, setGenTags] = useState("");
   const [generating, setGenerating] = useState(false);
   const abortRef = useRef<AbortController|null>(null);
@@ -930,30 +934,35 @@ Output format (JSON array only, no other text):
   const manualFileRef = useRef<HTMLInputElement>(null);
 
   // 카테고리 로드
-  async function loadCategories(plat: string) {
+  // saveToAccId: 불러온 카테고리를 저장할 계정(계정관리에서 특정 계정 버튼 클릭 시). 없으면 발행 탭 계정.
+  async function loadCategories(plat: string, saveToAccId?: string) {
+    const targetAcc = saveToAccId || pubAccId;
     if (!botOnline) {
       // 봇 오프라인 → accCats에서 로드
-      const saved=accCats[pubAccId]||[];
+      const saved=accCats[targetAcc]||[];
       setCategories(saved.map((c,i)=>({id:String(i),name:c})));
       return;
     }
-    setLoadingCats(true); setCategories([]); setCategory("");
+    setLoadingCats(true); setCategories([]); if(!saveToAccId)setCategory("");
     try {
       const r = await botFetch(`${BOT}/api/${plat}/categories/${user.id}`, {method:"GET", signal: AbortSignal.timeout(30000)} as any);
       const d = await r.json();
       if (d.categories && d.categories.length>0) {
         setCategories(d.categories);
-        // 봇에서 불러온 카테고리를 accCats에도 저장
+        // 봇에서 불러온 카테고리를 accCats에도 저장(대상 계정)
         const names=d.categories.map((c:{id:string;name:string})=>c.name);
-        saveAccCat(pubAccId, names);
+        saveAccCat(targetAcc, names);
+        showToast(`✅ 카테고리 ${d.categories.length}개를 불러왔어요.`,"success");
       } else {
         // 봇 응답이 비었으면 저장된 accCats 사용
-        const saved=accCats[pubAccId]||[];
+        const saved=accCats[targetAcc]||[];
         setCategories(saved.map((c,i)=>({id:String(i),name:c})));
+        showToast("불러온 카테고리가 없어요. 네이버 로그인/글쓰기 권한을 확인해주세요.","error");
       }
     } catch {
-      const saved=accCats[pubAccId]||[];
+      const saved=accCats[targetAcc]||[];
       setCategories(saved.map((c,i)=>({id:String(i),name:c})));
+      showToast("카테고리 불러오기 실패 — 봇/네이버 로그인 상태를 확인해주세요.","error");
     }
     finally { setLoadingCats(false); }
   }
@@ -996,7 +1005,8 @@ Output format (JSON array only, no other text):
     function hasSectionMarker(b:ContentBlock):boolean{
       if(b.type!=="text")return false;
       const c=(b as TextBlock).content;
-      return c.includes("[FAQ시작]")||c.includes("[참고자료시작]")||c.includes("[관련글시작]");
+      // 마커([FAQ시작] 등)뿐 아니라 마커 없는 "질문답변/Q&A/해시태그/자주묻는" 텍스트도 경계로 → 이미지가 절대 그 아래로 안 감
+      return /\[FAQ시작\]|\[참고자료시작\]|\[관련글시작\]|질문\s*답변|Q\s*&\s*A|큐앤에이|해시태그|자주\s*묻는/i.test(c);
     }
     const markerIdx=textOnly.findIndex(hasSectionMarker);
     const safeBlocks=markerIdx===-1?textOnly:textOnly.slice(0,markerIdx);
@@ -1005,11 +1015,11 @@ Output format (JSON array only, no other text):
     const imgs=images.filter(img=>img?.src&&img.src.trim()!=="");
     if(imgs.length===0)return;
 
-    // 실제 패턴 결정 (랜덤이면 A/B/C 중 하나 선택)
-    const patterns:("A"|"B"|"C")[] = ["A","B","C"];
+    // 실제 패턴 결정 (랜덤이면 A/C 중 하나 — B(2장 나란히)는 캡션 문제로 제거)
+    const patterns:("A"|"C")[] = ["A","C"];
     const activePattern:("A"|"B"|"C") = imgPattern==="random"
-      ? patterns[Math.floor(Math.random()*3)]
-      : imgPattern;
+      ? patterns[Math.floor(Math.random()*patterns.length)]
+      : (imgPattern==="B"?"C":imgPattern); // 혹시 B가 저장돼 있어도 C로
 
     // ★ 모든 패턴 공통: 이미지가 글 문단 사이에 "균등 분산"되도록 배치 계산
     //   (예전 패턴 A가 나머지를 한 곳에 몰아넣어 이미지가 다 붙던 버그를 근본 차단)
@@ -1022,17 +1032,11 @@ Output format (JSON array only, no other text):
     result.push(mkImg(imgs[0],1));
     const rest=imgs.slice(1);
 
-    // 2) 나머지 이미지를 "묶음(unit)"으로 구성: 패턴 B면 2장 pair도 섞음, 아니면 전부 단독
+    // 2) 나머지 이미지 = 전부 "한 줄 1장(단독)"으로 배치.
+    //    ★네이버는 2장 한 줄(콜라주)에 개별 캡션을 자동으로 못 넣음 → 캡션 보장 위해 항상 단독.
     type Unit = {kind:"single";img:{src:string;alt?:string}} | {kind:"pair";imgs:{src:string;alt?:string}[]};
     const units:Unit[]=[];
-    if(activePattern==="B"){
-      for(let i=0;i<rest.length;i+=2){
-        if(i+1<rest.length) units.push({kind:"pair",imgs:[rest[i],rest[i+1]]});
-        else units.push({kind:"single",img:rest[i]});
-      }
-    }else{
-      rest.forEach(img=>units.push({kind:"single",img}));
-    }
+    rest.forEach(img=>units.push({kind:"single",img}));
 
     // 3) 텍스트 블록 사이 "간격(gap)"에 units를 균등 분배
     //    gap 개수 = safeTextCount (각 텍스트 문단 뒤). units를 gap에 라운드로빈으로 고르게.
@@ -1122,7 +1126,7 @@ Output format (JSON array only, no other text):
     function escHtml(t:string){return t.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");}
     function inlineFmt(t:string){return escHtml(t).replace(/\*\*(.+?)\*\*/g,"<strong>$1</strong>").replace(/\*(.+?)\*/g,"<em>$1</em>");}
     const parts:string[]=[];
-    const sectionMarkerIdx=blocks.findIndex(b=>b.type==="text"&&((b as TextBlock).content.includes("[FAQ시작]")||(b as TextBlock).content.includes("[참고자료시작]")||(b as TextBlock).content.includes("[관련글시작]")));
+    const sectionMarkerIdx=blocks.findIndex(b=>b.type==="text"&&/\[FAQ시작\]|\[참고자료시작\]|\[관련글시작\]|질문\s*답변|Q\s*&\s*A|큐앤에이|해시태그|자주\s*묻는/i.test((b as TextBlock).content));
     blocks.forEach((b,blockIdx)=>{
       const afterSection=sectionMarkerIdx!==-1&&blockIdx>=sectionMarkerIdx;
       if(b.type==="text"){
@@ -1316,16 +1320,14 @@ Output format (JSON array only, no other text):
   /* ── 글 구간별 캡션 생성 ── */
   function buildCaptions(kw:string, count:number, content?:string):string[]{
     const k = kw || "사진";
-    // 이미지 검색 SEO를 위해 키워드 기반 설명형 캡션 생성
+    // 플레이스홀더처럼 보이는 "~이미지" 문구 제거. 자연스러운 짧은 캡션(SEO 키워드 유지).
     const pool = [
-      `${k} 대표 이미지`,
-      `${k} 상세 설명 이미지`,
-      `${k} 실제 예시 이미지`,
-      `${k} 관련 참고 이미지`,
-      `${k} 핵심 내용 이미지`,
-      `${k} 주요 정보 이미지`,
-      `${k} 비교 분석 이미지`,
-      `${k} 활용 예시 이미지`,
+      `${k}`,
+      `${k} 현장`,
+      `${k} 추천`,
+      `${k} 자세히 보기`,
+      `${k} 실물`,
+      `${k} 정보`,
     ];
     return Array.from({length:count},(_,i)=>pool[i%pool.length]);
   }
@@ -1824,37 +1826,45 @@ Output format (JSON array only, no other text):
     finally{setLoadingTitles(false);}
   }
 
+  // ① 조회 — 링크로 상품 정보 불러와 미리보기(onPartnerPreview)만 채운다. 목록엔 아직 안 담김.
   async function loadOnPartnerProduct(){
     const link=onPartnerLink.trim();
     if(!link){setOnPartnerError("온파트너 상품 링크를 입력해주세요.");return;}
-    setOnPartnerLoading(true);setOnPartnerError("");setOnPartnerProduct(null);
+    if(onPartnerItems.length>=MAX_ONPARTNER){setOnPartnerError(`상품은 최대 ${MAX_ONPARTNER}개까지 넣을 수 있어요.`);return;}
+    setOnPartnerLoading(true);setOnPartnerError("");setOnPartnerPreview(null);
     try{
       const response=await fetch(`https://partner.yuanfnb.com/api/product-card?url=${encodeURIComponent(link)}`,{signal:AbortSignal.timeout(10000)});
       const data=await response.json().catch(()=>({}));
       if(!response.ok||!data.ok||!data.product)throw new Error(data.error==="link_not_found"?"사용할 수 없는 링크예요.":"상품 정보를 불러오지 못했어요.");
-      setOnPartnerProduct(data.product as OnPartnerProduct);
-      setOnPartnerLink(data.product.partnerUrl);
-      showToast("✅ 온파트너 상품을 불러왔어요.","success");
+      const prod=data.product as OnPartnerProduct;
+      if(onPartnerItems.some(it=>it.product.partnerUrl===prod.partnerUrl)){setOnPartnerError("이미 추가된 상품이에요.");return;}
+      // 서버가 만든 예쁜 가로 배너(온파트너 /api/banner) — 디자인 통일 + CORS 위험 없음.
+      const codeM=prod.partnerUrl.match(/\/r\/([a-z0-9-]+)/i);
+      const banner=codeM?`https://partner.yuanfnb.com/api/banner?code=${codeM[1]}`:"";
+      setOnPartnerPreview({product:prod,banner});
+      showToast("✅ 상품을 조회했어요. '추가'를 누르면 담겨요.","success");
     }catch(e:any){
       setOnPartnerError(e.name==="TimeoutError"?"상품 확인 시간이 초과됐어요. 다시 시도해주세요.":e.message||"상품 정보를 불러오지 못했어요.");
     }finally{setOnPartnerLoading(false);}
   }
+  // ② 추가 — 조회한 상품을 목록에 담고 입력/미리보기 초기화.
+  function addOnPartnerProduct(){
+    if(!onPartnerPreview)return;
+    if(onPartnerItems.length>=MAX_ONPARTNER){setOnPartnerError(`상품은 최대 ${MAX_ONPARTNER}개까지 넣을 수 있어요.`);return;}
+    if(onPartnerItems.some(it=>it.product.partnerUrl===onPartnerPreview.product.partnerUrl)){setOnPartnerError("이미 추가된 상품이에요.");return;}
+    setOnPartnerItems(prev=>[...prev,onPartnerPreview]);
+    setOnPartnerPreview(null);setOnPartnerLink("");setOnPartnerError("");
+    showToast("✅ 상품을 추가했어요.","success");
+  }
 
-  function placeOnPartnerProduct(generatedBody:string, product:OnPartnerProduct):string{
+  // 배너는 온파트너 서버(/api/banner)가 생성 — 클라 canvas 불필요.
+
+  // 본문 최상단에 제휴 안내만 넣는다. 배너(링크 연결된 이미지)는 발행 시 블록에 직접 분산 삽입.
+  function placeOnPartnerProduct(generatedBody:string, products:OnPartnerProduct[]):string{
+    const items=products.filter(p=>p&&p.available);
+    if(items.length===0)return generatedBody.trim();
     const disclosure="※ 이 글에는 제휴 링크가 포함되어 있으며, 구매 시 작성자에게 일정 수수료가 발생할 수 있습니다.";
-    // OG 카드가 상품 이미지·이름·가격을 보여주므로 본문엔 짧은 안내 + 링크만(문맥 안 끊기게 자체 문단으로).
-    const productCard=`👀 이 글에서 소개한 '${product.name}', 여기서 바로 확인할 수 있어요 👇\n${product.partnerUrl}`;
-    // 상품 링크는 어떤 위치 옵션에서도 FAQ·질문답변·관련글·해시태그 아래로 내려가지 않는다.
-    const marker=generatedBody.search(/\n?(?:\[FAQ시작\]|\[관련글시작\]|(?:질문\s*답변|Q&A|큐앤에이|해시태그)\s*:)/i);
-    const main=(marker>=0?generatedBody.slice(0,marker):generatedBody).trim();
-    const tail=(marker>=0?generatedBody.slice(marker).trim():"");
-    const paragraphs=main.split(/\n{2,}/).map(p=>p.trim()).filter(Boolean);
-    const effective=onPartnerPlacement==="auto"?(adType==="adpost"?"adpost":"auto"):onPartnerPlacement;
-    const ratio=effective==="adpost"?.72:effective==="after_first"?.3:effective==="middle"?.5:effective==="before_last"?.82:effective==="bottom"?1:.6;
-    const index=Math.max(1,Math.min(paragraphs.length,Math.round(paragraphs.length*ratio)));
-    paragraphs.splice(index,0,productCard);
-    paragraphs.push("상품이 궁금하다면 위 온파트너 상품 링크에서 가격과 상세 구성을 확인해보세요.");
-    return [disclosure,paragraphs.join("\n\n"),tail].filter(Boolean).join("\n\n");
+    return [disclosure,generatedBody.trim()].join("\n\n");
   }
 
   async function handleGenerate(){
@@ -1970,7 +1980,7 @@ POST3: (제목)|(이유)
       const bm=cleaned.match(/태그[^\n]*\n([\s\S]+)/);
       setGenTitle(title);if(tgm)setGenTags(tgm[1].trim());
       const generatedBody=ensureQuestionHeadings(bm?bm[1].trim():cleaned,keyword||title);
-      const body=onPartnerProduct?.available?placeOnPartnerProduct(generatedBody,onPartnerProduct):generatedBody.trim();setGenContent(body);setQualityScore(calcQualityScore(body,keyword));
+      const body=onPartnerItems.length>0?placeOnPartnerProduct(generatedBody,onPartnerItems.map(it=>it.product)):generatedBody.trim();setGenContent(body);setQualityScore(calcQualityScore(body,keyword));
       if(imgCountAuto)setImgCount(recommendImgCount(body));
       if(flowImgCountAuto)setFlowImgCount(recommendImgCount(body));
       // ── tarry 방식: 블록 자동 분리 + 제목/태그 자동 연동 ──
@@ -2019,18 +2029,25 @@ POST3: (제목)|(이유)
   // ── 글을 읽고 "장면이 서로 다른" 이미지 프롬프트 N개 생성 (Gemini) ──
   //   6하원칙(언제/어디서/무엇을/어떻게/왜)에 맞춰 이미지만 봐도 스토리가 읽히게.
   async function buildStoryPrompts(title:string, content:string, n:number):Promise<{prompts:string[];captions:string[]}>{
-    const body=(content||"").slice(0,3000);
-    const ask=`너는 블로그 사진 디렉터야. 아래 글을 읽고, 이 글에 어울리는 ${n}장의 사진을 기획해줘.
-핵심: ${n}장이 서로 완전히 다른 "장면"이어야 해. 영화처럼 사진만 봐도 글의 흐름과 감정이 읽히게.
-예) 음식 후기라면: 원산지(바다/산지) → 재료 원물 → 손질/조리 과정 → 완성 요리 클로즈업 → 먹는 순간/상차림 → 곁들임/디테일. 절대 6장 다 "완성된 접시"만 반복하지 마.
-장면은 글 내용(언제/어디서/무엇을/어떻게/왜)에 근거해서 구체적으로.
+    // ★글을 실제 순서대로 N개 구간으로 나눠, "각 구간 본문이 말하는 바로 그 장면"의 이미지를 만든다.
+    //   (예전엔 정해진 스토리 아크로 만들어 글과 이미지가 어긋났음 — 생선구이 얘기에 간장게장 이미지 등)
+    const clean=(content||"").replace(/\[(FAQ|참고자료|관련글)시작\][\s\S]*?\[\1끝\]/g,"").trim();
+    const paras=clean.split(/\n{2,}/).map(p=>p.replace(/^#+\s*/,"").trim()).filter(p=>p.length>15);
+    // N개 구간으로 균등 분할(각 구간=연속된 문단 묶음)
+    const per=Math.max(1,Math.ceil(paras.length/n));
+    const segments:string[]=[];
+    for(let i=0;i<n;i++){ const s=paras.slice(i*per,(i+1)*per).join(" ").slice(0,320); if(s)segments.push(s); }
+    while(segments.length<n && segments.length>0) segments.push(segments[segments.length-1]);
+    const segList=segments.map((s,i)=>`[${i+1}번 구간] ${s}`).join("\n");
+    const ask=`너는 블로그 사진 디렉터야. 아래는 한 글을 순서대로 ${segments.length}구간으로 나눈 거야.
+각 구간의 "그 문단이 실제로 말하는 장면"을 사진 1장으로 기획해줘. 반드시 해당 구간 내용과 딱 맞아야 해(다른 구간 내용/엉뚱한 소재 금지).
+예: 구간이 '생선구이'면 생선구이 사진, '조개구이'면 조개구이 사진. 구간에 특정 음식/장소가 나오면 그걸 그려.
 
-각 사진마다 아래 형식으로 정확히 ${n}줄 출력(다른 말 금지):
-장면설명(한국어 10~20자) | 영문 이미지 프롬프트(사진 스타일, 구체적 장면, 조명, 사실적, 글자/워터마크 없이)
+구간별로 아래 형식 정확히 ${segments.length}줄(순서대로, 다른 말 금지):
+장면설명(한국어 10~20자) | 영문 이미지 프롬프트(사진 스타일, 그 구간의 구체적 장면·소재, 조명, 사실적, 글자/워터마크 없이)
 
 글 제목: ${title}
-글 본문:
-${body}`;
+${segList}`;
     const text=await callAI(ask);
     const prompts:string[]=[]; const captions:string[]=[];
     for(const line of text.split("\n")){
@@ -2038,7 +2055,10 @@ ${body}`;
       const [cap,...rest]=t.replace(/^\d+[).\s]*/,"").split("|");
       const eng=rest.join("|").trim();
       if(eng.length<10)continue;
-      captions.push(cap.trim().replace(/[*#-]/g,"").slice(0,30));
+      let capClean=cap.trim().replace(/[*#\-]/g,"").replace(/^\[|\]$/g,"").replace(/^\d+번?\s*구간\]?\s*/,"").trim();
+      // ★형식 헤더 그대로 나온 것("장면설명" 등) 걸러내기 — 캡션에 안 씀
+      if(/^장면\s*설명/.test(capClean)||/한국어\s*10/.test(capClean)||capClean.length<2) capClean="";
+      captions.push(capClean.slice(0,30));
       prompts.push(`${eng}, ultra realistic 8K photography, natural lighting, absolutely no text, no letters, no watermark, no logo`);
     }
     return { prompts, captions };
@@ -2242,6 +2262,46 @@ ${body}`;
       effectiveBlocks=textBlocks.length>0?[imgBlocks[0],...interleave(textBlocks,imgBlocks.slice(1))]:[...imgBlocks];
       if(!thumbnail && activeImgs[0]) setThumbnail(activeImgs[0]);
     }
+    // ── 온파트너 링크: URL만 본문에 분산 삽입 → 네이버가 정사각 링크 카드로 렌더(상품당 1개, Q&A·해시태그 위) ──
+    // ★안전장치: 조회만 하고 저장(💾) 안 한 상품(onPartnerPreview)도 발행에 포함.
+    const partnerForPublish:OnPartnerItem[] = onPartnerItems.length>0 ? onPartnerItems : (onPartnerPreview?[onPartnerPreview]:[]);
+    console.log("[publy] 온파트너 링크 대상:", partnerForPublish.length, "개", partnerForPublish.map(it=>it.product.name));
+    if(partnerForPublish.length>0){
+      const items=partnerForPublish.filter(it=>it.product.available&&it.product.partnerUrl);
+      // ★고지 문단을 "썸네일 바로 다음"(본문 맨 앞)에 무조건 1회. 이미 있으면 중복 안 넣음.
+      const DISCLOSURE="※ 이 글에는 제휴 링크가 포함되어 있으며, 구매 시 작성자에게 일정 수수료가 발생할 수 있습니다.";
+      const hasDisclosure=effectiveBlocks.some(b=>b.type==="text"&&(b as TextBlock).content.includes("제휴 링크가 포함"));
+      if(!hasDisclosure){
+        effectiveBlocks=[{type:"text",id:uid(),content:DISCLOSURE} as ContentBlock,...effectiveBlocks];
+      }
+      // 광고 금지 경계: FAQ/Q&A/관련글/해시태그 섹션 시작 텍스트 블록 — 광고는 이 위에만.
+      const isBoundary=(b:ContentBlock)=>b.type==="text"&&/\[FAQ시작\]|\[관련글시작\]|질문\s*답변|Q\s*&\s*A|큐앤에이|해시태그|자주\s*묻는/i.test((b as TextBlock).content);
+      let boundaryIdx=effectiveBlocks.findIndex(isBoundary);
+      if(boundaryIdx<0)boundaryIdx=effectiveBlocks.length;
+      // 충분한 길이의 본문 텍스트 블록 뒤에만(짧은 소제목 뒤 방지)
+      const textIdxs:number[]=[];
+      for(let i=0;i<boundaryIdx;i++){const b=effectiveBlocks[i];if(b.type==="text"&&(b as TextBlock).content.trim().length>=40)textIdxs.push(i);}
+      if(textIdxs.length===0)for(let i=0;i<boundaryIdx;i++)if(effectiveBlocks[i].type==="text")textIdxs.push(i);
+      if(textIdxs.length>0){
+        const ratios = items.length===1?[0.6]:items.length===2?[0.45,0.72]:[0.35,0.58,0.8];
+        const insertAfter=items.map((_,i)=>{
+          let ti=Math.round(textIdxs.length*ratios[i])-1;
+          ti=Math.max(items.length===1?1:0, Math.min(textIdxs.length-1, ti));
+          return textIdxs[ti];
+        });
+        const withLink:ContentBlock[]=[];
+        effectiveBlocks.forEach((b,i)=>{
+          withLink.push(b);
+          items.forEach((it,k)=>{
+            if(insertAfter[k]===i){
+              // URL만 자체 문단으로 → 네이버가 정사각 링크 카드 자동 생성. 앞에 짧은 안내 한 줄.
+              withLink.push({type:"text",id:uid(),content:`👇 '${it.product.name}' 지금 바로 확인하기\n${it.product.partnerUrl}`} as ContentBlock);
+            }
+          });
+        });
+        effectiveBlocks=withLink;
+      }
+    }
     const publishBody={
       userId:user.id,platform,title:effTitle,content,
       pubScope,
@@ -2254,7 +2314,7 @@ ${body}`;
       videoPosition,
       blocks:effectiveBlocks.map(b=>{
         if(b.type==="text")return{type:"text",content:(b as TextBlock).content};
-        if(b.type==="image")return{type:"image",src:(b as SingleImageBlock).src,alt:(b as SingleImageBlock).alt||""};
+        if(b.type==="image")return{type:"image",src:(b as SingleImageBlock).src,alt:(b as SingleImageBlock).alt||"",link:(b as any).link||undefined};
         if(b.type==="image-pair")return{type:"image-pair",images:(b as ImagePairBlock).images};
         return null;
       }).filter(Boolean),
@@ -2826,7 +2886,7 @@ POST3: (제목)|(이유)
         {t:"🤖 AI 자동 생성",d:"수량 자동추천 또는 직접 입력 (체험단 15장+ 가능). 생성 중 언제든 ⏹ 중단 가능!"},
         {t:"📁 내 이미지 업로드",d:"직접 찍은 사진이나 저장한 이미지. 여러 장 동시 업로드 가능!"},
         {t:"🚫 이미지 없이 발행",d:"텍스트만 발행할 때 선택."},
-        {t:"📐 이미지 배치 패턴",d:"🎲 랜덤(권장): 매 발행마다 자동 변경 → AI 감지 방지!\nA: 썸네일 + 글 중간 배치 / B: 2장씩 한 줄 나란히 / C: 균등 분산"},
+        {t:"📐 이미지 배치 패턴",d:"🎲 랜덤(권장): 매 발행마다 자동 변경 → AI 감지 방지!\nA: 썸네일 + 글 중간 배치 / B: 균등 분산 (모든 이미지 캡션 포함)"},
         {t:"🎬 영상 삽입",d:"네이버TV/유튜브 URL 입력 후 ON. 체험단 영상 필수 업체 대응! 위치(상단/중간/하단) 선택 가능."},
       ].map((item,i)=>(
         <div key={i} style={{padding:"13px 15px",borderRadius:12,background:"rgba(255,255,255,.04)",border:"1px solid rgba(255,255,255,.08)",marginBottom:8}}>
@@ -3239,37 +3299,57 @@ POST3: (제목)|(이유)
                 </div>
 
                 {/* 수익화 목적 + 플랫폼 */}
-                <div className="card" style={{borderColor:onPartnerProduct?"rgba(190,255,0,.38)":undefined}}>
-                  <div className="card-title" style={{marginBottom:6}}>🌱 온파트너 상품 링크</div>
-                  <div style={{fontSize:11,color:"var(--text3)",lineHeight:1.6,marginBottom:10}}>추천 링크를 넣으면 제휴 안내는 글 상단에 명확하게 표시하고, 상품 소개 카드는 구매 관심이 높아지는 본문 위치에 자동 배치해요.</div>
-                  <div style={{display:"flex",gap:7,alignItems:"stretch"}}>
-                    <input className="inp" value={onPartnerLink} onChange={e=>{setOnPartnerLink(e.target.value);setOnPartnerProduct(null);setOnPartnerError("");}} placeholder="https://partner.yuanfnb.com/r/추천코드" style={{flex:1,minWidth:0}}/>
-                    <button className="btn btn-secondary" onClick={loadOnPartnerProduct} disabled={onPartnerLoading} style={{flexShrink:0}}>{onPartnerLoading?<><span className="spinner"/>확인 중</>:"상품 확인"}</button>
-                  </div>
-                  {onPartnerError&&<div style={{fontSize:11,color:"var(--danger)",marginTop:7}}>⚠️ {onPartnerError}</div>}
-                  {onPartnerProduct&&(
-                    <div style={{marginTop:12,padding:10,borderRadius:11,background:"var(--card2)",border:"1px solid var(--border)"}}>
-                      <div style={{display:"flex",gap:12,alignItems:"center"}}>
-                        {onPartnerProduct.image?<img src={onPartnerProduct.image} alt={onPartnerProduct.name} style={{width:64,height:64,borderRadius:9,objectFit:"cover",flexShrink:0}}/>:<div style={{width:64,height:64,borderRadius:9,background:"var(--bg2)",display:"grid",placeItems:"center",fontSize:24,flexShrink:0}}>🌱</div>}
-                        <div style={{minWidth:0,flex:1}}>
-                          <div style={{fontSize:13,fontWeight:800,color:"var(--text)",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{onPartnerProduct.name}</div>
-                          <div style={{fontSize:12,fontWeight:800,color:"var(--accent-text)",marginTop:4}}>{onPartnerProduct.price?`${onPartnerProduct.price.toLocaleString("ko-KR")}원`:"가격은 상품 페이지에서 확인"}</div>
-                          <div style={{fontSize:10,color:onPartnerProduct.available?"var(--success)":"var(--danger)",marginTop:3}}>{onPartnerProduct.available?"● 판매 중 · 제휴 링크 적용":"● 현재 판매 중지"}</div>
-                        </div>
-                        <button type="button" onClick={()=>{setOnPartnerLink("");setOnPartnerProduct(null);setOnPartnerError("");}} style={{border:0,background:"transparent",color:"var(--text3)",cursor:"pointer",fontSize:16}}>✕</button>
-                      </div>
-                      {onPartnerProduct.available&&<div style={{marginTop:10,paddingTop:10,borderTop:"1px solid var(--border)"}}>
-                        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,flexWrap:"wrap"}}>
-                          <b style={{fontSize:11,color:"var(--text2)"}}>📍 상품 카드 위치</b>
-                          <select className="inp" value={onPartnerPlacement} onChange={e=>{const v=e.target.value as OnPartnerPlacement;setOnPartnerPlacement(v);localStorage.setItem("publy_onpartner_placement",v)}} style={{width:"min(210px,100%)",padding:"7px 9px",fontSize:11}}>
-                            {Object.entries(ONPARTNER_PLACEMENT_INFO).map(([value,info])=><option key={value} value={value}>{info.label}</option>)}
-                          </select>
-                        </div>
-                        <div style={{marginTop:7,padding:"8px 10px",borderRadius:9,background:"var(--accent-bg)",color:"var(--text2)",fontSize:10,lineHeight:1.55}}>{ONPARTNER_PLACEMENT_INFO[onPartnerPlacement].desc}</div>
-                        <div style={{marginTop:6,color:"var(--accent-text)",fontSize:10,fontWeight:800}}>상단 제휴 안내 → 본문 안 상품 카드 → FAQ·관련글·해시태그 전 구매 안내</div>
-                      </div>}
+                <div className="card" style={{borderColor:onPartnerItems.length>0?"rgba(190,255,0,.38)":undefined}}>
+                  <div className="card-title" style={{marginBottom:6}}>🌱 온파트너 상품 링크 <span style={{fontSize:11,color:"var(--text3)",fontWeight:600}}>({onPartnerItems.length}/{MAX_ONPARTNER})</span></div>
+                  <div style={{fontSize:11,color:"var(--text3)",lineHeight:1.6,marginBottom:10}}>링크 넣고 <b>조회</b> → <b>저장</b>을 <b>최대 {MAX_ONPARTNER}개까지</b> 반복하면, 각 상품 링크가 본문에 자동 삽입돼요(네이버 상품 카드로 표시, Q&A·해시태그 위).</div>
+                  {onPartnerItems.length<MAX_ONPARTNER&&(
+                    <div style={{display:"flex",gap:7,alignItems:"stretch"}}>
+                      <input className="inp" value={onPartnerLink} onChange={e=>{setOnPartnerLink(e.target.value);setOnPartnerError("");setOnPartnerPreview(null);}} onKeyDown={e=>e.key==="Enter"&&loadOnPartnerProduct()} placeholder="https://partner.yuanfnb.com/r/추천코드" style={{flex:1,minWidth:0}}/>
+                      <button className="btn btn-secondary" onClick={loadOnPartnerProduct} disabled={onPartnerLoading} style={{flexShrink:0}}>{onPartnerLoading?<><span className="spinner"/>조회 중</>:"🔍 조회"}</button>
                     </div>
                   )}
+                  {onPartnerError&&<div style={{fontSize:11,color:"var(--danger)",marginTop:7}}>⚠️ {onPartnerError}</div>}
+
+                  {/* 조회된 상품 미리보기 (아직 추가 전) — 여기서 '추가' 눌러야 목록에 담김 */}
+                  {onPartnerPreview&&(
+                    <div style={{marginTop:12,padding:10,borderRadius:11,background:"var(--accent-bg)",border:"1.5px solid var(--accent-border)"}}>
+                      <div style={{display:"flex",gap:12,alignItems:"center"}}>
+                        {onPartnerPreview.product.image?<img src={onPartnerPreview.product.image} alt={onPartnerPreview.product.name} style={{width:56,height:56,borderRadius:9,objectFit:"cover",flexShrink:0}}/>:<div style={{width:56,height:56,borderRadius:9,background:"var(--bg2)",display:"grid",placeItems:"center",fontSize:22,flexShrink:0}}>🌱</div>}
+                        <div style={{minWidth:0,flex:1}}>
+                          <div style={{fontSize:13,fontWeight:800,color:"var(--text)",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{onPartnerPreview.product.name}</div>
+                          <div style={{fontSize:12,fontWeight:800,color:"var(--accent-text)",marginTop:3}}>{onPartnerPreview.product.price?`${onPartnerPreview.product.price.toLocaleString("ko-KR")}원`:"가격은 상품 페이지에서 확인"}</div>
+                          <div style={{fontSize:10,color:onPartnerPreview.product.available?"var(--success)":"var(--danger)",marginTop:3}}>{onPartnerPreview.product.available?"● 판매 중":"● 현재 판매 중지"}</div>
+                        </div>
+                      </div>
+                      <div style={{display:"flex",gap:7,marginTop:10}}>
+                        <button className="btn btn-primary" onClick={addOnPartnerProduct} style={{flex:1,justifyContent:"center"}}>💾 저장 (목록에 추가)</button>
+                        <button className="btn btn-secondary" onClick={()=>{setOnPartnerPreview(null);setOnPartnerLink("");}} style={{flexShrink:0}}>취소</button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* 추가된 상품 목록 (최대 3) — 컴팩트 한 줄 (배너는 작은 썸네일) */}
+                  {onPartnerItems.map((it,idx)=>(
+                    <div key={it.product.partnerUrl||idx} style={{marginTop:8,padding:"8px 10px",borderRadius:10,background:"var(--card2)",border:"1px solid var(--border)",display:"flex",gap:10,alignItems:"center"}}>
+                      <span style={{fontSize:11,fontWeight:800,color:"var(--accent-text)",flexShrink:0}}>{idx+1}</span>
+                      {it.product.image?<img src={it.product.image} alt={it.product.name} style={{width:50,height:50,borderRadius:7,objectFit:"cover",flexShrink:0}}/>:<div style={{width:50,height:50,borderRadius:7,background:"var(--bg2)",display:"grid",placeItems:"center",fontSize:20,flexShrink:0}}>🌱</div>}
+                      <div style={{minWidth:0,flex:1}}>
+                        <div style={{fontSize:12.5,fontWeight:800,color:"var(--text)",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{it.product.name}</div>
+                        <div style={{fontSize:11,fontWeight:800,color:"var(--accent-text)",marginTop:2}}>{it.product.price?`${it.product.price.toLocaleString("ko-KR")}원`:"가격 상품페이지 확인"}<span style={{fontSize:9,color:"var(--text3)",fontWeight:600,marginLeft:6}}>· 링크 자동삽입</span></div>
+                      </div>
+                      <button type="button" onClick={()=>setOnPartnerItems(prev=>prev.filter((_,i)=>i!==idx))} title="빼기" style={{border:0,background:"transparent",color:"var(--text3)",cursor:"pointer",fontSize:15,flexShrink:0}}>✕</button>
+                    </div>
+                  ))}
+
+                  {onPartnerItems.length>0&&onPartnerItems.length===1&&(
+                    <div style={{marginTop:8,display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,flexWrap:"wrap"}}>
+                      <b style={{fontSize:11,color:"var(--text2)"}}>📍 배너 위치</b>
+                      <select className="inp" value={onPartnerPlacement} onChange={e=>{const v=e.target.value as OnPartnerPlacement;setOnPartnerPlacement(v);localStorage.setItem("publy_onpartner_placement",v)}} style={{width:"min(200px,100%)",padding:"6px 9px",fontSize:11}}>
+                        {Object.entries(ONPARTNER_PLACEMENT_INFO).map(([value,info])=><option key={value} value={value}>{info.label}</option>)}
+                      </select>
+                    </div>
+                  )}
+                  {onPartnerItems.length>1&&<div style={{marginTop:8,color:"var(--accent-text)",fontSize:10,fontWeight:800}}>본문에 골고루 분산 배치돼요 (Q&A·해시태그 위).</div>}
                 </div>
 
                 <div className="card">
@@ -3980,8 +4060,7 @@ POST3: (제목)|(이유)
                         {([
                           {v:"random",l:"🎲 랜덤",badge:"권장",sub:"매 발행마다 자동으로 패턴 변경",desc:"AI 감지 방지에 가장 효과적이에요",diagram:"🖼️ → 📝 → 🖼️ → 📝"},
                           {v:"A",l:"패턴 A",badge:"",sub:"썸네일 + 중간 이미지 1장",desc:"글 중간에 이미지 1장 배치",diagram:"🖼️썸네일 → 📝글 → 🖼️중간 → 📝글"},
-                          {v:"B",l:"패턴 B",badge:"",sub:"이미지 2장씩 한 줄 나란히",desc:"이미지를 2장씩 묶어서 한 줄에 배치",diagram:"🖼️썸네일 → 📝글 → 🖼️🖼️나란히 → 📝글"},
-                          {v:"C",l:"패턴 C",badge:"",sub:"썸네일 + 이미지 균등 분산",desc:"이미지를 글 전체에 고르게 배치",diagram:"🖼️썸네일 → 📝 → 🖼️ → 📝 → 🖼️"},
+                          {v:"C",l:"패턴 B",badge:"",sub:"썸네일 + 이미지 균등 분산",desc:"이미지를 글 전체에 고르게 배치",diagram:"🖼️썸네일 → 📝 → 🖼️ → 📝 → 🖼️"},
                         ] as const).map(p=>(
                           <button key={p.v} onClick={()=>setImgPattern(p.v)} style={{padding:"11px 13px",borderRadius:10,border:`1.5px solid ${imgPattern===p.v?"var(--accent)":"var(--border)"}`,background:imgPattern===p.v?"var(--accent-bg)":"var(--bg)",cursor:"pointer",fontFamily:"inherit",textAlign:"left",transition:"all .15s"}}>
                             <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:4}}>
@@ -4732,8 +4811,8 @@ POST3: (제목)|(이유)
                           <button onClick={()=>addCatToAcc(a.id)} className="btn btn-primary" style={{padding:"0 16px",flexShrink:0}}>추가</button>
                         </div>
                         {botOnline&&(
-                          <button onClick={async()=>{await loadCategories(a.platform);setEditingCatAccId(a.id);}} style={{marginTop:8,width:"100%",padding:"8px",borderRadius:9,border:"1px solid var(--border)",background:"var(--bg)",color:"var(--text2)",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:"inherit"}}>
-                            🔄 봇에서 자동 불러오기
+                          <button onClick={async()=>{setEditingCatAccId(a.id);await loadCategories(a.platform,a.id);}} disabled={loadingCats} style={{marginTop:8,width:"100%",padding:"8px",borderRadius:9,border:"1px solid var(--border)",background:"var(--bg)",color:"var(--text2)",cursor:loadingCats?"wait":"pointer",fontSize:12,fontWeight:700,fontFamily:"inherit"}}>
+                            {loadingCats?"⏳ 불러오는 중...":"🔄 봇에서 카테고리 자동 불러오기"}
                           </button>
                         )}
                       </div>

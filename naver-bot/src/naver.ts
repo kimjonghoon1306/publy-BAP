@@ -217,44 +217,44 @@ export async function getNaverCategories(
     }
     if (!frame) { await browser.close(); return []; }
 
-    // 발행 패널 열기
-    const publishSels = [
-      "button.publish_btn__Y8C4q",
-      "button[class*='publish_btn']",
-      "button:has-text('발행')",
-    ];
-    for (const sel of publishSels) {
-      try {
-        const el = await frame.$(sel);
-        if (el) { await frame.click(sel, { timeout: 5000 }); break; }
-      } catch {}
+    // 발행 레이어 열기(상단 '발행' 버튼) — option_category가 뜰 때까지 재시도
+    let panelReady = false;
+    for (let attempt = 0; attempt < 4 && !panelReady; attempt++) {
+      await frame.$$eval("button", (bs) => {
+        const b = bs.find(x => (x.textContent||"").trim()==="발행" && /publish_btn/.test((x as HTMLElement).className))
+          || bs.find(x => (x.textContent||"").trim()==="발행");
+        if (b) (b as HTMLElement).click();
+      }).catch(()=>{});
+      try { await frame.waitForSelector("[class*='option_category']", { timeout: 6000 }); panelReady = true; } catch {}
     }
-    await page.waitForTimeout(2500);
+    if (!panelReady) { await browser.close(); return []; }
 
-    // 카테고리 select 옵션 추출
-    const categories: { id: string; name: string }[] = [];
-    const catSels = [
-      "select.category_select__YWKIP",
-      "select[class*='category_select']",
-      "select[class*='category']",
-      ".publish_panel select",
-      "select[name='categoryNo']",
-    ];
-    for (const sel of catSels) {
-      try {
-        const opts = await frame.$$(sel + " option");
-        if (opts.length > 0) {
-          for (const opt of opts) {
-            const value = await opt.getAttribute("value");
-            const text = await opt.textContent();
-            if (value && value !== "0" && value !== "-1" && text?.trim()) {
-              categories.push({ id: value, name: text.trim() });
-            }
-          }
-          break;
-        }
-      } catch {}
-    }
+    // 카테고리 드롭다운 펼치기(selectbox_button)
+    await frame.evaluate(() => {
+      const oc = document.querySelector("[class*='option_category']");
+      const btn = oc?.querySelector("button,[role='button']") as HTMLElement | null;
+      if (btn) btn.click();
+    }).catch(()=>{});
+    await page.waitForTimeout(1500);
+
+    // 라디오 목록에서 카테고리 추출: input id="{카테고리ID}_{이름}", data-testid="categoryBtn_{ID}"
+    const categories: { id: string; name: string }[] = await frame.evaluate(() => {
+      const oc = document.querySelector("[class*='option_category']");
+      if (!oc) return [];
+      const seen = new Set<string>();
+      const list: { id: string; name: string }[] = [];
+      oc.querySelectorAll("li input[type=radio]").forEach((inp) => {
+        const el = inp as HTMLInputElement;
+        const testid = el.getAttribute("data-testid") || "";           // categoryBtn_1
+        const idm = testid.match(/categoryBtn_(\d+)/);
+        const idAttr = el.id || "";                                     // 1_맛집 리뷰
+        const id = idm ? idm[1] : (idAttr.split("_")[0] || "");
+        const lbl = oc.querySelector(`label[for="${CSS.escape(el.id)}"] .text__sraQE, label[for="${CSS.escape(el.id)}"]`);
+        const name = (lbl?.textContent || idAttr.replace(/^\d+_/, "") || "").trim();
+        if (id && name && !seen.has(id)) { seen.add(id); list.push({ id, name }); }
+      });
+      return list;
+    });
     await browser.close();
     return categories;
   } catch (e) {
@@ -292,7 +292,7 @@ export async function publishNaver(params: {
   categoryId?: string;
   visibility?: "public" | "neighbor" | "private";
   scheduleTime?: string;
-  blocks?: Array<{type: string; content?: string; src?: string; alt?: string}>;
+  blocks?: Array<{type: string; content?: string; src?: string; alt?: string; link?: string}>;
   videoUrl?: string;
   videoPosition?: "top" | "middle" | "bottom";
 }): Promise<string> {
@@ -585,7 +585,62 @@ export async function publishNaver(params: {
     }
 
     // 이미지 업로드 헬퍼
-    async function uploadImage(imgUrl: string, alt?: string) {
+    // ★ 마지막 이미지에 링크 걸기(온파트너 배너 클릭 → 쇼핑몰). 실측 DOM: .se-link-toolbar-button + .se-custom-layer-link-input
+    async function linkLastImage(url: string): Promise<boolean> {
+      const link = (url || "").trim();
+      if (!/^https?:\/\//.test(link)) return false;
+      try {
+        const comps = await frame.$$(".se-component.se-image");
+        const comp = comps[comps.length - 1];
+        if (!comp) return false;
+        await comp.scrollIntoViewIfNeeded().catch(() => {});
+        const imgRes = await comp.$(".se-image-resource") ?? await comp.$("img");
+        if (imgRes) { await imgRes.click({ force: true }).catch(() => {}); await page.waitForTimeout(400); }
+        // 이미지 링크 버튼 클릭
+        const btnClicked = await frame.evaluate(() => {
+          const b = document.querySelector(".se-link-toolbar-button") as HTMLElement | null;
+          if (b) { b.click(); return true; } return false;
+        });
+        if (!btnClicked) return false;
+        await page.waitForTimeout(600);
+        // URL 입력칸에 입력
+        const input = await frame.$(".se-custom-layer-link-input");
+        if (!input) return false;
+        await input.click({ force: true }).catch(() => {});
+        await input.fill(link).catch(async () => { await page.keyboard.type(link, { delay: 15 }); });
+        await page.waitForTimeout(300);
+        // ★확인은 Enter가 아니라 "링크 입력" 적용 버튼 클릭이어야 실제로 걸린다(실측 확인).
+        let applied = await frame.evaluate(() => {
+          const b = document.querySelector(".se-custom-layer-link-apply-button") as HTMLElement | null;
+          if (b) { b.click(); return true; } return false;
+        });
+        if (!applied) { await page.keyboard.press("Enter"); }  // 폴백
+        await page.waitForTimeout(600);
+        // 검증: 이미지가 링크로 감싸졌는지 확인(안 됐으면 실패 반환)
+        const ok = await frame.evaluate(() => {
+          const comp = [...document.querySelectorAll(".se-component.se-image")].pop();
+          return !!(comp && comp.querySelector("a[href]"));
+        });
+        return ok;
+      } catch { return false; }
+    }
+    // ★ 마지막 이미지 가운데 정렬
+    async function centerLastImage(): Promise<void> {
+      try {
+        const comps = await frame.$$(".se-component.se-image");
+        const comp = comps[comps.length - 1];
+        if (!comp) return;
+        const imgRes = await comp.$(".se-image-resource") ?? await comp.$("img");
+        if (imgRes) { await imgRes.click({ force: true }).catch(() => {}); await page.waitForTimeout(300); }
+        await frame.evaluate(() => {
+          const btn = [...document.querySelectorAll("button")].find(b => /가운데 정렬/.test(b.getAttribute("aria-label") || "")) as HTMLElement | null;
+          if (btn) btn.click();
+        });
+        await page.waitForTimeout(300);
+      } catch {}
+    }
+
+    async function uploadImage(imgUrl: string, alt?: string, link?: string) {
       const tmpFile = await downloadImageToTemp(imgUrl);
       if (!tmpFile) { console.log("[naver] 이미지 다운로드 실패:", imgUrl.slice(0,60)); return; }
       try {
@@ -596,20 +651,17 @@ export async function publishNaver(params: {
         const ok = await uploadFileToEditor(tmpFile);
         if (ok) {
           console.log("[naver] ✅ 이미지 업로드 완료");
+          // 가운데 정렬(항상)
+          await centerLastImage();
           if (alt?.trim()) {
-            // 1순위: 네이버 전용 캡션칸에 직접 입력
+            // 네이버 전용 캡션칸에만 입력(★밖 문단 폴백 제거 — 캡션이 본문 밖으로 새지 않게)
             const capOk = await fillLastImageCaption(alt.trim());
-            if (capOk) {
-              console.log("[naver] ✅ 이미지 캡션(설명칸) 입력:", alt.trim());
-            } else {
-              // 폴백: 캡션칸을 못 찾으면 이미지 밑 문단으로 설명 추가
-              try {
-                await moveCursorToEnd();
-                await page.keyboard.press("Enter");
-                await insertText(alt.trim());
-                console.log("[naver] ✅ 캡션(문단 폴백) 입력:", alt.trim());
-              } catch {}
-            }
+            console.log(capOk ? "[naver] ✅ 이미지 캡션 입력: " + alt.trim() : "[naver] ⚠️ 캡션칸 못찾음(캡션 생략)");
+          }
+          // 온파트너 배너 등: 이미지에 링크 걸기(클릭 시 쇼핑몰)
+          if (link?.trim()) {
+            const linkOk = await linkLastImage(link.trim());
+            console.log(linkOk ? "[naver] ✅ 이미지 링크 연결: " + link.trim() : "[naver] ⚠️ 이미지 링크 연결 실패");
           }
         } else {
           console.log("[naver] 이미지 버튼 못 찾음 - 이미지 스킵");
@@ -693,7 +745,7 @@ export async function publishNaver(params: {
           }
         } else if (block.type === "image" && block.src) {
           if (block.src !== imageUrl) {
-            await uploadImage(block.src, block.alt);
+            await uploadImage(block.src, block.alt, (block as any).link);
           }
         }
       }
@@ -744,27 +796,38 @@ export async function publishNaver(params: {
       } catch (e) { console.log("[naver] 태그 입력 실패 (무시):", e); }
     }
 
-    // ── 카테고리 선택 ──
+    // ── 카테고리 선택 (SmartEditor ONE: option_category 안의 라디오 목록) ──
     if (categoryId) {
       console.log(`[naver] 카테고리 선택: ${categoryId}`);
       try {
-        const catSels = [
-          "select.category_select__YWKIP",
-          "select[class*='category_select']",
-          "select[class*='category']",
-          "select[name='categoryNo']",
-        ];
-        for (const sel of catSels) {
-          try {
-            const el = await frame.$(sel);
-            if (el) {
-              await frame.selectOption(sel, categoryId);
-              await page.waitForTimeout(500);
-              console.log("[naver] ✅ 카테고리 선택 완료");
-              break;
-            }
-          } catch {}
-        }
+        // 발행 레이어의 카테고리 영역 대기
+        try { await frame.waitForSelector("[class*='option_category']", { timeout: 6000 }); } catch {}
+        // 드롭다운 펼치기
+        await frame.evaluate(() => {
+          const oc = document.querySelector("[class*='option_category']");
+          const btn = oc?.querySelector("button,[role='button']") as HTMLElement | null;
+          if (btn) btn.click();
+        });
+        await page.waitForTimeout(800);
+        // categoryId(숫자)와 일치하는 라디오/라벨 클릭 (data-testid=categoryBtn_{id} 또는 input id="{id}_이름")
+        const done = await frame.evaluate((cid: string) => {
+          const oc = document.querySelector("[class*='option_category']");
+          if (!oc) return false;
+          const radios = Array.from(oc.querySelectorAll("li input[type=radio]")) as HTMLInputElement[];
+          const match = radios.find(r => {
+            const t = r.getAttribute("data-testid") || "";
+            const m = t.match(/categoryBtn_(\d+)/);
+            const idFromTest = m ? m[1] : "";
+            const idFromId = (r.id || "").split("_")[0];
+            return idFromTest === cid || idFromId === cid;
+          });
+          if (!match) return false;
+          const label = oc.querySelector(`label[for="${CSS.escape(match.id)}"]`) as HTMLElement | null;
+          (label || match).click();
+          return true;
+        }, categoryId);
+        await page.waitForTimeout(500);
+        console.log(done ? "[naver] ✅ 카테고리 선택 완료" : "[naver] ⚠️ 일치 카테고리 못찾음(ID:" + categoryId + ")");
       } catch (e) { console.log("[naver] 카테고리 선택 실패 (무시):", e); }
     }
 
