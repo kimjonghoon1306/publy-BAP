@@ -7,9 +7,6 @@ interface Props {
 }
 
 export default function GoogleFlowCard({ botOnline, botUrl, userId }: Props) {
-  const [email, setEmail] = useState("");
-  const [pw, setPw] = useState("");
-  const [showPw, setShowPw] = useState(false);
   const [loading, setLoading] = useState(false);
   const [sessionExists, setSessionExists] = useState(false);
   const [checking, setChecking] = useState(true);
@@ -24,52 +21,26 @@ export default function GoogleFlowCard({ botOnline, botUrl, userId }: Props) {
       .finally(() => setChecking(false));
   }, [botOnline, botUrl, userId]);
 
-  async function handleSave() {
-    if (!botOnline) { alert("Publy 앱을 먼저 실행해주세요"); return; }
-    if (!email || !pw) { alert("이메일과 비밀번호를 입력해주세요"); return; }
-    setLoading(true);
-    try {
-      const r = await fetch(`${botUrl}/api/google/save-session`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userId, email, pw }),
-        signal: AbortSignal.timeout(150000),
-      });
-      const d = await r.json();
-      if (d.success) {
-        setSessionExists(true);
-        setEmail("");
-        setPw("");
-        alert("✅ Google Flow 연결 완료! 이제 발행 시 플로우 이미지를 사용할 수 있어요.");
-      } else {
-        alert("❌ 연결 실패: " + (d.error || "다시 시도해주세요"));
-      }
-    } catch (e: any) {
-      alert("❌ 오류: " + e.message);
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function handleReconnect() {
+  // 크롬 창을 열어 사용자가 직접 구글 로그인 → 로그인되면 세션 저장
+  async function handleConnect() {
     if (!botOnline) { alert("Publy 앱을 먼저 실행해주세요"); return; }
     setLoading(true);
     try {
-      // 저장된 이메일/비번으로 재연결 (서버에서 세션파일에서 읽음)
       const r = await fetch(`${botUrl}/api/google/save-session`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ userId }),
-        signal: AbortSignal.timeout(150000),
+        signal: AbortSignal.timeout(210000), // 봇이 로그인 최대 3분 대기 → 여유 있게
       });
       const d = await r.json();
       if (d.success) {
-        alert("✅ Google Flow 재연결 완료!");
+        setSessionExists(true);
+        alert("✅ Google 연결 완료! 이제 글쓰기·이미지 생성 시 자동으로 사용돼요.");
       } else {
-        alert("❌ 재연결 실패: " + (d.error || "다시 시도해주세요"));
+        alert("❌ 연결 실패: " + (d.error || "크롬 창에서 로그인을 완료했는지 확인해주세요"));
       }
     } catch (e: any) {
-      alert("❌ 오류: " + e.message);
+      alert("❌ 오류: " + e.message + "\n(크롬 창에서 로그인을 마쳤는지 확인해주세요)");
     } finally {
       setLoading(false);
     }
@@ -99,63 +70,38 @@ export default function GoogleFlowCard({ botOnline, botUrl, userId }: Props) {
 
       {/* 사용 방법 */}
       <div style={{ fontSize: 11, color: "var(--text)", lineHeight: 1.9, marginBottom: 12, padding: "10px 12px", borderRadius: 10, background: "rgba(168,85,247,.06)", border: "1px solid rgba(168,85,247,.15)" }}>
-        <div style={{ fontWeight: 800, color: "#c084fc", marginBottom: 4 }}>📖 플로우 사용 방법</div>
-        <div>① 구글 계정 없으면 아래 발급받기 클릭</div>
-        <div>② 이메일·비밀번호 입력 후 저장하기</div>
-        <div>③ Chrome 자동 오픈 → 자동 로그인</div>
-        <div>④ 발행하기 → 이미지탭 → Flow 선택 후 발행</div>
+        <div style={{ fontWeight: 800, color: "#c084fc", marginBottom: 4 }}>📖 연결 방법</div>
+        <div>① 아래 <b>[Google 연결하기]</b> 클릭</div>
+        <div>② 크롬 창이 자동으로 열립니다</div>
+        <div>③ <b>그 창에서 직접 구글 로그인</b> (한 번만)</div>
+        <div>④ 로그인되면 자동 저장 → 여기서 매번 로그인 안 해도 됨</div>
+        <div style={{ color: "var(--warn)", marginTop: 4 }}>⚠️ 크롬 창을 닫지 말고 로그인 완료까지 기다려주세요</div>
       </div>
 
-      {/* 세션 없을 때: 입력 폼 */}
+      {/* 세션 없을 때: 연결 버튼 */}
       {!sessionExists && (
-        <>
-          <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 10 }}>
-            <input
-              className="inp"
-              type="email"
-              placeholder="구글 이메일 (예: example@gmail.com)"
-              value={email}
-              onChange={e => setEmail(e.target.value)}
-              style={{ fontSize: 13 }}
-            />
-            <div style={{ position: "relative" }}>
-              <input
-                className="inp"
-                type={showPw ? "text" : "password"}
-                placeholder="구글 비밀번호"
-                value={pw}
-                onChange={e => setPw(e.target.value)}
-                style={{ fontSize: 13, paddingRight: 40, width: "100%" }}
-              />
-              <button type="button" onClick={() => setShowPw(v => !v)}
-                style={{ position: "absolute", right: 10, top: "50%", transform: "translateY(-50%)", background: "none", border: "none", cursor: "pointer", fontSize: 16, color: "var(--text3)" }}>
-                {showPw ? "🙈" : "👁️"}
-              </button>
-            </div>
-          </div>
-          <div style={{ display: "flex", gap: 8 }}>
-            <a href="https://accounts.google.com/signup" target="_blank" rel="noreferrer"
-              style={{ flex: 1, padding: "9px", borderRadius: 9, border: "1.5px solid rgba(168,85,247,.4)", background: "transparent", color: "#c084fc", cursor: "pointer", fontSize: 12, fontWeight: 700, fontFamily: "inherit", textDecoration: "none", display: "flex", alignItems: "center", justifyContent: "center", gap: 4 }}>
-              🔑 구글 계정 발급받기
-            </a>
-            <button onClick={handleSave} disabled={loading || !email || !pw}
-              style={{ flex: 1, padding: "9px", borderRadius: 9, border: "none", background: "linear-gradient(135deg,#7c3aed,#a855f7)", color: "#fff", cursor: "pointer", fontSize: 12, fontWeight: 800, fontFamily: "inherit", opacity: loading || !email || !pw ? 0.6 : 1 }}>
-              {loading ? "🔄 연결 중..." : "💾 저장하기"}
-            </button>
-          </div>
-        </>
+        <div style={{ display: "flex", gap: 8 }}>
+          <a href="https://accounts.google.com/signup" target="_blank" rel="noreferrer"
+            style={{ flex: "0 0 auto", padding: "9px 14px", borderRadius: 9, border: "1.5px solid rgba(168,85,247,.4)", background: "transparent", color: "#c084fc", cursor: "pointer", fontSize: 12, fontWeight: 700, fontFamily: "inherit", textDecoration: "none", display: "flex", alignItems: "center", justifyContent: "center", gap: 4 }}>
+            🔑 구글 계정 만들기
+          </a>
+          <button onClick={handleConnect} disabled={loading}
+            style={{ flex: 1, padding: "9px", borderRadius: 9, border: "none", background: "linear-gradient(135deg,#7c3aed,#a855f7)", color: "#fff", cursor: loading ? "default" : "pointer", fontSize: 12, fontWeight: 800, fontFamily: "inherit", opacity: loading ? 0.7 : 1 }}>
+            {loading ? "🔄 크롬 창에서 로그인 대기 중..." : "🔗 Google 연결하기"}
+          </button>
+        </div>
       )}
 
-      {/* 세션 있을 때: 재연결 버튼만 */}
+      {/* 세션 있을 때: 재연결 버튼 */}
       {sessionExists && (
         <div style={{ display: "flex", gap: 8 }}>
-          <button onClick={() => { setSessionExists(false); setEmail(""); setPw(""); }}
+          <button onClick={() => setSessionExists(false)}
             style={{ flex: 1, padding: "9px", borderRadius: 9, border: "1.5px solid rgba(168,85,247,.4)", background: "transparent", color: "#c084fc", cursor: "pointer", fontSize: 12, fontWeight: 700, fontFamily: "inherit" }}>
             ✏️ 계정 변경
           </button>
-          <button onClick={handleReconnect} disabled={loading}
-            style={{ flex: 1, padding: "9px", borderRadius: 9, border: "none", background: "linear-gradient(135deg,#7c3aed,#a855f7)", color: "#fff", cursor: "pointer", fontSize: 12, fontWeight: 800, fontFamily: "inherit", opacity: loading ? 0.6 : 1 }}>
-            {loading ? "🔄 연결 중..." : "🔗 재연결"}
+          <button onClick={handleConnect} disabled={loading}
+            style={{ flex: 1, padding: "9px", borderRadius: 9, border: "none", background: "linear-gradient(135deg,#7c3aed,#a855f7)", color: "#fff", cursor: loading ? "default" : "pointer", fontSize: 12, fontWeight: 800, fontFamily: "inherit", opacity: loading ? 0.7 : 1 }}>
+            {loading ? "🔄 로그인 대기 중..." : "🔗 재연결"}
           </button>
         </div>
       )}
