@@ -169,7 +169,26 @@ function createWindow() {
 declare global { namespace Electron { interface App { isQuitting: boolean; } } }
 app.isQuitting = false;
 
+/* ── ★ macOS 격리 딱지 자가 제거 ──
+   갓 다운로드한 앱은 번들 내부 파일에 com.apple.quarantine 격리 속성이 남는다.
+   메인 앱은 "그래도 열기"로 승인돼 실행되지만, 그 뒤 봇(내부 Electron/Node 바이너리)을
+   spawn/fork 하면 격리된 자식이 Gatekeeper에 막혀 죽는다 → 봇이 안 떠 "서버 오프라인".
+   (실측 확정: 격리 O→봇 안뜸, 격리 제거→봇 정상.)
+   메인 프로세스는 이미 승인·실행 중이고 사용자가 설치한 번들이라 쓰기 권한이 있으므로,
+   봇을 띄우기 전에 자기 번들의 격리 속성을 통째로 벗겨낸다. */
+function stripSelfQuarantine() {
+  if (process.platform !== "darwin" || isDev) return;
+  try {
+    const appBundle = path.resolve(app.getPath("exe"), "..", "..", ".."); // .../Publy.app
+    execSync(`/usr/bin/xattr -dr com.apple.quarantine ${JSON.stringify(appBundle)}`, { stdio: "ignore", timeout: 30000 });
+    console.log("[startup] 격리 속성 제거 완료:", appBundle);
+  } catch (e: any) {
+    console.warn("[startup] 격리 제거 실패(무시하고 진행):", e?.message);
+  }
+}
+
 app.whenReady().then(async () => {
+  stripSelfQuarantine();          // ★ 봇 스폰 전에 반드시 먼저
   await startBotServer();
   await startNeighborBotServer();
   await startInstaBotServer();
