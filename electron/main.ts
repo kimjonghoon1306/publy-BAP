@@ -34,23 +34,40 @@ function killPort(port: number) {
 
 /* ── 봇 로그를 파일로 저장 ──
    봇 내부 로그(발행/Flow 등)는 원래 콘솔로만 나가 사용자가 볼 수 없었다.
-   바탕화면의 "Publy_로그" 폴더에 날짜별로 남겨 문제 발생 시 확인/전달할 수 있게 한다. */
-function logFilePath(): string {
+   바탕화면의 "Publy_로그" 폴더에 날짜별로 남긴다.
+
+   ★중요: 예전엔 로그 한 줄마다 mkdirSync + appendFileSync(둘 다 동기)를 메인 프로세스에서
+   실행했다. 봇이 로그를 조금만 자주 뿜어도 메인 스레드가 디스크 I/O에 묶여 창이 응답을 못 해
+   맥/윈도우 모두 "뱅글뱅글(busy 커서)+클릭 안 됨" 상태로 얼어붙었다.
+   → 폴더는 한 번만 만들고, 쓰기는 비동기 append WriteStream(논블로킹)으로 처리한다. */
+const fsMod = require("fs") as typeof import("fs");
+const LOG_DIR = () => path.join(app.getPath("desktop"), "Publy_로그");
+let logStream: import("fs").WriteStream | null = null;
+let logStreamYmd = "";
+function todayYmd(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+function getLogStream(): import("fs").WriteStream | null {
+  const ymd = todayYmd();
+  if (logStream && logStreamYmd === ymd) return logStream;
   try {
-    const dir = path.join(app.getPath("desktop"), "Publy_로그");
-    require("fs").mkdirSync(dir, { recursive: true });
-    const d = new Date();
-    const ymd = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-    return path.join(dir, `bot-${ymd}.log`);
-  } catch { return ""; }
+    const dir = LOG_DIR();
+    fsMod.mkdirSync(dir, { recursive: true }); // 스트림 새로 열 때만(하루 1회 수준)
+    if (logStream) { try { logStream.end(); } catch {} }
+    logStream = fsMod.createWriteStream(path.join(dir, `bot-${ymd}.log`), { flags: "a" });
+    logStream.on("error", () => { logStream = null; }); // 쓰기 실패해도 앱은 계속
+    logStreamYmd = ymd;
+    return logStream;
+  } catch { return null; }
 }
 function botLog(tag: string, text: string, isErr = false) {
   const line = `[${new Date().toLocaleTimeString("ko-KR")}] ${tag} ${text}`;
   (isErr ? console.error : console.log)(line);
-  try { const f = logFilePath(); if (f) require("fs").appendFileSync(f, line + "\n"); } catch {}
+  try { getLogStream()?.write(line + "\n"); } catch {} // 비동기 write → 메인 스레드 안 막힘
 }
 export function openLogFolder() {
-  try { shell.openPath(path.dirname(logFilePath())); } catch {}
+  try { shell.openPath(LOG_DIR()); } catch {}
 }
 
 function botEnvironment(extra: NodeJS.ProcessEnv = {}): Record<string, string> {
