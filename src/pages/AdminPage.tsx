@@ -606,6 +606,7 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
   const [bugLoading, setBugLoading] = useState(false);
   const [bugExpanded, setBugExpanded] = useState<string|null>(null);
   const [bugFilter, setBugFilter] = useState<"open"|"all">("open");
+  const [bugReply, setBugReply] = useState<Record<string,string>>({});
   const loadBugReports = useCallback(async()=>{ setBugLoading(true); try{ setBugReports(await getBugReports()); }catch{} finally{ setBugLoading(false); } },[]);
   useEffect(()=>{ if(tab==="bug") loadBugReports(); },[tab,loadBugReports]);
   // 인스타 DM 상태
@@ -4040,10 +4041,16 @@ POST3: (제목)|(이유)
                             <span style={{marginLeft:"auto",fontSize:11,color:"var(--text3)"}}>{new Date(b.created_at).toLocaleString("ko-KR")}</span>
                           </div>
                           {b.memo&&<div style={{marginTop:8,fontSize:13,color:"var(--text)",lineHeight:1.6,whiteSpace:"pre-wrap"}}>{b.memo}</div>}
+                          {b.status!=="resolved"&&(
+                            <input value={bugReply[b.id]??""} onChange={e=>setBugReply(p=>({...p,[b.id]:e.target.value}))}
+                              placeholder="회원에게 보낼 답변 (선택) — 예: v2.0.27에서 수정했어요"
+                              style={{width:"100%",marginTop:10,padding:"9px 12px",borderRadius:9,border:"1px solid var(--border)",background:"var(--bg)",color:"var(--text)",fontSize:12,fontFamily:"inherit",boxSizing:"border-box",outline:"none"}}/>
+                          )}
+                          {b.status==="resolved"&&b.admin_reply&&<div style={{marginTop:8,fontSize:12,color:"var(--text3)"}}>💬 보낸 답변: {b.admin_reply}</div>}
                           <div style={{display:"flex",gap:8,marginTop:10,flexWrap:"wrap"}}>
                             <button onClick={()=>setBugExpanded(bugExpanded===b.id?null:b.id)} style={{padding:"6px 12px",borderRadius:8,border:"1px solid var(--border)",background:"var(--bg)",color:"var(--text2)",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:"inherit"}}>{bugExpanded===b.id?"로그 접기":"📄 로그 보기"}</button>
                             {b.log_text&&<button onClick={()=>{navigator.clipboard.writeText(b.log_text||"");}} style={{padding:"6px 12px",borderRadius:8,border:"1px solid var(--border)",background:"var(--bg)",color:"var(--text2)",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:"inherit"}}>📋 로그 복사</button>}
-                            <button onClick={async()=>{await updateBugReportStatus(b.id,b.status==="resolved"?"open":"resolved");loadBugReports();}} style={{padding:"6px 12px",borderRadius:8,border:"none",background:b.status==="resolved"?"var(--card2)":"#3fb950",color:b.status==="resolved"?"var(--text2)":"#fff",cursor:"pointer",fontSize:12,fontWeight:800,fontFamily:"inherit"}}>{b.status==="resolved"?"미처리로":"✓ 처리완료"}</button>
+                            <button onClick={async()=>{await updateBugReportStatus(b.id,b.status==="resolved"?"open":"resolved",bugReply[b.id]);loadBugReports();}} style={{padding:"6px 12px",borderRadius:8,border:"none",background:b.status==="resolved"?"var(--card2)":"#3fb950",color:b.status==="resolved"?"var(--text2)":"#fff",cursor:"pointer",fontSize:12,fontWeight:800,fontFamily:"inherit"}}>{b.status==="resolved"?"미처리로":"✓ 처리완료 (회원에게 알림)"}</button>
                             <button onClick={async()=>{if(confirm("이 신고를 삭제할까요?")){await deleteBugReport(b.id);loadBugReports();}}} style={{padding:"6px 12px",borderRadius:8,border:"1px solid rgba(248,81,73,.3)",background:"transparent",color:"var(--danger)",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:"inherit"}}>삭제</button>
                           </div>
                           {bugExpanded===b.id&&(

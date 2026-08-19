@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import GoogleFlowCard from "../GoogleFlowCard";
 import { PublyUser, getQuota, getHistory, getAccounts, PublyQuota, PublyHistory, PublyAccount, upsertAccount, useQuota, addHistory, deleteHistory, deleteAllHistory, changeUserPassword, getNaverApiKeys, saveNaverApiKeys, NaverApiKeys, checkNaverQuota, incrementNaverQuota, getNaverDailyUsage, NAVER_DAILY_LIMIT, getUserNaverApiKeys, logError, PLAN_CONFIG, checkDailyPublishQuota, incrementDailyPublish, getDailyPublishUsage, getNeighborDailyUsage, NEIGHBOR_DAILY_LIMIT, getEngageDailyUsage, ENGAGE_DAILY_LIMIT, InstaDmTarget, InstaDmHistory, InstaDmQuota, getInstaDmTargets, addInstaDmTarget, deleteInstaDmTarget, getInstaDmHistory, addInstaDmHistory, getInstaDmQuota, upsertInstaDmQuota, incrementInstaDmUsage, INSTA_DM_DAILY_LIMIT } from "../lib/supabase";
-import { supabase, submitBugReportRow } from "../lib/supabase";
+import { supabase, submitBugReportRow, getMyResolvedBugAlerts, markBugNotified, PublyBugReport } from "../lib/supabase";
 import NeighborPage from "./NeighborPage";
 import { botFetch, BotEventStream } from "../lib/botApi";
 import WebInstallNotice from "../WebInstallNotice";
@@ -936,6 +936,8 @@ Output format (JSON array only, no other text):
   const [bugMemo, setBugMemo] = useState("");
   const [bugSending, setBugSending] = useState(false);
   const [bugMsg, setBugMsg] = useState("");
+  // 내 신고가 처리완료되면 화면 어디서든 뜨는 팝업
+  const [bugAlert, setBugAlert] = useState<PublyBugReport|null>(null);
   const [naverKeys, setNaverKeys] = useState<NaverApiKeys>({});
   const [naverKeysSaving, setNaverKeysSaving] = useState(false);
   const [naverKeysMsg, setNaverKeysMsg] = useState("");
@@ -1228,6 +1230,24 @@ Output format (JSON array only, no other text):
     } catch (e:any) {
       setBugMsg("❌ 전송 실패: " + (e.message||"") + " — '로그 폴더 열기'로 파일을 보내주셔도 돼요.");
     } finally { setBugSending(false); }
+  }
+
+  // ── 내 신고가 관리자에 의해 처리완료되면, 화면 어디에 있든 팝업으로 알림 ──
+  useEffect(()=>{
+    let alive=true;
+    const check=async()=>{
+      if(bugAlert) return; // 이미 하나 떠 있으면 대기
+      try{ const rows=await getMyResolvedBugAlerts(user.id); if(alive && rows.length>0) setBugAlert(rows[0]); }catch{}
+    };
+    const t=setTimeout(check, 3000);          // 진입 직후 한 번
+    const iv=setInterval(check, 60000);        // 이후 1분마다
+    return ()=>{ alive=false; clearTimeout(t); clearInterval(iv); };
+  },[user.id,bugAlert]);
+
+  async function dismissBugAlert(){
+    if(!bugAlert) return;
+    const id=bugAlert.id; setBugAlert(null);
+    await markBugNotified(id);
   }
 
   // ── Ctrl+V 클립보드 이미지 붙여넣기 ──
@@ -5634,6 +5654,32 @@ POST3: (제목)|(이유)
               <button onClick={()=>{localStorage.setItem("publy_dismissed_"+noticePopup.key,"1");setNoticePopup(null);}}
                 style={{width:"100%",padding:"12px",borderRadius:12,border:"none",background:"var(--accent)",color:"#000",fontSize:14,fontWeight:800,cursor:"pointer",fontFamily:"inherit"}}>
                 확인했어요 👍
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 버그 신고 처리완료 알림 — 화면 어디에 있든 뜸 */}
+      {bugAlert&&(
+        <div style={{position:"fixed",inset:0,zIndex:10050,background:"rgba(0,0,0,.85)",display:"flex",alignItems:"center",justifyContent:"center",padding:20}}
+          onClick={dismissBugAlert}>
+          <div style={{width:"100%",maxWidth:420,borderRadius:20,background:"var(--card)",border:"1px solid var(--border)",overflow:"hidden",animation:"fadeUp .25s ease",boxShadow:"0 24px 60px rgba(0,0,0,.6)"}}
+            onClick={e=>e.stopPropagation()}>
+            <div style={{background:"linear-gradient(135deg,#3fb950,#2ea043)",padding:"20px 22px",textAlign:"center"}}>
+              <div style={{fontSize:34,marginBottom:4}}>✅</div>
+              <div style={{fontSize:17,fontWeight:900,color:"#fff"}}>신고하신 문제가 해결됐어요!</div>
+            </div>
+            <div style={{padding:"18px 22px"}}>
+              {bugAlert.memo&&<div style={{fontSize:12,color:"var(--text3)",marginBottom:10}}>신고 내용: {bugAlert.memo}</div>}
+              <div style={{fontSize:14,color:"var(--text)",lineHeight:1.75}}>
+                {bugAlert.admin_reply?.trim()
+                  ? bugAlert.admin_reply
+                  : "말씀해주신 문제를 처리했어요. 불편을 드려 죄송하고, 신고해주셔서 감사합니다 🙏"}
+              </div>
+              <button onClick={dismissBugAlert}
+                style={{width:"100%",marginTop:18,padding:"13px",borderRadius:12,border:"none",background:"var(--accent)",color:"#000",fontSize:14,fontWeight:800,cursor:"pointer",fontFamily:"inherit"}}>
+                확인
               </button>
             </div>
           </div>

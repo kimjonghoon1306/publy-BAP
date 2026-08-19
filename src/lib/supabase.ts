@@ -767,6 +767,8 @@ export interface PublyBugReport {
   memo?: string;
   log_text?: string;
   status?: "open" | "resolved";
+  admin_reply?: string;
+  user_notified?: boolean;
   created_at: string;
 }
 
@@ -788,10 +790,32 @@ export async function getBugReports(): Promise<PublyBugReport[]> {
   return (data || []) as PublyBugReport[];
 }
 
-export async function updateBugReportStatus(id: string, status: "open" | "resolved") {
-  await supabase.from("publy_bug_reports").update({ status }).eq("id", id);
+// 관리자: 처리완료 시 답변 저장 + user_notified=false 로 초기화(회원이 팝업 받도록). 미처리 전환은 그대로.
+export async function updateBugReportStatus(id: string, status: "open" | "resolved", adminReply?: string) {
+  const patch: Record<string, any> = { status };
+  if (status === "resolved") { patch.user_notified = false; patch.admin_reply = (adminReply || "").trim() || null; }
+  await supabase.from("publy_bug_reports").update(patch).eq("id", id);
 }
 
 export async function deleteBugReport(id: string) {
   await supabase.from("publy_bug_reports").delete().eq("id", id);
+}
+
+// 회원: 내가 신고한 것 중 "처리완료 됐고 아직 팝업으로 안 본" 건 (팝업 알림용)
+export async function getMyResolvedBugAlerts(userId: string): Promise<PublyBugReport[]> {
+  try {
+    const { data } = await supabase
+      .from("publy_bug_reports")
+      .select("*")
+      .eq("user_id", userId)
+      .eq("status", "resolved")
+      .eq("user_notified", false)
+      .order("created_at", { ascending: false });
+    return (data || []) as PublyBugReport[];
+  } catch { return []; }
+}
+
+// 회원이 팝업 "확인" 누르면 다시 안 뜨게 표시
+export async function markBugNotified(id: string) {
+  try { await supabase.from("publy_bug_reports").update({ user_notified: true }).eq("id", id); } catch {}
 }
