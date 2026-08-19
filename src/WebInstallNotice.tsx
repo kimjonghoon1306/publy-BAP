@@ -1,28 +1,39 @@
 import React from "react";
 
 /**
- * PC앱(윈도우 설치 파일) 다운로드 링크 — 단일 소스.
+ * PC앱 설치파일 다운로드 링크 — 단일 소스.
  * 릴리스 태그 `latest`에 버전 없는 고정 이름으로 올려두어 매 버전마다 링크가 안 깨지게 함.
- * (CI가 매 릴리스에 Publy-Setup.exe 도 함께 올림)
+ * (CI가 매 릴리스에 아래 고정 이름들로도 함께 업로드)
  */
-export const EXE_DOWNLOAD_URL =
-  "https://github.com/kimjonghoon1306/publy-BAP/releases/latest/download/Publy-Setup.exe";
+const REL = "https://github.com/kimjonghoon1306/publy-BAP/releases/latest/download";
+export const EXE_DOWNLOAD_URL = `${REL}/Publy-Setup.exe`;
+export const MAC_ARM_URL = `${REL}/Publy-Mac-AppleSilicon.dmg`;
+export const MAC_INTEL_URL = `${REL}/Publy-Mac-Intel.dmg`;
 
 /** Electron(설치된 앱)이 아니라 웹 브라우저로 접속한 경우에만 true */
 export const isWebPreview = () =>
   typeof window !== "undefined" && !(window as any).electron;
 
+function detectOS(): "win" | "mac" | "other" {
+  if (typeof navigator === "undefined") return "other";
+  const ua = navigator.userAgent || "";
+  if (/iPhone|iPad|iPod|Android/i.test(ua)) return "other";
+  if (/Mac/i.test(ua)) return "mac";
+  if (/Win/i.test(ua)) return "win";
+  return "other";
+}
+
 /**
- * 웹 접속자에게 "앱 설치" 안내하는 상단 경고 배너.
- * 라이트/다크 어디서나 잘 보이는 앰버 컬러 고정. Electron 앱 안에서는 렌더 안 함.
+ * 웹 접속자에게 "앱 설치"를 안내하는 상단 경고 배너.
+ * 접속 OS에 맞는 설치 버튼만 보여줌. Electron 앱 안에서는 렌더 안 함.
+ * 라이트/다크 어디서나 잘 보이는 앰버 컬러 고정.
  */
-export default function WebInstallNotice({
-  onGuide,
-}: {
-  theme?: "dark" | "light";
-  onGuide?: () => void;
-}) {
+export default function WebInstallNotice(_: { theme?: "dark" | "light" }) {
   if (!isWebPreview()) return null;
+
+  const os = detectOS();
+  const showWin = os === "win" || os === "other";
+  const showMac = os === "mac" || os === "other";
 
   return (
     <div className="web-install-notice" role="alert">
@@ -30,17 +41,24 @@ export default function WebInstallNotice({
         <span className="win-badge">⚠️ 필독</span>
         <span className="win-msg">
           이 화면은 <b>미리보기</b>예요. 실제 사용은 <b>PC에 앱을 설치</b>해야 합니다.
-          <span className="win-sub">윈도우 전용 · Mac은 관리자에게 문의해 주세요.</span>
+          <span className="win-sub">윈도우 · 맥 모두 지원 · 본인 PC에 설치해 사용하세요.</span>
         </span>
       </div>
       <div className="win-actions">
-        <a href={EXE_DOWNLOAD_URL} className="win-dl" download>
-          <span className="win-dl-ico">⬇️</span>윈도우용 PC앱 설치
-        </a>
-        {onGuide && (
-          <button className="win-guide" type="button" onClick={onGuide}>
-            📖 기능 설명
-          </button>
+        {showWin && (
+          <a href={EXE_DOWNLOAD_URL} className="win-dl" download>
+            <span className="win-dl-ico">⬇️</span>윈도우용 PC앱 설치
+          </a>
+        )}
+        {showMac && (
+          <a href={MAC_ARM_URL} className="win-dl win-dl-mac" download>
+            <span className="win-dl-ico">🍎</span>맥용 설치 (Apple 칩)
+          </a>
+        )}
+        {showMac && (
+          <a href={MAC_INTEL_URL} className="win-mac-alt" download>
+            인텔 맥용
+          </a>
         )}
       </div>
 
@@ -74,7 +92,7 @@ export default function WebInstallNotice({
           color:#5a3d00; font-size:12.5px; font-weight:700;
         }
         .web-install-notice .win-actions{
-          display:flex; align-items:center; gap:8px; flex-shrink:0;
+          display:flex; align-items:center; gap:8px; flex-shrink:0; flex-wrap:wrap; justify-content:center;
         }
         .web-install-notice .win-dl{
           display:inline-flex; align-items:center; gap:6px;
@@ -87,15 +105,19 @@ export default function WebInstallNotice({
         .web-install-notice .win-dl:hover{ transform:translateY(-1px); box-shadow:0 6px 18px rgba(0,120,70,.45); }
         .web-install-notice .win-dl:active{ transform:translateY(0); }
         .web-install-notice .win-dl-ico{ font-size:14px; }
-        .web-install-notice .win-guide{
-          display:inline-flex; align-items:center; gap:5px;
-          padding:9px 15px; border-radius:99px;
-          border:2px solid rgba(26,18,0,.6); background:rgba(255,255,255,.35); color:#1a1200;
-          font-family:'Noto Sans KR',sans-serif; font-size:13px; font-weight:900; white-space:nowrap;
-          cursor:pointer; transition:transform .15s ease, background .15s ease;
+        .web-install-notice .win-dl-mac{
+          background:linear-gradient(135deg,#2b2b30,#111114); color:#fff;
+          box-shadow:0 3px 12px rgba(0,0,0,.3);
         }
-        .web-install-notice .win-guide:hover{ transform:translateY(-1px); background:rgba(255,255,255,.6); }
-        .web-install-notice .win-guide:active{ transform:translateY(0); }
+        .web-install-notice .win-dl-mac:hover{ box-shadow:0 6px 18px rgba(0,0,0,.4); }
+        .web-install-notice .win-mac-alt{
+          display:inline-flex; align-items:center;
+          padding:8px 13px; border-radius:99px;
+          border:2px solid rgba(26,18,0,.5); background:rgba(255,255,255,.3); color:#1a1200;
+          font-size:12px; font-weight:800; text-decoration:none; white-space:nowrap; cursor:pointer;
+          transition:background .15s ease;
+        }
+        .web-install-notice .win-mac-alt:hover{ background:rgba(255,255,255,.55); }
         @media (max-width:640px){
           .web-install-notice{ padding:9px 12px; gap:9px; }
           .web-install-notice .win-msg{ font-size:12.5px; }
@@ -104,7 +126,7 @@ export default function WebInstallNotice({
           .web-install-notice .win-dl{ flex:1; justify-content:center; }
         }
         @media (prefers-reduced-motion: reduce){
-          .web-install-notice .win-dl, .web-install-notice .win-guide{ transition:none; }
+          .web-install-notice .win-dl, .web-install-notice .win-mac-alt{ transition:none; }
         }
       `}</style>
     </div>

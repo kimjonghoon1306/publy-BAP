@@ -4,7 +4,7 @@ import { PublyUser, getQuota, getHistory, getAccounts, PublyQuota, PublyHistory,
 import { supabase } from "../lib/supabase";
 import NeighborPage from "./NeighborPage";
 import { botFetch, BotEventStream } from "../lib/botApi";
-import WebInstallNotice, { EXE_DOWNLOAD_URL } from "../WebInstallNotice";
+import WebInstallNotice from "../WebInstallNotice";
 
 type MainTab = "keyword" | "write" | "image" | "photo" | "publish" | "manage" | "accounts" | "rank" | "calendar" | "settings" | "neighbor" | "engage" | "insta_dm";
 type OnPartnerProduct = {id:string|null;name:string;image:string;price:number|null;available:boolean;partnerUrl:string;shopUrl:string};
@@ -2958,7 +2958,7 @@ POST3: (제목)|(이유)
       <div className={`app ${theme} ${fontMode==="large"?"large":""}`}>
 
         {/* ── 웹 접속자용 앱 설치 안내 배너 (Electron 앱에서는 안 뜸) ── */}
-        <WebInstallNotice onGuide={()=>{setShowGuide(true);setGuideTab(0);}} />
+        <WebInstallNotice />
 
         {/* ── 초기 로딩 오버레이 (플리커 방지) ── */}
         {!pageReady && (
@@ -3085,7 +3085,6 @@ POST3: (제목)|(이유)
             <div style={{width:1,height:16,background:"var(--border)",flexShrink:0}}/>
             <div className={`server-chip ${botOnline?"server-on":"server-off"}`}><div className={`dot ${botOnline?"dot-on":"dot-off"}`}/>{botOnline?"서버 온라인":"서버 오프라인"}</div>
             <div className="quota-chip"><div className="quota-bar-bg"><div className="quota-bar-fill" style={{width:`${Math.min(100,(dailyPublishUsed/(PLAN_CONFIG[user.plan]?.dailyPublish??2))*100)}%`}}/></div>{Math.max(0,(PLAN_CONFIG[user.plan]?.dailyPublish??2)-dailyPublishUsed)}건<span className={`plan-badge plan-${user.plan}`}>{PLAN_LABELS[user.plan]}</span></div>
-            <a href={EXE_DOWNLOAD_URL} className="dl-btn" download><span>⬇️</span><span>PC앱 다운로드</span></a>
           </div>
           <div className="header-right">
             <button className="guide-open-btn" onClick={()=>{setShowGuide(true);setGuideTab(0);}}>📖 <span className="guide-btn-text">사용설명서</span></button>
