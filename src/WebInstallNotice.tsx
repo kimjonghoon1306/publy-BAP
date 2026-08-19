@@ -14,26 +14,16 @@ export const MAC_INTEL_URL = `${REL}/Publy-Mac-Intel.dmg`;
 export const isWebPreview = () =>
   typeof window !== "undefined" && !(window as any).electron;
 
-function detectOS(): "win" | "mac" | "other" {
-  if (typeof navigator === "undefined") return "other";
-  const ua = navigator.userAgent || "";
-  if (/iPhone|iPad|iPod|Android/i.test(ua)) return "other";
-  if (/Mac/i.test(ua)) return "mac";
-  if (/Win/i.test(ua)) return "win";
-  return "other";
-}
-
 /**
  * 웹 접속자에게 "앱 설치"를 안내하는 상단 경고 배너.
- * 접속 OS에 맞는 설치 버튼만 보여줌. Electron 앱 안에서는 렌더 안 함.
- * 라이트/다크 어디서나 잘 보이는 앰버 컬러 고정.
+ * 윈도우/맥 설치 버튼을 항상 모두 노출(OS 감지로 숨기지 않음 — 어느 기기든 원하는 걸 받게).
+ * Electron 앱 안에서는 렌더 안 함. 라이트/다크 어디서나 잘 보이는 앰버 컬러 고정.
  */
 export default function WebInstallNotice(_: { theme?: "dark" | "light" }) {
   if (!isWebPreview()) return null;
 
-  const os = detectOS();
-  const showWin = os === "win" || os === "other";
-  const showMac = os === "mac" || os === "other";
+  const showWin = true;
+  const showMac = true;
 
   return (
     <div className="web-install-notice" role="alert">

@@ -232,8 +232,8 @@ const CSS = `
 .logout-btn:hover{border-color:var(--danger);color:var(--danger);}
 .dl-btn{display:inline-flex;align-items:center;gap:7px;padding:8px 16px;border-radius:99px;border:none;background:linear-gradient(135deg,#00ff9d,#00c870);color:#000;font-size:12px;font-weight:800;font-family:'Noto Sans KR',sans-serif;cursor:pointer;text-decoration:none;animation:dlFloat 2.5s ease-in-out infinite;white-space:nowrap;flex-shrink:0;box-shadow:0 3px 14px rgba(0,255,157,.35);}
 .guide-open-btn{display:inline-flex;align-items:center;gap:6px;padding:8px 15px;border-radius:99px;border:none;background:linear-gradient(135deg,#FF6B9D,#FF3D7F);color:#fff;font-size:12px;font-weight:800;font-family:'Noto Sans KR',sans-serif;cursor:pointer;animation:guideFloat 2.8s ease-in-out infinite;white-space:nowrap;flex-shrink:0;box-shadow:0 3px 14px rgba(255,61,127,.35);}
-.layout{flex:1;display:flex;overflow:hidden;min-height:0;padding-left:210px;}
-.sidebar{position:fixed;left:0;top:58px;bottom:0;z-index:50;width:210px;background:var(--bg2);border-right:1px solid var(--border);display:flex;flex-direction:column;padding:12px 8px;gap:2px;overflow-y:auto;}
+.layout{flex:1;display:flex;overflow:hidden;min-height:0;}
+.sidebar{position:relative;flex-shrink:0;z-index:50;width:210px;background:var(--bg2);border-right:1px solid var(--border);display:flex;flex-direction:column;padding:12px 8px;gap:2px;overflow-y:auto;}
 .nav-lbl{font-size:9px;font-weight:800;letter-spacing:.13em;text-transform:uppercase;color:var(--text3);padding:5px 11px 7px;margin-top:4px;}
 .nav-item{display:flex;align-items:center;gap:10px;padding:11px 12px;border-radius:9px;border:none;cursor:pointer;width:100%;font-size:13px;font-weight:500;font-family:'Noto Sans KR',sans-serif;color:var(--text2);background:transparent;transition:all .15s;text-align:left;position:relative;}
 .nav-item:hover{background:var(--card-hover);color:var(--text);}
