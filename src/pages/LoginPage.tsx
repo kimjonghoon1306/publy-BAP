@@ -93,7 +93,7 @@ const CSS = `
 /* 메인 카드 */
 .login-card {
   position:relative; width:460px; z-index:10;
-  border-radius:28px; padding:52px 44px;
+  border-radius:28px; padding:36px 44px;
   animation:card-float 7s ease-in-out infinite, form-rise .7s ease both, glow-breathe 4s ease-in-out infinite;
 }
 .dark .login-card {
@@ -117,9 +117,9 @@ const CSS = `
 .light .card-glow-line { background:linear-gradient(90deg,transparent,rgba(0,180,80,.4),transparent); }
 
 /* 로고 */
-.logo-section { text-align:center; margin-bottom:40px; }
+.logo-section { text-align:center; margin-bottom:26px; }
 .logo-ring-wrap {
-  position:relative; width:88px; height:88px; margin:0 auto 20px;
+  position:relative; width:88px; height:88px; margin:0 auto 16px;
   animation:logo-emerge .8s cubic-bezier(.34,1.56,.64,1) both;
 }
 .logo-ring {
