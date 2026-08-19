@@ -506,30 +506,47 @@ export async function publishNaver(params: {
       // 마지막 "본문 텍스트 문단"을 실제 클릭 → 커서가 문서 끝으로.
       //   ⚠️ frame.evaluate(Selection API)는 이미지 업로드 직후 실제 브라우저에서 무한 대기/페이지 닫힘을
       //   유발(headless에선 재현 안 됨, 실측으로 확인). Meta+End(Mac)도 페이지 닫힘 유발. → 클릭 방식만 사용.
-      //   ★★핵심 버그 수정: 이미지 캡션칸(.se-caption 안)도 contenteditable이라, 예전 셀렉터
-      //     ".se-section:last-of-type [contenteditable]" 가 "이미지 캡션칸"을 집어 → 다음 본문 텍스트가
-      //     캡션에 써지던 버그("캡션에 글 내용이 들어감"). 이제 본문 텍스트 컴포넌트(.se-component.se-text)만
-      //     대상으로 하고 캡션은 절대 클릭하지 않는다.
-      const bodySels = [
-        ".se-component.se-text:last-of-type .se-text-paragraph",
-        ".se-component.se-text .se-text-paragraph",
-        ".se-component.se-text:last-of-type [contenteditable='true']",
-        ".se-component.se-text [contenteditable='true']",
-      ];
-      for (const sel of bodySels) {
-        try {
-          const els = await frame.$$(sel);
-          // 혹시라도 캡션 안(.se-caption)에 있는 요소면 제외
-          for (let k = els.length - 1; k >= 0; k--) {
-            const inCaption = await els[k].evaluate(node => !!(node as HTMLElement).closest(".se-caption")).catch(() => false);
-            if (inCaption) continue;
-            await els[k].click({ timeout: 3000 });
+      //   ★★캡션 오염 + 순서 둘 다 만족: 문서의 "진짜 맨 끝" 편집영역을 집되(→ 이미지-글-이미지 순서 유지),
+      //     이미지 캡션칸(.se-caption 안)과 제목은 제외한다(→ 본문이 캡션에 써지던 버그 방지).
+      //     DOM 순서상 마지막 본문 텍스트 편집영역부터 뒤로 보며 "마지막 이미지 뒤 문단"을 클릭.
+      //     (예전 v2.0.32는 캡션까지 집어 오염, 그 직후 수정은 본문컴포넌트만 좁혀 이미지 뒤 위치를 못 찾아
+      //      글·이미지 순서가 뒤바뀜 → 이 방식이 둘 다 해결.)
+      try {
+        // 이미지 업로드 직후 SE4가 이미지 아래 빈 텍스트 컴포넌트를 늦게 만들 수 있다.
+        // 연속 이미지에서도 직전 이미지 앞 문단으로 돌아가지 않도록 그 후행 문단을 잠시 기다린다.
+        for (let attempt = 0; attempt < 15; attempt++) {
+          const editables = await frame.$$(".se-main-container .se-component.se-text [contenteditable='true']");
+          let fallback: typeof editables[number] | undefined;
+          for (let k = editables.length - 1; k >= 0; k--) {
+            const state = await editables[k].evaluate(node => {
+              const el = node as HTMLElement;
+              if (el.closest(".se-caption, .se-section-documentTitle, .se-documentTitle")) {
+                return { skip: true, afterLastImage: false };
+              }
+              const lastImage = [...document.querySelectorAll(".se-main-container .se-component.se-image")].pop();
+              const afterLastImage = !lastImage || !!(lastImage.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING);
+              return { skip: false, afterLastImage };
+            }).catch(() => ({ skip: true, afterLastImage: false }));
+            if (state.skip) continue;
+            fallback = editables[k];
+            if (state.afterLastImage) {
+              await editables[k].click({ timeout: 3000 });
+              await page.waitForTimeout(120);
+              return;
+            }
+            break;
+          }
+          // 이미지가 없거나 후행 문단 생성 대기 대상이 아니면 즉시 마지막 본문 영역 사용.
+          const hasImage = await frame.$(".se-main-container .se-component.se-image");
+          if (!hasImage && fallback) {
+            await fallback.click({ timeout: 3000 });
             await page.waitForTimeout(120);
             return;
           }
-        } catch {}
-      }
-      // 폴백: 본문 텍스트 컴포넌트가 없으면(이미지로만 시작 등) 컨테이너 클릭
+          await page.waitForTimeout(100);
+        }
+      } catch {}
+      // 폴백: 편집영역을 못 찾으면 컨테이너 클릭
       await frame.click(".se-main-container", { timeout: 3000 }).catch(() => {});
       await page.waitForTimeout(120);
     }
