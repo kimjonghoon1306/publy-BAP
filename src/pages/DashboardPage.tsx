@@ -1233,15 +1233,21 @@ Output format (JSON array only, no other text):
   }
 
   // ── 내 신고가 관리자에 의해 처리완료되면, 화면 어디에 있든 팝업으로 알림 ──
-  const bugSeenRef = useRef<Set<string>>(new Set()); // 이번 세션에 이미 확인·표시한 신고 id (DB쓰기 지연에도 재등장 방지)
+  // "한 번 닫으면 절대 다시 안 뜬다"를 보장: ①로컬(localStorage)에 확인한 id 영구 저장(이 기기)
+  //  ②서버에 user_notified=true 기록(다른 기기·재설치까지). 둘 중 하나만 살아있어도 재등장 안 함.
+  const BUG_SEEN_KEY = `publy_bug_seen_${user.id}`;
+  const bugSeenRef = useRef<Set<string>>(new Set(
+    (()=>{ try{ return JSON.parse(localStorage.getItem(`publy_bug_seen_${user.id}`)||"[]"); }catch{ return []; } })()
+  ));
+  const persistBugSeen = ()=>{ try{ localStorage.setItem(BUG_SEEN_KEY, JSON.stringify([...bugSeenRef.current])); }catch{} };
   useEffect(()=>{
     let alive=true;
     const check=async()=>{
       if(bugAlert) return; // 이미 하나 떠 있으면 대기
       try{
         const rows=await getMyResolvedBugAlerts(user.id);
-        const next=rows.find(r=>!bugSeenRef.current.has(r.id)); // 아직 안 본 것만
-        if(alive && next){ bugSeenRef.current.add(next.id); setBugAlert(next); }
+        const next=rows.find(r=>!bugSeenRef.current.has(r.id)); // 아직 안 본 것만(로컬 기록 포함)
+        if(alive && next){ bugSeenRef.current.add(next.id); persistBugSeen(); setBugAlert(next); }
       }catch{}
     };
     const t=setTimeout(check, 3000);          // 진입 직후 한 번
@@ -1253,8 +1259,9 @@ Output format (JSON array only, no other text):
     if(!bugAlert) return;
     const id=bugAlert.id;
     bugSeenRef.current.add(id); // 즉시 재등장 차단(DB 반영 전이라도)
+    persistBugSeen();           // 이 기기에 영구 저장 → 재설치 전까지 절대 안 뜸(DB 실패해도)
     setBugAlert(null);          // 팝업 닫기
-    await markBugNotified(id);  // 다음 접속에도 안 뜨게 서버에 기록
+    try{ await markBugNotified(id); }catch{} // 서버에도 기록(다른 기기·재설치 대응)
   }
 
   // ── Ctrl+V 클립보드 이미지 붙여넣기 ──
