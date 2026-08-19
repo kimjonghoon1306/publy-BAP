@@ -553,6 +553,12 @@ export default function DashboardPage({user, onLogout, onAdminLogin, onThemeTogg
   const [showInstaWarn, setShowInstaWarn] = useState(false);
   const [guideTab, setGuideTab] = useState(0);
   const [botOnline, setBotOnline] = useState(false);
+  // 봇에 실제로 저장된 세션 상태(플랫폼별) — 계정관리 "연결됨"이 거짓말하지 않게.
+  const [realSession, setRealSession] = useState<{naver?:boolean;tistory?:boolean;google?:boolean}>({});
+  const refreshSessionStatus = useCallback(async()=>{
+    try{ const r=await botFetch(`${BOT}/api/session-status/${user.id}`,{signal:AbortSignal.timeout(3000)}); if(r.ok) setRealSession(await r.json()); }catch{}
+  },[user.id]);
+  useEffect(()=>{ if(botOnline) refreshSessionStatus(); },[botOnline,refreshSessionStatus]);
   // 인스타 DM
   const [dmTargets, setDmTargets] = useState<InstaDmTarget[]>([]);
   const [dmHistory, setDmHistory] = useState<InstaDmHistory[]>([]);
@@ -2543,6 +2549,7 @@ ${segList}`;
       const d=await r.json();if(!d.success)throw new Error(d.error||"연결 실패");
       await upsertAccount({...acc,password_encrypted:"",is_connected:true,connected_at:new Date().toISOString()});
       getAccounts(user.id).then(setAccounts);
+      refreshSessionStatus();
     }catch(e:any){alert("연결 실패: "+e.message);}finally{setConnId(null);}
   }
   async function generateFromPhotos() {
@@ -4778,7 +4785,14 @@ POST3: (제목)|(이유)
                     <div className={`acc-card ${a.is_connected?(a.platform==="naver"?"conn-naver":"conn-tistory"):""}`}>
                       <span style={{fontSize:26}}>{a.platform==="naver"?"🟢":"🟠"}</span>
                       <div style={{flex:1,minWidth:0}}><div style={{fontSize:15,fontWeight:700,color:"var(--text)"}}>{a.username}</div><div style={{fontSize:11,color:"var(--text2)",marginTop:2}}>{a.platform}{a.blog_name&&` · ${a.blog_name}`}</div></div>
-                      <span style={{fontSize:11,fontWeight:700,padding:"4px 11px",borderRadius:99,background:a.is_connected?"var(--accent-bg)":"var(--card-hover)",color:a.is_connected?"var(--accent-text)":"var(--text2)",border:"1px solid",borderColor:a.is_connected?"var(--accent-border)":"var(--border)"}}>{a.is_connected?"✅ 연결됨":"미연결"}</span>
+                      {(()=>{
+                        const rs = a.platform==="naver"?realSession.naver:a.platform==="tistory"?realSession.tistory:undefined;
+                        // 봇 온라인이면 실제 세션 기준, 오프라인이면 확인 불가라 DB값 기준.
+                        const needReconnect = botOnline && a.is_connected && rs===false; // 저장은 됐다는데 실제 세션이 없음
+                        const ok = botOnline ? !!rs : a.is_connected;
+                        const label = ok?"✅ 연결됨":needReconnect?"⚠️ 재연결 필요":"미연결";
+                        return <span style={{fontSize:11,fontWeight:700,padding:"4px 11px",borderRadius:99,background:ok?"var(--accent-bg)":needReconnect?"rgba(255,140,0,.14)":"var(--card-hover)",color:ok?"var(--accent-text)":needReconnect?"#ff8c00":"var(--text2)",border:"1px solid",borderColor:ok?"var(--accent-border)":needReconnect?"rgba(255,140,0,.5)":"var(--border)"}}>{label}</span>;
+                      })()}
                       <button className="btn btn-secondary btn-sm" onClick={()=>handleConnect(a)} disabled={!!connId||!botOnline}>{connId===a.id?<><span className="sp-w spinner"/>연결 중...</>:a.is_connected?"재연결":"연결"}</button>
                       <button className="btn btn-danger btn-sm" onClick={()=>handleDeleteAccount(a.id)}>🗑 삭제</button>
                       <button onClick={()=>setEditingCatAccId(editingCatAccId===a.id?null:a.id)} style={{padding:"5px 11px",borderRadius:8,border:"1px solid var(--border)",background:"var(--bg2)",color:"var(--text2)",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:"inherit",flexShrink:0}}>

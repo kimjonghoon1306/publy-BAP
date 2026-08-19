@@ -32,6 +32,27 @@ function killPort(port: number) {
   } catch { /* 점유 프로세스 없으면 명령이 비정상 종료 → 무시 */ }
 }
 
+/* ── 봇 로그를 파일로 저장 ──
+   봇 내부 로그(발행/Flow 등)는 원래 콘솔로만 나가 사용자가 볼 수 없었다.
+   바탕화면의 "Publy_로그" 폴더에 날짜별로 남겨 문제 발생 시 확인/전달할 수 있게 한다. */
+function logFilePath(): string {
+  try {
+    const dir = path.join(app.getPath("desktop"), "Publy_로그");
+    require("fs").mkdirSync(dir, { recursive: true });
+    const d = new Date();
+    const ymd = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    return path.join(dir, `bot-${ymd}.log`);
+  } catch { return ""; }
+}
+function botLog(tag: string, text: string, isErr = false) {
+  const line = `[${new Date().toLocaleTimeString("ko-KR")}] ${tag} ${text}`;
+  (isErr ? console.error : console.log)(line);
+  try { const f = logFilePath(); if (f) require("fs").appendFileSync(f, line + "\n"); } catch {}
+}
+export function openLogFolder() {
+  try { shell.openPath(path.dirname(logFilePath())); } catch {}
+}
+
 function botEnvironment(extra: NodeJS.ProcessEnv = {}): Record<string, string> {
   const merged: NodeJS.ProcessEnv = {
     ...process.env,
@@ -78,8 +99,8 @@ async function forkBotServer(opts: {
         env,
       });
       opts.setProc(child);
-      child.stdout?.on("data", d => console.log(`[${opts.name}]`, d.toString().trim()));
-      child.stderr?.on("data", d => console.error(`[${opts.name}]`, d.toString().trim()));
+      child.stdout?.on("data", d => botLog(`[${opts.name}]`, d.toString().trim()));
+      child.stderr?.on("data", d => botLog(`[${opts.name}]`, d.toString().trim(), true));
       child.on("spawn", () => console.log(`[${opts.name}] 실행됨 pid=${child.pid}`));
       child.on("exit", (code) => {
         console.warn(`[${opts.name}] 종료 (code: ${code}). 3초 후 재시작...`);
@@ -95,8 +116,8 @@ async function forkBotServer(opts: {
         env: { ...env, ELECTRON_RUN_AS_NODE: "1" },
       });
       opts.setProc(child);
-      child.stdout?.on("data", d => console.log(`[${opts.name}]`, d.toString().trim()));
-      child.stderr?.on("data", d => console.error(`[${opts.name}]`, d.toString().trim()));
+      child.stdout?.on("data", d => botLog(`[${opts.name}]`, d.toString().trim()));
+      child.stderr?.on("data", d => botLog(`[${opts.name}]`, d.toString().trim(), true));
       child.on("exit", (code) => {
         console.warn(`[${opts.name}] (폴백) 종료 (code: ${code}). 3초 후 재시작...`);
         opts.setProc(null);
