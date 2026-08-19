@@ -182,6 +182,7 @@ const CSS = `
   --naver:#03C75A;--tistory:#FF6B35;
   --danger:#ff5363;--warn:#ff9f3f;--info:#4da6ff;--success:#00d68f;
   --header-bg:rgba(8,12,16,.94);--shadow:0 4px 24px rgba(0,0,0,.4);
+  --g-fg:#eef7ff;--g-fg2:rgba(232,244,255,.72);--g-green:#00ff9d;--g-yellow:#FFD93D;--g-pink:#FF6B9D;--g-surface:#0d1a0d;--g-surface2:#132414;--g-line:rgba(255,255,255,.08);
 }
 .app.light{
   --bg:#f0f4f8;--bg2:#ffffff;--card:#ffffff;--card2:#f8fafc;--card-hover:#f0f4f8;
@@ -195,6 +196,7 @@ const CSS = `
   --naver:#03C75A;--tistory:#FF6B35;
   --danger:#cf222e;--warn:#9a6700;--info:#0969da;--success:#1a7f37;
   --header-bg:rgba(240,244,248,.95);--shadow:0 2px 12px rgba(0,0,0,.08);
+  --g-fg:#0d1f2d;--g-fg2:#42607a;--g-green:#0a8f57;--g-yellow:#956e00;--g-pink:#d6336c;--g-surface:#ffffff;--g-surface2:#eef3f8;--g-line:#dbe4ec;
 }
 .app{width:100vw;height:100dvh;font-family:'Noto Sans KR',sans-serif;color:var(--text);background:var(--bg);display:flex;flex-direction:column;overflow:hidden;transition:background .2s,color .2s;}
 *::-webkit-scrollbar{width:5px;}*::-webkit-scrollbar-thumb{background:var(--border2);border-radius:99px;}
@@ -366,32 +368,32 @@ textarea.inp{resize:vertical;line-height:1.75;min-height:80px;}
 .preview-inner{width:100%;max-width:720px;max-height:92vh;overflow-y:auto;background:#fff;border-radius:18px;padding:32px 28px;animation:guideIn .3s ease both;}
 .guide-overlay{position:fixed;inset:0;z-index:999;background:rgba(0,0,0,.78);backdrop-filter:blur(8px);display:flex;align-items:center;justify-content:center;padding:max(12px,env(safe-area-inset-top)) 12px max(12px,env(safe-area-inset-bottom));}
 .guide-modal{width:100%;max-width:560px;max-height:calc(100dvh - 24px - env(safe-area-inset-top) - env(safe-area-inset-bottom));border-radius:24px;overflow:hidden;display:flex;flex-direction:column;animation:guideIn .32s cubic-bezier(.34,1.56,.64,1) both;box-shadow:0 32px 80px rgba(0,0,0,.6);position:relative;}
-.guide-header{padding:22px 22px 0;background:linear-gradient(135deg,#1a2e1a,#0d1a0d);flex-shrink:0;border-bottom:1px solid rgba(255,255,255,.06);}
+.guide-header{padding:22px 22px 0;background:var(--g-surface2);flex-shrink:0;border-bottom:1px solid var(--g-line);}
 .guide-logo-row{display:flex;align-items:center;gap:10px;margin-bottom:14px;}
 .guide-logo-ico{width:40px;height:40px;border-radius:12px;background:linear-gradient(135deg,#00ff9d,#00c870);display:flex;align-items:center;justify-content:center;font-size:20px;flex-shrink:0;}
-.guide-title{font-size:20px;font-weight:900;color:#fff;}
-.guide-subtitle{font-size:12px;color:rgba(255,255,255,.5);margin-top:3px;}
+.guide-title{font-size:20px;font-weight:900;color:var(--g-fg);}
+.guide-subtitle{font-size:12px;color:var(--g-fg2);margin-top:3px;}
 .guide-tabs{display:flex;overflow-x:auto;scrollbar-width:none;}
 .guide-tabs::-webkit-scrollbar{display:none;}
-.guide-tab{padding:11px 16px;border:none;background:transparent;font-size:12px;font-weight:700;color:rgba(255,255,255,.4);cursor:pointer;font-family:'Noto Sans KR',sans-serif;white-space:nowrap;border-bottom:3px solid transparent;transition:all .15s;flex-shrink:0;}
-.guide-tab.active{color:#FFD93D;border-bottom-color:#FFD93D;}
-.guide-body{flex:1;overflow-y:auto;background:#0d1a0d;padding:18px 18px 22px;min-height:0;}
+.guide-tab{padding:11px 16px;border:none;background:transparent;font-size:12px;font-weight:700;color:var(--g-fg2);cursor:pointer;font-family:'Noto Sans KR',sans-serif;white-space:nowrap;border-bottom:3px solid transparent;transition:all .15s;flex-shrink:0;}
+.guide-tab.active{color:var(--g-yellow);border-bottom-color:var(--g-yellow);}
+.guide-body{flex:1;overflow-y:auto;background:var(--g-surface);padding:18px 18px 22px;min-height:0;}
 .guide-body::-webkit-scrollbar{width:4px;}
-.guide-body::-webkit-scrollbar-thumb{background:rgba(255,255,255,.1);border-radius:99px;}
-.guide-close{position:absolute;top:14px;right:16px;width:32px;height:32px;border-radius:99px;background:rgba(255,255,255,.12);border:none;color:#fff;cursor:pointer;font-size:15px;display:flex;align-items:center;justify-content:center;z-index:10;}
-.guide-close:hover{background:rgba(255,255,255,.22);}
+.guide-body::-webkit-scrollbar-thumb{background:var(--g-line);border-radius:99px;}
+.guide-close{position:absolute;top:14px;right:16px;width:32px;height:32px;border-radius:99px;background:var(--g-surface2);border:1px solid var(--g-line);color:var(--g-fg);cursor:pointer;font-size:15px;display:flex;align-items:center;justify-content:center;z-index:10;}
+.guide-close:hover{filter:brightness(.94);}
 .g-step{border-radius:15px;padding:15px 15px;margin-bottom:10px;border:1.5px solid;}
 .g-step-num{font-size:10px;font-weight:900;letter-spacing:.1em;text-transform:uppercase;margin-bottom:5px;display:flex;align-items:center;gap:6px;}
 .g-step-title{font-size:15px;font-weight:900;margin-bottom:5px;line-height:1.3;}
-.g-step-desc{font-size:13px;line-height:1.85;color:rgba(255,255,255,.82);}
-.g-step-desc b{font-weight:900;color:#fff;}
-.g-tip{margin-top:9px;padding:9px 12px;border-radius:9px;background:rgba(255,255,255,.05);font-size:12px;line-height:1.75;color:rgba(255,255,255,.7);}
-.g-tip b{font-weight:800;color:#FFD93D;}
+.g-step-desc{font-size:13px;line-height:1.85;color:var(--g-fg2);}
+.g-step-desc b{font-weight:900;color:var(--g-fg);}
+.g-tip{margin-top:9px;padding:9px 12px;border-radius:9px;background:var(--g-surface2);font-size:12px;line-height:1.75;color:var(--g-fg2);}
+.g-tip b{font-weight:800;color:var(--g-yellow);}
 .g-btn{display:inline-flex;align-items:center;gap:7px;padding:10px 18px;border-radius:99px;border:none;font-size:13px;font-weight:800;font-family:'Noto Sans KR',sans-serif;cursor:pointer;margin-top:11px;transition:all .15s;}
 .g-btn:hover{filter:brightness(1.1);transform:translateY(-1px);}
-.guide-footer{padding:12px 18px;background:#0a150a;border-top:1px solid rgba(255,255,255,.07);display:flex;align-items:center;justify-content:space-between;flex-shrink:0;gap:10px;flex-wrap:wrap;}
+.guide-footer{padding:12px 18px;background:var(--g-surface2);border-top:1px solid var(--g-line);display:flex;align-items:center;justify-content:space-between;flex-shrink:0;gap:10px;flex-wrap:wrap;}
 .guide-nav-btn{padding:9px 20px;border-radius:99px;border:1.5px solid;font-size:13px;font-weight:700;font-family:'Noto Sans KR',sans-serif;cursor:pointer;transition:all .15s;}
-.guide-page{font-size:12px;color:rgba(255,255,255,.35);font-weight:600;}
+.guide-page{font-size:12px;color:var(--g-fg2);font-weight:600;}
 .mob-bar{display:none;position:fixed;bottom:0;left:0;right:0;z-index:200;background:var(--header-bg);border-top:1px solid var(--border);backdrop-filter:blur(24px);padding:7px 4px max(12px,env(safe-area-inset-bottom));}
 .mob-btn{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;padding:5px 2px;border:none;background:transparent;cursor:pointer;font-family:'Noto Sans KR',sans-serif;transition:all .15s;min-height:50px;border-radius:9px;}
 .mob-btn-ico{font-size:21px;}
@@ -2804,34 +2806,34 @@ POST3: (제목)|(이유)
     /* ── 0: 시작 ── */
     <div key="0">
       <div className="g-step" style={{borderColor:`${G}40`,background:`${G}08`}}>
-        <div className="g-step-num" style={{color:G}}>🎉 PUBLY에 오신 걸 환영해요!</div>
-        <div className="g-step-title" style={{color:"#fff"}}>AI가 블로그 글을 대신 써줘요</div>
+        <div className="g-step-num" style={{color:"var(--g-green)"}}>🎉 PUBLY에 오신 걸 환영해요!</div>
+        <div className="g-step-title" style={{color:"var(--g-fg)"}}>AI가 블로그 글을 대신 써줘요</div>
         <div className="g-step-desc">키워드 하나만 입력하면 <b>제목 → 글 → 이미지 → 자동 발행</b>까지 전부 자동이에요!</div>
       </div>
       <div className="g-step" style={{borderColor:`${Y}40`,background:`${Y}08`}}>
-        <div className="g-step-num" style={{color:Y}}>📋 5단계 전체 흐름</div>
-        <div className="g-step-title" style={{color:"#fff"}}>이 순서대로만 하면 끝!</div>
+        <div className="g-step-num" style={{color:"var(--g-yellow)"}}>📋 5단계 전체 흐름</div>
+        <div className="g-step-title" style={{color:"var(--g-fg)"}}>이 순서대로만 하면 끝!</div>
         <div className="g-step-desc">
           {[["✍️","글쓰기 탭","키워드 입력 → 제목 선택 → 글 자동 생성"],["🖼️","이미지 탭","AI 이미지 생성 + 캡션 입력 + 영상 설정"],["🚀","발행 탭","발행 방식 선택 → 계정 선택 → 자동 발행"],["📋","기록 탭","발행된 글 목록 전체 확인"],["⚙️","설정 탭","API 키 관리 + 블로그 계정 연결"]].map(([ico,t,d],idx)=>(
-            <div key={idx} style={{display:"flex",gap:10,padding:"9px 0",borderBottom:idx<4?"1px solid rgba(255,255,255,.06)":"none"}}>
+            <div key={idx} style={{display:"flex",gap:10,padding:"9px 0",borderBottom:idx<4?"1px solid var(--g-line)":"none"}}>
               <span style={{fontSize:22,flexShrink:0}}>{ico}</span>
-              <div><div style={{fontWeight:800,color:"#fff",fontSize:15}}>{t}</div><div style={{fontSize:13,color:"rgba(255,255,255,.55)",marginTop:2}}>{d}</div></div>
+              <div><div style={{fontWeight:800,color:"var(--g-fg)",fontSize:15}}>{t}</div><div style={{fontSize:13,color:"var(--g-fg2)",marginTop:2}}>{d}</div></div>
             </div>
           ))}
         </div>
       </div>
       <div className="g-step" style={{borderColor:`${P}40`,background:`${P}08`}}>
-        <div className="g-step-num" style={{color:P}}>💰 수익화 2가지</div>
-        <div className="g-step-title" style={{color:"#fff"}}>무엇을 선택할까요?</div>
+        <div className="g-step-num" style={{color:"var(--g-pink)"}}>💰 수익화 2가지</div>
+        <div className="g-step-title" style={{color:"var(--g-fg)"}}>무엇을 선택할까요?</div>
         <div className="g-step-desc">
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginTop:4}}>
             <div style={{padding:14,borderRadius:12,background:"rgba(3,199,90,.1)",border:"1.5px solid rgba(3,199,90,.3)"}}>
               <div style={{fontSize:15,fontWeight:900,color:"#03C75A",marginBottom:5}}>📰 애드포스트</div>
-              <div style={{fontSize:13,color:"rgba(255,255,255,.7)",lineHeight:1.7}}>네이버 블로그.<br/>친근하고 감성적.<br/>처음 시작에 추천!</div>
+              <div style={{fontSize:13,color:"var(--g-fg2)",lineHeight:1.7}}>네이버 블로그.<br/>친근하고 감성적.<br/>처음 시작에 추천!</div>
             </div>
             <div style={{padding:14,borderRadius:12,background:"rgba(77,166,255,.1)",border:"1.5px solid rgba(77,166,255,.3)"}}>
               <div style={{fontSize:15,fontWeight:900,color:"#4da6ff",marginBottom:5}}>🔍 애드센스</div>
-              <div style={{fontSize:13,color:"rgba(255,255,255,.7)",lineHeight:1.7}}>티스토리.<br/>구글 검색 노출.<br/>글자 수 더 많아요.</div>
+              <div style={{fontSize:13,color:"var(--g-fg2)",lineHeight:1.7}}>티스토리.<br/>구글 검색 노출.<br/>글자 수 더 많아요.</div>
             </div>
           </div>
         </div>
@@ -2841,8 +2843,8 @@ POST3: (제목)|(이유)
     /* ── 1: API 키 ── */
     <div key="1">
       <div className="g-step" style={{borderColor:`${Y}40`,background:`${Y}08`}}>
-        <div className="g-step-num" style={{color:Y}}>⚠️ 이것부터 해야 해요!</div>
-        <div className="g-step-title" style={{color:"#fff"}}>API 키 없으면 글을 쓸 수 없어요</div>
+        <div className="g-step-num" style={{color:"var(--g-yellow)"}}>⚠️ 이것부터 해야 해요!</div>
+        <div className="g-step-title" style={{color:"var(--g-fg)"}}>API 키 없으면 글을 쓸 수 없어요</div>
         <div className="g-step-desc">API 키는 AI 서비스 이용권이에요. 아래 중 <b>하나만</b> 있으면 돼요!</div>
         <button className="g-btn" style={{background:`linear-gradient(135deg,${Y},#e0a500)`,color:"#000"}} onClick={()=>{setShowGuide(false);setTab("settings");}}>⚙️ 지금 API 키 설정하기</button>
       </div>
@@ -2850,10 +2852,10 @@ POST3: (제목)|(이유)
         <div key={i} className="g-step" style={{borderColor:`${ai.color}35`,background:`${ai.color}08`}}>
           <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:8}}>
             <div style={{width:34,height:34,borderRadius:9,background:ai.color,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:900,color:"#000",fontSize:14,flexShrink:0}}>{ai.logo}</div>
-            <div><div style={{fontSize:15,fontWeight:800,color:"#fff"}}>{ai.name}</div><span style={{fontSize:11,fontWeight:800,padding:"2px 8px",borderRadius:99,background:ai.free?"rgba(0,200,117,.15)":"rgba(245,158,11,.15)",color:ai.free?"#00c875":"#f59e0b"}}>{ai.free?"✅ 무료":"💳 유료"}</span></div>
+            <div><div style={{fontSize:15,fontWeight:800,color:"var(--g-fg)"}}>{ai.name}</div><span style={{fontSize:11,fontWeight:800,padding:"2px 8px",borderRadius:99,background:ai.free?"rgba(0,200,117,.15)":"rgba(245,158,11,.15)",color:ai.free?"#00c875":"#f59e0b"}}>{ai.free?"✅ 무료":"💳 유료"}</span></div>
           </div>
           <div className="g-step-desc">{ai.desc}</div>
-          <div className="g-tip" style={{marginTop:8,fontSize:13}}>🔑 <a href={ai.link} target="_blank" rel="noopener noreferrer" style={{color:Y,fontWeight:700,textDecoration:"underline"}}>여기서 키 발급</a> → 로그인 → API 키 생성 → 복사 → 설정 탭 붙여넣기</div>
+          <div className="g-tip" style={{marginTop:8,fontSize:13}}>🔑 <a href={ai.link} target="_blank" rel="noopener noreferrer" style={{color:"var(--g-yellow)",fontWeight:700,textDecoration:"underline"}}>여기서 키 발급</a> → 로그인 → API 키 생성 → 복사 → 설정 탭 붙여넣기</div>
         </div>
       ))}
     </div>,
@@ -2869,7 +2871,7 @@ POST3: (제목)|(이유)
       ].map((s,i)=>(
         <div key={i} className="g-step" style={{borderColor:`${s.c}40`,background:`${s.c}08`}}>
           <div className="g-step-num" style={{color:s.c}}>{s.i} {s.n}</div>
-          <div className="g-step-title" style={{color:"#fff"}}>{s.t}</div>
+          <div className="g-step-title" style={{color:"var(--g-fg)"}}>{s.t}</div>
           <div className="g-step-desc">{s.d}</div>
         </div>
       ))}
@@ -2878,8 +2880,8 @@ POST3: (제목)|(이유)
     /* ── 3: 이미지 ── */
     <div key="3">
       <div className="g-step" style={{borderColor:`${G}40`,background:`${G}08`}}>
-        <div className="g-step-num" style={{color:G}}>🖼️ 이미지 탭 사용법</div>
-        <div className="g-step-title" style={{color:"#fff"}}>이미지마다 캡션을 꼭 입력해요!</div>
+        <div className="g-step-num" style={{color:"var(--g-green)"}}>🖼️ 이미지 탭 사용법</div>
+        <div className="g-step-title" style={{color:"var(--g-fg)"}}>이미지마다 캡션을 꼭 입력해요!</div>
         <div className="g-step-desc">캡션(이미지 설명)은 네이버 상위 노출에 도움이 돼요. 자동 생성되지만 직접 수정도 가능해요.</div>
       </div>
       {[
@@ -2889,9 +2891,9 @@ POST3: (제목)|(이유)
         {t:"📐 이미지 배치 패턴",d:"🎲 랜덤(권장): 매 발행마다 자동 변경 → AI 감지 방지!\nA: 썸네일 + 글 중간 배치 / B: 균등 분산 (모든 이미지 캡션 포함)"},
         {t:"🎬 영상 삽입",d:"네이버TV/유튜브 URL 입력 후 ON. 체험단 영상 필수 업체 대응! 위치(상단/중간/하단) 선택 가능."},
       ].map((item,i)=>(
-        <div key={i} style={{padding:"13px 15px",borderRadius:12,background:"rgba(255,255,255,.04)",border:"1px solid rgba(255,255,255,.08)",marginBottom:8}}>
-          <div style={{fontSize:15,fontWeight:800,color:"#fff",marginBottom:4}}>{item.t}</div>
-          <div style={{fontSize:13,color:"rgba(255,255,255,.65)",lineHeight:1.7,whiteSpace:"pre-line"}}>{item.d}</div>
+        <div key={i} style={{padding:"13px 15px",borderRadius:12,background:"var(--g-surface2)",border:"1px solid var(--g-line)",marginBottom:8}}>
+          <div style={{fontSize:15,fontWeight:800,color:"var(--g-fg)",marginBottom:4}}>{item.t}</div>
+          <div style={{fontSize:13,color:"var(--g-fg2)",lineHeight:1.7,whiteSpace:"pre-line"}}>{item.d}</div>
         </div>
       ))}
     </div>,
@@ -2899,25 +2901,25 @@ POST3: (제목)|(이유)
     /* ── 4: 발행 ── */
     <div key="4">
       <div className="g-step" style={{borderColor:`${P}40`,background:`${P}08`}}>
-        <div className="g-step-num" style={{color:P}}>🚨 발행 전 필수 확인!</div>
-        <div className="g-step-title" style={{color:"#fff"}}>PC에서 Publy 앱이 실행 중이어야 해요</div>
-        <div className="g-step-desc">오른쪽 패널에 <b style={{color:G}}>● 온라인</b>이 보여야 즉시 발행! 오프라인이면 자동으로 대기열에 저장돼요 😊</div>
+        <div className="g-step-num" style={{color:"var(--g-pink)"}}>🚨 발행 전 필수 확인!</div>
+        <div className="g-step-title" style={{color:"var(--g-fg)"}}>PC에서 Publy 앱이 실행 중이어야 해요</div>
+        <div className="g-step-desc">오른쪽 패널에 <b style={{color:"var(--g-green)"}}>● 온라인</b>이 보여야 즉시 발행! 오프라인이면 자동으로 대기열에 저장돼요 😊</div>
       </div>
       <div className="g-step" style={{borderColor:`${G}40`,background:`${G}08`}}>
-        <div className="g-step-num" style={{color:G}}>✅ 발행 순서 (이거 하나면 끝!)</div>
-        <div className="g-step-title" style={{color:"#fff"}}>순서대로만 하면 돼요</div>
+        <div className="g-step-num" style={{color:"var(--g-green)"}}>✅ 발행 순서 (이거 하나면 끝!)</div>
+        <div className="g-step-title" style={{color:"var(--g-fg)"}}>순서대로만 하면 돼요</div>
         <div className="g-step-desc">
           {[["① 이미지 생성 후 발행탭 이동","이미지가 자동으로 글 사이에 배치돼요. 썸네일도 자동 설정!"],["② 오른쪽 패널에서 계정·플랫폼 선택","네이버 또는 티스토리, 연결된 계정 선택"],["③ 발행 방식 선택","전체/본문+FAQ/본문만 — 오른쪽 패널에서 선택"],["④ 🚀 발행 버튼 클릭","오른쪽 아래 큰 초록 버튼!"]].map(([t,d],i)=>(
-            <div key={i} style={{display:"flex",gap:8,padding:"8px 0",borderBottom:i<3?"1px solid rgba(255,255,255,.06)":"none"}}>
-              <div><div style={{fontSize:14,fontWeight:800,color:"#fff"}}>{t}</div><div style={{fontSize:13,color:"rgba(255,255,255,.6)",marginTop:2}}>{d}</div></div>
+            <div key={i} style={{display:"flex",gap:8,padding:"8px 0",borderBottom:i<3?"1px solid var(--g-line)":"none"}}>
+              <div><div style={{fontSize:14,fontWeight:800,color:"var(--g-fg)"}}>{t}</div><div style={{fontSize:13,color:"var(--g-fg2)",marginTop:2}}>{d}</div></div>
             </div>
           ))}
         </div>
         <button className="g-btn" style={{background:`linear-gradient(135deg,${G},#00c870)`,color:"#000"}} onClick={()=>{setShowGuide(false);setTab("accounts");}}>🔗 계정 연결하러 가기</button>
       </div>
       <div className="g-step" style={{borderColor:`${Y}40`,background:`${Y}08`}}>
-        <div className="g-step-num" style={{color:Y}}>🖼️ 이미지+글 패턴 확인</div>
-        <div className="g-step-title" style={{color:"#fff"}}>본문 편집기에서 눈으로 확인하세요</div>
+        <div className="g-step-num" style={{color:"var(--g-yellow)"}}>🖼️ 이미지+글 패턴 확인</div>
+        <div className="g-step-title" style={{color:"var(--g-fg)"}}>본문 편집기에서 눈으로 확인하세요</div>
         <div className="g-step-desc">이미지와 글이 섞인 순서가 보여요. 위치가 마음에 안 들면 블록 옆 <b>🖼️ 버튼</b>으로 직접 조정!</div>
       </div>
     </div>,
@@ -2939,7 +2941,7 @@ POST3: (제목)|(이유)
       ].map((item,i)=>(
         <div key={i} className="g-step" style={{borderColor:`${item.c}55`,background:`${item.c}15`,marginBottom:10,padding:"14px 16px"}}>
           <div style={{fontSize:13,fontWeight:900,color:item.c,marginBottom:6}}>Q. {item.q}</div>
-          <div style={{fontSize:13,color:"#ddd",lineHeight:1.8,whiteSpace:"pre-line"}}>👉 {item.a}</div>
+          <div style={{fontSize:13,color:"var(--g-fg2)",lineHeight:1.8,whiteSpace:"pre-line"}}>👉 {item.a}</div>
         </div>
       ))}
     </div>,
@@ -3006,12 +3008,12 @@ POST3: (제목)|(이유)
               <div style={{padding:"18px 22px 16px",background:alertPopup.type==="expire"?"linear-gradient(135deg,#ff5363,#ff3366)":"linear-gradient(135deg,#ff9f3f,#ff6600)",display:"flex",alignItems:"center",gap:12}}>
                 <div style={{fontSize:28}}>{alertPopup.type==="expire"?"⏰":"📊"}</div>
                 <div>
-                  <div style={{fontSize:16,fontWeight:900,color:"#fff"}}>
+                  <div style={{fontSize:16,fontWeight:900,color:"var(--g-fg)"}}>
                     {alertPopup.type==="expire"
                       ? alertPopup.daysLeft===0 ? "오늘 만료됩니다!" : alertPopup.daysLeft! < 0 ? "서비스가 만료됐습니다!" : `만료 ${alertPopup.daysLeft}일 전`
                       : "오늘 발행 한도가 얼마 안 남았어요"}
                   </div>
-                  <div style={{fontSize:12,color:"rgba(255,255,255,.85)",marginTop:2}}>
+                  <div style={{fontSize:12,color:"var(--g-fg2)",marginTop:2}}>
                     {alertPopup.type==="expire" ? "서비스 이용을 위해 갱신해주세요" : "추가 발행이 필요하면 플랜을 업그레이드하세요"}
                   </div>
                 </div>
@@ -3043,7 +3045,7 @@ POST3: (제목)|(이유)
                   </button>
                   <a href="https://open.kakao.com/o/s0lQ66wi" target="_blank" rel="noopener noreferrer"
                     onClick={()=>setAlertPopup(null)}
-                    style={{flex:2,padding:"10px",borderRadius:10,border:"none",background:alertPopup.type==="expire"?"linear-gradient(135deg,#ff5363,#ff3366)":"linear-gradient(135deg,#ff9f3f,#ff6600)",color:"#fff",cursor:"pointer",fontSize:13,fontWeight:800,fontFamily:"inherit",textDecoration:"none",display:"flex",alignItems:"center",justifyContent:"center",gap:6}}>
+                    style={{flex:2,padding:"10px",borderRadius:10,border:"none",background:alertPopup.type==="expire"?"linear-gradient(135deg,#ff5363,#ff3366)":"linear-gradient(135deg,#ff9f3f,#ff6600)",color:"var(--g-fg)",cursor:"pointer",fontSize:13,fontWeight:800,fontFamily:"inherit",textDecoration:"none",display:"flex",alignItems:"center",justifyContent:"center",gap:6}}>
                     💬 {alertPopup.type==="expire" ? "카카오로 갱신 문의" : "카카오로 업그레이드 문의"}
                   </a>
                 </div>
@@ -3063,9 +3065,9 @@ POST3: (제목)|(이유)
               </div>
               <div className="guide-body">{guidePages[guideTab]}</div>
               <div className="guide-footer">
-                <button className="guide-nav-btn" style={{borderColor:"rgba(255,255,255,.15)",background:"transparent",color:"rgba(255,255,255,.6)"}} onClick={()=>setGuideTab(Math.max(0,guideTab-1))} disabled={guideTab===0}>← 이전</button>
+                <button className="guide-nav-btn" style={{borderColor:"var(--g-line)",background:"transparent",color:"var(--g-fg2)"}} onClick={()=>setGuideTab(Math.max(0,guideTab-1))} disabled={guideTab===0}>← 이전</button>
                 <span className="guide-page">{guideTab+1} / {guideTabs.length}</span>
-                {guideTab<guideTabs.length-1?<button className="guide-nav-btn" style={{borderColor:Y,background:`${Y}15`,color:Y}} onClick={()=>setGuideTab(guideTab+1)}>다음 →</button>:<button className="guide-nav-btn" style={{borderColor:G,background:`${G}15`,color:G}} onClick={()=>{localStorage.setItem("publy_guide_seen","1");setShowGuide(false);}}>✅ 시작하기!</button>}
+                {guideTab<guideTabs.length-1?<button className="guide-nav-btn" style={{borderColor:Y,background:`${Y}15`,color:"var(--g-yellow)"}} onClick={()=>setGuideTab(guideTab+1)}>다음 →</button>:<button className="guide-nav-btn" style={{borderColor:G,background:`${G}15`,color:"var(--g-green)"}} onClick={()=>{localStorage.setItem("publy_guide_seen","1");setShowGuide(false);}}>✅ 시작하기!</button>}
               </div>
             </div>
           </div>
