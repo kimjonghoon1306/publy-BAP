@@ -644,8 +644,6 @@ export default function LoginPage({ onLogin, onAdminLogin, theme, onThemeToggle 
           </div>
         </div>
       )}
-
-      <PWAInstallBtn theme={theme} />
       </div>
     </>
   );
