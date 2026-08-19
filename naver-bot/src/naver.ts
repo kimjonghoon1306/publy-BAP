@@ -551,24 +551,21 @@ export async function publishNaver(params: {
       await page.waitForTimeout(120);
     }
 
-    // ★ 본문 타이핑 직전 최종 방어선.
-    // 이미지 업로드 직후 포커스가 캡션에 남아 있으면 본문 문단으로 다시 빼고,
-    // 실제 활성 요소가 캡션/제목이 아닌 본문 텍스트인지 확인된 경우에만 타이핑한다.
+    // ★ 본문 타이핑 직전 캡션 오염 방어선.
+    // SE4의 activeElement 구조는 상태/버전별로 달라 본문 여부를 성공 조건으로 쓸 수 없다.
+    // 캡션에 있음이 확실할 때만 커서를 빼내고, 판정/교정이 안 되어도 원래 타이핑은 막지 않는다.
     async function ensureBodyTypingFocus(): Promise<void> {
       for (let attempt = 0; attempt < 3; attempt++) {
-        const focus = await frame.evaluate(() => {
+        const inCaption = await frame.evaluate(() => {
           const active = document.activeElement as HTMLElement | null;
-          return {
-            inCaption: !!active?.closest(".se-caption"),
-            inBodyText: !!active?.closest(".se-main-container .se-component.se-text") &&
-              !active?.closest(".se-section-documentTitle, .se-documentTitle"),
-          };
-        }).catch(() => ({ inCaption: true, inBodyText: false }));
-        if (!focus.inCaption && focus.inBodyText) return;
+          return !!active?.closest(".se-caption");
+        }).catch(() => false);
+        if (!inCaption) return;
+        console.log(`[naver] ⚠️ 본문 타이핑 직전 캡션 포커스 감지 — 본문으로 이동 시도 (${attempt + 1}/3)`);
         await moveCursorToEnd();
         await page.waitForTimeout(150);
       }
-      throw new Error("본문 텍스트 문단 포커스를 확인하지 못해 타이핑을 중단했습니다.");
+      console.log("[naver] ⚠️ 캡션 포커스 교정을 확인하지 못했지만 본문 타이핑은 계속합니다.");
     }
 
     async function typeBodyText(text: string, delay: number): Promise<void> {
@@ -1707,57 +1704,79 @@ export async function generateFlowImagesCDP(params: {
         continue;
       }
 
-      // 생성 대기(최대 165초): beforeSet에 없던 "새 URL"이 나타나면 성공(개수비교보다 견고).
+      // 생성 대기(최대 165초): Flow는 한 번에 여러 후보를 순차적으로 렌더할 수 있다.
+      // 첫 이미지에서 즉시 끝내지 말고, 생성 표시가 끝나고 후보 개수가 안정될 때까지 수집한다.
       log("[Flow] ⏳ 이미지 생성 대기...");
-      let freshSrcs: string[] = [];
+      let freshCandidates: { src: string; width: number; height: number }[] = [];
+      let stableChecks = 0;
+      let previousCount = 0;
+      let firstCandidateAt = -1;
       for (let t = 0; t < 55; t++) {
         await page.waitForTimeout(3000);
         const snap = await page.evaluate((beforeArr: string[]) => {
           const before = new Set(beforeArr);
-          const fresh: string[] = [];
+          const bySrc = new Map<string, { src: string; width: number; height: number }>();
           document.querySelectorAll('img[src*="media.getMediaUrlRedirect"]').forEach(im => {
             const el = im as HTMLImageElement;
-            if (el.naturalWidth >= 500 && !before.has(el.src)) fresh.push(el.src);
+            if (el.naturalWidth >= 500 && !before.has(el.src)) {
+              const old = bySrc.get(el.src);
+              if (!old || el.naturalWidth * el.naturalHeight > old.width * old.height) {
+                bySrc.set(el.src, { src: el.src, width: el.naturalWidth, height: el.naturalHeight });
+              }
+            }
           });
           // ⚠️ '이미지를 생성했습니다'(완료) 오탐 방지 — 진행중 표현만 (~중/~ing만)
           const generating = /생성\s*중|만들고\s*있|생성하고\s*있|generating|creating\b|thinking/i.test(document.body.innerText);
-          return { fresh, generating };
+          return { fresh: [...bySrc.values()], generating };
         }, beforeSrcs);
         if (snap.fresh.length > 0) {
-          freshSrcs = snap.fresh;
-          // 새 이미지가 잡혔으면: 생성중 문구 없으면 바로, 있어도 안전하게 진행
-          if (!snap.generating) { await page.waitForTimeout(2500); break; }
-          // 생성중이어도 새 이미지가 이미 목표 수만큼 나왔으면 완료로 간주(오탐 대비)
-          if (freshSrcs.length >= 1) { await page.waitForTimeout(4000); break; }
+          if (firstCandidateAt < 0) firstCandidateAt = t;
+          freshCandidates = snap.fresh;
+          stableChecks = snap.fresh.length === previousCount ? stableChecks + 1 : 0;
+          previousCount = snap.fresh.length;
+          if (!snap.generating && stableChecks >= 2) break;
+          // Flow의 진행중 문구가 화면에 남는 UI에서도 첫 후보 뒤 15초 이상 불필요하게 기다리지 않는다.
+          if (t - firstCandidateAt >= 5) break;
         }
       }
 
-      // 최종 새 URL 재수집(마지막 스냅샷 기준)
-      freshSrcs = await page.evaluate((beforeArr: string[]) => {
+      // 최종 후보 재수집. DOM 중복은 제거하고 실제 해상도가 큰 순서로 선택한다.
+      freshCandidates = await page.evaluate((beforeArr: string[]) => {
         const before = new Set(beforeArr);
-        const fresh: string[] = [];
+        const bySrc = new Map<string, { src: string; width: number; height: number }>();
         document.querySelectorAll('img[src*="media.getMediaUrlRedirect"]').forEach(im => {
           const el = im as HTMLImageElement;
-          if (el.naturalWidth >= 500 && !before.has(el.src)) fresh.push(el.src);
+          if (el.naturalWidth >= 500 && !before.has(el.src)) {
+            const old = bySrc.get(el.src);
+            if (!old || el.naturalWidth * el.naturalHeight > old.width * old.height) {
+              bySrc.set(el.src, { src: el.src, width: el.naturalWidth, height: el.naturalHeight });
+            }
+          }
         });
-        return fresh;
+        return [...bySrc.values()].sort((a, b) => b.width * b.height - a.width * a.height);
       }, beforeSrcs);
 
-      if (freshSrcs.length === 0) { log(`[Flow] ⚠️ (${i + 1}) 이미지 생성 실패/타임아웃`); requeue(); continue; }
+      if (freshCandidates.length === 0) { log(`[Flow] ⚠️ (${i + 1}) 이미지 생성 실패/타임아웃`); requeue(); continue; }
+      log(`[Flow] 🖼️ (${i + 1}) 후보 ${freshCandidates.length}장 중 고해상도 우선 선택`);
 
-      // 새로 생긴 이미지 1장 다운로드(가장 최근 것 = 배열 마지막)
-      const targetSrc = freshSrcs[freshSrcs.length - 1];
-      const dataUrl: string = await page.evaluate(async (src) => {
-        try {
-          const res = await fetch(src);
-          if (!res.ok) return "ERR:" + res.status;
-          const blob = await res.blob();
-          return await new Promise<string>(r => { const rd = new FileReader(); rd.onloadend = () => r(rd.result as string); rd.readAsDataURL(blob); });
-        } catch (e: any) { return "ERR:" + e.message; }
-      }, targetSrc);
+      // 가장 큰 후보부터 다운로드하되 URL 일시 실패 시 다음 후보로 폴백한다.
+      let dataUrl = "ERR:no candidate downloaded";
+      let chosen: { src: string; width: number; height: number } | undefined;
+      for (const candidate of freshCandidates) {
+        dataUrl = await page.evaluate(async (src) => {
+          try {
+            const res = await fetch(src);
+            if (!res.ok) return "ERR:" + res.status;
+            const blob = await res.blob();
+            return await new Promise<string>(r => { const rd = new FileReader(); rd.onloadend = () => r(rd.result as string); rd.readAsDataURL(blob); });
+          } catch (e: any) { return "ERR:" + e.message; }
+        }, candidate.src);
+        if (dataUrl.startsWith("data:image")) { chosen = candidate; break; }
+      }
 
       if (dataUrl.startsWith("data:image")) {
         results.push({ src: dataUrl, alt: captions[i] || "" });
+        if (chosen) log(`[Flow] ✅ (${i + 1}) 선택: ${chosen.width}x${chosen.height}`);
         // 바탕화면 날짜 폴더에 자동 백업
         if (backupDir) {
           try {
