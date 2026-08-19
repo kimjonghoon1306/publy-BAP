@@ -1,6 +1,6 @@
 import { app, BrowserWindow, ipcMain, shell, utilityProcess } from "electron";
 import path from "path";
-import { spawn, execSync, ChildProcess } from "child_process";
+import { spawn, exec as _exec, execSync, ChildProcess } from "child_process";
 import { randomBytes } from "crypto";
 
 let mainWindow: BrowserWindow | null = null;
@@ -15,21 +15,21 @@ const isDev = !app.isPackaged;
 const botAuthToken = randomBytes(32).toString("hex");
 
 // 이전 실행에서 남은(orphan) 봇 프로세스가 포트를 물고 있으면 새 봇이 못 뜨고
-// 토큰이 어긋나 "Unauthorized/봇 오프라인"이 남 → 앱 시작 시 해당 포트를 강제 정리.
-function killPort(port: number) {
-  try {
-    if (process.platform === "win32") {
-      const out = execSync(`netstat -ano -p tcp | findstr :${port}`, { encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"] });
-      const pids = new Set(
-        out.split(/\r?\n/).map(l => l.trim().split(/\s+/).pop() || "").filter(p => /^\d+$/.test(p) && p !== "0")
-      );
-      pids.forEach(pid => { try { execSync(`taskkill /PID ${pid} /F`, { stdio: "ignore" }); } catch {} });
-    } else {
-      const out = execSync(`lsof -ti tcp:${port}`, { encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"] });
-      out.split(/\s+/).filter(Boolean).forEach(pid => { try { process.kill(Number(pid), "SIGKILL"); } catch {} });
-    }
-    console.log(`[bot] 포트 ${port} 정리 완료`);
-  } catch { /* 점유 프로세스 없으면 명령이 비정상 종료 → 무시 */ }
+// 토큰이 어긋나 "Unauthorized/봇 오프라인"이 남 → 해당 포트를 강제 정리.
+//
+// ★★멈춤(파란 원 깜빡+로딩 김) 근본원인: 예전엔 execSync(동기)로 netstat/taskkill을 돌렸다.
+//   봇이 시작 못하고 3초마다 재시작 루프를 돌면, 매번 이 동기 netstat(윈도우선 특히 느림)이
+//   메인 스레드를 막아 커서가 계속 깜빡이고 창이 버벅였다. → exec(비동기)로 바꿔 메인 스레드를
+//   절대 막지 않는다. 완료를 기다려야 하는 곳은 await(이벤트 루프는 안 막힘).
+function killPort(port: number): Promise<void> {
+  return new Promise(resolve => {
+    const cmd = process.platform === "win32"
+      ? `for /f "tokens=5" %a in ('netstat -ano -p tcp ^| findstr :${port}') do taskkill /PID %a /F`
+      : `lsof -ti tcp:${port} | xargs -r kill -9`;
+    try {
+      _exec(cmd, { windowsHide: true, timeout: 8000 }, () => resolve()); // 결과 무관, 논블로킹
+    } catch { resolve(); }
+  });
 }
 
 /* ── 봇 로그 파이핑을 완전히 제거함 (v2.0.26) ──
@@ -79,9 +79,19 @@ async function forkBotServer(opts: {
 
   const env = botEnvironment({ PLAYWRIGHT_BROWSERS_PATH: opts.chromiumPath, ...(opts.extraEnv || {}) });
 
-  const start = () => {
+  // 재시작 백오프: 봇이 계속 죽어도 3초마다 무한 루프 돌지 않게(메인 부하↓). 성공 기동 시 리셋.
+  let restartAttempts = 0;
+  const scheduleRestart = () => {
+    if (app.isQuitting) return;
+    restartAttempts++;
+    const delay = Math.min(60000, 3000 * restartAttempts); // 3s,6s,9s…최대 60s
+    setTimeout(() => { void start(); }, delay);
+  };
+
+  const start = async () => {
     console.log(`[${opts.name}] 서버 시작(utilityProcess)...`);
-    killPort(opts.port);
+    await killPort(opts.port); // 비동기 → 메인 스레드 안 막힘
+    if (app.isQuitting) return;
     try {
       const child = utilityProcess.fork(serverJs, [], {
         cwd: opts.botPath,
@@ -91,11 +101,11 @@ async function forkBotServer(opts: {
         env,
       });
       opts.setProc(child);
-      child.on("spawn", () => console.log(`[${opts.name}] 실행됨 pid=${child.pid}`));
+      child.on("spawn", () => { restartAttempts = 0; console.log(`[${opts.name}] 실행됨 pid=${child.pid}`); });
       child.on("exit", (code) => {
-        console.warn(`[${opts.name}] 종료 (code: ${code}). 3초 후 재시작...`);
+        console.warn(`[${opts.name}] 종료 (code: ${code}). 재시작 예약...`);
         opts.setProc(null);
-        if (!app.isQuitting) setTimeout(start, 3000);
+        scheduleRestart();
       });
     } catch (e: any) {
       // utilityProcess가 어떤 이유로 실패하면 구방식으로라도 띄운다.
@@ -106,15 +116,16 @@ async function forkBotServer(opts: {
         env: { ...env, ELECTRON_RUN_AS_NODE: "1" },
       });
       opts.setProc(child);
+      child.on("spawn", () => { restartAttempts = 0; });
       child.on("exit", (code) => {
-        console.warn(`[${opts.name}] (폴백) 종료 (code: ${code}). 3초 후 재시작...`);
+        console.warn(`[${opts.name}] (폴백) 종료 (code: ${code}). 재시작 예약...`);
         opts.setProc(null);
-        if (!app.isQuitting) setTimeout(start, 3000);
+        scheduleRestart();
       });
     }
   };
 
-  start();
+  await start();
 }
 
 const resourceDir = (rel: string) =>
