@@ -1,16 +1,13 @@
-import { app, BrowserWindow, ipcMain, shell, utilityProcess } from "electron";
+import { app, BrowserWindow, ipcMain, shell } from "electron";
 import path from "path";
 import { spawn, exec as _exec, execSync, ChildProcess } from "child_process";
 import { randomBytes } from "crypto";
 
 let mainWindow: BrowserWindow | null = null;
-// 봇 서버는 Electron 공식 utilityProcess로 실행한다.
-// (구버전은 spawn(process.execPath, ELECTRON_RUN_AS_NODE)로 앱 실행파일을 Node로 재실행했는데,
-//  갓 다운로드한 macOS 앱은 격리+미공증 상태라 그 자식 프로세스가 Gatekeeper에 막혀 조용히 죽어
-//  → 봇이 안 떠 "서버 오프라인"이 됨. utilityProcess 자식은 앱 서명/권한을 물려받아 안 막힌다.)
-let botProcess: Electron.UtilityProcess | ChildProcess | null = null;
-let neighborBotProcess: Electron.UtilityProcess | ChildProcess | null = null;
-let instaBotProcess: Electron.UtilityProcess | ChildProcess | null = null;
+// 봇 서버는 Electron 메인과 분리된 Node 자식 프로세스로 실행한다.
+let botProcess: ChildProcess | null = null;
+let neighborBotProcess: ChildProcess | null = null;
+let instaBotProcess: ChildProcess | null = null;
 const isDev = !app.isPackaged;
 const botAuthToken = randomBytes(32).toString("hex");
 
@@ -51,24 +48,22 @@ function botEnvironment(extra: NodeJS.ProcessEnv = {}): Record<string, string> {
     PUBLY_LOG_DIR: path.join(app.getPath("userData"), "logs"),
     BOT_AUTH_TOKEN: botAuthToken,
   };
-  // utilityProcess.fork의 env는 문자열 값만 허용 → undefined 값 제거
+  // child_process env에 undefined가 섞이지 않도록 문자열 값만 전달
   const clean: Record<string, string> = {};
   for (const [k, v] of Object.entries(merged)) if (typeof v === "string") clean[k] = v;
   return clean;
 }
 
-/* ── 봇 서버 실행(공용) ──
-   Electron utilityProcess.fork로 dist/server.js를 Node 서비스로 띄운다.
-   utilityProcess 자식은 앱 코드서명/entitlement를 그대로 물려받아
-   갓 다운로드한(격리·미공증) 앱에서도 Gatekeeper에 막히지 않고 확실히 뜬다.
-   혹시 fork가 실패하면 구방식(spawn)으로 폴백해 최소한의 동작을 보장한다. */
+/* 봇은 Electron utility-process가 아닌 독립 Node 자식으로 실행한다.
+   Playwright가 Chromium 자식 프로세스 트리를 만드는 동안 봇을 Electron 메인의
+   utility-process 생명주기/IPC에 결합하지 않는다. */
 async function forkBotServer(opts: {
   name: string;
   botPath: string;      // dist/server.js 가 들어있는 폴더
   chromiumPath: string;
   port: number;
   extraEnv?: NodeJS.ProcessEnv;
-  setProc: (p: Electron.UtilityProcess | ChildProcess | null) => void;
+  setProc: (p: ChildProcess | null) => void;
 }) {
   const fs = await import("fs");
   const serverJs = path.join(opts.botPath, "dist", "server.js");
@@ -79,7 +74,7 @@ async function forkBotServer(opts: {
 
   const env = botEnvironment({ PLAYWRIGHT_BROWSERS_PATH: opts.chromiumPath, ...(opts.extraEnv || {}) });
 
-  // 재시작 백오프: 봇이 계속 죽어도 3초마다 무한 루프 돌지 않게(메인 부하↓). 성공 기동 시 리셋.
+  // 짧게 뜬 뒤 죽는 프로세스는 성공 기동이 아니다. 일정 시간 생존해야 백오프를 리셋한다.
   let restartAttempts = 0;
   const scheduleRestart = () => {
     if (app.isQuitting) return;
@@ -89,40 +84,25 @@ async function forkBotServer(opts: {
   };
 
   const start = async () => {
-    console.log(`[${opts.name}] 서버 시작(utilityProcess)...`);
+    console.log(`[${opts.name}] 서버 시작...`);
     await killPort(opts.port); // 비동기 → 메인 스레드 안 막힘
     if (app.isQuitting) return;
-    try {
-      const child = utilityProcess.fork(serverJs, [], {
-        cwd: opts.botPath,
-        serviceName: opts.name,
-        // ★ stdio 전부 ignore — 봇 출력을 메인이 받지 않는다(멈춤 근본원인 제거). pipe 금지.
-        stdio: ["ignore", "ignore", "ignore"],
-        env,
-      });
-      opts.setProc(child);
-      child.on("spawn", () => { restartAttempts = 0; console.log(`[${opts.name}] 실행됨 pid=${child.pid}`); });
-      child.on("exit", (code) => {
-        console.warn(`[${opts.name}] 종료 (code: ${code}). 재시작 예약...`);
-        opts.setProc(null);
-        scheduleRestart();
-      });
-    } catch (e: any) {
-      // utilityProcess가 어떤 이유로 실패하면 구방식으로라도 띄운다.
-      console.error(`[${opts.name}] utilityProcess 실패 → spawn 폴백:`, e?.message);
-      const child = spawn(process.execPath, ["dist/server.js"], {
-        cwd: opts.botPath,
-        stdio: "ignore", // ★ 봇 출력 무시(메인 스레드 보호) — pipe 금지
-        env: { ...env, ELECTRON_RUN_AS_NODE: "1" },
-      });
-      opts.setProc(child);
-      child.on("spawn", () => { restartAttempts = 0; });
-      child.on("exit", (code) => {
-        console.warn(`[${opts.name}] (폴백) 종료 (code: ${code}). 재시작 예약...`);
-        opts.setProc(null);
-        scheduleRestart();
-      });
-    }
+    const child = spawn(process.execPath, [serverJs], {
+      cwd: opts.botPath,
+      stdio: "ignore",
+      windowsHide: true,
+      env: { ...env, ELECTRON_RUN_AS_NODE: "1" },
+    });
+    opts.setProc(child);
+    const stableTimer = setTimeout(() => { restartAttempts = 0; }, 30000);
+    child.on("spawn", () => console.log(`[${opts.name}] 실행됨 pid=${child.pid}`));
+    child.on("error", (error) => console.error(`[${opts.name}] 실행 실패:`, error.message));
+    child.on("close", (code) => {
+      clearTimeout(stableTimer);
+      console.warn(`[${opts.name}] 종료 (code: ${code}). 재시작 예약...`);
+      opts.setProc(null);
+      scheduleRestart();
+    });
   };
 
   await start();
