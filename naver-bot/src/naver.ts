@@ -927,7 +927,21 @@ export async function publishNaver(params: {
           return false;
         });
         console.log(`[naver] 예약 라디오 선택: ${picked}`);
+        if (!picked) throw new Error("예약 라디오를 찾지 못했습니다");
         await page.waitForTimeout(1200);
+
+        // 선택 뒤 예약 입력 UI가 실제로 열렸는지 확인한다. 이 확인 없이 확정하면 즉시 발행될 수 있다.
+        const reserveSelected = await frame.evaluate(() => {
+          const radios = [...document.querySelectorAll("input[type=radio]")] as HTMLInputElement[];
+          if (radios.some(r => r.checked && /reserve|예약/i.test(`${r.value} ${r.id} ${r.name}`))) return true;
+          const exactReserve = [...document.querySelectorAll("label, button, [role=radio]")]
+            .filter(e => (e.textContent || "").replace(/\s/g, "") === "예약");
+          return exactReserve.some(e =>
+            e.getAttribute("aria-checked") === "true" ||
+            /active|selected|checked|on/i.test(String(e.className))
+          ) || document.querySelectorAll("select").length >= 2;
+        });
+        if (!reserveSelected) throw new Error("예약 라디오 선택 상태를 확인하지 못했습니다");
 
         // 2) 시(hour)·분(minute) select 드롭다운 설정
         const setTime = await frame.evaluate(({ h, m }: { h: number; m: number }) => {
@@ -955,6 +969,9 @@ export async function publishNaver(params: {
           return { okH, okM, selectCount: selects.length };
         }, { h: hour, m: min });
         console.log(`[naver] 시/분 설정:`, JSON.stringify(setTime));
+        if (!setTime.okH || !setTime.okM) {
+          throw new Error(`예약 시/분 설정 실패 (시:${setTime.okH}, 분:${setTime.okM})`);
+        }
 
         // 3) 날짜: 오늘이 아니면 달력에서 해당 날짜 셀 클릭
         const dateSet = await frame.evaluate(({ y, mo, d }: { y: number; mo: number; d: number }) => {
@@ -970,45 +987,69 @@ export async function publishNaver(params: {
           return "none";
         }, { y: year, mo: month, d: day });
         console.log(`[naver] 날짜 설정(${year}-${month}-${day}): ${dateSet}`);
+        if (dateSet === "none") throw new Error("예약 날짜를 달력에서 찾지 못했습니다");
 
         await page.waitForTimeout(600);
         console.log(`[naver] ✅ 예약 설정 완료: ${year}-${month}-${day} ${hour}:${String(min).padStart(2, "0")}`);
-      } catch (e) { console.log("[naver] 예약 발행 설정 실패:", e); }
+      } catch (e) {
+        console.error("[naver] 예약 발행 설정 실패 — 즉시 발행하지 않습니다:", e);
+        throw e;
+      }
     }
 
     // ── 최종 발행 또는 예약 확정 ──
     console.log("[naver] 최종 발행...");
     const finalLabel = scheduleTime ? "예약" : "발행";
-    const finalSels = scheduleTime
-      ? [
-          "button[class*='confirm']:has-text('예약')",
-          "button:has-text('예약 발행')",
-          "button:has-text('예약')",
-          "button.confirm_btn__xiHQQ",
-          "button[class*='confirm_btn']",
-        ]
-      : [
-          "button.confirm_btn__xiHQQ",
-          "button[class*='confirm_btn']",
-          "button:has-text('발행')",
-        ];
+    const beforeFinalUrl = page.url();
+    const finalDone = await frame.evaluate(({ label, scheduled }: { label: string; scheduled: boolean }) => {
+      const visible = (el: HTMLElement) => {
+        const s = getComputedStyle(el);
+        const r = el.getBoundingClientRect();
+        return s.display !== "none" && s.visibility !== "hidden" && r.width > 0 && r.height > 0;
+      };
+      const normalized = (el: Element) => (el.textContent || "").replace(/\s/g, "");
+      const expected = scheduled ? /^(예약|예약발행)$/ : /^발행$/;
+      const buttons = [...document.querySelectorAll("button")]
+        .filter((b): b is HTMLButtonElement => visible(b) && !b.disabled && expected.test(normalized(b)));
 
-    let finalDone = false;
-    for (const sel of finalSels) {
-      try {
-        const el = await frame.$(sel);
-        if (el) { await frame.click(sel, { timeout: 8000 }); finalDone = true; break; }
-      } catch {}
-    }
+      // CSS-module 해시는 무시하고 역할(confirm_btn) + 정확한 라벨을 함께 확인한다.
+      // confirm 버튼이 없을 때만 발행 옵션 레이어 안의 마지막 정확-라벨 버튼을 사용한다.
+      const confirm = buttons.filter(b => /(^|\s|_)confirm(?:_btn)?(?:__|\s|_|$)/i.test(b.className)).at(-1);
+      const inPublishLayer = buttons.filter(b =>
+        b.closest("[class*='publish'], [class*='Publish'], [class*='layer'], [role='dialog']")
+      ).at(-1);
+      const target = confirm || inPublishLayer;
+      if (!target) return false;
+      target.click();
+      return true;
+    }, { label: finalLabel, scheduled: Boolean(scheduleTime) });
+
     if (!finalDone) {
-      const btns = await frame.$$("button");
-      for (const btn of btns.reverse()) {
-        const txt = await btn.textContent();
-        if (txt?.includes(finalLabel)) { await btn.click(); finalDone = true; break; }
-      }
+      const message = scheduleTime
+        ? "예약 확정 버튼을 찾지 못했습니다. 안전을 위해 즉시 발행하지 않습니다."
+        : "발행 옵션 레이어의 최종 발행 버튼을 찾지 못했습니다.";
+      console.error(`[naver] ❌ ${message}`);
+      throw new Error(message);
     }
 
     await page.waitForTimeout(scheduleTime ? 3000 : 5000);
+
+    const finalSignal = await frame.evaluate(({ label }: { label: string }) => {
+      const visible = (el: HTMLElement) => {
+        const s = getComputedStyle(el);
+        const r = el.getBoundingClientRect();
+        return s.display !== "none" && s.visibility !== "hidden" && r.width > 0 && r.height > 0;
+      };
+      const confirmStillVisible = [...document.querySelectorAll("button[class*='confirm']")]
+        .some(b => visible(b as HTMLElement) && (b.textContent || "").replace(/\s/g, "") === label);
+      const successText = /예약(?:이|이\s)?완료|예약되었습니다|발행되었습니다/.test(document.body.innerText);
+      return { layerClosed: !confirmStillVisible, successText };
+    }, { label: finalLabel });
+    const urlChanged = page.url() !== beforeFinalUrl;
+    console.log(`[naver] 최종 확정 신호: 레이어닫힘=${finalSignal.layerClosed}, URL변경=${urlChanged}, 완료문구=${finalSignal.successText}`);
+    if (!finalSignal.layerClosed && !urlChanged && !finalSignal.successText) {
+      console.warn("[naver] ⚠️ 최종 확정 성공 신호를 확인하지 못했습니다");
+    }
 
     // URL 추출
     let postUrl = page.url();
