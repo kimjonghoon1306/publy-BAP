@@ -255,10 +255,13 @@ async function processJobs() {
         let postUrl = "";
         // ★ payload가 있으면(예약/큐 발행) 이미지 블록까지 그대로 발행. 없으면 옛 방식(텍스트만) 폴백.
         const p = job.payload || null;
+        // 예약시간이 미래면 네이버 예약발행으로, 이미 지났으면 즉시 발행.
+        const sched = (job as any).schedule_time as string | undefined;
+        const schedFuture = sched && new Date(sched).getTime() > Date.now() ? sched : undefined;
         if (job.platform === "naver") {
           postUrl = p
-            ? await publishNaver({ userId: job.user_id, title: p.title || job.title, content: p.content ?? job.content, pubScope: p.pubScope, tags: p.tags || job.tags, imageUrl: p.imageUrl, categoryId: p.categoryId ?? (job as any).category_id, visibility: p.visibility, blocks: p.blocks as any, videoUrl: p.videoUrl, videoPosition: p.videoPosition })
-            : await publishNaver({ userId: job.user_id, title: job.title, content: job.content, tags: job.tags, categoryId: (job as any).category_id, visibility: (job as any).visibility });
+            ? await publishNaver({ userId: job.user_id, title: p.title || job.title, content: p.content ?? job.content, pubScope: p.pubScope, tags: p.tags || job.tags, imageUrl: p.imageUrl, categoryId: p.categoryId ?? (job as any).category_id, visibility: p.visibility, blocks: p.blocks as any, videoUrl: p.videoUrl, videoPosition: p.videoPosition, scheduleTime: schedFuture })
+            : await publishNaver({ userId: job.user_id, title: job.title, content: job.content, tags: job.tags, categoryId: (job as any).category_id, visibility: (job as any).visibility, scheduleTime: schedFuture });
         } else if (job.platform === "tistory") {
           postUrl = p
             ? await publishTistory({ userId: job.user_id, title: p.title || job.title, content: p.content ?? job.content, tags: p.tags || job.tags, categoryId: p.categoryId ?? (job as any).category_id, visibility: p.visibility as any })

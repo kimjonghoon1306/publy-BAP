@@ -873,76 +873,78 @@ export async function publishNaver(params: {
       await page.waitForTimeout(400);
     } catch (e) { console.log("[naver] 공개 설정 실패 (무시):", e); }
 
-    // ── 예약 발행 ──
+    // ── 예약 발행 (네이버 발행 레이어의 "예약" 기능에 시간 설정) ──
+    //   ★ 네이버 예약 UI 실제 구조(2026): 발행 옵션에서 "예약" 라디오 선택 → 날짜(달력 셀 클릭) +
+    //     시(select) + 분(select, 10분 단위). 예전엔 text input에 넣으려 해 전혀 안 먹혔음.
+    //   즉시 글·이미지 작성 후 예약 확정 → PC 꺼도 네이버 서버가 그 시간에 발행.
     if (scheduleTime) {
       console.log(`[naver] 예약 발행 설정: ${scheduleTime}`);
       try {
-        // "예약" 옵션 선택
-        const scheduleSels = [
-          "label:has-text('예약')",
-          "button:has-text('예약')",
-          "input[value='schedule'] + label",
-          ".se-schedule-button",
-          "[class*='schedule']",
-        ];
-        let scheduleToggled = false;
-        for (const sel of scheduleSels) {
-          try {
-            const el = await frame.$(sel);
-            if (el) { await frame.click(sel, { timeout: 3000 }); scheduleToggled = true; break; }
-          } catch {}
-        }
-        if (scheduleToggled) {
-          await page.waitForTimeout(1000);
-          // 날짜/시간 입력
-          // scheduleTime format: "2025-03-15T10:00"
-          const dt = new Date(scheduleTime);
-          const year  = dt.getFullYear().toString();
-          const month = String(dt.getMonth() + 1).padStart(2, "0");
-          const day   = String(dt.getDate()).padStart(2, "0");
-          const hour  = String(dt.getHours()).padStart(2, "0");
-          const min   = String(dt.getMinutes()).padStart(2, "0");
+        const dt = new Date(scheduleTime);
+        const year = dt.getFullYear();
+        const month = dt.getMonth() + 1;           // 1~12
+        const day = dt.getDate();                  // 1~31
+        const hour = dt.getHours();                // 0~23
+        const min = Math.floor(dt.getMinutes() / 10) * 10; // 네이버는 10분 단위 → 내림
 
-          // 날짜 입력
-          const dateSels = [
-            "input[class*='date']",
-            "input[name='publishDate']",
-            "input[placeholder*='날짜']",
-            "input[type='date']",
-          ];
-          for (const sel of dateSels) {
-            try {
-              const el = await frame.$(sel);
-              if (el) {
-                await frame.click(sel, { clickCount: 3 }).catch(() => frame.click(sel));
-                await frame.fill(sel, `${year}-${month}-${day}`);
-                await page.waitForTimeout(300);
-                break;
-              }
-            } catch {}
+        // 1) "예약" 라디오 선택 (label/텍스트/radio 기반)
+        const picked = await frame.evaluate(() => {
+          const cands = [...document.querySelectorAll("label, button, span, a")];
+          const el = cands.find(e => (e.textContent || "").replace(/\s/g, "") === "예약")
+                  || cands.find(e => /예약/.test(e.textContent || "") && !/즉시/.test(e.textContent || ""));
+          if (el) { (el as HTMLElement).click(); return true; }
+          const radio = document.querySelector("input[type=radio][value*='RESERVE'], input[type=radio][id*='reserve' i]") as HTMLInputElement | null;
+          if (radio) { radio.click(); return true; }
+          return false;
+        });
+        console.log(`[naver] 예약 라디오 선택: ${picked}`);
+        await page.waitForTimeout(1200);
+
+        // 2) 시(hour)·분(minute) select 드롭다운 설정
+        const setTime = await frame.evaluate(({ h, m }: { h: number; m: number }) => {
+          const selects = [...document.querySelectorAll("select")] as HTMLSelectElement[];
+          const pick = (sel: HTMLSelectElement, want: number) => {
+            const opts = [...sel.options];
+            let opt = opts.find(o => {
+              const n = (o.textContent || o.value).replace(/[^\d]/g, "");
+              return n !== "" && parseInt(n, 10) === want;
+            });
+            if (!opt) opt = opts.find(o => (o.value || "").replace(/[^\d]/g, "") === String(want));
+            if (opt) { sel.value = opt.value; sel.dispatchEvent(new Event("change", { bubbles: true })); return true; }
+            return false;
+          };
+          let hourSel: HTMLSelectElement | undefined, minSel: HTMLSelectElement | undefined;
+          for (const s of selects) {
+            const nums = [...s.options].map(o => parseInt((o.textContent || o.value).replace(/[^\d]/g, ""), 10)).filter(n => !isNaN(n));
+            if (!nums.length) continue;
+            const max = Math.max(...nums);
+            if (max >= 20 && max <= 23 && !hourSel) hourSel = s;                         // 시: 최대 23
+            else if (nums.includes(0) && nums.includes(10) && max <= 50 && !minSel) minSel = s; // 분: 0,10,…,50
           }
-          // 시간 입력
-          const timeSels = [
-            "input[class*='time']",
-            "input[name='publishTime']",
-            "input[placeholder*='시간']",
-            "input[type='time']",
-          ];
-          for (const sel of timeSels) {
-            try {
-              const el = await frame.$(sel);
-              if (el) {
-                await frame.click(sel, { clickCount: 3 }).catch(() => frame.click(sel));
-                await frame.fill(sel, `${hour}:${min}`);
-                await page.waitForTimeout(300);
-                break;
-              }
-            } catch {}
-          }
-          await page.waitForTimeout(500);
-          console.log(`[naver] ✅ 예약 날짜 설정: ${year}-${month}-${day} ${hour}:${min}`);
-        }
-      } catch (e) { console.log("[naver] 예약 발행 설정 실패 (무시):", e); }
+          const okH = hourSel ? pick(hourSel, h) : false;
+          const okM = minSel ? pick(minSel, m) : false;
+          return { okH, okM, selectCount: selects.length };
+        }, { h: hour, m: min });
+        console.log(`[naver] 시/분 설정:`, JSON.stringify(setTime));
+
+        // 3) 날짜: 오늘이 아니면 달력에서 해당 날짜 셀 클릭
+        const dateSet = await frame.evaluate(({ y, mo, d }: { y: number; mo: number; d: number }) => {
+          const openBtn = [...document.querySelectorAll("button, [role=button]")]
+            .find(b => /달력|날짜|calendar/i.test((b.getAttribute("aria-label") || "") + (b.className || "")));
+          if (openBtn) (openBtn as HTMLElement).click();
+          const iso = `${y}-${String(mo).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+          const byData = document.querySelector(`[data-date='${iso}'], td[data-day='${d}']`) as HTMLElement | null;
+          if (byData) { byData.click(); return "data"; }
+          const cells = [...document.querySelectorAll("button, td, span, a")]
+            .filter(e => (e.textContent || "").trim() === String(d) && !(e as HTMLElement).getAttribute("disabled"));
+          if (cells.length) { (cells[0] as HTMLElement).click(); return "text"; }
+          return "none";
+        }, { y: year, mo: month, d: day });
+        console.log(`[naver] 날짜 설정(${year}-${month}-${day}): ${dateSet}`);
+
+        await page.waitForTimeout(600);
+        console.log(`[naver] ✅ 예약 설정 완료: ${year}-${month}-${day} ${hour}:${String(min).padStart(2, "0")}`);
+      } catch (e) { console.log("[naver] 예약 발행 설정 실패:", e); }
     }
 
     // ── 최종 발행 또는 예약 확정 ──

@@ -2138,11 +2138,22 @@ ${segList}`;
   //   append=true 면 기존 이미지에 "이어붙임"(1장 지운 자리 채우기 등), false 면 전체 새로 생성(교체)
   async function handleGenerateFlowImages(append:boolean=false){
     // 1) Flow 준비 상태 확인 (디버깅 크롬 열려있나) — Electron 우선, 없으면 봇 API
-    let ready=false;
-    try{
-      if((window as any).electron?.flowStatus){ const s=await (window as any).electron.flowStatus(); ready=!!s.ready; }
-      else{ const r=await botFetch(`${BOT}/api/flow/status`,{signal:AbortSignal.timeout(3000)}); const j=await r.json(); ready=!!j.ready; }
-    }catch{}
+    const checkReady=async():Promise<boolean>=>{
+      try{
+        if((window as any).electron?.flowStatus){ const s=await (window as any).electron.flowStatus(); return !!s.ready; }
+        const r=await botFetch(`${BOT}/api/flow/status`,{signal:AbortSignal.timeout(3000)}); const j=await r.json(); return !!j.ready;
+      }catch{ return false; }
+    };
+    let ready=await checkReady();
+    // ★ 크롬이 안 떠 있으면 여기서 "자동으로" 띄운다(예전엔 안내만 하고 아무 창도 안 떠 혼란).
+    if(!ready && (window as any).electron?.flowLaunchChrome){
+      showToast("🚀 Flow 크롬을 여는 중... (처음이면 로그인 창이 떠요)","info");
+      try{
+        const lr=await (window as any).electron.flowLaunchChrome();
+        if(lr?.ok){ setFlowReady(true); ready=true; }
+        else showToast("❌ 크롬 열기 실패: "+(lr?.error||"Chrome이 설치돼 있는지 확인해주세요"),"error");
+      }catch(e:any){ showToast("❌ 크롬 열기 오류: "+(e?.message||""),"error"); }
+    }
     if(!ready){
       showToast("🎨 Flow 준비가 안 됐어요. 위의 '🚀 Flow 준비' 버튼을 먼저 눌러주세요.","error");
       return;
@@ -2411,23 +2422,23 @@ ${segList}`;
         showToast(`❌ 오늘 발행 한도(${dailyCheck.limit}개) 초과! 내일 다시 가능해요`, "error");
         setPublishing(false); return;
       }
-      // ★ 예약발행은 봇 온라인이어도 "항상" 큐로 보낸다(네이버 네이티브 예약은 불안정 → 안 씀).
-      //   payload에 blocks(이미지 포함) 전체를 저장 → 봇이 예약시간에 이미지까지 그대로 발행.
-      if(scheduleOn || !botOnline){
+      // 봇 오프라인일 때만 큐(publy_jobs)에 저장 → 앱 켜지면 처리. (예약이든 아니든)
+      //   ★ 예약발행(scheduleOn)은 봇 온라인이면 아래 else로 가서 "지금 즉시 네이버에 글·이미지 작성 후
+      //     네이버 예약발행 UI에 시간을 넣어" 확정한다(PC 꺼도 네이버가 그 시간에 발행). scheduleTime을 payload로 넘김.
+      if(!botOnline){
         const jobRow:any={user_id:user.id,platform,title:effTitle,content,
           tags,image_url:publishBody.imageUrl,
           category_id:category||undefined,visibility,
           schedule_time:scheduleOn?scheduleTime:undefined,status:"pending",
           payload:publishBody};
         let {error:jobErr}=await supabase.from("publy_jobs").insert(jobRow);
-        // payload 컬럼이 아직 없으면(SQL 미실행) payload 빼고 재시도 → 최소한 발행은 되게(이미지 없이)
         if(jobErr && /payload|column|schema|does not exist/i.test(jobErr.message)){
           const {payload,...noPayload}=jobRow;
           const retry=await supabase.from("publy_jobs").insert(noPayload); jobErr=retry.error;
         }
         if(jobErr) throw new Error("예약 저장 실패: "+jobErr.message);
-        setPubMsg(scheduleOn?"✅ 예약 완료! 설정한 시간에 (이미지 포함) 자동 발행돼요.":"✅ PC 봇에 예약됐어요! Publy 앱 실행 시 자동 발행돼요.");
-        showToast(scheduleOn?"⏰ 예약 완료! 이미지까지 그대로 올라가요.":"✅ PC 봇에 예약됐어요! Publy 앱 실행 시 자동 발행돼요.");
+        setPubMsg("✅ PC 봇에 예약됐어요! Publy 앱 실행 시 자동 발행돼요.");
+        showToast("✅ PC 봇에 예약됐어요! Publy 앱 실행 시 자동 발행돼요.");
         await addHistory({user_id:user.id,platform,title:effTitle,status:"pending" as "success"|"fail"});
       }else{
         // PC 봇이 오프라인인 작업은 봇이 실제 처리할 때 한 번만 차감한다.
