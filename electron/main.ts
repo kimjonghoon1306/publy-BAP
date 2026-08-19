@@ -1,12 +1,16 @@
-import { app, BrowserWindow, ipcMain, shell } from "electron";
+import { app, BrowserWindow, ipcMain, shell, utilityProcess } from "electron";
 import path from "path";
 import { spawn, execSync, ChildProcess } from "child_process";
 import { randomBytes } from "crypto";
 
 let mainWindow: BrowserWindow | null = null;
-let botProcess: ChildProcess | null = null;
-let neighborBotProcess: ChildProcess | null = null;
-let instaBotProcess: ChildProcess | null = null;
+// 봇 서버는 Electron 공식 utilityProcess로 실행한다.
+// (구버전은 spawn(process.execPath, ELECTRON_RUN_AS_NODE)로 앱 실행파일을 Node로 재실행했는데,
+//  갓 다운로드한 macOS 앱은 격리+미공증 상태라 그 자식 프로세스가 Gatekeeper에 막혀 조용히 죽어
+//  → 봇이 안 떠 "서버 오프라인"이 됨. utilityProcess 자식은 앱 서명/권한을 물려받아 안 막힌다.)
+let botProcess: Electron.UtilityProcess | ChildProcess | null = null;
+let neighborBotProcess: Electron.UtilityProcess | ChildProcess | null = null;
+let instaBotProcess: Electron.UtilityProcess | ChildProcess | null = null;
 const isDev = !app.isPackaged;
 const botAuthToken = randomBytes(32).toString("hex");
 
@@ -28,155 +32,117 @@ function killPort(port: number) {
   } catch { /* 점유 프로세스 없으면 명령이 비정상 종료 → 무시 */ }
 }
 
-function botEnvironment(extra: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
-  return {
+function botEnvironment(extra: NodeJS.ProcessEnv = {}): Record<string, string> {
+  const merged: NodeJS.ProcessEnv = {
     ...process.env,
     ...extra,
     PUBLY_SESSION_DIR: path.join(app.getPath("userData"), "publy-sessions"),
     BOT_AUTH_TOKEN: botAuthToken,
-    // ★ Electron 내장 Node로 봇 실행 → 사용자 맥에 Node.js 미설치여도 봇이 뜬다("서버 오프라인" 근본해결)
-    ELECTRON_RUN_AS_NODE: "1",
   };
+  // utilityProcess.fork의 env는 문자열 값만 허용 → undefined 값 제거
+  const clean: Record<string, string> = {};
+  for (const [k, v] of Object.entries(merged)) if (typeof v === "string") clean[k] = v;
+  return clean;
 }
 
-async function startBotServer() {
-  const botPath = isDev
-    ? path.join(__dirname, "../../naver-bot")
-    : path.join(process.resourcesPath, "naver-bot");
+/* ── 봇 서버 실행(공용) ──
+   Electron utilityProcess.fork로 dist/server.js를 Node 서비스로 띄운다.
+   utilityProcess 자식은 앱 코드서명/entitlement를 그대로 물려받아
+   갓 다운로드한(격리·미공증) 앱에서도 Gatekeeper에 막히지 않고 확실히 뜬다.
+   혹시 fork가 실패하면 구방식(spawn)으로 폴백해 최소한의 동작을 보장한다. */
+async function forkBotServer(opts: {
+  name: string;
+  botPath: string;      // dist/server.js 가 들어있는 폴더
+  chromiumPath: string;
+  port: number;
+  extraEnv?: NodeJS.ProcessEnv;
+  setProc: (p: Electron.UtilityProcess | ChildProcess | null) => void;
+}) {
+  const fs = await import("fs");
+  const serverJs = path.join(opts.botPath, "dist", "server.js");
+  if (!fs.existsSync(serverJs)) {
+    console.error(`[${opts.name}] dist/server.js 없음:`, serverJs);
+    return;
+  }
 
-  const chromiumPath = isDev
-    ? path.join(__dirname, "../../chromium")
-    : path.join(process.resourcesPath, "chromium");
+  const env = botEnvironment({ PLAYWRIGHT_BROWSERS_PATH: opts.chromiumPath, ...(opts.extraEnv || {}) });
 
-  try {
-    const fs = await import("fs");
-    if (!fs.existsSync(path.join(botPath, "dist", "server.js"))) {
-      console.error("[bot] dist/server.js 없음:", botPath);
-      return;
+  const start = () => {
+    console.log(`[${opts.name}] 서버 시작(utilityProcess)...`);
+    killPort(opts.port);
+    try {
+      const child = utilityProcess.fork(serverJs, [], {
+        cwd: opts.botPath,
+        serviceName: opts.name,
+        stdio: ["ignore", "pipe", "pipe"],
+        env,
+      });
+      opts.setProc(child);
+      child.stdout?.on("data", d => console.log(`[${opts.name}]`, d.toString().trim()));
+      child.stderr?.on("data", d => console.error(`[${opts.name}]`, d.toString().trim()));
+      child.on("spawn", () => console.log(`[${opts.name}] 실행됨 pid=${child.pid}`));
+      child.on("exit", (code) => {
+        console.warn(`[${opts.name}] 종료 (code: ${code}). 3초 후 재시작...`);
+        opts.setProc(null);
+        if (!app.isQuitting) setTimeout(start, 3000);
+      });
+    } catch (e: any) {
+      // utilityProcess가 어떤 이유로 실패하면 구방식으로라도 띄운다.
+      console.error(`[${opts.name}] utilityProcess 실패 → spawn 폴백:`, e?.message);
+      const child = spawn(process.execPath, ["dist/server.js"], {
+        cwd: opts.botPath,
+        stdio: "pipe",
+        env: { ...env, ELECTRON_RUN_AS_NODE: "1" },
+      });
+      opts.setProc(child);
+      child.stdout?.on("data", d => console.log(`[${opts.name}]`, d.toString().trim()));
+      child.stderr?.on("data", d => console.error(`[${opts.name}]`, d.toString().trim()));
+      child.on("exit", (code) => {
+        console.warn(`[${opts.name}] (폴백) 종료 (code: ${code}). 3초 후 재시작...`);
+        opts.setProc(null);
+        if (!app.isQuitting) setTimeout(start, 3000);
+      });
     }
-  } catch { return; }
-
-  // ★ Electron 내장 Node로 봇 실행(시스템 node 불필요) — 모든 OS·회원PC에서 봇이 확실히 뜬다
-  const nodePath = process.execPath;
-
-  const startBot = () => {
-    console.log("[bot] 봇 서버 시작...");
-    killPort(3333);
-    botProcess = spawn(nodePath, ["dist/server.js"], {
-      cwd: botPath,
-      stdio: "pipe",
-      env: botEnvironment({
-        PLAYWRIGHT_BROWSERS_PATH: chromiumPath,
-      }),
-    });
-
-    botProcess.stdout?.on("data", d => console.log("[bot]", d.toString().trim()));
-    botProcess.stderr?.on("data", d => console.error("[bot]", d.toString().trim()));
-
-    botProcess.on("exit", (code) => {
-      console.warn(`[bot] 종료 (code: ${code}). 3초 후 재시작...`);
-      botProcess = null;
-      if (!app.isQuitting) setTimeout(startBot, 3000);
-    });
   };
 
-  startBot();
+  start();
+}
+
+const resourceDir = (rel: string) =>
+  isDev ? path.join(__dirname, "../../", rel) : path.join(process.resourcesPath, rel);
+
+async function startBotServer() {
+  await forkBotServer({
+    name: "bot",
+    botPath: resourceDir("naver-bot"),
+    chromiumPath: resourceDir("chromium"),
+    port: 3333,
+    setProc: p => { botProcess = p; },
+  });
 }
 
 async function startNeighborBotServer() {
-  const botPath = isDev
-    ? path.join(__dirname, "../../neighbor-bot")
-    : path.join(process.resourcesPath, "neighbor-bot");
-
-  // playwright는 naver-bot node_modules 공유
-  const naverBotPath = isDev
-    ? path.join(__dirname, "../../naver-bot")
-    : path.join(process.resourcesPath, "naver-bot");
-
-  const chromiumPath = isDev
-    ? path.join(__dirname, "../../chromium")
-    : path.join(process.resourcesPath, "chromium");
-
-  const fs = await import("fs");
-  if (!fs.existsSync(path.join(botPath, "dist", "server.js"))) {
-    console.warn("[neighbor-bot] dist/server.js 없음:", botPath);
-    return;
-  }
-
-  // ★ Electron 내장 Node로 봇 실행(시스템 node 불필요) — 모든 OS·회원PC에서 봇이 확실히 뜬다
-  const nodePath = process.execPath;
-
-  const startBot = () => {
-    console.log("[neighbor-bot] 서버 시작...");
-    killPort(3334);
-    neighborBotProcess = spawn(nodePath, ["dist/server.js"], {
-      cwd: botPath,
-      stdio: "pipe",
-      env: botEnvironment({
-        PLAYWRIGHT_BROWSERS_PATH: chromiumPath,
-        NODE_PATH: path.join(naverBotPath, "node_modules"),
-      }),
-    });
-
-    neighborBotProcess.stdout?.on("data", d => console.log("[neighbor-bot]", d.toString().trim()));
-    neighborBotProcess.stderr?.on("data", d => console.error("[neighbor-bot]", d.toString().trim()));
-
-    neighborBotProcess.on("exit", (code) => {
-      console.warn(`[neighbor-bot] 종료 (code: ${code}). 3초 후 재시작...`);
-      neighborBotProcess = null;
-      if (!app.isQuitting) setTimeout(startBot, 3000);
-    });
-  };
-
-  startBot();
+  await forkBotServer({
+    name: "neighbor-bot",
+    botPath: resourceDir("neighbor-bot"),
+    chromiumPath: resourceDir("chromium"),
+    port: 3334,
+    // playwright는 naver-bot node_modules 공유
+    extraEnv: { NODE_PATH: path.join(resourceDir("naver-bot"), "node_modules") },
+    setProc: p => { neighborBotProcess = p; },
+  });
 }
 
 async function startInstaBotServer() {
-  const botPath = isDev
-    ? path.join(__dirname, "../../insta-bot")
-    : path.join(process.resourcesPath, "insta-bot");
-
-  // playwright는 naver-bot node_modules 공유
-  const naverBotPath = isDev
-    ? path.join(__dirname, "../../naver-bot")
-    : path.join(process.resourcesPath, "naver-bot");
-
-  const chromiumPath = isDev
-    ? path.join(__dirname, "../../chromium")
-    : path.join(process.resourcesPath, "chromium");
-
-  const fs = await import("fs");
-  if (!fs.existsSync(path.join(botPath, "dist", "server.js"))) {
-    console.warn("[insta-bot] dist/server.js 없음:", botPath);
-    return;
-  }
-
-  // ★ Electron 내장 Node로 봇 실행(시스템 node 불필요) — 모든 OS·회원PC에서 봇이 확실히 뜬다
-  const nodePath = process.execPath;
-
-  const startBot = () => {
-    console.log("[insta-bot] 서버 시작...");
-    killPort(3335);
-    instaBotProcess = spawn(nodePath, ["dist/server.js"], {
-      cwd: botPath,
-      stdio: "pipe",
-      env: botEnvironment({
-        PLAYWRIGHT_BROWSERS_PATH: chromiumPath,
-        NODE_PATH: path.join(naverBotPath, "node_modules"),
-      }),
-    });
-
-    instaBotProcess.stdout?.on("data", d => console.log("[insta-bot]", d.toString().trim()));
-    instaBotProcess.stderr?.on("data", d => console.error("[insta-bot]", d.toString().trim()));
-
-    instaBotProcess.on("exit", (code) => {
-      console.warn(`[insta-bot] 종료 (code: ${code}). 3초 후 재시작...`);
-      instaBotProcess = null;
-      if (!app.isQuitting) setTimeout(startBot, 3000);
-    });
-  };
-
-  startBot();
+  await forkBotServer({
+    name: "insta-bot",
+    botPath: resourceDir("insta-bot"),
+    chromiumPath: resourceDir("chromium"),
+    port: 3335,
+    // playwright는 naver-bot node_modules 공유
+    extraEnv: { NODE_PATH: path.join(resourceDir("naver-bot"), "node_modules") },
+    setProc: p => { instaBotProcess = p; },
+  });
 }
 
 function createWindow() {

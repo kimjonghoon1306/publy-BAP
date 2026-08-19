@@ -1309,8 +1309,10 @@ Output format (JSON array only, no other text):
       if(d){const p=JSON.parse(d);if(p.content&&p.title){setDraftAvailable(true);setDraftData(p);}}
     }catch{}
     const iv=setInterval(checkBot,30000);
+    // 앱 시작 직후 봇 서버가 뜨는 데 몇 초 걸림 → 초반엔 자주 재확인해 "오프라인"이 오래 남지 않게.
+    const warm=[2000,4000,7000,11000,16000,22000].map(t=>setTimeout(checkBot,t));
     if(!localStorage.getItem("publy_guide_seen")){setTimeout(()=>setShowGuide(true),900);}
-    return()=>clearInterval(iv);
+    return()=>{clearInterval(iv);warm.forEach(clearTimeout);};
   },[checkBot,user.id]);
 
   function recommendImgCount(content:string):number{
