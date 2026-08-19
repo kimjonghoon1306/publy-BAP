@@ -1233,11 +1233,16 @@ Output format (JSON array only, no other text):
   }
 
   // ── 내 신고가 관리자에 의해 처리완료되면, 화면 어디에 있든 팝업으로 알림 ──
+  const bugSeenRef = useRef<Set<string>>(new Set()); // 이번 세션에 이미 확인·표시한 신고 id (DB쓰기 지연에도 재등장 방지)
   useEffect(()=>{
     let alive=true;
     const check=async()=>{
       if(bugAlert) return; // 이미 하나 떠 있으면 대기
-      try{ const rows=await getMyResolvedBugAlerts(user.id); if(alive && rows.length>0) setBugAlert(rows[0]); }catch{}
+      try{
+        const rows=await getMyResolvedBugAlerts(user.id);
+        const next=rows.find(r=>!bugSeenRef.current.has(r.id)); // 아직 안 본 것만
+        if(alive && next){ bugSeenRef.current.add(next.id); setBugAlert(next); }
+      }catch{}
     };
     const t=setTimeout(check, 3000);          // 진입 직후 한 번
     const iv=setInterval(check, 60000);        // 이후 1분마다
@@ -1246,8 +1251,10 @@ Output format (JSON array only, no other text):
 
   async function dismissBugAlert(){
     if(!bugAlert) return;
-    const id=bugAlert.id; setBugAlert(null);
-    await markBugNotified(id);
+    const id=bugAlert.id;
+    bugSeenRef.current.add(id); // 즉시 재등장 차단(DB 반영 전이라도)
+    setBugAlert(null);          // 팝업 닫기
+    await markBugNotified(id);  // 다음 접속에도 안 뜨게 서버에 기록
   }
 
   // ── Ctrl+V 클립보드 이미지 붙여넣기 ──
