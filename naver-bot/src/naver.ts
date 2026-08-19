@@ -551,6 +551,31 @@ export async function publishNaver(params: {
       await page.waitForTimeout(120);
     }
 
+    // ★ 본문 타이핑 직전 최종 방어선.
+    // 이미지 업로드 직후 포커스가 캡션에 남아 있으면 본문 문단으로 다시 빼고,
+    // 실제 활성 요소가 캡션/제목이 아닌 본문 텍스트인지 확인된 경우에만 타이핑한다.
+    async function ensureBodyTypingFocus(): Promise<void> {
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const focus = await frame.evaluate(() => {
+          const active = document.activeElement as HTMLElement | null;
+          return {
+            inCaption: !!active?.closest(".se-caption"),
+            inBodyText: !!active?.closest(".se-main-container .se-component.se-text") &&
+              !active?.closest(".se-section-documentTitle, .se-documentTitle"),
+          };
+        }).catch(() => ({ inCaption: true, inBodyText: false }));
+        if (!focus.inCaption && focus.inBodyText) return;
+        await moveCursorToEnd();
+        await page.waitForTimeout(150);
+      }
+      throw new Error("본문 텍스트 문단 포커스를 확인하지 못해 타이핑을 중단했습니다.");
+    }
+
+    async function typeBodyText(text: string, delay: number): Promise<void> {
+      await ensureBodyTypingFocus();
+      await page.keyboard.type(text, { delay });
+    }
+
     // 텍스트 블록 입력 헬퍼
     //   spacerBefore=true면 앞 내용과 사이에 빈 줄 하나를 먼저 넣어 문단이 붙지 않게(모바일 가독성)
     let anyBodyWritten = false;
@@ -580,7 +605,7 @@ export async function publishNaver(params: {
       const lines = plain.split("\n").filter(l => l.trim().length > 0); // 빈 줄 정리 후 균일 간격 적용
       for (let i = 0; i < lines.length; i++) {
         // delay를 높여 SE4가 붙여넣기가 아닌 진짜 타이핑으로 인식
-        await page.keyboard.type(lines[i], { delay: 80 });
+        await typeBodyText(lines[i], 80);
         await page.waitForTimeout(100);
         anyBodyWritten = true;
         if (i < lines.length - 1) {
@@ -614,6 +639,10 @@ export async function publishNaver(params: {
         try { await p.click({ timeout: 5000, force: true }); }
         catch { const r = await p.boundingBox(); if (r) await page.mouse.click(r.x + r.width / 2, r.y + r.height / 2); }
         await page.waitForTimeout(300);
+        const captionFocused = await frame.evaluate(() =>
+          !!(document.activeElement as HTMLElement | null)?.closest(".se-caption")
+        ).catch(() => false);
+        if (!captionFocused) return false;
         await page.keyboard.type(cap, { delay: 25 });
         await page.waitForTimeout(200);
         return true;
@@ -643,7 +672,8 @@ export async function publishNaver(params: {
         const input = await frame.$(".se-custom-layer-link-input");
         if (!input) return false;
         await input.click({ force: true }).catch(() => {});
-        await input.fill(link).catch(async () => { await page.keyboard.type(link, { delay: 15 }); });
+        const linkFilled = await input.fill(link).then(() => true).catch(() => false);
+        if (!linkFilled) return false;
         await page.waitForTimeout(300);
         // ★확인은 Enter가 아니라 "링크 입력" 적용 버튼 클릭이어야 실제로 걸린다(실측 확인).
         let applied = await frame.evaluate(() => {
@@ -720,7 +750,7 @@ export async function publishNaver(params: {
         await moveCursorToEnd();
         await page.keyboard.press("Enter");
         await page.waitForTimeout(200);
-        await page.keyboard.type(u, { delay: 40 });
+        await typeBodyText(u, 40);
         await page.keyboard.press("Enter");
         await page.waitForTimeout(3500); // 임베드 변환 대기
         console.log("[naver] ✅ 영상 임베드 완료");
@@ -916,32 +946,59 @@ export async function publishNaver(params: {
         const hour = dt.getHours();                // 0~23
         const min = Math.floor(dt.getMinutes() / 10) * 10; // 네이버는 10분 단위 → 내림
 
-        // 1) "예약" 라디오 선택 (label/텍스트/radio 기반)
-        const picked = await frame.evaluate(() => {
-          const cands = [...document.querySelectorAll("label, button, span, a")];
-          const el = cands.find(e => (e.textContent || "").replace(/\s/g, "") === "예약")
-                  || cands.find(e => /예약/.test(e.textContent || "") && !/즉시/.test(e.textContent || ""));
-          if (el) { (el as HTMLElement).click(); return true; }
-          const radio = document.querySelector("input[type=radio][value*='RESERVE'], input[type=radio][id*='reserve' i]") as HTMLInputElement | null;
-          if (radio) { radio.click(); return true; }
-          return false;
-        });
-        console.log(`[naver] 예약 라디오 선택: ${picked}`);
-        if (!picked) throw new Error("예약 라디오를 찾지 못했습니다");
-        await page.waitForTimeout(1200);
-
-        // 선택 뒤 예약 입력 UI가 실제로 열렸는지 확인한다. 이 확인 없이 확정하면 즉시 발행될 수 있다.
-        const reserveSelected = await frame.evaluate(() => {
+        // 1) "예약" 라디오 선택 (텍스트 → label 연결 radio → radio 직접 클릭 순서)
+        const checkReserveSelected = () => frame.evaluate(() => {
+          const visible = (e: Element) => {
+            const el = e as HTMLElement;
+            const s = getComputedStyle(el);
+            const r = el.getBoundingClientRect();
+            return s.display !== "none" && s.visibility !== "hidden" && r.width > 0 && r.height > 0;
+          };
           const radios = [...document.querySelectorAll("input[type=radio]")] as HTMLInputElement[];
           if (radios.some(r => r.checked && /reserve|예약/i.test(`${r.value} ${r.id} ${r.name}`))) return true;
-          const exactReserve = [...document.querySelectorAll("label, button, [role=radio]")]
-            .filter(e => (e.textContent || "").replace(/\s/g, "") === "예약");
-          return exactReserve.some(e =>
-            e.getAttribute("aria-checked") === "true" ||
+          const reserveOptions = [...document.querySelectorAll("label, button, [role=radio], [role=button]")]
+            .filter(e => /예약/.test((e.textContent || "").replace(/\s/g, "")) && !/예약취소|취소예약/.test((e.textContent || "").replace(/\s/g, "")));
+          if (reserveOptions.some(e =>
+            e.getAttribute("aria-checked") === "true" || e.getAttribute("aria-selected") === "true" ||
             /active|selected|checked|on/i.test(String(e.className))
-          ) || document.querySelectorAll("select").length >= 2;
+          )) return true;
+          const visibleSelects = [...document.querySelectorAll("select")].filter(visible);
+          const calendar = [...document.querySelectorAll("[class*='calendar' i], [class*='datepicker' i], [role=grid]")].some(visible);
+          return visibleSelects.length >= 2 || calendar;
         });
+
+        let reserveSelected = false;
+        const pickMethods = ["text", "label-for", "radio"] as const;
+        for (const method of pickMethods) {
+          const clicked = await frame.evaluate((pickMethod) => {
+            const normalized = (e: Element) => (e.textContent || "").replace(/\s/g, "");
+            const isReserve = (e: Element) => /예약/.test(normalized(e)) && !/예약취소|취소예약/.test(normalized(e));
+            if (pickMethod === "text") {
+              const cands = [...document.querySelectorAll("label, button, [role=radio], [role=button], a, span")];
+              const target = cands.find(e => normalized(e) === "예약") || cands.find(isReserve);
+              if (target) { (target as HTMLElement).click(); return target.tagName.toLowerCase(); }
+            } else if (pickMethod === "label-for") {
+              const labels = [...document.querySelectorAll("label[for]")].filter(isReserve) as HTMLLabelElement[];
+              for (const label of labels) {
+                const radio = document.getElementById(label.htmlFor) as HTMLInputElement | null;
+                if (radio?.type === "radio") { label.click(); radio.click(); return label.htmlFor; }
+              }
+            } else {
+              const radios = [...document.querySelectorAll("input[type=radio]")] as HTMLInputElement[];
+              const radio = radios.find(r => /reserve|예약/i.test(`${r.value} ${r.id} ${r.name} ${r.getAttribute("aria-label") || ""}`));
+              if (radio) { radio.click(); return radio.id || radio.value || "radio"; }
+            }
+            return "";
+          }, method);
+          console.log(`[naver] 예약 선택 시도(${method}): ${clicked || "대상 없음"}`);
+          if (!clicked) continue;
+          await page.waitForTimeout(500);
+          reserveSelected = await checkReserveSelected();
+          console.log(`[naver] 예약 선택 확인(${method}): ${reserveSelected}`);
+          if (reserveSelected) break;
+        }
         if (!reserveSelected) throw new Error("예약 라디오 선택 상태를 확인하지 못했습니다");
+        await page.waitForTimeout(700);
 
         // 2) 시(hour)·분(minute) select 드롭다운 설정
         const setTime = await frame.evaluate(({ h, m }: { h: number; m: number }) => {

@@ -39,6 +39,9 @@ function formatDaysLeft(dateStr?: string): string {
   if (days <= 0) return "오늘 만료";
   return `D-${days}`;
 }
+function formatKstDateTime(date = new Date(), withSeconds = false): string {
+  return new Date(date.getTime() + 9 * 60 * 60 * 1000).toISOString().slice(0, withSeconds ? 19 : 16);
+}
 
 const WRITE_AI_LIST = [
   {id:"gemini",label:"Gemini Flash",sub:"무료",placeholder:"AIza...",storageKey:"publy_gemini_key",link:"https://aistudio.google.com/app/apikey",color:"#4285F4",logo:"G",free:true},
@@ -897,6 +900,11 @@ Output format (JSON array only, no other text):
   const [visibility, setVisibility] = useState<"public"|"neighbor"|"private">("public");
   const [scheduleOn, setScheduleOn] = useState(false);
   const [scheduleTime, setScheduleTime] = useState("");
+  const [kstNow, setKstNow] = useState(()=>formatKstDateTime(new Date(), true));
+  useEffect(()=>{
+    const timer=setInterval(()=>setKstNow(formatKstDateTime(new Date(), true)),1000);
+    return ()=>clearInterval(timer);
+  },[]);
 
   // ── 블록 에디터 (tarry 방식) ──
   type TextBlock = {type:"text";id:string;content:string};
@@ -2343,7 +2351,7 @@ ${segList}`;
       effectiveBlocks=textBlocks.length>0?[imgBlocks[0],...interleave(textBlocks,imgBlocks.slice(1))]:[...imgBlocks];
       if(!thumbnail && activeImgs[0]) setThumbnail(activeImgs[0]);
     }
-    // ── 온파트너 링크: URL만 본문에 분산 삽입 → 네이버가 정사각 링크 카드로 렌더(상품당 1개, Q&A·해시태그 위) ──
+    // ── 온파트너 링크: 링크가 연결된 배너를 본문에 분산 삽입(상품당 1개, Q&A·해시태그 위) ──
     // ★안전장치: 조회만 하고 저장(💾) 안 한 상품(onPartnerPreview)도 발행에 포함.
     const partnerForPublish:OnPartnerItem[] = onPartnerItems.length>0 ? onPartnerItems : (onPartnerPreview?[onPartnerPreview]:[]);
     console.log("[publy] 온파트너 링크 대상:", partnerForPublish.length, "개", partnerForPublish.map(it=>it.product.name));
@@ -2375,8 +2383,8 @@ ${segList}`;
           withLink.push(b);
           items.forEach((it,k)=>{
             if(insertAfter[k]===i){
-              // URL만 자체 문단으로 → 네이버가 정사각 링크 카드 자동 생성. 앞에 짧은 안내 한 줄.
-              withLink.push({type:"text",id:uid(),content:`👇 '${it.product.name}' 지금 바로 확인하기\n${it.product.partnerUrl}`} as ContentBlock);
+              // 상품 하나를 단일 이미지 링크 블록으로 유지해 링크 사이에 본문 문단이 끼지 않게 한다.
+              withLink.push({type:"image",id:uid(),src:it.banner,alt:it.product.name,position:"center",source:"auto",link:it.product.partnerUrl} as ContentBlock);
             }
           });
         });
@@ -2576,13 +2584,14 @@ ${segList}`;
             <div className="card-title" style={{margin:0}}>⏰ 예약 발행</div>
             <div style={{fontSize:11,color:"var(--text3)",marginTop:2}}>설정 시간에 자동 발행</div>
           </div>
-          <button onClick={()=>{setScheduleOn(v=>!v);if(!scheduleTime){const d=new Date();d.setHours(d.getHours()+1,0,0,0);setScheduleTime(d.toISOString().slice(0,16));}}} style={{width:48,height:26,borderRadius:99,background:scheduleOn?"var(--accent)":"var(--border)",border:"none",cursor:"pointer",position:"relative",transition:"background .2s",flexShrink:0}}>
+          <button onClick={()=>{setScheduleOn(v=>!v);if(!scheduleTime){const d=new Date(Date.now()+60*60*1000);d.setUTCMinutes(0,0,0);setScheduleTime(formatKstDateTime(d));}}} style={{width:48,height:26,borderRadius:99,background:scheduleOn?"var(--accent)":"var(--border)",border:"none",cursor:"pointer",position:"relative",transition:"background .2s",flexShrink:0}}>
             <div style={{position:"absolute",top:3,left:scheduleOn?24:3,width:20,height:20,borderRadius:"50%",background:"#fff",transition:"left .2s",boxShadow:"0 1px 4px rgba(0,0,0,.3)"}}/>
           </button>
         </div>
         {scheduleOn&&(
           <div>
-            <input type="datetime-local" value={scheduleTime} onChange={e=>setScheduleTime(e.target.value)} min={new Date().toISOString().slice(0,16)} style={{width:"100%",padding:"10px 12px",borderRadius:10,border:"2px solid var(--border)",background:"var(--bg)",color:"var(--text)",fontSize:14,fontFamily:"inherit",outline:"none",boxSizing:"border-box"}}/>
+            <div style={{fontSize:12,color:"var(--text2)",marginBottom:8}}>🇰🇷 현재 한국시간 {kstNow.replace("T"," ")}</div>
+            <input type="datetime-local" value={scheduleTime} onChange={e=>setScheduleTime(e.target.value)} min={formatKstDateTime()} style={{width:"100%",padding:"10px 12px",borderRadius:10,border:"2px solid var(--border)",background:"var(--bg)",color:"var(--text)",fontSize:14,fontFamily:"inherit",outline:"none",boxSizing:"border-box"}}/>
             {scheduleTime&&<div style={{marginTop:8,padding:"10px 12px",borderRadius:10,background:"var(--accent-bg)",border:"1px solid var(--accent-border)",fontSize:12,color:"var(--accent-text)",fontWeight:600}}>
               ✅ {new Date(scheduleTime).toLocaleDateString("ko-KR",{month:"long",day:"numeric",weekday:"short"})} {new Date(scheduleTime).toLocaleTimeString("ko-KR",{hour:"2-digit",minute:"2-digit"})} 발행
             </div>}
