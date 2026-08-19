@@ -461,8 +461,9 @@ export async function publishNaver(params: {
     //   (예전엔 맨 위에 넣고 본문 루프에서 같은 걸 건너뛰었는데, 맨 위 삽입이 실패하면
     //    그 이미지가 위에서도 본문에서도 빠져 "4장 만들었는데 3장"이 됐다. 이제 본문에 전부 넣는다.
     //    네이버 대표 이미지는 본문 첫 이미지로 자동 지정됨.)
-    const thumbInBody = !!imageUrl && (processedBlocks || []).some(
-      b => b.type === "image" && b.src === imageUrl
+    const thumbInBody = !!imageUrl && (processedBlocks || []).some(b =>
+      (b.type === "image" && b.src === imageUrl) ||
+      (b.type === "image-pair" && (b as any).images?.some((img: {src?: string}) => img.src === imageUrl))
     );
     if (imageUrl && !thumbInBody) {
       console.log("[naver] 이미지 삽입 시도...");
@@ -792,13 +793,7 @@ export async function publishNaver(params: {
                 let capDone = false;
                 if (pairImages[1].alt?.trim()) capDone = await fillLastImageCaption(pairImages[1].alt.trim(), 0) || capDone;
                 if (pairImages[0].alt?.trim()) capDone = await fillLastImageCaption(pairImages[0].alt.trim(), 1) || capDone;
-                // 캡션칸을 못 찾으면 문단 폴백
-                if (!capDone) {
-                  const pairAlt = pairImages[0].alt || pairImages[1].alt;
-                  if (pairAlt?.trim()) {
-                    try { await moveCursorToEnd(); await page.keyboard.press("Enter"); await insertText(pairAlt.trim()); } catch {}
-                  }
-                }
+                if (!capDone) console.log("[naver] ⚠️ 페어 이미지 캡션칸 못찾음(캡션 생략)");
               }
             } catch(e) { console.log("[naver] 페어 이미지 업로드 실패:", e); }
             finally {
@@ -937,11 +932,14 @@ export async function publishNaver(params: {
       console.log(`[naver] 예약 발행 설정: ${scheduleTime}`);
       try {
         const dt = new Date(scheduleTime);
-        const year = dt.getFullYear();
-        const month = dt.getMonth() + 1;           // 1~12
-        const day = dt.getDate();                  // 1~31
-        const hour = dt.getHours();                // 0~23
-        const min = Math.floor(dt.getMinutes() / 10) * 10; // 네이버는 10분 단위 → 내림
+        if (Number.isNaN(dt.getTime())) throw new Error("예약시간 형식이 올바르지 않습니다");
+        // 봇 OS 타임존과 무관하게 네이버 UI에는 한국시간을 넣는다.
+        const kst = new Date(dt.getTime() + 9 * 60 * 60 * 1000);
+        const year = kst.getUTCFullYear();
+        const month = kst.getUTCMonth() + 1;        // 1~12
+        const day = kst.getUTCDate();               // 1~31
+        const hour = kst.getUTCHours();             // 0~23
+        const min = Math.floor(kst.getUTCMinutes() / 10) * 10; // 네이버는 10분 단위 → 내림
 
         // 1) "예약" 라디오 선택 (텍스트 → label 연결 radio → radio 직접 클릭 순서)
         const checkReserveSelected = () => frame.evaluate(() => {
@@ -1088,21 +1086,23 @@ export async function publishNaver(params: {
 
     await page.waitForTimeout(scheduleTime ? 3000 : 5000);
 
-    const finalSignal = await frame.evaluate(({ label }: { label: string }) => {
+    const finalSignal = await frame.evaluate(({ scheduled }: { scheduled: boolean }) => {
       const visible = (el: HTMLElement) => {
         const s = getComputedStyle(el);
         const r = el.getBoundingClientRect();
         return s.display !== "none" && s.visibility !== "hidden" && r.width > 0 && r.height > 0;
       };
-      const confirmStillVisible = [...document.querySelectorAll("button[class*='confirm']")]
-        .some(b => visible(b as HTMLElement) && (b.textContent || "").replace(/\s/g, "") === label);
+      const expected = scheduled ? /^(예약|예약발행)$/ : /^발행$/;
+      const confirmStillVisible = [...document.querySelectorAll("button")]
+        .some(b => visible(b as HTMLElement) && expected.test((b.textContent || "").replace(/\s/g, "")) &&
+          (/confirm/i.test(b.className) || !!b.closest("[class*='publish'], [class*='Publish'], [class*='layer'], [role='dialog']")));
       const successText = /예약(?:이|이\s)?완료|예약되었습니다|발행되었습니다/.test(document.body.innerText);
       return { layerClosed: !confirmStillVisible, successText };
-    }, { label: finalLabel });
+    }, { scheduled: Boolean(scheduleTime) });
     const urlChanged = page.url() !== beforeFinalUrl;
     console.log(`[naver] 최종 확정 신호: 레이어닫힘=${finalSignal.layerClosed}, URL변경=${urlChanged}, 완료문구=${finalSignal.successText}`);
     if (!finalSignal.layerClosed && !urlChanged && !finalSignal.successText) {
-      console.warn("[naver] ⚠️ 최종 확정 성공 신호를 확인하지 못했습니다");
+      throw new Error(`${finalLabel} 버튼 클릭 후 완료 신호를 확인하지 못했습니다`);
     }
 
     // URL 추출
@@ -1537,7 +1537,8 @@ export async function generateFlowImagesCDP(params: {
 }): Promise<{ src: string; alt: string }[]> {
   const { prompts, captions = [], cdpPort = 9222, onLog } = params;
   const log = onLog || console.log;
-  const results: { src: string; alt: string }[] = [];
+  // 재시도 큐에서는 뒤 프롬프트가 먼저 성공할 수 있으므로 원래 순서를 함께 보존한다.
+  const results: { src: string; alt: string; promptIndex: number }[] = [];
 
   // 0) 백업 폴더 준비: 바탕화면/Publy_Flow이미지_YYYY-MM-DD (생성 이미지 자동 보관)
   let backupDir = "";
@@ -1775,7 +1776,7 @@ export async function generateFlowImagesCDP(params: {
       }
 
       if (dataUrl.startsWith("data:image")) {
-        results.push({ src: dataUrl, alt: captions[i] || "" });
+        results.push({ src: dataUrl, alt: captions[i] || "", promptIndex: i });
         if (chosen) log(`[Flow] ✅ (${i + 1}) 선택: ${chosen.width}x${chosen.height}`);
         // 바탕화면 날짜 폴더에 자동 백업
         if (backupDir) {
@@ -1799,7 +1800,9 @@ export async function generateFlowImagesCDP(params: {
     // CDP는 연결만 끊고 사용자 크롬은 유지
     await browser.close().catch(() => {});
     log(`✅ [Flow] 전체 ${results.length}장 생성/다운로드 완료`);
-    return results;
+    return results
+      .sort((a, b) => a.promptIndex - b.promptIndex)
+      .map(({ src, alt }) => ({ src, alt }));
   } catch (e: any) {
     await browser.close().catch(() => {});
     throw e;

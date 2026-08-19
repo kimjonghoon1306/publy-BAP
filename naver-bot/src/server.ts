@@ -261,7 +261,7 @@ async function processJobs() {
         if (job.platform === "naver") {
           postUrl = p
             ? await publishNaver({ userId: job.user_id, title: p.title || job.title, content: p.content ?? job.content, pubScope: p.pubScope, tags: p.tags || job.tags, imageUrl: p.imageUrl, categoryId: p.categoryId ?? (job as any).category_id, visibility: p.visibility, blocks: p.blocks as any, videoUrl: p.videoUrl, videoPosition: p.videoPosition, scheduleTime: schedFuture })
-            : await publishNaver({ userId: job.user_id, title: job.title, content: job.content, tags: job.tags, categoryId: (job as any).category_id, visibility: (job as any).visibility, scheduleTime: schedFuture });
+            : await publishNaver({ userId: job.user_id, title: job.title, content: job.content, tags: job.tags, imageUrl: job.image_url || undefined, categoryId: (job as any).category_id, visibility: (job as any).visibility, scheduleTime: schedFuture });
         } else if (job.platform === "tistory") {
           postUrl = p
             ? await publishTistory({ userId: job.user_id, title: p.title || job.title, content: p.content ?? job.content, tags: p.tags || job.tags, categoryId: p.categoryId ?? (job as any).category_id, visibility: p.visibility as any })

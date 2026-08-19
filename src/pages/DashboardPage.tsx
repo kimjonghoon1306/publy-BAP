@@ -43,6 +43,14 @@ function formatKstDateTime(date = new Date(), withSeconds = false): string {
   return new Date(date.getTime() + 9 * 60 * 60 * 1000).toISOString().slice(0, withSeconds ? 19 : 16);
 }
 
+// datetime-local은 타임존 정보가 없으므로 전송/큐 저장 전에 KST offset을 명시한다.
+function kstScheduleIso(localValue: string): string | undefined {
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2})?$/.test(localValue)) return undefined;
+  const normalized = localValue.length === 16 ? `${localValue}:00` : localValue;
+  const iso = `${normalized}+09:00`;
+  return Number.isNaN(Date.parse(iso)) ? undefined : iso;
+}
+
 const WRITE_AI_LIST = [
   {id:"gemini",label:"Gemini Flash",sub:"무료",placeholder:"AIza...",storageKey:"publy_gemini_key",link:"https://aistudio.google.com/app/apikey",color:"#4285F4",logo:"G",free:true},
   {id:"groq",  label:"Groq Llama 3",sub:"무료",placeholder:"gsk_...",storageKey:"publy_groq_key",  link:"https://console.groq.com/keys",          color:"#F55036",logo:"L",free:true},
@@ -2336,6 +2344,8 @@ ${segList}`;
     const content = buildPublishContentWith(effGenContent);
     if(!content){alert("발행할 본문이 없어요. 글 생성 탭에서 글을 만들어주세요");return;}
     if(scheduleOn&&!scheduleTime){alert("예약 날짜와 시간을 선택해주세요");return;}
+    const normalizedScheduleTime=scheduleOn?kstScheduleIso(scheduleTime):undefined;
+    if(scheduleOn&&(!normalizedScheduleTime||Date.parse(normalizedScheduleTime)<=Date.now())){alert("예약 시간은 현재 한국시간보다 이후로 선택해주세요");return;}
     setPublishing(true);showToast(scheduleOn?"예약 설정 중...":"발행 중...","info");
     const tags=hashtags.map(t=>t.replace("#","")).filter(Boolean);
     // ── blocks 이미지 보정: 선택된 이미지(업로드/AI)가 blocks에 안 들어가 있으면 자동 배치 ──
@@ -2357,6 +2367,7 @@ ${segList}`;
     console.log("[publy] 온파트너 링크 대상:", partnerForPublish.length, "개", partnerForPublish.map(it=>it.product.name));
     if(partnerForPublish.length>0){
       const items=partnerForPublish.filter(it=>it.product.available&&it.product.partnerUrl);
+      if(items.length>0){
       // ★고지 문단을 "썸네일 바로 다음"(본문 맨 앞)에 무조건 1회. 이미 있으면 중복 안 넣음.
       const DISCLOSURE="※ 이 글에는 제휴 링크가 포함되어 있으며, 구매 시 작성자에게 일정 수수료가 발생할 수 있습니다.";
       const hasDisclosure=effectiveBlocks.some(b=>b.type==="text"&&(b as TextBlock).content.includes("제휴 링크가 포함"));
@@ -2390,6 +2401,7 @@ ${segList}`;
         });
         effectiveBlocks=withLink;
       }
+      }
     }
     const publishBody={
       userId:user.id,platform,title:effTitle,content,
@@ -2398,7 +2410,7 @@ ${segList}`;
       imageUrl:thumbnail||activeImgs[0]||undefined,
       categoryId:category||undefined,
       visibility,
-      scheduleTime:scheduleOn?scheduleTime:undefined,
+      scheduleTime:normalizedScheduleTime,
       videoUrl:(videoOn&&videoUrl.trim())?videoUrl.trim():undefined,
       videoPosition,
       blocks:effectiveBlocks.map(b=>{
@@ -2437,7 +2449,7 @@ ${segList}`;
         const jobRow:any={user_id:user.id,platform,title:effTitle,content,
           tags,image_url:publishBody.imageUrl,
           category_id:category||undefined,visibility,
-          schedule_time:scheduleOn?scheduleTime:undefined,status:"pending",
+          schedule_time:normalizedScheduleTime,status:"pending",
           payload:publishBody};
         let {error:jobErr}=await supabase.from("publy_jobs").insert(jobRow);
         if(jobErr && /payload|column|schema|does not exist/i.test(jobErr.message)){
