@@ -5664,21 +5664,21 @@ POST3: (제목)|(이유)
       {bugAlert&&(
         <div style={{position:"fixed",inset:0,zIndex:10050,background:"rgba(0,0,0,.85)",display:"flex",alignItems:"center",justifyContent:"center",padding:20}}
           onClick={dismissBugAlert}>
-          <div style={{width:"100%",maxWidth:420,borderRadius:20,background:"var(--card)",border:"1px solid var(--border)",overflow:"hidden",animation:"fadeUp .25s ease",boxShadow:"0 24px 60px rgba(0,0,0,.6)"}}
+          <div style={{width:"100%",maxWidth:420,borderRadius:20,background:theme==="dark"?"#161d27":"#ffffff",border:`1px solid ${theme==="dark"?"#2a3542":"#e2e8f0"}`,overflow:"hidden",animation:"fadeUp .25s ease",boxShadow:"0 24px 60px rgba(0,0,0,.6)"}}
             onClick={e=>e.stopPropagation()}>
             <div style={{background:"linear-gradient(135deg,#3fb950,#2ea043)",padding:"20px 22px",textAlign:"center"}}>
               <div style={{fontSize:34,marginBottom:4}}>✅</div>
               <div style={{fontSize:17,fontWeight:900,color:"#fff"}}>신고하신 문제가 해결됐어요!</div>
             </div>
-            <div style={{padding:"18px 22px"}}>
-              {bugAlert.memo&&<div style={{fontSize:12,color:"var(--text3)",marginBottom:10}}>신고 내용: {bugAlert.memo}</div>}
-              <div style={{fontSize:14,color:"var(--text)",lineHeight:1.75}}>
+            <div style={{padding:"18px 22px",background:theme==="dark"?"#161d27":"#ffffff"}}>
+              {bugAlert.memo&&<div style={{fontSize:12,color:theme==="dark"?"#8a97a6":"#64748b",marginBottom:10}}>신고 내용: {bugAlert.memo}</div>}
+              <div style={{fontSize:14,color:theme==="dark"?"#e8edf2":"#1e293b",lineHeight:1.75}}>
                 {bugAlert.admin_reply?.trim()
                   ? bugAlert.admin_reply
                   : "말씀해주신 문제를 처리했어요. 불편을 드려 죄송하고, 신고해주셔서 감사합니다 🙏"}
               </div>
               <button onClick={dismissBugAlert}
-                style={{width:"100%",marginTop:18,padding:"13px",borderRadius:12,border:"none",background:"var(--accent)",color:"#000",fontSize:14,fontWeight:800,cursor:"pointer",fontFamily:"inherit"}}>
+                style={{width:"100%",marginTop:18,padding:"13px",borderRadius:12,border:"none",background:"#3fb950",color:"#fff",fontSize:14,fontWeight:800,cursor:"pointer",fontFamily:"inherit"}}>
                 확인
               </button>
             </div>
