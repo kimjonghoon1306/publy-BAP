@@ -33,15 +33,18 @@ function killPort(port: number) {
 }
 
 /* ── 봇 로그를 파일로 저장 ──
-   봇 내부 로그(발행/Flow 등)는 원래 콘솔로만 나가 사용자가 볼 수 없었다.
-   바탕화면의 "Publy_로그" 폴더에 날짜별로 남긴다.
+   봇 내부 로그(발행/Flow 등)는 원래 콘솔로만 나가 사용자가 볼 수 없었다. 날짜별로 파일에 남긴다.
 
-   ★중요: 예전엔 로그 한 줄마다 mkdirSync + appendFileSync(둘 다 동기)를 메인 프로세스에서
-   실행했다. 봇이 로그를 조금만 자주 뿜어도 메인 스레드가 디스크 I/O에 묶여 창이 응답을 못 해
-   맥/윈도우 모두 "뱅글뱅글(busy 커서)+클릭 안 됨" 상태로 얼어붙었다.
-   → 폴더는 한 번만 만들고, 쓰기는 비동기 append WriteStream(논블로킹)으로 처리한다. */
+   ★★멈춤(뱅글뱅글+클릭불가) 근본원인 = 로그 저장 위치+방식(v2.0.22 회귀, 맥·윈도우 공통):
+   ① v2.0.22가 로그를 **바탕화면**에 저장했는데, 바탕화면이 클라우드 동기화 폴더면
+      (맥 iCloud Desktop / 윈도우 OneDrive Desktop) 파일에 쓸 때마다 동기화가 걸려 매우 느려짐.
+   ② 게다가 로그 한 줄마다 mkdirSync + appendFileSync(둘 다 **동기**)를 메인 프로세스에서 실행 →
+      봇이 로그를 조금만 자주 뿜어도 메인 스레드가 그 느린 I/O에 묶여 창이 응답 불가 = 얼어붙음.
+   → 해결: (a) 저장 위치를 **동기화 안 되는 앱 내부 폴더(userData/logs)**로 이동,
+           (b) 폴더는 하루 1회만 생성, 쓰기는 **비동기 WriteStream**(메인 스레드 안 막힘).
+   userData는 iCloud/OneDrive 대상이 아니라 아무리 써도 동기화 폭주가 없다. 로그는 "로그 폴더 열기"로 접근. */
 const fsMod = require("fs") as typeof import("fs");
-const LOG_DIR = () => path.join(app.getPath("desktop"), "Publy_로그");
+const LOG_DIR = () => path.join(app.getPath("userData"), "logs");
 let logStream: import("fs").WriteStream | null = null;
 let logStreamYmd = "";
 function todayYmd(): string {
