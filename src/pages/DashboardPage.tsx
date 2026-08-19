@@ -4,6 +4,7 @@ import { PublyUser, getQuota, getHistory, getAccounts, PublyQuota, PublyHistory,
 import { supabase } from "../lib/supabase";
 import NeighborPage from "./NeighborPage";
 import { botFetch, BotEventStream } from "../lib/botApi";
+import WebInstallNotice, { EXE_DOWNLOAD_URL } from "../WebInstallNotice";
 
 type MainTab = "keyword" | "write" | "image" | "photo" | "publish" | "manage" | "accounts" | "rank" | "calendar" | "settings" | "neighbor" | "engage" | "insta_dm";
 type OnPartnerProduct = {id:string|null;name:string;image:string;price:number|null;available:boolean;partnerUrl:string;shopUrl:string};
@@ -20,7 +21,6 @@ const ONPARTNER_PLACEMENT_INFO:Record<OnPartnerPlacement,{label:string;desc:stri
 
 const BOT = "http://127.0.0.1:3333";
 const INSTA_BOT = "http://127.0.0.1:3335";
-const EXE_DOWNLOAD_URL = "https://github.com/kimjonghoon13/publy-BAP/releases/latest/download/Publy-Setup.exe";
 const BATCH = 30;
 const MAX_TITLES = 90;
 const MAX_KW = 90;
@@ -2956,6 +2956,9 @@ POST3: (제목)|(이유)
     <>
       <style>{CSS}</style>
       <div className={`app ${theme} ${fontMode==="large"?"large":""}`}>
+
+        {/* ── 웹 접속자용 앱 설치 안내 배너 (Electron 앱에서는 안 뜸) ── */}
+        <WebInstallNotice onGuide={()=>{setShowGuide(true);setGuideTab(0);}} />
 
         {/* ── 초기 로딩 오버레이 (플리커 방지) ── */}
         {!pageReady && (

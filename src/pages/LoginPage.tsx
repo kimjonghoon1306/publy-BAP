@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { signIn, signUp, PublyUser, findEmailByNamePhone, resetPasswordTemp, supabase } from "../lib/supabase";
+import WebInstallNotice from "../WebInstallNotice";
 
 interface Props {
   onLogin: (user: PublyUser) => void;
@@ -35,7 +36,7 @@ const CSS = `
 /* 루트 */
 .login-root {
   width:100vw; height:100vh; overflow:hidden;
-  display:flex; align-items:center; justify-content:center;
+  display:flex; flex-direction:column; align-items:center; justify-content:flex-start;
   position:relative; font-family:'Noto Sans KR',sans-serif;
   perspective:1000px;
 }
@@ -74,7 +75,7 @@ const CSS = `
 .light .scan-line { background:linear-gradient(90deg,transparent,rgba(0,180,80,.2),transparent); }
 
 /* 상단 버튼 */
-.top-bar { position:fixed; top:0; left:0; right:0; display:flex; justify-content:space-between; align-items:center; padding:16px 24px; z-index:100; }
+.top-bar { position:relative; width:100%; box-sizing:border-box; display:flex; justify-content:space-between; align-items:center; padding:16px 24px; z-index:100; flex-shrink:0; }
 .top-btn {
   width:44px; height:44px; border-radius:14px; cursor:pointer; font-size:18px;
   display:flex; align-items:center; justify-content:center; border:1px solid;
@@ -92,7 +93,7 @@ const CSS = `
 
 /* 메인 카드 */
 .login-card {
-  position:relative; width:460px; z-index:10;
+  position:relative; width:460px; z-index:10; margin:auto;
   border-radius:28px; padding:52px 44px;
   animation:card-float 7s ease-in-out infinite, form-rise .7s ease both, glow-breathe 4s ease-in-out infinite;
 }
@@ -443,6 +444,9 @@ export default function LoginPage({ onLogin, onAdminLogin, theme, onThemeToggle 
     <>
       <style>{CSS}</style>
       <div className={`login-root ${theme}`}>
+        {/* 웹 접속자용 앱 설치 안내 배너 (Electron 앱에서는 안 뜸) */}
+        <WebInstallNotice theme={theme} />
+
         {/* 배경 */}
         <div className="cosmos-bg">
           <div className="cosmos-orb cosmos-orb-1" />

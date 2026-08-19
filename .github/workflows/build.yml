@@ -80,6 +80,15 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      # 웹사이트/카톡 공유용 고정 다운로드 링크가 버전마다 안 깨지도록
+      # 버전 없는 이름(Publy-Setup.exe)으로 한 벌 복사 → 릴리스에 함께 업로드
+      - name: Make stable-named installer (Publy-Setup.exe)
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem release/*.exe | Where-Object { $_.Name -ne 'Publy-Setup.exe' } | Select-Object -First 1
+          Copy-Item $exe.FullName release/Publy-Setup.exe -Force
+          Write-Host "Stable installer: $($exe.Name) -> Publy-Setup.exe"
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
