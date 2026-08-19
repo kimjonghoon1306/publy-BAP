@@ -756,3 +756,42 @@ export async function getAllInstaDmQuotas(): Promise<(InstaDmQuota & { user_name
     }));
   } catch { return []; }
 }
+
+// ── 버그 신고 ──
+export interface PublyBugReport {
+  id: string;
+  user_id: string;
+  user_name?: string;
+  user_email?: string;
+  app_version?: string;
+  memo?: string;
+  log_text?: string;
+  status?: "open" | "resolved";
+  created_at: string;
+}
+
+export async function submitBugReportRow(row: {
+  user_id: string; user_name?: string; user_email?: string;
+  app_version?: string; memo?: string; log_text?: string;
+}): Promise<{ ok: boolean; error?: string }> {
+  const { error } = await supabase.from("publy_bug_reports").insert({ ...row, status: "open" });
+  if (error) return { ok: false, error: error.message };
+  return { ok: true };
+}
+
+export async function getBugReports(): Promise<PublyBugReport[]> {
+  const { data } = await supabase
+    .from("publy_bug_reports")
+    .select("*")
+    .order("created_at", { ascending: false })
+    .limit(500);
+  return (data || []) as PublyBugReport[];
+}
+
+export async function updateBugReportStatus(id: string, status: "open" | "resolved") {
+  await supabase.from("publy_bug_reports").update({ status }).eq("id", id);
+}
+
+export async function deleteBugReport(id: string) {
+  await supabase.from("publy_bug_reports").delete().eq("id", id);
+}

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import GoogleFlowCard from "../GoogleFlowCard";
 import { PublyUser, getQuota, getHistory, getAccounts, PublyQuota, PublyHistory, PublyAccount, upsertAccount, useQuota, addHistory, deleteHistory, deleteAllHistory, changeUserPassword, getNaverApiKeys, saveNaverApiKeys, NaverApiKeys, checkNaverQuota, incrementNaverQuota, getNaverDailyUsage, NAVER_DAILY_LIMIT, getUserNaverApiKeys, logError, PLAN_CONFIG, checkDailyPublishQuota, incrementDailyPublish, getDailyPublishUsage, getNeighborDailyUsage, NEIGHBOR_DAILY_LIMIT, getEngageDailyUsage, ENGAGE_DAILY_LIMIT, InstaDmTarget, InstaDmHistory, InstaDmQuota, getInstaDmTargets, addInstaDmTarget, deleteInstaDmTarget, getInstaDmHistory, addInstaDmHistory, getInstaDmQuota, upsertInstaDmQuota, incrementInstaDmUsage, INSTA_DM_DAILY_LIMIT } from "../lib/supabase";
-import { supabase } from "../lib/supabase";
+import { supabase, submitBugReportRow } from "../lib/supabase";
 import NeighborPage from "./NeighborPage";
 import { botFetch, BotEventStream } from "../lib/botApi";
 import WebInstallNotice from "../WebInstallNotice";
@@ -932,6 +932,10 @@ Output format (JSON array only, no other text):
   const [newPw2, setNewPw2] = useState("");
   const [pwMsg, setPwMsg] = useState("");
   const [pwChanging, setPwChanging] = useState(false);
+  // 버그 신고
+  const [bugMemo, setBugMemo] = useState("");
+  const [bugSending, setBugSending] = useState(false);
+  const [bugMsg, setBugMsg] = useState("");
   const [naverKeys, setNaverKeys] = useState<NaverApiKeys>({});
   const [naverKeysSaving, setNaverKeysSaving] = useState(false);
   const [naverKeysMsg, setNaverKeysMsg] = useState("");
@@ -1204,6 +1208,26 @@ Output format (JSON array only, no other text):
     } catch (e: any) {
       setPwMsg("❌ " + e.message);
     } finally { setPwChanging(false); }
+  }
+
+  // ── 버그 신고: 로컬 봇 로그 + 메모 + 아이디를 관리자 페이지로 전송 ──
+  async function submitBugReport() {
+    setBugSending(true); setBugMsg("");
+    try {
+      let log = "";
+      try { log = (await (window as any).electron?.readBotLog?.()) || ""; } catch {}
+      const version = (await (window as any).electron?.checkAppUpdate?.().then((r:any)=>r?.currentVersion).catch(()=>"")) || "";
+      const res = await submitBugReportRow({
+        user_id: user.id, user_name: user.name, user_email: user.email,
+        app_version: version, memo: bugMemo.trim(), log_text: log,
+      });
+      if (!res.ok) throw new Error(res.error || "전송 실패");
+      setBugMemo("");
+      setBugMsg("✅ 신고 완료! 로그가 관리자에게 전송됐어요. 빠르게 확인할게요.");
+      setTimeout(()=>setBugMsg(""), 6000);
+    } catch (e:any) {
+      setBugMsg("❌ 전송 실패: " + (e.message||"") + " — '로그 폴더 열기'로 파일을 보내주셔도 돼요.");
+    } finally { setBugSending(false); }
   }
 
   // ── Ctrl+V 클립보드 이미지 붙여넣기 ──
@@ -5350,6 +5374,25 @@ POST3: (제목)|(이유)
 
             {tab==="settings"&&(
               <div style={{animation:"fadeUp .25s ease both"}}>
+
+                {/* 버그 신고 — 문제 발생 시 로그를 관리자에게 보내면 아이디로 확인·수정 */}
+                <div className="card">
+                  <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:10}}>
+                    <div>
+                      <div className="card-title" style={{marginBottom:4}}>🐞 버그 신고</div>
+                      <div style={{fontSize:12,color:"var(--text3)"}}>문제가 생기면 아래 버튼으로 신고해주세요. 로그가 함께 전송돼 원인을 빠르게 찾아드려요.</div>
+                    </div>
+                    <div style={{display:"flex",gap:8,flexShrink:0}}>
+                      <button onClick={()=>(window as any).electron?.openLogFolder?.()}
+                        style={{padding:"9px 15px",borderRadius:10,border:"1px solid var(--border)",background:"var(--bg)",color:"var(--text2)",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:"inherit"}}>📂 로그 폴더 열기</button>
+                      <button onClick={submitBugReport} disabled={bugSending}
+                        style={{padding:"9px 18px",borderRadius:10,border:"none",background:bugSending?"var(--card2)":"var(--accent)",color:bugSending?"var(--text2)":"#000",cursor:bugSending?"default":"pointer",fontSize:12,fontWeight:800,fontFamily:"inherit"}}>{bugSending?"전송 중...":"🐞 버그 신고하기"}</button>
+                    </div>
+                  </div>
+                  <textarea value={bugMemo} onChange={e=>setBugMemo(e.target.value)} placeholder="어떤 문제가 있었는지 적어주세요 (선택) — 예: 카테고리 누르면 화면이 멈춰요"
+                    style={{width:"100%",marginTop:12,minHeight:64,padding:"10px 12px",borderRadius:10,border:"1px solid var(--border)",background:"var(--bg)",color:"var(--text)",fontSize:13,fontFamily:"inherit",resize:"vertical",outline:"none",boxSizing:"border-box"}}/>
+                  {bugMsg&&<div style={{marginTop:8,fontSize:12,fontWeight:700,color:bugMsg.startsWith("✅")?"var(--success)":"var(--danger)"}}>{bugMsg}</div>}
+                </div>
 
                 <div className="card">
                   <div className="card-title" style={{marginBottom:5}}>🌐 퍼블리와 함께 쓰는 온종일 서비스</div>

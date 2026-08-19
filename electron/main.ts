@@ -32,64 +32,23 @@ function killPort(port: number) {
   } catch { /* 점유 프로세스 없으면 명령이 비정상 종료 → 무시 */ }
 }
 
-/* ── 봇 로그를 파일로 저장 ──
-   봇 내부 로그(발행/Flow 등)는 원래 콘솔로만 나가 사용자가 볼 수 없었다. 날짜별로 파일에 남긴다.
-
-   ★★멈춤(뱅글뱅글+클릭불가) 근본원인 = 로그 저장 위치+방식(v2.0.22 회귀, 맥·윈도우 공통):
-   ① v2.0.22가 로그를 **바탕화면**에 저장했는데, 바탕화면이 클라우드 동기화 폴더면
-      (맥 iCloud Desktop / 윈도우 OneDrive Desktop) 파일에 쓸 때마다 동기화가 걸려 매우 느려짐.
-   ② 게다가 로그 한 줄마다 mkdirSync + appendFileSync(둘 다 **동기**)를 메인 프로세스에서 실행 →
-      봇이 로그를 조금만 자주 뿜어도 메인 스레드가 그 느린 I/O에 묶여 창이 응답 불가 = 얼어붙음.
-   → 해결: (a) 저장 위치를 **동기화 안 되는 앱 내부 폴더(userData/logs)**로 이동,
-           (b) 폴더는 하루 1회만 생성, 쓰기는 **비동기 WriteStream**(메인 스레드 안 막힘).
-   userData는 iCloud/OneDrive 대상이 아니라 아무리 써도 동기화 폭주가 없다. 로그는 "로그 폴더 열기"로 접근. */
-const fsMod = require("fs") as typeof import("fs");
-const LOG_DIR = () => path.join(app.getPath("userData"), "logs");
-let logStream: import("fs").WriteStream | null = null;
-let logStreamYmd = "";
-let logDisabled = false;   // 스트림이 한 번이라도 에러나면 파일로깅 완전 포기(콘솔만) — 재오픈 폭주 방지
-let logDirEnsured = false; // 폴더 생성은 앱 전체에서 딱 한 번만
-function todayYmd(): string {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-}
-/* ★per-line 경로에서는 어떤 *Sync fs도 절대 호출하지 않는다.
-   폴더 생성(mkdir)은 비동기+평생 1회, 스트림 에러 시 파일로깅을 완전히 끄고 콘솔로만 남긴다.
-   (예전엔 스트림 에러→null→다음 줄마다 mkdirSync로 재오픈해 클라우드 폴더에서 메인스레드가 얼어붙었다.) */
-function ensureLogDirOnce() {
-  if (logDirEnsured) return;
-  logDirEnsured = true;
-  fsMod.mkdir(LOG_DIR(), { recursive: true }, () => {}); // 비동기, 실패해도 무시
-}
-function getLogStream(): import("fs").WriteStream | null {
-  if (logDisabled) return null;
-  const ymd = todayYmd();
-  if (logStream && logStreamYmd === ymd) return logStream;
-  try {
-    ensureLogDirOnce();
-    if (logStream) { try { logStream.end(); } catch {} }
-    // createWriteStream은 파일 오픈을 비동기로 처리 → 메인 스레드 안 막음.
-    logStream = fsMod.createWriteStream(path.join(LOG_DIR(), `bot-${ymd}.log`), { flags: "a" });
-    logStream.on("error", () => { logDisabled = true; logStream = null; }); // 에러 시 영구 비활성(재오픈 안 함)
-    logStreamYmd = ymd;
-    return logStream;
-  } catch { logDisabled = true; return null; }
-}
-function botLog(tag: string, text: string, isErr = false) {
-  const line = `[${new Date().toLocaleTimeString("ko-KR")}] ${tag} ${text}`;
-  (isErr ? console.error : console.log)(line);
-  try { getLogStream()?.write(line + "\n"); } catch {} // 순수 비동기 → 메인 스레드 절대 안 막힘
-}
-export function openLogFolder() {
-  try { fsMod.mkdirSync(LOG_DIR(), { recursive: true }); } catch {} // 사용자 클릭 시점(드묾)이라 sync 무방
-  try { shell.openPath(LOG_DIR()); } catch {}
-}
+/* ── 봇 로그 파이핑을 완전히 제거함 (v2.0.26) ──
+   ★★진짜 멈춤(뱅글뱅글+클릭불가) 원인 = 봇 자식 프로세스의 출력을 메인이 받은 것.
+   카테고리 로드 등에서 봇이 Playwright/크롬을 실행하다 실패하면 stderr로 에러를 초당 수천 줄
+   폭주시키는데, v2.0.22가 그 출력을 `child.stdout/stderr.on("data")`로 메인 프로세스에서 받아
+   줄마다 처리(문자열+콘솔+파일)했다 → 메인 스레드가 이벤트 폭주에 묶여 창이 응답 불가(busy 커서,
+   클릭·창닫기 전부 안 됨), 봇도 결국 죽어 "서버 오프라인". 파일 위치/동기·비동기 문제가 아니라
+   **봇 출력을 메인이 받는 것 자체가 독**이었다. → stdio를 'ignore'로 두어 봇 출력이 메인에
+   아예 도달하지 않게 한다(로그 저장 기능 폐기). 봇이 아무리 토해내도 메인은 무사하다. */
 
 function botEnvironment(extra: NodeJS.ProcessEnv = {}): Record<string, string> {
   const merged: NodeJS.ProcessEnv = {
     ...process.env,
     ...extra,
     PUBLY_SESSION_DIR: path.join(app.getPath("userData"), "publy-sessions"),
+    // 봇이 "자기 로그를 스스로" 이 폴더에 쓴다(메인은 봇 출력을 안 받음 → 화면 안 멈춤).
+    // 버그 신고 시 이 폴더의 로그를 회원이 보내주면 아이디로 확인 가능.
+    PUBLY_LOG_DIR: path.join(app.getPath("userData"), "logs"),
     BOT_AUTH_TOKEN: botAuthToken,
   };
   // utilityProcess.fork의 env는 문자열 값만 허용 → undefined 값 제거
@@ -127,12 +86,11 @@ async function forkBotServer(opts: {
       const child = utilityProcess.fork(serverJs, [], {
         cwd: opts.botPath,
         serviceName: opts.name,
-        stdio: ["ignore", "pipe", "pipe"],
+        // ★ stdio 전부 ignore — 봇 출력을 메인이 받지 않는다(멈춤 근본원인 제거). pipe 금지.
+        stdio: ["ignore", "ignore", "ignore"],
         env,
       });
       opts.setProc(child);
-      child.stdout?.on("data", d => botLog(`[${opts.name}]`, d.toString().trim()));
-      child.stderr?.on("data", d => botLog(`[${opts.name}]`, d.toString().trim(), true));
       child.on("spawn", () => console.log(`[${opts.name}] 실행됨 pid=${child.pid}`));
       child.on("exit", (code) => {
         console.warn(`[${opts.name}] 종료 (code: ${code}). 3초 후 재시작...`);
@@ -144,12 +102,10 @@ async function forkBotServer(opts: {
       console.error(`[${opts.name}] utilityProcess 실패 → spawn 폴백:`, e?.message);
       const child = spawn(process.execPath, ["dist/server.js"], {
         cwd: opts.botPath,
-        stdio: "pipe",
+        stdio: "ignore", // ★ 봇 출력 무시(메인 스레드 보호) — pipe 금지
         env: { ...env, ELECTRON_RUN_AS_NODE: "1" },
       });
       opts.setProc(child);
-      child.stdout?.on("data", d => botLog(`[${opts.name}]`, d.toString().trim()));
-      child.stderr?.on("data", d => botLog(`[${opts.name}]`, d.toString().trim(), true));
       child.on("exit", (code) => {
         console.warn(`[${opts.name}] (폴백) 종료 (code: ${code}). 3초 후 재시작...`);
         opts.setProc(null);
@@ -312,6 +268,30 @@ ipcMain.handle("open-app-update", async (_event, url: string) => {
   if (!/^https:\/\/github\.com\/kimjonghoon1306\/publy-BAP\/releases\//.test(url)) return false;
   await shell.openExternal(url);
   return true;
+});
+
+/* ── 버그 신고: 봇 로그 폴더 열기 ── 회원이 문제 신고 시 이 폴더의 로그 파일을 보내면 원인 확인 가능. */
+ipcMain.handle("open-log-folder", async () => {
+  const dir = path.join(app.getPath("userData"), "logs");
+  try { require("fs").mkdirSync(dir, { recursive: true }); } catch {}
+  try { await shell.openPath(dir); return true; } catch { return false; }
+});
+
+/* ── 버그 신고: 최근 로그 텍스트 읽기 ── (오늘/어제 로그의 마지막 ~400줄) 신고에 첨부해 관리자 페이지로 전송. */
+ipcMain.handle("read-bot-log", async () => {
+  try {
+    const fs = require("fs") as typeof import("fs");
+    const dir = path.join(app.getPath("userData"), "logs");
+    if (!fs.existsSync(dir)) return "";
+    const files = fs.readdirSync(dir).filter(f => f.endsWith(".log")).sort();
+    const pick = files.slice(-2); // 어제+오늘
+    let text = "";
+    for (const f of pick) {
+      try { text += `\n===== ${f} =====\n` + fs.readFileSync(path.join(dir, f), "utf8"); } catch {}
+    }
+    const lines = text.split("\n");
+    return lines.slice(-400).join("\n").slice(-20000); // 마지막 400줄, 최대 20KB
+  } catch { return ""; }
 });
 
 ipcMain.handle("register-user", async (_event, userId: string) => {

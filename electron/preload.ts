@@ -9,4 +9,6 @@ contextBridge.exposeInMainWorld("electron", {
   flowStatus:       () => ipcRenderer.invoke("flow-status"),
   checkAppUpdate:   () => ipcRenderer.invoke("check-app-update"),
   openAppUpdate:    (url: string) => ipcRenderer.invoke("open-app-update", url),
+  openLogFolder:    () => ipcRenderer.invoke("open-log-folder"),
+  readBotLog:       () => ipcRenderer.invoke("read-bot-log"),
 });

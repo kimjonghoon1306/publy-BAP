@@ -1,8 +1,41 @@
 import express from "express";
 import cors from "cors";
+import fs from "fs";
+import path from "path";
 import { saveNaverSession, publishNaver, naverSessionExists, generateFlowImages, generateFlowImagesCDP, getNaverCategories, saveGoogleSession, googleSessionExists, deleteNaverSession, deleteGoogleSession } from "./naver";
 import { saveTistorySession, publishTistory, tistorySessionExists, deleteTistorySession } from "./tistory";
 import { fetchPendingJobs, updateJob, addHistory, useQuota } from "./supabase";
+
+/* ── 봇 자체 로그 파일 (버그 신고용) ──
+   메인 프로세스가 아니라 "봇 프로세스가 자기 로그를 직접" 쓴다. 봇은 별도 프로세스라
+   파일 I/O로 잠깐 바빠도 앱 화면(메인/렌더러)은 절대 안 멈춘다.
+   비동기 append 스트림 1개로만 기록(줄마다 열지 않음). 회원이 문제 신고 시 이 파일을 보내면
+   userId·에러가 남아 원인 확인 가능. 크롬(Playwright) stderr 폭주는 봇 console으로 안 들어와
+   여기 볼륨은 낮고 안전하다. */
+const LOG_DIR = process.env.PUBLY_LOG_DIR || "";
+let _logStream: fs.WriteStream | null = null;
+if (LOG_DIR) {
+  try {
+    fs.mkdirSync(LOG_DIR, { recursive: true });
+    const ymd = new Date().toISOString().slice(0, 10);
+    _logStream = fs.createWriteStream(path.join(LOG_DIR, `bot-${ymd}.log`), { flags: "a" });
+    _logStream.on("error", () => { _logStream = null; });
+  } catch { _logStream = null; }
+}
+function fileLog(args: unknown[], isErr = false) {
+  if (!_logStream) return;
+  try {
+    const line = `[${new Date().toLocaleString("ko-KR")}]${isErr ? " ERROR" : ""} ` +
+      args.map(a => (typeof a === "string" ? a : (() => { try { return JSON.stringify(a); } catch { return String(a); } })())).join(" ");
+    _logStream.write(line + "\n");
+  } catch {}
+}
+{
+  const _log = console.log.bind(console), _err = console.error.bind(console), _warn = console.warn.bind(console);
+  console.log = (...a: unknown[]) => { fileLog(a); _log(...a); };
+  console.error = (...a: unknown[]) => { fileLog(a, true); _err(...a); };
+  console.warn = (...a: unknown[]) => { fileLog(a); _warn(...a); };
+}
 
 const app = express();
 const PORT = 3333;

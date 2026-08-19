@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import GoogleFlowCard from "../GoogleFlowCard";
-import { supabase, getAccounts, upsertAccount, PublyAccount, getHistory, PublyHistory, addHistory, deleteHistory, deleteAllHistory, setAdminPassword, saveAdminNaverApiKeys, getNaverApiKeys, NaverApiKeys, getNaverDailyUsage, NAVER_DAILY_LIMIT, checkNaverQuota, incrementNaverQuota, getUserNaverApiKeys, getReferrals, getErrorLogs, getUnreadErrorCount, markErrorsAsRead, logError, PLAN_CONFIG, getAllNeighborHistory, NeighborHistory, getAllEngageHistory, EngageHistory, InstaDmTarget, InstaDmHistory, InstaDmQuota, getInstaDmTargets, addInstaDmTarget, updateInstaDmTargetStatus, deleteInstaDmTarget, getInstaDmHistory, addInstaDmHistory, getAllInstaDmHistory, getInstaDmQuota, upsertInstaDmQuota, getAllInstaDmQuotas, INSTA_DM_DAILY_LIMIT } from "../lib/supabase";
+import { supabase, getAccounts, upsertAccount, PublyAccount, getHistory, PublyHistory, addHistory, deleteHistory, deleteAllHistory, setAdminPassword, saveAdminNaverApiKeys, getNaverApiKeys, NaverApiKeys, getNaverDailyUsage, NAVER_DAILY_LIMIT, checkNaverQuota, incrementNaverQuota, getUserNaverApiKeys, getReferrals, getErrorLogs, getUnreadErrorCount, markErrorsAsRead, logError, PLAN_CONFIG, getAllNeighborHistory, NeighborHistory, getAllEngageHistory, EngageHistory, InstaDmTarget, InstaDmHistory, InstaDmQuota, getInstaDmTargets, addInstaDmTarget, updateInstaDmTargetStatus, deleteInstaDmTarget, getInstaDmHistory, addInstaDmHistory, getAllInstaDmHistory, getInstaDmQuota, upsertInstaDmQuota, getAllInstaDmQuotas, INSTA_DM_DAILY_LIMIT, PublyBugReport, getBugReports, updateBugReportStatus, deleteBugReport } from "../lib/supabase";
 import NeighborPage from "./NeighborPage";
 import { botFetch, BotEventStream } from "../lib/botApi";
 
@@ -589,6 +589,7 @@ const TABS = [
   {k:"engage",          i:"❤️", l:"공감·댓글"},
   {k:"insta_dm",        i:"📱", l:"인스타 DM"},
   {k:"users",           i:"👥", l:"회원관리"},
+  {k:"bug",             i:"🐞", l:"버그 신고"},
   {k:"stats",           i:"📈", l:"통계"},
   {k:"insta_dm_manage", i:"📊", l:"DM 회원관리"},
   {k:"neighbor_manage", i:"📋", l:"서이추 관리"},
@@ -597,9 +598,16 @@ const TABS = [
 ] as const;
 
 export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: Props) {
-  const [tab, setTab] = useState<"keyword"|"write"|"image"|"photo"|"publish"|"manage"|"accounts"|"rank"|"calendar"|"neighbor"|"engage"|"neighbor_manage"|"engage_manage"|"insta_dm"|"insta_dm_manage"|"users"|"stats"|"settings">("keyword");
+  const [tab, setTab] = useState<"keyword"|"write"|"image"|"photo"|"publish"|"manage"|"accounts"|"rank"|"calendar"|"neighbor"|"engage"|"neighbor_manage"|"engage_manage"|"insta_dm"|"insta_dm_manage"|"users"|"bug"|"stats"|"settings">("keyword");
   const [statsSubTab, setStatsSubTab] = useState<"mine"|"all">("mine");
   const [usersSubTab, setUsersSubTab] = useState<"list"|"referral">("list");
+  // 버그 신고
+  const [bugReports, setBugReports] = useState<PublyBugReport[]>([]);
+  const [bugLoading, setBugLoading] = useState(false);
+  const [bugExpanded, setBugExpanded] = useState<string|null>(null);
+  const [bugFilter, setBugFilter] = useState<"open"|"all">("open");
+  const loadBugReports = useCallback(async()=>{ setBugLoading(true); try{ setBugReports(await getBugReports()); }catch{} finally{ setBugLoading(false); } },[]);
+  useEffect(()=>{ if(tab==="bug") loadBugReports(); },[tab,loadBugReports]);
   // 인스타 DM 상태
   const [dmTargets, setDmTargets] = useState<InstaDmTarget[]>([]);
   const [dmHistory, setDmHistory] = useState<(InstaDmHistory & {user_name?:string;user_email?:string})[]>([]);
@@ -3999,6 +4007,53 @@ POST3: (제목)|(이유)
                     </div>
                   </div>
                 )}
+              </div>
+            )}
+
+            {/* ───── 🐞 버그 신고 ───── */}
+            {tab === "bug" && (
+              <div style={{animation:"fadeUp .25s ease both"}}>
+                <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:14,flexWrap:"wrap"}}>
+                  <div style={{fontSize:18,fontWeight:900,color:"var(--text)"}}>🐞 버그 신고</div>
+                  <div style={{display:"flex",gap:6,background:"var(--card)",border:"1px solid var(--border)",borderRadius:10,padding:4}}>
+                    {([{k:"open",l:"미처리"},{k:"all",l:"전체"}] as const).map(f=>(
+                      <button key={f.k} onClick={()=>setBugFilter(f.k)} style={{padding:"6px 14px",borderRadius:7,border:"none",cursor:"pointer",fontSize:12,fontWeight:800,fontFamily:"inherit",background:bugFilter===f.k?"var(--danger)":"transparent",color:bugFilter===f.k?"#fff":"var(--text2)"}}>{f.l}</button>
+                    ))}
+                  </div>
+                  <button onClick={loadBugReports} style={{marginLeft:"auto",padding:"7px 14px",borderRadius:8,border:"1px solid var(--border)",background:"var(--card2)",color:"var(--text2)",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:"inherit"}}>🔄 새로고침</button>
+                </div>
+                {bugLoading?(
+                  <div style={{padding:"40px",textAlign:"center",color:"var(--text3)"}}>불러오는 중...</div>
+                ):(()=>{
+                  const list=bugReports.filter(b=>bugFilter==="all"||b.status!=="resolved");
+                  return list.length===0?(
+                    <div style={{padding:"40px",textAlign:"center",color:"var(--text3)",fontSize:14}}>{bugFilter==="open"?"미처리 신고가 없어요. 👍":"신고 내역이 없어요."}</div>
+                  ):(
+                    <div style={{display:"flex",flexDirection:"column",gap:10}}>
+                      {list.map(b=>(
+                        <div key={b.id} style={{border:`1px solid ${b.status==="resolved"?"var(--border)":"rgba(248,81,73,.35)"}`,borderRadius:12,padding:"14px 16px",background:"var(--card)"}}>
+                          <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
+                            <span style={{fontSize:14,fontWeight:800,color:"var(--text)"}}>{b.user_name||"(이름없음)"}</span>
+                            <span style={{fontSize:12,color:"var(--text3)"}}>{b.user_email||b.user_id?.slice(0,8)}</span>
+                            {b.app_version&&<span style={{fontSize:11,fontWeight:700,padding:"2px 8px",borderRadius:99,background:"var(--card2)",color:"var(--text2)",border:"1px solid var(--border)"}}>v{b.app_version}</span>}
+                            <span style={{fontSize:11,fontWeight:700,padding:"2px 8px",borderRadius:99,background:b.status==="resolved"?"rgba(63,185,80,.12)":"rgba(248,81,73,.12)",color:b.status==="resolved"?"#3fb950":"#f85149"}}>{b.status==="resolved"?"처리완료":"미처리"}</span>
+                            <span style={{marginLeft:"auto",fontSize:11,color:"var(--text3)"}}>{new Date(b.created_at).toLocaleString("ko-KR")}</span>
+                          </div>
+                          {b.memo&&<div style={{marginTop:8,fontSize:13,color:"var(--text)",lineHeight:1.6,whiteSpace:"pre-wrap"}}>{b.memo}</div>}
+                          <div style={{display:"flex",gap:8,marginTop:10,flexWrap:"wrap"}}>
+                            <button onClick={()=>setBugExpanded(bugExpanded===b.id?null:b.id)} style={{padding:"6px 12px",borderRadius:8,border:"1px solid var(--border)",background:"var(--bg)",color:"var(--text2)",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:"inherit"}}>{bugExpanded===b.id?"로그 접기":"📄 로그 보기"}</button>
+                            {b.log_text&&<button onClick={()=>{navigator.clipboard.writeText(b.log_text||"");}} style={{padding:"6px 12px",borderRadius:8,border:"1px solid var(--border)",background:"var(--bg)",color:"var(--text2)",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:"inherit"}}>📋 로그 복사</button>}
+                            <button onClick={async()=>{await updateBugReportStatus(b.id,b.status==="resolved"?"open":"resolved");loadBugReports();}} style={{padding:"6px 12px",borderRadius:8,border:"none",background:b.status==="resolved"?"var(--card2)":"#3fb950",color:b.status==="resolved"?"var(--text2)":"#fff",cursor:"pointer",fontSize:12,fontWeight:800,fontFamily:"inherit"}}>{b.status==="resolved"?"미처리로":"✓ 처리완료"}</button>
+                            <button onClick={async()=>{if(confirm("이 신고를 삭제할까요?")){await deleteBugReport(b.id);loadBugReports();}}} style={{padding:"6px 12px",borderRadius:8,border:"1px solid rgba(248,81,73,.3)",background:"transparent",color:"var(--danger)",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:"inherit"}}>삭제</button>
+                          </div>
+                          {bugExpanded===b.id&&(
+                            <pre style={{marginTop:10,padding:"12px",borderRadius:10,background:"var(--bg)",border:"1px solid var(--border)",color:"var(--text2)",fontSize:11,lineHeight:1.5,maxHeight:360,overflow:"auto",whiteSpace:"pre-wrap",wordBreak:"break-all"}}>{b.log_text||"(로그 없음)"}</pre>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })()}
               </div>
             )}
 

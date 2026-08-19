@@ -20,6 +20,8 @@ declare global {
       flowStatus: () => Promise<{ ready: boolean }>;
       checkAppUpdate: () => Promise<{ available: boolean; currentVersion?: string; latestVersion?: string; url?: string }>;
       openAppUpdate: (url: string) => Promise<boolean>;
+      openLogFolder: () => Promise<boolean>;
+      readBotLog: () => Promise<string>;
     };
   }
 }
