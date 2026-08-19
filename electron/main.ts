@@ -47,29 +47,41 @@ const fsMod = require("fs") as typeof import("fs");
 const LOG_DIR = () => path.join(app.getPath("userData"), "logs");
 let logStream: import("fs").WriteStream | null = null;
 let logStreamYmd = "";
+let logDisabled = false;   // 스트림이 한 번이라도 에러나면 파일로깅 완전 포기(콘솔만) — 재오픈 폭주 방지
+let logDirEnsured = false; // 폴더 생성은 앱 전체에서 딱 한 번만
 function todayYmd(): string {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
+/* ★per-line 경로에서는 어떤 *Sync fs도 절대 호출하지 않는다.
+   폴더 생성(mkdir)은 비동기+평생 1회, 스트림 에러 시 파일로깅을 완전히 끄고 콘솔로만 남긴다.
+   (예전엔 스트림 에러→null→다음 줄마다 mkdirSync로 재오픈해 클라우드 폴더에서 메인스레드가 얼어붙었다.) */
+function ensureLogDirOnce() {
+  if (logDirEnsured) return;
+  logDirEnsured = true;
+  fsMod.mkdir(LOG_DIR(), { recursive: true }, () => {}); // 비동기, 실패해도 무시
+}
 function getLogStream(): import("fs").WriteStream | null {
+  if (logDisabled) return null;
   const ymd = todayYmd();
   if (logStream && logStreamYmd === ymd) return logStream;
   try {
-    const dir = LOG_DIR();
-    fsMod.mkdirSync(dir, { recursive: true }); // 스트림 새로 열 때만(하루 1회 수준)
+    ensureLogDirOnce();
     if (logStream) { try { logStream.end(); } catch {} }
-    logStream = fsMod.createWriteStream(path.join(dir, `bot-${ymd}.log`), { flags: "a" });
-    logStream.on("error", () => { logStream = null; }); // 쓰기 실패해도 앱은 계속
+    // createWriteStream은 파일 오픈을 비동기로 처리 → 메인 스레드 안 막음.
+    logStream = fsMod.createWriteStream(path.join(LOG_DIR(), `bot-${ymd}.log`), { flags: "a" });
+    logStream.on("error", () => { logDisabled = true; logStream = null; }); // 에러 시 영구 비활성(재오픈 안 함)
     logStreamYmd = ymd;
     return logStream;
-  } catch { return null; }
+  } catch { logDisabled = true; return null; }
 }
 function botLog(tag: string, text: string, isErr = false) {
   const line = `[${new Date().toLocaleTimeString("ko-KR")}] ${tag} ${text}`;
   (isErr ? console.error : console.log)(line);
-  try { getLogStream()?.write(line + "\n"); } catch {} // 비동기 write → 메인 스레드 안 막힘
+  try { getLogStream()?.write(line + "\n"); } catch {} // 순수 비동기 → 메인 스레드 절대 안 막힘
 }
 export function openLogFolder() {
+  try { fsMod.mkdirSync(LOG_DIR(), { recursive: true }); } catch {} // 사용자 클릭 시점(드묾)이라 sync 무방
   try { shell.openPath(LOG_DIR()); } catch {}
 }
 
