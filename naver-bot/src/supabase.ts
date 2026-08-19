@@ -23,6 +23,23 @@ export interface PublyJob {
   result_url?: string;
   error?: string;
   created_at: string;
+  category_id?: string | null;
+  visibility?: string | null;
+  // ★ 예약/큐 발행의 전체 발행 데이터(blocks=이미지 포함). 있으면 이걸로 발행, 없으면 옛 방식(텍스트만).
+  payload?: PublyJobPayload | null;
+}
+
+export interface PublyJobPayload {
+  title?: string;
+  content?: string;
+  pubScope?: "body" | "faq" | "full";
+  tags?: string[];
+  imageUrl?: string;
+  categoryId?: string;
+  visibility?: "public" | "neighbor" | "private";
+  videoUrl?: string;
+  videoPosition?: "top" | "middle" | "bottom";
+  blocks?: Array<{ type: string; content?: string; src?: string; alt?: string; link?: string; images?: {src:string;alt:string}[] }>;
 }
 
 export async function fetchPendingJobs(userId: string): Promise<PublyJob[]> {

@@ -2124,8 +2124,10 @@ ${segList}`;
       const eng=rest.join("|").trim();
       if(eng.length<10)continue;
       let capClean=cap.trim().replace(/[*#\-]/g,"").replace(/^\[|\]$/g,"").replace(/^\d+번?\s*구간\]?\s*/,"").trim();
-      // ★형식 헤더 그대로 나온 것("장면설명" 등) 걸러내기 — 캡션에 안 씀
-      if(/^장면\s*설명/.test(capClean)||/한국어\s*10/.test(capClean)||capClean.length<2) capClean="";
+      // ★형식 안내문이 캡션에 새는 것 차단: "영문 이미지 프롬프트/장면설명/사진 스타일" 등 메타 문구,
+      //   한글이 하나도 없는(=영문 프롬프트가 통째로 들어온) 경우는 캡션으로 안 씀 → 아래서 깨끗한 폴백 사용.
+      if(/프롬프트|영문|prompt|워터마크|사진\s*스타일|장면\s*설명|한국어|구간/i.test(capClean)) capClean="";
+      if(!/[가-힣]/.test(capClean)||capClean.length<2) capClean="";
       captions.push(capClean.slice(0,30));
       prompts.push(`${eng}, ultra realistic 8K photography, natural lighting, absolutely no text, no letters, no watermark, no logo`);
     }
@@ -2409,12 +2411,23 @@ ${segList}`;
         showToast(`❌ 오늘 발행 한도(${dailyCheck.limit}개) 초과! 내일 다시 가능해요`, "error");
         setPublishing(false); return;
       }
-      if(!botOnline){
-        await supabase.from("publy_jobs").insert({user_id:user.id,platform,title:effTitle,content,
-          tags,image_url:thumbnail||getActiveImages()[0]||undefined,
+      // ★ 예약발행은 봇 온라인이어도 "항상" 큐로 보낸다(네이버 네이티브 예약은 불안정 → 안 씀).
+      //   payload에 blocks(이미지 포함) 전체를 저장 → 봇이 예약시간에 이미지까지 그대로 발행.
+      if(scheduleOn || !botOnline){
+        const jobRow:any={user_id:user.id,platform,title:effTitle,content,
+          tags,image_url:publishBody.imageUrl,
           category_id:category||undefined,visibility,
-          schedule_time:scheduleOn?scheduleTime:undefined,status:"pending"});
-        showToast("✅ PC 봇에 예약됐어요! Publy 앱 실행 시 자동 발행돼요.");
+          schedule_time:scheduleOn?scheduleTime:undefined,status:"pending",
+          payload:publishBody};
+        let {error:jobErr}=await supabase.from("publy_jobs").insert(jobRow);
+        // payload 컬럼이 아직 없으면(SQL 미실행) payload 빼고 재시도 → 최소한 발행은 되게(이미지 없이)
+        if(jobErr && /payload|column|schema|does not exist/i.test(jobErr.message)){
+          const {payload,...noPayload}=jobRow;
+          const retry=await supabase.from("publy_jobs").insert(noPayload); jobErr=retry.error;
+        }
+        if(jobErr) throw new Error("예약 저장 실패: "+jobErr.message);
+        setPubMsg(scheduleOn?"✅ 예약 완료! 설정한 시간에 (이미지 포함) 자동 발행돼요.":"✅ PC 봇에 예약됐어요! Publy 앱 실행 시 자동 발행돼요.");
+        showToast(scheduleOn?"⏰ 예약 완료! 이미지까지 그대로 올라가요.":"✅ PC 봇에 예약됐어요! Publy 앱 실행 시 자동 발행돼요.");
         await addHistory({user_id:user.id,platform,title:effTitle,status:"pending" as "success"|"fail"});
       }else{
         // PC 봇이 오프라인인 작업은 봇이 실제 처리할 때 한 번만 차감한다.
@@ -2438,8 +2451,23 @@ ${segList}`;
   }
 
   // ── 발행 패널 렌더 함수 ──
+  // 발행 탭: 작성한 글 + 생성한 이미지 전부 초기화(설정·계정은 유지)
+  function resetDraft(){
+    if(!confirm("작성한 글과 생성한 이미지를 모두 지우고 처음부터 시작할까요?"))return;
+    setGenContent(""); setGenTitle(""); setPubTitle(""); setGenTags("");
+    setBlocks([{type:"text",id:uid(),content:""}]);
+    setGeneratedImages([]); setCaptions([]); setThumbnail("");
+    try{ localStorage.removeItem("publy_draft"); }catch{}
+    setDraftAvailable(false); setDraftData(null);
+    showToast("🧹 글과 이미지를 초기화했어요");
+  }
+
   function renderPublishPanel(){
     return(<div style={{display:"flex",flexDirection:"column",gap:12}}>
+      {/* 초기화 */}
+      <div style={{display:"flex",justifyContent:"flex-end"}}>
+        <button onClick={resetDraft} style={{display:"inline-flex",alignItems:"center",gap:6,padding:"8px 14px",borderRadius:9,border:"1px solid var(--border)",background:"var(--bg2)",color:"var(--text2)",cursor:"pointer",fontSize:12.5,fontWeight:700,fontFamily:"inherit",transition:"all .15s"}}>🧹 글·이미지 초기화</button>
+      </div>
       {/* 플랫폼 */}
       <div className="card" style={{padding:"14px 16px"}}>
         <div className="card-title" style={{marginBottom:10}}>🌐 플랫폼</div>

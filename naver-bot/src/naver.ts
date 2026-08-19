@@ -457,7 +457,14 @@ export async function publishNaver(params: {
     }
 
     // ── 이미지 삽입 (썸네일) ──
-    if (imageUrl) {
+    // ★ 썸네일(imageUrl)이 이미 본문 이미지 블록 중 하나면 맨 위에 또 넣지 않는다.
+    //   (예전엔 맨 위에 넣고 본문 루프에서 같은 걸 건너뛰었는데, 맨 위 삽입이 실패하면
+    //    그 이미지가 위에서도 본문에서도 빠져 "4장 만들었는데 3장"이 됐다. 이제 본문에 전부 넣는다.
+    //    네이버 대표 이미지는 본문 첫 이미지로 자동 지정됨.)
+    const thumbInBody = !!imageUrl && (processedBlocks || []).some(
+      b => b.type === "image" && b.src === imageUrl
+    );
+    if (imageUrl && !thumbInBody) {
       console.log("[naver] 이미지 삽입 시도...");
       const tmpFile = await downloadImageToTemp(imageUrl);
       if (tmpFile) {
@@ -744,9 +751,8 @@ export async function publishNaver(params: {
             }
           }
         } else if (block.type === "image" && block.src) {
-          if (block.src !== imageUrl) {
-            await uploadImage(block.src, block.alt, (block as any).link);
-          }
+          // 본문 이미지는 전부 순서대로 삽입(썸네일 중복 삽입은 위에서 thumbInBody로 이미 방지).
+          await uploadImage(block.src, block.alt, (block as any).link);
         }
       }
     } else {
