@@ -535,11 +535,22 @@ interface Props {
   onThemeToggle: () => void;
   theme: string;
 }
-type ServiceInfoKey = "farm"|"trial"|"partner";
-const PUBLY_SERVICE_INFO: Record<ServiceInfoKey,{icon:string;name:string;hook:string;summary:string;benefits:[string,string][];flow:string;cta:string;url?:string;coming?:boolean}> = {
+type ServiceInfoKey = "farm"|"trial"|"partner"|"publy"|"onai"|"oncatch"|"valhalla"|"gostop"|"sky"|"stickman"|"messenger"|"studio"|"honsa"|"news";
+const PUBLY_SERVICE_INFO: Record<ServiceInfoKey,{icon:string;name:string;aliases?:string[];hook:string;summary:string;benefits:[string,string][];flow:string;cta:string;url?:string;coming?:boolean}> = {
   farm:{icon:"🌱",name:"온종일팜",hook:"홍보할 상품을 찾는 시간부터 줄이세요. 신선한 산지 상품이 콘텐츠의 소재와 구매 전환으로 이어집니다.",summary:"홍보할 산지 상품을 빠르게 찾아보세요.",benefits:[["신선한 상품 발견","제철 먹거리와 산지 상품을 한곳에서 고릅니다."],["콘텐츠가 구매로 연결","상품 상세 정보와 구매 흐름이 자연스럽게 이어집니다."],["온파트너와 수익화","고른 상품으로 추천 링크를 만들어 판매 성과를 쌓습니다."]],flow:"온종일팜 상품 선택 → 온파트너 링크 발급 → 퍼블리 홍보글 작성 → 구매 전환",cta:"온종일팜 이용하기",url:"https://app.yuanfnb.com"},
-  trial:{icon:"🎁",name:"온종일 체험단",hook:"좋아하는 상품과 매장을 먼저 경험하고, 진짜 경험이 담긴 리뷰로 콘텐츠의 신뢰도를 키우세요.",summary:"상품을 체험하고 리뷰 경쟁력을 키워보세요.",benefits:[["상품·매장 직접 체험","관심 있는 캠페인을 골라 직접 경험합니다."],["리뷰 소재 확보","사진과 경험이 쌓여 블로그·SNS 글이 더 풍성해집니다."],["크리에이터 성장","포트폴리오와 브랜드 협업 기회를 넓힙니다."]],flow:"캠페인 발견 → 체험 신청 → 상품·매장 경험 → 리뷰 발행",cta:"신청하기",coming:true},
-  partner:{icon:"🔗",name:"온파트너",hook:"내가 소개한 상품이 팔릴 때마다 링크가 수익이 됩니다. 플랫폼 제약 없이 내 콘텐츠가 있는 곳이면 시작할 수 있어요.",summary:"추천 링크를 퍼블리 글에 넣고 판매 수익을 만드세요.",benefits:[["링크 하나로 수익 추적","클릭·구매·수익을 회원 대시보드에서 확인합니다."],["사이트 제약 없음","네이버 블로그, 틱톡, 유튜브, 인스타그램, 개인 홈페이지 등 어디서든 활용합니다."],["퍼블리와 바로 연결","상품 링크를 넣으면 제품 소개와 제휴 안내가 글에 자동 반영됩니다."]],flow:"온종일팜 상품 선택 → 내 추천 링크 생성 → 퍼블리·SNS 홍보 → 판매 수익",cta:"온파트너 신청하기",url:"https://partner.yuanfnb.com/pages/signup.html"}
+  trial:{icon:"🎁",name:"온종일 체험단",aliases:["온종일체험단","온종일 체험단"],hook:"좋아하는 상품과 매장을 먼저 경험하고, 진짜 경험이 담긴 리뷰로 콘텐츠의 신뢰도를 키우세요.",summary:"상품을 체험하고 리뷰 경쟁력을 키워보세요.",benefits:[["상품·매장 직접 체험","관심 있는 캠페인을 골라 직접 경험합니다."],["리뷰 소재 확보","사진과 경험이 쌓여 블로그·SNS 글이 더 풍성해집니다."],["크리에이터 성장","포트폴리오와 브랜드 협업 기회를 넓힙니다."]],flow:"캠페인 발견 → 체험 신청 → 상품·매장 경험 → 리뷰 발행",cta:"신청하기",url:"https://pick.온종일.com"},
+  partner:{icon:"🔗",name:"온파트너",hook:"내가 소개한 상품이 팔릴 때마다 링크가 수익이 됩니다. 플랫폼 제약 없이 내 콘텐츠가 있는 곳이면 시작할 수 있어요.",summary:"추천 링크를 퍼블리 글에 넣고 판매 수익을 만드세요.",benefits:[["링크 하나로 수익 추적","클릭·구매·수익을 회원 대시보드에서 확인합니다."],["사이트 제약 없음","네이버 블로그, 틱톡, 유튜브, 인스타그램, 개인 홈페이지 등 어디서든 활용합니다."],["퍼블리와 바로 연결","상품 링크를 넣으면 제품 소개와 제휴 안내가 글에 자동 반영됩니다."]],flow:"온종일팜 상품 선택 → 내 추천 링크 생성 → 퍼블리·SNS 홍보 → 판매 수익",cta:"온파트너 신청하기",url:"https://partner.yuanfnb.com/pages/signup.html"},
+  publy:{icon:"🚀",name:"퍼블리",hook:"글쓰기부터 이미지, 발행, 예약까지 블로그 운영을 자동으로. 클릭 몇 번이면 네이버·티스토리에 완성된 글이 올라갑니다.",summary:"블로그 글 작성과 발행을 자동으로 해주는 프로그램이에요.",benefits:[["AI 글·이미지 자동 생성","키워드만 넣으면 SEO에 맞는 본문과 이미지를 만들어요."],["네이버·티스토리 자동 발행","예약 발행까지 지원해 컴퓨터를 꺼도 원하는 시간에 올라가요."],["이웃·공감 자동화","블로그 운영에 드는 반복 작업을 대신 처리해요."]],flow:"키워드 입력 → AI 글·이미지 생성 → 검토 → 자동 발행/예약",cta:"퍼블리 시작하기",url:"https://publy.blogautopro.com"},
+  onai:{icon:"🤖",name:"온종일AI",aliases:["온종일 AI"],hook:"챗GPT 같은 AI 검색에 내 브랜드가 노출되도록. AI가 추천하는 시대, 검색의 판이 바뀌고 있습니다.",summary:"AI 검색(챗GPT 등)에 노출되게 도와주는 컨설팅이에요.",benefits:[["AI 검색 최적화","AI가 답변에 내 브랜드를 인용하도록 콘텐츠를 설계해요."],["새로운 유입 채널","검색엔진을 넘어 AI 답변에서 오는 방문자를 잡아요."],["브랜드 신뢰 상승","AI가 추천하는 브랜드라는 인식을 만들어요."]],flow:"현황 진단 → AI 노출 콘텐츠 설계 → 적용 → 노출 성과 확인",cta:"온종일AI 상담하기",url:"https://ai.온종일.com"},
+  oncatch:{icon:"🎮",name:"온캐치",hook:"게임하며 쌓은 재미가 혜택이 되는 애드버게임 플랫폼. 방치형 RPG부터 카드게임까지 한곳에 모았습니다.",summary:"여러 게임을 즐기며 혜택도 받는 무료 게임 플랫폼이에요.",benefits:[["다양한 무료 게임","방치형 RPG·슈팅·카드·퍼즐 등 여러 게임을 한곳에서 즐겨요."],["출석·랭킹·보상","매일 접속하고 순위에 도전하며 재화를 모아요."],["설치 없이 바로","웹에서 바로 실행되고 앱 설치도 가능해요."]],flow:"접속 → 게임 선택 → 플레이 → 랭킹·보상 획득",cta:"온캐치 즐기기",url:"https://game.온종일.com"},
+  valhalla:{icon:"⚔️",name:"온 발할라 레전드",aliases:["발할라","발할라 레전드"],hook:"3D 실시간 액션으로 즐기는 방치형 RPG. 12개 직업과 화려한 필살기로 성장의 재미를 느껴보세요.",summary:"온캐치의 3D 방치형 액션 RPG 게임이에요.",benefits:[["실시간 3D 전투","12개 직업의 개성 있는 필살기와 진화·각성 성장."],["방치형 편의","자동 전투로 접속만 해도 캐릭터가 성장해요."],["랭킹·업적·지갑 연동","다른 유저와 경쟁하고 보상을 모아요."]],flow:"직업 선택 → 자동 성장 → 강화·각성 → 레이드·랭킹",cta:"발할라 플레이",url:"https://game.온종일.com/valhalla"},
+  gostop:{icon:"🃏",name:"온캐치 고스톱",aliases:["고스톱"],hook:"언제 어디서든 즐기는 정통 화투 고스톱. 3D 카드 애니메이션과 똑똑한 AI 상대가 기다립니다.",summary:"온캐치의 정통 고스톱 카드게임이에요.",benefits:[["정통 화투 규칙","익숙한 고스톱을 그대로, 3D 카드 연출로."],["AI 상대와 대전","혼자서도 언제든 한 판 즐길 수 있어요."],["지갑·랭킹 연동","이기며 재화를 모으고 순위에 도전해요."]],flow:"입장 → AI와 대전 → 승리 보상 → 랭킹",cta:"고스톱 플레이",url:"https://game.온종일.com/gostop"},
+  sky:{icon:"✈️",name:"하늘 수호대",aliases:["하늘수호대"],hook:"손끝으로 조종하는 세로 스크롤 비행 슈팅. 7종의 기체와 필살기로 하늘을 지켜내세요.",summary:"온캐치의 육성형 비행 슈팅 게임이에요.",benefits:[["7종 기체·필살기","기체마다 다른 필살기로 색다른 플레이."],["육성·강화","무한 강화와 기체 해금으로 점점 강해져요."],["손가락 가림 없는 조작","화면을 가리지 않는 드래그 조작과 타격감."]],flow:"기체 선택 → 스테이지 돌파 → 강화·해금 → 보스전",cta:"하늘 수호대 플레이",url:"https://game.온종일.com/sky"},
+  stickman:{icon:"🥋",name:"스틱맨 액션",aliases:["스틱맨"],hook:"관절이 살아 움직이는 스틱맨 격투 액션. 주먹·발차기·베기로 통쾌한 타격감을 느껴보세요.",summary:"온캐치의 관절 스틱맨 격투 방치형 RPG예요.",benefits:[["살아있는 관절 액션","스켈레톤 애니메이션으로 부드러운 격투 동작."],["다양한 공격","주먹·발차기·베기·회전 등 통쾌한 액션."],["자동·수동 전투","방치와 조작을 오가며 즐겨요."]],flow:"전투 시작 → 웨이브 돌파 → 강화 → 도전",cta:"스틱맨 플레이",url:"https://game.온종일.com/stickman"},
+  messenger:{icon:"💬",name:"온메신저",hook:"관리자가 안전하게 운영하는 커뮤니티 메신저. 친구·단체방·공지·알림까지 깔끔하게 한곳에서.",summary:"안전하게 운영되는 커뮤니티 채팅 메신저예요.",benefits:[["친구·단체방 채팅","1:1과 단체방을 자유롭게, 초대 링크로 간편하게."],["공지·알림","중요한 소식을 공지로 고정하고 푸시 알림을 받아요."],["안전한 운영","관리자 모니터링과 제재로 건강한 커뮤니티 유지."]],flow:"가입 → 친구·방 참여 → 대화·공지 → 알림",cta:"온메신저 시작하기",url:"https://talk.온종일.com"},
+  studio:{icon:"🎬",name:"온종일 스튜디오",hook:"영상·디자인 작업을 한눈에 보여주는 포트폴리오. 우리가 만든 결과물로 신뢰를 전합니다.",summary:"온종일의 작품·영상 포트폴리오 사이트예요.",benefits:[["작품 쇼케이스","영상·디자인 결과물을 감각적으로 모아 보여줘요."],["신뢰 전달","실제 만든 결과물로 실력을 증명해요."],["의뢰 연결","마음에 든 작업을 바로 문의로 이어가요."]],flow:"작품 감상 → 관심 작업 확인 → 문의",cta:"스튜디오 둘러보기",url:"https://studio.온종일.com"},
+  honsa:{icon:"🏢",name:"온종일 본사",aliases:["온종일닷컴","온종일 홈페이지"],hook:"콘텐츠·커머스·게임·AI까지, 여러 사업을 한 흐름으로 잇는 온종일. 브랜드의 시작점입니다.",summary:"온종일의 사업 전체를 소개하는 본사 사이트예요.",benefits:[["다양한 사업 소개","커머스·체험단·게임·AI 등 온종일의 사업을 한눈에."],["브랜드 신뢰","여러 서비스를 하나의 흐름으로 연결해요."],["파트너 연결","협업·제휴 문의를 바로 이어가요."]],flow:"사업 소개 확인 → 관심 서비스 이동 → 문의",cta:"온종일 살펴보기",url:"https://www.온종일.com"},
+  news:{icon:"📰",name:"온종일뉴스",aliases:["온종일 뉴스"],hook:"정치 빼고 실생활에 진짜 도움 되는 소식만. AI·프랜차이즈·정부지원금·마케팅·무료 툴까지 쉽게 풀어드립니다.",summary:"실용 정보 중심의 온라인 뉴스예요.",benefits:[["실용 정보 특화","AI·창업·정부지원금·마케팅 등 바로 써먹는 정보."],["쉽고 신뢰 있게","어려운 소식도 친근하고 이해하기 쉽게 정리."],["트렌드를 빠르게","놓치기 쉬운 지원 사업·무료 툴 소식을 챙겨줘요."]],flow:"관심 주제 확인 → 기사 읽기 → 실생활 적용",cta:"온종일뉴스 보기",url:"https://news.온종일.com",coming:true}
 };
 
 export default function DashboardPage({user, onLogout, onAdminLogin, onThemeToggle, theme}: Props) {
@@ -2080,7 +2091,7 @@ Output format (JSON array only, no other text):
     //   (PUBLY_SERVICE_INFO)를 프롬프트에 넣어, 그 서비스가 뭔지 핵심을 "멋있게 풀어서" 쓰게 한다.
     const serviceHay=`${title} ${keyword}`;
     const serviceMatches=(Object.keys(PUBLY_SERVICE_INFO) as ServiceInfoKey[])
-      .filter(k=>serviceHay.includes(PUBLY_SERVICE_INFO[k].name)||(k==="trial"&&/온종일\s*체험단/.test(serviceHay)));
+      .filter(k=>{const s=PUBLY_SERVICE_INFO[k];return serviceHay.includes(s.name)||(s.aliases||[]).some(a=>serviceHay.includes(a));});
     const serviceGuide=serviceMatches.length>0
       ? "\n\n=== 🏷️ 우리 서비스 소개 (제목/키워드에 등장 — 아직 널리 알려지지 않았으니, 아래 정보를 바탕으로 그 서비스가 무엇인지 자연스럽고 매력적으로 풀어서 설명할 것. 지어내지 말고 이 내용만 사용) ===\n"
         + serviceMatches.map(k=>{const s=PUBLY_SERVICE_INFO[k];
@@ -2512,16 +2523,24 @@ ${segList}`;
       const isBoundary=(b:ContentBlock)=>b.type==="text"&&/\[FAQ시작\]|\[관련글시작\]|질문\s*답변|Q\s*&\s*A|큐앤에이|해시태그|자주\s*묻는/i.test((b as TextBlock).content);
       let boundaryIdx=effectiveBlocks.findIndex(isBoundary);
       if(boundaryIdx<0)boundaryIdx=effectiveBlocks.length;
-      // 충분한 길이의 본문 텍스트 블록 뒤에만(짧은 소제목 뒤 방지)
+      // ★링크는 "이미지 블록 바로 뒤"에 붙인다(테리 요청 2026-08-21): 이미지 → 링크 카드가 딱 붙어,
+      //   이미지와 링크 사이에 본문 글이 끼지 않게. 썸네일(첫 이미지, index 0)은 제외(제휴문구 자리라 충돌 방지).
+      //   이미지가 없으면 기존처럼 본문 텍스트 블록 뒤로 폴백.
+      const imgIdxs:number[]=[];
+      for(let i=1;i<boundaryIdx;i++){const t=effectiveBlocks[i].type;if(t==="image"||t==="image-pair")imgIdxs.push(i);}
       const textIdxs:number[]=[];
       for(let i=0;i<boundaryIdx;i++){const b=effectiveBlocks[i];if(b.type==="text"&&(b as TextBlock).content.trim().length>=40)textIdxs.push(i);}
       if(textIdxs.length===0)for(let i=0;i<boundaryIdx;i++)if(effectiveBlocks[i].type==="text")textIdxs.push(i);
-      if(textIdxs.length>0){
+      const anchorIdxs = imgIdxs.length>0 ? imgIdxs : textIdxs;   // 우선 이미지 뒤, 없으면 텍스트 뒤
+      if(anchorIdxs.length>0){
         const ratios = items.length===1?[0.6]:items.length===2?[0.45,0.72]:[0.35,0.58,0.8];
+        const used=new Set<number>();
         const insertAfter=items.map((_,i)=>{
-          let ti=Math.round(textIdxs.length*ratios[i])-1;
-          ti=Math.max(items.length===1?1:0, Math.min(textIdxs.length-1, ti));
-          return textIdxs[ti];
+          let ai=Math.round(anchorIdxs.length*ratios[i])-1;
+          ai=Math.max(0, Math.min(anchorIdxs.length-1, ai));
+          while(used.has(anchorIdxs[ai])&&ai<anchorIdxs.length-1)ai++;   // 여러 링크가 같은 이미지에 몰리지 않게
+          used.add(anchorIdxs[ai]);
+          return anchorIdxs[ai];
         });
         const withLink:ContentBlock[]=[];
         effectiveBlocks.forEach((b,i)=>{
@@ -2534,6 +2553,20 @@ ${segList}`;
           });
         });
         effectiveBlocks=withLink;
+      }
+    }
+    // ── 글쓴이 인사말: "제휴문구 바로 다음 / 제휴문구 없으면 썸네일(첫 이미지) 다음"에 1회 삽입 (테리 요청 2026-08-21) ──
+    //    순서 = 썸네일 → (있으면)제휴문구 → 인사말 → 본문. 인사말이 비어있으면 안 넣는다.
+    //    blocks 기반 발행이라 여기서 명시적으로 넣어야 유실 안 됨(기존엔 buildNaverText에만 있어 발행에서 누락됐음).
+    if(greeting.trim()){
+      const g=greeting.trim();
+      const already=effectiveBlocks.some(b=>b.type==="text"&&(b as TextBlock).content.trim()===g);
+      if(!already){
+        const gBlock={type:"text",id:uid(),content:g} as ContentBlock;
+        const discIdx=effectiveBlocks.findIndex(b=>b.type==="text"&&(b as TextBlock).content.includes("제휴 링크가 포함"));
+        const firstImgIdx=effectiveBlocks.findIndex(b=>b.type==="image"||b.type==="image-pair");
+        const at = discIdx>=0 ? discIdx+1 : (firstImgIdx>=0 ? firstImgIdx+1 : 0);   // 제휴문구 뒤 > 썸네일 뒤 > 맨 앞
+        effectiveBlocks=[...effectiveBlocks.slice(0,at),gBlock,...effectiveBlocks.slice(at)];
       }
     }
     const publishBody={
