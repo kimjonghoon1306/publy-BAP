@@ -2099,6 +2099,13 @@ ${catGuide}
    예) "${keyword||title} 어떻게 고를까요?"  "왜 ${keyword||title}가 인기일까요?"  "${keyword||title} 추천 이유는?"
 ✅ 소제목은 짧게(10~30자), 서술형 종결어미(~요/~다)로 끝내지 말 것 (제목처럼)
 ✅ 키워드 "${keyword||title}"를 본문에 2~6회 자연스럽게 반복 (검색 노출)
+
+=== 📱 단락 분리 규칙 — 모바일 가독성 최우선(반드시 지킬 것) ===
+✅ 모든 단락과 단락 사이는 반드시 "빈 줄 하나"(엔터 두 번)로 분리 — 문단이 절대 딱 붙지 않게
+✅ 한 단락은 2~4문장까지만. 길어지면 끊어서 새 단락(빈 줄)으로 나누기
+✅ 소제목은 그 자체로 한 줄 단독 + 앞뒤로 빈 줄 (위 단락과, 아래 내용과 딱 붙이지 말 것)
+✅ "첫째/둘째/셋째", "1. 2. 3.", "① ② ③" 처럼 순서·항목을 나열할 때는 각 항목을 반드시 별도 단락(빈 줄)으로 분리 — 한 덩어리로 붙여 쓰지 말 것
+✅ 이유: 블로그는 얼마나 읽기 쉽고 편하냐가 전부다. 모바일에서 빽빽하면 안 읽힌다.
 ★ 아래 [글의 방향] 지침이 이 글의 성격을 결정한다 — 구조·어조·시작·초점을 그대로 따를 것 (다른 규칙과 충돌하면 [글의 방향] 우선)
 
 === 글 패턴 가이드 (매번 다르게) ===
@@ -2141,7 +2148,32 @@ POST3: (제목)|(이유)
       // 비동기 글 생성 도중 사용자가 직접입력으로 바꿔도 완료 시점의 최신 선택을 존중한다.
       if(flowImgCountAutoRef.current)setFlowImgCount(recommendImgCount(body));
       // ── tarry 방식: 블록 자동 분리 + 제목/태그 자동 연동 ──
-      const rawBlocks = body.split("\n\n").filter(Boolean).map(p=>({type:"text" as const,id:uid(),content:p}));
+      // ★모바일 가독성(테리 강조 2026-08-21): "단락이 끝나거나 첫째/둘째/셋째로 나뉠 때 꼭 분리".
+      //   AI가 여러 문장을 한 줄에 몰아 쓰거나 열거를 붙여 쓰면 발행 시 빽빽해져 모바일에서 안 읽힘.
+      //   → 블록으로 쪼갤 때 (a)열거항목(첫째/1./①/- 등)은 앞에서 끊고 (b)긴 문단은 2문장씩 끊는다.
+      //   FAQ/관련글 마커 블록은 구조가 있으니 그대로 둔다(건드리지 않음).
+      const isStructured=(t:string)=>/\[FAQ시작\]|\[FAQ끝\]|\[관련글시작\]|\[관련글끝\]|\[참고자료시작\]|\[참고자료끝\]/.test(t);
+      const splitSentences2=(t:string):string[]=>{ // 긴 줄을 2문장씩(약 130자 초과 시)
+        if(t.length<=130)return[t];
+        const sents=t.match(/[^.!?。！？]+[.!?。！？]+["'”’)\]]*\s*|[^.!?。！？]+$/g)||[t];
+        const groups:string[]=[]; for(let i=0;i<sents.length;i+=2)groups.push(sents.slice(i,i+2).join("").trim());
+        return groups.filter(Boolean);
+      };
+      const enumRe=/^(\s*(?:첫째|둘째|셋째|넷째|다섯째|여섯째|[0-9]+[.)]|[①②③④⑤⑥⑦⑧⑨⑩]|[-•·]))\s/;
+      const normalizeToBlocks=(raw:string):string[]=>{
+        const out:string[]=[];
+        raw.split(/\n\n+/).forEach(chunk=>{
+          const c=chunk.trim(); if(!c)return;
+          if(isStructured(c)){ out.push(c); return; }            // 구조 블록은 그대로
+          c.split(/\n/).forEach(lineRaw=>{                        // 줄바꿈도 문단 경계로
+            const line=lineRaw.trim(); if(!line)return;
+            if(enumRe.test(line)){ out.push(line); return; }      // 열거 항목은 독립 문단
+            splitSentences2(line).forEach(p=>{const s=p.trim(); if(s)out.push(s);});
+          });
+        });
+        return out;
+      };
+      const rawBlocks = normalizeToBlocks(body).map(p=>({type:"text" as const,id:uid(),content:p}));
       setBlocks(rawBlocks.length>0?rawBlocks:[{type:"text",id:uid(),content:body}]);
       setPubTitle(title);
       if(tgm)setHashtags(tgm[1].trim().split(",").map((t:string)=>{const clean=t.trim().replace(/\s+/g,"");return clean.startsWith("#")?clean:"#"+clean;}).filter(Boolean).slice(0,Math.floor(Math.random()*4)+5));
