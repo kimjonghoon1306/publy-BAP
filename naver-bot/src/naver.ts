@@ -588,20 +588,14 @@ export async function publishNaver(params: {
         ".se-section-text [contenteditable='true']",
         ".se-main-container .se-section:not(.se-section-documentTitle) [contenteditable='true']",
       ];
+      // ★v2.0.30(잘 되던 때)로 되돌림: 마지막 편집영역을 "무조건" 클릭해 커서를 확실히 본문에 둔다.
+      //   v2.0.44에서 캡션칸(.se-caption) skip을 넣었더니, 이미지 바로 다음에 본문 문단이 아직 없을 때
+      //   클릭할 대상이 하나도 없어 커서가 붕 뜨고 → 이미지 직후 첫 텍스트(제휴 광고고지)가 통째로
+      //   유실되던 회귀가 생겼다. 캡션 오염 방지보다 "제휴문구가 아예 안 나오는" 게 더 큰 문제라 원복.
       for (const sel of bodySels) {
         try {
           const els = await frame.$$(sel);
-          // ★ 뒤(문서 끝)에서부터 보되, 이미지 캡션칸(.se-caption 안)은 절대 클릭하지 않는다.
-          //   (셀렉터가 캡션 contenteditable도 잡아서, 마지막 블록이 이미지면 커서가 캡션칸에 들어가고
-          //    그 다음 본문 텍스트(예: 제휴 광고고지)가 캡션에 따라 써지던 근본 버그 차단.
-          //    v2.0.30 셀렉터는 그대로 두어 글·이미지 순서는 유지, 캡션만 제외.)
-          for (let k = els.length - 1; k >= 0; k--) {
-            const inCaption = await els[k].evaluate(node => !!(node as HTMLElement).closest(".se-caption")).catch(() => false);
-            if (inCaption) continue;
-            await els[k].click({ timeout: 3000 });
-            await page.waitForTimeout(120);
-            return;
-          }
+          if (els.length) { await els[els.length - 1].click({ timeout: 3000 }); await page.waitForTimeout(120); return; }
         } catch {}
       }
       await frame.click(".se-main-container", { timeout: 3000 }).catch(() => {});
