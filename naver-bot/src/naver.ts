@@ -300,13 +300,24 @@ export async function publishNaver(params: {
   const title = rawTitle.replace(/\n/g, " ").trim().slice(0, 40);
 
   // pubScope에 따라 블록 필터링 + 마커 제거
-  const processedBlocks = (blocks || []).map(b => {
-    if (b.type !== "text") return b;
-    const text = b.content || "";
-    if (pubScope === "body" && /\[FAQ시작\]|\[참고자료시작\]|\[관련글시작\]/.test(text)) return null;
-    if (pubScope === "faq" && /\[참고자료시작\]|\[관련글시작\]/.test(text)) return null;
-    return { ...b, content: cleanContent(text) };
-  }).filter(Boolean) as typeof blocks;
+  //   ★ "블록 단위"로 마커 포함 블록만 지우면, FAQ/Q&A가 여러 블록으로 쪼개졌을 때
+  //     [FAQ시작] 마커 없는 Q&A 내용 블록이 살아남아 "본문만인데 Q&A가 들어가는" 버그가 됐다.
+  //     FAQ·참고자료·관련글은 항상 글의 "뒷부분"이므로, 경계(시작 마커)가 처음 나오는 블록부터
+  //     끝까지 통째로 잘라낸다(쪼개져도 확실히 제거). body=세 구간 전부, faq=참고자료·관련글만.
+  const cutRe = pubScope === "body"
+    ? /\[FAQ시작\]|\[참고자료시작\]|\[관련글시작\]/
+    : pubScope === "faq"
+    ? /\[참고자료시작\]|\[관련글시작\]/
+    : null;
+  let cutIdx = -1;
+  if (cutRe) {
+    cutIdx = (blocks || []).findIndex(b => b.type === "text" && cutRe.test(b.content || ""));
+  }
+  const keptBlocks = cutIdx >= 0 ? (blocks || []).slice(0, cutIdx) : (blocks || []);
+  if (cutIdx >= 0) console.log(`[naver] 본문설정(${pubScope}): 경계 이후 ${(blocks || []).length - cutIdx}개 블록 제거`);
+  const processedBlocks = keptBlocks.map(b =>
+    b.type === "text" ? { ...b, content: cleanContent(b.content || "") } : b
+  ) as typeof blocks;
 
   const cleanedContent = cleanContent(content);
   if (!naverSessionExists(userId)) throw new Error("네이버 세션 없음. 계정 재연결 필요");
@@ -616,6 +627,16 @@ export async function publishNaver(params: {
 
       await moveCursorToEnd();
       await page.waitForTimeout(200);
+      // ★진단+방어: 본문 타이핑 직전 커서가 이미지 캡션칸(.se-caption)에 있으면 본문으로 다시 이동.
+      //   (제휴 광고고지 등 본문 텍스트가 캡션에 새는 것 방지. throw 없이 — 못 빼도 그냥 진행.)
+      //   어떤 텍스트를 넣는지 + 캡션에서 뺐는지 로그로 남겨 실제 경로를 눈으로 확인 가능하게.
+      const beforeCap = await frame.evaluate(() => !!(document.activeElement as HTMLElement | null)?.closest(".se-caption")).catch(() => false);
+      if (beforeCap) {
+        console.log(`[naver] ⚠️ 본문 입력 직전 커서가 캡션칸 감지 → 본문으로 이동 (텍스트: ${plain.slice(0, 20)})`);
+        await moveCursorToEnd();
+        await page.waitForTimeout(120);
+      }
+      console.log(`[naver] 본문 텍스트 입력: ${plain.slice(0, 25)}${plain.length > 25 ? "…" : ""}`);
       // 앞 문단/이미지와 사이에 빈 줄 하나 → 문단이 딱 붙지 않게(모바일 가독성)
       //   블록 사이도 "엔터 2번(빈 줄 하나)"으로 통일 — 블록 안 문단 간격과 동일하게 숨통 트이게.
       if (spacerBefore && anyBodyWritten) {
