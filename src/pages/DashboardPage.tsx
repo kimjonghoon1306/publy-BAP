@@ -2201,7 +2201,7 @@ ${segList}`;
       const postOnce=()=>botFetch(`${BOT}/api/flow-generate`,{
         method:"POST",headers:{"Content-Type":"application/json"},
         body:JSON.stringify({prompts,captions:caps}),
-        signal:AbortSignal.timeout(imgCount*120000+30000),
+        signal:AbortSignal.timeout(n*120000+30000),
       });
       let r=await postOnce();
       let d=await r.json();
@@ -2361,18 +2361,20 @@ ${segList}`;
       effectiveBlocks=textBlocks.length>0?[imgBlocks[0],...interleave(textBlocks,imgBlocks.slice(1))]:[...imgBlocks];
       if(!thumbnail && activeImgs[0]) setThumbnail(activeImgs[0]);
     }
-    // ── 온파트너 링크: 링크가 연결된 배너를 본문에 분산 삽입(상품당 1개, Q&A·해시태그 위) ──
+    // ── 온파트너 링크: URL 문단을 본문에 분산 삽입(상품당 1개, Q&A·해시태그 위) ──
     // ★안전장치: 조회만 하고 저장(💾) 안 한 상품(onPartnerPreview)도 발행에 포함.
     const partnerForPublish:OnPartnerItem[] = onPartnerItems.length>0 ? onPartnerItems : (onPartnerPreview?[onPartnerPreview]:[]);
     console.log("[publy] 온파트너 링크 대상:", partnerForPublish.length, "개", partnerForPublish.map(it=>it.product.name));
     if(partnerForPublish.length>0){
       const items=partnerForPublish.filter(it=>it.product.available&&it.product.partnerUrl);
       if(items.length>0){
-      // ★고지 문단을 "썸네일 바로 다음"(본문 맨 앞)에 무조건 1회. 이미 있으면 중복 안 넣음.
+      // ★고지 문단을 선행 썸네일/이미지 바로 다음의 본문 문단으로 1회 삽입.
       const DISCLOSURE="※ 이 글에는 제휴 링크가 포함되어 있으며, 구매 시 작성자에게 일정 수수료가 발생할 수 있습니다.";
       const hasDisclosure=effectiveBlocks.some(b=>b.type==="text"&&(b as TextBlock).content.includes("제휴 링크가 포함"));
       if(!hasDisclosure){
-        effectiveBlocks=[{type:"text",id:uid(),content:DISCLOSURE} as ContentBlock,...effectiveBlocks];
+        let disclosureIdx=0;
+        while(disclosureIdx<effectiveBlocks.length&&(effectiveBlocks[disclosureIdx].type==="image"||effectiveBlocks[disclosureIdx].type==="image-pair")) disclosureIdx++;
+        effectiveBlocks=[...effectiveBlocks.slice(0,disclosureIdx),{type:"text",id:uid(),content:DISCLOSURE} as ContentBlock,...effectiveBlocks.slice(disclosureIdx)];
       }
       // 광고 금지 경계: FAQ/Q&A/관련글/해시태그 섹션 시작 텍스트 블록 — 광고는 이 위에만.
       const isBoundary=(b:ContentBlock)=>b.type==="text"&&/\[FAQ시작\]|\[관련글시작\]|질문\s*답변|Q\s*&\s*A|큐앤에이|해시태그|자주\s*묻는/i.test((b as TextBlock).content);
@@ -2394,8 +2396,8 @@ ${segList}`;
           withLink.push(b);
           items.forEach((it,k)=>{
             if(insertAfter[k]===i){
-              // 상품 하나를 단일 이미지 링크 블록으로 유지해 링크 사이에 본문 문단이 끼지 않게 한다.
-              withLink.push({type:"image",id:uid(),src:it.banner,alt:it.product.name,position:"center",source:"auto",link:it.product.partnerUrl} as ContentBlock);
+              // 안내와 URL을 하나의 텍스트 블록으로 유지해 상품 카드 사이에 본문이 끼지 않게 한다.
+              withLink.push({type:"text",id:uid(),content:`👇 '${it.product.name}' 지금 바로 확인하기\n${it.product.partnerUrl}`} as ContentBlock);
             }
           });
         });
@@ -2420,9 +2422,9 @@ ${segList}`;
         return null;
       }).filter(Boolean),
       // Flow 이미지 설정
-      useFlow: imgGenType === "flow",
-      flowImgCount: imgGenType === "flow" ? flowImgCount : undefined,
-      flowPrompts: imgGenType === "flow" ? (() => {
+      useFlow: imgGenType === "flow" && generatedImages.length === 0,
+      flowImgCount: imgGenType === "flow" && generatedImages.length === 0 ? flowImgCount : undefined,
+      flowPrompts: imgGenType === "flow" && generatedImages.length === 0 ? (() => {
         const c = genContent || "";
         const lines = c.split("\n").filter((l:string) => l.trim().length > 5);
         const step = Math.max(1, Math.floor(lines.length / flowImgCount));
@@ -2431,7 +2433,7 @@ ${segList}`;
           return buildFlowPrompt(keyword||genTitle, pubTitle, seg, i);
         });
       })() : undefined,
-      flowCaptions: imgGenType === "flow"
+      flowCaptions: imgGenType === "flow" && generatedImages.length === 0
         ? buildCaptions(keyword||genTitle, flowImgCount, genContent)
         : undefined,
     };

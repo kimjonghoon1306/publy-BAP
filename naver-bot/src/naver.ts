@@ -592,6 +592,7 @@ export async function publishNaver(params: {
 
       await moveCursorToEnd();
       await page.waitForTimeout(200);
+      await ensureBodyTypingFocus();
       // 앞 문단/이미지와 사이에 빈 줄 하나 → 문단이 딱 붙지 않게(모바일 가독성)
       //   블록 사이도 "엔터 2번(빈 줄 하나)"으로 통일 — 블록 안 문단 간격과 동일하게 숨통 트이게.
       if (spacerBefore && anyBodyWritten) {
@@ -1735,9 +1736,11 @@ export async function generateFlowImagesCDP(params: {
           freshCandidates = snap.fresh;
           stableChecks = snap.fresh.length === previousCount ? stableChecks + 1 : 0;
           previousCount = snap.fresh.length;
-          if (!snap.generating && stableChecks >= 2) break;
-          // Flow의 진행중 문구가 화면에 남는 UI에서도 첫 후보 뒤 15초 이상 불필요하게 기다리지 않는다.
-          if (t - firstCandidateAt >= 5) break;
+          // 보통 4장 그리드가 순차 렌더되므로 4장이 모이면 생성 종료+안정을 확인해 종료한다.
+          // UI가 4장보다 적게 내는 경우도 있어, 첫 후보 후 30초간 개수가 안정되고 생성 표시가 끝나면 종료한다.
+          const gridComplete = snap.fresh.length >= 4;
+          const fallbackSettled = t - firstCandidateAt >= 10;
+          if (!snap.generating && stableChecks >= 2 && (gridComplete || fallbackSettled)) break;
         }
       }
 
