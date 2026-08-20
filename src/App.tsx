@@ -22,6 +22,7 @@ declare global {
       openAppUpdate: (url: string) => Promise<boolean>;
       openLogFolder: () => Promise<boolean>;
       readBotLog: () => Promise<string>;
+      getAppVersion: () => Promise<string>;
     };
   }
 }

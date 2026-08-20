@@ -261,6 +261,9 @@ ipcMain.handle("open-app-update", async (_event, url: string) => {
   return true;
 });
 
+/* ── 앱 버전 (화면에 표시해 회원이 최신인지 눈으로 확인) ── */
+ipcMain.handle("get-app-version", () => app.getVersion());
+
 /* ── 버그 신고: 봇 로그 폴더 열기 ── 회원이 문제 신고 시 이 폴더의 로그 파일을 보내면 원인 확인 가능. */
 ipcMain.handle("open-log-folder", async () => {
   const dir = path.join(app.getPath("userData"), "logs");

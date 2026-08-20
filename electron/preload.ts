@@ -11,4 +11,5 @@ contextBridge.exposeInMainWorld("electron", {
   openAppUpdate:    (url: string) => ipcRenderer.invoke("open-app-update", url),
   openLogFolder:    () => ipcRenderer.invoke("open-log-folder"),
   readBotLog:       () => ipcRenderer.invoke("read-bot-log"),
+  getAppVersion:    () => ipcRenderer.invoke("get-app-version"),
 });

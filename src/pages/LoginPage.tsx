@@ -343,6 +343,7 @@ function PWAInstallBtn({ theme }: { theme: "dark" | "light" }) {
 
 
 export default function LoginPage({ onLogin, onAdminLogin, theme, onThemeToggle }: Props) {
+  const [appVersion, setAppVersion] = useState("");
   const logoTapCount = useRef(0);
   const logoTapTimer = useRef<ReturnType<typeof setTimeout>|null>(null);
   const handleLogoTap = () => {
@@ -359,6 +360,12 @@ export default function LoginPage({ onLogin, onAdminLogin, theme, onThemeToggle 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [refCode, setRefCode] = useState("");
+
+  useEffect(()=>{
+    let alive = true;
+    window.electron?.getAppVersion?.().then(version=>{ if(alive) setAppVersion(version); }).catch(()=>{});
+    return ()=>{ alive = false; };
+  }, []);
 
   useEffect(()=>{
     // URL 파라미터 방식은 Electron에서 동작 안 함 — 코드 직접 입력으로 전환
@@ -454,7 +461,10 @@ export default function LoginPage({ onLogin, onAdminLogin, theme, onThemeToggle 
 
         {/* 상단 */}
         <div className="top-bar">
-          <div className="top-brand">PUBLY</div>
+          <div style={{display:"flex",alignItems:"baseline",gap:8}}>
+            <div className="top-brand">PUBLY</div>
+            {appVersion&&<span style={{fontSize:11,color:theme==="dark"?"rgba(255,255,255,.45)":"rgba(0,0,0,.48)",letterSpacing:".04em"}}>{appVersion.startsWith("v")?appVersion:`v${appVersion}`}</span>}
+          </div>
           <div style={{ display: "flex", gap: 10 }}>
             <button className="top-btn" onClick={onThemeToggle}>{theme === "dark" ? "☀️" : "🌙"}</button>
           </div>

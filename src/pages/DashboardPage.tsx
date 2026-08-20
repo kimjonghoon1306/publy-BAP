@@ -543,6 +543,7 @@ const PUBLY_SERVICE_INFO: Record<ServiceInfoKey,{icon:string;name:string;hook:st
 };
 
 export default function DashboardPage({user, onLogout, onAdminLogin, onThemeToggle, theme}: Props) {
+  const [appVersion, setAppVersion] = useState("");
   const [serviceInfo, setServiceInfo] = useState<ServiceInfoKey|null>(null);
   useEffect(()=>{
     if(!serviceInfo)return;
@@ -862,6 +863,12 @@ Output format (JSON array only, no other text):
   const [pubTitle, setPubTitle] = useState("");
   const [pubTags, setPubTags] = useState("");
   const [publishing, setPublishing] = useState(false);
+  const [liveLog, setLiveLog] = useState("");
+  const [liveLogCollapsed, setLiveLogCollapsed] = useState(false);
+  const [fullLog, setFullLog] = useState<string|null>(null);
+  const [fullLogLoading, setFullLogLoading] = useState(false);
+  const liveLogSnapshotRef = useRef("");
+  const liveLogEndRef = useRef<HTMLDivElement|null>(null);
   const [pubMsg, setPubMsg] = useState("");
   const [pubScope, setPubScope] = useState<"body"|"faq"|"full">("full");
   const [imgGenFailed, setImgGenFailed] = useState(false);
@@ -913,6 +920,54 @@ Output format (JSON array only, no other text):
     const timer=setInterval(()=>setKstNow(formatKstDateTime(new Date(), true)),1000);
     return ()=>clearInterval(timer);
   },[]);
+
+  useEffect(()=>{
+    let alive = true;
+    window.electron?.getAppVersion?.().then(version=>{ if(alive) setAppVersion(version); }).catch(()=>{});
+    return ()=>{ alive = false; };
+  },[]);
+
+  const liveLogActive = (tab==="publish"&&publishing)||(tab==="image"&&genImgLoading);
+  useEffect(()=>{
+    if(!liveLogActive||!window.electron?.readBotLog)return;
+    let alive = true;
+    let polling = false;
+    setLiveLog("");
+    liveLogSnapshotRef.current = "";
+    const poll = async()=>{
+      if(polling)return;
+      polling = true;
+      try{
+        const next = (await window.electron?.readBotLog?.())||"";
+        if(!alive||next===liveLogSnapshotRef.current)return;
+        const previous = liveLogSnapshotRef.current;
+        let added = next;
+        if(previous&&next.startsWith(previous)) added = next.slice(previous.length);
+        else if(previous){
+          let overlap = Math.min(previous.length,next.length);
+          while(overlap>0&&!previous.endsWith(next.slice(0,overlap))) overlap--;
+          added = next.slice(overlap);
+        }
+        liveLogSnapshotRef.current = next;
+        if(added) setLiveLog(current=>current+added);
+      }catch{}
+      finally{ polling = false; }
+    };
+    void poll();
+    const interval = window.setInterval(poll,1250);
+    return ()=>{ alive=false; window.clearInterval(interval); };
+  },[liveLogActive]);
+
+  useEffect(()=>{
+    if(!liveLogCollapsed) liveLogEndRef.current?.scrollIntoView({block:"end"});
+  },[liveLog,liveLogCollapsed]);
+
+  async function openFullLog(){
+    setFullLogLoading(true);
+    try{ setFullLog((await window.electron?.readBotLog?.())||"로그가 없습니다."); }
+    catch{ setFullLog("로그를 불러오지 못했습니다."); }
+    finally{ setFullLogLoading(false); }
+  }
 
   // ── 블록 에디터 (tarry 방식) ──
   type TextBlock = {type:"text";id:string;content:string};
@@ -3228,6 +3283,7 @@ POST3: (제목)|(이유)
             <div className="logo-ico" style={{fontSize:17,fontWeight:900,color:"#000"}}>P</div>
             <span className="logo-text">PUBLY</span>
           </button>
+          {appVersion&&<span style={{fontSize:10.5,color:"var(--text3)",fontWeight:600,whiteSpace:"nowrap"}}>{appVersion.startsWith("v")?appVersion:`v${appVersion}`}</span>}
           <div className="header-mid">
             <button className={`plat-btn ${platform==="naver"?"plat-btn-naver":"plat-btn-naver-off"}`} onClick={()=>setPlatform("naver")}>🟢 네이버</button>
             <button className={`plat-btn ${platform==="tistory"?"plat-btn-tistory":"plat-btn-tistory-off"}`} onClick={()=>setPlatform("tistory")}>🟠 티스토리</button>
@@ -5497,6 +5553,8 @@ POST3: (제목)|(이유)
                       <div style={{fontSize:12,color:"var(--text3)"}}>문제가 생기면 아래 버튼으로 신고해주세요. 로그가 함께 전송돼 원인을 빠르게 찾아드려요.</div>
                     </div>
                     <div style={{display:"flex",gap:8,flexShrink:0}}>
+                      <button onClick={openFullLog} disabled={fullLogLoading||!window.electron?.readBotLog}
+                        style={{padding:"9px 15px",borderRadius:10,border:"1px solid var(--border)",background:"var(--bg)",color:"var(--text2)",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:"inherit"}}>{fullLogLoading?"불러오는 중...":"📋 전체 로그 보기"}</button>
                       <button onClick={()=>(window as any).electron?.openLogFolder?.()}
                         style={{padding:"9px 15px",borderRadius:10,border:"1px solid var(--border)",background:"var(--bg)",color:"var(--text2)",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:"inherit"}}>📂 로그 폴더 열기</button>
                       <button onClick={submitBugReport} disabled={bugSending}
@@ -5755,6 +5813,31 @@ POST3: (제목)|(이유)
       )}
 
       {/* 버그 신고 처리완료 알림 — 화면 어디에 있든 뜸 */}
+      {liveLogActive&&(
+        <div style={{position:"fixed",left:0,right:0,bottom:0,zIndex:500,height:liveLogCollapsed?42:180,background:theme==="dark"?"#0d1117":"#f6f8fa",borderTop:`1px solid ${theme==="dark"?"#30363d":"#d0d7de"}`,boxShadow:"0 -6px 20px rgba(0,0,0,.16)",display:"flex",flexDirection:"column",transition:"height .18s ease"}}>
+          <div style={{height:42,flexShrink:0,padding:"0 14px",display:"flex",alignItems:"center",justifyContent:"space-between",color:theme==="dark"?"#e6edf3":"#24292f",borderBottom:liveLogCollapsed?"none":`1px solid ${theme==="dark"?"#30363d":"#d0d7de"}`}}>
+            <span style={{fontSize:12,fontWeight:800}}>📋 실시간 로그 · {tab==="publish"?"발행 중":"이미지 생성 중"}</span>
+            <button onClick={()=>setLiveLogCollapsed(value=>!value)} style={{border:0,background:"transparent",color:"inherit",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:"inherit"}}>{liveLogCollapsed?"펼치기 ▲":"접기 ▼"}</button>
+          </div>
+          {!liveLogCollapsed&&<div style={{flex:1,overflowY:"auto",padding:"9px 14px",fontFamily:"ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",fontSize:11.5,lineHeight:1.55,whiteSpace:"pre-wrap",wordBreak:"break-word",color:theme==="dark"?"#b1bac4":"#57606a"}}>
+            {liveLog?liveLog.split(/\r?\n/).map((line,index)=>{
+              const success=/✅|완료|성공/i.test(line), failure=/❌|실패|오류|error/i.test(line);
+              return <div key={index} style={{color:success?(theme==="dark"?"#3fb950":"#1a7f37"):failure?(theme==="dark"?"#f85149":"#cf222e"):undefined,minHeight:"1.55em"}}>{line}</div>;
+            }):<div style={{color:theme==="dark"?"#8b949e":"#6e7781"}}>로그를 기다리는 중...</div>}
+            <div ref={liveLogEndRef}/>
+          </div>}
+        </div>
+      )}
+
+      {fullLog!==null&&(
+        <div style={{position:"fixed",inset:0,zIndex:10060,background:"rgba(0,0,0,.72)",display:"flex",alignItems:"center",justifyContent:"center",padding:20}} onClick={()=>setFullLog(null)}>
+          <div style={{width:"min(900px,100%)",height:"min(680px,85vh)",background:theme==="dark"?"#0d1117":"#f6f8fa",border:`1px solid ${theme==="dark"?"#30363d":"#d0d7de"}`,borderRadius:16,overflow:"hidden",display:"flex",flexDirection:"column",boxShadow:"0 24px 70px rgba(0,0,0,.5)"}} onClick={event=>event.stopPropagation()}>
+            <div style={{padding:"13px 16px",display:"flex",alignItems:"center",justifyContent:"space-between",borderBottom:`1px solid ${theme==="dark"?"#30363d":"#d0d7de"}`,color:theme==="dark"?"#e6edf3":"#24292f"}}><strong style={{fontSize:14}}>📋 전체 로그</strong><button onClick={()=>setFullLog(null)} style={{border:0,background:"transparent",color:"inherit",cursor:"pointer",fontSize:18}}>✕</button></div>
+            <pre style={{margin:0,padding:16,flex:1,overflow:"auto",whiteSpace:"pre-wrap",wordBreak:"break-word",fontFamily:"ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",fontSize:11.5,lineHeight:1.55,color:theme==="dark"?"#b1bac4":"#57606a"}}>{fullLog}</pre>
+          </div>
+        </div>
+      )}
+
       {bugAlert&&(
         <div style={{position:"fixed",inset:0,zIndex:10050,background:"rgba(0,0,0,.85)",display:"flex",alignItems:"center",justifyContent:"center",padding:20}}
           onClick={dismissBugAlert}>
