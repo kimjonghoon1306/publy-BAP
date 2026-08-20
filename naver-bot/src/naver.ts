@@ -753,34 +753,20 @@ export async function publishNaver(params: {
         const ok = await uploadFileToEditor(tmpFile);
         if (ok) {
           console.log("[naver] ✅ 이미지 업로드 완료");
-          // 가운데 정렬(항상)
-          await centerLastImage();
           if (alt?.trim()) {
-            // 네이버 전용 캡션칸에만 입력(★밖 문단 폴백 제거 — 캡션이 본문 밖으로 새지 않게)
+            // ★캡션 있는 이미지(본문 이미지): 이미지를 클릭해 정렬 + 캡션 입력.
+            //   캡션 타이핑이 이미지를 '확정'해 커서가 본문으로 정상 복귀하므로 이미지를 잡아도 안전.
+            await centerLastImage();
             const capOk = await fillLastImageCaption(alt.trim());
             console.log(capOk ? "[naver] ✅ 이미지 캡션 입력: " + alt.trim() : "[naver] ⚠️ 캡션칸 못찾음(캡션 생략)");
           } else {
-            // ★온파트너 썸네일 등 "캡션 없는 이미지"(alt="")의 근본버그 해결(테리 실측 진단, 2026-08-21):
-            //   캡션을 칠 때는 캡션 타이핑이 이미지를 '확정'하며 이미지 아래에 본문 문단이 생겨,
-            //   바로 다음 본문 첫 줄(제휴 광고고지)이 정상 입력됐다.
-            //   그런데 캡션을 건너뛰면(온파트너 썸네일) 이미지가 '선택'된 채로 남아 아래 본문 문단이
-            //   안 생기고, 다음 제휴문구가 갈 곳이 없어 '썸네일 한 번 클릭할 때' 통째로 날아갔다.
-            //   → 캡션 없이도 이미지를 클릭해 선택한 뒤 아래로 커서를 내려 본문 문단을 확보한다.
-            try {
-              const comps = await frame.$$(".se-component.se-image");
-              const comp = comps[comps.length - 1];
-              const imgRes = comp ? (await comp.$(".se-image-resource") ?? await comp.$("img")) : null;
-              if (imgRes) { await imgRes.click({ force: true }).catch(() => {}); await page.waitForTimeout(300); }
-              // 이미지 선택 상태에서 아래로 → 이미지 밖 본문 문단으로. 없으면 Enter로 새 본문 문단 생성.
-              await page.keyboard.press("ArrowDown");
-              await page.waitForTimeout(200);
-              const inBody = await frame.evaluate(() => {
-                const a = document.activeElement as HTMLElement | null;
-                return !!(a && a.closest(".se-component.se-text") && !a.closest(".se-caption"));
-              }).catch(() => false);
-              if (!inBody) { await page.keyboard.press("Enter"); await page.waitForTimeout(200); }
-              console.log(`[naver] 캡션 없는 이미지 → 아래 본문 문단 확보(제휴문구 유실 방지, inBody=${inBody})`);
-            } catch (e) { console.log("[naver] 캡션 없는 이미지 본문 복귀 처리 실패:", String(e).slice(0, 60)); }
+            // ★캡션 없는 이미지(온파트너 썸네일 등)의 근본해결 (테리 실측 진단, 2026-08-21):
+            //   증상=썸네일을 '잡아(선택)' 캡션을 쓰려다, 캡션을 안 쓰니 번쩍하며 이미지가 선택된 채 남고
+            //        바로 다음 제휴문구가 갈 곳 없이 통째로 날아감('썸네일 한 번 클릭할 때 날린다').
+            //   해결=캡션 없는 이미지는 "이미지를 절대 클릭/선택/정렬하지 않는다".
+            //        업로드 직후 커서가 이미지 다음 본문에 있는 '자연 상태'를 그대로 두면 제휴문구가 정상 입력된다.
+            //        (정렬 centerLastImage()도 이미지를 클릭하므로 캡션 없을 땐 생략 — 정렬보다 제휴문구가 우선.)
+            console.log("[naver] 캡션 없는 이미지 → 이미지 안 건드림(선택/정렬/캡션 전부 생략, 제휴문구 유실 방지)");
           }
           // 온파트너 배너 등: 이미지에 링크 걸기(클릭 시 쇼핑몰)
           if (link?.trim()) {
