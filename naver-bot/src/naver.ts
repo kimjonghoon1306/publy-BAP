@@ -504,74 +504,23 @@ export async function publishNaver(params: {
     // ── 커서를 문서 맨 끝(마지막 블록의 끝)으로 확실히 이동 ──
     //   기존 Meta+End 단독은 Mac에서 '스크롤'만 하고 커서를 안 옮겨 글/이미지가 중간에 끼어들던 근본 버그를 잡음.
     async function moveCursorToEnd() {
-      // 마지막 "본문 텍스트 문단"을 실제 클릭 → 커서가 문서 끝으로.
+      // 마지막 편집영역(가장 아래 contenteditable)을 실제 클릭 → 커서가 문서 끝으로.
       //   ⚠️ frame.evaluate(Selection API)는 이미지 업로드 직후 실제 브라우저에서 무한 대기/페이지 닫힘을
       //   유발(headless에선 재현 안 됨, 실측으로 확인). Meta+End(Mac)도 페이지 닫힘 유발. → 클릭 방식만 사용.
-      //   ★★캡션 오염 + 순서 둘 다 만족: 문서의 "진짜 맨 끝" 편집영역을 집되(→ 이미지-글-이미지 순서 유지),
-      //     이미지 캡션칸(.se-caption 안)과 제목은 제외한다(→ 본문이 캡션에 써지던 버그 방지).
-      //     DOM 순서상 마지막 본문 텍스트 편집영역부터 뒤로 보며 "마지막 이미지 뒤 문단"을 클릭.
-      //     (예전 v2.0.32는 캡션까지 집어 오염, 그 직후 수정은 본문컴포넌트만 좁혀 이미지 뒤 위치를 못 찾아
-      //      글·이미지 순서가 뒤바뀜 → 이 방식이 둘 다 해결.)
-      try {
-        // 이미지 업로드 직후 SE4가 이미지 아래 빈 텍스트 컴포넌트를 늦게 만들 수 있다.
-        // 연속 이미지에서도 직전 이미지 앞 문단으로 돌아가지 않도록 그 후행 문단을 잠시 기다린다.
-        for (let attempt = 0; attempt < 15; attempt++) {
-          const editables = await frame.$$(".se-main-container .se-component.se-text [contenteditable='true']");
-          let fallback: typeof editables[number] | undefined;
-          for (let k = editables.length - 1; k >= 0; k--) {
-            const state = await editables[k].evaluate(node => {
-              const el = node as HTMLElement;
-              if (el.closest(".se-caption, .se-section-documentTitle, .se-documentTitle")) {
-                return { skip: true, afterLastImage: false };
-              }
-              const lastImage = [...document.querySelectorAll(".se-main-container .se-component.se-image")].pop();
-              const afterLastImage = !lastImage || !!(lastImage.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING);
-              return { skip: false, afterLastImage };
-            }).catch(() => ({ skip: true, afterLastImage: false }));
-            if (state.skip) continue;
-            fallback = editables[k];
-            if (state.afterLastImage) {
-              await editables[k].click({ timeout: 3000 });
-              await page.waitForTimeout(120);
-              return;
-            }
-            break;
-          }
-          // 이미지가 없거나 후행 문단 생성 대기 대상이 아니면 즉시 마지막 본문 영역 사용.
-          const hasImage = await frame.$(".se-main-container .se-component.se-image");
-          if (!hasImage && fallback) {
-            await fallback.click({ timeout: 3000 });
-            await page.waitForTimeout(120);
-            return;
-          }
-          await page.waitForTimeout(100);
-        }
-      } catch {}
-      // 폴백: 편집영역을 못 찾으면 컨테이너 클릭
+      const bodySels = [
+        ".se-section-text:last-of-type [contenteditable='true']",
+        ".se-main-container .se-section:not(.se-section-documentTitle):last-of-type [contenteditable='true']",
+        ".se-section-text [contenteditable='true']",
+        ".se-main-container .se-section:not(.se-section-documentTitle) [contenteditable='true']",
+      ];
+      for (const sel of bodySels) {
+        try {
+          const els = await frame.$$(sel);
+          if (els.length) { await els[els.length - 1].click({ timeout: 3000 }); await page.waitForTimeout(120); return; }
+        } catch {}
+      }
       await frame.click(".se-main-container", { timeout: 3000 }).catch(() => {});
       await page.waitForTimeout(120);
-    }
-
-    // ★ 본문 타이핑 직전 캡션 오염 방어선.
-    // SE4의 activeElement 구조는 상태/버전별로 달라 본문 여부를 성공 조건으로 쓸 수 없다.
-    // 캡션에 있음이 확실할 때만 커서를 빼내고, 판정/교정이 안 되어도 원래 타이핑은 막지 않는다.
-    async function ensureBodyTypingFocus(): Promise<void> {
-      for (let attempt = 0; attempt < 3; attempt++) {
-        const inCaption = await frame.evaluate(() => {
-          const active = document.activeElement as HTMLElement | null;
-          return !!active?.closest(".se-caption");
-        }).catch(() => false);
-        if (!inCaption) return;
-        console.log(`[naver] ⚠️ 본문 타이핑 직전 캡션 포커스 감지 — 본문으로 이동 시도 (${attempt + 1}/3)`);
-        await moveCursorToEnd();
-        await page.waitForTimeout(150);
-      }
-      console.log("[naver] ⚠️ 캡션 포커스 교정을 확인하지 못했지만 본문 타이핑은 계속합니다.");
-    }
-
-    async function typeBodyText(text: string, delay: number): Promise<void> {
-      await ensureBodyTypingFocus();
-      await page.keyboard.type(text, { delay });
     }
 
     // 텍스트 블록 입력 헬퍼
@@ -592,7 +541,6 @@ export async function publishNaver(params: {
 
       await moveCursorToEnd();
       await page.waitForTimeout(200);
-      await ensureBodyTypingFocus();
       // 앞 문단/이미지와 사이에 빈 줄 하나 → 문단이 딱 붙지 않게(모바일 가독성)
       //   블록 사이도 "엔터 2번(빈 줄 하나)"으로 통일 — 블록 안 문단 간격과 동일하게 숨통 트이게.
       if (spacerBefore && anyBodyWritten) {
@@ -604,7 +552,7 @@ export async function publishNaver(params: {
       const lines = plain.split("\n").filter(l => l.trim().length > 0); // 빈 줄 정리 후 균일 간격 적용
       for (let i = 0; i < lines.length; i++) {
         // delay를 높여 SE4가 붙여넣기가 아닌 진짜 타이핑으로 인식
-        await typeBodyText(lines[i], 80);
+        await page.keyboard.type(lines[i], { delay: 80 });
         await page.waitForTimeout(100);
         anyBodyWritten = true;
         if (i < lines.length - 1) {
@@ -638,10 +586,6 @@ export async function publishNaver(params: {
         try { await p.click({ timeout: 5000, force: true }); }
         catch { const r = await p.boundingBox(); if (r) await page.mouse.click(r.x + r.width / 2, r.y + r.height / 2); }
         await page.waitForTimeout(300);
-        const captionFocused = await frame.evaluate(() =>
-          !!(document.activeElement as HTMLElement | null)?.closest(".se-caption")
-        ).catch(() => false);
-        if (!captionFocused) return false;
         await page.keyboard.type(cap, { delay: 25 });
         await page.waitForTimeout(200);
         return true;
@@ -671,8 +615,7 @@ export async function publishNaver(params: {
         const input = await frame.$(".se-custom-layer-link-input");
         if (!input) return false;
         await input.click({ force: true }).catch(() => {});
-        const linkFilled = await input.fill(link).then(() => true).catch(() => false);
-        if (!linkFilled) return false;
+        await input.fill(link).catch(async () => { await page.keyboard.type(link, { delay: 15 }); });
         await page.waitForTimeout(300);
         // ★확인은 Enter가 아니라 "링크 입력" 적용 버튼 클릭이어야 실제로 걸린다(실측 확인).
         let applied = await frame.evaluate(() => {
@@ -749,7 +692,7 @@ export async function publishNaver(params: {
         await moveCursorToEnd();
         await page.keyboard.press("Enter");
         await page.waitForTimeout(200);
-        await typeBodyText(u, 40);
+        await page.keyboard.type(u, { delay: 40 });
         await page.keyboard.press("Enter");
         await page.waitForTimeout(3500); // 임베드 변환 대기
         console.log("[naver] ✅ 영상 임베드 완료");
@@ -794,7 +737,13 @@ export async function publishNaver(params: {
                 let capDone = false;
                 if (pairImages[1].alt?.trim()) capDone = await fillLastImageCaption(pairImages[1].alt.trim(), 0) || capDone;
                 if (pairImages[0].alt?.trim()) capDone = await fillLastImageCaption(pairImages[0].alt.trim(), 1) || capDone;
-                if (!capDone) console.log("[naver] ⚠️ 페어 이미지 캡션칸 못찾음(캡션 생략)");
+                // 캡션칸을 못 찾으면 문단 폴백
+                if (!capDone) {
+                  const pairAlt = pairImages[0].alt || pairImages[1].alt;
+                  if (pairAlt?.trim()) {
+                    try { await moveCursorToEnd(); await page.keyboard.press("Enter"); await insertText(pairAlt.trim()); } catch {}
+                  }
+                }
               }
             } catch(e) { console.log("[naver] 페어 이미지 업로드 실패:", e); }
             finally {
@@ -996,7 +945,7 @@ export async function publishNaver(params: {
         if (!reserveSelected) throw new Error("예약 라디오 선택 상태를 확인하지 못했습니다");
         await page.waitForTimeout(700);
 
-        // 2) 시(hour)·분(minute) select 드롭다운 설정
+        // 2) 시(hour)·분(minute): native select 우선, 없으면 button/listbox형 커스텀 드롭다운.
         const setTime = await frame.evaluate(({ h, m }: { h: number; m: number }) => {
           const selects = [...document.querySelectorAll("select")] as HTMLSelectElement[];
           const pick = (sel: HTMLSelectElement, want: number) => {
@@ -1019,28 +968,89 @@ export async function publishNaver(params: {
           }
           const okH = hourSel ? pick(hourSel, h) : false;
           const okM = minSel ? pick(minSel, m) : false;
-          return { okH, okM, selectCount: selects.length };
+          return { okH, okM, selectCount: selects.length, methodH: okH ? "select" : "none", methodM: okM ? "select" : "none" };
         }, { h: hour, m: min });
-        console.log(`[naver] 시/분 설정:`, JSON.stringify(setTime));
+        const setCustomTime = async (kind: "hour" | "minute", want: number): Promise<string> => {
+          const opened = await frame.evaluate((timeKind) => {
+            const visible = (e: Element) => { const el=e as HTMLElement,r=el.getBoundingClientRect(),s=getComputedStyle(el); return r.width>0&&r.height>0&&s.display!=="none"&&s.visibility!=="hidden"; };
+            const re=timeKind==="hour"?/시|hour/i:/분|minute/i;
+            const target=[...document.querySelectorAll("button, [role=combobox], [aria-haspopup=listbox], [aria-haspopup=menu]")]
+              .filter(visible).find(e=>re.test(`${e.getAttribute("aria-label")||""} ${e.getAttribute("title")||""} ${e.textContent||""} ${String(e.className)}`));
+            if(!target)return "control-not-found";
+            (target as HTMLElement).click();
+            return `${target.tagName.toLowerCase()}:${(target.textContent||target.getAttribute("aria-label")||"").trim().slice(0,40)}`;
+          },kind);
+          console.log(`[naver] ${kind === "hour" ? "시" : "분"} 커스텀 드롭다운 열기: ${opened}`);
+          if(opened==="control-not-found")return "none";
+          await page.waitForTimeout(300);
+          return frame.evaluate(({ value, timeKind })=>{
+            const visible=(e:Element)=>{const el=e as HTMLElement,r=el.getBoundingClientRect(),s=getComputedStyle(el);return r.width>0&&r.height>0&&s.display!=="none"&&s.visibility!=="hidden";};
+            const suffix=timeKind==="hour"?"시":"분";
+            const target=[...document.querySelectorAll("[role=option], [role=menuitem], li, button")].filter(visible).find(e=>{
+              const text=(e.textContent||"").trim(),digits=text.replace(/[^\d]/g,"");
+              return digits!==""&&Number(digits)===value&&(text===String(value)||text===String(value).padStart(2,"0")||text.includes(suffix));
+            });
+            if(!target)return "option-not-found";
+            (target as HTMLElement).click(); return `${target.tagName.toLowerCase()}:${(target.textContent||"").trim()}`;
+          },{value:want,timeKind:kind});
+        };
+        if(!setTime.okH){setTime.methodH=await setCustomTime("hour",hour);setTime.okH=!/none|not-found/.test(setTime.methodH);}
+        if(!setTime.okM){setTime.methodM=await setCustomTime("minute",min);setTime.okM=!/none|not-found/.test(setTime.methodM);}
+        console.log(`[naver] 시/분 설정 결과: ${JSON.stringify(setTime)}`);
         if (!setTime.okH || !setTime.okM) {
-          throw new Error(`예약 시/분 설정 실패 (시:${setTime.okH}, 분:${setTime.okM})`);
+          throw new Error(`예약 시/분 설정 실패 (시:${setTime.methodH}, 분:${setTime.methodM})`);
         }
 
-        // 3) 날짜: 오늘이 아니면 달력에서 해당 날짜 셀 클릭
-        const dateSet = await frame.evaluate(({ y, mo, d }: { y: number; mo: number; d: number }) => {
-          const openBtn = [...document.querySelectorAll("button, [role=button]")]
-            .find(b => /달력|날짜|calendar/i.test((b.getAttribute("aria-label") || "") + (b.className || "")));
-          if (openBtn) (openBtn as HTMLElement).click();
-          const iso = `${y}-${String(mo).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
-          const byData = document.querySelector(`[data-date='${iso}'], td[data-day='${d}']`) as HTMLElement | null;
-          if (byData) { byData.click(); return "data"; }
-          const cells = [...document.querySelectorAll("button, td, span, a")]
-            .filter(e => (e.textContent || "").trim() === String(d) && !(e as HTMLElement).getAttribute("disabled"));
-          if (cells.length) { (cells[0] as HTMLElement).click(); return "text"; }
-          return "none";
-        }, { y: year, mo: month, d: day });
-        console.log(`[naver] 날짜 설정(${year}-${month}-${day}): ${dateSet}`);
-        if (dateSet === "none") throw new Error("예약 날짜를 달력에서 찾지 못했습니다");
+        // 3) 날짜: 입력값/aria/data 속성/datepicker 셀을 탐색하고 필요한 경우 월을 이동한다.
+        const iso=`${year}-${String(month).padStart(2,"0")}-${String(day).padStart(2,"0")}`;
+        const dotted=`${year}.${String(month).padStart(2,"0")}.${String(day).padStart(2,"0")}`;
+        const todayKst=new Date(Date.now()+9*60*60*1000);
+        const isToday=year===todayKst.getUTCFullYear()&&month===todayKst.getUTCMonth()+1&&day===todayKst.getUTCDate();
+        const dateInputState=await frame.evaluate(({isoValue,dottedValue})=>{
+          const visible=(e:Element)=>{const el=e as HTMLElement,r=el.getBoundingClientRect(),s=getComputedStyle(el);return r.width>0&&r.height>0&&s.display!=="none"&&s.visibility!=="hidden";};
+          const text=(e:Element)=>`${e.getAttribute("aria-label")||""} ${e.getAttribute("title")||""} ${(e as HTMLInputElement).value||""} ${e.textContent||""}`;
+          const controls=[...document.querySelectorAll("input, button, [role=button], [role=textbox]")].filter(visible);
+          const already=controls.find(e=>text(e).includes(isoValue)||text(e).replace(/\s/g,"").includes(dottedValue));
+          const opener=already||controls.find(e=>/달력|날짜|calendar|date|\d{4}[.\/-]\d{1,2}[.\/-]\d{1,2}/i.test(text(e)+" "+String(e.className)));
+          if(opener)(opener as HTMLElement).click();
+          return {already:!!already,opener:opener?`${opener.tagName.toLowerCase()}:${text(opener).trim().slice(0,60)}`:"none"};
+        },{isoValue:iso,dottedValue:dotted});
+        console.log(`[naver] 날짜 입력부 탐색: ${JSON.stringify(dateInputState)}`);
+        await page.waitForTimeout(400);
+        let dateSet="none";
+        for(let nav=0;nav<25&&dateSet==="none";nav++){
+          const attempt=await frame.evaluate(({y,mo,d,isoValue,dottedValue})=>{
+            const visible=(e:Element)=>{const el=e as HTMLElement,r=el.getBoundingClientRect(),s=getComputedStyle(el);return r.width>0&&r.height>0&&s.display!=="none"&&s.visibility!=="hidden";};
+            const enabled=(e:Element)=>!(e as HTMLButtonElement).disabled&&e.getAttribute("aria-disabled")!=="true"&&!/disabled|outside|other.month/i.test(String(e.className));
+            const roots=[...document.querySelectorAll("[role=grid], [class*='calendar' i], [class*='datepicker' i], [class*='date_picker' i]")].filter(visible);
+            const cells=[...document.querySelectorAll("[data-date], [data-day], [role=gridcell], td, button, a, [class*='day' i]")].filter(e=>visible(e)&&enabled(e));
+            const labels=[isoValue,dottedValue,`${y}년 ${mo}월 ${d}일`,`${mo}월 ${d}일`];
+            const byAttr=cells.find(e=>labels.some(v=>`${e.getAttribute("data-date")||""} ${e.getAttribute("data-day")||""} ${e.getAttribute("aria-label")||""} ${e.getAttribute("title")||""}`.includes(v)));
+            if(byAttr){(byAttr as HTMLElement).click();return `attribute:${byAttr.tagName.toLowerCase()}`;}
+            const header=[...document.querySelectorAll("[class*='month' i], [class*='calendar' i] strong, [role=heading]")].filter(visible).find(e=>/\d{4}\D+\d{1,2}|\d{1,2}\s*월/.test(e.textContent||""));
+            const headerText=(header?.textContent||"").replace(/\s/g," ").trim();
+            const ym=headerText.match(/(\d{4})\D+(\d{1,2})/)||headerText.match(/(\d{1,2})\s*월/);
+            const current=ym?(ym.length>=3?Number(ym[1])*12+Number(ym[2]):y*12+Number(ym[1])):0,target=y*12+mo;
+            if(current&&current!==target){
+              const next=current<target,re=next?/다음|next|chevron_right|arrow_forward/i:/이전|prev|previous|chevron_left|arrow_back/i;
+              const btn=[...document.querySelectorAll("button, [role=button], a")].filter(visible).find(e=>re.test(`${e.getAttribute("aria-label")||""} ${e.getAttribute("title")||""} ${e.textContent||""} ${String(e.className)}`));
+              if(btn){(btn as HTMLElement).click();return `${next?"navigate-next":"navigate-prev"}:${headerText}`;}
+            }
+            // 숫자만 있는 셀은 열린 달이 목표 달임을 확인한 뒤에만 클릭한다(다른 달의 같은 일자 오선택 방지).
+            const byDayData=cells.find(e=>e.getAttribute("data-day")===String(d)&&roots.some(root=>root.contains(e)));
+            const byText=cells.find(e=>(e.textContent||"").trim()===String(d)&&roots.some(root=>root.contains(e)));
+            const dayCell=byDayData||byText;
+            if(dayCell&&current===target){(dayCell as HTMLElement).click();return `${byDayData?"data-day":"calendar-text"}:${dayCell.tagName.toLowerCase()}`;}
+            return `none:${headerText||"header-not-found"}`;
+          },{y:year,mo:month,d:day,isoValue:iso,dottedValue:dotted});
+          console.log(`[naver] 날짜 셀 탐색 ${nav+1}/25: ${attempt}`);
+          if(/^attribute:|^data-day:|^calendar-text:/.test(attempt))dateSet=attempt;
+          else if(/^navigate-/.test(attempt))await page.waitForTimeout(350);
+          else break;
+        }
+        if(dateSet==="none"&&isToday&&dateInputState.already){dateSet="today-already-selected";console.log("[naver] 오늘 날짜가 이미 선택되어 날짜 클릭을 생략합니다");}
+        console.log(`[naver] 날짜 설정(${iso}): ${dateSet}`);
+        if(dateSet==="none")throw new Error(`예약 날짜를 달력에서 찾지 못했습니다 (${iso})`);
 
         await page.waitForTimeout(600);
         console.log(`[naver] ✅ 예약 설정 완료: ${year}-${month}-${day} ${hour}:${String(min).padStart(2, "0")}`);
@@ -1808,6 +1818,13 @@ export async function generateFlowImagesCDP(params: {
       .map(({ src, alt }) => ({ src, alt }));
   } catch (e: any) {
     await browser.close().catch(() => {});
+    if (results.length > 0) {
+      log(`[Flow] ⚠️ 작업 중 예외가 발생했지만 확보한 ${results.length}/${prompts.length}장을 부분 반환합니다: ${String(e?.message || e).split("\n")[0]}`);
+      return results
+        .sort((a, b) => a.promptIndex - b.promptIndex)
+        .map(({ src, alt }) => ({ src, alt }));
+    }
+    log(`[Flow] ❌ 확보 이미지 없이 중단: ${String(e?.message || e).split("\n")[0]}`);
     throw e;
   }
 }

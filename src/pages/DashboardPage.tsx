@@ -932,6 +932,8 @@ Output format (JSON array only, no other text):
   const [flowLaunching, setFlowLaunching] = useState(false);
   const [flowImgCount, setFlowImgCount] = useState(2);
   const [flowImgCountAuto, setFlowImgCountAuto] = useState(true);
+  const flowImgCountAutoRef = useRef(true);
+  useEffect(()=>{ flowImgCountAutoRef.current=flowImgCountAuto; },[flowImgCountAuto]);
   const [autoInserted, setAutoInserted] = useState(false);
   const [showPreviewModal, setShowPreviewModal] = useState(false);
   const [showNaverMenu, setShowNaverMenu] = useState(false);
@@ -1655,8 +1657,19 @@ Output format (JSON array only, no other text):
       "detail vignette shot highlighting a single key element, artistic focus",
     ];
     const shot = shots[idx % shots.length];
+    const storyBeats = [
+      "an immersive establishing moment that introduces the place and overall atmosphere",
+      "a tactile close detail of the subject's most distinctive material, ingredient, or feature",
+      "the preparation or work process in progress, with tools and ingredients in context",
+      "a lively environmental moment showing how the subject belongs in the real location",
+      "a candid human hand interaction that communicates scale and experience, no visible face",
+      "the polished finished result presented as the visual conclusion of the story",
+      "a behind-the-scenes detail from an unexpected side angle",
+      "a colorful final atmosphere shot connecting the subject with its surroundings",
+    ];
+    const storyBeat = storyBeats[idx % storyBeats.length];
     // 품질 + 텍스트 오염 방지(글자/워터마크/로고 없이 순수 이미지만) — 모든 주제 공통
-    const quality = `${shot}, ultra-high resolution 8K, hyperrealistic, award-winning photography, National Geographic quality, razor-sharp focus, absolutely no text, no letters, no words, no captions, no watermark, no logo, no typography`;
+    const quality = `${storyBeat}, ${shot}, rich varied colors, visually beautiful editorial storytelling, ultra-high resolution 8K, hyperrealistic, award-winning photography, razor-sharp focus, absolutely no text, no letters, no words, no captions, no watermark, no logo, no typography`;
 
     const FLOW_CATS: [RegExp, string][] = [
       [/먹|맛|식당|음식|요리|카페|커피|레스토랑|맛집|디저트|베이커리|밥|술|맥주|와인|소주|막걸리/, `A stunning food photography scene featuring "${title}", beautifully plated gourmet Korean cuisine, vibrant fresh ingredients, professional food styling, bokeh restaurant interior, appetizing shallow depth of field`],
@@ -2066,7 +2079,8 @@ POST3: (제목)|(이유)
       const generatedBody=ensureQuestionHeadings(bm?bm[1].trim():cleaned,keyword||title);
       const body=onPartnerItems.length>0?placeOnPartnerProduct(generatedBody,onPartnerItems.map(it=>it.product)):generatedBody.trim();setGenContent(body);setQualityScore(calcQualityScore(body,keyword));
       if(imgCountAuto)setImgCount(recommendImgCount(body));
-      if(flowImgCountAuto)setFlowImgCount(recommendImgCount(body));
+      // 비동기 글 생성 도중 사용자가 직접입력으로 바꿔도 완료 시점의 최신 선택을 존중한다.
+      if(flowImgCountAutoRef.current)setFlowImgCount(recommendImgCount(body));
       // ── tarry 방식: 블록 자동 분리 + 제목/태그 자동 연동 ──
       const rawBlocks = body.split("\n\n").filter(Boolean).map(p=>({type:"text" as const,id:uid(),content:p}));
       setBlocks(rawBlocks.length>0?rawBlocks:[{type:"text",id:uid(),content:body}]);
@@ -2117,15 +2131,21 @@ POST3: (제목)|(이유)
     //   (예전엔 정해진 스토리 아크로 만들어 글과 이미지가 어긋났음 — 생선구이 얘기에 간장게장 이미지 등)
     const clean=(content||"").replace(/\[(FAQ|참고자료|관련글)시작\][\s\S]*?\[\1끝\]/g,"").trim();
     const paras=clean.split(/\n{2,}/).map(p=>p.replace(/^#+\s*/,"").trim()).filter(p=>p.length>15);
-    // N개 구간으로 균등 분할(각 구간=연속된 문단 묶음)
-    const per=Math.max(1,Math.ceil(paras.length/n));
-    const segments:string[]=[];
-    for(let i=0;i<n;i++){ const s=paras.slice(i*per,(i+1)*per).join(" ").slice(0,320); if(s)segments.push(s); }
-    while(segments.length<n && segments.length>0) segments.push(segments[segments.length-1]);
-    const segList=segments.map((s,i)=>`[${i+1}번 구간] ${s}`).join("\n");
+    const source=(paras.join(" ")||clean||title).replace(/\s+/g," ").trim();
+    // 문단 수가 장수보다 적어도 마지막 문단을 복제하지 않는다. 원문을 서로 겹치지 않는 연속 범위로 나눈다.
+    const segments=Array.from({length:n},(_,i)=>{
+      const start=Math.floor(source.length*i/n);
+      const end=i===n-1?source.length:Math.floor(source.length*(i+1)/n);
+      return source.slice(start,end).trim().slice(0,320)||`${title}의 ${i+1}번째 이야기 장면`;
+    });
+    const perspectives=["공간과 전체 맥락을 보여주는 와이드 전체샷","핵심 소재의 질감과 특징을 담은 매크로 클로즈업","재료·도구·준비 과정을 보여주는 과정 컷","현장과 주변 분위기를 함께 담는 환경 컷","사람의 손과 사용 경험을 담는 자연스러운 인물 디테일 컷","완성 결과를 아름답게 마무리하는 히어로 컷","예상 밖의 측면 시점으로 보는 비하인드 디테일","풍부한 색감으로 장소와 주제를 연결하는 분위기 컷"];
+    const segList=segments.map((s,i)=>`[${i+1}번 구간 / 필수 연출: ${perspectives[i%perspectives.length]}] ${s}`).join("\n");
     const ask=`너는 블로그 사진 디렉터야. 아래는 한 글을 순서대로 ${segments.length}구간으로 나눈 거야.
 각 구간의 "그 문단이 실제로 말하는 장면"을 사진 1장으로 기획해줘. 반드시 해당 구간 내용과 딱 맞아야 해(다른 구간 내용/엉뚱한 소재 금지).
 예: 구간이 '생선구이'면 생선구이 사진, '조개구이'면 조개구이 사진. 구간에 특정 음식/장소가 나오면 그걸 그려.
+각 사진은 촬영 각도·거리·구도·조명·관점과 핵심 소재가 서로 확실히 달라야 해. 동일하거나 유사한 이미지와 프롬프트 반복은 금지해.
+전체샷→디테일→재료/과정→현장/분위기→사람의 손/경험→완성 장면처럼 한 제목 안에서 다채롭고 색감 풍부하고 예쁜 스토리텔링 흐름을 만들어.
+각 구간의 '필수 연출'은 반드시 반영하되, 원문에 없는 대상이나 행동을 새로 지어내지는 마.
 
 구간별로 아래 형식 정확히 ${segments.length}줄(순서대로, 다른 말 금지):
 장면설명(한국어 10~20자) | 영문 이미지 프롬프트(사진 스타일, 그 구간의 구체적 장면·소재, 조명, 사실적, 글자/워터마크 없이)
@@ -2145,7 +2165,8 @@ ${segList}`;
       if(/프롬프트|영문|prompt|워터마크|사진\s*스타일|장면\s*설명|한국어|구간/i.test(capClean)) capClean="";
       if(!/[가-힣]/.test(capClean)||capClean.length<2) capClean="";
       captions.push(capClean.slice(0,30));
-      prompts.push(`${eng}, ultra realistic 8K photography, natural lighting, absolutely no text, no letters, no watermark, no logo`);
+      const perspective=perspectives[prompts.length%perspectives.length];
+      prompts.push(`${eng}, distinctly staged as ${perspective}, unique camera angle and composition versus every other image in this series, rich vibrant color palette, ultra realistic 8K photography, absolutely no text, no letters, no watermark, no logo`);
     }
     return { prompts, captions };
   }
@@ -2201,7 +2222,8 @@ ${segList}`;
       const postOnce=()=>botFetch(`${BOT}/api/flow-generate`,{
         method:"POST",headers:{"Content-Type":"application/json"},
         body:JSON.stringify({prompts,captions:caps}),
-        signal:AbortSignal.timeout(n*120000+30000),
+        // Flow의 후보 렌더·다운로드·재시도 시간을 장수에 비례해 보장한다(8장 약 34분).
+        signal:AbortSignal.timeout(n*240000+120000),
       });
       let r=await postOnce();
       let d=await r.json();
@@ -2361,20 +2383,17 @@ ${segList}`;
       effectiveBlocks=textBlocks.length>0?[imgBlocks[0],...interleave(textBlocks,imgBlocks.slice(1))]:[...imgBlocks];
       if(!thumbnail && activeImgs[0]) setThumbnail(activeImgs[0]);
     }
-    // ── 온파트너 링크: URL 문단을 본문에 분산 삽입(상품당 1개, Q&A·해시태그 위) ──
+    // ── 온파트너 링크: URL만 본문에 분산 삽입 → 네이버가 정사각 링크 카드로 렌더(상품당 1개, Q&A·해시태그 위) ──
     // ★안전장치: 조회만 하고 저장(💾) 안 한 상품(onPartnerPreview)도 발행에 포함.
     const partnerForPublish:OnPartnerItem[] = onPartnerItems.length>0 ? onPartnerItems : (onPartnerPreview?[onPartnerPreview]:[]);
     console.log("[publy] 온파트너 링크 대상:", partnerForPublish.length, "개", partnerForPublish.map(it=>it.product.name));
     if(partnerForPublish.length>0){
       const items=partnerForPublish.filter(it=>it.product.available&&it.product.partnerUrl);
-      if(items.length>0){
-      // ★고지 문단을 선행 썸네일/이미지 바로 다음의 본문 문단으로 1회 삽입.
+      // ★고지 문단을 "썸네일 바로 다음"(본문 맨 앞)에 무조건 1회. 이미 있으면 중복 안 넣음.
       const DISCLOSURE="※ 이 글에는 제휴 링크가 포함되어 있으며, 구매 시 작성자에게 일정 수수료가 발생할 수 있습니다.";
       const hasDisclosure=effectiveBlocks.some(b=>b.type==="text"&&(b as TextBlock).content.includes("제휴 링크가 포함"));
       if(!hasDisclosure){
-        let disclosureIdx=0;
-        while(disclosureIdx<effectiveBlocks.length&&(effectiveBlocks[disclosureIdx].type==="image"||effectiveBlocks[disclosureIdx].type==="image-pair")) disclosureIdx++;
-        effectiveBlocks=[...effectiveBlocks.slice(0,disclosureIdx),{type:"text",id:uid(),content:DISCLOSURE} as ContentBlock,...effectiveBlocks.slice(disclosureIdx)];
+        effectiveBlocks=[{type:"text",id:uid(),content:DISCLOSURE} as ContentBlock,...effectiveBlocks];
       }
       // 광고 금지 경계: FAQ/Q&A/관련글/해시태그 섹션 시작 텍스트 블록 — 광고는 이 위에만.
       const isBoundary=(b:ContentBlock)=>b.type==="text"&&/\[FAQ시작\]|\[관련글시작\]|질문\s*답변|Q\s*&\s*A|큐앤에이|해시태그|자주\s*묻는/i.test((b as TextBlock).content);
@@ -2396,13 +2415,12 @@ ${segList}`;
           withLink.push(b);
           items.forEach((it,k)=>{
             if(insertAfter[k]===i){
-              // 안내와 URL을 하나의 텍스트 블록으로 유지해 상품 카드 사이에 본문이 끼지 않게 한다.
+              // URL만 자체 문단으로 → 네이버가 정사각 링크 카드 자동 생성. 앞에 짧은 안내 한 줄.
               withLink.push({type:"text",id:uid(),content:`👇 '${it.product.name}' 지금 바로 확인하기\n${it.product.partnerUrl}`} as ContentBlock);
             }
           });
         });
         effectiveBlocks=withLink;
-      }
       }
     }
     const publishBody={
@@ -3970,11 +3988,11 @@ POST3: (제목)|(이유)
                       <div style={{marginBottom:16}}>
                         <div style={{fontSize:12,fontWeight:700,color:"var(--text3)",marginBottom:8}}>📸 생성할 이미지 수</div>
                         <div style={{display:"flex",gap:6,marginBottom:8}}>
-                          <button onClick={()=>{setFlowImgCountAuto(true);if(genContent)setFlowImgCount(recommendImgCount(genContent));}}
+                          <button onClick={()=>{flowImgCountAutoRef.current=true;setFlowImgCountAuto(true);if(genContent)setFlowImgCount(recommendImgCount(genContent));}}
                             style={{flex:1,padding:"8px",borderRadius:9,border:`1.5px solid ${flowImgCountAuto?"#a855f7":"var(--border)"}`,background:flowImgCountAuto?"rgba(168,85,247,.15)":"transparent",cursor:"pointer",fontSize:12,fontWeight:700,color:flowImgCountAuto?"#c084fc":"var(--text2)",fontFamily:"inherit"}}>
                             🤖 자동추천
                           </button>
-                          <button onClick={()=>setFlowImgCountAuto(false)}
+                          <button onClick={()=>{flowImgCountAutoRef.current=false;setFlowImgCountAuto(false);}}
                             style={{flex:1,padding:"8px",borderRadius:9,border:`1.5px solid ${!flowImgCountAuto?"#a855f7":"var(--border)"}`,background:!flowImgCountAuto?"rgba(168,85,247,.15)":"transparent",cursor:"pointer",fontSize:12,fontWeight:700,color:!flowImgCountAuto?"#c084fc":"var(--text2)",fontFamily:"inherit"}}>
                             ✏️ 직접입력
                           </button>
@@ -3987,12 +4005,12 @@ POST3: (제목)|(이유)
                           </div>
                         ) : (
                           <div style={{display:"flex",alignItems:"center",gap:8}}>
-                            <button onClick={()=>setFlowImgCount(Math.max(1,flowImgCount-1))}
+                            <button onClick={()=>{flowImgCountAutoRef.current=false;setFlowImgCountAuto(false);setFlowImgCount(v=>Math.max(1,v-1));}}
                               style={{width:36,height:36,borderRadius:9,border:"1px solid var(--border)",background:"var(--bg2)",cursor:"pointer",fontSize:18,fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center",color:"var(--text)"}}>−</button>
                             <input type="number" min={1} max={10} value={flowImgCount}
-                              onChange={e=>setFlowImgCount(Math.max(1,Math.min(10,Number(e.target.value))))}
+                              onChange={e=>{flowImgCountAutoRef.current=false;setFlowImgCountAuto(false);setFlowImgCount(Math.max(1,Math.min(10,Number(e.target.value)||1)));}}
                               style={{flex:1,textAlign:"center",padding:"8px",borderRadius:9,border:"1.5px solid rgba(168,85,247,.4)",background:"var(--bg2)",color:"#c084fc",fontSize:20,fontWeight:900,fontFamily:"'Space Grotesk',sans-serif"}}/>
-                            <button onClick={()=>setFlowImgCount(Math.min(10,flowImgCount+1))}
+                            <button onClick={()=>{flowImgCountAutoRef.current=false;setFlowImgCountAuto(false);setFlowImgCount(v=>Math.min(10,v+1));}}
                               style={{width:36,height:36,borderRadius:9,border:"1px solid var(--border)",background:"var(--bg2)",cursor:"pointer",fontSize:18,fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center",color:"var(--text)"}}>+</button>
                           </div>
                         )}

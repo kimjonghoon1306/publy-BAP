@@ -432,9 +432,12 @@ app.post("/api/flow-generate", async (req, res) => {
     if (images.length === 0) {
       return res.status(500).json({ error: "이미지가 생성되지 않았어요. Flow 로그인/크레딧을 확인하거나 잠시 후 다시 시도해주세요." });
     }
-    res.json({ images }); // [{src: dataURL, alt}]
+    const partial = images.length < prompts.length;
+    console.log(`[server] Flow 회수 완료: 요청 ${prompts.length}장 / 반환 ${images.length}장${partial ? " (부분 결과)" : ""}`);
+    res.status(200).json({ images, partial, requested: prompts.length, received: images.length });
   } catch (e: any) {
     const msg = e.message || "";
+    console.error(`[server] Flow 생성 핸들러 오류 (프로세스 유지): ${msg}`);
     if (msg.includes("CDP_CONNECT_FAIL")) return res.status(503).json({ error: "Flow 준비가 안 됐어요. 'Flow 준비' 버튼으로 크롬을 먼저 열어주세요.", code: "CDP_CONNECT_FAIL" });
     if (msg.includes("FLOW_NOT_LOGGED_IN")) return res.status(401).json({ error: "크롬에서 Google Flow에 먼저 로그인해주세요.", code: "FLOW_NOT_LOGGED_IN" });
     res.status(500).json({ error: msg });
