@@ -580,7 +580,17 @@ export async function publishNaver(params: {
       for (const sel of bodySels) {
         try {
           const els = await frame.$$(sel);
-          if (els.length) { await els[els.length - 1].click({ timeout: 3000 }); await page.waitForTimeout(120); return; }
+          // ★ 뒤(문서 끝)에서부터 보되, 이미지 캡션칸(.se-caption 안)은 절대 클릭하지 않는다.
+          //   (셀렉터가 캡션 contenteditable도 잡아서, 마지막 블록이 이미지면 커서가 캡션칸에 들어가고
+          //    그 다음 본문 텍스트(예: 제휴 광고고지)가 캡션에 따라 써지던 근본 버그 차단.
+          //    v2.0.30 셀렉터는 그대로 두어 글·이미지 순서는 유지, 캡션만 제외.)
+          for (let k = els.length - 1; k >= 0; k--) {
+            const inCaption = await els[k].evaluate(node => !!(node as HTMLElement).closest(".se-caption")).catch(() => false);
+            if (inCaption) continue;
+            await els[k].click({ timeout: 3000 });
+            await page.waitForTimeout(120);
+            return;
+          }
         } catch {}
       }
       await frame.click(".se-main-container", { timeout: 3000 }).catch(() => {});
@@ -1140,7 +1150,7 @@ export async function publishNaver(params: {
     await ensureEditorReady("최종 발행 전");
     const finalLabel = scheduleTime ? "예약" : "발행";
     const beforeFinalUrl = page.url();
-    const finalDone = await frame.evaluate(({ label, scheduled }: { label: string; scheduled: boolean }) => {
+    const finalResult = await frame.evaluate(({ label, scheduled }: { label: string; scheduled: boolean }) => {
       const visible = (el: HTMLElement) => {
         const s = getComputedStyle(el);
         const r = el.getBoundingClientRect();
@@ -1148,6 +1158,56 @@ export async function publishNaver(params: {
       };
       const normalized = (el: Element) => (el.textContent || "").replace(/\s/g, "");
       const expected = scheduled ? /^(예약|예약발행)$/ : /^발행$/;
+
+      if (scheduled) {
+        const classText = (el: Element) => typeof el.className === "string" ? el.className : el.getAttribute("class") || "";
+        const enabled = (el: Element) => !(el as HTMLButtonElement).disabled && el.getAttribute("aria-disabled") !== "true";
+        const textParts = (el: Element) => [el.textContent || "", el.getAttribute("aria-label") || ""].map(value => value.replace(/\s/g, "")).filter(Boolean);
+        const text = (el: Element) => textParts(el).join(" ");
+        const controls = [...document.querySelectorAll("button, [role='button']")]
+          .filter(el => visible(el as HTMLElement) && enabled(el));
+        const layerSelector = "[class*='publish' i], [class*='layer' i], [class*='option' i], [role='dialog']";
+        const inLayer = (el: Element) => !!el.closest(layerSelector);
+        const primary = (el: Element) => /confirm(?:_btn)?|primary|submit|complete|apply|point/i.test(`${classText(el)} ${el.getAttribute("data-testid") || ""}`);
+        const allowedReservation = (el: Element) => textParts(el).some(value => /예약/.test(value) && !/예약취소|예약해제|취소/.test(value));
+        const exactReservation = (el: Element) => textParts(el).some(value => /^(예약|예약발행|예약완료|예약하기)$/.test(value));
+        const describe = (el?: Element) => el ? {
+          tag: el.tagName.toLowerCase(),
+          text: (el.textContent || "").replace(/\s+/g, " ").trim().slice(0, 100),
+          ariaLabel: el.getAttribute("aria-label") || "",
+          className: classText(el).slice(0, 200),
+        } : null;
+        const attempts: Array<{ method: string; candidate: ReturnType<typeof describe> }> = [];
+        const tryCandidate = (method: string, candidates: Element[]) => {
+          const candidate = candidates.at(-1);
+          attempts.push({ method, candidate: describe(candidate) });
+          if (!candidate) return false;
+          (candidate as HTMLElement).click();
+          return true;
+        };
+
+        if (tryCandidate("exact+confirm-primary", controls.filter(el => exactReservation(el) && primary(el))))
+          return { clicked: true, attempts };
+        if (tryCandidate("exact+publish-layer", controls.filter(el => exactReservation(el) && inLayer(el))))
+          return { clicked: true, attempts };
+        if (tryCandidate("contains-reservation+confirm-primary", controls.filter(el => allowedReservation(el) && primary(el))))
+          return { clicked: true, attempts };
+        if (tryCandidate("contains-reservation+publish-layer", controls.filter(el => allowedReservation(el) && inLayer(el))))
+          return { clicked: true, attempts };
+
+        // 예약 선택 전에는 '발행'이던 동일 위치의 버튼일 수 있어, 발행 레이어의 primary/confirm을 다시 찾는다.
+        if (tryCandidate("publish-layer+confirm-primary", controls.filter(el => inLayer(el) && primary(el) && !/취소|닫기/.test(text(el)))))
+          return { clicked: true, attempts };
+        const layers = [...document.querySelectorAll(layerSelector)].filter(el => visible(el as HTMLElement));
+        const activeLayer = layers.at(-1);
+        const footerControls = activeLayer
+          ? controls.filter(el => activeLayer.contains(el) && !/취소|닫기|이전/.test(text(el)))
+          : [];
+        if (tryCandidate("publish-layer-last-enabled", footerControls))
+          return { clicked: true, attempts };
+        return { clicked: false, attempts };
+      }
+
       const buttons = [...document.querySelectorAll("button")]
         .filter((b): b is HTMLButtonElement => visible(b) && !b.disabled && expected.test(normalized(b)));
 
@@ -1158,12 +1218,45 @@ export async function publishNaver(params: {
         b.closest("[class*='publish'], [class*='Publish'], [class*='layer'], [role='dialog']")
       ).at(-1);
       const target = confirm || inPublishLayer;
-      if (!target) return false;
+      if (!target) return { clicked: false, attempts: [] };
       target.click();
-      return true;
+      return { clicked: true, attempts: [] };
     }, { label: finalLabel, scheduled: Boolean(scheduleTime) });
+    if (scheduleTime) {
+      for (const attempt of finalResult.attempts) {
+        console.log(`[naver] 예약 확정 버튼 탐색(${attempt.method}): ${JSON.stringify(attempt.candidate)}`);
+      }
+    }
 
-    if (!finalDone) {
+    if (!finalResult.clicked) {
+      if (scheduleTime) {
+        try {
+          const dump = await frame.evaluate(() => {
+            const visible = (el: Element) => { const r = el.getBoundingClientRect(), s = getComputedStyle(el); return r.width > 0 && r.height > 0 && s.display !== "none" && s.visibility !== "hidden"; };
+            const classText = (el: Element) => typeof (el as HTMLElement).className === "string" ? (el as HTMLElement).className : el.getAttribute("class") || "";
+            const layerSelector = "[class*='publish' i], [class*='layer' i], [class*='option' i], [role='dialog']";
+            const layers = [...document.querySelectorAll(layerSelector)].filter(visible);
+            const activeLayer = layers.at(-1);
+            const candidates = [...(activeLayer || document).querySelectorAll("button, [role='button']")]
+              .filter(visible)
+              .map(el => ({
+                tag: el.tagName.toLowerCase(),
+                textContent: (el.textContent || "").replace(/\s+/g, " ").trim().slice(0, 200),
+                ariaLabel: el.getAttribute("aria-label") || "",
+                role: el.getAttribute("role") || "",
+                className: classText(el).slice(0, 300),
+                disabled: (el as HTMLButtonElement).disabled || el.getAttribute("aria-disabled") === "true",
+              }));
+            return {
+              activeLayer: activeLayer ? { tag: activeLayer.tagName.toLowerCase(), className: classText(activeLayer).slice(0, 300), role: activeLayer.getAttribute("role") || "" } : null,
+              buttons: candidates,
+            };
+          });
+          console.error(`[naver] 🔎 예약 확정 발행 레이어 DOM 덤프: ${JSON.stringify(dump)}`);
+        } catch (e: any) {
+          console.error(`[naver] ⚠️ 예약 확정 DOM 덤프 수집 실패: ${String(e?.message || e).split("\n")[0]}`);
+        }
+      }
       const message = scheduleTime
         ? "예약 확정 버튼을 찾지 못했습니다. 안전을 위해 즉시 발행하지 않습니다."
         : "발행 옵션 레이어의 최종 발행 버튼을 찾지 못했습니다.";
