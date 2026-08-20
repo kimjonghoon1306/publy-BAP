@@ -2255,41 +2255,31 @@ ${segList}`;
       return;
     }
     setGenImgLoading(true);setGenImgProgress(0);setGenImgCurrent(0);setImgGenFailed(false);
-    // 2) 글 내용 기반 프롬프트 + 캡션 구성 (★flowImgCount 사용)
-    // 이어붙이기(추가 생성)면 지정한 추가 개수(최대 3장), 아니면 설정 개수(ref=최신).
+    // 2) 글 내용 기반 프롬프트 + 캡션 구성
+    // ★버튼 숫자 = 만들 장수(n). 기존 이미지가 몇 장이든 상관없이 그 개수만큼만 만든다(더하기 계산 없음).
+    //   이어붙이기면 addCount(1/2/3장), 처음 생성이면 설정 개수(ref=최신).
     const n=append&&addCount ? Math.max(1,Math.min(3,addCount)) : Math.max(1,flowImgCountRef.current);
     const content=genContent||"";
-    // ★ Gemini가 글을 읽고 "장면이 서로 다른"(6하원칙: 언제/어디서/무엇을/어떻게/왜) 이미지 프롬프트 N개 생성.
-    //   이미지만 봐도 스토리가 읽히게. 실패 시 기존 고정 템플릿으로 폴백.
     let prompts:string[]=[];
     let caps:string[]=[];
-    // ★추가 생성(append)이면 "글 전체를 n장으로 압축"하지 말고, (기존 장수+추가 장수)로 구간을 나눠
-    //   그 중 "뒤쪽(추가분)" 프롬프트만 쓴다. 그래야 추가 이미지가 글의 다른 구간이라 자연스럽고,
-    //   글 전체를 1장에 뭉뚱그려 소재가 뒤섞이는(양념게장이 괴물로 나오는) 문제를 막는다.
-    const existing=append?generatedImages.length:0;
-    const total=existing+n;
-    // ★진단 로그: 새 생성인지/추가인지, 몇 장 요청, 기존 몇 장, 프롬프트를 글의 몇~몇 구간에서 뽑는지 명확히.
-    //   (6장 같은 개수 불일치를 정확히 짚기 위해 화면 토스트로도 보여준다)
-    const _mode = append ? `이어붙이기(+${n}장)` : `새 생성(${n}장)`;
-    const _srcType = append ? "추가" : (!flowImgCountAutoRef.current ? "임의입력" : "추천");
-    console.log(`[publy] Flow ${_mode} | 종류=${_srcType} | 기존 ${existing}장 → 총 ${total}장 목표 | 프롬프트 구간 ${existing+1}~${total}`);
+    console.log(`[publy] Flow ${append?"이어서":"새로"} ${n}장 생성 (버튼 숫자=만들 장수, 기존 개수 무관)`);
+    // 글 전체를 n등분해 서로 다른 구간의 프롬프트 n개 생성(장면이 안 섞여 괴물 방지). 실패 시 고정 템플릿 폴백.
     try{
-      const sceneResult=await buildStoryPrompts(pubTitle||genTitle, content, total);
-      if(sceneResult.prompts.length>=total){ prompts=sceneResult.prompts.slice(existing,total); caps=sceneResult.captions.slice(existing,total); }
+      const sceneResult=await buildStoryPrompts(pubTitle||genTitle, content, n);
+      if(sceneResult.prompts.length>=n){ prompts=sceneResult.prompts.slice(0,n); caps=sceneResult.captions.slice(0,n); }
     }catch{}
     if(prompts.length<n){
-      // 폴백: 기존 방식 (구간별 고정 템플릿) — 전체 구간 중 뒤쪽(추가분)만
+      // 폴백: 구간별 고정 템플릿 — 글을 n등분
       const lines=content.split("\n").filter(l=>l.trim().length>5);
-      const step=Math.max(1,Math.floor(lines.length/total));
+      const step=Math.max(1,Math.floor(lines.length/n));
       prompts=Array.from({length:n},(_,k)=>{
-        const i=existing+k;
-        const seg=lines.slice(i*step,(i+1)*step).join(" ").slice(0,150);
-        return buildFlowPrompt(keyword||genTitle,pubTitle||genTitle,seg,i);
+        const seg=lines.slice(k*step,(k+1)*step).join(" ").slice(0,150);
+        return buildFlowPrompt(keyword||genTitle,pubTitle||genTitle,seg,k);
       });
-      caps=buildCaptions(keyword||genTitle,total,content).slice(existing,total);
+      caps=buildCaptions(keyword||genTitle,n,content).slice(0,n);
     }
     try{
-      showToast(append?`🎨 이어붙이기: 기존 ${existing}장 + ${n}장 추가 생성 중... (글 뒷부분 이어받음)`:`🎨 새로 이미지 ${n}장 생성 중... (기존 이미지는 교체)`,"info");
+      showToast(append?`🎨 이미지 ${n}장 이어서 생성 중... (글 뒷부분 이어받음)`:`🎨 새로 이미지 ${n}장 생성 중...`,"info");
       const postOnce=()=>botFetch(`${BOT}/api/flow-generate`,{
         method:"POST",headers:{"Content-Type":"application/json"},
         body:JSON.stringify({prompts,captions:caps}),
@@ -2321,7 +2311,7 @@ ${segList}`;
       if(!thumbnail)setThumbnail(finalImgs[0]);
       triggerAutoInsert(finalImgs.map((src,i)=>({id:i,src,alt:finalCaps[i]||`${keyword||genTitle} 사진`})));
       setShowMeta(true);
-      showToast(append?`✅ ${imgs.length}장 추가! (총 ${finalImgs.length}장)`:`✅ Flow 이미지 ${imgs.length}장 생성 완료! (바탕화면에도 백업됨)`,"success");
+      showToast(append?`✅ 이미지 ${imgs.length}장 이어서 생성 완료!`:`✅ Flow 이미지 ${imgs.length}장 생성 완료! (바탕화면에도 백업됨)`,"success");
     }catch(e:any){
       if(e.name!=="AbortError"){ showToast("❌ Flow 생성 실패: "+e.message,"error");setImgGenFailed(true); }
     }finally{ setGenImgLoading(false); }
@@ -4224,13 +4214,13 @@ POST3: (제목)|(이유)
                               <div style={{padding:"12px 14px",borderRadius:12,background:"rgba(16,185,129,.08)",border:"1px solid rgba(16,185,129,.3)",display:"flex",flexDirection:"column",gap:8}}>
                                 <div style={{fontSize:12,color:"#10b981",fontWeight:700,lineHeight:1.6}}>
                                   ➕ 이미지 더 만들기
-                                  <div style={{fontSize:11,color:"var(--text2)",fontWeight:500,marginTop:2}}>맘에 안 드는 이미지는 🗑로 지운 뒤, 아래에서 그만큼 다시 만들어 채우세요. (지우지 않고 더 추가도 가능 · 한 번에 최대 3장)</div>
+                                  <div style={{fontSize:11,color:"var(--text2)",fontWeight:500,marginTop:2,lineHeight:1.7}}>버튼 숫자만큼 이미지를 만들어요 — <b>1장</b>이면 1장, <b>2장</b>이면 2장, <b>3장</b>이면 3장. (더하기 아님)<br/>· 맘에 안 드는 이미지를 🗑로 지운 뒤 <b>그 자리 채우기</b><br/>· 기존 이미지는 그대로 두고 <b>더 추가하기</b><br/>새로 만든 이미지는 <b>글 흐름을 이어받아</b> 뒤에 붙어요(섞여서 이상한 이미지 안 나와요).</div>
                                 </div>
                                 <div style={{display:"flex",gap:6}}>
                                   {[1,2,3].map(c=>(
                                     <button key={c} className="btn btn-sm" onClick={()=>handleGenerateFlowImages(true,c)} disabled={genImgLoading||!genContent}
                                       style={{flex:1,background:"rgba(16,185,129,.15)",color:"#10b981",border:"1.5px solid #10b981",cursor:"pointer",justifyContent:"center",fontWeight:800,fontFamily:"inherit"}}>
-                                      +{c}장
+                                      {c}장
                                     </button>
                                   ))}
                                 </div>
@@ -5847,9 +5837,15 @@ POST3: (제목)|(이유)
       {/* 버그 신고 처리완료 알림 — 화면 어디에 있든 뜸 */}
       {liveLogActive&&(
         <div style={{position:"fixed",left:0,right:0,bottom:0,zIndex:500,height:liveLogCollapsed?42:180,background:theme==="dark"?"#0d1117":"#f6f8fa",borderTop:`1px solid ${theme==="dark"?"#30363d":"#d0d7de"}`,boxShadow:"0 -6px 20px rgba(0,0,0,.16)",display:"flex",flexDirection:"column",transition:"height .18s ease"}}>
-          <div style={{height:42,flexShrink:0,padding:"0 14px",display:"flex",alignItems:"center",justifyContent:"space-between",color:theme==="dark"?"#e6edf3":"#24292f",borderBottom:liveLogCollapsed?"none":`1px solid ${theme==="dark"?"#30363d":"#d0d7de"}`}}>
-            <span style={{fontSize:12,fontWeight:800}}>📋 실시간 로그 · {tab==="publish"?"발행 중":"이미지 생성 중"}</span>
-            <button onClick={()=>setLiveLogCollapsed(value=>!value)} style={{border:0,background:"transparent",color:"inherit",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:"inherit"}}>{liveLogCollapsed?"펼치기 ▲":"접기 ▼"}</button>
+          <div style={{height:42,flexShrink:0,padding:"0 14px",display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,color:theme==="dark"?"#e6edf3":"#24292f",borderBottom:liveLogCollapsed?"none":`1px solid ${theme==="dark"?"#30363d":"#d0d7de"}`}}>
+            <span style={{fontSize:12,fontWeight:800,display:"flex",alignItems:"center",gap:8,minWidth:0}}>
+              <span style={{whiteSpace:"nowrap"}}>📋 실시간 로그 · {tab==="publish"?"발행 중":"이미지 생성 중"}</span>
+              {(()=>{const errN=liveLog?liveLog.split(/\r?\n/).filter(l=>/❌|실패|오류|error/i.test(l)).length:0;return errN>0?<span style={{fontSize:11,fontWeight:800,color:"#fff",background:theme==="dark"?"#cf222e":"#e5484d",padding:"2px 8px",borderRadius:20,whiteSpace:"nowrap"}}>⚠️ 오류 {errN}</span>:null;})()}
+            </span>
+            <span style={{display:"flex",alignItems:"center",gap:6,flexShrink:0}}>
+              <button onClick={async()=>{try{await navigator.clipboard.writeText(liveLog||"");showToast("📋 로그를 복사했어요. 문제가 있으면 여기에 붙여넣어 보내주세요.","success");}catch{showToast("복사 실패 — '전체 로그 보기'에서 길게 눌러 복사해주세요.","error");}}} style={{border:`1px solid ${theme==="dark"?"#30363d":"#d0d7de"}`,background:"transparent",color:"inherit",cursor:"pointer",fontSize:11.5,fontWeight:700,fontFamily:"inherit",padding:"5px 10px",borderRadius:8}}>📋 복사</button>
+              <button onClick={()=>setLiveLogCollapsed(value=>!value)} style={{border:0,background:"transparent",color:"inherit",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:"inherit"}}>{liveLogCollapsed?"펼치기 ▲":"접기 ▼"}</button>
+            </span>
           </div>
           {!liveLogCollapsed&&<div tabIndex={0} onKeyDown={event=>{if((event.metaKey||event.ctrlKey)&&event.key.toLowerCase()==="a"){event.preventDefault();const selection=window.getSelection();const range=document.createRange();range.selectNodeContents(event.currentTarget);selection?.removeAllRanges();selection?.addRange(range);}}} style={{flex:1,overflowY:"auto",padding:"9px 14px",fontFamily:"ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",fontSize:11.5,lineHeight:1.55,whiteSpace:"pre-wrap",wordBreak:"break-word",userSelect:"text",outline:"none",color:theme==="dark"?"#b1bac4":"#57606a"}}>
             {liveLog?liveLog.split(/\r?\n/).map((line,index)=>{
@@ -5864,7 +5860,7 @@ POST3: (제목)|(이유)
       {fullLog!==null&&(
         <div style={{position:"fixed",inset:0,zIndex:10060,background:"rgba(0,0,0,.72)",display:"flex",alignItems:"center",justifyContent:"center",padding:20}} onClick={()=>setFullLog(null)}>
           <div style={{width:"min(900px,100%)",height:"min(680px,85vh)",background:theme==="dark"?"#0d1117":"#f6f8fa",border:`1px solid ${theme==="dark"?"#30363d":"#d0d7de"}`,borderRadius:16,overflow:"hidden",display:"flex",flexDirection:"column",boxShadow:"0 24px 70px rgba(0,0,0,.5)"}} onClick={event=>event.stopPropagation()}>
-            <div style={{padding:"13px 16px",display:"flex",alignItems:"center",justifyContent:"space-between",borderBottom:`1px solid ${theme==="dark"?"#30363d":"#d0d7de"}`,color:theme==="dark"?"#e6edf3":"#24292f"}}><strong style={{fontSize:14}}>📋 전체 로그</strong><button onClick={()=>setFullLog(null)} style={{border:0,background:"transparent",color:"inherit",cursor:"pointer",fontSize:18}}>✕</button></div>
+            <div style={{padding:"13px 16px",display:"flex",alignItems:"center",justifyContent:"space-between",borderBottom:`1px solid ${theme==="dark"?"#30363d":"#d0d7de"}`,color:theme==="dark"?"#e6edf3":"#24292f"}}><strong style={{fontSize:14}}>📋 전체 로그</strong><span style={{display:"flex",gap:8,alignItems:"center"}}><button onClick={async()=>{try{await navigator.clipboard.writeText(fullLog||"");showToast("📋 전체 로그를 복사했어요. 문제 신고 시 붙여넣어 주세요.","success");}catch{showToast("복사 실패 — 로그를 길게 눌러 직접 복사해주세요.","error");}}} style={{border:`1px solid ${theme==="dark"?"#30363d":"#d0d7de"}`,background:"transparent",color:"inherit",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:"inherit",padding:"6px 12px",borderRadius:8}}>📋 복사</button><button onClick={()=>setFullLog(null)} style={{border:0,background:"transparent",color:"inherit",cursor:"pointer",fontSize:18}}>✕</button></span></div>
             <pre tabIndex={0} onKeyDown={event=>{if((event.metaKey||event.ctrlKey)&&event.key.toLowerCase()==="a"){event.preventDefault();const selection=window.getSelection();const range=document.createRange();range.selectNodeContents(event.currentTarget);selection?.removeAllRanges();selection?.addRange(range);}}} style={{margin:0,padding:16,flex:1,overflow:"auto",whiteSpace:"pre-wrap",wordBreak:"break-word",userSelect:"text",outline:"none",fontFamily:"ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",fontSize:11.5,lineHeight:1.55,color:theme==="dark"?"#b1bac4":"#57606a"}}>{fullLog}</pre>
           </div>
         </div>
