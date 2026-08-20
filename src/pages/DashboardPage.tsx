@@ -2075,6 +2075,19 @@ Output format (JSON array only, no other text):
     const endTone=WRITE_STYLE_ENDTONE[writeStyle]||"문장 끝: ~해요, ~거든요, ~더라고요, ~잖아요 다양하게.";
     const personaGuide=PERSONA_STYLES.find(p=>p.id===persona)?.prompt||"";
     const templateGuide=BLOG_TEMPLATES.find(t=>t.id===blogTemplate)?.guide||"";
+    // ★온종일팜/온파트너/온종일체험단 자동 소개(테리 요청 2026-08-21): 아직 유명하지 않은 서비스라
+    //   제목/키워드에 이름이 나오면 AI가 모르고 대충 쓰거나 엉뚱하게 쓴다. → 우리가 가진 소개 데이터
+    //   (PUBLY_SERVICE_INFO)를 프롬프트에 넣어, 그 서비스가 뭔지 핵심을 "멋있게 풀어서" 쓰게 한다.
+    const serviceHay=`${title} ${keyword}`;
+    const serviceMatches=(Object.keys(PUBLY_SERVICE_INFO) as ServiceInfoKey[])
+      .filter(k=>serviceHay.includes(PUBLY_SERVICE_INFO[k].name)||(k==="trial"&&/온종일\s*체험단/.test(serviceHay)));
+    const serviceGuide=serviceMatches.length>0
+      ? "\n\n=== 🏷️ 우리 서비스 소개 (제목/키워드에 등장 — 아직 널리 알려지지 않았으니, 아래 정보를 바탕으로 그 서비스가 무엇인지 자연스럽고 매력적으로 풀어서 설명할 것. 지어내지 말고 이 내용만 사용) ===\n"
+        + serviceMatches.map(k=>{const s=PUBLY_SERVICE_INFO[k];
+            return `● ${s.name}: ${s.hook}\n  - 한줄요약: ${s.summary}\n  - 핵심 장점: ${s.benefits.map(b=>`${b[0]}(${b[1]})`).join(" / ")}\n  - 이용 흐름: ${s.flow}${s.url?`\n  - 링크: ${s.url}`:""}`;
+          }).join("\n")
+        + "\n※ 위 서비스가 글 주제와 자연스럽게 이어지는 대목에서 1~2문단으로 소개하되, 광고처럼 딱딱하지 않게 실제 경험담·추천 톤으로 녹여 쓸 것."
+      : "";
     const prompt=`당신은 대한민국 최고의 블로그 작가입니다.
 
 키워드: "${keyword}"  제목: "${title}"
@@ -2115,7 +2128,7 @@ ${catGuide}
 
 ${adGuide}
 ${platGuide}
-${styleGuide}${personaGuide?"\n\n[말투/페르소나]\n"+personaGuide:""}${templateGuide?"\n\n"+templateGuide:""}
+${styleGuide}${personaGuide?"\n\n[말투/페르소나]\n"+personaGuide:""}${templateGuide?"\n\n"+templateGuide:""}${serviceGuide}
 
 === 출력 형식 ===
 태그: 태그1, 태그2, 태그3, 태그4, 태그5
