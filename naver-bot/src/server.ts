@@ -36,6 +36,8 @@ function fileLog(args: unknown[], isErr = false) {
   console.error = (...a: unknown[]) => { fileLog(a, true); _err(...a); };
   console.warn = (...a: unknown[]) => { fileLog(a); _warn(...a); };
 }
+// ★봇 프로세스 시작 구분선 — 로그에서 "봇이 언제 떴는지/재시작됐는지" 한눈에(오프라인 디버깅 핵심).
+console.log(`\n━━━━━━━━━━━━━━ 봇 시작 (PID ${process.pid}) ━━━━━━━━━━━━━━`);
 
 const app = express();
 const PORT = 3333;
@@ -241,7 +243,7 @@ async function processJobs() {
   try {
     const jobs = await fetchPendingJobs(currentUserId);
     for (const job of jobs) {
-      console.log(`[bot] 작업 시작: ${job.platform} - ${job.title}`);
+      console.log(`\n━━━━━ [발행 작업 시작] ${job.platform} · "${job.title}" ${(job as any).schedule_time?`· 예약 ${(job as any).schedule_time}`:"· 즉시"} ━━━━━`);
       await updateJob(job.id, { status: "running" });
 
       await acquireSlot();
@@ -270,11 +272,11 @@ async function processJobs() {
 
         await updateJob(job.id, { status: "success", result_url: postUrl });
         await addHistory({ user_id: job.user_id, platform: job.platform, title: job.title, post_url: postUrl, status: "success" });
-        console.log(`[bot] 발행 완료: ${postUrl}`);
+        console.log(`✅━━━ [발행 완료] "${job.title}" → ${postUrl} ━━━✅\n`);
       } catch (e: any) {
         await updateJob(job.id, { status: "fail", error: e.message });
         await addHistory({ user_id: job.user_id, platform: job.platform, title: job.title, status: "fail", error_message: e.message });
-        console.error(`[bot] 발행 실패: ${e.message}`);
+        console.error(`❌━━━ [발행 실패] "${job.title}" — ${e.message} ━━━❌\n`);
       } finally {
         releaseSlot();
       }
