@@ -5819,7 +5819,7 @@ POST3: (제목)|(이유)
             <span style={{fontSize:12,fontWeight:800}}>📋 실시간 로그 · {tab==="publish"?"발행 중":"이미지 생성 중"}</span>
             <button onClick={()=>setLiveLogCollapsed(value=>!value)} style={{border:0,background:"transparent",color:"inherit",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:"inherit"}}>{liveLogCollapsed?"펼치기 ▲":"접기 ▼"}</button>
           </div>
-          {!liveLogCollapsed&&<div style={{flex:1,overflowY:"auto",padding:"9px 14px",fontFamily:"ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",fontSize:11.5,lineHeight:1.55,whiteSpace:"pre-wrap",wordBreak:"break-word",color:theme==="dark"?"#b1bac4":"#57606a"}}>
+          {!liveLogCollapsed&&<div tabIndex={0} onKeyDown={event=>{if((event.metaKey||event.ctrlKey)&&event.key.toLowerCase()==="a"){event.preventDefault();const selection=window.getSelection();const range=document.createRange();range.selectNodeContents(event.currentTarget);selection?.removeAllRanges();selection?.addRange(range);}}} style={{flex:1,overflowY:"auto",padding:"9px 14px",fontFamily:"ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",fontSize:11.5,lineHeight:1.55,whiteSpace:"pre-wrap",wordBreak:"break-word",userSelect:"text",outline:"none",color:theme==="dark"?"#b1bac4":"#57606a"}}>
             {liveLog?liveLog.split(/\r?\n/).map((line,index)=>{
               const success=/✅|완료|성공/i.test(line), failure=/❌|실패|오류|error/i.test(line);
               return <div key={index} style={{color:success?(theme==="dark"?"#3fb950":"#1a7f37"):failure?(theme==="dark"?"#f85149":"#cf222e"):undefined,minHeight:"1.55em"}}>{line}</div>;
@@ -5833,7 +5833,7 @@ POST3: (제목)|(이유)
         <div style={{position:"fixed",inset:0,zIndex:10060,background:"rgba(0,0,0,.72)",display:"flex",alignItems:"center",justifyContent:"center",padding:20}} onClick={()=>setFullLog(null)}>
           <div style={{width:"min(900px,100%)",height:"min(680px,85vh)",background:theme==="dark"?"#0d1117":"#f6f8fa",border:`1px solid ${theme==="dark"?"#30363d":"#d0d7de"}`,borderRadius:16,overflow:"hidden",display:"flex",flexDirection:"column",boxShadow:"0 24px 70px rgba(0,0,0,.5)"}} onClick={event=>event.stopPropagation()}>
             <div style={{padding:"13px 16px",display:"flex",alignItems:"center",justifyContent:"space-between",borderBottom:`1px solid ${theme==="dark"?"#30363d":"#d0d7de"}`,color:theme==="dark"?"#e6edf3":"#24292f"}}><strong style={{fontSize:14}}>📋 전체 로그</strong><button onClick={()=>setFullLog(null)} style={{border:0,background:"transparent",color:"inherit",cursor:"pointer",fontSize:18}}>✕</button></div>
-            <pre style={{margin:0,padding:16,flex:1,overflow:"auto",whiteSpace:"pre-wrap",wordBreak:"break-word",fontFamily:"ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",fontSize:11.5,lineHeight:1.55,color:theme==="dark"?"#b1bac4":"#57606a"}}>{fullLog}</pre>
+            <pre tabIndex={0} onKeyDown={event=>{if((event.metaKey||event.ctrlKey)&&event.key.toLowerCase()==="a"){event.preventDefault();const selection=window.getSelection();const range=document.createRange();range.selectNodeContents(event.currentTarget);selection?.removeAllRanges();selection?.addRange(range);}}} style={{margin:0,padding:16,flex:1,overflow:"auto",whiteSpace:"pre-wrap",wordBreak:"break-word",userSelect:"text",outline:"none",fontFamily:"ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",fontSize:11.5,lineHeight:1.55,color:theme==="dark"?"#b1bac4":"#57606a"}}>{fullLog}</pre>
           </div>
         </div>
       )}

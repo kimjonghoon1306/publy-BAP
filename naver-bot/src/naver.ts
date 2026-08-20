@@ -320,10 +320,39 @@ export async function publishNaver(params: {
   await applyAntiDetection(context);
   await context.addCookies(cookies);
   const page = await context.newPage();
+  let lastPageAction = "발행 브라우저 초기화";
+  let unexpectedPageClose = false;
+  let closingExpected = false;
+  const markPageAction = (action: string) => { lastPageAction = action; };
+  const assertPageOpen = (action: string) => {
+    const previousAction = lastPageAction;
+    markPageAction(action);
+    if (page.isClosed()) {
+      unexpectedPageClose = true;
+      throw new Error(`네이버 발행 페이지가 닫혔습니다 (단계: ${action}, 직전 액션: ${previousAction})`);
+    }
+  };
+  page.on("close", () => {
+    if (closingExpected) return;
+    unexpectedPageClose = true;
+    console.error(`[naver] ❌ 발행 페이지 close 감지 (직전 액션: ${lastPageAction})`);
+  });
+  browser.on("disconnected", () => {
+    if (closingExpected) return;
+    console.error(`[naver] ❌ 발행 브라우저 disconnected 감지 (직전 액션: ${lastPageAction})`);
+  });
+  context.on("page", popup => {
+    if (popup === page) return;
+    console.log(`[naver] ⚠️ 새 탭/팝업 감지 — 원래 발행 page 유지 (직전 액션: ${lastPageAction})`);
+    popup.waitForLoadState("domcontentloaded", { timeout: 5000 }).catch(() => {}).finally(() => {
+      console.log(`[naver] 새 탭 URL: ${popup.isClosed() ? "(이미 닫힘)" : popup.url()}`);
+    });
+  });
 
   try {
     const writeUrl = `https://blog.naver.com/GoBlogWrite.naver?blogId=${blogId}`;
     console.log(`[naver] 글쓰기 진입: ${writeUrl}`);
+    assertPageOpen("글쓰기 페이지 이동 전");
     await page.goto(writeUrl, { waitUntil: "domcontentloaded", timeout: 60000 });
 
     if (page.url().includes("nidlogin") || page.url().includes("login.naver")) {
@@ -351,6 +380,15 @@ export async function publishNaver(params: {
     if (!frame) throw new Error("mainFrame을 찾을 수 없습니다");
     console.log("[naver] mainFrame 획득!");
 
+    const ensureEditorReady = async (action: string) => {
+      assertPageOpen(action);
+      if (!frame || frame.isDetached()) {
+        console.log(`[naver] ⚠️ mainFrame 재탐색 (단계: ${action})`);
+        frame = getFrame();
+        if (!frame) throw new Error(`mainFrame이 분리되었습니다 (단계: ${action})`);
+      }
+    };
+
     // 복원 팝업 처리
     try {
       await frame.click(".se-popup-button-cancel", { timeout: 3000 });
@@ -371,6 +409,7 @@ export async function publishNaver(params: {
 
     // ── 제목 입력 ──
     console.log("[naver] 제목 입력...");
+    await ensureEditorReady("제목 입력 전");
     // 제목 클릭 후 입력
     try {
       await frame.click(".se-section-documentTitle", { timeout: 5000 });
@@ -413,9 +452,13 @@ export async function publishNaver(params: {
     // ── 파일 업로드 헬퍼 (OS 파일 피커 다이얼로그 차단) ──
     const IMG_BTN_SELS = [
       "button[data-type='image']",
+      "button[data-name='image']",
+      "button[data-testid*='image' i]",
       ".se-toolbar-item-imageUpload button",
+      ".se-toolbar-item-image button",
       "button[title='이미지']",
       "button[aria-label='이미지']",
+      "button[aria-label*='사진']",
       ".se-toolbar button[class*='image']",
     ];
     const PC_UPLOAD_SELS = [
@@ -427,31 +470,52 @@ export async function publishNaver(params: {
 
     async function uploadFileToEditor(files: string | string[]): Promise<boolean> {
       const fileList = Array.isArray(files) ? files : [files];
-      for (const sel of IMG_BTN_SELS) {
-        try {
-          const btn = await frame.$(sel) ?? await page.$(sel);
-          if (!btn) continue;
-          // filechooser 인터셉션 먼저 등록 → OS 다이얼로그 차단
-          const chooserPromise = page.waitForEvent("filechooser", { timeout: 8000 }).catch(() => null);
-          await btn.click();
-          await page.waitForTimeout(1200);
-          // 일부 SE4 버전은 모달 → "내 PC에서 올리기" 버튼 필요
-          for (const pcSel of PC_UPLOAD_SELS) {
-            try {
-              const pcBtn = await frame.$(pcSel) ?? await page.$(pcSel);
-              if (pcBtn) { await pcBtn.click(); await page.waitForTimeout(500); break; }
-            } catch {}
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        await ensureEditorReady(`이미지 업로드 버튼 탐색 ${attempt}/3`);
+        // 연속 업로드 뒤 툴바가 화면 밖/비활성 상태가 되는 경우 본문을 다시 활성화한다.
+        await frame.locator(".se-toolbar, [class*='toolbar']").first().scrollIntoViewIfNeeded().catch(() => {});
+        if (attempt > 1) {
+          await frame.locator(".se-main-container").first().click({ timeout: 1500 }).catch(() => {});
+          await page.waitForTimeout(500);
+        }
+        for (const sel of IMG_BTN_SELS) {
+          try {
+            const btn = await frame.$(sel) ?? await page.$(sel);
+            if (!btn || !(await btn.isVisible().catch(() => false))) continue;
+            await btn.scrollIntoViewIfNeeded().catch(() => {});
+            markPageAction(`이미지 버튼 클릭 (${sel}, ${attempt}/3)`);
+            // filechooser 인터셉션 먼저 등록 → OS 다이얼로그 차단
+            const chooserPromise = page.waitForEvent("filechooser", { timeout: 5000 }).catch(() => null);
+            await btn.click({ timeout: 3000 });
+            await page.waitForTimeout(700);
+            await ensureEditorReady("이미지 업로드 방식 선택 전");
+            // 일부 SE4 버전은 모달 → "내 PC에서 올리기" 버튼 필요
+            for (const pcSel of PC_UPLOAD_SELS) {
+              try {
+                const pcBtn = await frame.$(pcSel) ?? await page.$(pcSel);
+                if (pcBtn) { markPageAction(`내 PC 업로드 클릭 (${pcSel})`); await pcBtn.click(); await page.waitForTimeout(300); break; }
+              } catch {}
+            }
+            const chooser = await chooserPromise;
+            if (chooser) {
+              markPageAction(`파일 선택 적용 (${fileList.length}개)`);
+              await chooser.setFiles(fileList);
+              await page.waitForTimeout(4000);
+              await ensureEditorReady("이미지 파일 적용 후");
+              return true;
+            }
+            // fallback: 숨겨진 file input 직접 세팅
+            const fi = await page.$("input[type='file']") ?? await frame.$("input[type='file']");
+            if (fi) { markPageAction("숨겨진 file input 적용"); await fi.setInputFiles(fileList); await page.waitForTimeout(4000); await ensureEditorReady("이미지 file input 적용 후"); return true; }
+          } catch (e: any) {
+            if (page.isClosed()) throw e;
+            console.log(`[naver] ⚠️ 이미지 버튼 시도 실패 (${attempt}/3, ${sel}): ${String(e?.message || e).split("\n")[0]}`);
           }
-          const chooser = await chooserPromise;
-          if (chooser) {
-            await chooser.setFiles(fileList);
-            await page.waitForTimeout(4000);
-            return true;
-          }
-          // fallback: 숨겨진 file input 직접 세팅
-          const fi = await page.$("input[type='file']") ?? await frame.$("input[type='file']");
-          if (fi) { await fi.setInputFiles(fileList); await page.waitForTimeout(4000); return true; }
-        } catch {}
+        }
+        if (attempt < 3) {
+          console.log(`[naver] 이미지 버튼 재탐색 대기 (${attempt}/3)`);
+          await page.waitForTimeout(800);
+        }
       }
       return false;
     }
@@ -527,6 +591,7 @@ export async function publishNaver(params: {
     //   spacerBefore=true면 앞 내용과 사이에 빈 줄 하나를 먼저 넣어 문단이 붙지 않게(모바일 가독성)
     let anyBodyWritten = false;
     async function insertText(text: string, spacerBefore = false) {
+      await ensureEditorReady("본문 텍스트 입력 전");
       const isHtml = /<[a-z][\s\S]*>/i.test(text);
       const plain = isHtml
         ? text
@@ -552,6 +617,7 @@ export async function publishNaver(params: {
       const lines = plain.split("\n").filter(l => l.trim().length > 0); // 빈 줄 정리 후 균일 간격 적용
       for (let i = 0; i < lines.length; i++) {
         // delay를 높여 SE4가 붙여넣기가 아닌 진짜 타이핑으로 인식
+        await ensureEditorReady(`본문 ${i + 1}/${lines.length}줄 입력 직전`);
         await page.keyboard.type(lines[i], { delay: 80 });
         await page.waitForTimeout(100);
         anyBodyWritten = true;
@@ -571,6 +637,7 @@ export async function publishNaver(params: {
       const cap = (text || "").trim();
       if (!cap) return false;
       try {
+        await ensureEditorReady("이미지 캡션 입력 전");
         // 대상 이미지 컴포넌트 선택
         const comps = await frame.$$(".se-component.se-image");
         const comp = comps[comps.length - 1 - fromEnd];
@@ -586,6 +653,7 @@ export async function publishNaver(params: {
         try { await p.click({ timeout: 5000, force: true }); }
         catch { const r = await p.boundingBox(); if (r) await page.mouse.click(r.x + r.width / 2, r.y + r.height / 2); }
         await page.waitForTimeout(300);
+        await ensureEditorReady("이미지 캡션 타이핑 직전");
         await page.keyboard.type(cap, { delay: 25 });
         await page.waitForTimeout(200);
         return true;
@@ -598,6 +666,7 @@ export async function publishNaver(params: {
       const link = (url || "").trim();
       if (!/^https?:\/\//.test(link)) return false;
       try {
+        await ensureEditorReady("이미지 링크 입력 전");
         const comps = await frame.$$(".se-component.se-image");
         const comp = comps[comps.length - 1];
         if (!comp) return false;
@@ -615,14 +684,14 @@ export async function publishNaver(params: {
         const input = await frame.$(".se-custom-layer-link-input");
         if (!input) return false;
         await input.click({ force: true }).catch(() => {});
-        await input.fill(link).catch(async () => { await page.keyboard.type(link, { delay: 15 }); });
+        await input.fill(link).catch(async () => { await ensureEditorReady("이미지 링크 타이핑 폴백 직전"); await page.keyboard.type(link, { delay: 15 }); });
         await page.waitForTimeout(300);
         // ★확인은 Enter가 아니라 "링크 입력" 적용 버튼 클릭이어야 실제로 걸린다(실측 확인).
         let applied = await frame.evaluate(() => {
           const b = document.querySelector(".se-custom-layer-link-apply-button") as HTMLElement | null;
           if (b) { b.click(); return true; } return false;
         });
-        if (!applied) { await page.keyboard.press("Enter"); }  // 폴백
+        if (!applied) { await ensureEditorReady("이미지 링크 적용 Enter 직전"); await page.keyboard.press("Enter"); }  // 폴백
         await page.waitForTimeout(600);
         // 검증: 이미지가 링크로 감싸졌는지 확인(안 됐으면 실패 반환)
         const ok = await frame.evaluate(() => {
@@ -672,9 +741,10 @@ export async function publishNaver(params: {
             console.log(linkOk ? "[naver] ✅ 이미지 링크 연결: " + link.trim() : "[naver] ⚠️ 이미지 링크 연결 실패");
           }
         } else {
-          console.log("[naver] 이미지 버튼 못 찾음 - 이미지 스킵");
+          console.log(`[naver] 이미지 버튼 3회 못 찾음 - 이미지 스킵: ${imgUrl.slice(0, 100)}`);
         }
       } catch (e) {
+        if (page.isClosed()) throw e;
         console.log("[naver] 이미지 업로드 실패:", e);
       } finally {
         try { fs.unlinkSync(tmpFile); } catch {}
@@ -770,6 +840,7 @@ export async function publishNaver(params: {
 
     // ── 발행 패널 열기 ──
     console.log("[naver] 발행 패널 열기...");
+    await ensureEditorReady("발행 패널 열기 전");
     const publishSels = [
       "button.publish_btn__Y8C4q",
       "button[class*='publish_btn']",
@@ -788,6 +859,7 @@ export async function publishNaver(params: {
 
     // ── 태그 입력 ──
     if (tags.length > 0) {
+      await ensureEditorReady("태그 입력 전");
       try {
         const tagSel = "input.tag_input__YWKIP, input[class*='tag_input'], input[placeholder*='태그']";
         const tagEl = await frame.$(tagSel);
@@ -806,6 +878,7 @@ export async function publishNaver(params: {
     // ── 카테고리 선택 (SmartEditor ONE: option_category 안의 라디오 목록) ──
     if (categoryId) {
       console.log(`[naver] 카테고리 선택: ${categoryId}`);
+      await ensureEditorReady("카테고리 선택 전");
       try {
         // 발행 레이어의 카테고리 영역 대기
         try { await frame.waitForSelector("[class*='option_category']", { timeout: 6000 }); } catch {}
@@ -840,6 +913,7 @@ export async function publishNaver(params: {
 
     // ── 공개 설정 ──
     console.log(`[naver] 공개 설정: ${visibility}`);
+    await ensureEditorReady("공개 설정 전");
     try {
       if (visibility === "neighbor") {
         // 이웃공개
@@ -880,6 +954,7 @@ export async function publishNaver(params: {
     //   즉시 글·이미지 작성 후 예약 확정 → PC 꺼도 네이버 서버가 그 시간에 발행.
     if (scheduleTime) {
       console.log(`[naver] 예약 발행 설정: ${scheduleTime}`);
+      await ensureEditorReady("예약 발행 설정 전");
       try {
         const dt = new Date(scheduleTime);
         if (Number.isNaN(dt.getTime())) throw new Error("예약시간 형식이 올바르지 않습니다");
@@ -1062,6 +1137,7 @@ export async function publishNaver(params: {
 
     // ── 최종 발행 또는 예약 확정 ──
     console.log("[naver] 최종 발행...");
+    await ensureEditorReady("최종 발행 전");
     const finalLabel = scheduleTime ? "예약" : "발행";
     const beforeFinalUrl = page.url();
     const finalDone = await frame.evaluate(({ label, scheduled }: { label: string; scheduled: boolean }) => {
@@ -1128,6 +1204,7 @@ export async function publishNaver(params: {
     session.cookies = newCookies;
     writeSession(naverSessionName(userId), session);
 
+    closingExpected = true;
     await browser.close();
     console.log(`[naver] ✅ ${scheduleTime ? "예약 완료" : "발행 완료"}: ${postUrl}`);
     return postUrl;
@@ -1136,9 +1213,16 @@ export async function publishNaver(params: {
     try {
       const debugDir = path.join(__dirname, "../debug");
       if (!fs.existsSync(debugDir)) fs.mkdirSync(debugDir, { recursive: true });
-      await page.screenshot({ path: path.join(debugDir, `naver_error_${Date.now()}.png`), fullPage: true });
+      if (!page.isClosed()) await page.screenshot({ path: path.join(debugDir, `naver_error_${Date.now()}.png`), fullPage: true });
+      else console.error(`[naver] 스크린샷 불가: page가 이미 닫힘 (직전 액션: ${lastPageAction})`);
     } catch {}
+    closingExpected = true;
     await browser.close().catch(() => {});
+    const pageClosedError = unexpectedPageClose || /Target page, context or browser has been closed|page has been closed|browser has been closed/i.test(String(e?.message || e));
+    if (pageClosedError && !(params as any).__pageCloseRetry) {
+      console.error(`[naver] 🔁 page closed 발행 전체 재시도 1/1 (직전 액션: ${lastPageAction})`);
+      return publishNaver({ ...params, __pageCloseRetry: true } as any);
+    }
     throw e;
   }
 }
@@ -1815,12 +1899,12 @@ export async function generateFlowImagesCDP(params: {
       }, { expectedPrompt: prompt, mode });
 
       const submitMethods: { name: string; run: () => Promise<string | void> }[] = [
-        { name: "의미/레이블 버튼", run: () => clickSubmitCandidate("semantic") },
-        { name: "입력창 근처 제출 버튼", run: () => clickSubmitCandidate("near") },
-        { name: "화살표/send 아이콘 버튼", run: () => clickSubmitCandidate("icon") },
         { name: "Enter", run: async () => { const inp = page.locator("[contenteditable=true]:visible,textarea:visible").filter({ hasText: prompt }).first(); await inp.click({ timeout: 3000 }).catch(async () => page.locator("[contenteditable=true]:visible,textarea:visible").first().click()); await page.keyboard.press("Enter"); } },
         { name: process.platform === "darwin" ? "Meta+Enter" : "Control+Enter", run: async () => { await page.keyboard.press(process.platform === "darwin" ? "Meta+Enter" : "Control+Enter"); } },
         { name: process.platform === "darwin" ? "Control+Enter" : "Meta+Enter", run: async () => { await page.keyboard.press(process.platform === "darwin" ? "Control+Enter" : "Meta+Enter"); } },
+        { name: "의미/레이블 버튼", run: () => clickSubmitCandidate("semantic") },
+        { name: "입력창 근처 제출 버튼", run: () => clickSubmitCandidate("near") },
+        { name: "화살표/send 아이콘 버튼", run: () => clickSubmitCandidate("icon") },
       ];
       let sent = false;
       for (let attempt = 0; attempt < submitMethods.length && !sent; attempt++) {
