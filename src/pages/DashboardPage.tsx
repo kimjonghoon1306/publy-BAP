@@ -989,6 +989,10 @@ Output format (JSON array only, no other text):
   const [flowImgCountAuto, setFlowImgCountAuto] = useState(true);
   const flowImgCountAutoRef = useRef(true);
   useEffect(()=>{ flowImgCountAutoRef.current=flowImgCountAuto; },[flowImgCountAuto]);
+  // ★ 이미지 생성/발행 시 항상 "최신" 개수를 쓰도록 ref 미러링(클로저로 옛 값이 잡혀 직접입력이
+  //   무시되고 추천 개수로 만들어지던 것 방지). 직접입력 N → 실제로 N장 생성.
+  const flowImgCountRef = useRef(flowImgCount);
+  useEffect(()=>{ flowImgCountRef.current=flowImgCount; },[flowImgCount]);
   const [autoInserted, setAutoInserted] = useState(false);
   const [showPreviewModal, setShowPreviewModal] = useState(false);
   const [showNaverMenu, setShowNaverMenu] = useState(false);
@@ -2252,7 +2256,8 @@ ${segList}`;
     }
     setGenImgLoading(true);setGenImgProgress(0);setGenImgCurrent(0);setImgGenFailed(false);
     // 2) 글 내용 기반 프롬프트 + 캡션 구성 (★flowImgCount 사용)
-    const n=Math.max(1,flowImgCount);
+    const n=Math.max(1,flowImgCountRef.current); // ★ref로 항상 최신 개수(직접입력 반영)
+    console.log(`[publy] Flow 이미지 생성 요청: ${n}장 (직접입력=${!flowImgCountAutoRef.current})`);
     const content=genContent||"";
     // ★ Gemini가 글을 읽고 "장면이 서로 다른"(6하원칙: 언제/어디서/무엇을/어떻게/왜) 이미지 프롬프트 N개 생성.
     //   이미지만 봐도 스토리가 읽히게. 실패 시 기존 고정 템플릿으로 폴백.
@@ -2444,6 +2449,13 @@ ${segList}`;
     console.log("[publy] 온파트너 링크 대상:", partnerForPublish.length, "개", partnerForPublish.map(it=>it.product.name));
     if(partnerForPublish.length>0){
       const items=partnerForPublish.filter(it=>it.product.available&&it.product.partnerUrl);
+      // ★온파트너(제휴) 있으면 썸네일(첫 이미지) 캡션을 비운다 — 원래 잘 되던 모습:
+      //   썸네일엔 캡션 없이, 바로 밑에 제휴 광고고지 문구가 오게. (캡션이 있으면 그 밑에 문구가
+      //   붙어 지저분하고, 캡션칸 자체가 없어야 문구가 본문에 깔끔히 들어감.)
+      if(items.length>0){
+        const firstImgIdx=effectiveBlocks.findIndex(b=>b.type==="image");
+        if(firstImgIdx>=0) effectiveBlocks[firstImgIdx]={...(effectiveBlocks[firstImgIdx] as SingleImageBlock),alt:""} as ContentBlock;
+      }
       // ★고지 문단을 "썸네일 바로 다음"(본문 맨 앞)에 무조건 1회. 이미 있으면 중복 안 넣음.
       const DISCLOSURE="※ 이 글에는 제휴 링크가 포함되어 있으며, 구매 시 작성자에게 일정 수수료가 발생할 수 있습니다.";
       const hasDisclosure=effectiveBlocks.some(b=>b.type==="text"&&(b as TextBlock).content.includes("제휴 링크가 포함"));
@@ -2496,7 +2508,7 @@ ${segList}`;
       }).filter(Boolean),
       // Flow 이미지 설정
       useFlow: imgGenType === "flow" && generatedImages.length === 0,
-      flowImgCount: imgGenType === "flow" && generatedImages.length === 0 ? flowImgCount : undefined,
+      flowImgCount: imgGenType === "flow" && generatedImages.length === 0 ? flowImgCountRef.current : undefined,
       flowPrompts: imgGenType === "flow" && generatedImages.length === 0 ? (() => {
         const c = genContent || "";
         const lines = c.split("\n").filter((l:string) => l.trim().length > 5);
