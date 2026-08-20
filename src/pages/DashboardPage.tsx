@@ -2258,7 +2258,6 @@ ${segList}`;
     // 2) 글 내용 기반 프롬프트 + 캡션 구성 (★flowImgCount 사용)
     // 이어붙이기(추가 생성)면 지정한 추가 개수(최대 3장), 아니면 설정 개수(ref=최신).
     const n=append&&addCount ? Math.max(1,Math.min(3,addCount)) : Math.max(1,flowImgCountRef.current);
-    console.log(`[publy] Flow 이미지 ${append?"추가":"생성"} 요청: ${n}장 (직접입력=${!flowImgCountAutoRef.current})`);
     const content=genContent||"";
     // ★ Gemini가 글을 읽고 "장면이 서로 다른"(6하원칙: 언제/어디서/무엇을/어떻게/왜) 이미지 프롬프트 N개 생성.
     //   이미지만 봐도 스토리가 읽히게. 실패 시 기존 고정 템플릿으로 폴백.
@@ -2269,6 +2268,11 @@ ${segList}`;
     //   글 전체를 1장에 뭉뚱그려 소재가 뒤섞이는(양념게장이 괴물로 나오는) 문제를 막는다.
     const existing=append?generatedImages.length:0;
     const total=existing+n;
+    // ★진단 로그: 새 생성인지/추가인지, 몇 장 요청, 기존 몇 장, 프롬프트를 글의 몇~몇 구간에서 뽑는지 명확히.
+    //   (6장 같은 개수 불일치를 정확히 짚기 위해 화면 토스트로도 보여준다)
+    const _mode = append ? `이어붙이기(+${n}장)` : `새 생성(${n}장)`;
+    const _srcType = append ? "추가" : (!flowImgCountAutoRef.current ? "임의입력" : "추천");
+    console.log(`[publy] Flow ${_mode} | 종류=${_srcType} | 기존 ${existing}장 → 총 ${total}장 목표 | 프롬프트 구간 ${existing+1}~${total}`);
     try{
       const sceneResult=await buildStoryPrompts(pubTitle||genTitle, content, total);
       if(sceneResult.prompts.length>=total){ prompts=sceneResult.prompts.slice(existing,total); caps=sceneResult.captions.slice(existing,total); }
@@ -2285,7 +2289,7 @@ ${segList}`;
       caps=buildCaptions(keyword||genTitle,total,content).slice(existing,total);
     }
     try{
-      showToast(`🎨 Flow로 이미지 ${n}장 생성 중... (1~2분 소요)`,"info");
+      showToast(append?`🎨 이어붙이기: 기존 ${existing}장 + ${n}장 추가 생성 중... (글 뒷부분 이어받음)`:`🎨 새로 이미지 ${n}장 생성 중... (기존 이미지는 교체)`,"info");
       const postOnce=()=>botFetch(`${BOT}/api/flow-generate`,{
         method:"POST",headers:{"Content-Type":"application/json"},
         body:JSON.stringify({prompts,captions:caps}),
