@@ -2131,21 +2131,22 @@ POST3: (제목)|(이유)
     //   (예전엔 정해진 스토리 아크로 만들어 글과 이미지가 어긋났음 — 생선구이 얘기에 간장게장 이미지 등)
     const clean=(content||"").replace(/\[(FAQ|참고자료|관련글)시작\][\s\S]*?\[\1끝\]/g,"").trim();
     const paras=clean.split(/\n{2,}/).map(p=>p.replace(/^#+\s*/,"").trim()).filter(p=>p.length>15);
-    const source=(paras.join(" ")||clean||title).replace(/\s+/g," ").trim();
-    // 문단 수가 장수보다 적어도 마지막 문단을 복제하지 않는다. 원문을 서로 겹치지 않는 연속 범위로 나눈다.
-    const segments=Array.from({length:n},(_,i)=>{
-      const start=Math.floor(source.length*i/n);
-      const end=i===n-1?source.length:Math.floor(source.length*(i+1)/n);
-      return source.slice(start,end).trim().slice(0,320)||`${title}의 ${i+1}번째 이야기 장면`;
-    });
-    const perspectives=["공간과 전체 맥락을 보여주는 와이드 전체샷","핵심 소재의 질감과 특징을 담은 매크로 클로즈업","재료·도구·준비 과정을 보여주는 과정 컷","현장과 주변 분위기를 함께 담는 환경 컷","사람의 손과 사용 경험을 담는 자연스러운 인물 디테일 컷","완성 결과를 아름답게 마무리하는 히어로 컷","예상 밖의 측면 시점으로 보는 비하인드 디테일","풍부한 색감으로 장소와 주제를 연결하는 분위기 컷"];
-    const segList=segments.map((s,i)=>`[${i+1}번 구간 / 필수 연출: ${perspectives[i%perspectives.length]}] ${s}`).join("\n");
+    // N개 구간으로 균등 분할(각 구간=연속된 문단 묶음). 문단이 부족할 때만 실제 문장 경계로 세분화한다.
+    let units=paras.length?paras:[clean||title];
+    if(units.length<n){
+      const sentences=units.flatMap(p=>p.match(/[^.!?。！？]+[.!?。！？]?/g)?.map(s=>s.trim()).filter(Boolean)||[]);
+      if(sentences.length>units.length) units=sentences;
+    }
+    const count=Math.min(n,units.length);
+    const segments=Array.from({length:count},(_,i)=>{
+      const start=Math.floor(units.length*i/count);
+      const end=Math.floor(units.length*(i+1)/count);
+      return units.slice(start,end).join(" ").slice(0,320);
+    }).filter(Boolean);
+    const segList=segments.map((s,i)=>`[${i+1}번 구간] ${s}`).join("\n");
     const ask=`너는 블로그 사진 디렉터야. 아래는 한 글을 순서대로 ${segments.length}구간으로 나눈 거야.
 각 구간의 "그 문단이 실제로 말하는 장면"을 사진 1장으로 기획해줘. 반드시 해당 구간 내용과 딱 맞아야 해(다른 구간 내용/엉뚱한 소재 금지).
 예: 구간이 '생선구이'면 생선구이 사진, '조개구이'면 조개구이 사진. 구간에 특정 음식/장소가 나오면 그걸 그려.
-각 사진은 촬영 각도·거리·구도·조명·관점과 핵심 소재가 서로 확실히 달라야 해. 동일하거나 유사한 이미지와 프롬프트 반복은 금지해.
-전체샷→디테일→재료/과정→현장/분위기→사람의 손/경험→완성 장면처럼 한 제목 안에서 다채롭고 색감 풍부하고 예쁜 스토리텔링 흐름을 만들어.
-각 구간의 '필수 연출'은 반드시 반영하되, 원문에 없는 대상이나 행동을 새로 지어내지는 마.
 
 구간별로 아래 형식 정확히 ${segments.length}줄(순서대로, 다른 말 금지):
 장면설명(한국어 10~20자) | 영문 이미지 프롬프트(사진 스타일, 그 구간의 구체적 장면·소재, 조명, 사실적, 글자/워터마크 없이)
@@ -2165,8 +2166,7 @@ ${segList}`;
       if(/프롬프트|영문|prompt|워터마크|사진\s*스타일|장면\s*설명|한국어|구간/i.test(capClean)) capClean="";
       if(!/[가-힣]/.test(capClean)||capClean.length<2) capClean="";
       captions.push(capClean.slice(0,30));
-      const perspective=perspectives[prompts.length%perspectives.length];
-      prompts.push(`${eng}, distinctly staged as ${perspective}, unique camera angle and composition versus every other image in this series, rich vibrant color palette, ultra realistic 8K photography, absolutely no text, no letters, no watermark, no logo`);
+      prompts.push(`${eng}, rich vibrant color palette, ultra realistic 8K photography, absolutely no text, no letters, no watermark, no logo`);
     }
     return { prompts, captions };
   }

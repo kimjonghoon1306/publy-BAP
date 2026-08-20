@@ -1608,6 +1608,110 @@ export async function generateFlowImagesCDP(params: {
       log("[Flow] ⚠️ 새 프로젝트 진입 실패 — 현재 화면에서 진행");
     }
 
+    // Flow UI는 자주 바뀌므로 실패 시 다음 수정에 필요한 DOM 단서를 로그로 남겨둔다.
+    const dumpFlowControls = async (reason: string) => {
+      try {
+        const dump = await page.evaluate(() => {
+          const visible = (el: Element) => {
+            const r = el.getBoundingClientRect();
+            const s = getComputedStyle(el);
+            return r.width > 0 && r.height > 0 && s.display !== "none" && s.visibility !== "hidden";
+          };
+          const describe = (el: Element) => ({
+            tag: el.tagName.toLowerCase(),
+            text: (el.textContent || "").replace(/\s+/g, " ").trim().slice(0, 160),
+            aria: el.getAttribute("aria-label") || "",
+            title: el.getAttribute("title") || "",
+            role: el.getAttribute("role") || "",
+            type: el.getAttribute("type") || "",
+            value: (el as HTMLInputElement).value || el.getAttribute("data-value") || "",
+            disabled: (el as HTMLButtonElement).disabled || el.getAttribute("aria-disabled") === "true",
+          });
+          const buttons = [...document.querySelectorAll("button,[role=button]")].filter(visible).slice(0, 80).map(describe);
+          const outputRelated = [...document.querySelectorAll("label,button,[role=button],[role=option],[role=menuitem],select,input,[aria-label]")]
+            .filter(el => visible(el) && /\ucd9c\ub825\s*(\uac1c\uc218|\uc218)|\uc774\ubbf8\uc9c0\s*(\uac1c\uc218|\uc218)|number\s+of\s+outputs?|outputs?|images?\s*(count|number)|\uac1c\s*\uc0dd\uc131/i.test(`${el.textContent || ""} ${el.getAttribute("aria-label") || ""}`))
+            .slice(0, 40).map(describe);
+          const inputs = [...document.querySelectorAll("textarea,[contenteditable=true],input,select")].filter(visible).slice(0, 40).map(describe);
+          return { url: location.href, buttons, outputRelated, inputs };
+        });
+        log(`[Flow] 🔎 DOM 진단(${reason}): ${JSON.stringify(dump)}`);
+      } catch (e: any) {
+        log(`[Flow] ⚠️ DOM 진단 수집 실패: ${String(e?.message || e).split("\n")[0]}`);
+      }
+    };
+
+    // 설정 레이블과 같은 작은 컨테이너 안의 1만 누른다. 프로젝트 내 다른 "1" 버튼은 누르지 않는다.
+    let outputCountIsOne = false;
+    const setOutputCountToOne = async (): Promise<boolean> => {
+      log("[Flow] 🎯 출력 개수 1장 설정 탐색...");
+      try {
+        const direct = await page.evaluate(() => {
+          const visible = (el: Element) => {
+            const r = el.getBoundingClientRect();
+            const s = getComputedStyle(el);
+            return r.width > 0 && r.height > 0 && s.display !== "none" && s.visibility !== "hidden";
+          };
+          const outputRe = /\ucd9c\ub825\s*(\uac1c\uc218|\uc218)|\uc774\ubbf8\uc9c0\s*(\uac1c\uc218|\uc218)|number\s+of\s+outputs?|outputs?|images?\s*(count|number)|\uac1c\s*\uc0dd\uc131/i;
+          const labels = [...document.querySelectorAll("label,[aria-label],button,[role=button]")]
+            .filter(el => visible(el) && outputRe.test(`${el.textContent || ""} ${el.getAttribute("aria-label") || ""}`));
+          for (const label of labels) {
+            let box: Element | null = label;
+            for (let depth = 0; box && depth < 5; depth++, box = box.parentElement) {
+              const select = box.querySelector("select") as HTMLSelectElement | null;
+              if (select && [...select.options].some(o => o.value === "1" || o.text.trim() === "1")) {
+                const opt = [...select.options].find(o => o.value === "1" || o.text.trim() === "1")!;
+                select.value = opt.value;
+                select.dispatchEvent(new Event("input", { bubbles: true }));
+                select.dispatchEvent(new Event("change", { bubbles: true }));
+                return `select:${(label.textContent || label.getAttribute("aria-label") || "").trim().slice(0, 80)}`;
+              }
+              const input = [...box.querySelectorAll('input[type="number"],input[type="range"]')]
+                .find(el => visible(el)) as HTMLInputElement | undefined;
+              if (input) {
+                const min = Number(input.min || "1");
+                const max = Number(input.max || "999");
+                if (min <= 1 && max >= 1) {
+                  const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+                  setter?.call(input, "1");
+                  input.dispatchEvent(new Event("input", { bubbles: true }));
+                  input.dispatchEvent(new Event("change", { bubbles: true }));
+                  return `input:${input.type}`;
+                }
+              }
+              const one = [...box.querySelectorAll("button,[role=button],[role=option],[role=menuitem]")]
+                .find(el => visible(el) && /^(1|1\s*\uc7a5|1\s*image)$/i.test((el.textContent || el.getAttribute("aria-label") || "").trim()));
+              if (one) { (one as HTMLElement).click(); return "nearby-option:1"; }
+            }
+          }
+          return "";
+        });
+        if (direct) {
+          await page.waitForTimeout(600);
+          log(`[Flow] ✅ 출력 개수 1장 설정 시도 완료 (${direct})`);
+          return true;
+        }
+
+        // 드롭다운은 먼저 설정 트리거를 열어야 1 옵션이 DOM에 나온다.
+        const trigger = page.locator('button,[role="button"]').filter({ hasText: /\ucd9c\ub825\s*(\uac1c\uc218|\uc218)|\uc774\ubbf8\uc9c0\s*(\uac1c\uc218|\uc218)|number\s+of\s+outputs?|outputs?|images?\s*(count|number)/i }).first();
+        if (await trigger.isVisible().catch(() => false)) {
+          await trigger.click({ timeout: 3000 });
+          await page.waitForTimeout(500);
+          const option = page.locator('[role="option"],[role="menuitem"],button').filter({ hasText: /^\s*(1|1\s*\uc7a5|1\s*image)\s*$/i }).first();
+          if (await option.isVisible().catch(() => false)) {
+            await option.click({ timeout: 3000 });
+            log("[Flow] ✅ 출력 개수 1장 설정 시도 완료 (dropdown)");
+            return true;
+          }
+        }
+      } catch (e: any) {
+        log(`[Flow] ⚠️ 출력 개수 설정 시도 오류: ${String(e?.message || e).split("\n")[0]}`);
+      }
+      log("[Flow] ⚠️ 출력개수 설정 못 찾음 — 여러 장 생성 시 1장 선택으로 폴백");
+      await dumpFlowControls("출력개수 설정 실패");
+      return false;
+    };
+    outputCountIsOne = await setOutputCountToOne();
+
     // 5) 프롬프트별 생성 — ★ 큐 방식: 실패한 프롬프트는 다시 시도(최대 3회)해서 "요청한 개수 정확히" 채운다.
     const target = prompts.length;              // 요청한 총 장수
     const queue: number[] = prompts.map((_, i) => i);
@@ -1622,6 +1726,9 @@ export async function generateFlowImagesCDP(params: {
         prompt += ", (photo only, absolutely no text, no letters, no words, no watermark, no logo)";
       }
       log(`[Flow] (${i + 1}/${prompts.length}) 프롬프트 입력: ${prompt.slice(0, 40)}...`);
+
+      // 첫 화면에서 설정 UI가 늦게 로드되는 경우를 위해 실패했던 경우만 제출 직전 한 번 더 확인한다.
+      if (!outputCountIsOne) outputCountIsOne = await setOutputCountToOne();
 
       // 입력창(보이는 contenteditable/textarea)에 입력
       let entered = false;
@@ -1651,7 +1758,7 @@ export async function generateFlowImagesCDP(params: {
 
       // 클릭 API가 성공해도 React가 이벤트를 놓칠 수 있으므로, 반드시 UI의 "전송 성공 신호"를
       // 확인한다. 실패하면 매번 다른 방식으로 다시 보내고, 전부 실패해도 생성 대기에는 진입하지 않는다.
-      // '만들기' 버튼 2개(add_2만들기=업로드, arrow_forward만들기=전송) → 정확 텍스트로 구분.
+      // 업로드(add_2/attach/image/reference)는 모든 탐색에서 제외한다.
       const submissionStarted = async (): Promise<boolean> => page.evaluate((expectedPrompt: string) => {
         const visible = (el: Element) => {
           const r = el.getBoundingClientRect();
@@ -1677,41 +1784,61 @@ export async function generateFlowImagesCDP(params: {
         return false;
       };
 
+      const clickSubmitCandidate = async (mode: "semantic" | "near" | "icon"): Promise<string> => page.evaluate(({ expectedPrompt, mode }) => {
+        const visible = (el: Element) => {
+          const r = el.getBoundingClientRect();
+          const s = getComputedStyle(el);
+          return r.width > 0 && r.height > 0 && s.display !== "none" && s.visibility !== "hidden";
+        };
+        const inputs = [...document.querySelectorAll("[contenteditable=true],textarea")].filter(visible);
+        const input = inputs.find(el => (el instanceof HTMLTextAreaElement ? el.value : el.textContent || "").includes(expectedPrompt)) || inputs[0];
+        if (!input) throw new Error("prompt input not found");
+        const ir = input.getBoundingClientRect();
+        const candidates = [...document.querySelectorAll("button,[role=button]")].filter(visible).map(el => {
+          const text = `${el.textContent || ""} ${el.getAttribute("aria-label") || ""} ${el.getAttribute("title") || ""}`.replace(/\s+/g, " ").trim();
+          const r = el.getBoundingClientRect();
+          const distance = Math.hypot(r.left + r.width / 2 - (ir.left + ir.width / 2), r.top + r.height / 2 - (ir.top + ir.height / 2));
+          const upload = /add_?2|upload|attach|reference|\uc5c5\ub85c\ub4dc|\ucca8\ubd80|\ucc38\uc870\s*\uc774\ubbf8\uc9c0|\uc774\ubbf8\uc9c0\s*\ucd94\uac00/i.test(text);
+          const semantic = /\ub9cc\ub4e4\uae30|\uc0dd\uc131|create|generate|\uc804\uc1a1|submit/i.test(text);
+          const icon = /arrow_forward|send|arrow_upward/i.test(text);
+          const disabled = (el as HTMLButtonElement).disabled || el.getAttribute("aria-disabled") === "true";
+          return { el, text, distance, upload, semantic, icon, disabled };
+        }).filter(c => !c.upload && !c.disabled);
+        let matches = mode === "semantic" ? candidates.filter(c => c.semantic) :
+          mode === "icon" ? candidates.filter(c => c.icon) :
+          candidates.filter(c => c.distance < Math.max(500, ir.width * 0.8) && (c.semantic || c.icon || c.distance < 180));
+        matches = matches.sort((a, b) => (Number(b.semantic) + Number(b.icon) - b.distance / 1000) - (Number(a.semantic) + Number(a.icon) - a.distance / 1000));
+        const chosen = matches[0];
+        if (!chosen) throw new Error(`${mode} submit candidate not found`);
+        (chosen.el as HTMLElement).click();
+        return `${chosen.text.slice(0, 120)} (distance=${Math.round(chosen.distance)})`;
+      }, { expectedPrompt: prompt, mode });
+
+      const submitMethods: { name: string; run: () => Promise<string | void> }[] = [
+        { name: "의미/레이블 버튼", run: () => clickSubmitCandidate("semantic") },
+        { name: "입력창 근처 제출 버튼", run: () => clickSubmitCandidate("near") },
+        { name: "화살표/send 아이콘 버튼", run: () => clickSubmitCandidate("icon") },
+        { name: "Enter", run: async () => { const inp = page.locator("[contenteditable=true]:visible,textarea:visible").filter({ hasText: prompt }).first(); await inp.click({ timeout: 3000 }).catch(async () => page.locator("[contenteditable=true]:visible,textarea:visible").first().click()); await page.keyboard.press("Enter"); } },
+        { name: process.platform === "darwin" ? "Meta+Enter" : "Control+Enter", run: async () => { await page.keyboard.press(process.platform === "darwin" ? "Meta+Enter" : "Control+Enter"); } },
+        { name: process.platform === "darwin" ? "Control+Enter" : "Meta+Enter", run: async () => { await page.keyboard.press(process.platform === "darwin" ? "Control+Enter" : "Meta+Enter"); } },
+      ];
       let sent = false;
-      for (let attempt = 1; attempt <= 4 && !sent; attempt++) {
-        log(`[Flow] 📤 전송 시도 ${attempt}/4`);
+      for (let attempt = 0; attempt < submitMethods.length && !sent; attempt++) {
+        const method = submitMethods[attempt];
+        log(`[Flow] 📤 전송 시도 ${attempt + 1}/${submitMethods.length}: ${method.name}`);
         try {
-          if (attempt === 1) {
-            const btn = page.locator("button").filter({ hasText: /^arrow_forward만들기$/ }).first();
-            await btn.scrollIntoViewIfNeeded({ timeout: 3000 }).catch(() => {});
-            await btn.click({ force: true, timeout: 5000 });
-          } else if (attempt === 2) {
-            // DOM에서 정확 텍스트 버튼을 다시 찾아 native click 이벤트 발생.
-            await page.evaluate(() => {
-              const btn = [...document.querySelectorAll("button")]
-                .find(el => (el.textContent || "").trim() === "arrow_forward만들기") as HTMLButtonElement | undefined;
-              if (!btn) throw new Error("submit button not found");
-              btn.click();
-            });
-          } else if (attempt === 3) {
-            const inp = page.locator("[contenteditable=true]:visible, textarea:visible").first();
-            await inp.click({ timeout: 3000 });
-            await page.keyboard.press(process.platform === "darwin" ? "Meta+Enter" : "Control+Enter");
-          } else {
-            // UI가 재렌더된 뒤의 최신 버튼을 다시 resolve해 일반 실제 클릭.
-            const btn = page.locator("button").filter({ hasText: /^arrow_forward만들기$/ }).first();
-            await btn.waitFor({ state: "visible", timeout: 4000 });
-            await btn.click({ timeout: 5000 });
-          }
+          const detail = await method.run();
+          if (detail) log(`[Flow] 📤 전송 후보: ${detail}`);
         } catch (e: any) {
-          log(`[Flow] ⚠️ 전송 시도 ${attempt} 동작 실패: ${String(e?.message || e).split("\n")[0]}`);
+          log(`[Flow] ⚠️ 전송 시도 ${attempt + 1}(${method.name}) 동작 실패: ${String(e?.message || e).split("\n")[0]}`);
         }
         sent = await waitForSubmission();
-        if (sent) log(`[Flow] ✅ 전송 확인 (${attempt}번째 시도)`);
-        else if (attempt < 4) log(`[Flow] ⚠️ 전송 신호 없음 — 다른 방식으로 재시도`);
+        if (sent) log(`[Flow] ✅ 전송 확인 (${method.name})`);
+        else if (attempt < submitMethods.length - 1) log(`[Flow] ⚠️ 전송 신호 없음 — 다른 방식으로 재시도`);
       }
       if (!sent) {
-        log(`[Flow] ❌ (${i + 1}/${prompts.length}) 4회 전송 실패`);
+        log(`[Flow] ❌ (${i + 1}/${prompts.length}) ${submitMethods.length}회 전송 실패`);
+        await dumpFlowControls("프롬프트 전송 실패");
         requeue();
         continue;
       }
@@ -1748,7 +1875,8 @@ export async function generateFlowImagesCDP(params: {
           previousCount = snap.fresh.length;
           // 보통 4장 그리드가 순차 렌더되므로 4장이 모이면 생성 종료+안정을 확인해 종료한다.
           // UI가 4장보다 적게 내는 경우도 있어, 첫 후보 후 30초간 개수가 안정되고 생성 표시가 끝나면 종료한다.
-          const gridComplete = snap.fresh.length >= 4;
+          // 1장 출력으로 설정했다면 첫 이미지가 안정된 즉시 종료한다.
+          const gridComplete = outputCountIsOne ? snap.fresh.length >= 1 : snap.fresh.length >= 4;
           const fallbackSettled = t - firstCandidateAt >= 10;
           if (!snap.generating && stableChecks >= 2 && (gridComplete || fallbackSettled)) break;
         }
