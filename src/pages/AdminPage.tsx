@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import GoogleFlowCard from "../GoogleFlowCard";
-import { supabase, getAccounts, upsertAccount, PublyAccount, getHistory, PublyHistory, addHistory, deleteHistory, deleteAllHistory, setAdminPassword, saveAdminNaverApiKeys, getNaverApiKeys, NaverApiKeys, getNaverDailyUsage, NAVER_DAILY_LIMIT, checkNaverQuota, incrementNaverQuota, getUserNaverApiKeys, getReferrals, getErrorLogs, getUnreadErrorCount, markErrorsAsRead, logError, PLAN_CONFIG, getAllNeighborHistory, NeighborHistory, getAllEngageHistory, EngageHistory, InstaDmTarget, InstaDmHistory, InstaDmQuota, getInstaDmTargets, addInstaDmTarget, updateInstaDmTargetStatus, deleteInstaDmTarget, getInstaDmHistory, addInstaDmHistory, getAllInstaDmHistory, getInstaDmQuota, upsertInstaDmQuota, getAllInstaDmQuotas, INSTA_DM_DAILY_LIMIT, PublyBugReport, getBugReports, updateBugReportStatus, deleteBugReport } from "../lib/supabase";
+import { supabase, getAccounts, upsertAccount, PublyAccount, getHistory, PublyHistory, addHistory, deleteHistory, deleteAllHistory, setAdminPassword, saveAdminNaverApiKeys, getNaverApiKeys, NaverApiKeys, getNaverDailyUsage, NAVER_DAILY_LIMIT, checkNaverQuota, incrementNaverQuota, getUserNaverApiKeys, getReferrals, getErrorLogs, getUnreadErrorCount, markErrorsAsRead, logError, PLAN_CONFIG, getAllNeighborHistory, NeighborHistory, getAllEngageHistory, EngageHistory, InstaDmTarget, InstaDmHistory, InstaDmQuota, getInstaDmTargets, addInstaDmTarget, updateInstaDmTargetStatus, deleteInstaDmTarget, getInstaDmHistory, addInstaDmHistory, getAllInstaDmHistory, getInstaDmQuota, upsertInstaDmQuota, getAllInstaDmQuotas, INSTA_DM_DAILY_LIMIT, PublyBugReport, getBugReports, updateBugReportStatus, deleteBugReport, resetDailyPublish } from "../lib/supabase";
 import NeighborPage from "./NeighborPage";
 import { botFetch, BotEventStream } from "../lib/botApi";
 
@@ -2176,7 +2176,7 @@ POST3: (제목)|(이유)
     finally { setSaving(null); }
   }
 
-  async function resetQuota(uid: string) { if (!confirm("건수 초기화?")) return; await supabase.from("publy_quotas").update({used_quota:0}).eq("user_id",uid); await loadUsers(); }
+  async function resetQuota(uid: string) { if (!confirm("건수 초기화?")) return; await supabase.from("publy_quotas").update({used_quota:0}).eq("user_id",uid); await resetDailyPublish(uid); await loadUsers(); alert("✅ 발행 건수를 초기화했어요."); }
   async function toggleActive(u: UserFull) { if (!confirm(`${u.name||u.email} ${u.is_active?"비활성화":"활성화"}?`)) return; await supabase.from("publy_users").update({is_active:!u.is_active}).eq("id",u.id); await loadUsers(); }
   async function addNote(uid: string) { if (!newNote.trim()) return; await supabase.from("publy_notes").insert({user_id:uid,content:newNote.trim()}); setNewNote(""); await loadUsers(); }
   async function addPayment(uid: string, plan: string) {
@@ -3755,6 +3755,7 @@ POST3: (제목)|(이유)
                                   <option value="free">FREE — 하루 2건 · 계정 1개 · 7일</option>
                                   <option value="basic">BASIC — 하루 6건 · 계정 2개 · 30일</option>
                                   <option value="pro">PRO — 하루 15건 · 계정 3개 · 30일</option>
+                                  <option value="unlimited">무제한 — 모든 기능 한도 없음</option>
                                 </select>
                               </div>
                               <div className="detail-field"><span className="field-label">네이버 키워드 분석</span>

@@ -25,7 +25,7 @@ const BATCH = 30;
 const MAX_TITLES = 90;
 const MAX_KW = 90;
 const GEMINI_MODELS = ["gemini-2.0-flash","gemini-2.0-flash-lite","gemini-2.5-flash","gemini-2.5-flash-lite"];
-const PLAN_LABELS: Record<string,string> = {free:"FREE",basic:"BASIC",pro:"PRO"};
+const PLAN_LABELS: Record<string,string> = {free:"FREE",basic:"BASIC",pro:"PRO",unlimited:"무제한"};
 // 만료일까지 남은 일수 — 자정 기준으로 계산해 시각과 무관하게 항상 동일한 값(상단/하단 D-day 일치)
 function daysUntil(dateStr?: string): number | null {
   if (!dateStr) return null;
@@ -2232,7 +2232,7 @@ ${segList}`;
 
   // ── Google Flow 이미지 생성 (봇 CDP 경유, 미리보기까지) ──
   //   append=true 면 기존 이미지에 "이어붙임"(1장 지운 자리 채우기 등), false 면 전체 새로 생성(교체)
-  async function handleGenerateFlowImages(append:boolean=false){
+  async function handleGenerateFlowImages(append:boolean=false, addCount?:number){
     // 1) Flow 준비 상태 확인 (디버깅 크롬 열려있나) — Electron 우선, 없으면 봇 API
     const checkReady=async():Promise<boolean>=>{
       try{
@@ -2256,26 +2256,33 @@ ${segList}`;
     }
     setGenImgLoading(true);setGenImgProgress(0);setGenImgCurrent(0);setImgGenFailed(false);
     // 2) 글 내용 기반 프롬프트 + 캡션 구성 (★flowImgCount 사용)
-    const n=Math.max(1,flowImgCountRef.current); // ★ref로 항상 최신 개수(직접입력 반영)
-    console.log(`[publy] Flow 이미지 생성 요청: ${n}장 (직접입력=${!flowImgCountAutoRef.current})`);
+    // 이어붙이기(추가 생성)면 지정한 추가 개수(최대 3장), 아니면 설정 개수(ref=최신).
+    const n=append&&addCount ? Math.max(1,Math.min(3,addCount)) : Math.max(1,flowImgCountRef.current);
+    console.log(`[publy] Flow 이미지 ${append?"추가":"생성"} 요청: ${n}장 (직접입력=${!flowImgCountAutoRef.current})`);
     const content=genContent||"";
     // ★ Gemini가 글을 읽고 "장면이 서로 다른"(6하원칙: 언제/어디서/무엇을/어떻게/왜) 이미지 프롬프트 N개 생성.
     //   이미지만 봐도 스토리가 읽히게. 실패 시 기존 고정 템플릿으로 폴백.
     let prompts:string[]=[];
     let caps:string[]=[];
+    // ★추가 생성(append)이면 "글 전체를 n장으로 압축"하지 말고, (기존 장수+추가 장수)로 구간을 나눠
+    //   그 중 "뒤쪽(추가분)" 프롬프트만 쓴다. 그래야 추가 이미지가 글의 다른 구간이라 자연스럽고,
+    //   글 전체를 1장에 뭉뚱그려 소재가 뒤섞이는(양념게장이 괴물로 나오는) 문제를 막는다.
+    const existing=append?generatedImages.length:0;
+    const total=existing+n;
     try{
-      const sceneResult=await buildStoryPrompts(pubTitle||genTitle, content, n);
-      if(sceneResult.prompts.length>=n){ prompts=sceneResult.prompts.slice(0,n); caps=sceneResult.captions.slice(0,n); }
+      const sceneResult=await buildStoryPrompts(pubTitle||genTitle, content, total);
+      if(sceneResult.prompts.length>=total){ prompts=sceneResult.prompts.slice(existing,total); caps=sceneResult.captions.slice(existing,total); }
     }catch{}
     if(prompts.length<n){
-      // 폴백: 기존 방식 (구간별 고정 템플릿)
+      // 폴백: 기존 방식 (구간별 고정 템플릿) — 전체 구간 중 뒤쪽(추가분)만
       const lines=content.split("\n").filter(l=>l.trim().length>5);
-      const step=Math.max(1,Math.floor(lines.length/n));
-      prompts=Array.from({length:n},(_,i)=>{
+      const step=Math.max(1,Math.floor(lines.length/total));
+      prompts=Array.from({length:n},(_,k)=>{
+        const i=existing+k;
         const seg=lines.slice(i*step,(i+1)*step).join(" ").slice(0,150);
         return buildFlowPrompt(keyword||genTitle,pubTitle||genTitle,seg,i);
       });
-      caps=buildCaptions(keyword||genTitle,n,content);
+      caps=buildCaptions(keyword||genTitle,total,content).slice(existing,total);
     }
     try{
       showToast(`🎨 Flow로 이미지 ${n}장 생성 중... (1~2분 소요)`,"info");
@@ -4210,11 +4217,20 @@ POST3: (제목)|(이유)
                             {genImgLoading&&<button className="btn-stop" style={{width:"100%",justifyContent:"center"}} onClick={stopImageGen}>⏹ 생성 중단</button>}
                             {imgGenFailed&&!genImgLoading&&<button className="btn btn-sm" onClick={()=>{setImgGenFailed(false);handleGenerateImages();}} style={{background:"var(--warn)",color:"#fff",border:"none",cursor:"pointer",width:"100%",justifyContent:"center",marginTop:4}}>🔄 재시도</button>}
                             {imgGenType==="flow"&&generatedImages.length>0&&!genImgLoading&&(
-                              <button className="btn btn-full btn-sm" onClick={()=>handleGenerateFlowImages(true)} disabled={genImgLoading||!genContent}
-                                style={{background:"rgba(16,185,129,.15)",color:"#10b981",border:"1.5px solid #10b981",cursor:"pointer",width:"100%",justifyContent:"center",fontWeight:800}}
-                                title="지운 자리 채우기 — 기존 이미지에 이어붙여요">
-                                ➕ {Math.max(1,flowImgCount)}장 추가 생성 (기존에 이어붙임)
-                              </button>
+                              <div style={{padding:"12px 14px",borderRadius:12,background:"rgba(16,185,129,.08)",border:"1px solid rgba(16,185,129,.3)",display:"flex",flexDirection:"column",gap:8}}>
+                                <div style={{fontSize:12,color:"#10b981",fontWeight:700,lineHeight:1.6}}>
+                                  ➕ 이미지 더 만들기
+                                  <div style={{fontSize:11,color:"var(--text2)",fontWeight:500,marginTop:2}}>맘에 안 드는 이미지는 🗑로 지운 뒤, 아래에서 그만큼 다시 만들어 채우세요. (지우지 않고 더 추가도 가능 · 한 번에 최대 3장)</div>
+                                </div>
+                                <div style={{display:"flex",gap:6}}>
+                                  {[1,2,3].map(c=>(
+                                    <button key={c} className="btn btn-sm" onClick={()=>handleGenerateFlowImages(true,c)} disabled={genImgLoading||!genContent}
+                                      style={{flex:1,background:"rgba(16,185,129,.15)",color:"#10b981",border:"1.5px solid #10b981",cursor:"pointer",justifyContent:"center",fontWeight:800,fontFamily:"inherit"}}>
+                                      +{c}장
+                                    </button>
+                                  ))}
+                                </div>
+                              </div>
                             )}
                             {generatedImages.length>0&&!genImgLoading&&<button className="btn btn-danger btn-full btn-sm" onClick={()=>{setGeneratedImages([]);setCaptions([]);}}>🗑 이미지 초기화</button>}
                           </div>

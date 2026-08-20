@@ -1795,15 +1795,22 @@ export async function generateFlowImagesCDP(params: {
       await page.goto("https://labs.google/fx/ko/tools/flow", { waitUntil: "domcontentloaded", timeout: 30000 });
       await page.waitForTimeout(3500);
     }
-    try {
-      await page.click("text=새 프로젝트", { timeout: 8000 });
-    } catch {
-      // 폴백: '만들기'/'프로젝트' 계열 버튼
-      try { await page.locator("button:has-text('프로젝트')").first().click({ timeout: 4000 }); } catch {}
+    //   ★실제 Flow UI 버튼명은 "새 프로젝트"가 아니라 "새로운 세션"(edit_square)일 수 있다(로그 DOM 확인).
+    //     이걸 못 눌러 기존 프로젝트에 이미지가 쌓이면, Flow(대화형)가 이전 이미지를 참조해 엉뚱한
+    //     이미지(예: 양념게장이 게 괴물로)를 만든다. 여러 이름을 순서대로 시도한다.
+    let newSessionOk = false;
+    for (const label of ["새로운 세션", "새 프로젝트", "새 세션", "New session", "New project"]) {
+      try {
+        const btn = page.locator(`button:has-text('${label}')`).first();
+        if (await btn.count() > 0) { await btn.click({ timeout: 4000 }); newSessionOk = true; log(`[Flow] 세션 초기화 클릭: ${label}`); break; }
+      } catch {}
+    }
+    if (!newSessionOk) {
+      try { await page.click("text=새 프로젝트", { timeout: 4000 }); newSessionOk = true; } catch {}
     }
     await page.waitForTimeout(5000);
-    if (!page.url().includes("/project/")) {
-      log("[Flow] ⚠️ 새 프로젝트 진입 실패 — 현재 화면에서 진행");
+    if (!page.url().includes("/project/") && !newSessionOk) {
+      log("[Flow] ⚠️ 새 프로젝트/세션 진입 실패 — 현재 화면에서 진행");
     }
 
     // Flow UI는 자주 바뀌므로 실패 시 다음 수정에 필요한 DOM 단서를 로그로 남겨둔다.

@@ -11,7 +11,7 @@ export interface PublyUser {
   id: string;
   email: string;
   name: string;
-  plan: "free" | "basic" | "pro";
+  plan: "free" | "basic" | "pro" | "unlimited";
   app_type: "app" | "web" | "both";
   is_active: boolean;
   created_at: string;
@@ -105,6 +105,11 @@ export async function getQuota(userId: string): Promise<PublyQuota | null> {
 }
 
 export async function useQuota(userId: string): Promise<boolean> {
+  // 무제한(unlimited) 등급은 총 발행 쿼타 체크/차감 없이 항상 통과.
+  try {
+    const { data: u } = await supabase.from("publy_users").select("plan").eq("id", userId).maybeSingle();
+    if (u?.plan === "unlimited") return true;
+  } catch {}
   const quota = await getQuota(userId);
   if (!quota || quota.remaining_quota <= 0) return false;
 
@@ -251,6 +256,7 @@ export const PLAN_CONFIG: Record<string, {
   free:  { label: "FREE",  maxAccounts: 1, dailyPublish: 2,  trialDays: 7  },
   basic: { label: "BASIC", maxAccounts: 2, dailyPublish: 6,  trialDays: 30 },
   pro:   { label: "PRO",   maxAccounts: 3, dailyPublish: 15, trialDays: 30 },
+  unlimited: { label: "무제한", maxAccounts: 999, dailyPublish: 999999, trialDays: 99999 },
   admin: { label: "ADMIN", maxAccounts: 99, dailyPublish: 9999, trialDays: 9999 },
 };
 
@@ -287,10 +293,20 @@ export async function incrementDailyPublish(userId: string): Promise<void> {
     .upsert({ key, value: String(used + 1) }, { onConflict: "key" });
 }
 
+/* ── 관리자: 오늘 발행 카운트 초기화 ── (실제 한도체크가 읽는 publy_settings 키를 0으로) */
+export async function resetDailyPublish(userId: string): Promise<void> {
+  try {
+    await supabase
+      .from("publy_settings")
+      .upsert({ key: publishQuotaKey(userId), value: "0" }, { onConflict: "key" });
+  } catch {}
+}
+
 export const NAVER_DAILY_LIMIT: Record<string, number> = {
   free: 5,
   pro: 20,
   business: 100,
+  unlimited: 999999,
   admin: 9999,
 };
 
@@ -343,6 +359,7 @@ export const NEIGHBOR_DAILY_LIMIT: Record<string, number> = {
   free: 10,
   basic: 50,
   pro: 100,
+  unlimited: 999999,
   admin: 9999,
 };
 
@@ -350,6 +367,7 @@ export const ENGAGE_DAILY_LIMIT: Record<string, number> = {
   free: 10,
   basic: 50,
   pro: 100,
+  unlimited: 999999,
   admin: 9999,
 };
 
@@ -638,6 +656,7 @@ export const INSTA_DM_DAILY_LIMIT: Record<string, number> = {
   free: 5,
   basic: 10,
   pro: 30,
+  unlimited: 999999,
   admin: 9999,
 };
 
