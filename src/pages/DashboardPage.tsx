@@ -851,6 +851,11 @@ Output format (JSON array only, no other text):
   const [onPartnerItems, setOnPartnerItems] = useState<OnPartnerItem[]>([]);
   const [onPartnerPreview, setOnPartnerPreview] = useState<OnPartnerItem|null>(null); // 조회한 상품(아직 추가 전)
   const MAX_ONPARTNER = 3;
+  // ── 내 링크(일반 사이트): URL만 넣으면 네이버가 OG 썸네일 카드로 렌더. 온파트너와 별도 관리(안 엉키게) ──
+  const [myLinkInput, setMyLinkInput] = useState("");
+  const [myLinks, setMyLinks] = useState<string[]>([]);
+  const [myLinkError, setMyLinkError] = useState("");
+  const MAX_MYLINK = 3;
   const [genTags, setGenTags] = useState("");
   const [generating, setGenerating] = useState(false);
   const abortRef = useRef<AbortController|null>(null);
@@ -2046,6 +2051,18 @@ Output format (JSON array only, no other text):
     showToast("✅ 상품을 추가했어요.","success");
   }
 
+  // 내 링크 추가: 일반 사이트 URL을 목록에 담는다. 발행 시 네이버가 OG 썸네일 카드로 렌더.
+  function addMyLink(){
+    let url=myLinkInput.trim();
+    if(!url){setMyLinkError("링크를 입력해주세요.");return;}
+    if(!/^https?:\/\//i.test(url)) url="https://"+url;   // http 빠졌으면 붙여줌
+    try{ new URL(url); }catch{ setMyLinkError("올바른 링크 주소가 아니에요."); return; }
+    if(myLinks.length>=MAX_MYLINK){setMyLinkError(`링크는 최대 ${MAX_MYLINK}개까지 넣을 수 있어요.`);return;}
+    if(myLinks.includes(url)){setMyLinkError("이미 추가된 링크예요.");return;}
+    setMyLinks(prev=>[...prev,url]); setMyLinkInput(""); setMyLinkError("");
+    showToast("✅ 내 링크를 추가했어요.","success");
+  }
+
   // 배너는 온파트너 서버(/api/banner)가 생성 — 클라 canvas 불필요.
 
   // 본문 최상단에 제휴 안내만 넣는다. 배너(링크 연결된 이미지)는 발행 시 블록에 직접 분산 삽입.
@@ -2119,7 +2136,12 @@ Output format (JSON array only, no other text):
         + serviceMatches.map(k=>{const s=PUBLY_SERVICE_INFO[k];
             return `● ${s.name}: ${s.hook}\n  - 한줄요약: ${s.summary}\n  - 핵심 장점: ${s.benefits.map(b=>`${b[0]}(${b[1]})`).join(" / ")}\n  - 이용 흐름: ${s.flow}${s.url?`\n  - 링크: ${s.url}`:""}`;
           }).join("\n")
-        + "\n※ 위 서비스가 글 주제와 자연스럽게 이어지는 대목에서 1~2문단으로 소개하되, 광고처럼 딱딱하지 않게 실제 경험담·추천 톤으로 녹여 쓸 것."
+        + `\n\n★★ 서비스 글 작성 필수 규칙(짧게 쓰지 말 것 — 이게 이 글의 주제다):
+- 이 서비스가 제목/주제이므로, 위 정보를 뼈대로 삼아 **글 전체를 충분히 길게** 써서 목표 글자수(${chars}자)를 반드시 채운다. 자료가 적다고 짧게 끝내지 말 것.
+- 각 "핵심 장점"을 하나씩 소제목 구간으로 만들어, 각 장점마다 **구체적인 상황·예시·이렇게 쓰면 뭐가 좋은지**를 3~4문장 이상으로 풀어 쓴다.
+- "이용 흐름"은 1단계→2단계→3단계처럼 각 단계가 실제로 어떤 모습인지 초보자도 알게 자세히 설명한다.
+- "어떤 사람에게 좋은지", "직접 써보니(써본다면) 어떤 점이 편한지", "시작하는 법" 같은 실용 문단도 추가해 살을 붙인다.
+- 광고처럼 딱딱하지 말고, 실제 경험담·추천 말투로 자연스럽게. 과장·거짓 정보는 금지(위 내용 범위에서만).`
       : "";
     const prompt=`당신은 대한민국 최고의 블로그 작가입니다.
 
@@ -2575,6 +2597,33 @@ ${segList}`;
           });
         });
         effectiveBlocks=withLink;
+      }
+    }
+    // ── 내 링크(일반 사이트): 온파트너와 별도로, "이미지 바로 뒤(사이 글 없이)"에 URL만 삽입 → 네이버 OG 카드 ──
+    //    ★온파트너와 안 엉키게: 이미 링크가 바로 뒤에 붙은 이미지는 앵커에서 제외한다.
+    if(myLinks.length>0){
+      const isBoundary2=(b:ContentBlock)=>b.type==="text"&&/\[FAQ시작\]|\[관련글시작\]|질문\s*답변|Q\s*&\s*A|큐앤에이|해시태그|자주\s*묻는/i.test((b as TextBlock).content);
+      let bIdx=effectiveBlocks.findIndex(isBoundary2); if(bIdx<0)bIdx=effectiveBlocks.length;
+      const isLinkBlock=(b?:ContentBlock)=>!!b&&b.type==="text"&&/https?:\/\//.test((b as TextBlock).content);
+      // 앵커=경계 전 이미지 블록 중, 바로 뒤가 이미 링크가 아닌 것(온파트너 링크 붙은 이미지 제외). 썸네일(0) 제외.
+      const anchors:number[]=[];
+      for(let i=1;i<bIdx;i++){const t=effectiveBlocks[i].type;if((t==="image"||t==="image-pair")&&!isLinkBlock(effectiveBlocks[i+1]))anchors.push(i);}
+      // 이미지 앵커가 없으면 본문 텍스트 블록 뒤로 폴백
+      if(anchors.length===0)for(let i=0;i<bIdx;i++){const b=effectiveBlocks[i];if(b.type==="text"&&(b as TextBlock).content.trim().length>=40&&!/https?:\/\//.test((b as TextBlock).content))anchors.push(i);}
+      if(anchors.length>0){
+        const ratios = myLinks.length===1?[0.7]:myLinks.length===2?[0.5,0.8]:[0.4,0.62,0.85];
+        const used=new Set<number>();
+        const insAfter=myLinks.map((_,i)=>{
+          let ai=Math.round(anchors.length*ratios[i])-1; ai=Math.max(0,Math.min(anchors.length-1,ai));
+          while(used.has(anchors[ai])&&ai<anchors.length-1)ai++;
+          used.add(anchors[ai]); return anchors[ai];
+        });
+        const withMy:ContentBlock[]=[];
+        effectiveBlocks.forEach((b,i)=>{
+          withMy.push(b);
+          myLinks.forEach((url,k)=>{ if(insAfter[k]===i) withMy.push({type:"text",id:uid(),content:url} as ContentBlock); });  // URL만 → OG 카드
+        });
+        effectiveBlocks=withMy;
       }
     }
     // ── 글쓴이 인사말: "제휴문구 바로 다음 / 제휴문구 없으면 썸네일(첫 이미지) 다음"에 1회 삽입 (테리 요청 2026-08-21) ──
@@ -3675,6 +3724,30 @@ POST3: (제목)|(이유)
                     </div>
                   )}
                   {onPartnerItems.length>1&&<div style={{marginTop:8,color:"var(--accent-text)",fontSize:10,fontWeight:800}}>본문에 골고루 분산 배치돼요 (Q&A·해시태그 위).</div>}
+                </div>
+
+                {/* ── 내 링크 (일반 사이트) — 온파트너와 별도, OG 썸네일 카드로 자동 배치 ── */}
+                <div className="card" style={{borderColor:myLinks.length>0?"rgba(0,150,255,.35)":undefined}}>
+                  <div className="card-title" style={{marginBottom:6}}>🔗 내 링크 넣기 <span style={{fontSize:11,color:"var(--text3)",fontWeight:600}}>({myLinks.length}/{MAX_MYLINK})</span></div>
+                  <div style={{fontSize:11,color:"var(--text3)",lineHeight:1.6,marginBottom:10}}>내 사이트·블로그 등 <b>아무 링크</b>나 넣고 <b>추가</b>하면, 발행 시 이미지 바로 밑에 <b>썸네일 카드(OG)</b>로 자동 배치돼요. 온파트너와 안 섞여요. (최대 {MAX_MYLINK}개)</div>
+                  {myLinks.length<MAX_MYLINK&&(
+                    <div style={{display:"flex",gap:7,alignItems:"stretch"}}>
+                      <input className="inp" value={myLinkInput} onChange={e=>{setMyLinkInput(e.target.value);setMyLinkError("");}} onKeyDown={e=>e.key==="Enter"&&addMyLink()} placeholder="https://내사이트.com  (또는 pick.온종일.com)" style={{flex:1,minWidth:0}}/>
+                      <button className="btn btn-secondary" onClick={addMyLink} style={{flexShrink:0}}>＋ 추가</button>
+                    </div>
+                  )}
+                  {myLinkError&&<div style={{fontSize:11,color:"var(--danger)",marginTop:7}}>⚠️ {myLinkError}</div>}
+                  {myLinks.map((url,idx)=>(
+                    <div key={url} style={{marginTop:8,padding:"9px 11px",borderRadius:10,background:"var(--card2)",border:"1px solid var(--border)",display:"flex",gap:10,alignItems:"center"}}>
+                      <span style={{fontSize:14,flexShrink:0}}>🔗</span>
+                      <div style={{minWidth:0,flex:1}}>
+                        <div style={{fontSize:12.5,fontWeight:800,color:"var(--text)",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{url.replace(/^https?:\/\//,"")}</div>
+                        <div style={{fontSize:10,color:"var(--text3)",fontWeight:600,marginTop:2}}>발행 시 썸네일 카드로 자동 삽입</div>
+                      </div>
+                      <button type="button" onClick={()=>setMyLinks(prev=>prev.filter((_,i)=>i!==idx))} title="빼기" style={{border:0,background:"transparent",color:"var(--text3)",cursor:"pointer",fontSize:15,flexShrink:0}}>✕</button>
+                    </div>
+                  ))}
+                  {myLinks.length>1&&<div style={{marginTop:8,color:"#0096ff",fontSize:10,fontWeight:800}}>본문 이미지 밑에 골고루 배치돼요 (Q&A·해시태그 위).</div>}
                 </div>
 
                 <div className="card">
