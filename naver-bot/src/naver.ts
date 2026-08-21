@@ -1930,6 +1930,7 @@ export async function generateFlowImagesCDP(params: {
     const target = prompts.length;              // 요청한 총 장수
     const queue: number[] = prompts.map((_, i) => i);
     const attemptsById: Record<number, number> = {};
+    const softened: Record<number, boolean> = {};   // 정책 거부로 프롬프트를 순화한 슬롯 표시
     while (queue.length > 0 && results.length < target) {
       const i = queue.shift()!;
       attemptsById[i] = (attemptsById[i] || 0) + 1;
@@ -2063,6 +2064,7 @@ export async function generateFlowImagesCDP(params: {
       let previousCount = 0;
       let firstCandidateAt = -1;
       let lastLoggedCount = -1;   // 상태 변화 있을 때만 로그(도배 방지)
+      let policyBlocked = false;  // 구글이 이 프롬프트를 정책 위반으로 거부했는지
       for (let t = 0; t < 55; t++) {
         await page.waitForTimeout(3000);
         const snap = await page.evaluate((beforeArr: string[]) => {
@@ -2079,8 +2081,13 @@ export async function generateFlowImagesCDP(params: {
           });
           // ⚠️ '이미지를 생성했습니다'(완료) 오탐 방지 — 진행중 표현만 (~중/~ing만)
           const generating = /생성\s*중|만들고\s*있|생성하고\s*있|generating|creating\b|thinking/i.test(document.body.innerText);
-          return { fresh: [...bySrc.values()], generating };
+          // ★구글이 프롬프트를 "정책 위반"으로 거부한 경우 감지(테리 실측: "이 생성은 구글 정책을 위반할
+          //   수 있습니다. 다른 프롬프트를 사용해 보거나 의견을 보내주세요"). 이러면 같은 프롬프트론 계속 거부됨.
+          const policyBlocked = /정책을?\s*위반|정책\s*위반|다른\s*프롬프트를?\s*사용|violat|policy|not\s*allowed|can'?t\s*(help|generate|create)|무언가\s*잘못/i.test(document.body.innerText);
+          return { fresh: [...bySrc.values()], generating, policyBlocked };
         }, beforeSrcs);
+        // 정책 거부가 뜨면 이 프롬프트로는 아무리 기다려도 안 되므로 즉시 대기 종료한다.
+        if (snap.policyBlocked && snap.fresh.length === 0) { policyBlocked = true; break; }
         // ★상태를 눈으로 볼 수 있게(테리: "Flow가 맘대로 움직일 때 알아야 한다"):
         //   후보 이미지 개수가 바뀌거나, 15초마다 "아직 그리는 중"을 로그로 남긴다.
         if (snap.fresh.length !== lastLoggedCount) {
@@ -2119,7 +2126,23 @@ export async function generateFlowImagesCDP(params: {
         return [...bySrc.values()].sort((a, b) => b.width * b.height - a.width * a.height);
       }, beforeSrcs);
 
-      if (freshCandidates.length === 0) { log(`[Flow] ⚠️ ${i + 1}번째 그림이 잘 안 나왔어요. 다시 만들어 볼게요`); requeue(); continue; }
+      if (freshCandidates.length === 0) {
+        if (policyBlocked) {
+          // 구글이 이 프롬프트를 정책 위반으로 거부함. 같은 프롬프트론 계속 거부되므로,
+          //   딱 한 번만 "안전하고 무난한 프롬프트"로 바꿔 다시 시도하고, 그래도 막히면 건너뛴다.
+          if (!softened[i]) {
+            const subject = (captions[i] || "").replace(/[^\w가-힣\s]/g, " ").trim().slice(0, 40);
+            prompts[i] = `A clean, bright, friendly everyday photo${subject ? ` about ${subject}` : ""}, simple and safe for all audiences, soft natural light, no text, no letters`;
+            softened[i] = true;
+            log(`[Flow] ⚠️ ${i + 1}번째 그림은 구글이 막았어요(정책). 더 무난한 그림으로 한 번 더 해볼게요`);
+            queue.push(i);   // 순화 프롬프트로 재시도
+          } else {
+            log(`[Flow] ⛔ ${i + 1}번째 그림은 구글 정책 때문에 만들 수 없어 건너뛸게요 (이 그림만 빠집니다)`);
+          }
+          continue;
+        }
+        log(`[Flow] ⚠️ ${i + 1}번째 그림이 잘 안 나왔어요. 다시 만들어 볼게요`); requeue(); continue;
+      }
       log(`[Flow]    🖼️ 나온 그림 ${freshCandidates.length}장 중에서 제일 예쁜 걸 고르는 중이에요...`);
 
       // 가장 큰 후보부터 다운로드하되 URL 일시 실패 시 다음 후보로 폴백한다.
