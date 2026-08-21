@@ -862,6 +862,12 @@ Output format (JSON array only, no other text):
   const [imgSource, setImgSource] = useState<"ai"|"upload"|"none">("ai");
   const [imgCount, setImgCount] = useState(3);
   const [imgCountAuto, setImgCountAuto] = useState(true);
+  // 이미지 개수는 엔진(AI/Flow)에 관계없이 이 상태 하나만 사용한다.
+  // ref는 적용 직후 같은 이벤트 흐름에서 생성해도 최신 값을 읽게 한다.
+  const imgCountRef = useRef(imgCount);
+  const imgCountAutoRef = useRef(imgCountAuto);
+  useEffect(()=>{ imgCountRef.current=imgCount; },[imgCount]);
+  useEffect(()=>{ imgCountAutoRef.current=imgCountAuto; },[imgCountAuto]);
   const [generatedImages, setGeneratedImages] = useState<string[]>([]);
   const [uploadedImages, setUploadedImages] = useState<string[]>([]);
   const [genImgLoading, setGenImgLoading] = useState(false);
@@ -1019,25 +1025,34 @@ Output format (JSON array only, no other text):
   const [showFlowGuide, setShowFlowGuide] = useState(false);
   const [flowReady, setFlowReady] = useState(false);
   const [flowLaunching, setFlowLaunching] = useState(false);
-  const [flowImgCount, setFlowImgCount] = useState(2);
-  const [flowImgCountAuto, setFlowImgCountAuto] = useState(true);
-  const flowImgCountAutoRef = useRef(true);
-  useEffect(()=>{ flowImgCountAutoRef.current=flowImgCountAuto; },[flowImgCountAuto]);
-  // ★ 이미지 생성/발행 시 항상 "최신" 개수를 쓰도록 ref 미러링(클로저로 옛 값이 잡혀 직접입력이
-  //   무시되고 추천 개수로 만들어지던 것 방지). 직접입력 N → 실제로 N장 생성.
-  const flowImgCountRef = useRef(flowImgCount);
-  useEffect(()=>{ flowImgCountRef.current=flowImgCount; },[flowImgCount]);
+  // 기존 Flow 표시/발행 참조도 공통 이미지 개수로 연결한다(별도 상태를 만들지 않음).
+  const flowImgCount = imgCount;
+  const flowImgCountAuto = imgCountAuto;
+  const flowImgCountRef = imgCountRef;
   const [autoInserted, setAutoInserted] = useState(false);
   const [showPreviewModal, setShowPreviewModal] = useState(false);
   const [showNaverMenu, setShowNaverMenu] = useState(false);
   const [showPublishPanel, setShowPublishPanel] = useState(false);
   const [showMeta, setShowMeta] = useState(false);
   const [toasts, setToasts] = useState<{id:number;msg:string;type:"success"|"error"|"info"}[]>([]);
+  const [imageCountPopup, setImageCountPopup] = useState<{kind:"set"|"append";count:number}|null>(null);
   function showToast(msg:string, type:"success"|"error"|"info"="success"){
     const id=Date.now();
     setToasts(p=>[...p,{id,msg,type}]);
     setTimeout(()=>setToasts(p=>p.filter(t=>t.id!==id)),3200);
   } // 썸네일+인사말 접기 (이미지 있으면 자동펼침)
+  function setManualImageCount(next:number){
+    const count=Math.max(1,Math.min(30,next||1));
+    imgCountAutoRef.current=false;
+    setImgCountAuto(false);
+    imgCountRef.current=count;
+    setImgCount(count);
+  }
+  function applyImageCount(){
+    const count=Math.max(1,Math.min(30,imgCount));
+    setManualImageCount(count);
+    setImageCountPopup({kind:"set",count});
+  }
   const [currentPw, setCurrentPw] = useState("");
   const [newPw1, setNewPw1] = useState("");
   const [newPw2, setNewPw2] = useState("");
@@ -2221,9 +2236,12 @@ POST3: (제목)|(이유)
       setGenTitle(title);if(tgm)setGenTags(tgm[1].trim());
       const generatedBody=ensureQuestionHeadings(bm?bm[1].trim():cleaned,keyword||title);
       const body=onPartnerItems.length>0?placeOnPartnerProduct(generatedBody,onPartnerItems.map(it=>it.product)):generatedBody.trim();setGenContent(body);setQualityScore(calcQualityScore(body,keyword));
-      if(imgCountAuto)setImgCount(recommendImgCount(body));
-      // 비동기 글 생성 도중 사용자가 직접입력으로 바꿔도 완료 시점의 최신 선택을 존중한다.
-      if(flowImgCountAutoRef.current)setFlowImgCount(recommendImgCount(body));
+      // 비동기 글 생성 도중 직접입력으로 바뀌었으면 추천값으로 절대 덮지 않는다.
+      if(imgCountAutoRef.current){
+        const recommended=recommendImgCount(body);
+        imgCountRef.current=recommended;
+        setImgCount(recommended);
+      }
       // ── tarry 방식: 블록 자동 분리 + 제목/태그 자동 연동 ──
       // ★모바일 가독성(테리 강조 2026-08-21): "단락이 끝나거나 첫째/둘째/셋째로 나뉠 때 꼭 분리".
       //   AI가 여러 문장을 한 줄에 몰아 쓰거나 열거를 붙여 쓰면 발행 시 빽빽해져 모바일에서 안 읽힘.
@@ -2421,6 +2439,7 @@ ${segList}`;
       triggerAutoInsert(finalImgs.map((src,i)=>({id:i,src,alt:finalCaps[i]||`${keyword||genTitle} 사진`})));
       setShowMeta(true);
       showToast(append?`✅ 이미지 ${imgs.length}장 이어서 생성 완료!`:`✅ Flow 이미지 ${imgs.length}장 생성 완료! (바탕화면에도 백업됨)`,"success");
+      if(append)setImageCountPopup({kind:"append",count:imgs.length});
     }catch(e:any){
       if(e.name!=="AbortError"){ showToast("❌ Flow 생성 실패: "+e.message,"error");setImgGenFailed(true); }
     }finally{ setGenImgLoading(false); }
@@ -4268,11 +4287,11 @@ POST3: (제목)|(이유)
                       <div style={{marginBottom:16}}>
                         <div style={{fontSize:12,fontWeight:700,color:"var(--text3)",marginBottom:8}}>📸 생성할 이미지 수</div>
                         <div style={{display:"flex",gap:6,marginBottom:8}}>
-                          <button onClick={()=>{flowImgCountAutoRef.current=true;setFlowImgCountAuto(true);if(genContent)setFlowImgCount(recommendImgCount(genContent));}}
+                          <button onClick={()=>{imgCountAutoRef.current=true;setImgCountAuto(true);if(genContent){const n=recommendImgCount(genContent);imgCountRef.current=n;setImgCount(n);}}}
                             style={{flex:1,padding:"8px",borderRadius:9,border:`1.5px solid ${flowImgCountAuto?"#a855f7":"var(--border)"}`,background:flowImgCountAuto?"rgba(168,85,247,.15)":"transparent",cursor:"pointer",fontSize:12,fontWeight:700,color:flowImgCountAuto?"#c084fc":"var(--text2)",fontFamily:"inherit"}}>
                             🤖 자동추천
                           </button>
-                          <button onClick={()=>{flowImgCountAutoRef.current=false;setFlowImgCountAuto(false);}}
+                          <button onClick={()=>{imgCountAutoRef.current=false;setImgCountAuto(false);}}
                             style={{flex:1,padding:"8px",borderRadius:9,border:`1.5px solid ${!flowImgCountAuto?"#a855f7":"var(--border)"}`,background:!flowImgCountAuto?"rgba(168,85,247,.15)":"transparent",cursor:"pointer",fontSize:12,fontWeight:700,color:!flowImgCountAuto?"#c084fc":"var(--text2)",fontFamily:"inherit"}}>
                             ✏️ 직접입력
                           </button>
@@ -4284,15 +4303,17 @@ POST3: (제목)|(이유)
                             <span style={{fontSize:24,fontWeight:900,color:"#c084fc",fontFamily:"'Space Grotesk',sans-serif"}}>{flowImgCount}장</span>
                           </div>
                         ) : (
+                          <div>
                           <div style={{display:"flex",alignItems:"center",gap:8}}>
-                            <button onClick={()=>{flowImgCountAutoRef.current=false;setFlowImgCountAuto(false);setFlowImgCount(v=>{const nv=Math.max(1,v-1);showToast(`✅ 이미지 ${nv}장으로 설정됐어요`,"success");return nv;});}}
+                            <button onClick={()=>setManualImageCount(imgCount-1)}
                               style={{width:40,height:40,borderRadius:9,border:"2px solid #a855f7",background:"rgba(168,85,247,.18)",cursor:"pointer",fontSize:22,fontWeight:900,lineHeight:1,display:"flex",alignItems:"center",justifyContent:"center",color:"#c084fc",transition:"transform .08s"}} onMouseDown={e=>e.currentTarget.style.transform="scale(.9)"} onMouseUp={e=>e.currentTarget.style.transform="scale(1)"} onMouseLeave={e=>e.currentTarget.style.transform="scale(1)"}>−</button>
-                            <input type="number" min={1} max={10} value={flowImgCount}
-                              onChange={e=>{flowImgCountAutoRef.current=false;setFlowImgCountAuto(false);setFlowImgCount(Math.max(1,Math.min(10,Number(e.target.value)||1)));}}
-                              onBlur={e=>{const nv=Math.max(1,Math.min(10,Number(e.target.value)||1));showToast(`✅ 이미지 ${nv}장으로 설정됐어요`,"success");}}
+                            <input type="number" min={1} max={30} value={flowImgCount}
+                              onChange={e=>setManualImageCount(Number(e.target.value))}
                               style={{flex:1,textAlign:"center",padding:"8px",borderRadius:9,border:"1.5px solid rgba(168,85,247,.4)",background:"var(--bg2)",color:"#c084fc",fontSize:20,fontWeight:900,fontFamily:"'Space Grotesk',sans-serif"}}/>
-                            <button onClick={()=>{flowImgCountAutoRef.current=false;setFlowImgCountAuto(false);setFlowImgCount(v=>{const nv=Math.min(10,v+1);showToast(`✅ 이미지 ${nv}장으로 설정됐어요`,"success");return nv;});}}
+                            <button onClick={()=>setManualImageCount(imgCount+1)}
                               style={{width:40,height:40,borderRadius:9,border:"2px solid #a855f7",background:"rgba(168,85,247,.18)",cursor:"pointer",fontSize:22,fontWeight:900,lineHeight:1,display:"flex",alignItems:"center",justifyContent:"center",color:"#c084fc",transition:"transform .08s"}} onMouseDown={e=>e.currentTarget.style.transform="scale(.9)"} onMouseUp={e=>e.currentTarget.style.transform="scale(1)"} onMouseLeave={e=>e.currentTarget.style.transform="scale(1)"}>+</button>
+                          </div>
+                          <button onClick={applyImageCount} style={{width:"100%",marginTop:10,padding:"13px",borderRadius:11,border:"2px solid #a855f7",background:"linear-gradient(135deg,#a855f7,#7c3aed)",color:"#fff",cursor:"pointer",fontSize:15,fontWeight:900,fontFamily:"inherit",boxShadow:"0 5px 18px rgba(168,85,247,.35)"}}>✓ 이미지 {imgCount}장 적용</button>
                           </div>
                         )}
                       </div>
@@ -4358,8 +4379,8 @@ POST3: (제목)|(이유)
                           <label className="inp-label">생성 수량</label>
                           {/* 자동/수동 모드 전환 */}
                           <div style={{display:"flex",gap:6,marginBottom:10}}>
-                            <button onClick={()=>{setImgCountAuto(true);if(genContent)setImgCount(recommendImgCount(genContent));}} style={{flex:1,padding:"7px",borderRadius:8,border:`1.5px solid ${imgCountAuto?"var(--accent)":"var(--border)"}`,background:imgCountAuto?"var(--accent-bg)":"transparent",cursor:"pointer",fontSize:12,fontWeight:700,color:imgCountAuto?"var(--accent-text)":"var(--text2)",fontFamily:"inherit"}}>🤖 자동추천</button>
-                            <button onClick={()=>setImgCountAuto(false)} style={{flex:1,padding:"7px",borderRadius:8,border:`1.5px solid ${!imgCountAuto?"var(--accent)":"var(--border)"}`,background:!imgCountAuto?"var(--accent-bg)":"transparent",cursor:"pointer",fontSize:12,fontWeight:700,color:!imgCountAuto?"var(--accent-text)":"var(--text2)",fontFamily:"inherit"}}>✏️ 직접입력</button>
+                            <button onClick={()=>{imgCountAutoRef.current=true;setImgCountAuto(true);if(genContent){const n=recommendImgCount(genContent);imgCountRef.current=n;setImgCount(n);}}} style={{flex:1,padding:"7px",borderRadius:8,border:`1.5px solid ${imgCountAuto?"var(--accent)":"var(--border)"}`,background:imgCountAuto?"var(--accent-bg)":"transparent",cursor:"pointer",fontSize:12,fontWeight:700,color:imgCountAuto?"var(--accent-text)":"var(--text2)",fontFamily:"inherit"}}>🤖 자동추천</button>
+                            <button onClick={()=>{imgCountAutoRef.current=false;setImgCountAuto(false);}} style={{flex:1,padding:"7px",borderRadius:8,border:`1.5px solid ${!imgCountAuto?"var(--accent)":"var(--border)"}`,background:!imgCountAuto?"var(--accent-bg)":"transparent",cursor:"pointer",fontSize:12,fontWeight:700,color:!imgCountAuto?"var(--accent-text)":"var(--text2)",fontFamily:"inherit"}}>✏️ 직접입력</button>
                           </div>
 
                           {imgCountAuto?(
@@ -4370,10 +4391,11 @@ POST3: (제목)|(이유)
                           ):(
                             <div style={{marginBottom:10}}>
                               <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
-                                <button onClick={()=>setImgCount(Math.max(1,imgCount-1))} style={{width:32,height:32,borderRadius:8,border:"1px solid var(--border)",background:"var(--bg2)",cursor:"pointer",fontSize:18,fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center"}}>−</button>
-                                <input type="number" min={1} max={30} value={imgCount} onChange={e=>setImgCount(Math.max(1,Math.min(30,Number(e.target.value))))} style={{flex:1,textAlign:"center",padding:"7px",borderRadius:8,border:"1.5px solid var(--border)",background:"var(--bg2)",color:"var(--text)",fontSize:18,fontWeight:900,fontFamily:"'Space Grotesk',sans-serif"}}/>
-                                <button onClick={()=>setImgCount(Math.min(30,imgCount+1))} style={{width:32,height:32,borderRadius:8,border:"1px solid var(--border)",background:"var(--bg2)",cursor:"pointer",fontSize:18,fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center"}}>+</button>
+                                <button onClick={()=>setManualImageCount(imgCount-1)} style={{width:40,height:40,borderRadius:9,border:"2px solid #a855f7",background:"rgba(168,85,247,.18)",color:"#c084fc",cursor:"pointer",fontSize:22,fontWeight:900,display:"flex",alignItems:"center",justifyContent:"center"}}>−</button>
+                                <input type="number" min={1} max={30} value={imgCount} onChange={e=>setManualImageCount(Number(e.target.value))} style={{flex:1,textAlign:"center",padding:"8px",borderRadius:9,border:"1.5px solid rgba(168,85,247,.4)",background:"var(--bg2)",color:"#c084fc",fontSize:20,fontWeight:900,fontFamily:"'Space Grotesk',sans-serif"}}/>
+                                <button onClick={()=>setManualImageCount(imgCount+1)} style={{width:40,height:40,borderRadius:9,border:"2px solid #a855f7",background:"rgba(168,85,247,.18)",color:"#c084fc",cursor:"pointer",fontSize:22,fontWeight:900,display:"flex",alignItems:"center",justifyContent:"center"}}>+</button>
                               </div>
+                              <button onClick={applyImageCount} style={{width:"100%",padding:"13px",borderRadius:11,border:"2px solid #a855f7",background:"linear-gradient(135deg,#a855f7,#7c3aed)",color:"#fff",cursor:"pointer",fontSize:15,fontWeight:900,fontFamily:"inherit",boxShadow:"0 5px 18px rgba(168,85,247,.35)"}}>✓ 이미지 {imgCount}장 적용</button>
                               <div style={{fontSize:11,color:"var(--text3)",textAlign:"center"}}>체험단 15장 이상도 가능 (최대 30장)</div>
                             </div>
                           )}
@@ -6098,6 +6120,22 @@ POST3: (제목)|(이유)
                 style={{width:"100%",marginTop:18,padding:"13px",borderRadius:12,border:"none",background:"#3fb950",color:"#fff",fontSize:14,fontWeight:800,cursor:"pointer",fontFamily:"inherit"}}>
                 확인
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {imageCountPopup&&(
+        <div style={{position:"fixed",inset:0,zIndex:10070,background:"rgba(0,0,0,.78)",backdropFilter:"blur(5px)",display:"flex",alignItems:"center",justifyContent:"center",padding:20}} onClick={()=>setImageCountPopup(null)}>
+          <div style={{width:"100%",maxWidth:420,borderRadius:22,overflow:"hidden",background:theme==="dark"?"#17111f":"#fff",border:"2px solid #a855f7",boxShadow:"0 24px 70px rgba(168,85,247,.45)",animation:"fadeUp .2s ease"}} onClick={e=>e.stopPropagation()}>
+            <div style={{padding:"28px 24px 18px",textAlign:"center",background:"linear-gradient(135deg,rgba(168,85,247,.3),rgba(99,102,241,.18))"}}>
+              <div style={{fontSize:44,marginBottom:8}}>{imageCountPopup.kind==="append"?"🎉":"✅"}</div>
+              <div style={{fontSize:20,fontWeight:900,color:theme==="dark"?"#f5f3ff":"#3b0764"}}>
+                {imageCountPopup.kind==="append"?`이미지 ${imageCountPopup.count}장이 추가되었습니다`:`이미지 ${imageCountPopup.count}장으로 설정되었습니다`}
+              </div>
+            </div>
+            <div style={{padding:"18px 22px"}}>
+              <button onClick={()=>setImageCountPopup(null)} style={{width:"100%",padding:"14px",borderRadius:12,border:0,background:"linear-gradient(135deg,#a855f7,#7c3aed)",color:"#fff",fontSize:15,fontWeight:900,cursor:"pointer",fontFamily:"inherit"}}>확인</button>
             </div>
           </div>
         </div>
