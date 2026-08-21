@@ -22,6 +22,16 @@ export default function IntroSplash({ onDone }: { onDone: () => void }) {
     if (v && v.muted) { v.muted = false; setMuted(false); v.play().catch(() => {}); }
   };
 
+  // 스피커 토글 (켜기/음소거)
+  const toggleSound = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const v = videoRef.current;
+    if (!v) return;
+    v.muted = !v.muted;
+    setMuted(v.muted);
+    if (!v.muted) v.play().catch(() => {});
+  };
+
   return (
     <div
       style={{
@@ -59,6 +69,21 @@ export default function IntroSplash({ onDone }: { onDone: () => void }) {
           🔇 탭하면 소리가 나와요
         </button>
       )}
+
+      {/* 스피커 토글 */}
+      <button
+        onClick={toggleSound}
+        aria-label={muted ? "소리 켜기" : "음소거"}
+        style={{
+          position: "absolute", top: "calc(6vh + 14px)", left: 20, zIndex: 5,
+          width: 44, height: 44, borderRadius: "50%",
+          border: "1px solid rgba(255,255,255,.28)", background: "rgba(20,12,20,.5)",
+          backdropFilter: "blur(8px)", color: "#fff", fontSize: 18, cursor: "pointer",
+          display: "flex", alignItems: "center", justifyContent: "center",
+        }}
+      >
+        {muted ? "🔇" : "🔊"}
+      </button>
 
       {/* 건너뛰기 */}
       <button
