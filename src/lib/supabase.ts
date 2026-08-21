@@ -312,11 +312,16 @@ export async function incrementDailyPublish(userId: string): Promise<void> {
 
 /* ── 관리자: 오늘 발행 카운트 초기화 ── (실제 한도체크가 읽는 publy_settings 키를 0으로) */
 export async function resetDailyPublish(userId: string): Promise<void> {
-  try {
-    await supabase
-      .from("publy_settings")
-      .upsert({ key: publishQuotaKey(userId), value: "0" }, { onConflict: "key" });
-  } catch {}
+  const key = publishQuotaKey(userId);
+  const { data, error } = await supabase
+    .from("publy_settings")
+    .upsert({ key, value: "0" }, { onConflict: "key" })
+    .select("key,value");
+  if (error) throw new Error(`일일 발행 건수 초기화 실패: ${error.message}`);
+  const saved = data?.find(row => row.key === key);
+  if (!saved || saved.value !== "0") {
+    throw new Error("일일 발행 건수 초기화 실패 — 권한/RLS로 반영된 행이 없습니다");
+  }
 }
 
 export const NAVER_DAILY_LIMIT: Record<string, number> = {
@@ -555,7 +560,8 @@ export async function logError(params: {
 export async function getErrorLogs(userId?: string) {
   let query = supabase.from("publy_error_logs").select("*").order("created_at", { ascending: false }).limit(100);
   if (userId) query = query.eq("user_id", userId);
-  const { data } = await query;
+  const { data, error } = await query;
+  if (error) throw new Error(`오류 로그 조회 실패: ${error.message}`);
   return (data || []) as {id:string;user_id:string;user_name:string;user_email:string;feature:string;error_message:string;created_at:string;is_read:boolean}[];
 }
 

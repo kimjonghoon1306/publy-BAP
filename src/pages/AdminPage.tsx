@@ -813,6 +813,8 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
   const [draftAvailable, setDraftAvailable] = useState(false);
   const [draftData, setDraftData] = useState<{title:string;content:string;savedAt:string}|null>(null);
   const [errorLogs, setErrorLogs] = useState<{id:string;user_id:string;user_name:string;user_email:string;feature:string;error_message:string;created_at:string;is_read:boolean}[]>([]);
+  const [errorLogsLoading, setErrorLogsLoading] = useState(false);
+  const [errorLogsError, setErrorLogsError] = useState("");
   const [unreadErrors, setUnreadErrors] = useState(0);
   const [showErrorPopup, setShowErrorPopup] = useState(false);
   const [errorFilter, setErrorFilter] = useState<string|null>(null);
@@ -1267,9 +1269,18 @@ Output format (JSON array only, no other text):
     }
   }
 
-    async function loadErrorLogs(userId?: string) {
-    const logs = await getErrorLogs(userId||undefined);
-    setErrorLogs(logs);
+  async function loadErrorLogs(userId?: string) {
+    setErrorLogsLoading(true);
+    setErrorLogsError("");
+    try {
+      const logs = await getErrorLogs(userId||undefined);
+      setErrorLogs(logs);
+    } catch (e:any) {
+      setErrorLogs([]);
+      setErrorLogsError(e.message || "오류 로그를 불러오지 못했습니다");
+    } finally {
+      setErrorLogsLoading(false);
+    }
   }
 
   async function loadUnreadCount() {
@@ -2181,21 +2192,42 @@ POST3: (제목)|(이유)
       if (e.plan&&e.plan!==u.plan) upd.plan=e.plan;
       if (e.memo!==undefined) upd.memo=e.memo;
       if (e.phone!==undefined) upd.phone=e.phone;
-      if (Object.keys(upd).length>0) await supabase.from("publy_users").update(upd).eq("id",u.id);
-      if (e.plan&&e.plan!==u.plan) await supabase.from("publy_quotas").update({total_quota:PLAN_QUOTA[e.plan]||10}).eq("user_id",u.id);
-      if (e.quota!==undefined&&u.quota) await supabase.from("publy_quotas").update({total_quota:Number(e.quota),used_quota:Math.min(u.quota.used_quota,Number(e.quota))}).eq("user_id",u.id);
-      if (e.days!==undefined&&u.quota) { const d=new Date(u.quota.reset_date); d.setDate(d.getDate()+Number(e.days)); await supabase.from("publy_quotas").update({reset_date:d.toISOString()}).eq("user_id",u.id); }
+      if (Object.keys(upd).length>0) {
+        const {data,error}=await supabase.from("publy_users").update(upd).eq("id",u.id).select("id,plan,memo,phone");
+        if(error) throw new Error(`회원정보 저장 실패: ${error.message}`);
+        const saved=data?.[0];
+        if(!saved || (upd.plan!==undefined&&saved.plan!==upd.plan) || (upd.memo!==undefined&&saved.memo!==upd.memo) || (upd.phone!==undefined&&saved.phone!==upd.phone)) throw new Error("회원정보/등급 저장 실패 — 권한/RLS로 반영된 행이 없거나 값이 일치하지 않습니다");
+      }
+      const quotaUpdate:any={};
+      if(e.plan&&e.plan!==u.plan) quotaUpdate.total_quota=PLAN_QUOTA[e.plan]||10;
+      if(e.quota!==undefined){
+        if(!u.quota) throw new Error("한도 저장 실패 — 회원의 publy_quotas 행이 없습니다");
+        const total=Number(e.quota); if(!Number.isFinite(total)||total<0) throw new Error("한도는 0 이상의 숫자여야 합니다");
+        quotaUpdate.total_quota=total; quotaUpdate.used_quota=Math.min(u.quota.used_quota,total);
+      }
+      if(e.days!==undefined){
+        if(!u.quota) throw new Error("만료일 저장 실패 — 회원의 publy_quotas 행이 없습니다");
+        const days=Number(e.days); if(!Number.isFinite(days)) throw new Error("기간은 숫자여야 합니다");
+        const d=new Date(u.quota.reset_date); d.setDate(d.getDate()+days); quotaUpdate.reset_date=d.toISOString();
+      }
+      if(Object.keys(quotaUpdate).length){
+        const {data,error}=await supabase.from("publy_quotas").update(quotaUpdate).eq("user_id",u.id).select("user_id,total_quota,used_quota,reset_date");
+        if(error) throw new Error(`한도/만료일 저장 실패: ${error.message}`);
+        const saved=data?.[0];
+        if(!saved || Object.entries(quotaUpdate).some(([k,v])=>(saved as Record<string,unknown>)[k]!==v)) throw new Error("한도/만료일 저장 실패 — 권한/RLS로 반영된 행이 없거나 값이 일치하지 않습니다");
+      }
       await loadUsers(); setEditMap(p=>{const n={...p};delete n[u.id];return n;}); alert("저장됨");
     } catch(e:any) { alert("오류: "+e.message); }
     finally { setSaving(null); }
   }
 
-  async function resetQuota(uid: string) { if (!confirm("건수 초기화?")) return; await supabase.from("publy_quotas").update({used_quota:0}).eq("user_id",uid); await resetDailyPublish(uid); await loadUsers(); alert("✅ 발행 건수를 초기화했어요."); }
-  async function toggleActive(u: UserFull) { if (!confirm(`${u.name||u.email} ${u.is_active?"비활성화":"활성화"}?`)) return; await supabase.from("publy_users").update({is_active:!u.is_active}).eq("id",u.id); await loadUsers(); }
-  async function addNote(uid: string) { if (!newNote.trim()) return; await supabase.from("publy_notes").insert({user_id:uid,content:newNote.trim()}); setNewNote(""); await loadUsers(); }
+  async function resetQuota(uid: string) { if (!confirm("건수 초기화?")) return; try { const {data,error}=await supabase.from("publy_quotas").update({used_quota:0}).eq("user_id",uid).select("user_id,used_quota"); if(error)throw new Error(error.message); if(!data?.[0]||data[0].used_quota!==0)throw new Error("권한/RLS로 publy_quotas에 반영된 행이 없습니다"); await resetDailyPublish(uid); await loadUsers(); alert("✅ 발행 건수를 초기화했어요. 회원 화면에 20초 안에 반영됩니다."); } catch(e:any){alert("건수 초기화 실패 — "+e.message);} }
+  async function toggleActive(u: UserFull) { if (!confirm(`${u.name||u.email} ${u.is_active?"비활성화":"활성화"}?`)) return; try { const next=!u.is_active; const {data,error}=await supabase.from("publy_users").update({is_active:next}).eq("id",u.id).select("id,is_active"); if(error)throw new Error(error.message); if(!data?.[0]||data[0].is_active!==next)throw new Error("권한/RLS로 반영된 행이 없습니다"); await loadUsers(); } catch(e:any){alert("활성 상태 저장 실패 — "+e.message);} }
+  async function addNote(uid: string) { if (!newNote.trim()) return; try { const content=newNote.trim(); const {data,error}=await supabase.from("publy_notes").insert({user_id:uid,content}).select("id,user_id,content"); if(error)throw new Error(error.message); if(!data?.[0]||data[0].user_id!==uid||data[0].content!==content)throw new Error("권한/RLS로 반영된 행이 없습니다"); setNewNote(""); await loadUsers(); } catch(e:any){alert("메모 추가 실패 — "+e.message);} }
   async function addPayment(uid: string, plan: string) {
     if (!newPayAmt) return; setAddingPay(true);
-    try { await supabase.from("publy_payments").insert({user_id:uid,amount:Number(newPayAmt),plan,method:"manual",status:"completed",note:newPayNote||undefined}); await supabase.from("publy_users").update({plan}).eq("id",uid); await supabase.from("publy_quotas").update({total_quota:PLAN_QUOTA[plan]||10}).eq("user_id",uid); setNewPayAmt(""); setNewPayNote(""); await loadUsers(); }
+    try { const amount=Number(newPayAmt); if(!Number.isFinite(amount))throw new Error("결제 금액이 올바르지 않습니다"); const {data:pay,error:payError}=await supabase.from("publy_payments").insert({user_id:uid,amount,plan,method:"manual",status:"completed",note:newPayNote||undefined}).select("id,user_id,amount,plan"); if(payError)throw new Error(payError.message); if(!pay?.[0]||pay[0].user_id!==uid||pay[0].plan!==plan)throw new Error("결제 내역이 권한/RLS로 저장되지 않았습니다"); const {data:userRows,error:userError}=await supabase.from("publy_users").update({plan}).eq("id",uid).select("id,plan"); if(userError)throw new Error(userError.message); if(!userRows?.[0]||userRows[0].plan!==plan)throw new Error("회원 등급이 권한/RLS로 저장되지 않았습니다"); const expected=PLAN_QUOTA[plan]||10; const {data:quotaRows,error:quotaError}=await supabase.from("publy_quotas").update({total_quota:expected}).eq("user_id",uid).select("user_id,total_quota"); if(quotaError)throw new Error(quotaError.message); if(!quotaRows?.[0]||quotaRows[0].total_quota!==expected)throw new Error("회원 한도가 권한/RLS로 저장되지 않았습니다"); setNewPayAmt(""); setNewPayNote(""); await loadUsers(); alert("✅ 결제와 등급/한도를 저장했습니다."); }
+    catch(e:any){alert("결제 등록 실패 — "+e.message);}
     finally { setAddingPay(false); }
   }
   async function changeAdminPw() {
@@ -3685,7 +3717,7 @@ POST3: (제목)|(이유)
 
                 {/* 전체 오류확인 */}
                 <div style={{display:"flex",justifyContent:"flex-end",marginBottom:12}}>
-                  <button onClick={()=>{setShowAllErrors(true);loadErrorLogs();}} style={{padding:"8px 16px",borderRadius:20,background:unreadErrors>0?"#f85149":"var(--card2)",color:unreadErrors>0?"#fff":"var(--text2)",border:`1px solid ${unreadErrors>0?"#f85149":"var(--border)"}`,cursor:"pointer",fontSize:12,fontWeight:800,fontFamily:"inherit",display:"flex",alignItems:"center",gap:6}}>
+                  <button onClick={()=>{setShowAllErrors(true);loadErrorLogs();}} style={{padding:"8px 16px",borderRadius:20,background:unreadErrors>0?"#dc2626":theme==="dark"?"#263241":"#ffffff",color:unreadErrors>0?"#fff":theme==="dark"?"#f8fafc":"#172033",border:`2px solid ${unreadErrors>0?"#f87171":theme==="dark"?"#94a3b8":"#64748b"}`,boxShadow:theme==="dark"?"0 0 0 1px rgba(255,255,255,.08),0 3px 12px rgba(0,0,0,.35)":"0 2px 8px rgba(15,23,42,.12)",cursor:"pointer",fontSize:12,fontWeight:800,fontFamily:"inherit",display:"flex",alignItems:"center",gap:6}}>
                     🚨 전체 오류확인 {unreadErrors>0?`(새 오류 ${unreadErrors}건)`:""}
                   </button>
                 </div>
@@ -5219,42 +5251,46 @@ POST3: (제목)|(이유)
 
       {/* 에러 로그 팝업 */}
       {showAllErrors&&(
-        <div style={{position:"fixed",inset:0,zIndex:9999,background:"rgba(0,0,0,.92)",display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
-          <div style={{background:"var(--bg)",borderRadius:20,width:"100%",maxWidth:780,maxHeight:"80vh",boxShadow:"0 8px 40px rgba(0,0,0,.8)",display:"flex",flexDirection:"column",overflow:"hidden",border:"1px solid var(--border)"}}>
+        <div role="presentation" style={{position:"fixed",inset:0,zIndex:9999,background:theme==="dark"?"rgba(0,0,0,.82)":"rgba(15,23,42,.55)",display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
+          <div role="dialog" aria-modal="true" aria-labelledby="error-log-title" style={{background:theme==="dark"?"#111827":"#ffffff",color:theme==="dark"?"#f8fafc":"#172033",borderRadius:20,width:"100%",maxWidth:780,maxHeight:"80vh",boxShadow:"0 18px 60px rgba(0,0,0,.65)",display:"flex",flexDirection:"column",overflow:"hidden",border:`2px solid ${theme==="dark"?"#64748b":"#cbd5e1"}`}}>
             {/* 헤더 */}
             <div style={{padding:"16px 20px",borderBottom:"1px solid var(--border)",display:"flex",alignItems:"center",justifyContent:"space-between",flexShrink:0}}>
               <div style={{display:"flex",alignItems:"center",gap:12}}>
                 <span style={{fontSize:20}}>🚨</span>
                 <div>
-                  <div style={{fontSize:15,fontWeight:800,color:"var(--text)"}}>
+                  <div id="error-log-title" style={{fontSize:15,fontWeight:800,color:theme==="dark"?"#ffffff":"#0f172a"}}>
                     {errorFilter ? `회원 오류 내역` : "전체 오류 내역"}
                   </div>
-                  <div style={{fontSize:11,color:"var(--text3)"}}>{errorLogs.length}건</div>
+                  <div style={{fontSize:11,color:theme==="dark"?"#cbd5e1":"#475569"}}>{errorLogsLoading?"불러오는 중...":`${errorLogs.length}건`}</div>
                 </div>
               </div>
               <div style={{display:"flex",gap:8,alignItems:"center"}}>
                 {errorFilter&&<button onClick={()=>{setErrorFilter(null);loadErrorLogs();}} style={{padding:"5px 12px",borderRadius:8,background:"var(--bg2)",border:"1px solid var(--border)",cursor:"pointer",fontSize:11,fontFamily:"inherit",color:"var(--text2)"}}>전체 보기</button>}
                 <button onClick={()=>markErrorsAsRead().then(()=>{setUnreadErrors(0);setErrorLogs(p=>p.map(l=>({...l,is_read:true})));loadErrorLogs(errorFilter||undefined);})} style={{padding:"5px 12px",borderRadius:8,background:"var(--bg2)",border:"1px solid var(--border)",cursor:"pointer",fontSize:11,fontFamily:"inherit",color:"var(--text2)"}}>모두 읽음</button>
-                <button onClick={()=>{setShowAllErrors(false);setErrorFilter(null);}} style={{width:32,height:32,borderRadius:8,background:"var(--bg2)",border:"1px solid var(--border)",cursor:"pointer",fontSize:18,color:"var(--text2)"}}>✕</button>
+                <button aria-label="오류 로그 닫기" title="닫기" onClick={()=>{setShowAllErrors(false);setErrorFilter(null);}} style={{width:36,height:36,borderRadius:8,background:theme==="dark"?"#334155":"#f1f5f9",border:`2px solid ${theme==="dark"?"#94a3b8":"#64748b"}`,cursor:"pointer",fontSize:20,fontWeight:900,color:theme==="dark"?"#ffffff":"#0f172a",lineHeight:1}}>✕</button>
               </div>
             </div>
             {/* 목록 */}
             <div style={{flex:1,overflowY:"auto",padding:"12px 16px"}}>
-              {errorLogs.length===0?(
-                <div style={{textAlign:"center",padding:"40px 20px",color:"var(--text3)",fontSize:13}}>오류 내역이 없어요 ✅</div>
+              {errorLogsLoading?(
+                <div style={{textAlign:"center",padding:"40px 20px",color:theme==="dark"?"#e2e8f0":"#334155",fontSize:13}}>오류 로그를 불러오는 중...</div>
+              ):errorLogsError?(
+                <div role="alert" style={{padding:"16px",borderRadius:10,background:theme==="dark"?"#450a0a":"#fef2f2",border:"1px solid #ef4444",color:theme==="dark"?"#fecaca":"#991b1b",fontSize:13,fontWeight:700}}>🚨 {errorLogsError}<br/><span style={{fontSize:11,fontWeight:500}}>publy_error_logs의 SELECT 권한/RLS 정책을 확인하세요.</span></div>
+              ):errorLogs.length===0?(
+                <div style={{textAlign:"center",padding:"40px 20px",color:theme==="dark"?"#cbd5e1":"#475569",fontSize:13}}>오류 내역이 없어요 ✅</div>
               ):(
                 <div style={{display:"flex",flexDirection:"column",gap:8}}>
                   {errorLogs.map(log=>(
-                    <div key={log.id} style={{padding:"12px 14px",borderRadius:12,background:log.is_read?"var(--bg2)":"#f8514915",border:`1px solid ${log.is_read?"var(--border)":"#f85149"}`,display:"flex",gap:12,alignItems:"flex-start"}}>
+                    <div key={log.id} style={{padding:"12px 14px",borderRadius:12,background:log.is_read?(theme==="dark"?"#1e293b":"#f8fafc"):(theme==="dark"?"#3f1218":"#fff1f2"),border:`1px solid ${log.is_read?(theme==="dark"?"#475569":"#cbd5e1"):"#ef4444"}`,display:"flex",gap:12,alignItems:"flex-start"}}>
                       {!log.is_read&&<span style={{width:8,height:8,borderRadius:"50%",background:"#f85149",flexShrink:0,marginTop:4}}/>}
                       <div style={{flex:1,minWidth:0}}>
                         <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4,flexWrap:"wrap"}}>
-                          <span style={{fontSize:12,fontWeight:800,color:"var(--text)"}}>{log.user_name||"이름없음"}</span>
-                          <span style={{fontSize:11,color:"var(--text3)"}}>{log.user_email}</span>
+                          <span style={{fontSize:12,fontWeight:800,color:theme==="dark"?"#ffffff":"#0f172a"}}>{log.user_name||"이름없음"}</span>
+                          <span style={{fontSize:11,color:theme==="dark"?"#cbd5e1":"#475569"}}>{log.user_email}</span>
                           <span style={{fontSize:10,padding:"2px 8px",borderRadius:99,background:"var(--accent-bg)",color:"var(--accent-text)",fontWeight:700}}>{log.feature}</span>
-                          <span style={{fontSize:10,color:"var(--text3)",marginLeft:"auto"}}>{new Date(log.created_at).toLocaleString("ko-KR")}</span>
+                          <span style={{fontSize:10,color:theme==="dark"?"#cbd5e1":"#475569",marginLeft:"auto"}}>{new Date(log.created_at).toLocaleString("ko-KR")}</span>
                         </div>
-                        <div style={{fontSize:12,color:"#f85149",wordBreak:"break-all",lineHeight:1.6}}>{log.error_message}</div>
+                        <div style={{fontSize:12,color:theme==="dark"?"#fca5a5":"#b91c1c",fontWeight:600,wordBreak:"break-all",lineHeight:1.6}}>{log.error_message}</div>
                       </div>
                     </div>
                   ))}
