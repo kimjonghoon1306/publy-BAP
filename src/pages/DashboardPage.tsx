@@ -469,6 +469,10 @@ textarea.inp{resize:vertical;line-height:1.75;min-height:80px;}
 .on-service-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;}
 .on-service-card{min-width:0;padding:14px;border-radius:14px;border:1px solid var(--border);background:var(--bg);color:var(--text);text-align:left;font-family:inherit;cursor:pointer;transition:transform .18s,border-color .18s;}
 .on-service-card:hover{transform:translateY(-2px);border-color:var(--accent);}.on-service-card b{display:block;font-size:13px;margin:8px 0 4px}.on-service-card small{display:block;color:var(--text3);font-size:10px;line-height:1.55}.on-service-card em{display:block;color:var(--accent-text);font-size:10px;font-style:normal;font-weight:800;margin-top:9px}
+.on-service-card.featured{position:relative;border:1.5px solid transparent;background:linear-gradient(var(--bg),var(--bg)) padding-box,linear-gradient(135deg,#f59e0b,#f7c948) border-box;box-shadow:0 3px 16px rgba(245,158,11,.18);}
+.on-service-card.featured:hover{border-color:transparent;transform:translateY(-3px);box-shadow:0 8px 24px rgba(245,158,11,.32);}
+.on-service-card.featured b{color:var(--text)}
+.svc-badge{position:absolute;top:8px;right:8px;font-size:9px;font-weight:900;color:#6b3f00;background:linear-gradient(135deg,#ffdf6b,#f5b301);padding:2px 7px;border-radius:99px;box-shadow:0 1px 4px rgba(245,158,11,.4);letter-spacing:.2px;z-index:1;}
 .service-info-overlay{position:fixed;inset:0;z-index:9998;display:grid;place-items:center;padding:18px;background:rgba(0,0,0,.72);backdrop-filter:blur(7px)}.service-info-dialog{position:relative;width:min(590px,100%);max-height:88vh;overflow:auto;box-sizing:border-box;padding:27px;border:1px solid rgba(0,214,143,.38);border-radius:23px;background:var(--card);box-shadow:0 24px 80px rgba(0,0,0,.48)}.service-info-close{position:absolute;right:14px;top:10px;border:0;background:transparent;color:var(--text3);font-size:27px;cursor:pointer}.service-info-kicker{color:var(--accent-text);font-size:10px;font-weight:900;letter-spacing:.08em}.service-info-dialog h2{margin:7px 35px 8px 0;font-size:24px}.service-info-hook{color:var(--text2);font-size:14px;line-height:1.65}.service-info-benefits{display:grid;gap:8px;margin:18px 0}.service-info-benefit{padding:12px;border:1px solid var(--border);border-radius:12px;background:var(--bg)}.service-info-benefit b,.service-info-benefit span{display:block}.service-info-benefit b{font-size:13px}.service-info-benefit span{margin-top:3px;color:var(--text3);font-size:11px;line-height:1.5}.service-info-flow{padding:12px;border-radius:12px;background:rgba(0,214,143,.09);color:var(--accent-text);font-size:11px;font-weight:800;line-height:1.6}.service-info-footer{display:flex;align-items:center;gap:9px;margin-top:18px}.service-info-cta{flex:1;display:flex;justify-content:center;padding:13px;border:0;border-radius:12px;background:var(--accent);color:#02170f;font-size:13px;font-weight:900;text-decoration:none}.service-info-cta:disabled{opacity:.48}.service-info-coming{padding:8px 10px;border:1px solid rgba(255,80,150,.4);border-radius:999px;color:#ff5a9f;font-size:10px;font-weight:900;white-space:nowrap}
 .service-info-overlay.service-info-dark{--card:#111820;--text:#e8f4ff;--text2:#a6bdd0;--text3:#7895aa;--bg:#0d1117;--border:#2a3a49;--accent:#00d68f;--accent-text:#21e6a4}.service-info-overlay.service-info-light{--card:#fff;--text:#0d1f2d;--text2:#3f596d;--text3:#607c91;--bg:#f2f6f9;--border:#cbd8e2;--accent:#00c781;--accent-text:#08794f}.service-info-dialog{color:var(--text)!important;background:var(--card)!important}.service-info-dialog h2,.service-info-benefit{color:var(--text)!important}.service-info-close{width:36px;height:36px;border:1px solid var(--border)!important;border-radius:10px;background:var(--bg)!important;color:var(--text)!important}
 @media(max-width:640px){.on-service-grid{display:flex;gap:8px;overflow-x:auto;margin:0 -2px;padding:2px 2px 7px;scrollbar-width:none;scroll-snap-type:x proximity}.on-service-grid::-webkit-scrollbar{display:none}.on-service-card{flex:0 0 150px;min-height:80px;padding:10px;display:grid;grid-template-columns:30px 1fr;column-gap:8px;scroll-snap-align:start}.on-service-card>span{grid-row:1/4;font-size:19px !important}.on-service-card b{font-size:12px;margin:0 0 2px}.on-service-card small{font-size:10px;line-height:1.35;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}.on-service-card em{font-size:10px;margin-top:4px}.service-info-dialog{padding:22px 16px;border-radius:19px}.service-info-dialog h2{font-size:21px}.service-info-footer{align-items:stretch;flex-direction:column}.service-info-cta{width:100%;box-sizing:border-box}.service-info-coming{text-align:center}}
@@ -2271,7 +2275,7 @@ POST3: (제목)|(이유)
       const rawBlocks = normalizeToBlocks(body).map(p=>({type:"text" as const,id:uid(),content:p}));
       setBlocks(rawBlocks.length>0?rawBlocks:[{type:"text",id:uid(),content:body}]);
       setPubTitle(title);
-      if(tgm)setHashtags(tgm[1].trim().split(",").map((t:string)=>{const clean=t.trim().replace(/\s+/g,"");return clean.startsWith("#")?clean:"#"+clean;}).filter(Boolean).slice(0,Math.floor(Math.random()*4)+5));
+      if(tgm)setHashtags(tgm[1].trim().split(",").map((t:string)=>{const clean=t.trim().replace(/\s+/g,"");return clean.startsWith("#")?clean:"#"+clean;}).filter((t:string)=>t.replace(/^#+/,"").length>=2).slice(0,Math.floor(Math.random()*4)+5));
       setAutoInserted(false);setThumbnail("");
       // 임시저장
       try {
@@ -3081,7 +3085,7 @@ POST3: (제목)|(이유)
         setHashtags(tagM[1].trim().split(",").map((t:string)=>{
           const clean=t.trim().replace(/\s+/g,"");
           return clean.startsWith("#")?clean:"#"+clean;
-        }).filter(Boolean).slice(0,Math.floor(Math.random()*4)+5));
+        }).filter((t:string)=>t.replace(/^#+/,"").length>=2).slice(0,Math.floor(Math.random()*4)+5));
       }
 
       const body2 = bodyM?.[1]?.trim()||text;
@@ -5186,7 +5190,7 @@ POST3: (제목)|(이유)
                         {h.status==="success"?"✅ 성공":h.status==="fail"?"❌ 실패":"⏳ 대기"}
                       </span>
                       {h.post_url&&<a href={h.post_url} target="_blank" rel="noopener noreferrer" className="view-link">보기</a>}
-                      <button style={{padding:"4px 10px",borderRadius:7,border:"1px solid rgba(255,71,87,.3)",background:"transparent",color:"var(--danger)",cursor:"pointer",fontSize:12,fontWeight:700,flexShrink:0}} onClick={async()=>{await deleteHistory(h.id);setHistory(prev=>prev.filter(x=>x.id!==h.id));}}>삭제</button>
+                      <button style={{padding:"4px 10px",borderRadius:7,border:"1px solid rgba(255,71,87,.4)",background:"rgba(255,71,87,.08)",color:"var(--danger)",cursor:"pointer",fontSize:12,fontWeight:800,flexShrink:0}} onClick={async()=>{if(!window.confirm(`이 발행 기록을 삭제할까요?\n\n"${h.title}"\n(이 기록만 지워지고, 실제 블로그 글은 그대로예요)`))return;await deleteHistory(h.id);setHistory(prev=>prev.filter(x=>x.id!==h.id));showToast("🗑 발행 기록 1건 삭제 완료","success");}}>🗑 삭제</button>
                           {h.status!=="fail"&&(
                             <button onClick={()=>{
                               const c=(h as any).content;
@@ -5826,7 +5830,7 @@ POST3: (제목)|(이유)
                   <div className="card-title" style={{marginBottom:5}}>🌐 퍼블리와 함께 쓰는 온종일 서비스</div>
                   <div style={{fontSize:11,color:"var(--text3)",marginBottom:13}}>상품 선택부터 체험 리뷰와 판매 수익까지 자연스럽게 이어보세요.</div>
                   <div className="on-service-grid">
-                    {(Object.keys(PUBLY_SERVICE_INFO) as ServiceInfoKey[]).map(key=>{const s=PUBLY_SERVICE_INFO[key];return <button key={key} className="on-service-card" type="button" onClick={()=>setServiceInfo(key)}><span style={{fontSize:24}}>{s.icon}</span><b>{s.name}</b><small>{s.summary}</small><em>{s.coming?"곳 출시 · 자세히":"기능·혜택 자세히"} →</em></button>})}
+                    {(["farm","trial","partner","onai","oncatch","gostop","messenger","studio"] as ServiceInfoKey[]).map(key=>{const s=PUBLY_SERVICE_INFO[key];const feat=key==="farm"||key==="trial"||key==="partner";return <button key={key} className={`on-service-card${feat?" featured":""}`} type="button" onClick={()=>setServiceInfo(key)}>{feat&&<span className="svc-badge">⭐ 대표</span>}<span style={{fontSize:24}}>{s.icon}</span><b>{s.name}</b><small>{s.summary}</small><em>{s.coming?"곳 출시 · 자세히":"기능·혜택 자세히"} →</em></button>})}
                   </div>
                 </div>
 

@@ -150,7 +150,7 @@ export async function getHistory(userId: string): Promise<PublyHistory[]> {
     .select("*")
     .eq("user_id", userId)
     .order("published_at", { ascending: false })
-    .limit(100);
+    .limit(2000);   // 발행 흔적을 자동으로 지우지 않는다(테리). 삭제는 사용자가 개별/전체 버튼으로만.
   return data || [];
 }
 
