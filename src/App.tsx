@@ -4,6 +4,7 @@ import AdminLoginPage from "./pages/AdminLoginPage";
 import AdminPageRaw from "./pages/AdminPage";
 const AdminPage = AdminPageRaw as React.ComponentType<any>;
 import DashboardPage from "./pages/DashboardPage";
+import IntroSplash from "./pages/IntroSplash";
 import { PublyUser, refreshUserById, touchLastSeen } from "./lib/supabase";
 
 type View = "login" | "admin-login" | "admin" | "dashboard";
@@ -37,6 +38,8 @@ export default function App() {
     (localStorage.getItem("publy_theme") as any) || "dark"
   );
   const [loading, setLoading] = useState(true);
+  // 첫 실행 시 인트로 영상 1회 재생("다시 보지 않기"/건너뛰기 시 저장)
+  const [showIntro, setShowIntro] = useState(() => !localStorage.getItem("publy_intro_seen"));
 
   useEffect(() => {
     // 초기화: localStorage에서 세션 복원 후 한 번에 state 업데이트
@@ -129,6 +132,9 @@ export default function App() {
       <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
     </div>
   );
+
+  // 첫 실행 인트로 영상 (로그인 앞에서 1회)
+  if (showIntro) return <IntroSplash onDone={() => setShowIntro(false)} />;
 
   if (view==="login") return (
     <LoginPage

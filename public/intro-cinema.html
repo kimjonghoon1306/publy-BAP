@@ -110,8 +110,19 @@
     .sign{font-size:clamp(22px,6vw,32px)}
     .rule{height:2px}
   }
+  /* ── 태블릿(iPad 등) 최적화 641~1024px ── */
+  @media (min-width:641px) and (max-width:1024px){
+    .cap{bottom:18vh;font-size:clamp(24px,3.4vw,38px)}
+    .cbtn{width:50px;height:50px}          /* 터치 타깃 */
+    .ctrls{gap:10px}
+    .logo{font-size:clamp(72px,11vw,130px)}
+    .tag{font-size:clamp(17px,2.4vw,23px)}
+    .sign{font-size:clamp(26px,3.4vw,38px)}
+  }
   /* 세로가 짧은 가로 모바일 대응 */
   @media (max-height:480px){ .cap{bottom:14vh} }
+  /* 세로 화면(폰 세로): 이미지 꽉 채우고 카피 더 위로 */
+  @media (max-width:640px) and (orientation:portrait){ .cap{bottom:24vh} }
 </style></head>
 <body>
   <div class="film">
