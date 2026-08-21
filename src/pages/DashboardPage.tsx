@@ -537,7 +537,7 @@ interface Props {
 }
 type ServiceInfoKey = "farm"|"trial"|"partner"|"publy"|"onai"|"oncatch"|"valhalla"|"gostop"|"sky"|"stickman"|"messenger"|"studio"|"honsa"|"news";
 const PUBLY_SERVICE_INFO: Record<ServiceInfoKey,{icon:string;name:string;aliases?:string[];hook:string;summary:string;benefits:[string,string][];flow:string;cta:string;url?:string;coming?:boolean}> = {
-  farm:{icon:"🌱",name:"온종일팜",hook:"홍보할 상품을 찾는 시간부터 줄이세요. 신선한 산지 상품이 콘텐츠의 소재와 구매 전환으로 이어집니다.",summary:"홍보할 산지 상품을 빠르게 찾아보세요.",benefits:[["신선한 상품 발견","제철 먹거리와 산지 상품을 한곳에서 고릅니다."],["콘텐츠가 구매로 연결","상품 상세 정보와 구매 흐름이 자연스럽게 이어집니다."],["온파트너와 수익화","고른 상품으로 추천 링크를 만들어 판매 성과를 쌓습니다."]],flow:"온종일팜 상품 선택 → 온파트너 링크 발급 → 퍼블리 홍보글 작성 → 구매 전환",cta:"온종일팜 이용하기",url:"https://app.yuanfnb.com"},
+  farm:{icon:"🌱",name:"온종일팜",hook:"홍보할 상품을 찾는 시간부터 줄이세요. 신선한 산지 상품이 콘텐츠의 소재와 구매 전환으로 이어집니다.",summary:"홍보할 산지 상품을 빠르게 찾아보세요.",benefits:[["신선한 상품 발견","제철 먹거리와 산지 상품을 한곳에서 고릅니다."],["콘텐츠가 구매로 연결","상품 상세 정보와 구매 흐름이 자연스럽게 이어집니다."],["온파트너와 수익화","고른 상품으로 추천 링크를 만들어 판매 성과를 쌓습니다."]],flow:"온종일팜 상품 선택 → 온파트너 링크 발급 → 퍼블리 홍보글 작성 → 구매 전환",cta:"온종일팜 이용하기",url:"https://app.yuanfnb.com/landing"},
   trial:{icon:"🎁",name:"온종일 체험단",aliases:["온종일체험단","온종일 체험단"],hook:"좋아하는 상품과 매장을 먼저 경험하고, 진짜 경험이 담긴 리뷰로 콘텐츠의 신뢰도를 키우세요.",summary:"상품을 체험하고 리뷰 경쟁력을 키워보세요.",benefits:[["상품·매장 직접 체험","관심 있는 캠페인을 골라 직접 경험합니다."],["리뷰 소재 확보","사진과 경험이 쌓여 블로그·SNS 글이 더 풍성해집니다."],["크리에이터 성장","포트폴리오와 브랜드 협업 기회를 넓힙니다."]],flow:"캠페인 발견 → 체험 신청 → 상품·매장 경험 → 리뷰 발행",cta:"신청하기",url:"https://pick.온종일.com"},
   partner:{icon:"🔗",name:"온파트너",hook:"내가 소개한 상품이 팔릴 때마다 링크가 수익이 됩니다. 플랫폼 제약 없이 내 콘텐츠가 있는 곳이면 시작할 수 있어요.",summary:"추천 링크를 퍼블리 글에 넣고 판매 수익을 만드세요.",benefits:[["링크 하나로 수익 추적","클릭·구매·수익을 회원 대시보드에서 확인합니다."],["사이트 제약 없음","네이버 블로그, 틱톡, 유튜브, 인스타그램, 개인 홈페이지 등 어디서든 활용합니다."],["퍼블리와 바로 연결","상품 링크를 넣으면 제품 소개와 제휴 안내가 글에 자동 반영됩니다."]],flow:"온종일팜 상품 선택 → 내 추천 링크 생성 → 퍼블리·SNS 홍보 → 판매 수익",cta:"온파트너 신청하기",url:"https://partner.yuanfnb.com/pages/signup.html"},
   publy:{icon:"🚀",name:"퍼블리",hook:"글쓰기부터 이미지, 발행, 예약까지 블로그 운영을 자동으로. 클릭 몇 번이면 네이버·티스토리에 완성된 글이 올라갑니다.",summary:"블로그 글 작성과 발행을 자동으로 해주는 프로그램이에요.",benefits:[["AI 글·이미지 자동 생성","키워드만 넣으면 SEO에 맞는 본문과 이미지를 만들어요."],["네이버·티스토리 자동 발행","예약 발행까지 지원해 컴퓨터를 꺼도 원하는 시간에 올라가요."],["이웃·공감 자동화","블로그 운영에 드는 반복 작업을 대신 처리해요."]],flow:"키워드 입력 → AI 글·이미지 생성 → 검토 → 자동 발행/예약",cta:"퍼블리 시작하기",url:"https://publy.blogautopro.com"},
@@ -2553,19 +2553,20 @@ ${segList}`;
       effectiveBlocks=textBlocks.length>0?[imgBlocks[0],...interleave(textBlocks,imgBlocks.slice(1))]:[...imgBlocks];
       if(!thumbnail && activeImgs[0]) setThumbnail(activeImgs[0]);
     }
+    // ★썸네일(첫 이미지)은 "어떤 상황에도" 캡션을 넣지 않는다(테리 2026-08-21). 썸네일 캡션칸이 열려 있으면
+    //   그 칸으로 글쓴이 인사말·제휴 광고고지 같은 본문 텍스트가 빨려 들어가 본문에서 유실된다(온파트너 안 넣었을 때 재현).
+    //   온파트너 유무와 무관하게 항상 첫 이미지 alt를 비운다(naver.ts는 alt="" 이미지는 클릭/캡션을 생략함).
+    {
+      const thumbIdx=effectiveBlocks.findIndex(b=>b.type==="image");
+      if(thumbIdx>=0) effectiveBlocks[thumbIdx]={...(effectiveBlocks[thumbIdx] as SingleImageBlock),alt:""} as ContentBlock;
+    }
     // ── 온파트너 링크: URL만 본문에 분산 삽입 → 네이버가 정사각 링크 카드로 렌더(상품당 1개, Q&A·해시태그 위) ──
     // ★안전장치: 조회만 하고 저장(💾) 안 한 상품(onPartnerPreview)도 발행에 포함.
     const partnerForPublish:OnPartnerItem[] = onPartnerItems.length>0 ? onPartnerItems : (onPartnerPreview?[onPartnerPreview]:[]);
     console.log("[publy] 온파트너 링크 대상:", partnerForPublish.length, "개", partnerForPublish.map(it=>it.product.name));
     if(partnerForPublish.length>0){
       const items=partnerForPublish.filter(it=>it.product.available&&it.product.partnerUrl);
-      // ★온파트너(제휴) 있으면 썸네일(첫 이미지) 캡션을 비운다 — 원래 잘 되던 모습:
-      //   썸네일엔 캡션 없이, 바로 밑에 제휴 광고고지 문구가 오게. (캡션이 있으면 그 밑에 문구가
-      //   붙어 지저분하고, 캡션칸 자체가 없어야 문구가 본문에 깔끔히 들어감.)
-      if(items.length>0){
-        const firstImgIdx=effectiveBlocks.findIndex(b=>b.type==="image");
-        if(firstImgIdx>=0) effectiveBlocks[firstImgIdx]={...(effectiveBlocks[firstImgIdx] as SingleImageBlock),alt:""} as ContentBlock;
-      }
+      // (썸네일 첫 이미지 캡션 비우기는 위에서 온파트너 유무와 무관하게 항상 처리함)
       // ★고지 문단을 "썸네일 바로 다음"(본문 맨 앞)에 무조건 1회. 이미 있으면 중복 안 넣음.
       const DISCLOSURE="※ 이 글에는 제휴 링크가 포함되어 있으며, 구매 시 작성자에게 일정 수수료가 발생할 수 있습니다.";
       const hasDisclosure=effectiveBlocks.some(b=>b.type==="text"&&(b as TextBlock).content.includes("제휴 링크가 포함"));
@@ -2633,6 +2634,29 @@ ${segList}`;
           myLinks.forEach((url,k)=>{ if(insAfter[k]===i) withMy.push({type:"text",id:uid(),content:url} as ContentBlock); });  // URL만 → OG 카드
         });
         effectiveBlocks=withMy;
+      }
+    }
+    // ── 온종일팜 자동 링크(테리 2026-08-21): 제목/키워드에 "온종일팜"이 나오면 소개 랜딩(app.yuanfnb.com/landing)을 ──
+    //    OG 링크 카드로 자동 삽입한다. 내 링크와 동일 방식(이미지 바로 뒤에 URL만 → 네이버 OG 썸네일 카드).
+    //    온파트너·내 링크가 이미 붙은 이미지는 앵커에서 제외해 서로 안 엉키게. 이미 같은 URL이 있으면 중복 안 넣음.
+    {
+      const farmUrl=PUBLY_SERVICE_INFO.farm.url;   // https://app.yuanfnb.com/landing
+      const farmHay=`${effTitle} ${keyword}`;
+      const farmMatched=!!farmUrl && (farmHay.includes(PUBLY_SERVICE_INFO.farm.name)||(PUBLY_SERVICE_INFO.farm.aliases||[]).some(a=>farmHay.includes(a)));
+      const farmAlready=!!farmUrl && effectiveBlocks.some(b=>b.type==="text"&&(b as TextBlock).content.includes(farmUrl));
+      if(farmMatched && farmUrl && !farmAlready){
+        const isBoundaryF=(b:ContentBlock)=>b.type==="text"&&/\[FAQ시작\]|\[관련글시작\]|질문\s*답변|Q\s*&\s*A|큐앤에이|해시태그|자주\s*묻는/i.test((b as TextBlock).content);
+        let fIdx=effectiveBlocks.findIndex(isBoundaryF); if(fIdx<0)fIdx=effectiveBlocks.length;
+        const isLinkBlockF=(b?:ContentBlock)=>!!b&&b.type==="text"&&/https?:\/\//.test((b as TextBlock).content);
+        const ancF:number[]=[];
+        for(let i=1;i<fIdx;i++){const t=effectiveBlocks[i].type;if((t==="image"||t==="image-pair")&&!isLinkBlockF(effectiveBlocks[i+1]))ancF.push(i);}
+        if(ancF.length===0)for(let i=0;i<fIdx;i++){const b=effectiveBlocks[i];if(b.type==="text"&&(b as TextBlock).content.trim().length>=40&&!/https?:\/\//.test((b as TextBlock).content))ancF.push(i);}
+        if(ancF.length>0){
+          const at=ancF[Math.min(ancF.length-1, Math.round(ancF.length*0.66))];   // 본문 후반부 이미지/문단 뒤
+          const withFarm:ContentBlock[]=[];
+          effectiveBlocks.forEach((b,i)=>{ withFarm.push(b); if(i===at) withFarm.push({type:"text",id:uid(),content:farmUrl} as ContentBlock); });
+          effectiveBlocks=withFarm;
+        }
       }
     }
     // ── 글쓴이 인사말: "제휴문구 바로 다음 / 제휴문구 없으면 썸네일(첫 이미지) 다음"에 1회 삽입 (테리 요청 2026-08-21) ──
