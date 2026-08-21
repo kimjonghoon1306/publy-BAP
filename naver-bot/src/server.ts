@@ -424,6 +424,9 @@ app.post("/api/flow-generate", async (req, res) => {
   const { prompts, captions } = req.body;
   if (!Array.isArray(prompts) || prompts.length === 0)
     return res.status(400).json({ error: "prompts 배열 필요" });
+  // ★요청 받자마자 즉시 로그(테리 요청): 사용자가 버튼 누른 걸 인식했다는 신호를 바로 보여준다.
+  //   (봇의 상세 "생성 시작" 로그는 크롬 연결·세션 준비 후라 10~20초 뒤에야 나오므로, 그 전에 확인용.)
+  console.log(`\n━━━━━ 🎨 그림 만들기를 시작합니다! 총 ${prompts.length}장을 만들 거예요. 잠시만 기다려 주세요 😊 ━━━━━`);
   try {
     const images = await generateFlowImagesCDP({
       prompts,
@@ -435,7 +438,7 @@ app.post("/api/flow-generate", async (req, res) => {
       return res.status(500).json({ error: "이미지가 생성되지 않았어요. Flow 로그인/크레딧을 확인하거나 잠시 후 다시 시도해주세요." });
     }
     const partial = images.length < prompts.length;
-    console.log(`[server] Flow 회수 완료: 요청 ${prompts.length}장 / 반환 ${images.length}장${partial ? " (부분 결과)" : ""}`);
+    console.log(`[server] 🎉 다 됐어요! 그림 ${images.length}장을 퍼블리로 가져왔어요${partial ? ` (${prompts.length}장 중 ${images.length}장 성공)` : " (전부 성공)"}. 이제 글에 넣으면 돼요!`);
     res.status(200).json({ images, partial, requested: prompts.length, received: images.length });
   } catch (e: any) {
     const msg = e.message || "";

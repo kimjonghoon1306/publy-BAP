@@ -16,6 +16,7 @@ export interface PublyUser {
   is_active: boolean;
   created_at: string;
   referred_by?: string;
+  last_seen?: string;   // 마지막 접속(앱 켜짐/사용) 시각
 }
 
 export interface PublyQuota {
@@ -92,6 +93,22 @@ export async function signIn(email: string, password: string) {
   if (!match) throw new Error("이메일 또는 비밀번호가 올바르지 않습니다");
 
   return user as PublyUser;
+}
+
+// 마지막 접속 시각 기록(앱 켜짐/사용 중). 관리자가 "누가 언제 마지막에 썼는지" 확인용.
+//   컬럼이 아직 없으면 조용히 무시(마이그레이션 전에도 앱이 죽지 않게).
+export async function touchLastSeen(userId: string): Promise<void> {
+  try { await supabase.from("publy_users").update({ last_seen: new Date().toISOString() }).eq("id", userId); } catch {}
+}
+
+// 최신 회원정보(등급/활성 등)를 id로 다시 읽는다. 관리자가 등급을 바꾸면 회원 앱이 실시간으로 반영하기 위함.
+export async function refreshUserById(userId: string): Promise<PublyUser | null> {
+  const { data } = await supabase
+    .from("publy_users")
+    .select("*")
+    .eq("id", userId)
+    .maybeSingle();
+  return (data as PublyUser) || null;
 }
 
 // ── 쿼터 ─────────────────────────────────────────────────

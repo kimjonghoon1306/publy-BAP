@@ -25,7 +25,7 @@ const BATCH = 30;
 const MAX_TITLES = 90;
 const MAX_KW = 90;
 const GEMINI_MODELS = ["gemini-2.0-flash","gemini-2.0-flash-lite","gemini-2.5-flash","gemini-2.5-flash-lite"];
-const PLAN_LABELS: Record<string,string> = {free:"FREE",basic:"BASIC",pro:"PRO",unlimited:"무제한"};
+const PLAN_LABELS: Record<string,string> = {free:"FREE",basic:"BASIC",pro:"PRO",unlimited:"무제한",admin:"ADMIN"};
 // 만료일까지 남은 일수 — 자정 기준으로 계산해 시각과 무관하게 항상 동일한 값(상단/하단 D-day 일치)
 function daysUntil(dateStr?: string): number | null {
   if (!dateStr) return null;
@@ -993,6 +993,16 @@ Output format (JSON array only, no other text):
   const [newTag, setNewTag] = useState("");
   const [imageMode, setImageMode] = useState<"auto"|"manual">("auto");
   const [imgGenType, setImgGenType] = useState<"ai"|"flow">(()=>(localStorage.getItem("publy_img_gen_type") as "ai"|"flow")||"flow");
+  // ★Flow 이미지 생성 진행 표시를 봇 로그와 동기화(테리: "로그가 계속 1/6, 진행이 안 보인다").
+  //   Flow는 한 번의 요청이라 앱이 개수를 못 받는다 → 봇 로그의 "N장 완성" 문구를 읽어 진행률을 움직인다.
+  useEffect(()=>{
+    if(!(tab==="image"&&genImgLoading&&imgGenType==="flow"))return;
+    const m=[...liveLog.matchAll(/(\d+)장\s*다\s*만들었어요/g)];
+    const done = m.length>0 ? Number(m[m.length-1][1]) : 0;
+    const total = Math.max(1, flowImgCountRef.current);
+    setGenImgCurrent(done);
+    setGenImgProgress(/불러오는 중/.test(liveLog)?100:Math.min(99,Math.round((done/total)*100)));
+  },[liveLog,genImgLoading,imgGenType,tab]);
   const [showFlowGuide, setShowFlowGuide] = useState(false);
   const [flowReady, setFlowReady] = useState(false);
   const [flowLaunching, setFlowLaunching] = useState(false);
@@ -1418,6 +1428,18 @@ Output format (JSON array only, no other text):
     }
     if(tab==="engage") getEngageDailyUsage(user.id).then(setEngageUsed);
   },[tab,user.id]);
+
+  // ★사용량/발행건수 실시간 갱신(테리 요청): 관리자가 '건수 초기화'나 쿼터를 바꾸면 회원 앱이
+  //   로그아웃 없이도 20초 안에 반영한다. (등급 실시간은 App.tsx refreshUserById가 담당)
+  useEffect(()=>{
+    let alive=true;
+    const sync=()=>{
+      getQuota(user.id).then((q:PublyQuota|null)=>{ if(alive&&q) setQuota(q); });
+      getDailyPublishUsage(user.id).then(u=>{ if(alive) setDailyPublishUsed(u); });
+    };
+    const iv=window.setInterval(sync,20000);
+    return ()=>{ alive=false; window.clearInterval(iv); };
+  },[user.id]);
 
   useEffect(()=>{
     checkBot();
@@ -3380,7 +3402,9 @@ POST3: (제목)|(이유)
             <button className={`plat-btn ${platform==="tistory"?"plat-btn-tistory":"plat-btn-tistory-off"}`} onClick={()=>setPlatform("tistory")}>🟠 티스토리</button>
             <div style={{width:1,height:16,background:"var(--border)",flexShrink:0}}/>
             <div className={`server-chip ${botOnline?"server-on":"server-off"}`}><div className={`dot ${botOnline?"dot-on":"dot-off"}`}/>{botOnline?"서버 온라인":"서버 오프라인"}</div>
-            <div className="quota-chip"><div className="quota-bar-bg"><div className="quota-bar-fill" style={{width:`${Math.min(100,(dailyPublishUsed/(PLAN_CONFIG[user.plan]?.dailyPublish??2))*100)}%`}}/></div>{Math.max(0,(PLAN_CONFIG[user.plan]?.dailyPublish??2)-dailyPublishUsed)}건<span className={`plan-badge plan-${user.plan}`}>{PLAN_LABELS[user.plan]}</span></div>
+            {(["unlimited","admin"] as string[]).includes(user.plan)
+              ? <div className="quota-chip"><div className="quota-bar-bg"><div className="quota-bar-fill" style={{width:"100%"}}/></div>무제한<span className={`plan-badge plan-${user.plan}`}>{PLAN_LABELS[user.plan]}</span></div>
+              : <div className="quota-chip"><div className="quota-bar-bg"><div className="quota-bar-fill" style={{width:`${Math.min(100,(dailyPublishUsed/(PLAN_CONFIG[user.plan]?.dailyPublish??2))*100)}%`}}/></div>{Math.max(0,(PLAN_CONFIG[user.plan]?.dailyPublish??2)-dailyPublishUsed)}건<span className={`plan-badge plan-${user.plan}`}>{PLAN_LABELS[user.plan]}</span></div>}
           </div>
           <div className="header-right">
             <button className="guide-open-btn" onClick={()=>{setShowGuide(true);setGuideTab(0);}}>📖 <span className="guide-btn-text">사용설명서</span></button>
@@ -3529,9 +3553,11 @@ POST3: (제목)|(이유)
             ))}
             <div className="sidebar-foot">
               <div className="stat-card">
-                <div className="stat-num" style={{color: dailyPublishUsed >= (PLAN_CONFIG[user.plan]?.dailyPublish ?? 2) ? "var(--danger)" : "var(--text)"}}>
-                  {dailyPublishUsed}<span style={{fontSize:12,color:"var(--text3)",fontWeight:500}}>/{PLAN_CONFIG[user.plan]?.dailyPublish ?? 2}</span>
-                </div>
+                {(["unlimited","admin"] as string[]).includes(user.plan)
+                  ? <div className="stat-num" style={{color:"var(--text)"}}>{dailyPublishUsed}<span style={{fontSize:12,color:"var(--text3)",fontWeight:500}}> · 무제한</span></div>
+                  : <div className="stat-num" style={{color: dailyPublishUsed >= (PLAN_CONFIG[user.plan]?.dailyPublish ?? 2) ? "var(--danger)" : "var(--text)"}}>
+                      {dailyPublishUsed}<span style={{fontSize:12,color:"var(--text3)",fontWeight:500}}>/{PLAN_CONFIG[user.plan]?.dailyPublish ?? 2}</span>
+                    </div>}
                 <div className="stat-lbl">오늘 발행</div>
               </div>
               <div className="stat-card" style={{background:"var(--accent-bg)",borderColor:"var(--accent-border)"}}>
@@ -3563,13 +3589,14 @@ POST3: (제목)|(이유)
               return (
                 <div style={{display:"flex",gap:10,marginBottom:16,flexWrap:"wrap",alignItems:"center"}}>
                   {items.map(({label,used,limit,color})=>{
-                    const pct = Math.min(100, (used/limit)*100);
-                    const over = used >= limit;
+                    const unlimited = limit>=99999 || (["unlimited","admin"] as string[]).includes(plan);
+                    const pct = unlimited ? 100 : Math.min(100, (used/limit)*100);
+                    const over = !unlimited && used >= limit;
                     return (
                       <div key={label} style={{flex:1,minWidth:120,padding:"10px 14px",borderRadius:14,background:"var(--card)",border:`1px solid ${over?"rgba(255,83,99,.4)":"var(--border)"}`,transition:"border .2s"}}>
                         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
                           <span style={{fontSize:12,fontWeight:700,color:"var(--text2)"}}>{label}</span>
-                          <span style={{fontSize:12,fontWeight:800,color:over?"var(--danger)":color}}>{used}<span style={{fontSize:11,color:"var(--text3)",fontWeight:500}}>/{limit}</span></span>
+                          <span style={{fontSize:12,fontWeight:800,color:over?"var(--danger)":color}}>{used}<span style={{fontSize:11,color:"var(--text3)",fontWeight:500}}>{unlimited?" · 무제한":`/${limit}`}</span></span>
                         </div>
                         <div style={{height:5,borderRadius:99,background:"var(--border)",overflow:"hidden"}}>
                           <div style={{height:"100%",borderRadius:99,width:`${pct}%`,background:over?"var(--danger)":color,transition:"width .4s"}}/>
@@ -4152,13 +4179,14 @@ POST3: (제목)|(이유)
                           </div>
                         ) : (
                           <div style={{display:"flex",alignItems:"center",gap:8}}>
-                            <button onClick={()=>{flowImgCountAutoRef.current=false;setFlowImgCountAuto(false);setFlowImgCount(v=>Math.max(1,v-1));}}
-                              style={{width:36,height:36,borderRadius:9,border:"1px solid var(--border)",background:"var(--bg2)",cursor:"pointer",fontSize:18,fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center",color:"var(--text)"}}>−</button>
+                            <button onClick={()=>{flowImgCountAutoRef.current=false;setFlowImgCountAuto(false);setFlowImgCount(v=>{const nv=Math.max(1,v-1);showToast(`✅ 이미지 ${nv}장으로 설정됐어요`,"success");return nv;});}}
+                              style={{width:40,height:40,borderRadius:9,border:"2px solid #a855f7",background:"rgba(168,85,247,.18)",cursor:"pointer",fontSize:22,fontWeight:900,lineHeight:1,display:"flex",alignItems:"center",justifyContent:"center",color:"#c084fc",transition:"transform .08s"}} onMouseDown={e=>e.currentTarget.style.transform="scale(.9)"} onMouseUp={e=>e.currentTarget.style.transform="scale(1)"} onMouseLeave={e=>e.currentTarget.style.transform="scale(1)"}>−</button>
                             <input type="number" min={1} max={10} value={flowImgCount}
                               onChange={e=>{flowImgCountAutoRef.current=false;setFlowImgCountAuto(false);setFlowImgCount(Math.max(1,Math.min(10,Number(e.target.value)||1)));}}
+                              onBlur={e=>{const nv=Math.max(1,Math.min(10,Number(e.target.value)||1));showToast(`✅ 이미지 ${nv}장으로 설정됐어요`,"success");}}
                               style={{flex:1,textAlign:"center",padding:"8px",borderRadius:9,border:"1.5px solid rgba(168,85,247,.4)",background:"var(--bg2)",color:"#c084fc",fontSize:20,fontWeight:900,fontFamily:"'Space Grotesk',sans-serif"}}/>
-                            <button onClick={()=>{flowImgCountAutoRef.current=false;setFlowImgCountAuto(false);setFlowImgCount(v=>Math.min(10,v+1));}}
-                              style={{width:36,height:36,borderRadius:9,border:"1px solid var(--border)",background:"var(--bg2)",cursor:"pointer",fontSize:18,fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center",color:"var(--text)"}}>+</button>
+                            <button onClick={()=>{flowImgCountAutoRef.current=false;setFlowImgCountAuto(false);setFlowImgCount(v=>{const nv=Math.min(10,v+1);showToast(`✅ 이미지 ${nv}장으로 설정됐어요`,"success");return nv;});}}
+                              style={{width:40,height:40,borderRadius:9,border:"2px solid #a855f7",background:"rgba(168,85,247,.18)",cursor:"pointer",fontSize:22,fontWeight:900,lineHeight:1,display:"flex",alignItems:"center",justifyContent:"center",color:"#c084fc",transition:"transform .08s"}} onMouseDown={e=>e.currentTarget.style.transform="scale(.9)"} onMouseUp={e=>e.currentTarget.style.transform="scale(1)"} onMouseLeave={e=>e.currentTarget.style.transform="scale(1)"}>+</button>
                           </div>
                         )}
                       </div>
@@ -4248,7 +4276,7 @@ POST3: (제목)|(이유)
                           {genImgLoading&&(
                             <div style={{marginBottom:12,padding:"12px 14px",borderRadius:10,background:"var(--bg)",border:"1px solid var(--border)"}}>
                               <div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}>
-                                <span style={{fontSize:12,fontWeight:700,color:"var(--accent-text)",animation:"pulse 1.2s infinite"}}>⏳ {genImgCurrent} / {imgCount}장</span>
+                                <span style={{fontSize:12,fontWeight:700,color:"var(--accent-text)",animation:"pulse 1.2s infinite"}}>⏳ {genImgCurrent} / {imgGenType==="flow"?flowImgCount:imgCount}장 완성</span>
                                 <span style={{fontSize:14,fontWeight:900,color:"var(--accent-text)",fontFamily:"'Space Grotesk',sans-serif"}}>{genImgProgress}%</span>
                               </div>
                               <div style={{height:8,background:"var(--border)",borderRadius:99,overflow:"hidden"}}>
@@ -4644,7 +4672,7 @@ POST3: (제목)|(이유)
             {tab==="publish"&&(
               <div style={{animation:"fadeUp .25s ease both"}}>
                 {!botOnline&&<div className="alert-box alert-warn" style={{margin:"12px 16px 0"}}>⚠️ 봇 오프라인 — PC에서 Publy 앱 실행 시 즉시 발행, 아니면 대기열 저장돼요.</div>}
-                {quota&&quota.remaining_quota<=0&&<div className="alert-box alert-danger" style={{margin:"12px 16px 0"}}>⚠️ 발행 건수 초과. 플랜을 업그레이드해주세요.</div>}
+                {quota&&quota.remaining_quota<=0&&!(["unlimited","admin"] as string[]).includes(user.plan)&&<div className="alert-box alert-danger" style={{margin:"12px 16px 0"}}>⚠️ 발행 건수 초과. 플랜을 업그레이드해주세요.</div>}
 
                 {/* ── 발행 준비도 + 설정 스티키 바 ── */}
                 <div className="pub-sticky-bar">

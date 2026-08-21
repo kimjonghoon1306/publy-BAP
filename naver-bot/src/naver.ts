@@ -1703,7 +1703,7 @@ export async function generateFlowImages(params: {
 
     // 각 프롬프트별 이미지 생성
     for (let i = 0; i < prompts.length; i++) {
-      log(`🎨 [Flow] ${i + 1}/${prompts.length} 이미지 생성 중...`);
+      log(`🎨 [Flow] [${i + 1}번째 / 총 ${prompts.length}장] 이미지 만드는 중...`);
 
       // 첫 번째 아니면 페이지 새로고침
       if (i > 0) {
@@ -1760,9 +1760,11 @@ export async function generateFlowImagesCDP(params: {
   } catch { backupDir = ""; }
 
   // 1) 사용자 실크롬(디버깅 포트)에 연결
+  log(`[Flow] 🔌 그림 만드는 프로그램을 여는 중이에요...`);
   let browser;
   try {
     browser = await chromium.connectOverCDP(`http://localhost:${cdpPort}`);
+    log("[Flow] ✅ 프로그램이 잘 열렸어요");
   } catch (e: any) {
     throw new Error(`CDP_CONNECT_FAIL: 크롬이 디버깅 모드로 열려있지 않습니다 (포트 ${cdpPort}). Flow 준비 버튼을 먼저 눌러주세요.`);
   }
@@ -1772,12 +1774,15 @@ export async function generateFlowImagesCDP(params: {
     if (!ctx) throw new Error("크롬 컨텍스트를 찾을 수 없습니다");
 
     // 2) Flow 탭 찾기(없으면 새로 열기)
+    log("[Flow] 🔎 그림 만드는 화면을 찾는 중이에요...");
     let page = ctx.pages().find(p => p.url().includes("labs.google/fx"));
     if (!page) {
-      log("[Flow] Flow 탭이 없어 새로 엽니다");
+      log("[Flow] 그림 만드는 화면을 새로 여는 중이에요");
       page = await ctx.newPage();
       await page.goto("https://labs.google/fx/ko/tools/flow", { waitUntil: "domcontentloaded", timeout: 30000 });
       await page.waitForTimeout(4000);
+    } else {
+      log("[Flow] ✅ 화면을 찾았어요");
     }
     await page.bringToFront();
     await page.waitForTimeout(1500);
@@ -1789,10 +1794,11 @@ export async function generateFlowImagesCDP(params: {
       return !hasLoginBtn && /Flow|프로젝트|크레딧|안녕하세요/.test(t);
     });
     if (!loggedIn) throw new Error("FLOW_NOT_LOGGED_IN: 크롬에서 Google Flow에 먼저 로그인해주세요");
+    log("[Flow] ✅ 로그인이 되어 있어요");
 
     // 4) ★항상 새 프로젝트로 시작 (이전 작업 컨텍스트/텍스트가 이미지에 섞이는 것 방지)
     //    기존 프로젝트에 있으면 홈으로 나갔다가 새로 생성한다.
-    log("[Flow] 새 프로젝트 생성(이전 컨텍스트 초기화)...");
+    log("[Flow] 🧹 깨끗한 새 화면을 준비하는 중이에요 (이전 그림이 섞이지 않게)...");
     if (page.url().includes("/project/")) {
       await page.goto("https://labs.google/fx/ko/tools/flow", { waitUntil: "domcontentloaded", timeout: 30000 });
       await page.waitForTimeout(3500);
@@ -1920,19 +1926,20 @@ export async function generateFlowImagesCDP(params: {
     outputCountIsOne = await setOutputCountToOne();
 
     // 5) 프롬프트별 생성 — ★ 큐 방식: 실패한 프롬프트는 다시 시도(최대 3회)해서 "요청한 개수 정확히" 채운다.
+    log(`[Flow] 🎬 준비 끝! 이제 그림 ${prompts.length}장을 한 장씩 만들게요`);
     const target = prompts.length;              // 요청한 총 장수
     const queue: number[] = prompts.map((_, i) => i);
     const attemptsById: Record<number, number> = {};
     while (queue.length > 0 && results.length < target) {
       const i = queue.shift()!;
       attemptsById[i] = (attemptsById[i] || 0) + 1;
-      const requeue = () => { if (attemptsById[i] < 3) { queue.push(i); log(`[Flow] 🔁 (${i + 1}) 재시도 예약 (${attemptsById[i]}/3)`); } else { log(`[Flow] ⛔ (${i + 1}) 3회 실패 — 이 장은 포기`); } };
+      const requeue = () => { if (attemptsById[i] < 3) { queue.push(i); log(`[Flow] 🔁 ${i + 1}번째 그림을 다시 만들어 볼게요 (${attemptsById[i]}번째 시도)`); } else { log(`[Flow] ⛔ ${i + 1}번째 그림은 여러 번 해봐도 안 돼서 건너뛸게요`); } };
       // 텍스트 오염 방지 안전장치(어떤 경로로 온 프롬프트든 글자 없이 순수 이미지)
       let prompt = prompts[i];
       if (!/no text|no letters|글자 ?없/i.test(prompt)) {
         prompt += ", (photo only, absolutely no text, no letters, no words, no watermark, no logo)";
       }
-      log(`[Flow] (${i + 1}/${prompts.length}) 프롬프트 입력: ${prompt.slice(0, 40)}...`);
+      log(`[Flow] 🎨 ${i + 1}번째 그림 그리는 중이에요 (${prompts.length}장 중 ${i + 1}번째)`);
 
       // 첫 화면에서 설정 UI가 늦게 로드되는 경우를 위해 실패했던 경우만 제출 직전 한 번 더 확인한다.
       if (!outputCountIsOne) outputCountIsOne = await setOutputCountToOne();
@@ -2032,19 +2039,17 @@ export async function generateFlowImagesCDP(params: {
       let sent = false;
       for (let attempt = 0; attempt < submitMethods.length && !sent; attempt++) {
         const method = submitMethods[attempt];
-        log(`[Flow] 📤 전송 시도 ${attempt + 1}/${submitMethods.length}: ${method.name}`);
         try {
-          const detail = await method.run();
-          if (detail) log(`[Flow] 📤 전송 후보: ${detail}`);
+          await method.run();
         } catch (e: any) {
-          log(`[Flow] ⚠️ 전송 시도 ${attempt + 1}(${method.name}) 동작 실패: ${String(e?.message || e).split("\n")[0]}`);
+          // 전송 방식 실패는 조용히 다음 방식으로(사용자에겐 노이즈). 개발 진단은 최종 실패 로그로 충분.
         }
         sent = await waitForSubmission();
-        if (sent) log(`[Flow] ✅ 전송 확인 (${method.name})`);
-        else if (attempt < submitMethods.length - 1) log(`[Flow] ⚠️ 전송 신호 없음 — 다른 방식으로 재시도`);
+        if (sent) log(`[Flow]    ✅ 그림 그려 달라고 요청했어요`);
+        else if (attempt < submitMethods.length - 1) log(`[Flow]    …다시 요청해 볼게요`);
       }
       if (!sent) {
-        log(`[Flow] ❌ (${i + 1}/${prompts.length}) ${submitMethods.length}회 전송 실패`);
+        log(`[Flow] ⚠️ ${i + 1}번째 그림 요청이 잘 안 됐어요. 다시 해볼게요`);
         await dumpFlowControls("프롬프트 전송 실패");
         requeue();
         continue;
@@ -2052,11 +2057,12 @@ export async function generateFlowImagesCDP(params: {
 
       // 생성 대기(최대 165초): Flow는 한 번에 여러 후보를 순차적으로 렌더할 수 있다.
       // 첫 이미지에서 즉시 끝내지 말고, 생성 표시가 끝나고 후보 개수가 안정될 때까지 수집한다.
-      log("[Flow] ⏳ 이미지 생성 대기...");
+      log(`[Flow]    ⏳ 그림이 그려지길 기다리는 중이에요 (보통 1~2분 걸려요)`);
       let freshCandidates: { src: string; width: number; height: number }[] = [];
       let stableChecks = 0;
       let previousCount = 0;
       let firstCandidateAt = -1;
+      let lastLoggedCount = -1;   // 상태 변화 있을 때만 로그(도배 방지)
       for (let t = 0; t < 55; t++) {
         await page.waitForTimeout(3000);
         const snap = await page.evaluate((beforeArr: string[]) => {
@@ -2075,6 +2081,14 @@ export async function generateFlowImagesCDP(params: {
           const generating = /생성\s*중|만들고\s*있|생성하고\s*있|generating|creating\b|thinking/i.test(document.body.innerText);
           return { fresh: [...bySrc.values()], generating };
         }, beforeSrcs);
+        // ★상태를 눈으로 볼 수 있게(테리: "Flow가 맘대로 움직일 때 알아야 한다"):
+        //   후보 이미지 개수가 바뀌거나, 15초마다 "아직 그리는 중"을 로그로 남긴다.
+        if (snap.fresh.length !== lastLoggedCount) {
+          if (snap.fresh.length > 0) log(`[Flow]    …그림이 ${snap.fresh.length}장 나타났어요 (다 그려지면 제일 예쁜 걸 고를게요)`);
+          lastLoggedCount = snap.fresh.length;
+        } else if (t > 0 && t % 5 === 0) {
+          log(`[Flow]    …${snap.generating ? "아직 그리는 중이에요, 조금만 더 기다려 주세요" : "거의 다 됐어요"} (${(t + 1) * 3}초째)`);
+        }
         if (snap.fresh.length > 0) {
           if (firstCandidateAt < 0) firstCandidateAt = t;
           freshCandidates = snap.fresh;
@@ -2105,8 +2119,8 @@ export async function generateFlowImagesCDP(params: {
         return [...bySrc.values()].sort((a, b) => b.width * b.height - a.width * a.height);
       }, beforeSrcs);
 
-      if (freshCandidates.length === 0) { log(`[Flow] ⚠️ (${i + 1}) 이미지 생성 실패/타임아웃`); requeue(); continue; }
-      log(`[Flow] 🖼️ (${i + 1}) 후보 ${freshCandidates.length}장 중 고해상도 우선 선택`);
+      if (freshCandidates.length === 0) { log(`[Flow] ⚠️ ${i + 1}번째 그림이 잘 안 나왔어요. 다시 만들어 볼게요`); requeue(); continue; }
+      log(`[Flow]    🖼️ 나온 그림 ${freshCandidates.length}장 중에서 제일 예쁜 걸 고르는 중이에요...`);
 
       // 가장 큰 후보부터 다운로드하되 URL 일시 실패 시 다음 후보로 폴백한다.
       let dataUrl = "ERR:no candidate downloaded";
@@ -2125,7 +2139,7 @@ export async function generateFlowImagesCDP(params: {
 
       if (dataUrl.startsWith("data:image")) {
         results.push({ src: dataUrl, alt: captions[i] || "", promptIndex: i });
-        if (chosen) log(`[Flow] ✅ (${i + 1}) 선택: ${chosen.width}x${chosen.height}`);
+        if (chosen) log(`[Flow]    ✅ 제일 예쁜 그림을 골랐어요`);
         // 바탕화면 날짜 폴더에 자동 백업
         if (backupDir) {
           try {
@@ -2133,12 +2147,12 @@ export async function generateFlowImagesCDP(params: {
             const ts = new Date().toISOString().replace(/[:T]/g, "-").slice(0, 19);
             const file = path.join(backupDir, `${safeName}_${ts}.png`);
             fs.writeFileSync(file, Buffer.from(dataUrl.split(",")[1], "base64"));
-            log(`[Flow] 💾 백업: ${file}`);
+            log(`[Flow]    💾 그림을 컴퓨터 바탕화면에도 저장해 뒀어요`);
           } catch {}
         }
-        log(`[Flow] ✅ (${i + 1}) 이미지 다운로드 완료`);
+        log(`[Flow] ✅ ${i + 1}번째 그림 완성! (총 ${prompts.length}장 중 ${results.length}장 다 만들었어요)`);
       } else {
-        log(`[Flow] ⚠️ (${i + 1}) 다운로드 실패: ${dataUrl.slice(0, 40)}`);
+        log(`[Flow] ⚠️ ${i + 1}번째 그림을 가져오지 못했어요. 다시 만들어 볼게요`);
         requeue();
       }
       await page.waitForTimeout(1000);
@@ -2147,7 +2161,7 @@ export async function generateFlowImagesCDP(params: {
 
     // CDP는 연결만 끊고 사용자 크롬은 유지
     await browser.close().catch(() => {});
-    log(`✅ [Flow] 전체 ${results.length}장 생성/다운로드 완료`);
+    log(`🎉 [Flow] 그림 ${results.length}장을 모두 완성했어요! 이제 퍼블리로 가져오는 중이에요...`);
     return results
       .sort((a, b) => a.promptIndex - b.promptIndex)
       .map(({ src, alt }) => ({ src, alt }));

@@ -4,7 +4,7 @@ import AdminLoginPage from "./pages/AdminLoginPage";
 import AdminPageRaw from "./pages/AdminPage";
 const AdminPage = AdminPageRaw as React.ComponentType<any>;
 import DashboardPage from "./pages/DashboardPage";
-import { PublyUser } from "./lib/supabase";
+import { PublyUser, refreshUserById, touchLastSeen } from "./lib/supabase";
 
 type View = "login" | "admin-login" | "admin" | "dashboard";
 
@@ -60,6 +60,30 @@ export default function App() {
     setView(nextView);
     setLoading(false);
   }, []);
+
+  // ★회원 등급/활성 실시간 반영(테리 요청): 관리자가 등급을 바꾸면(무제한 등) 회원 앱이
+  //   로그아웃 없이도 최신 등급을 반영한다. ①로그인 상태면 즉시 1회 최신화 ②20초마다 갱신.
+  //   등급이 실제로 바뀐 경우에만 setUser(리렌더 최소화). localStorage도 함께 갱신해 새로고침에도 유지.
+  useEffect(() => {
+    if (!user?.id) return;
+    let alive = true;
+    const sync = async () => {
+      try {
+        void touchLastSeen(user.id);   // 마지막 접속 시각 갱신(관리자 확인용)
+        const fresh = await refreshUserById(user.id);
+        if (!alive || !fresh) return;
+        // 비활성 처리되면 로그아웃
+        if ((fresh as any).is_active === false) { handleLogout(); return; }
+        if (fresh.plan !== user.plan || (fresh as any).is_active !== (user as any).is_active) {
+          localStorage.setItem("publy_user", JSON.stringify(fresh));
+          setUser(fresh);
+        }
+      } catch {}
+    };
+    void sync();
+    const iv = window.setInterval(sync, 20000);
+    return () => { alive = false; window.clearInterval(iv); };
+  }, [user?.id, user?.plan]);
 
   useEffect(() => { localStorage.setItem("publy_theme", theme); }, [theme]);
 

@@ -12,7 +12,7 @@ interface Props {
 }
 
 interface UserFull {
-  id:string; email:string; name:string; plan:string; is_active:boolean; created_at:string; phone?:string; memo?:string;
+  id:string; email:string; name:string; plan:string; is_active:boolean; created_at:string; phone?:string; memo?:string; last_seen?:string;
   quota?: { total_quota:number; used_quota:number; remaining_quota:number; reset_date:string; };
   payments?: any[]; notes?: any[]; history_count?: number;
 }
@@ -38,9 +38,22 @@ const PLAN_QUOTA: Record<string,number> = {
   free:  PLAN_CONFIG.free.dailyPublish,
   basic: PLAN_CONFIG.basic.dailyPublish,
   pro:   PLAN_CONFIG.pro.dailyPublish,
+  unlimited: PLAN_CONFIG.unlimited.dailyPublish,
   admin: PLAN_CONFIG.admin.dailyPublish,
 };
-const PLAN_LABELS: Record<string,string> = {free:"FREE", basic:"BASIC", pro:"PRO"};
+const PLAN_LABELS: Record<string,string> = {free:"FREE", basic:"BASIC", pro:"PRO", unlimited:"무제한", admin:"ADMIN"};
+// 마지막 접속을 "방금 전 / N분 전 / N시간 전 / N일 전 / 날짜"로 보기 쉽게.
+function timeAgo(iso?: string): string {
+  if (!iso) return "기록 없음";
+  const t = new Date(iso).getTime();
+  if (isNaN(t)) return "기록 없음";
+  const s = Math.floor((Date.now() - t) / 1000);
+  if (s < 60) return "방금 전";
+  if (s < 3600) return `${Math.floor(s/60)}분 전`;
+  if (s < 86400) return `${Math.floor(s/3600)}시간 전`;
+  if (s < 86400*7) return `${Math.floor(s/86400)}일 전`;
+  return new Date(iso).toLocaleDateString("ko-KR", { month:"numeric", day:"numeric" });
+}
 
 // ── AdmKeyInput (건드리지 않음) ─────────────────────────
 function AdmKeyInput({k}:{k:any; [x:string]:any}) {
@@ -1366,7 +1379,7 @@ Output format (JSON array only, no other text):
   }
 
   function exportToExcel() {
-    const headers = ["이름","이메일","연락처","등급","활성여부","마지막 결제일","다음 결제일(만료일)","총 발행 건수","사용한 건수","남은 건수","발행 이력","가입일","회원 ID"];
+    const headers = ["이름","이메일","연락처","등급","활성여부","마지막 결제일","다음 결제일(만료일)","총 발행 건수","사용한 건수","남은 건수","발행 이력","마지막 접속","가입일","회원 ID"];
     const rows = users.map(u => {
       const lastPay = u.payments?.[0];
       return [
@@ -1381,6 +1394,7 @@ Output format (JSON array only, no other text):
         u.quota?.used_quota??0,
         u.quota?.remaining_quota??0,
         u.history_count??0,
+        u.last_seen?new Date(u.last_seen).toLocaleString("ko-KR"):"기록 없음",
         new Date(u.created_at).toLocaleDateString("ko-KR"),
         u.id,
       ];
@@ -3729,6 +3743,7 @@ POST3: (제목)|(이유)
                           <div style={{textAlign:"right",flexShrink:0}}>
                             <div className="quota-mini">{u.quota?.remaining_quota??0}/{u.quota?.total_quota??0}</div>
                             <div style={{fontSize:10,color:"var(--text3)",marginTop:2}}>발행 {u.history_count??0}건</div>
+                            <div style={{fontSize:10,color: u.last_seen && (Date.now()-new Date(u.last_seen).getTime())<300000 ? "var(--success)" : "var(--text3)",marginTop:2,fontWeight:600}}>🕒 {timeAgo(u.last_seen)}</div>
                           </div>
                           <span style={{fontSize:16,color:"var(--text3)"}}>{selUser?.id===u.id?"▲":"▼"}</span>
                         </div>
