@@ -643,9 +643,20 @@ export async function publishNaver(params: {
       for (let i = 0; i < lines.length; i++) {
         // delay를 높여 SE4가 붙여넣기가 아닌 진짜 타이핑으로 인식
         await ensureEditorReady(`본문 ${i + 1}/${lines.length}줄 입력 직전`);
+        const isUrlLine = /^https?:\/\/\S+$/.test(lines[i].trim());   // 그 줄이 "URL만"인지
         await page.keyboard.type(lines[i], { delay: 80 });
         await page.waitForTimeout(100);
         anyBodyWritten = true;
+        if (isUrlLine) {
+          // ★URL 줄: 바로 Enter를 눌러 네이버가 '링크 카드'로 변환하게 하고, 카드가 렌더될 때까지 기다린다.
+          //   (안 기다리면 URL이 생링크로 남고, 다음 본문이 카드보다 먼저 들어가 이미지-링크 사이에 글이 낀다.
+          //    테리 실측: 온파트너 URL이 파란 생링크로 뜨고 본문이 그 밑에 끼던 문제. 임베드와 동일한 대기 방식.)
+          await page.keyboard.press("Enter");
+          await page.waitForTimeout(3500);   // 링크 카드 변환/렌더 대기
+          console.log("[naver] 🔗 링크 카드 변환 대기 완료");
+          if (i < lines.length - 1) { await page.keyboard.press("Enter"); await page.waitForTimeout(120); }
+          continue;
+        }
         if (i < lines.length - 1) {
           // 문단 사이: Enter 2번(빈 줄 하나) → 줄글이 빽빽하지 않게
           await page.keyboard.press("Enter");
