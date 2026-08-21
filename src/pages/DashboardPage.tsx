@@ -249,7 +249,7 @@ const CSS = `
 .video-open-btn:hover{border-color:#FF3D7F;color:#FF6B9D;}
 .video-overlay{position:fixed;inset:0;z-index:300;background:rgba(0,0,0,.9);display:flex;align-items:center;justify-content:center;padding:2vh;}
 .video-frame{position:relative;width:100%;max-width:1000px;aspect-ratio:16/9;max-height:96vh;border-radius:16px;overflow:hidden;box-shadow:0 20px 80px rgba(0,0,0,.6);background:#000;}
-.video-frame iframe{width:100%;height:100%;border:none;display:block;}
+.video-frame iframe,.video-frame video{width:100%;height:100%;border:none;display:block;}
 .video-close{position:absolute;top:12px;right:12px;z-index:5;width:40px;height:40px;border-radius:50%;border:1px solid rgba(255,255,255,.25);background:rgba(20,12,20,.55);backdrop-filter:blur(8px);color:#fff;font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center;}
 .layout{flex:1;display:flex;overflow:hidden;min-height:0;}
 .sidebar{position:relative;flex-shrink:0;z-index:50;width:210px;background:var(--bg2);border-right:1px solid var(--border);display:flex;flex-direction:column;padding:12px 8px;gap:2px;overflow-y:auto;}
@@ -3488,7 +3488,7 @@ POST3: (제목)|(이유)
           <div className="video-overlay" onClick={()=>setShowVideo(false)}>
             <div className="video-frame" onClick={e=>e.stopPropagation()}>
               <button className="video-close" onClick={()=>setShowVideo(false)}>✕</button>
-              <iframe src="intro-cinema.html" title="PUBLY 소개 영상" />
+              <video src="intro-assets/publy-intro.mp4" autoPlay controls playsInline style={{width:"100%",height:"100%",objectFit:"contain",background:"#000",display:"block"}} />
             </div>
           </div>
         )}
