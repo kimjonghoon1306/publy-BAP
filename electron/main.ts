@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, shell } from "electron";
+import { app, BrowserWindow, ipcMain, shell, powerSaveBlocker } from "electron";
 import path from "path";
 import { spawn, exec as _exec, execSync, ChildProcess } from "child_process";
 import { randomBytes } from "crypto";
@@ -263,6 +263,26 @@ ipcMain.handle("open-app-update", async (_event, url: string) => {
 
 /* ── 앱 버전 (화면에 표시해 회원이 최신인지 눈으로 확인) ── */
 ipcMain.handle("get-app-version", () => app.getVersion());
+
+/* ── 절전 방지: 글쓰기(발행)·이미지 생성 중에는 화면/시스템이 안 꺼지게 (맥·윈도우 공통) ──
+   powerSaveBlocker('prevent-display-sleep')는 디스플레이+시스템 잠자기를 둘 다 막는다.
+   작업 끝나면 renderer가 keepAwake(false)로 꺼서 원래대로 복귀(평소엔 정상 절전). */
+let powerBlockerId = -1;
+ipcMain.handle("keep-awake", (_e, on: boolean) => {
+  try {
+    if (on) {
+      if (powerBlockerId === -1 || !powerSaveBlocker.isStarted(powerBlockerId)) {
+        powerBlockerId = powerSaveBlocker.start("prevent-display-sleep");
+        console.log("[power] 절전 방지 ON (작업 중 화면 안 꺼짐)");
+      }
+    } else if (powerBlockerId !== -1 && powerSaveBlocker.isStarted(powerBlockerId)) {
+      powerSaveBlocker.stop(powerBlockerId);
+      powerBlockerId = -1;
+      console.log("[power] 절전 방지 OFF (작업 끝 — 평소대로)");
+    }
+    return { ok: true, active: powerBlockerId !== -1 };
+  } catch (e: any) { return { ok: false, error: e.message }; }
+});
 
 /* ── 버그 신고: 봇 로그 폴더 열기 ── 회원이 문제 신고 시 이 폴더의 로그 파일을 보내면 원인 확인 가능. */
 ipcMain.handle("open-log-folder", async () => {

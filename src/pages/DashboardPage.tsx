@@ -943,6 +943,14 @@ Output format (JSON array only, no other text):
     return ()=>{ alive = false; };
   },[]);
 
+  // ★절전 방지(테리 요청): 글쓰기(발행)·이미지 생성 중엔 화면/맥이 안 꺼지게(맥·윈도우 공통).
+  //   작업 끝나면 자동으로 해제 → 평소엔 정상 절전. (영화 틀면 안 꺼지는 것과 같은 원리)
+  useEffect(()=>{
+    const busy = publishing || genImgLoading;
+    window.electron?.keepAwake?.(busy).catch(()=>{});
+    return ()=>{ if(busy) window.electron?.keepAwake?.(false).catch(()=>{}); };
+  },[publishing, genImgLoading]);
+
   const liveLogActive = (tab==="publish"&&publishing)||(tab==="image"&&genImgLoading);
   useEffect(()=>{
     if(!liveLogActive||!window.electron?.readBotLog)return;

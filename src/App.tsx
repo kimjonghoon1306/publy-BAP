@@ -23,6 +23,7 @@ declare global {
       openLogFolder: () => Promise<boolean>;
       readBotLog: () => Promise<string>;
       getAppVersion: () => Promise<string>;
+      keepAwake: (on: boolean) => Promise<{ ok: boolean; active?: boolean; error?: string }>;
     };
   }
 }
