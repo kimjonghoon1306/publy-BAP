@@ -158,7 +158,7 @@
     </div>
 
     <!-- 모바일 안내: 화면을 탭하면 크게 -->
-    <div class="tap-hint" id="tapHint">화면을 탭하면 크게 볼 수 있어요</div>
+    <div class="tap-hint" id="tapHint">화면을 탭하면 가로로 크게 볼 수 있어요</div>
   </div>
 
 <script>
@@ -167,10 +167,16 @@
   const btnReplay=document.getElementById('btnReplay'),
         btnExpand=document.getElementById('btnExpand'),
         tapHint=document.getElementById('tapHint');
-  function toggleFull(){
+  async function toggleFull(){
     const el=document.documentElement;
-    if(!document.fullscreenElement){ (el.requestFullscreen||el.webkitRequestFullscreen||function(){}).call(el); }
-    else { (document.exitFullscreen||document.webkitExitFullscreen||function(){}).call(document); }
+    if(!document.fullscreenElement){
+      try { await (el.requestFullscreen||el.webkitRequestFullscreen||function(){}).call(el); } catch(e){}
+      // 모바일: 전체화면 진입 시 가로로 눕혀 넓게 (유튜브식). 미지원 기기는 무시.
+      try { if(screen.orientation && screen.orientation.lock) await screen.orientation.lock('landscape'); } catch(e){}
+    } else {
+      try { if(screen.orientation && screen.orientation.unlock) screen.orientation.unlock(); } catch(e){}
+      try { (document.exitFullscreen||document.webkitExitFullscreen||function(){}).call(document); } catch(e){}
+    }
   }
   btnExpand.addEventListener('click', e=>{ e.stopPropagation(); toggleFull(); });
   btnReplay.addEventListener('click', e=>{ e.stopPropagation(); location.reload(); });
