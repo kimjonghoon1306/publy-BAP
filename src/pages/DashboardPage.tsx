@@ -245,6 +245,12 @@ const CSS = `
 .logout-btn:hover{border-color:var(--danger);color:var(--danger);}
 .dl-btn{display:inline-flex;align-items:center;gap:7px;padding:8px 16px;border-radius:99px;border:none;background:linear-gradient(135deg,#00ff9d,#00c870);color:#000;font-size:12px;font-weight:800;font-family:'Noto Sans KR',sans-serif;cursor:pointer;text-decoration:none;animation:dlFloat 2.5s ease-in-out infinite;white-space:nowrap;flex-shrink:0;box-shadow:0 3px 14px rgba(0,255,157,.35);}
 .guide-open-btn{display:inline-flex;align-items:center;gap:6px;padding:8px 15px;border-radius:99px;border:none;background:linear-gradient(135deg,#FF6B9D,#FF3D7F);color:#fff;font-size:12px;font-weight:800;font-family:'Noto Sans KR',sans-serif;cursor:pointer;animation:guideFloat 2.8s ease-in-out infinite;white-space:nowrap;flex-shrink:0;box-shadow:0 3px 14px rgba(255,61,127,.35);}
+.video-open-btn{display:inline-flex;align-items:center;gap:6px;padding:8px 15px;border-radius:99px;border:1px solid var(--border);background:transparent;color:var(--text2);font-size:12px;font-weight:800;font-family:'Noto Sans KR',sans-serif;cursor:pointer;white-space:nowrap;flex-shrink:0;transition:all .15s;}
+.video-open-btn:hover{border-color:#FF3D7F;color:#FF6B9D;}
+.video-overlay{position:fixed;inset:0;z-index:300;background:rgba(0,0,0,.9);display:flex;align-items:center;justify-content:center;padding:2vh;}
+.video-frame{position:relative;width:100%;max-width:1000px;aspect-ratio:16/9;max-height:96vh;border-radius:16px;overflow:hidden;box-shadow:0 20px 80px rgba(0,0,0,.6);background:#000;}
+.video-frame iframe{width:100%;height:100%;border:none;display:block;}
+.video-close{position:absolute;top:12px;right:12px;z-index:5;width:40px;height:40px;border-radius:50%;border:1px solid rgba(255,255,255,.25);background:rgba(20,12,20,.55);backdrop-filter:blur(8px);color:#fff;font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center;}
 .layout{flex:1;display:flex;overflow:hidden;min-height:0;}
 .sidebar{position:relative;flex-shrink:0;z-index:50;width:210px;background:var(--bg2);border-right:1px solid var(--border);display:flex;flex-direction:column;padding:12px 8px;gap:2px;overflow-y:auto;}
 .nav-lbl{font-size:9px;font-weight:800;letter-spacing:.13em;text-transform:uppercase;color:var(--text3);padding:5px 11px 7px;margin-top:4px;}
@@ -458,6 +464,8 @@ textarea.inp{resize:vertical;line-height:1.75;min-height:80px;}
   .header{padding:0 8px;gap:5px;}.user-name{display:none;}.logout-btn{display:none;}.quota-chip{display:none;}
   .dl-btn span:last-child{display:none;}.dl-btn{padding:9px 12px;}
   .guide-open-btn{font-size:11px;padding:6px 10px;}
+  .video-open-btn{padding:6px 9px;}.video-open-btn .guide-btn-text{display:none;}
+  .video-frame{aspect-ratio:auto;width:100%;height:auto;max-height:92vh;}
   .adtype-row{grid-template-columns:1fr;}.guide-overlay{padding:6px;}
   .guide-modal{max-height:calc(100dvh - 12px - env(safe-area-inset-top) - env(safe-area-inset-bottom));border-radius:16px;}.guide-tab{font-size:11px;padding:9px 11px;}
   .acc-form-grid{grid-template-columns:1fr !important;}
@@ -577,6 +585,7 @@ export default function DashboardPage({user, onLogout, onAdminLogin, onThemeTogg
   const [tab, setTab] = useState<MainTab>("keyword");
   const [pageReady, setPageReady] = useState(false);
   const [showGuide, setShowGuide] = useState(false);
+  const [showVideo, setShowVideo] = useState(false);   // 소개 영상 보기 모달
   const [showInstaWarn, setShowInstaWarn] = useState(false);
   const [guideTab, setGuideTab] = useState(0);
   const [botOnline, setBotOnline] = useState(false);
@@ -3474,6 +3483,16 @@ POST3: (제목)|(이유)
           </div>
         )}
 
+        {/* 소개 영상 모달 */}
+        {showVideo&&(
+          <div className="video-overlay" onClick={()=>setShowVideo(false)}>
+            <div className="video-frame" onClick={e=>e.stopPropagation()}>
+              <button className="video-close" onClick={()=>setShowVideo(false)}>✕</button>
+              <iframe src="intro-cinema.html" title="PUBLY 소개 영상" />
+            </div>
+          </div>
+        )}
+
         {/* 가이드 모달 */}
         {showGuide&&(
           <div className="guide-overlay" onClick={()=>{localStorage.setItem("publy_guide_seen","1");setShowGuide(false);}}>
@@ -3512,6 +3531,7 @@ POST3: (제목)|(이유)
               : <div className="quota-chip"><div className="quota-bar-bg"><div className="quota-bar-fill" style={{width:`${Math.min(100,(dailyPublishUsed/(PLAN_CONFIG[user.plan]?.dailyPublish??2))*100)}%`}}/></div>{Math.max(0,(PLAN_CONFIG[user.plan]?.dailyPublish??2)-dailyPublishUsed)}건<span className={`plan-badge plan-${user.plan}`}>{PLAN_LABELS[user.plan]}</span></div>}
           </div>
           <div className="header-right">
+            <button className="video-open-btn" onClick={()=>setShowVideo(true)} title="소개 영상 보기">🎬 <span className="guide-btn-text">영상</span></button>
             <button className="guide-open-btn" onClick={()=>{setShowGuide(true);setGuideTab(0);}}>📖 <span className="guide-btn-text">사용설명서</span></button>
             <button className="icon-btn" onClick={onThemeToggle}>{theme==="dark"?"☀️":"🌙"}</button>
             <button className="icon-btn" onClick={checkBot}>🔄</button>
