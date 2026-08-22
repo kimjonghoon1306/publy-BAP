@@ -5,6 +5,7 @@ import http from "http";
 import os from "os";
 import path from "path";
 import { deleteSession, hasSession, readSession, writeSession, SESSION_DIR } from "./session-store";
+import { getAdminBlogSearchKeys } from "./supabase";
 
 const LEGACY_SESSION_DIRS = [path.join(__dirname, "../sessions"), path.join(__dirname, "../../naver-bot/sessions")];
 const sessionName = (userId: string) => `naver_${userId}`;
@@ -1001,6 +1002,22 @@ export function donePath(accountId: string): string {
   return path.join(SESSION_DIR, `done_${accountId}.json`);
 }
 
+/* ── 당일 중복방지 공용 유틸 ──
+   done 기록에 처리 날짜(KST)를 함께 저장 → "오늘 이미 작업한 대상"은 skipDone 토글과 무관하게 항상 스킵.
+   기존 배열([blogId,...]) 파일은 자동 하위호환(과거 처리분=legacy로 취급, 당일 아님). */
+export function todayKST(): string {
+  return new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(0, 10); // YYYY-MM-DD (Asia/Seoul)
+}
+export function loadDoneMap(fp: string): Record<string, string> {
+  try {
+    if (!fs.existsSync(fp)) return {};
+    const raw = JSON.parse(fs.readFileSync(fp, "utf-8"));
+    if (Array.isArray(raw)) { const m: Record<string, string> = {}; for (const id of raw) m[String(id)] = "legacy"; return m; }
+    if (raw && typeof raw === "object") return raw as Record<string, string>;
+    return {};
+  } catch { return {}; }
+}
+
 /* ── 재신청 방지 기간: 실패/무응답 건은 마지막 시도일 기록 → N일 지나면 재시도 허용 ── */
 function attemptsPath(accountId: string): string {
   return path.join(SESSION_DIR, `attempts_${accountId}.json`);
@@ -1288,13 +1305,8 @@ export async function addNeighbors(params: {
   const { cookies } = loadSession(accountId);
 
   const dp = donePath(accountId);
-  let doneSet = new Set<string>();
-  if (skipDone && fs.existsSync(dp)) {
-    try {
-      const list: string[] = JSON.parse(fs.readFileSync(dp, "utf-8"));
-      doneSet = new Set(list);
-    } catch {}
-  }
+  const doneMap = loadDoneMap(dp);   // { blogId: "YYYY-MM-DD" | "legacy" }
+  const today = todayKST();
   // 재신청 방지: 실패/무응답 시도 이력 (blogId → 마지막 시도 ms)
   const attempts = loadAttempts(accountId);
   const retryMs = (retryDays > 0 ? retryDays : 0) * 86400 * 1000;
@@ -1346,8 +1358,10 @@ export async function addNeighbors(params: {
 
       const { keyword, blogId } = target;
 
-      if ((skipDone && doneSet.has(blogId)) || runSeen.has(blogId)) {
-        await onResult?.({ keyword, blogId, status: "skip", message: doneSet.has(blogId) ? "이미 처리됨" : "중복(이번 목록)" });
+      const doneToday = doneMap[blogId] === today;                 // 오늘 이미 처리 → 항상 스킵(당일 중복방지)
+      const donePerm = skipDone && (blogId in doneMap);            // 완료 스킵 ON → 과거 처리분도 스킵
+      if (doneToday || donePerm || runSeen.has(blogId)) {
+        await onResult?.({ keyword, blogId, status: "skip", message: doneToday ? "오늘 이미 처리됨(당일 중복방지)" : donePerm ? "이미 처리됨" : "중복(이번 목록)" });
         onProgress?.(done, fail);
         continue;
       }
@@ -1499,8 +1513,8 @@ export async function addNeighbors(params: {
         const ALREADY_RE = /이미\s*추가한?\s*이웃|이미\s*(서로)?이웃|이미\s*신청/;
         if (ALREADY_RE.test(afterTxt)) {
           await clickPopupConfirm();
-          doneSet.add(blogId);
-          fs.writeFileSync(dp, JSON.stringify([...doneSet], null, 2));
+          doneMap[blogId] = today;
+          fs.writeFileSync(dp, JSON.stringify(doneMap, null, 2));
           await onResult?.({ keyword, blogId, status: "skip", message: "이미 추가한 이웃" });
           log(`[서이추] ⏭ ${blogId} 이미 이웃 — 건너뜀`);
           onProgress?.(done, fail);
@@ -1569,8 +1583,8 @@ export async function addNeighbors(params: {
         }
 
         if (submitted) {
-          doneSet.add(blogId);
-          fs.writeFileSync(dp, JSON.stringify([...doneSet], null, 2));
+          doneMap[blogId] = today;
+          fs.writeFileSync(dp, JSON.stringify(doneMap, null, 2));
           done++;
           await onResult?.({ keyword, blogId, status: "success", message: "서이추 신청 완료" });
           log(`[서이추] ✅ ${blogId} 완료 (${done}/${dailyLimit})`);
@@ -1611,6 +1625,536 @@ export interface EngageResult {
   message: string;
 }
 
+/* ── AI 자동 댓글: 블로그 글을 읽고 Gemini로 자연스러운 댓글 1개 생성 ── */
+async function extractPostText(ctx: any): Promise<string> {
+  try {
+    return await ctx.evaluate(() => {
+      const pick = (sel: string) => (document.querySelector(sel) as HTMLElement | null)?.innerText || "";
+      const title = pick(".se-title-text") || pick(".htitle") || pick(".pcol1") || document.title || "";
+      const body = pick(".se-main-container") || pick("#postViewArea") || pick(".post_ct") || pick(".se_component_wrap") || "";
+      return (title + "\n" + body).replace(/\s+/g, " ").trim().slice(0, 1200);
+    });
+  } catch { return ""; }
+}
+async function generateAiComment(key: string, tone: string, postText: string, log: (m: string) => void): Promise<string> {
+  if (!key) { log("[AI댓글] ⚠️ Gemini 키가 없어 건너뜁니다 (설정 → 글쓰기 AI에서 Gemini 키 입력)"); return ""; }
+  if (!postText || postText.length < 10) { log("[AI댓글] 글 내용을 못 읽어 건너뜀"); return ""; }
+  const toneGuide = tone === "담백" ? "깔끔하고 담백한" : tone === "짧게" ? "짧고 간결한" : "다정하고 따뜻한";
+  const prompt = `너는 네이버 블로그 이웃이야. 아래 블로그 글을 읽고 ${toneGuide} 말투의 자연스러운 한국어 공감 댓글을 딱 1개만 써줘.\n규칙: 1~2문장, 45자 이내, 글 내용에 구체적으로 반응, 이모지 1개 정도만, 광고·링크·해시태그 금지, 따옴표 없이 댓글 문장만 출력.\n\n[블로그 글]\n${postText}`;
+  const models = ["gemini-2.0-flash", "gemini-2.5-flash", "gemini-1.5-flash"];
+  for (const model of models) {
+    try {
+      const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }], generationConfig: { maxOutputTokens: 200, temperature: 1.0 } }),
+      });
+      const d: any = await r.json();
+      if (!r.ok) { if (r.status === 404) continue; log(`[AI댓글] 생성 실패(${model}): ${d?.error?.message || r.status}`); return ""; }
+      const txt = d?.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+      if (txt) return txt.replace(/^["'\s]+|["'\s]+$/g, "").split("\n")[0].slice(0, 120);
+    } catch (e: any) { log(`[AI댓글] 오류(${model}): ${e.message}`); }
+  }
+  log("[AI댓글] 모든 모델 생성 실패");
+  return "";
+}
+
+/* ── 블로그 건강검진: 내 블로그 실제 지표 크롤 ──
+   네이버는 공식 '지수'를 공개하지 않으므로, 실제로 읽을 수 있는 지표만 수집한다:
+   총 게시글 수, 이웃 수, 최근 글 날짜들(→발행 빈도/마지막 활동). 점수·등급은 이 지표로 산출. */
+export type BlogExposureCheck = {
+  logNo: string;
+  title: string;
+  exposed: boolean | null;
+  rank: number | null;
+  postUrl?: string;
+};
+
+export type BlogVisitorDay = { date: string; visitors: number };
+
+export type BlogStats = {
+  blogId: string;
+  totalPosts: number;
+  neighbors: number;
+  recentDates: string[];
+  exposureChecks: BlogExposureCheck[];
+  lowQualitySuspected: boolean | null;
+  visitorDays: BlogVisitorDay[];
+  inflowKeywords: { keyword: string; count?: number }[];
+  visitorDrop: { detected: boolean; rate: number | null; message: string } | null;
+  totalPostsForExposure: number;
+  checkedTodayCount: number;
+  exposureCompletedCount: number;
+  exposureLimit: number | null;
+};
+
+type ExposurePost = { logNo: string; title: string };
+type ExposureHistory = { dailyDate: string; dailyCount: number; lastChecked: Record<string, number> };
+type ExposureProgress = { checks: BlogExposureCheck[]; checkedTodayCount: number; completedCount: number; limit: number | null };
+
+const EXPOSURE_DAILY_LIMIT: Record<string, number | null> = { free: 5, basic: 10, pro: 20, unlimited: null, admin: null };
+
+function exposureToday(): string {
+  try { return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Seoul", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date()); }
+  catch { return new Date().toISOString().slice(0, 10); }
+}
+
+function exposureHistoryPath(blogId: string): string {
+  const safeBlogId = blogId.replace(/[^a-zA-Z0-9_-]/g, "_");
+  return path.join(SESSION_DIR, `exposure_checked_${safeBlogId}.json`);
+}
+
+function readExposureHistory(blogId: string): ExposureHistory {
+  const today = exposureToday();
+  try {
+    const parsed = JSON.parse(fs.readFileSync(exposureHistoryPath(blogId), "utf8"));
+    return {
+      dailyDate: today,
+      dailyCount: parsed?.dailyDate === today && Number.isFinite(parsed?.dailyCount) ? Math.max(0, parsed.dailyCount) : 0,
+      lastChecked: parsed?.lastChecked && typeof parsed.lastChecked === "object" ? parsed.lastChecked : {},
+    };
+  } catch { return { dailyDate: today, dailyCount: 0, lastChecked: {} }; }
+}
+
+function writeExposureHistory(blogId: string, history: ExposureHistory): void {
+  try {
+    fs.mkdirSync(SESSION_DIR, { recursive: true, mode: 0o700 });
+    const target = exposureHistoryPath(blogId);
+    const temp = `${target}.${process.pid}.tmp`;
+    fs.writeFileSync(temp, JSON.stringify(history, null, 2), { mode: 0o600 });
+    fs.renameSync(temp, target);
+  } catch (e: any) { console.warn(`[검색노출] 검사 기록 저장 실패: ${e.message}`); }
+}
+
+async function checkBlogExposure(blogId: string, posts: ExposurePost[], plan: string, log: (msg: string) => void): Promise<ExposureProgress> {
+  const normalizedPlan = Object.prototype.hasOwnProperty.call(EXPOSURE_DAILY_LIMIT, plan) ? plan : "free";
+  const limit = EXPOSURE_DAILY_LIMIT[normalizedPlan];
+  if (!posts.length) return { checks: [], checkedTodayCount: 0, completedCount: 0, limit };
+  const unlimited = limit === null;
+  const history = unlimited ? { dailyDate: exposureToday(), dailyCount: 0, lastChecked: {} } : readExposureHistory(blogId);
+  const remaining = unlimited ? posts.length : Math.max(0, limit - history.dailyCount);
+  const selected = unlimited ? posts : [...posts]
+    .sort((a, b) => (history.lastChecked[a.logNo] || 0) - (history.lastChecked[b.logNo] || 0))
+    .slice(0, remaining);
+  if (!unlimited && remaining === 0) log(`[검색노출] 오늘 등급 한도 ${limit}개를 모두 검사했어요`);
+  const keys = await getAdminBlogSearchKeys();
+  if (!keys) {
+    log("[검색노출] 검색 API 키를 읽지 못해 노출 검사를 건너뜁니다");
+    return { checks: selected.map(post => ({ ...post, exposed: null, rank: null })), checkedTodayCount: history.dailyCount, completedCount: posts.filter(post => history.lastChecked[post.logNo]).length, limit };
+  }
+  const checks: BlogExposureCheck[] = [];
+  for (const post of selected) {
+    const { logNo, title } = post;
+    try {
+      const url = `https://openapi.naver.com/v1/search/blog.json?query=${encodeURIComponent(title)}&display=100&start=1&sort=sim`;
+      const response = await fetch(url, { headers: { "X-Naver-Client-Id": keys.clientId, "X-Naver-Client-Secret": keys.clientSecret } });
+      if (!response.ok) throw new Error(`검색 API ${response.status}`);
+      const json: any = await response.json();
+      const items: any[] = Array.isArray(json?.items) ? json.items : [];
+      const wanted = blogId.toLowerCase();
+      const index = items.findIndex(item => {
+        const link = String(item?.link || "").toLowerCase();
+        const bloggerLink = String(item?.bloggerlink || "").toLowerCase();
+        return link.includes(`blog.naver.com/${wanted}/`) || link.includes(`blog.naver.com/${wanted}?`) || bloggerLink.replace(/\/$/, "").endsWith(`/` + wanted);
+      });
+      checks.push({ logNo, title, exposed: index >= 0, rank: index >= 0 ? index + 1 : null, postUrl: index >= 0 ? String(items[index]?.link || "") : undefined });
+      log(`[검색노출] ${index >= 0 ? `노출 약 ${index + 1}위` : "100위 내 누락"} · ${title.slice(0, 28)}`);
+    } catch (e: any) {
+      log(`[검색노출] 확인 실패 · ${title.slice(0, 28)} (${e.message})`);
+      checks.push({ logNo, title, exposed: null, rank: null });
+    } finally {
+      if (!unlimited) {
+        history.dailyCount += 1;
+        history.lastChecked[logNo] = Date.now();
+        writeExposureHistory(blogId, history);
+      }
+    }
+  }
+  return { checks, checkedTodayCount: unlimited ? checks.length : history.dailyCount, completedCount: unlimited ? posts.length : posts.filter(post => history.lastChecked[post.logNo]).length, limit };
+}
+
+export async function crawlBlogStats(params: {
+  accountId: string;
+  plan?: string;
+  onLog?: (msg: string) => void;
+}): Promise<BlogStats> {
+  const { accountId, plan = "free", onLog } = params;
+  const log = onLog || console.log;
+  if (!naverSessionExists(accountId)) throw new Error("세션 없음 — 먼저 로그인하세요");
+  const { blogId, cookies } = loadSession(accountId);
+  if (!blogId) throw new Error("내 블로그 ID를 찾을 수 없어요 — 계정을 다시 연결해주세요");
+
+  const browser = await chromium.launch({ headless: true, args: LAUNCH_ARGS });
+  const context = await browser.newContext({ userAgent: UA, viewport: { width: 1280, height: 900 }, locale: "ko-KR" });
+  await applyAntiDetection(context);
+  await context.addCookies(cookies);
+  const page = await context.newPage();
+  let totalPosts = 0, neighbors = 0;
+  const recentDates: string[] = [];
+  let exposurePosts: ExposurePost[] = [];
+  let exposureChecks: BlogExposureCheck[] = [];
+  let visitorDays: BlogVisitorDay[] = [];
+  let inflowKeywords: { keyword: string; count?: number }[] = [];
+  let checkedTodayCount = 0, exposureCompletedCount = 0;
+  let exposureLimit: number | null = EXPOSURE_DAILY_LIMIT[Object.prototype.hasOwnProperty.call(EXPOSURE_DAILY_LIMIT, plan) ? plan : "free"];
+  try {
+    log(`[건강검진] 내 블로그(${blogId}) 지표 수집 중...`);
+    // 1) 이웃 수 — 프로필/버디 위젯 Ajax
+    try {
+      await page.goto(`https://blog.naver.com/BuddyMe.naver?blogId=${blogId}`, { waitUntil: "domcontentloaded", timeout: 15000 }).catch(() => {});
+      const body = await page.content();
+      const m = body.match(/이웃[^\d]{0,6}([\d,]+)\s*명/) || body.match(/buddyCnt["'\s:]+([\d,]+)/);
+      if (m) neighbors = parseInt(m[1].replace(/,/g, ""), 10) || 0;
+    } catch {}
+    // 2) 총 게시글 수 + 최근 글 날짜 — 글 목록 페이지
+    await page.goto(`https://blog.naver.com/PostList.naver?blogId=${blogId}&categoryNo=0&currentPage=1&widgetTypeCall=true`, { waitUntil: "domcontentloaded", timeout: 20000 }).catch(() => {});
+    await page.waitForTimeout(1200);
+    const frame = page.frames().find(f => f.name() === "mainFrame") ?? page.frames().find(f => f.url().includes("blog.naver.com")) ?? null;
+    const ctx: any = frame ?? page;
+    const data = await ctx.evaluate((bid: string) => {
+      const txt = document.body.innerText || "";
+      // "전체보기 (1,234)" 형태에서 총 글 수
+      let total = 0;
+      const tm = txt.match(/전체\s*보기?\s*\(?\s*([\d,]+)\s*\)?/) || txt.match(/전체글\s*([\d,]+)/);
+      if (tm) total = parseInt(tm[1].replace(/,/g, ""), 10) || 0;
+      // 최근 글 날짜들
+      const dates: string[] = [];
+      document.querySelectorAll("[class*='date'],[class*='se_date'],[class*='time']").forEach(el => {
+        const t = (el.textContent || "").trim();
+        const dm = t.match(/(\d{4})[.\-\s]+(\d{1,2})[.\-\s]+(\d{1,2})/);
+        if (dm && dates.length < 30) dates.push(`${dm[1]}-${dm[2].padStart(2, "0")}-${dm[3].padStart(2, "0")}`);
+      });
+      const posts: { logNo: string; title: string }[] = [], seenPosts = new Set<string>();
+      const links = Array.from(document.querySelectorAll("a[href*='logNo='],a[href*='/PostView'],a[href*='" + bid + "/']"));
+      for (const el of links) {
+        const href = (el as HTMLAnchorElement).href || "";
+        const post = href.match(/logNo=(\d+)/) || href.match(new RegExp(bid + "\\/(\\d{6,})"));
+        const t = (el.textContent || "").replace(/\s+/g, " ").trim();
+        if (post && !seenPosts.has(post[1]) && t.length >= 4 && t.length <= 200) {
+          seenPosts.add(post[1]); posts.push({ logNo: post[1], title: t });
+        }
+      }
+      return { total, dates, posts };
+    }, blogId).catch(() => ({ total: 0, dates: [], posts: [] }));
+    totalPosts = data.total;
+    recentDates.push(...data.dates);
+    exposurePosts = data.posts;
+    log(`[건강검진] 총 글 ${totalPosts}개 · 이웃 ${neighbors}명 · 최근 날짜 ${recentDates.length}개 수집`);
+
+    try {
+      // 순환 검사를 위해 첫 페이지만이 아니라 목록 끝까지 logNo/제목을 확보한다.
+      const seenExposure = new Set(exposurePosts.map(post => post.logNo));
+      const expectedPages = totalPosts > 0 ? Math.ceil(totalPosts / Math.max(1, exposurePosts.length || 5)) + 2 : 100;
+      for (let pg = 2; pg <= expectedPages && (totalPosts <= 0 || exposurePosts.length < totalPosts); pg++) {
+        try {
+          await page.goto(`https://blog.naver.com/PostList.naver?blogId=${blogId}&categoryNo=0&currentPage=${pg}&widgetTypeCall=true`, { waitUntil: "domcontentloaded", timeout: 15000 });
+          await page.waitForTimeout(500);
+          const listFrame = page.frames().find(f => f.name() === "mainFrame") ?? page.frames().find(f => f.url().includes("blog.naver.com")) ?? null;
+          const listCtx: any = listFrame ?? page;
+          const pagePosts: ExposurePost[] = await listCtx.evaluate((bid: string) => {
+            const out: { logNo: string; title: string }[] = [], seen = new Set<string>();
+            const links = Array.from(document.querySelectorAll("a[href*='logNo='],a[href*='/PostView'],a[href*='" + bid + "/']"));
+            for (const el of links) {
+              const href = (el as HTMLAnchorElement).href || "";
+              const match = href.match(/logNo=(\d+)/) || href.match(new RegExp(bid + "\\/(\\d{6,})"));
+              const title = (el.textContent || "").replace(/\s+/g, " ").trim();
+              if (match && !seen.has(match[1]) && title.length >= 4 && title.length <= 200) { seen.add(match[1]); out.push({ logNo: match[1], title }); }
+            }
+            return out;
+          }, blogId).catch(() => []);
+          let added = 0;
+          for (const post of pagePosts) if (!seenExposure.has(post.logNo)) { seenExposure.add(post.logNo); exposurePosts.push(post); added++; }
+          if (!pagePosts.length || added === 0) break;
+        } catch { break; }
+      }
+      log(`[검색노출] 검사 대상 글 ${exposurePosts.length}개 확보 · ${plan} 등급 검사 시작`);
+      const exposure = await checkBlogExposure(blogId, exposurePosts, plan, log);
+      exposureChecks = exposure.checks;
+      checkedTodayCount = exposure.checkedTodayCount;
+      exposureCompletedCount = exposure.completedCount;
+      exposureLimit = exposure.limit;
+    } catch (e: any) { log(`[검색노출] 검사 실패: ${e.message}`); }
+
+    // 관리자 통계 화면은 수시로 DOM/경로가 바뀌므로 여러 후보를 읽고, 일자-방문자/유입어 패턴만 보수적으로 채택한다.
+    try {
+      log("[방문자] 관리자 통계에서 최근 7일 방문자와 유입 검색어 수집 중...");
+      const statUrls = [
+        `https://admin.blog.naver.com/${blogId}/stat/visitor`,
+        `https://admin.blog.naver.com/${blogId}/stat/traffic`,
+        `https://admin.blog.naver.com/${blogId}/stat/keyword`,
+        `https://admin.blog.naver.com/${blogId}`,
+      ];
+      for (const statUrl of statUrls) {
+        try {
+          await page.goto(statUrl, { waitUntil: "domcontentloaded", timeout: 15000 });
+          await page.waitForTimeout(900);
+          const parsed = await page.evaluate(() => {
+            const text = (document.body?.innerText || "").replace(/\u00a0/g, " ");
+            const days: { date: string; visitors: number }[] = [];
+            const seen = new Set<string>();
+            const dateNumber = /(\d{4})[.\/-](\d{1,2})[.\/-](\d{1,2})[^\d]{0,20}([\d,]+)\s*(?:명|회)?/g;
+            let m: RegExpExecArray | null;
+            while ((m = dateNumber.exec(text)) && days.length < 14) {
+              const date = `${m[1]}-${m[2].padStart(2,"0")}-${m[3].padStart(2,"0")}`;
+              const visitors = Number(m[4].replace(/,/g, ""));
+              if (!seen.has(date) && Number.isFinite(visitors)) { seen.add(date); days.push({ date, visitors }); }
+            }
+            const keywords: { keyword: string; count?: number }[] = [];
+            const keywordRoots = Array.from(document.querySelectorAll("[class*='keyword'],[class*='searchword'],[class*='referer']"));
+            for (const root of keywordRoots) {
+              for (const row of Array.from(root.querySelectorAll("li,tr"))) {
+                const t = (row.textContent || "").replace(/\s+/g, " ").trim();
+                const km = t.match(/^(?:\d+[.)]?\s*)?(.{2,50}?)(?:\s+([\d,]+)(?:회|명|건)?)?$/);
+                if (km && !keywords.some(k => k.keyword === km[1])) keywords.push({ keyword: km[1], ...(km[2] ? { count: Number(km[2].replace(/,/g,"")) } : {}) });
+                if (keywords.length >= 5) break;
+              }
+              if (keywords.length >= 5) break;
+            }
+            return { days, keywords };
+          });
+          if (parsed.days.length > visitorDays.length) visitorDays = parsed.days;
+          if (parsed.keywords.length > inflowKeywords.length) inflowKeywords = parsed.keywords;
+          if (visitorDays.length >= 7 && inflowKeywords.length >= 3) break;
+        } catch {}
+      }
+      visitorDays = visitorDays.sort((a, b) => a.date.localeCompare(b.date)).slice(-7);
+      inflowKeywords = inflowKeywords.slice(0, 5);
+      log(`[방문자] 일별 ${visitorDays.length}일 · 유입 검색어 ${inflowKeywords.length}개 수집`);
+    } catch (e: any) { log(`[방문자] 통계 확인 실패: ${e.message}`); }
+  } finally {
+    await browser.close().catch(() => {});
+  }
+  const knownChecks = exposureChecks.filter(c => c.exposed !== null);
+  const missing = knownChecks.filter(c => c.exposed === false).length;
+  const lowQualitySuspected = knownChecks.length >= 3 ? missing / knownChecks.length > 0.5 : null;
+  let visitorDrop: BlogStats["visitorDrop"] = null;
+  if (visitorDays.length >= 2) {
+    const prev = visitorDays[visitorDays.length - 2].visitors;
+    const curr = visitorDays[visitorDays.length - 1].visitors;
+    const rate = prev > 0 ? Math.round(((curr - prev) / prev) * 100) : null;
+    visitorDrop = { detected: rate !== null && rate <= -30, rate, message: rate === null ? "전일 비교 불가" : rate <= -30 ? `전일 대비 ${Math.abs(rate)}% 급감` : `전일 대비 ${rate >= 0 ? "+" : ""}${rate}%` };
+  }
+  return { blogId, totalPosts, neighbors, recentDates, exposureChecks, lowQualitySuspected, visitorDays, inflowKeywords, visitorDrop, totalPostsForExposure: exposurePosts.length, checkedTodayCount, exposureCompletedCount, exposureLimit };
+}
+
+/* ── 답방 ①: 내 블로그 글 목록 불러오기 ──
+   세션에 저장된 내 blogId로 최근 글을 수집. selectMode=count(최근 N개)/period(최근 N일)/all(전체). */
+export async function crawlMyPosts(params: {
+  accountId: string;
+  selectMode: "count" | "all" | "period";
+  count: number;
+  period: number;
+  onLog?: (msg: string) => void;
+}): Promise<{ url: string; title: string; date: string }[]> {
+  const { accountId, selectMode, count, period, onLog } = params;
+  const log = onLog || console.log;
+  if (!naverSessionExists(accountId)) throw new Error("세션 없음 — 먼저 로그인하세요");
+  const { blogId, cookies } = loadSession(accountId);
+  if (!blogId) throw new Error("내 블로그 ID를 찾을 수 없어요 — 계정을 다시 연결해주세요");
+
+  const limit = selectMode === "count" ? Math.max(1, count) : selectMode === "period" ? 300 : 500;
+  const cutoff = selectMode === "period" ? Date.now() - period * 86400000 : 0;
+
+  const browser = await chromium.launch({ headless: true, args: LAUNCH_ARGS });
+  const context = await browser.newContext({ userAgent: UA, viewport: { width: 1280, height: 900 }, locale: "ko-KR" });
+  await applyAntiDetection(context);
+  await context.addCookies(cookies);
+  const page = await context.newPage();
+  const out: { url: string; title: string; date: string; dateMs: number }[] = [];
+  const seen = new Set<string>();
+  try {
+    log(`[답방] 내 블로그(${blogId}) 글 목록 불러오는 중...`);
+    for (let pg = 1; pg <= 15 && out.length < limit; pg++) {
+      await page.goto(`https://blog.naver.com/PostList.naver?blogId=${blogId}&categoryNo=0&currentPage=${pg}&widgetTypeCall=true&topReferer=`, { waitUntil: "domcontentloaded", timeout: 20000 }).catch(() => {});
+      await page.waitForTimeout(1000);
+      const frame = page.frames().find(f => f.name() === "mainFrame") ?? page.frames().find(f => f.url().includes("blog.naver.com")) ?? null;
+      const ctx: any = frame ?? page;
+      const posts: { logNo: string; title: string; date: string }[] = await ctx.evaluate((bid: string) => {
+        const res: { logNo: string; title: string; date: string }[] = [];
+        const seenIds = new Set<string>();
+        const links = Array.from(document.querySelectorAll("a[href*='logNo='], a[href*='/PostView'], a[href*='" + bid + "/']"));
+        for (const a of links) {
+          const href = (a as HTMLAnchorElement).href || "";
+          const m = href.match(/logNo=(\d+)/) || href.match(new RegExp(bid + "\\/(\\d{6,})"));
+          if (!m) continue;
+          const logNo = m[1];
+          if (seenIds.has(logNo)) continue;
+          const title = (a.textContent || "").replace(/\s+/g, " ").trim();
+          if (!title || title.length < 2 || title.length > 100) continue;
+          seenIds.add(logNo);
+          const container = a.closest("li,div[class*='post'],div[class*='item'],div[class*='list']");
+          let date = "";
+          const dEl = container?.querySelector("[class*='date'],[class*='time'],[class*='se_date']");
+          if (dEl) date = (dEl.textContent || "").replace(/\s+/g, " ").trim().slice(0, 12);
+          res.push({ logNo, title, date });
+        }
+        return res;
+      }, blogId);
+      if (!posts.length) break;
+      let added = 0;
+      for (const p of posts) {
+        if (seen.has(p.logNo)) continue;
+        seen.add(p.logNo);
+        let dateMs = 0;
+        const dm = p.date.match(/(\d{4})[.\-\s]+(\d{1,2})[.\-\s]+(\d{1,2})/);
+        if (dm) dateMs = new Date(`${dm[1]}-${dm[2].padStart(2, "0")}-${dm[3].padStart(2, "0")}`).getTime();
+        if (selectMode === "period" && dateMs && dateMs < cutoff) continue;
+        out.push({ url: `https://blog.naver.com/${blogId}/${p.logNo}`, title: p.title, date: p.date, dateMs });
+        added++;
+        if (out.length >= limit) break;
+      }
+      if (added === 0 && pg > 1) break; // 더 없음
+    }
+    log(`[답방] 글 ${out.length}개 수집 완료`);
+  } finally {
+    await browser.close().catch(() => {});
+  }
+  const sliced = selectMode === "count" ? out.slice(0, count) : out;
+  return sliced.map(p => ({ url: p.url, title: p.title, date: p.date }));
+}
+
+/* ── 답방 ②: 내 글 댓글에 대댓글(답글) 달기 ──
+   posts: 내 글 URL 배열. 각 글의 댓글을 훑어 (onlyNew면 아직 답글 없는 것만) 답글 작성.
+   mode=ai면 댓글 내용을 읽고 Gemini로 답글 생성, fixed면 고정 문구. */
+export async function replyToComments(params: {
+  accountId: string;
+  posts: string[];
+  mode: "ai" | "fixed";
+  comment: string;
+  tone: string;
+  onlyNew: boolean;
+  delayMin: number;
+  delayMax: number;
+  geminiKey?: string;
+  onLog?: (msg: string) => void;
+  onResult?: (r: { blogId?: string; postTitle?: string; status: "success" | "skip" | "fail"; message?: string }) => Promise<void>;
+  onProgress?: (done: number, fail: number) => void;
+  stopSignal?: () => boolean;
+}): Promise<void> {
+  const { accountId, posts, mode, comment, tone, onlyNew, delayMin, delayMax, geminiKey = "", onLog, onResult, onProgress, stopSignal } = params;
+  const log = onLog || console.log;
+  if (!naverSessionExists(accountId)) throw new Error("세션 없음 — 먼저 로그인하세요");
+  const { cookies } = loadSession(accountId);
+
+  const browser = await chromium.launch({ headless: false, args: LAUNCH_ARGS });
+  const context = await browser.newContext({ userAgent: UA, viewport: { width: 1280, height: 900 }, locale: "ko-KR" });
+  await applyAntiDetection(context);
+  await context.addCookies(cookies);
+  const page = await context.newPage();
+  let done = 0, fail = 0;
+
+  try {
+    for (const postUrl of posts) {
+      if (stopSignal?.()) { log("[답방] 중단 신호 수신"); break; }
+      try {
+        log(`[답방] 글 진입: ${postUrl}`);
+        await page.goto(postUrl, { waitUntil: "domcontentloaded", timeout: 20000 });
+        await page.waitForTimeout(1800);
+        const frame = page.frames().find(f => f.name() === "mainFrame") ?? page.frames().find(f => f.url().includes("blog.naver.com")) ?? null;
+        const ctx: any = frame ?? page;
+        const scrollInto = async (el: any) => { try { await el.evaluate((n: Element) => { const s = document.scrollingElement || document.documentElement; const r = n.getBoundingClientRect(); s.scrollTop = Math.max(0, s.scrollTop + r.top - window.innerHeight * 0.4); }); await page.waitForTimeout(300); } catch {} };
+
+        // 댓글 위젯 로드
+        for (let s = 0; s < 4; s++) { await page.mouse.wheel(0, 2500); await page.waitForTimeout(400); }
+        for (const os of ["a.btn_comment._cmtList", "a._cmtList", "a.btn_comment", "a._floating_bottom_btn_comment"]) {
+          const ob = await ctx.$(os); if (ob) { await scrollInto(ob); await ob.click({ timeout: 4000 }).catch(() => {}); await page.waitForTimeout(1500); break; }
+        }
+        await ctx.waitForSelector(".u_cbox_comment, li.u_cbox_comment, .u_cbox_list", { timeout: 6000 }).catch(() => {});
+
+        // 이 글의 댓글 목록 파악 (작성자·내용·이미 답글있는지)
+        const commentInfos: { idx: number; author: string; text: string; hasReply: boolean }[] = await ctx.evaluate(() => {
+          const items = Array.from(document.querySelectorAll("li.u_cbox_comment, .u_cbox_comment"));
+          const res: { idx: number; author: string; text: string; hasReply: boolean }[] = [];
+          items.forEach((li, i) => {
+            // 답글(대댓글)은 보통 u_cbox_reply_area 안 → 원댓글만 대상
+            if (li.closest(".u_cbox_reply_area")) return;
+            const author = (li.querySelector(".u_cbox_nick")?.textContent || "").trim();
+            const text = (li.querySelector(".u_cbox_contents")?.textContent || "").trim();
+            const hasReply = !!li.querySelector(".u_cbox_reply_area .u_cbox_comment, .u_cbox_reply_cnt");
+            if (text) res.push({ idx: i, author, text, hasReply });
+          });
+          return res;
+        }).catch(() => []);
+
+        if (!commentInfos.length) { log(`[답방] 댓글 없음, 스킵`); await onResult?.({ postTitle: postUrl, status: "skip", message: "댓글 없음" }); onProgress?.(done, fail); continue; }
+
+        const targets = onlyNew ? commentInfos.filter(c => !c.hasReply) : commentInfos;
+        log(`[답방] 댓글 ${commentInfos.length}개 중 답방 대상 ${targets.length}개`);
+
+        for (const c of targets) {
+          if (stopSignal?.()) break;
+          // 답글 문구 결정
+          let replyText = comment;
+          if (mode === "ai") {
+            replyText = await generateAiReply(geminiKey, tone, c.text, log);
+            if (!replyText) { log(`[답방] AI 답글 생성 실패 — 이 댓글 스킵`); continue; }
+          }
+          // 해당 댓글의 '답글' 버튼 클릭 → 입력창 → 등록
+          const ok = await ctx.evaluate((args: { idx: number }) => {
+            const items = Array.from(document.querySelectorAll("li.u_cbox_comment, .u_cbox_comment")).filter(li => !li.closest(".u_cbox_reply_area"));
+            const li = items[args.idx] as HTMLElement | undefined;
+            if (!li) return false;
+            const replyBtn = li.querySelector(".u_cbox_btn_reply, a[class*='reply']") as HTMLElement | null;
+            if (replyBtn) { replyBtn.click(); return true; }
+            return false;
+          }, { idx: c.idx }).catch(() => false);
+          if (!ok) { log(`[답방] 답글 버튼 못찾음 — 스킵`); continue; }
+          await page.waitForTimeout(1000);
+
+          // 펼쳐진 답글 입력창(u_cbox_reply_wrap 안 textarea)에 입력
+          const wrote = await ctx.evaluate((txt: string) => {
+            const areas = Array.from(document.querySelectorAll(".u_cbox_reply_wrap textarea, .u_cbox_write_area textarea, textarea.u_cbox_text"));
+            const ta = areas[areas.length - 1] as HTMLTextAreaElement | undefined;
+            if (!ta) return false;
+            ta.focus(); ta.value = txt;
+            ta.dispatchEvent(new Event("input", { bubbles: true }));
+            ta.dispatchEvent(new Event("keyup", { bubbles: true }));
+            return true;
+          }, replyText).catch(() => false);
+          if (!wrote) { log(`[답방] 답글 입력창 못찾음 — 스킵`); continue; }
+          await page.waitForTimeout(700);
+
+          // 등록 버튼
+          const submitted = await ctx.evaluate(() => {
+            const btns = Array.from(document.querySelectorAll(".u_cbox_reply_wrap .u_cbox_btn_upload, .u_cbox_btn_upload, button.u_cbox_btn_upload"));
+            const btn = btns[btns.length - 1] as HTMLElement | undefined;
+            if (btn) { btn.click(); return true; }
+            return false;
+          }).catch(() => false);
+          await page.waitForTimeout(1500);
+
+          if (submitted) { done++; log(`[답방] ✅ ${c.author}님 댓글에 답글: "${replyText}"`); await onResult?.({ postTitle: c.author, status: "success", message: replyText.slice(0, 30) }); }
+          else { fail++; log(`[답방] ❌ 등록 버튼 못찾음`); await onResult?.({ postTitle: c.author, status: "fail", message: "등록 실패" }); }
+          onProgress?.(done, fail);
+          await page.waitForTimeout(humanDelay(delayMin, delayMax));
+        }
+      } catch (e: any) {
+        fail++; log(`[답방] 글 처리 오류: ${e.message}`); onProgress?.(done, fail);
+      }
+    }
+    log(`[답방] 완료 — 답글 ${done}개 / 실패 ${fail}개`);
+  } finally {
+    await browser.close().catch(() => {});
+  }
+}
+async function generateAiReply(key: string, tone: string, commentText: string, log: (m: string) => void): Promise<string> {
+  if (!key) { log("[답방] Gemini 키 없음 — AI 답글 건너뜀"); return ""; }
+  const toneGuide = tone === "담백" ? "깔끔하고 담백한" : tone === "짧게" ? "짧고 간결한" : "다정하고 따뜻한";
+  const prompt = `너는 네이버 블로그 주인이야. 내 글에 아래 댓글이 달렸어. 이 댓글에 ${toneGuide} 말투로 고마움을 담은 자연스러운 한국어 답글을 딱 1개만 써줘.\n규칙: 1문장, 35자 이내, 댓글 내용에 구체적으로 반응, 이모지 1개 정도, 광고·링크 금지, 따옴표 없이 답글만 출력.\n\n[받은 댓글]\n${commentText}`;
+  for (const model of ["gemini-2.0-flash", "gemini-2.5-flash", "gemini-1.5-flash"]) {
+    try {
+      const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }], generationConfig: { maxOutputTokens: 150, temperature: 1.0 } }),
+      });
+      const d: any = await r.json();
+      if (!r.ok) { if (r.status === 404) continue; return ""; }
+      const txt = d?.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+      if (txt) return txt.replace(/^["'\s]+|["'\s]+$/g, "").split("\n")[0].slice(0, 100);
+    } catch {}
+  }
+  return "";
+}
+
 /* ── 공감·댓글 작업 ── */
 export async function engageBlogs(params: {
   accountId: string;
@@ -1626,6 +2170,9 @@ export async function engageBlogs(params: {
   skipDone: boolean;
   commentRate?: number;   // 댓글 확률 % (0~100, 기본 100). 도배 감지 회피용
   likeRate?: number;      // 공감 확률 % (0~100, 기본 100)
+  aiComment?: boolean;    // ★AI 자동 댓글: 글 내용을 읽고 Gemini로 매번 다른 댓글 생성
+  commentTone?: string;   // AI 댓글 말투(담백/다정/짧게)
+  geminiKey?: string;     // 사용자 Gemini API 키
   onLog?: (msg: string) => void;
   onResult?: (r: EngageResult) => Promise<void>;
   onProgress?: (done: number, fail: number) => void;
@@ -1634,7 +2181,8 @@ export async function engageBlogs(params: {
   const {
     accountId, targets, comment, doLike, doComment,
     periodDays, postsPerBlog, delayMin, delayMax,
-    dailyLimit, skipDone, commentRate = 100, likeRate = 100, onLog, onResult, onProgress, stopSignal,
+    dailyLimit, skipDone, commentRate = 100, likeRate = 100,
+    aiComment = false, commentTone = "다정", geminiKey = "", onLog, onResult, onProgress, stopSignal,
   } = params;
   const log = onLog || console.log;
 
@@ -1648,10 +2196,8 @@ export async function engageBlogs(params: {
 
   // 완료 기록 (서이추와 별도 파일)
   const engageDonePath = path.join(SESSION_DIR, `engage_done_${accountId}.json`);
-  let doneSet = new Set<string>();
-  if (skipDone && fs.existsSync(engageDonePath)) {
-    try { doneSet = new Set(JSON.parse(fs.readFileSync(engageDonePath, "utf-8"))); } catch {}
-  }
+  const doneMap = loadDoneMap(engageDonePath);   // { blogId: "YYYY-MM-DD" | "legacy" }
+  const today = todayKST();
 
   const cutoff = Date.now() - periodDays * 24 * 60 * 60 * 1000;
 
@@ -1695,8 +2241,10 @@ export async function engageBlogs(params: {
 
       const { keyword, blogId } = target;
 
-      if (skipDone && doneSet.has(blogId)) {
-        await onResult?.({ keyword, blogId, postUrl: "", liked: false, commented: false, status: "skip", message: "이미 처리됨" });
+      const doneToday = doneMap[blogId] === today;               // 오늘 이미 처리 → 항상 스킵(당일 중복방지)
+      const donePerm = skipDone && (blogId in doneMap);          // 완료 스킵 ON → 과거 처리분도 스킵
+      if (doneToday || donePerm) {
+        await onResult?.({ keyword, blogId, postUrl: "", liked: false, commented: false, status: "skip", message: doneToday ? "오늘 이미 처리됨(당일 중복방지)" : "이미 처리됨" });
         onProgress?.(done, fail);
         continue;
       }
@@ -1808,9 +2356,18 @@ export async function engageBlogs(params: {
 
         // 확률 게이트: 이 글에 공감/댓글을 실제로 할지 매번 주사위 (도배 감지 회피)
         const rollLike = doLike && (likeRate >= 100 || Math.random() * 100 < likeRate);
-        const rollComment = doComment && comment.trim() !== "" && (commentRate >= 100 || Math.random() * 100 < commentRate);
+        let rollComment = doComment && (commentRate >= 100 || Math.random() * 100 < commentRate);
+        // ★AI 자동 댓글: 이 글 내용을 읽고 Gemini로 생성 → comments에 반영(실패 시 이 글 댓글만 건너뜀)
+        if (rollComment && aiComment) {
+          const postText = await extractPostText(ctx);
+          const gen = await generateAiComment(geminiKey, commentTone, postText, log);
+          if (gen) { comments.length = 0; comments.push(gen); commentIdx = 0; log(`[AI댓글] ${blogId}: "${gen}"`); }
+          else { rollComment = false; }
+        } else if (rollComment && comments.length === 0) {
+          rollComment = false;
+        }
         if (doLike && !rollLike) log(`[공감·댓글] ${blogId} 공감 건너뜀(확률 ${likeRate}%)`);
-        if (doComment && comment.trim() && !rollComment) log(`[공감·댓글] ${blogId} 댓글 건너뜀(확률 ${commentRate}%)`);
+        if (doComment && !aiComment && comment.trim() && !rollComment) log(`[공감·댓글] ${blogId} 댓글 건너뜀(확률 ${commentRate}%)`);
 
         // ── 공감 클릭 ──
         //  실측(2026-08): 네이버 공감버튼 = a.u_likeit_list_button (텍스트 "공감"), 이미 눌렀으면 class에 'on'
@@ -2000,8 +2557,8 @@ export async function engageBlogs(params: {
         const goalMet = doComment ? commented : liked;
         if (goalMet) {
           // 목표 달성한 것만 "완료 목록"에 기록(다음번 '이미 처리됨' 대상)
-          doneSet.add(blogId);
-          fs.writeFileSync(engageDonePath, JSON.stringify([...doneSet], null, 2));
+          doneMap[blogId] = today;
+          fs.writeFileSync(engageDonePath, JSON.stringify(doneMap, null, 2));
           done++;
           const msg = commented ? "통과 (댓글 작성)" : "공감 완료";
           await onResult?.({ keyword, blogId, postUrl: targetPost.url, liked, commented, status: "success", message: msg });

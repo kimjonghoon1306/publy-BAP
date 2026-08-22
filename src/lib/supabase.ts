@@ -398,6 +398,72 @@ function engageQuotaKey(userId: string): string {
   return `engage_daily_${userId}_${today}`;
 }
 
+// ── 답방(내 글 댓글 답글) 일일 한도 ──
+export const REPLY_DAILY_LIMIT: Record<string, number> = {
+  free: 10, basic: 50, pro: 100, unlimited: 999999, admin: 9999,
+};
+function replyQuotaKey(userId: string): string {
+  return `reply_daily_${userId}_${new Date().toISOString().slice(0, 10)}`;
+}
+export async function getReplyDailyUsage(userId: string): Promise<number> {
+  try {
+    const { data } = await supabase.from("publy_settings").select("value").eq("key", replyQuotaKey(userId)).maybeSingle();
+    return data?.value ? parseInt(data.value) || 0 : 0;
+  } catch { return 0; }
+}
+export async function incrementReplyQuota(userId: string, by = 1): Promise<void> {
+  const key = replyQuotaKey(userId);
+  const used = await getReplyDailyUsage(userId);
+  await supabase.from("publy_settings").upsert({ key, value: String(used + by) }, { onConflict: "key" });
+}
+
+// ── 블로그 진단(건강검진) 일일 한도 ── (무거운 크롤이라 횟수 적게)
+export const BLOGSCORE_DAILY_LIMIT: Record<string, number> = {
+  free: 1, basic: 5, pro: 20, unlimited: 999999, admin: 9999,
+};
+function blogscoreQuotaKey(userId: string): string {
+  return `blogscore_daily_${userId}_${new Date().toISOString().slice(0, 10)}`;
+}
+export async function getBlogscoreDailyUsage(userId: string): Promise<number> {
+  try {
+    const { data } = await supabase.from("publy_settings").select("value").eq("key", blogscoreQuotaKey(userId)).maybeSingle();
+    return data?.value ? parseInt(data.value) || 0 : 0;
+  } catch { return 0; }
+}
+export async function incrementBlogscoreQuota(userId: string): Promise<void> {
+  const key = blogscoreQuotaKey(userId);
+  const used = await getBlogscoreDailyUsage(userId);
+  await supabase.from("publy_settings").upsert({ key, value: String(used + 1) }, { onConflict: "key" });
+}
+
+// ── 관리자용: 전체 회원의 "오늘" 기능별 사용량 한 번에 집계 ──
+//    모든 사용량이 publy_settings의 `{기능}_daily_{userId}_{날짜}` 키로 저장되므로 오늘 날짜로 끝나는 키를 통째로 조회해 집계.
+export interface DailyUsageRow { userId: string; publish: number; neighbor: number; engage: number; reply: number; blogscore: number; total: number; }
+export async function getAllDailyUsageToday(): Promise<DailyUsageRow[]> {
+  const today = new Date().toISOString().slice(0, 10);
+  const map: Record<string, DailyUsageRow> = {};
+  const ensure = (uid: string) => (map[uid] ||= { userId: uid, publish: 0, neighbor: 0, engage: 0, reply: 0, blogscore: 0, total: 0 });
+  try {
+    const { data } = await supabase.from("publy_settings").select("key,value").like("key", `%_daily_%_${today}`);
+    for (const row of (data || [])) {
+      // key = `{feature}_daily_{userId}_{date}` — feature는 언더스코어 없음, date는 끝 10자
+      const m = String(row.key).match(/^([a-z]+)_daily_(.+)_(\d{4}-\d{2}-\d{2})$/);
+      if (!m) continue;
+      const [, feature, uid] = m;
+      if (!["publish", "neighbor", "engage", "reply", "blogscore"].includes(feature)) continue; // naver 등 기타 키 제외
+      const val = parseInt(row.value) || 0;
+      const r = ensure(uid);
+      if (feature === "publish") r.publish += val;
+      else if (feature === "neighbor") r.neighbor += val;
+      else if (feature === "engage") r.engage += val;
+      else if (feature === "reply") r.reply += val;
+      else if (feature === "blogscore") r.blogscore += val;
+    }
+    for (const uid in map) map[uid].total = map[uid].publish + map[uid].neighbor + map[uid].engage + map[uid].reply + map[uid].blogscore;
+  } catch { /* 조회 실패 시 빈 배열 */ }
+  return Object.values(map).sort((a, b) => b.total - a.total);
+}
+
 export async function getEngageDailyUsage(userId: string): Promise<number> {
   try {
     const { data } = await supabase
@@ -615,6 +681,24 @@ export async function getEngageHistory(userId: string): Promise<EngageHistory[]>
       .order("created_at", { ascending: false })
       .limit(200);
     return data || [];
+  } catch { return []; }
+}
+
+// ── 답방 이력 (관리자) ──
+export interface ReplyHistory { id: string; user_id: string; post_title: string; status: "success"|"fail"|"skip"; message: string; created_at: string; }
+export async function getAllReplyHistory(): Promise<(ReplyHistory & { user_name?: string; user_email?: string })[]> {
+  try {
+    const { data } = await supabase.from("publy_reply_history").select("*, publy_users(name, email)").order("created_at", { ascending: false }).limit(500);
+    return (data || []).map((d: Record<string, any>) => ({ id: d.id, user_id: d.user_id, post_title: d.post_title, status: d.status, message: d.message, created_at: d.created_at, user_name: d.publy_users?.name, user_email: d.publy_users?.email }));
+  } catch { return []; }
+}
+
+// ── 블로그지수 진단 이력 (관리자) ──
+export interface BlogscoreHistory { id: string; user_id: string; blog_id: string; total_posts: number; neighbors: number; low_quality_suspected: boolean|null; created_at: string; }
+export async function getAllBlogscoreHistory(): Promise<(BlogscoreHistory & { user_name?: string; user_email?: string })[]> {
+  try {
+    const { data } = await supabase.from("publy_blogscore_history").select("*, publy_users(name, email)").order("created_at", { ascending: false }).limit(500);
+    return (data || []).map((d: Record<string, any>) => ({ id: d.id, user_id: d.user_id, blog_id: d.blog_id, total_posts: d.total_posts, neighbors: d.neighbors, low_quality_suspected: d.low_quality_suspected, created_at: d.created_at, user_name: d.publy_users?.name, user_email: d.publy_users?.email }));
   } catch { return []; }
 }
 

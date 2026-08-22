@@ -45,6 +45,46 @@ export async function addNeighborHistory(data: {
     console.error("[neighbor] 히스토리 저장 오류:", e);
   }
 }
+
+// 답방 이력 저장
+export async function addReplyHistory(data: {
+  user_id: string;
+  post_title: string;
+  status: "success" | "fail" | "skip";
+  message: string;
+}): Promise<void> {
+  try {
+    await supabase.from("publy_reply_history").insert({
+      user_id: data.user_id,
+      post_title: data.post_title,
+      status: data.status,
+      message: data.message,
+    });
+  } catch (e) {
+    console.error("[reply] 히스토리 저장 오류:", e);
+  }
+}
+
+// 블로그지수 진단 이력 저장
+export async function addBlogscoreHistory(data: {
+  user_id: string;
+  blog_id: string;
+  total_posts: number;
+  neighbors: number;
+  low_quality_suspected: boolean | null;
+}): Promise<void> {
+  try {
+    await supabase.from("publy_blogscore_history").insert({
+      user_id: data.user_id,
+      blog_id: data.blog_id,
+      total_posts: data.total_posts,
+      neighbors: data.neighbors,
+      low_quality_suspected: data.low_quality_suspected,
+    });
+  } catch (e) {
+    console.error("[blogscore] 히스토리 저장 오류:", e);
+  }
+}
 export async function getNeighborDailyUsage(userId: string): Promise<number> {
   try {
     const { data } = await supabase

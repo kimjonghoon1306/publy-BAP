@@ -1,7 +1,7 @@
 import express from "express";
 import cors from "cors";
-import { saveSession, sessionExists, removeSession, crawlBlogIds, crawlBuddyPosts, analyzeBuddyKeywords, addNeighbors, NeighborResult, donePath, engageBlogs, EngageResult, engageDonePath } from "./naver";
-import { checkNeighborQuota, incrementNeighborQuota, getNeighborDailyUsage, incrementEngageQuota, getEngageDailyUsage, getUserPlan, NEIGHBOR_DAILY_LIMIT, addNeighborHistory } from "./supabase";
+import { saveSession, sessionExists, removeSession, crawlBlogIds, crawlBuddyPosts, analyzeBuddyKeywords, addNeighbors, NeighborResult, donePath, engageBlogs, EngageResult, engageDonePath, crawlMyPosts, replyToComments, crawlBlogStats } from "./naver";
+import { checkNeighborQuota, incrementNeighborQuota, getNeighborDailyUsage, incrementEngageQuota, getEngageDailyUsage, getUserPlan, NEIGHBOR_DAILY_LIMIT, addNeighborHistory, addReplyHistory, addBlogscoreHistory } from "./supabase";
 import fs from "fs";
 
 const app = express();
@@ -224,7 +224,8 @@ app.post("/api/add-neighbor", async (req, res) => {
 app.get("/api/done/:accountId", (req, res) => {
   const dp = donePath(req.params.accountId);
   try {
-    const list = fs.existsSync(dp) ? JSON.parse(fs.readFileSync(dp, "utf-8")) : [];
+    const raw = fs.existsSync(dp) ? JSON.parse(fs.readFileSync(dp, "utf-8")) : [];
+    const list = Array.isArray(raw) ? raw : Object.keys(raw);   // 신형식({blogId:date})도 blogId 목록으로 반환
     res.json({ list });
   } catch {
     res.json({ list: [] });
@@ -273,13 +274,51 @@ app.get("/api/engage-crawl", async (req, res) => {
   res.end();
 });
 
+/* ── 블로그 건강검진: 내 블로그 지표 크롤 (SSE) ── */
+app.get("/api/blog-stats", async (req, res) => {
+  const { accountId, plan, userId } = req.query as Record<string, string>;
+  if (!accountId) return res.status(400).json({ error: "accountId 필요" });
+  sseSetup(res);
+  try {
+    const stats = await crawlBlogStats({ accountId, plan, onLog: (msg) => sseSend(res, { type: "log", msg }) });
+    sseSend(res, { type: "stats", stats });
+    if (userId) await addBlogscoreHistory({ user_id: userId, blog_id: stats.blogId, total_posts: stats.totalPosts, neighbors: stats.neighbors, low_quality_suspected: stats.lowQualitySuspected });
+  } catch (e: any) {
+    sseSend(res, { type: "error", msg: e.message });
+  }
+  res.end();
+});
+
+/* ── 답방 ①: 내 블로그 글 목록 불러오기 (SSE) ── */
+app.get("/api/my-posts", async (req, res) => {
+  const { accountId, selectMode, count, period } = req.query as Record<string, string>;
+  if (!accountId) return res.status(400).json({ error: "accountId 필요" });
+  stopAllActiveJobs();
+  sseSetup(res);
+  try {
+    const posts = await crawlMyPosts({
+      accountId,
+      selectMode: (selectMode === "all" || selectMode === "period") ? selectMode : "count",
+      count: parseInt(count || "10", 10),
+      period: parseInt(period || "7", 10),
+      onLog: (msg) => sseSend(res, { type: "log", msg }),
+    });
+    sseSend(res, { type: "posts", posts });
+  } catch (e: any) {
+    sseSend(res, { type: "error", msg: e.message });
+  }
+  res.end();
+});
+
 /* ── 공감·댓글 작업 (SSE) ── */
 app.post("/api/engage", async (req, res) => {
   const {
     userId, accountId, targets: targetsRaw, comment,
     doLike, doComment, periodDays, postsPerBlog,
     delayMin, delayMax, dailyLimit, skipDone, commentRate, likeRate, jobId,
+    aiComment, commentTone, geminiKey,
   } = req.body as Record<string, any>;
+  const isAiComment = aiComment === true || aiComment === "true";
 
   if (!accountId || !targetsRaw)
     return res.status(400).json({ error: "accountId, targets 필요" });
@@ -297,7 +336,10 @@ app.post("/api/engage", async (req, res) => {
       targets,
       comment: comment || "",
       doLike: doLike !== false && doLike !== "false",
-      doComment: doComment !== false && doComment !== "false" && !!(comment?.trim()),
+      doComment: doComment !== false && doComment !== "false" && (isAiComment || !!(comment?.trim())),
+      aiComment: isAiComment,
+      commentTone: commentTone || "다정",
+      geminiKey: geminiKey || "",
       periodDays: parseInt(String(periodDays ?? "7"), 10),
       postsPerBlog: parseInt(String(postsPerBlog ?? "1"), 10),
       delayMin: parseFloat(String(delayMin ?? "5")),
@@ -328,11 +370,48 @@ app.post("/api/engage", async (req, res) => {
   res.end();
 });
 
+/* ── 답방 ②: 내 글 댓글에 대댓글(답글) 작업 (SSE) ── */
+app.post("/api/reply", async (req, res) => {
+  const { userId, accountId, posts, mode, comment, tone, onlyNew, delayMin, delayMax, geminiKey, jobId } = req.body as Record<string, any>;
+  if (!accountId || !Array.isArray(posts) || posts.length === 0)
+    return res.status(400).json({ error: "accountId, posts 필요" });
+  sseSetup(res);
+  const jid = jobId || Date.now().toString();
+  beginJob(jid, res);
+  try {
+    sseSend(res, { type: "start", total: posts.length });
+    await replyToComments({
+      accountId,
+      posts,
+      mode: mode === "fixed" ? "fixed" : "ai",
+      comment: comment || "댓글 감사합니다 😊",
+      tone: tone || "다정",
+      onlyNew: onlyNew !== false && onlyNew !== "false",
+      delayMin: parseFloat(String(delayMin ?? "5")),
+      delayMax: parseFloat(String(delayMax ?? "10")),
+      geminiKey: geminiKey || "",
+      onLog: (msg) => sseSend(res, { type: "log", msg }),
+      onResult: async (r) => {
+        sseSend(res, { type: "result", ...r });
+        if (userId) await addReplyHistory({ user_id: userId, post_title: r.postTitle || "", status: r.status, message: r.message || "" });
+      },
+      onProgress: (done, fail) => sseSend(res, { type: "progress", done, fail }),
+      stopSignal: () => stopMap.get(jid) === true,
+    });
+    sseSend(res, { type: "done" });
+  } catch (e: any) {
+    sseSend(res, { type: "error", msg: e.message });
+  }
+  endJob(jid);
+  res.end();
+});
+
 /* ── 공감·댓글 완료 목록 조회/초기화 ── */
 app.get("/api/engage-done/:accountId", (req, res) => {
   const dp = engageDonePath(req.params.accountId);
   try {
-    const list = fs.existsSync(dp) ? JSON.parse(fs.readFileSync(dp, "utf-8")) : [];
+    const raw = fs.existsSync(dp) ? JSON.parse(fs.readFileSync(dp, "utf-8")) : [];
+    const list = Array.isArray(raw) ? raw : Object.keys(raw);   // 신형식({blogId:date})도 blogId 목록으로 반환
     res.json({ list });
   } catch { res.json({ list: [] }); }
 });

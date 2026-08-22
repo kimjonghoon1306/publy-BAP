@@ -1,12 +1,12 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import GoogleFlowCard from "../GoogleFlowCard";
-import { PublyUser, getQuota, getHistory, getAccounts, PublyQuota, PublyHistory, PublyAccount, upsertAccount, useQuota, addHistory, deleteHistory, deleteAllHistory, changeUserPassword, getNaverApiKeys, saveNaverApiKeys, NaverApiKeys, checkNaverQuota, incrementNaverQuota, getNaverDailyUsage, NAVER_DAILY_LIMIT, getUserNaverApiKeys, logError, PLAN_CONFIG, checkDailyPublishQuota, incrementDailyPublish, getDailyPublishUsage, getNeighborDailyUsage, NEIGHBOR_DAILY_LIMIT, getEngageDailyUsage, ENGAGE_DAILY_LIMIT, InstaDmTarget, InstaDmHistory, InstaDmQuota, getInstaDmTargets, addInstaDmTarget, deleteInstaDmTarget, getInstaDmHistory, addInstaDmHistory, getInstaDmQuota, upsertInstaDmQuota, incrementInstaDmUsage, INSTA_DM_DAILY_LIMIT } from "../lib/supabase";
+import { PublyUser, getQuota, getHistory, getAccounts, PublyQuota, PublyHistory, PublyAccount, upsertAccount, useQuota, addHistory, deleteHistory, deleteAllHistory, changeUserPassword, getNaverApiKeys, saveNaverApiKeys, NaverApiKeys, checkNaverQuota, incrementNaverQuota, getNaverDailyUsage, NAVER_DAILY_LIMIT, getUserNaverApiKeys, logError, PLAN_CONFIG, checkDailyPublishQuota, incrementDailyPublish, getDailyPublishUsage, getNeighborDailyUsage, NEIGHBOR_DAILY_LIMIT, getEngageDailyUsage, ENGAGE_DAILY_LIMIT, InstaDmTarget, InstaDmHistory, InstaDmQuota, getInstaDmTargets, addInstaDmTarget, deleteInstaDmTarget, getInstaDmHistory, addInstaDmHistory, getInstaDmQuota, upsertInstaDmQuota, incrementInstaDmUsage, INSTA_DM_DAILY_LIMIT, getReplyDailyUsage, REPLY_DAILY_LIMIT } from "../lib/supabase";
 import { supabase, submitBugReportRow, getMyResolvedBugAlerts, markBugNotified, PublyBugReport } from "../lib/supabase";
 import NeighborPage from "./NeighborPage";
 import { botFetch, BotEventStream } from "../lib/botApi";
 import WebInstallNotice from "../WebInstallNotice";
 
-type MainTab = "keyword" | "write" | "image" | "photo" | "publish" | "manage" | "accounts" | "rank" | "calendar" | "settings" | "neighbor" | "engage" | "insta_dm";
+type MainTab = "control" | "keyword" | "write" | "image" | "photo" | "publish" | "manage" | "accounts" | "rank" | "blogscore" | "calendar" | "settings" | "neighbor" | "engage" | "reply" | "insta_dm";
 type OnPartnerProduct = {id:string|null;name:string;image:string;price:number|null;available:boolean;partnerUrl:string;shopUrl:string};
 type OnPartnerPlacement = "auto"|"adpost"|"after_first"|"middle"|"before_last"|"bottom";
 type PublishConcept = "full" | "body_faq" | "body_only";
@@ -125,15 +125,34 @@ const PERSONA_STYLES = [
   {id:"reporter", label:"📰 기자",       color:"#94a3b8", prompt:"신문 기자가 심층 취재 기사 쓰듯 객관적이고 사실 기반으로 써줘. 핵심 정보를 앞에 배치하고 신뢰감 있는 문체로."},
 ] as const;
 type PersonaStyle = typeof PERSONA_STYLES[number]["id"];
+// ── 계정 안전 워밍업: 계정 나이(연결일~오늘)에 따라 하루 안전 활동량을 단계별로 권장 ──
+//    새 계정에 갑자기 많은 서이추·공감을 하면 네이버가 스팸으로 보고 제재 → 천천히 늘려 계정 보호.
+const WARMUP_STAGES = [
+  {maxDay:2,       stage:1, label:"새싹", emoji:"🌱", neighbor:10, engage:10, color:"#22c55e"},
+  {maxDay:6,       stage:2, label:"성장", emoji:"🌿", neighbor:20, engage:20, color:"#10b981"},
+  {maxDay:13,      stage:3, label:"안정", emoji:"🌳", neighbor:40, engage:40, color:"#06b6d4"},
+  {maxDay:29,      stage:4, label:"숙련", emoji:"⭐", neighbor:70, engage:70, color:"#3b82f6"},
+  {maxDay:Infinity,stage:5, label:"완료", emoji:"🏆", neighbor:100,engage:100,color:"#8b5cf6"},
+] as const;
+function getWarmup(connectedAt?: string){
+  const ageDays = connectedAt ? Math.max(0, Math.floor((Date.now()-new Date(connectedAt).getTime())/86400000)) : 0;
+  const s = WARMUP_STAGES.find(w=>ageDays<=w.maxDay) ?? WARMUP_STAGES[WARMUP_STAGES.length-1];
+  const progress = Math.min(100, Math.round((ageDays/30)*100)); // 30일이면 워밍업 완주
+  return {ageDays, stage:s.stage, label:s.label, emoji:s.emoji, neighbor:s.neighbor, engage:s.engage, color:s.color, progress, done:s.stage===5};
+}
+
 const NAV_GROUPS = [
+  {label:"",tabs:[
+    {k:"control",i:"🎛️",l:"컨트롤타워"},
+  ]},
   {label:"콘텐츠 만들기",tabs:[
     {k:"keyword",i:"🔍",l:"키워드/제목"},{k:"write",i:"✍️",l:"글 생성"},{k:"image",i:"🖼️",l:"이미지 생성"},{k:"photo",i:"📷",l:"사진 글쓰기"},{k:"publish",i:"🚀",l:"발행하기"},
   ]},
   {label:"블로그 운영",tabs:[
-    {k:"manage",i:"📋",l:"발행 관리"},{k:"rank",i:"📊",l:"블로그 순위"},{k:"calendar",i:"📅",l:"콘텐츠 캘린더"},
+    {k:"manage",i:"📋",l:"발행 관리"},{k:"blogscore",i:"📈",l:"블로그 지수"},{k:"calendar",i:"📅",l:"콘텐츠 캘린더"},
   ]},
   {label:"관계·소통 자동화",tabs:[
-    {k:"neighbor",i:"🤝",l:"서이추"},{k:"engage",i:"❤️",l:"공감·댓글"},{k:"insta_dm",i:"📱",l:"인스타 DM"},
+    {k:"neighbor",i:"🤝",l:"서이추"},{k:"engage",i:"❤️",l:"공감·댓글"},{k:"reply",i:"💬",l:"답방"},{k:"insta_dm",i:"📱",l:"인스타 DM"},
   ]},
   {label:"계정·설정",tabs:[
     {k:"accounts",i:"🔗",l:"계정 관리"},{k:"settings",i:"⚙️",l:"설정"},
@@ -509,6 +528,122 @@ textarea.inp{resize:vertical;line-height:1.75;min-height:80px;}
 .app.large .btn{font-size:15px;padding:13px 22px;}
 .app.large .btn-sm{font-size:13px;padding:10px 16px;}
 .app.large .flow-btn{font-size:16px;}
+
+/* ══ 🎛️ 컨트롤타워 ══ */
+.nav-new{margin-left:auto;font-size:9px;font-weight:900;letter-spacing:.5px;color:#fff;background:linear-gradient(135deg,#f43f5e,#f59e0b);padding:2px 7px;border-radius:99px;animation:navNewPulse 2s ease-in-out infinite;}
+@keyframes navNewPulse{0%,100%{opacity:1}50%{opacity:.5}}
+.nav-item.nav-control{font-weight:800;}
+.nav-item.nav-soon{opacity:.6;}
+.nav-item.nav-soon:hover{opacity:.8;}
+.nav-soon-badge{margin-left:auto;font-size:9px;font-weight:800;letter-spacing:.3px;color:var(--text3);background:var(--card2);border:1px solid var(--border);padding:2px 7px;border-radius:99px;}
+.nav-item.nav-control .nav-ico{filter:drop-shadow(0 0 6px var(--accent-30));}
+
+.ct{display:flex;flex-direction:column;gap:20px;max-width:1120px;padding-bottom:20px;}
+.ct-hero{display:flex;justify-content:space-between;align-items:flex-start;gap:20px;padding:26px 28px;border-radius:20px;background:linear-gradient(135deg,var(--accent-bg),transparent 65%),var(--card);border:1px solid var(--border);position:relative;overflow:hidden;}
+.ct-hero::after{content:'';position:absolute;right:-50px;top:-50px;width:200px;height:200px;border-radius:50%;background:radial-gradient(circle,var(--accent-30),transparent 70%);pointer-events:none;}
+.ct-hero-left{position:relative;z-index:1;}
+.ct-hero-eyebrow{font-size:12px;font-weight:800;color:var(--accent-text);letter-spacing:.3px;margin-bottom:9px;}
+.ct-hero-title{font-size:27px;font-weight:800;color:var(--text);margin:0 0 9px;line-height:1.25;}
+.ct-hero-title b{color:var(--accent-text);}
+.ct-hero-sub{font-size:13.5px;color:var(--text2);line-height:1.65;margin:0;max-width:580px;}
+.ct-hero-sub b{color:var(--text);font-weight:700;}
+.ct-hero-plan{flex-shrink:0;text-align:center;padding:16px 22px;border-radius:16px;background:var(--bg);border:1px solid var(--border);min-width:118px;position:relative;z-index:1;}
+.ct-plan-badge{font-size:12px;font-weight:800;color:var(--accent-text);margin-bottom:7px;}
+.ct-plan-days{font-size:23px;font-weight:800;color:var(--text);line-height:1;}
+.ct-plan-lbl{font-size:11px;color:var(--text3);margin-top:5px;}
+
+.ct-section{background:var(--card);border:1px solid var(--border);border-radius:18px;padding:20px 22px;}
+.ct-sec-head{margin-bottom:16px;}
+.ct-sec-title{font-size:17px;font-weight:800;color:var(--text);margin:0 0 5px;display:flex;align-items:center;gap:9px;flex-wrap:wrap;}
+.ct-sec-desc{font-size:12.5px;color:var(--text2);line-height:1.6;margin:0;font-weight:500;}
+.ct-sec-desc b{color:#00b487;}
+.app.dark .ct-sec-desc b{color:#00e6a8;}
+.ct-sec-desc b{color:var(--text2);font-weight:700;}
+.ct-tag-soon{font-size:10px;font-weight:800;color:#f59e0b;background:rgba(245,158,11,.14);border:1px solid rgba(245,158,11,.32);padding:2px 9px;border-radius:99px;}
+
+.ct-perf-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;}
+.ct-perf-card{text-align:left;padding:16px 16px 14px;border-radius:15px;border:1px solid var(--border);background:var(--bg);cursor:pointer;transition:transform .15s,box-shadow .15s,border-color .15s;font-family:inherit;position:relative;overflow:hidden;}
+.ct-perf-card::before{content:'';position:absolute;left:0;top:0;bottom:0;width:4px;background:var(--pc);}
+.ct-perf-card:hover{transform:translateY(-3px);box-shadow:0 10px 26px rgba(0,0,0,.16);border-color:var(--pc);}
+.ct-perf-card:active{transform:translateY(-1px);}
+.ct-perf-top{display:flex;align-items:center;gap:7px;margin-bottom:10px;}
+.ct-perf-ico{font-size:18px;}
+.ct-perf-name{font-size:13px;font-weight:700;color:var(--text2);}
+.ct-perf-num{font-size:30px;font-weight:800;color:var(--text);line-height:1;letter-spacing:-.5px;}
+.ct-perf-lim{font-size:13px;font-weight:600;color:var(--text3);letter-spacing:0;}
+.ct-perf-bar{height:6px;border-radius:99px;background:var(--card2);overflow:hidden;margin:12px 0 9px;}
+.ct-perf-fill{height:100%;border-radius:99px;transition:width .6s ease;}
+.ct-perf-hint{font-size:11px;color:var(--text2);line-height:1.4;}
+
+.ct-acc-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px;}
+.ct-acc-card{display:flex;align-items:center;gap:11px;padding:13px 15px;border-radius:13px;border:1px solid var(--border);background:var(--bg);}
+.ct-acc-card.warn{border-color:rgba(245,158,11,.4);}
+.ct-acc-dot{width:9px;height:9px;border-radius:50%;background:var(--success);box-shadow:0 0 0 3px rgba(0,214,143,.18);flex-shrink:0;}
+.ct-acc-dot.off{background:#f59e0b;box-shadow:0 0 0 3px rgba(245,158,11,.18);}
+.ct-acc-info{flex:1;min-width:0;}
+.ct-acc-name{font-size:13.5px;font-weight:700;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.ct-acc-plat{font-size:11px;color:var(--text3);margin-top:2px;}
+.ct-acc-status{font-size:11.5px;font-weight:700;color:var(--success);flex-shrink:0;}
+.ct-acc-status.warn{color:#f59e0b;}
+
+.ct-warm-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px;}
+.ct-warm-card{padding:15px 17px;border-radius:15px;border:1px solid var(--border);border-left:4px solid var(--wc);background:var(--bg);}
+.ct-warm-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:11px;flex-wrap:wrap;}
+.ct-warm-acc{display:flex;align-items:center;gap:8px;min-width:0;}
+.ct-warm-name{font-size:14px;font-weight:800;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:150px;}
+.ct-warm-plat{font-size:10.5px;font-weight:700;color:var(--text3);background:var(--card2);padding:2px 8px;border-radius:99px;flex-shrink:0;}
+.ct-warm-stage{font-size:12.5px;font-weight:700;color:var(--wc);flex-shrink:0;}
+.ct-warm-stage b{color:var(--wc);}
+.ct-warm-bar{height:8px;border-radius:99px;background:var(--card2);overflow:hidden;margin-bottom:10px;}
+.ct-warm-fill{height:100%;border-radius:99px;background:var(--wc);transition:width .6s ease;}
+.ct-warm-foot{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;}
+.ct-warm-age{font-size:11.5px;font-weight:600;color:var(--text3);}
+.ct-warm-rec{font-size:11.5px;color:var(--text2);}
+.ct-warm-rec b{color:var(--wc);font-weight:800;}
+.ct-warm-note{display:flex;gap:11px;align-items:flex-start;margin-top:13px;padding:13px 16px;border-radius:13px;background:linear-gradient(135deg,var(--accent-bg),transparent 80%),var(--bg);border:1px dashed var(--accent-border);}
+.ct-warm-note-ico{font-size:18px;flex-shrink:0;line-height:1.4;}
+.ct-warm-note div{font-size:12.5px;color:var(--text2);line-height:1.65;}
+.ct-warm-note b{color:var(--accent-text);font-weight:800;}
+
+.ct-quick-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:11px;}
+.ct-quick-btn{display:flex;align-items:center;gap:11px;padding:15px 17px;border-radius:14px;border:1.5px solid var(--border);background:var(--bg);cursor:pointer;font-family:inherit;transition:all .15s;color:var(--text);}
+.ct-quick-btn:hover{border-color:var(--qc);background:var(--card-hover);transform:translateY(-2px);}
+.ct-quick-btn:active{transform:translateY(0);}
+.ct-quick-ico{font-size:20px;width:38px;height:38px;display:flex;align-items:center;justify-content:center;border-radius:11px;background:color-mix(in srgb,var(--qc) 16%,transparent);flex-shrink:0;}
+.ct-quick-lbl{flex:1;font-size:14px;font-weight:700;}
+.ct-quick-arrow{color:var(--qc);font-weight:800;font-size:16px;}
+
+.ct-recent{display:flex;flex-direction:column;gap:2px;}
+.ct-recent-row{display:flex;align-items:center;gap:12px;padding:11px 12px;border-radius:10px;transition:background .12s;}
+.ct-recent-row:hover{background:var(--card-hover);}
+.ct-recent-badge{font-size:10.5px;font-weight:800;padding:3px 9px;border-radius:99px;flex-shrink:0;}
+.ct-recent-badge.ct-success{color:var(--success);background:rgba(0,214,143,.14);}
+.ct-recent-badge.ct-fail{color:var(--danger);background:rgba(255,90,90,.14);}
+.ct-recent-badge.ct-pending{color:var(--text3);background:rgba(128,128,128,.14);}
+.ct-recent-title{flex:1;min-width:0;font-size:13.5px;font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.ct-recent-plat{font-size:11.5px;color:var(--text3);flex-shrink:0;}
+.ct-recent-time{font-size:11.5px;color:var(--text3);flex-shrink:0;min-width:42px;text-align:right;}
+
+.ct-empty{padding:22px;text-align:center;color:var(--text2);font-size:13px;}
+.ct-link{background:none;border:none;color:var(--accent-text);font-weight:800;cursor:pointer;font-family:inherit;font-size:13px;}
+
+@media(max-width:768px){
+  .ct-hero{flex-direction:column;padding:20px;}
+  .ct-hero-plan{align-self:stretch;display:flex;align-items:center;justify-content:center;gap:12px;min-width:0;}
+  .ct-hero-plan .ct-plan-days{font-size:20px;}
+  .ct-hero-plan .ct-plan-lbl{margin-top:0;}
+  .ct-hero-title{font-size:22px;}
+  .ct-perf-grid{grid-template-columns:repeat(2,1fr);gap:10px;}
+  .ct-perf-num{font-size:26px;}
+  .ct-quick-grid{grid-template-columns:1fr;}
+  .ct-acc-grid{grid-template-columns:1fr;}
+  .ct-warm-grid{grid-template-columns:1fr;}
+  .ct-recent-plat{display:none;}
+}
+.app.large .ct-hero-title{font-size:30px;}
+.app.large .ct-perf-num{font-size:34px;}
+.app.large .ct-quick-lbl{font-size:16px;}
+
 /* ── 사진 글쓰기 꽃밭 테마 ── */
 .photo-root{padding:20px;max-width:860px;margin:0 auto;}
 .photo-story{display:flex;gap:0;margin-bottom:28px;border-radius:20px;overflow:hidden;box-shadow:0 4px 24px rgba(255,107,157,.15);}
@@ -556,7 +691,7 @@ const PUBLY_SERVICE_INFO: Record<ServiceInfoKey,{icon:string;name:string;aliases
   trial:{icon:"🎁",name:"온종일 체험단",aliases:["온종일체험단","온종일 체험단"],hook:"좋아하는 상품과 매장을 먼저 경험하고, 진짜 경험이 담긴 리뷰로 콘텐츠의 신뢰도를 키우세요.",summary:"상품을 체험하고 리뷰 경쟁력을 키워보세요.",benefits:[["상품·매장 직접 체험","관심 있는 캠페인을 골라 직접 경험합니다."],["리뷰 소재 확보","사진과 경험이 쌓여 블로그·SNS 글이 더 풍성해집니다."],["크리에이터 성장","포트폴리오와 브랜드 협업 기회를 넓힙니다."]],flow:"캠페인 발견 → 체험 신청 → 상품·매장 경험 → 리뷰 발행",cta:"신청하기",url:"https://pick.온종일.com"},
   partner:{icon:"🔗",name:"온파트너",hook:"내가 소개한 상품이 팔릴 때마다 링크가 수익이 됩니다. 플랫폼 제약 없이 내 콘텐츠가 있는 곳이면 시작할 수 있어요.",summary:"추천 링크를 퍼블리 글에 넣고 판매 수익을 만드세요.",benefits:[["링크 하나로 수익 추적","클릭·구매·수익을 회원 대시보드에서 확인합니다."],["사이트 제약 없음","네이버 블로그, 틱톡, 유튜브, 인스타그램, 개인 홈페이지 등 어디서든 활용합니다."],["퍼블리와 바로 연결","상품 링크를 넣으면 제품 소개와 제휴 안내가 글에 자동 반영됩니다."]],flow:"온종일팜 상품 선택 → 내 추천 링크 생성 → 퍼블리·SNS 홍보 → 판매 수익",cta:"온파트너 신청하기",url:"https://partner.yuanfnb.com/pages/signup.html"},
   publy:{icon:"🚀",name:"퍼블리",hook:"글쓰기부터 이미지, 발행, 예약까지 블로그 운영을 자동으로. 클릭 몇 번이면 네이버·티스토리에 완성된 글이 올라갑니다.",summary:"블로그 글 작성과 발행을 자동으로 해주는 프로그램이에요.",benefits:[["AI 글·이미지 자동 생성","키워드만 넣으면 SEO에 맞는 본문과 이미지를 만들어요."],["네이버·티스토리 자동 발행","예약 발행까지 지원해 컴퓨터를 꺼도 원하는 시간에 올라가요."],["이웃·공감 자동화","블로그 운영에 드는 반복 작업을 대신 처리해요."]],flow:"키워드 입력 → AI 글·이미지 생성 → 검토 → 자동 발행/예약",cta:"퍼블리 시작하기",url:"https://publy.blogautopro.com"},
-  onai:{icon:"🤖",name:"온종일AI",aliases:["온종일 AI"],hook:"챗GPT 같은 AI 검색에 내 브랜드가 노출되도록. AI가 추천하는 시대, 검색의 판이 바뀌고 있습니다.",summary:"AI 검색(챗GPT 등)에 노출되게 도와주는 컨설팅이에요.",benefits:[["AI 검색 최적화","AI가 답변에 내 브랜드를 인용하도록 콘텐츠를 설계해요."],["새로운 유입 채널","검색엔진을 넘어 AI 답변에서 오는 방문자를 잡아요."],["브랜드 신뢰 상승","AI가 추천하는 브랜드라는 인식을 만들어요."]],flow:"현황 진단 → AI 노출 콘텐츠 설계 → 적용 → 노출 성과 확인",cta:"온종일AI 상담하기",url:"https://ai.온종일.com"},
+  onai:{icon:"✨",name:"온종일AI",aliases:["온종일 AI"],hook:"챗GPT 같은 AI 검색에 내 브랜드가 노출되도록. AI가 추천하는 시대, 검색의 판이 바뀌고 있습니다.",summary:"AI 검색(챗GPT 등)에 노출되게 도와주는 컨설팅이에요.",benefits:[["AI 검색 최적화","AI가 답변에 내 브랜드를 인용하도록 콘텐츠를 설계해요."],["새로운 유입 채널","검색엔진을 넘어 AI 답변에서 오는 방문자를 잡아요."],["브랜드 신뢰 상승","AI가 추천하는 브랜드라는 인식을 만들어요."]],flow:"현황 진단 → AI 노출 콘텐츠 설계 → 적용 → 노출 성과 확인",cta:"온종일AI 상담하기",url:"https://ai.온종일.com"},
   oncatch:{icon:"🎮",name:"온캐치",hook:"게임하며 쌓은 재미가 혜택이 되는 애드버게임 플랫폼. 방치형 RPG부터 카드게임까지 한곳에 모았습니다.",summary:"여러 게임을 즐기며 혜택도 받는 무료 게임 플랫폼이에요.",benefits:[["다양한 무료 게임","방치형 RPG·슈팅·카드·퍼즐 등 여러 게임을 한곳에서 즐겨요."],["출석·랭킹·보상","매일 접속하고 순위에 도전하며 재화를 모아요."],["설치 없이 바로","웹에서 바로 실행되고 앱 설치도 가능해요."]],flow:"접속 → 게임 선택 → 플레이 → 랭킹·보상 획득",cta:"온캐치 즐기기",url:"https://game.온종일.com"},
   valhalla:{icon:"⚔️",name:"온 발할라 레전드",aliases:["발할라","발할라 레전드"],hook:"3D 실시간 액션으로 즐기는 방치형 RPG. 12개 직업과 화려한 필살기로 성장의 재미를 느껴보세요.",summary:"온캐치의 3D 방치형 액션 RPG 게임이에요.",benefits:[["실시간 3D 전투","12개 직업의 개성 있는 필살기와 진화·각성 성장."],["방치형 편의","자동 전투로 접속만 해도 캐릭터가 성장해요."],["랭킹·업적·지갑 연동","다른 유저와 경쟁하고 보상을 모아요."]],flow:"직업 선택 → 자동 성장 → 강화·각성 → 레이드·랭킹",cta:"발할라 플레이",url:"https://game.온종일.com/valhalla"},
   gostop:{icon:"🃏",name:"온캐치 고스톱",aliases:["고스톱"],hook:"언제 어디서든 즐기는 정통 화투 고스톱. 3D 카드 애니메이션과 똑똑한 AI 상대가 기다립니다.",summary:"온캐치의 정통 고스톱 카드게임이에요.",benefits:[["정통 화투 규칙","익숙한 고스톱을 그대로, 3D 카드 연출로."],["AI 상대와 대전","혼자서도 언제든 한 판 즐길 수 있어요."],["지갑·랭킹 연동","이기며 재화를 모으고 순위에 도전해요."]],flow:"입장 → AI와 대전 → 승리 보상 → 랭킹",cta:"고스톱 플레이",url:"https://game.온종일.com/gostop"},
@@ -585,7 +720,7 @@ export default function DashboardPage({user, onLogout, onAdminLogin, onThemeTogg
     if (logoTapCount.current >= 5) { logoTapCount.current = 0; onAdminLogin(); return; }
     logoTapTimer.current = setTimeout(() => { logoTapCount.current = 0; }, 1400);
   };
-  const [tab, setTab] = useState<MainTab>("keyword");
+  const [tab, setTab] = useState<MainTab>("control");
   const [pageReady, setPageReady] = useState(false);
   const [showGuide, setShowGuide] = useState(false);
   const [showVideo, setShowVideo] = useState(false);   // 소개 영상 보기 모달
@@ -685,6 +820,7 @@ export default function DashboardPage({user, onLogout, onAdminLogin, onThemeTogg
   const [quota, setQuota] = useState<PublyQuota|null>(null);
   const [dailyPublishUsed, setDailyPublishUsed] = useState(0);
   const [neighborUsed, setNeighborUsed] = useState(0);
+  const [replyUsed, setReplyUsed] = useState(0);
   const [engageUsed, setEngageUsed] = useState(0);
   const [instaUsed, setInstaUsed] = useState(0);
   const [alertPopup, setAlertPopup] = useState<{type:"expire"|"publish"|"insta"; daysLeft?:number; used?:number; limit?:number} | null>(null);
@@ -901,6 +1037,7 @@ Output format (JSON array only, no other text):
   const [pubTitle, setPubTitle] = useState("");
   const [pubTags, setPubTags] = useState("");
   const [publishing, setPublishing] = useState(false);
+  const [neighborBusy, setNeighborBusy] = useState(false);  // 서이추·공감댓글 자동작업 중(NeighborPage에서 통보) → 절전방지에 반영
   const [liveLog, setLiveLog] = useState("");
   const [liveLogCollapsed, setLiveLogCollapsed] = useState(false);
   const [fullLog, setFullLog] = useState<string|null>(null);
@@ -965,13 +1102,13 @@ Output format (JSON array only, no other text):
     return ()=>{ alive = false; };
   },[]);
 
-  // ★절전 방지(테리 요청): 글쓰기(발행)·이미지 생성 중엔 화면/맥이 안 꺼지게(맥·윈도우 공통).
-  //   작업 끝나면 자동으로 해제 → 평소엔 정상 절전. (영화 틀면 안 꺼지는 것과 같은 원리)
+  // ★절전 방지(테리 요청): 자동 작업(발행·이미지생성·서이추·공감댓글) 중엔 화면/맥이 안 꺼지게(맥·윈도우 공통).
+  //   어느 기능이든 하나라도 돌면 keepAwake, 전부 끝나면 자동 해제 → 평소엔 정상 절전. (영화 틀면 안 꺼지는 것과 같은 원리)
   useEffect(()=>{
-    const busy = publishing || genImgLoading;
+    const busy = publishing || genImgLoading || neighborBusy;
     window.electron?.keepAwake?.(busy).catch(()=>{});
     return ()=>{ if(busy) window.electron?.keepAwake?.(false).catch(()=>{}); };
-  },[publishing, genImgLoading]);
+  },[publishing, genImgLoading, neighborBusy]);
 
   const liveLogActive = (tab==="publish"&&publishing)||(tab==="image"&&genImgLoading);
   useEffect(()=>{
@@ -1491,6 +1628,7 @@ Output format (JSON array only, no other text):
     getHistory(user.id).then(setHistory);
     getNeighborDailyUsage(user.id).then(setNeighborUsed);
     getEngageDailyUsage(user.id).then(setEngageUsed);
+    getReplyDailyUsage(user.id).then(setReplyUsed);
     getInstaDmQuota(user.id).then(q=>{ const today=new Date().toISOString().slice(0,10); setInstaUsed(q && q.reset_date===today ? (q.used_today||0) : 0); });
     getQuota(user.id).then(async (q:PublyQuota|null)=>{
       if(!q) { setPageReady(true); return; }
@@ -3299,7 +3437,7 @@ POST3: (제목)|(이유)
         {n:"STEP 2",i:"🔍",t:"키워드 입력",c:Y,d:<>예: <b>"강남 맛집"</b> 입력 후 Enter 또는 버튼 클릭! 제목 30개 자동 추천!</>},
         {n:"STEP 3",i:"⭐",t:"제목 클릭해서 선택",c:P,d:<>AI가 추천한 제목 중 마음에 드는 거 클릭! 마음에 안 들면 30개 추가도 가능!</>},
         {n:"STEP 4",i:"📏",t:"글자수 설정",c:"#8B5CF6",d:<><b>🎲 자동 랜덤</b> 추천! 네이버: 1500~2000자, 체험단: 1800~2500자, 티스토리: 2000~3000자. 매번 달라서 AI 감지 방지!</>},
-        {n:"STEP 5",i:"🤖",t:"글 생성 시작",c:"#F55036",d:<><b>본문 생성 시작</b> 버튼! 인트로·소제목·마무리가 매번 달라져요. 이미지는 다음 탭에서 따로!</>},
+        {n:"STEP 5",i:"✨",t:"글 생성 시작",c:"#F55036",d:<><b>본문 생성 시작</b> 버튼! 인트로·소제목·마무리가 매번 달라져요. 이미지는 다음 탭에서 따로!</>},
       ].map((s,i)=>(
         <div key={i} className="g-step" style={{borderColor:`${s.c}40`,background:`${s.c}08`}}>
           <div className="g-step-num" style={{color:s.c}}>{s.i} {s.n}</div>
@@ -3317,7 +3455,7 @@ POST3: (제목)|(이유)
         <div className="g-step-desc">캡션(이미지 설명)은 네이버 상위 노출에 도움이 돼요. 자동 생성되지만 직접 수정도 가능해요.</div>
       </div>
       {[
-        {t:"🤖 AI 자동 생성",d:"수량 자동추천 또는 직접 입력 (체험단 15장+ 가능). 생성 중 언제든 ⏹ 중단 가능!"},
+        {t:"✨ AI 자동 생성",d:"수량 자동추천 또는 직접 입력 (체험단 15장+ 가능). 생성 중 언제든 ⏹ 중단 가능!"},
         {t:"📁 내 이미지 업로드",d:"직접 찍은 사진이나 저장한 이미지. 여러 장 동시 업로드 가능!"},
         {t:"🚫 이미지 없이 발행",d:"텍스트만 발행할 때 선택."},
         {t:"📐 이미지 배치 패턴",d:"🎲 랜덤(권장): 매 발행마다 자동 변경 → AI 감지 방지!\nA: 썸네일 + 글 중간 배치 / B: 균등 분산 (모든 이미지 캡션 포함)"},
@@ -3666,15 +3804,16 @@ POST3: (제목)|(이유)
           <div className="sidebar">
             {NAV_GROUPS.map(group=>(
               <div key={group.label}>
-                <div className="nav-lbl">{group.label}</div>
+                {group.label&&<div className="nav-lbl">{group.label}</div>}
                 {group.tabs.map(t=>(
-                  <button key={t.k} className={`nav-item ${tab===t.k?"active":""}`} onClick={()=>{if(t.k==="rank"){window.open("https://rank.xn--zk5biyyw.com/","_blank");return;}setTab(t.k);}}>
+                  <button key={t.k} className={`nav-item ${tab===t.k?"active":""} ${t.k==="control"?"nav-control":""} ${t.k==="insta_dm"?"nav-soon":""}`} onClick={()=>{if(t.k==="insta_dm"){showToast("📱 인스타 DM은 곧 출시됩니다!","info");return;}setTab(t.k);}}>
                     <span className="nav-ico">{t.i}</span>{t.l}
+                    {(t.k==="control"||t.k==="reply"||t.k==="blogscore")&&<span className="nav-new">NEW</span>}
+                    {t.k==="insta_dm"&&<span className="nav-soon-badge">곧 출시</span>}
                     {t.k==="keyword"&&titles.length>0&&<span className="nav-badge">{titles.length}</span>}
                     {t.k==="manage"&&history.length>0&&<span className="nav-badge">{history.length}</span>}
                     {t.k==="neighbor"&&<span className="nav-badge">{neighborUsed}</span>}
                     {t.k==="engage"&&<span className="nav-badge">{engageUsed}</span>}
-                    {t.k==="insta_dm"&&<span className="nav-badge">{instaUsed}</span>}
                   </button>
                 ))}
               </div>
@@ -3704,7 +3843,7 @@ POST3: (제목)|(이유)
               const publishLimit = config.dailyPublish;
               const neighborLimit = NEIGHBOR_DAILY_LIMIT[plan] ?? 10;
               const engageLimit = ENGAGE_DAILY_LIMIT[plan] ?? 10;
-              const instaLimit = INSTA_DM_DAILY_LIMIT[plan] ?? 5;
+              const replyLimit = REPLY_DAILY_LIMIT[plan] ?? 10;
               const expiry = quota ? new Date(quota.reset_date) : null;
               const daysLeft = quota ? daysUntil(quota.reset_date) : null;
               const dColor = daysLeft === null ? "var(--text3)" : daysLeft <= 3 ? "var(--danger)" : daysLeft <= 7 ? "#ff9f3f" : "var(--success)";
@@ -3712,7 +3851,7 @@ POST3: (제목)|(이유)
                 { label:"✍️ 글쓰기", used: dailyPublishUsed, limit: publishLimit, color:"var(--accent)" },
                 { label:"🤝 서이추", used: neighborUsed, limit: neighborLimit, color:"#00c8ff" },
                 { label:"❤️ 공감·댓글", used: engageUsed, limit: engageLimit, color:"#ff6b9d" },
-                { label:"📱 인스타DM", used: instaUsed, limit: instaLimit, color:"#FF6B9D" },
+                { label:"💬 답방", used: replyUsed, limit: replyLimit, color:"#8b5cf6" },
               ];
               return (
                 <div style={{display:"flex",gap:10,marginBottom:16,flexWrap:"wrap",alignItems:"center"}}>
@@ -3740,6 +3879,142 @@ POST3: (제목)|(이유)
                 </div>
               );
             })()}
+            {/* ═══ 🎛️ 컨트롤타워 탭 ═══ */}
+            {tab==="control"&&(()=>{
+              const cfg = PLAN_CONFIG[user.plan] ?? PLAN_CONFIG.free;
+              const isUnlim = (["unlimited","admin"] as string[]).includes(user.plan);
+              const perf = [
+                {label:"오늘 발행", icon:"🚀", used:dailyPublishUsed, limit:cfg.dailyPublish??2, color:"var(--accent)", go:"publish" as MainTab, hint:"오늘 블로그에 발행한 글 수예요"},
+                {label:"서이추",    icon:"🤝", used:neighborUsed,   limit:NEIGHBOR_DAILY_LIMIT[user.plan]??10, color:"#00b8d4", go:"neighbor" as MainTab, hint:"오늘 보낸 서로이웃 신청 수예요"},
+                {label:"공감·댓글", icon:"❤️", used:engageUsed,     limit:ENGAGE_DAILY_LIMIT[user.plan]??10,   color:"#e5397f", go:"engage" as MainTab,   hint:"오늘 남긴 공감·댓글 수예요"},
+                {label:"답방",      icon:"💬", used:replyUsed,      limit:REPLY_DAILY_LIMIT[user.plan]??10,    color:"#8b5cf6", go:"reply" as MainTab,    hint:"오늘 내 글 댓글에 답한 수예요"},
+              ];
+              const now = new Date();
+              const greeting = now.getHours()<12?"좋은 아침이에요":now.getHours()<18?"좋은 오후예요":"오늘도 수고 많으셨어요";
+              const quick = [
+                {label:"글 쓰러 가기", icon:"✍️", go:"keyword" as MainTab,    color:"var(--accent)"},
+                {label:"서이추 시작",  icon:"🤝", go:"neighbor" as MainTab, color:"#00b8d4"},
+                {label:"공감·댓글",    icon:"❤️", go:"engage" as MainTab,   color:"#e5397f"},
+                {label:"발행 관리",    icon:"📋", go:"manage" as MainTab,   color:"#f59e0b"},
+              ];
+              const recent = history.slice(0,5);
+              return (
+                <div className="ct" style={{animation:"fadeUp .3s ease both"}}>
+                  {/* 상단 인사 + 플랜 */}
+                  <div className="ct-hero">
+                    <div className="ct-hero-left">
+                      <div className="ct-hero-eyebrow">🎛️ 컨트롤타워 · {now.toLocaleDateString("ko-KR",{month:"long",day:"numeric",weekday:"long"})}</div>
+                      <h1 className="ct-hero-title">{greeting}, <b>{user.name||"회원"}</b>님</h1>
+                      <p className="ct-hero-sub">내 블로그 자동화의 <b>모든 현황을 한눈에</b> 관리하는 관제탑이에요. 오늘의 성과를 확인하고, 원하는 작업으로 바로 이동하세요.</p>
+                    </div>
+                    <div className="ct-hero-plan">
+                      <div className="ct-plan-badge">{PLAN_LABELS[user.plan]}</div>
+                      <div className="ct-plan-days">{formatDaysLeft(quota?.reset_date)}</div>
+                      <div className="ct-plan-lbl">이용권 남음</div>
+                    </div>
+                  </div>
+
+                  {/* 오늘의 성과 */}
+                  <section className="ct-section">
+                    <div className="ct-sec-head">
+                      <h2 className="ct-sec-title">📊 오늘의 성과</h2>
+                      <p className="ct-sec-desc">오늘 하루 자동화가 처리한 작업량이에요. <b>카드를 누르면</b> 해당 기능 화면으로 바로 이동해요.</p>
+                    </div>
+                    <div className="ct-perf-grid">
+                      {perf.map(p=>{
+                        const pct = isUnlim?Math.min(100,p.used):Math.min(100,(p.used/Math.max(1,p.limit))*100);
+                        const danger = !isUnlim && p.used>=p.limit;
+                        return (
+                          <button key={p.label} className="ct-perf-card" onClick={()=>setTab(p.go)} style={{["--pc" as any]:p.color}}>
+                            <div className="ct-perf-top"><span className="ct-perf-ico">{p.icon}</span><span className="ct-perf-name">{p.label}</span></div>
+                            <div className="ct-perf-num">{p.used}<span className="ct-perf-lim">{isUnlim?" · 무제한":` / ${p.limit}`}</span></div>
+                            <div className="ct-perf-bar"><div className="ct-perf-fill" style={{width:`${pct}%`,background:danger?"var(--danger)":p.color}}/></div>
+                            <div className="ct-perf-hint">{p.hint}</div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </section>
+
+                  {/* 계정 안전 · 워밍업 */}
+                  <section className="ct-section">
+                    <div className="ct-sec-head">
+                      <h2 className="ct-sec-title">🛡️ 계정 안전 · 워밍업</h2>
+                      <p className="ct-sec-desc">새 계정에 갑자기 많은 서이추·공감을 하면 네이버가 스팸으로 보고 <b>제재</b>할 수 있어요. 워밍업은 계정 나이에 맞춰 <b>안전한 하루 활동량</b>을 단계별로 안내해, 계정을 오래오래 지켜줘요. (연결 30일이면 완료)</p>
+                    </div>
+                    <div className="ct-warm-grid">
+                      {accounts.length===0
+                        ? <div className="ct-empty">아직 연결된 계정이 없어요. <button className="ct-link" onClick={()=>setTab("accounts")}>계정 연결하러 가기 →</button></div>
+                        : accounts.map(a=>{
+                            const w = getWarmup(a.connected_at);
+                            return (
+                              <div key={a.id} className="ct-warm-card" style={{["--wc" as any]:w.color}}>
+                                <div className="ct-warm-head">
+                                  <div className="ct-warm-acc">
+                                    <span className={`ct-acc-dot ${a.is_connected?"":"off"}`}/>
+                                    <span className="ct-warm-name">{a.blog_name||a.username||"계정"}</span>
+                                    <span className="ct-warm-plat">{a.platform==="naver"?"네이버":a.platform==="tistory"?"티스토리":a.platform}</span>
+                                  </div>
+                                  <div className="ct-warm-stage">{w.emoji} {w.label} <b>{w.stage}단계</b></div>
+                                </div>
+                                <div className="ct-warm-bar" title={`워밍업 진행 ${w.progress}%`}><div className="ct-warm-fill" style={{width:`${w.progress}%`}}/></div>
+                                <div className="ct-warm-foot">
+                                  <span className="ct-warm-age">{w.done?"✅ 워밍업 완료 · 안전":`연결 ${w.ageDays}일째 · 30일 목표`}</span>
+                                  <span className="ct-warm-rec">오늘 권장 서이추 <b>{w.neighbor}</b> · 공감 <b>{w.engage}</b></span>
+                                </div>
+                              </div>
+                            );
+                          })}
+                    </div>
+                    {accounts.length>0&&(
+                      <div className="ct-warm-note">
+                        <span className="ct-warm-note-ico">💡</span>
+                        <div><b>워밍업은 강제가 아니라 '안전 권장'이에요.</b> 원하시면 권장치보다 더 많이 활동하셔도 됩니다 — 다만 계정을 오래오래 지키려면 초반엔 천천히 늘려가시길 추천드려요.</div>
+                      </div>
+                    )}
+                  </section>
+
+                  {/* 빠른 실행 */}
+                  <section className="ct-section">
+                    <div className="ct-sec-head">
+                      <h2 className="ct-sec-title">⚡ 빠른 실행</h2>
+                      <p className="ct-sec-desc">자주 쓰는 작업으로 한 번에 이동해요.</p>
+                    </div>
+                    <div className="ct-quick-grid">
+                      {quick.map(q=>(
+                        <button key={q.label} className="ct-quick-btn" onClick={()=>setTab(q.go)} style={{["--qc" as any]:q.color}}>
+                          <span className="ct-quick-ico">{q.icon}</span><span className="ct-quick-lbl">{q.label}</span><span className="ct-quick-arrow">→</span>
+                        </button>
+                      ))}
+                      <button className="ct-quick-btn" onClick={()=>setTab("blogscore")} style={{["--qc" as any]:"#10b981"}}>
+                        <span className="ct-quick-ico">📈</span><span className="ct-quick-lbl">블로그 지수 진단</span><span className="ct-quick-arrow">→</span>
+                      </button>
+                    </div>
+                  </section>
+
+                  {/* 최근 활동 */}
+                  <section className="ct-section">
+                    <div className="ct-sec-head">
+                      <h2 className="ct-sec-title">📋 최근 활동</h2>
+                      <p className="ct-sec-desc">최근 발행한 글 기록이에요. 문제가 생긴 글은 빨간색으로 표시돼요.</p>
+                    </div>
+                    {recent.length===0
+                      ? <div className="ct-empty">아직 발행한 글이 없어요. <button className="ct-link" onClick={()=>setTab("keyword")}>첫 글 쓰러 가기 →</button></div>
+                      : <div className="ct-recent">
+                          {recent.map(h=>(
+                            <div key={h.id} className="ct-recent-row" onClick={()=>h.post_url&&window.open(h.post_url,"_blank")} style={{cursor:h.post_url?"pointer":"default"}}>
+                              <span className={`ct-recent-badge ct-${h.status}`}>{h.status==="success"?"성공":h.status==="fail"?"실패":"대기"}</span>
+                              <span className="ct-recent-title">{h.title||"(제목 없음)"}</span>
+                              <span className="ct-recent-plat">{h.platform==="naver"?"네이버":h.platform==="tistory"?"티스토리":h.platform}</span>
+                              <span className="ct-recent-time">{new Date(h.published_at).toLocaleDateString("ko-KR",{month:"numeric",day:"numeric"})}</span>
+                            </div>
+                          ))}
+                        </div>}
+                  </section>
+                </div>
+              );
+            })()}
+
             {/* ═══ 🔍 키워드/제목 탭 ═══ */}
             {tab==="keyword"&&(
               <div style={{animation:"fadeUp .25s ease both"}}>
@@ -4206,7 +4481,7 @@ POST3: (제목)|(이유)
                     {/* AI 이미지 */}
                     <button onClick={()=>{setImgGenType("ai");localStorage.setItem("publy_img_gen_type","ai");}}
                       style={{padding:"16px 14px",borderRadius:16,border:`2px solid ${imgGenType==="ai"?"#6366f1":"var(--border)"}`,background:imgGenType==="ai"?"linear-gradient(135deg,rgba(99,102,241,.18),rgba(99,102,241,.06))":"var(--card)",cursor:"pointer",fontFamily:"inherit",textAlign:"left",transition:"all .2s",boxShadow:imgGenType==="ai"?"0 4px 20px rgba(99,102,241,.25)":"none"}}>
-                      <div style={{fontSize:28,marginBottom:6}}>🤖</div>
+                      <div style={{fontSize:28,marginBottom:6}}>✨</div>
                       <div style={{fontSize:14,fontWeight:900,color:imgGenType==="ai"?"#818cf8":"var(--text)",marginBottom:4}}>AI 이미지</div>
                       <div style={{fontSize:11,color:"var(--text3)",lineHeight:1.5}}>DALL-E · Flux<br/>API 키 필요</div>
                       {imgGenType==="ai"&&<div style={{marginTop:8,fontSize:10,fontWeight:800,color:"#818cf8",background:"rgba(99,102,241,.15)",padding:"3px 8px",borderRadius:99,display:"inline-block"}}>✓ 선택됨</div>}
@@ -4273,7 +4548,7 @@ POST3: (제목)|(이유)
                         <div style={{marginBottom:12,padding:"12px 14px",borderRadius:12,background:"rgba(168,85,247,.08)",border:"1px solid rgba(168,85,247,.2)"}}>
                           <div style={{fontSize:13,fontWeight:800,color:"#c084fc",marginBottom:8}}>📸 이미지 수 설정</div>
                           <div style={{fontSize:12,color:"var(--text)",lineHeight:2}}>
-                            <strong style={{color:"#c084fc"}}>🤖 자동추천</strong> — 글자 수 기준 500자당 1장<br/>
+                            <strong style={{color:"#c084fc"}}>✨ 자동추천</strong> — 글자 수 기준 500자당 1장<br/>
                             예) 1,500자 → 3장 / 2,000자 → 4장<br/>
                             <strong style={{color:"#c084fc"}}>✏️ 직접입력</strong> — 원하는 수량 직접 설정 가능
                           </div>
@@ -4316,7 +4591,7 @@ POST3: (제목)|(이유)
                         <div style={{display:"flex",gap:6,marginBottom:8}}>
                           <button onClick={()=>{imgCountAutoRef.current=true;setImgCountAuto(true);if(genContent){const n=recommendImgCount(genContent);imgCountRef.current=n;setImgCount(n);}}}
                             style={{flex:1,padding:"8px",borderRadius:9,border:`1.5px solid ${flowImgCountAuto?"#a855f7":"var(--border)"}`,background:flowImgCountAuto?"rgba(168,85,247,.15)":"transparent",cursor:"pointer",fontSize:12,fontWeight:700,color:flowImgCountAuto?"#c084fc":"var(--text2)",fontFamily:"inherit"}}>
-                            🤖 자동추천
+                            ✨ 자동추천
                           </button>
                           <button onClick={()=>{imgCountAutoRef.current=false;setImgCountAuto(false);}}
                             style={{flex:1,padding:"8px",borderRadius:9,border:`1.5px solid ${!flowImgCountAuto?"#a855f7":"var(--border)"}`,background:!flowImgCountAuto?"rgba(168,85,247,.15)":"transparent",cursor:"pointer",fontSize:12,fontWeight:700,color:!flowImgCountAuto?"#c084fc":"var(--text2)",fontFamily:"inherit"}}>
@@ -4391,7 +4666,7 @@ POST3: (제목)|(이유)
                       <div className="card-title" style={{marginBottom:12}}>⚙️ 이미지 설정</div>
                       <label className="inp-label">이미지 소스</label>
                       <div style={{display:"flex",flexDirection:"column",gap:6,marginBottom:16}}>
-                        {([{id:"ai",ico:"🤖",label:"AI 자동 생성"},{id:"upload",ico:"📁",label:"내 이미지 업로드"},{id:"none",ico:"🚫",label:"이미지 없이 발행"}] as const).map(s=>(
+                        {([{id:"ai",ico:"✨",label:"AI 자동 생성"},{id:"upload",ico:"📁",label:"내 이미지 업로드"},{id:"none",ico:"🚫",label:"이미지 없이 발행"}] as const).map(s=>(
                           <button key={s.id} onClick={()=>setImgSource(s.id)} style={{padding:"10px 14px",borderRadius:10,border:`1.5px solid ${imgSource===s.id?"var(--accent)":"var(--border)"}`,background:imgSource===s.id?"var(--accent-bg)":"var(--bg)",cursor:"pointer",fontFamily:"inherit",transition:"all .15s",display:"flex",alignItems:"center",gap:9,textAlign:"left"}}>
                             <span style={{fontSize:18}}>{s.ico}</span>
                             <span style={{fontSize:13,fontWeight:600,color:imgSource===s.id?"var(--accent-text)":"var(--text2)"}}>{s.label}</span>
@@ -4406,7 +4681,7 @@ POST3: (제목)|(이유)
                           <label className="inp-label">생성 수량</label>
                           {/* 자동/수동 모드 전환 */}
                           <div style={{display:"flex",gap:6,marginBottom:10}}>
-                            <button onClick={()=>{imgCountAutoRef.current=true;setImgCountAuto(true);if(genContent){const n=recommendImgCount(genContent);imgCountRef.current=n;setImgCount(n);}}} style={{flex:1,padding:"7px",borderRadius:8,border:`1.5px solid ${imgCountAuto?"var(--accent)":"var(--border)"}`,background:imgCountAuto?"var(--accent-bg)":"transparent",cursor:"pointer",fontSize:12,fontWeight:700,color:imgCountAuto?"var(--accent-text)":"var(--text2)",fontFamily:"inherit"}}>🤖 자동추천</button>
+                            <button onClick={()=>{imgCountAutoRef.current=true;setImgCountAuto(true);if(genContent){const n=recommendImgCount(genContent);imgCountRef.current=n;setImgCount(n);}}} style={{flex:1,padding:"7px",borderRadius:8,border:`1.5px solid ${imgCountAuto?"var(--accent)":"var(--border)"}`,background:imgCountAuto?"var(--accent-bg)":"transparent",cursor:"pointer",fontSize:12,fontWeight:700,color:imgCountAuto?"var(--accent-text)":"var(--text2)",fontFamily:"inherit"}}>✨ 자동추천</button>
                             <button onClick={()=>{imgCountAutoRef.current=false;setImgCountAuto(false);}} style={{flex:1,padding:"7px",borderRadius:8,border:`1.5px solid ${!imgCountAuto?"var(--accent)":"var(--border)"}`,background:!imgCountAuto?"var(--accent-bg)":"transparent",cursor:"pointer",fontSize:12,fontWeight:700,color:!imgCountAuto?"var(--accent-text)":"var(--text2)",fontFamily:"inherit"}}>✏️ 직접입력</button>
                           </div>
 
@@ -4972,7 +5247,7 @@ POST3: (제목)|(이유)
                           <span style={{fontSize:14,fontWeight:700,color:"var(--text)"}}>이미지 삽입 모드</span>
                         </div>
                         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:10}}>
-                          {[{v:"auto",ico:"🤖",label:"자동",desc:"AI 이미지 자동 배치"},{v:"manual",ico:"📁",label:"수동",desc:"원하는 위치에 삽입"}].map(m=>(
+                          {[{v:"auto",ico:"✨",label:"자동",desc:"AI 이미지 자동 배치"},{v:"manual",ico:"📁",label:"수동",desc:"원하는 위치에 삽입"}].map(m=>(
                             <button key={m.v} onClick={()=>setImageMode(m.v as "auto"|"manual")} style={{padding:"10px 12px",borderRadius:10,border:`2px solid ${imageMode===m.v?"var(--accent)":"var(--border)"}`,background:imageMode===m.v?"var(--accent-bg)":"var(--bg)",cursor:"pointer",textAlign:"left",fontFamily:"inherit",transition:"all .15s"}}>
                               <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:3}}>
                                 <span>{m.ico}</span>
@@ -4991,7 +5266,7 @@ POST3: (제목)|(이유)
                             {autoInserted?(
                               <button onClick={handleRemoveAutoImages} style={{padding:"8px 14px",borderRadius:8,border:"1px solid rgba(255,71,87,.4)",background:"rgba(255,71,87,.08)",color:"var(--danger)",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:"inherit"}}>✕ 제거</button>
                             ):(
-                              <button onClick={handleAutoInsert} disabled={getActiveImages().length===0} style={{padding:"8px 14px",borderRadius:8,border:"none",background:"var(--accent)",color:"#000",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:"inherit",opacity:getActiveImages().length===0?.4:1}}>🤖 자동 삽입</button>
+                              <button onClick={handleAutoInsert} disabled={getActiveImages().length===0} style={{padding:"8px 14px",borderRadius:8,border:"none",background:"var(--accent)",color:"#000",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:"inherit",opacity:getActiveImages().length===0?.4:1}}>✨ 자동 삽입</button>
                             )}
                           </div>
                         )}
@@ -5081,7 +5356,7 @@ POST3: (제목)|(이유)
                             ):(
                               <div style={{borderRadius:12,overflow:"hidden",border:`2px solid ${(block as SingleImageBlock).source==="auto"?"var(--accent-border)":"oklch(.75 .12 300 / 50%)"}`}}>
                                 <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"7px 12px",background:(block as SingleImageBlock).source==="auto"?"var(--accent-bg)":"oklch(.75 .12 300 / 8%)"}}>
-                                  <span style={{fontSize:11,fontWeight:700,color:(block as SingleImageBlock).source==="auto"?"var(--accent-text)":"oklch(.75 .12 300)"}}>{(block as SingleImageBlock).source==="auto"?"🤖 AI 생성":"📁 내 이미지"}</span>
+                                  <span style={{fontSize:11,fontWeight:700,color:(block as SingleImageBlock).source==="auto"?"var(--accent-text)":"oklch(.75 .12 300)"}}>{(block as SingleImageBlock).source==="auto"?"✨ AI 생성":"📁 내 이미지"}</span>
                                   <div style={{display:"flex",gap:6,alignItems:"center"}}>
                                     <select value={(block as SingleImageBlock).position} onChange={e=>updateBlock(block.id,{position:e.target.value as "left"|"center"|"right"})} style={{fontSize:11,padding:"2px 6px",borderRadius:5,border:"1px solid var(--border)",background:"var(--bg)",color:"var(--text)"}}>
                                       <option value="left">왼쪽</option><option value="center">가운데</option><option value="right">오른쪽</option>
@@ -5562,7 +5837,7 @@ POST3: (제목)|(이유)
                         {[
                           {step:"01",ico:"🎯",title:"타겟 설정",desc:"발송할 인스타 계정 목록을 직접 입력하거나 키워드로 크롤링해요"},
                           {step:"02",ico:"✍️",title:"문구 작성",desc:"AI로 체험단 DM 문구를 자동 생성하거나 직접 입력해요"},
-                          {step:"03",ico:"🤖",title:"봇 실행",desc:"로컬 PC에서 봇 프로그램을 실행하면 자동으로 발송돼요"},
+                          {step:"03",ico:"✨",title:"봇 실행",desc:"로컬 PC에서 봇 프로그램을 실행하면 자동으로 발송돼요"},
                           {step:"04",ico:"📊",title:"결과 확인",desc:"발송 이력 탭에서 성공/실패 현황을 확인해요"},
                         ].map((s,i)=>(
                           <div key={i} style={{padding:"14px",borderRadius:12,background:"rgba(255,255,255,.04)",border:"1px solid rgba(255,255,255,.08)"}}>
@@ -5818,11 +6093,17 @@ POST3: (제목)|(이유)
             )}
 
             {tab==="neighbor"&&(
-              <NeighborPage theme={theme as "dark"|"light"} userId={user.id} plan={user.plan} singleTab initialNeighborUsed={neighborUsed} />
+              <NeighborPage theme={theme as "dark"|"light"} userId={user.id} plan={user.plan} singleTab initialNeighborUsed={neighborUsed} onBusyChange={setNeighborBusy} />
             )}
 
             {tab==="engage"&&(
-              <NeighborPage theme={theme as "dark"|"light"} userId={user.id} plan={user.plan} initialTab="engage" singleTab onEngageUsageChange={setEngageUsed} initialEngageUsed={engageUsed} />
+              <NeighborPage theme={theme as "dark"|"light"} userId={user.id} plan={user.plan} initialTab="engage" singleTab onEngageUsageChange={setEngageUsed} initialEngageUsed={engageUsed} onBusyChange={setNeighborBusy} />
+            )}
+            {tab==="reply"&&(
+              <NeighborPage theme={theme as "dark"|"light"} userId={user.id} plan={user.plan} initialTab="reply" singleTab onBusyChange={setNeighborBusy} />
+            )}
+            {tab==="blogscore"&&(
+              <NeighborPage theme={theme as "dark"|"light"} userId={user.id} plan={user.plan} initialTab="score" singleTab onBusyChange={setNeighborBusy} />
             )}
 
             {tab==="settings"&&(
@@ -5875,7 +6156,7 @@ POST3: (제목)|(이유)
                 </div>
 
                 <div className="card">
-                  <div className="card-title" style={{marginBottom:14}}>🤖 글쓰기 AI 선택</div>
+                  <div className="card-title" style={{marginBottom:14}}>✨ 글쓰기 AI 선택</div>
                   <div className="ai-grid">
                     {WRITE_AI_LIST.map(item=>(
                       <button key={item.id} className={`ai-card ${writeAI===item.id?"sel-ai":""}`} style={{borderColor:writeAI===item.id?item.color:"var(--border)",background:writeAI===item.id?`${item.color}12`:"var(--bg)"}} onClick={()=>{setWriteAI(item.id);localStorage.setItem("publy_write_ai",item.id);}}>

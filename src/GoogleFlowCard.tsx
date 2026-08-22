@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { botFetch } from "./lib/botApi";
 
 interface Props {
   botOnline: boolean;
@@ -14,7 +15,7 @@ export default function GoogleFlowCard({ botOnline, botUrl, userId }: Props) {
   // 마운트 시 세션 존재 여부 확인
   useEffect(() => {
     if (!botOnline) { setChecking(false); return; }
-    fetch(`${botUrl}/api/session-status/${userId}`)
+    botFetch(`${botUrl}/api/session-status/${userId}`)
       .then(r => r.json())
       .then(d => setSessionExists(!!d.google))
       .catch(() => {})
@@ -26,7 +27,7 @@ export default function GoogleFlowCard({ botOnline, botUrl, userId }: Props) {
     if (!botOnline) { alert("Publy 앱을 먼저 실행해주세요"); return; }
     setLoading(true);
     try {
-      const r = await fetch(`${botUrl}/api/google/save-session`, {
+      const r = await botFetch(`${botUrl}/api/google/save-session`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ userId }),

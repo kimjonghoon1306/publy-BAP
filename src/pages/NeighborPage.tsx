@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { botFetch, BotEventStream } from "../lib/botApi";
+import { getReplyDailyUsage, incrementReplyQuota, REPLY_DAILY_LIMIT, getBlogscoreDailyUsage, incrementBlogscoreQuota, BLOGSCORE_DAILY_LIMIT } from "../lib/supabase";
 
 const BOT = "http://127.0.0.1:3334";
 
@@ -54,7 +55,7 @@ const DEFAULT_MULTI_MSGS = "안녕하세요! 좋은 글 잘 읽고 갑니다. �
 interface EngageResult { keyword: string; blogId: string; postUrl: string; liked: boolean; commented: boolean; status: "success"|"fail"|"skip"|"pending"|"running"; message: string; }
 // 상단·사이드바 배지와 동일한 플랜별 하루 한도 (lib/supabase.ts의 NEIGHBOR/ENGAGE_DAILY_LIMIT와 일치)
 const DAILY_LIMIT_BY_PLAN: Record<string, number> = { free: 10, basic: 50, pro: 100, admin: 9999 };
-interface Props { theme: "dark"|"light"; userId?: string; plan?: string; initialTab?: "neighbor"|"engage"; singleTab?: boolean; onEngageUsageChange?: (used:number)=>void; initialNeighborUsed?: number; initialEngageUsed?: number; }
+interface Props { theme: "dark"|"light"; userId?: string; plan?: string; initialTab?: "neighbor"|"engage"|"reply"|"score"; singleTab?: boolean; onEngageUsageChange?: (used:number)=>void; initialNeighborUsed?: number; initialEngageUsed?: number; onBusyChange?: (busy:boolean)=>void; }
 
 /* ── 내 이웃 키워드 분석 카드 (서이추·공감댓글 공용) ── */
 const KeywordAnalyzer = ({ keywords, loading, onAnalyze, onPick }: {
@@ -158,12 +159,29 @@ const GUIDE = {
     { step: "5", title: "댓글 내용 작성", desc: "단일 댓글이나 여러 댓글을 줄바꿈으로 구분해 입력하면 순서대로 사용됩니다.\n예) 좋은 글 감사해요 😊\n자주 놀러올게요! ✨" },
     { step: "6", title: "추출 후 작업", desc: "'🔍 추출 시작' → '🚀 작업 시작' 순서로 진행하거나\n'추출 완료 후 바로 작업 시작' 옵션을 켜면 자동으로 이어집니다." },
   ],
+  reply: [
+    { step: "1", title: "계정 연결", desc: "답방할 내 네이버 블로그 계정을 연결하세요. 서이추·공감 탭과 같은 계정을 공유합니다." },
+    { step: "2", title: "확인할 글 수 설정", desc: "내 블로그 최근 글 몇 개까지 댓글을 확인할지 정하세요.\n예) 10개 → 최근 글 10개에 달린 댓글을 훑어봅니다." },
+    { step: "3", title: "답글 방식 선택", desc: "✨ AI 자동: 댓글 내용을 읽고 맞춤 답글을 매번 다르게 생성해요.\n✍️ 고정 답글: 미리 써둔 문구로 답합니다." },
+    { step: "4", title: "미답변만 / 전체", desc: "'아직 답글 없는 댓글만' 켜면 이미 답한 댓글은 건너뛰어 중복 답글을 막아요." },
+    { step: "5", title: "답방 시작", desc: "'🚀 답방 시작' 클릭 → 내 글 댓글에 순서대로 대댓글을 자동으로 답니다.\n딜레이를 5~10초로 두면 자연스러워요." },
+    { step: "팁", title: "왜 답방이 중요한가요?", desc: "댓글에 답글을 달면 이웃과 소통이 활발해지고, 블로그 체류·재방문이 늘어 블로그 지수에 좋아요." },
+  ],
+  score: [
+    { step: "1", title: "계정 연결", desc: "진단할 내 네이버 블로그 계정을 연결하세요. 서이추·공감 탭과 같은 계정을 공유해요." },
+    { step: "2", title: "진단 시작", desc: "'📈 블로그 진단 시작'을 누르면 봇이 내 블로그의 실제 지표를 읽어와 건강 리포트를 만들어요.\n(등급에 따라 하루 진단 횟수가 정해져 있고, 자정에 초기화돼요.)" },
+    { step: "3", title: "🔴 검색 노출 진단 (핵심)", desc: "내 최근 글 제목을 실제로 네이버에 검색해 '내 글이 뜨는지'를 확인해요.\n안 뜨는 글(누락)이 많으면 '저품질 의심'으로 알려드려요. 저품질 조기경보예요." },
+    { step: "4", title: "✏️ 제목·키워드 살리기", desc: "검색에 안 뜨는 글이 있으면 'AI 개선안 받기'를 눌러보세요.\n제목을 상위노출용으로 고치고 추천 키워드까지 알려줘요. (무료 Gemini 키 필요)" },
+    { step: "5", title: "👥 방문자·유입 확인", desc: "최근 방문자 추이(급감 여부)와 사람들이 어떤 키워드로 들어오는지 볼 수 있어요.\n내가 뭘로 노출되는지 알면 그 주제를 더 키울 수 있어요." },
+    { step: "팁", title: "등급별 검사 개수", desc: "검색 노출 검사는 하루 검사 글 수가 등급별로 달라요(무료 5·베이직 10·프로 20개, 무제한은 전체).\n이미 검사한 글은 건너뛰고 새 글부터 검사하니, 매일 진단하면 전체 글을 골고루 살펴봐요." },
+    { step: "팁", title: "네이버 공식 지수가 아니에요", desc: "네이버는 공식 '지수'를 공개하지 않아요. 이 진단은 실제 검색 결과·방문 데이터를 바탕으로 한 퍼블리 자체 건강검진으로, 블로그 관리 방향을 잡는 용도예요." },
+  ],
 };
 
 /* ── 사용설명서 모달 ── */
-const GuideModal = ({ tab, onClose }: { tab: "neighbor"|"engage"; onClose: () => void }) => {
-  const steps = GUIDE[tab];
-  const title = tab === "neighbor" ? "🤝 서이추 사용방법" : "❤️ 공감·댓글 사용방법";
+const GuideModal = ({ tab, onClose }: { tab: "neighbor"|"engage"|"reply"|"score"; onClose: () => void }) => {
+  const steps = (GUIDE as any)[tab] ?? [];
+  const title = tab === "neighbor" ? "🤝 서이추 사용방법" : tab === "engage" ? "❤️ 공감·댓글 사용방법" : tab === "reply" ? "💬 답방 사용방법" : "📈 블로그 건강검진";
   return (
     <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.6)", zIndex: 9999, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "60px 20px 20px", overflowY: "auto" }}>
       <div onClick={e => e.stopPropagation()} style={{ background: "var(--card)", borderRadius: 20, padding: "28px 32px", maxWidth: 560, width: "100%", boxShadow: "0 20px 60px rgba(0,0,0,.4)" }}>
@@ -172,7 +190,7 @@ const GuideModal = ({ tab, onClose }: { tab: "neighbor"|"engage"; onClose: () =>
           <button onClick={onClose} style={{ width: 32, height: 32, borderRadius: 10, border: "1px solid var(--border)", background: "transparent", color: "var(--text3)", cursor: "pointer", fontSize: 16, display: "flex", alignItems: "center", justifyContent: "center" }}>×</button>
         </div>
         <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-          {steps.map(({ step, title, desc }) => (
+          {steps.map(({ step, title, desc }: { step: string; title: string; desc: string }) => (
             <div key={step} style={{ display: "flex", gap: 14, padding: "16px", borderRadius: 14, background: "var(--bg2)", border: "1px solid var(--border)" }}>
               <div style={{ width: 36, height: 36, borderRadius: 10, background: step === "팁" ? "rgba(255,183,0,.15)" : "var(--accent-bg)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 900, color: step === "팁" ? "#ffb700" : "var(--accent-text)", flexShrink: 0, border: `1px solid ${step === "팁" ? "rgba(255,183,0,.3)" : "var(--accent)"}` }}>
                 {step === "팁" ? "💡" : `0${step}`}
@@ -193,8 +211,59 @@ const GuideModal = ({ tab, onClose }: { tab: "neighbor"|"engage"; onClose: () =>
 };
 
 /* ── 메인 컴포넌트 ── */
-export default function NeighborPage({ theme, userId, plan = "free", initialTab, singleTab, onEngageUsageChange, initialNeighborUsed = 0, initialEngageUsed = 0 }: Props) {
-  const [tab, setTab] = useState<"neighbor"|"engage">(initialTab || "neighbor");
+export default function NeighborPage({ theme, userId, plan = "free", initialTab, singleTab, onEngageUsageChange, initialNeighborUsed = 0, initialEngageUsed = 0, onBusyChange }: Props) {
+  const [tab, setTab] = useState<"neighbor"|"engage"|"reply"|"score">(initialTab || "neighbor");
+  // ── 답방(내 블로그 댓글에 대댓글) 상태 ──
+  const [rTargetPosts, setRTargetPosts] = useState(10);   // '최근 개수' 방식일 때 글 수
+  const [rSelectMode, setRSelectMode] = useState<"count"|"all"|"period">("count"); // 대상 글 선택 방식
+  const [rPeriod, setRPeriod] = useState<7|14|30>(7);      // '기간' 방식일 때 최근 N일
+  const [rMyPosts, setRMyPosts] = useState<{url:string;title:string;date:string;comments?:number}[]>([]); // 불러온 내 글 목록
+  const [rLoadingPosts, setRLoadingPosts] = useState(false);
+  const [rMode, setRMode] = useState<"ai"|"fixed">("ai");
+  const [rComment, setRComment] = useState("댓글 감사합니다 😊 자주 놀러오세요!");
+  const [rTone, setRTone] = useState<"담백"|"다정"|"짧게">("다정");
+  const [rOnlyNew, setROnlyNew] = useState(true);          // 아직 답글 없는 댓글만
+  const [rDelayMin, setRDelayMin] = useState(5);
+  const [rDelayMax, setRDelayMax] = useState(10);
+  const [rWorking, setRWorking] = useState(false);
+  const [rLogs, setRLogs] = useState<string[]>([]);
+  const [rDoneCnt, setRDoneCnt] = useState(0);
+  const [rFailCnt, setRFailCnt] = useState(0);
+  const rJobIdRef = useRef<string>("");
+  const rEsRef = useRef<BotEventStream|null>(null);
+  const rLogRef = useRef<HTMLDivElement>(null);
+  const addRLog = (m: string) => setRLogs(p => [...p, `${new Date().toLocaleTimeString("ko-KR",{hour12:false})}  ${m}`]);
+  // ── 블로그 건강검진 상태 ──
+  const [scLoading, setScLoading] = useState(false);
+  const [scResult, setScResult] = useState<null | {
+    blogId: string; totalPosts: number; neighbors: number; recentDates: string[];
+    exposureChecks?: { title: string; exposed: boolean | null; rank: number | null; postUrl?: string }[];
+    lowQualitySuspected?: boolean | null;
+    visitorDays?: { date: string; visitors: number }[];
+    inflowKeywords?: { keyword: string; count?: number }[];
+    visitorDrop?: { detected: boolean; rate: number | null; message: string } | null;
+    totalPostsForExposure?: number;
+    checkedTodayCount?: number;
+    exposureCompletedCount?: number;
+    exposureLimit?: number | null;
+  }>(null);
+  const [scLogs, setScLogs] = useState<string[]>([]);
+  const scLogRef = useRef<HTMLDivElement>(null);
+  const addScLog = (m: string) => setScLogs(p => [...p, `${new Date().toLocaleTimeString("ko-KR",{hour12:false})}  ${m}`]);
+  // ── 저품질/누락 글 제목·키워드 개선 솔루션(AI) ──
+  const [scSolLoading, setScSolLoading] = useState(false);
+  const [scSolutions, setScSolutions] = useState<null | { original: string; newTitle: string; keywords: string[]; reason: string }[]>(null);
+  // ── 등급별 일일 사용량 (답방·블로그진단) ──
+  const isUnlimitedPlan = plan === "unlimited" || plan === "admin";
+  const [replyUsed, setReplyUsed] = useState(0);
+  const replyLimit = REPLY_DAILY_LIMIT[plan] ?? REPLY_DAILY_LIMIT.free;
+  const [scUsed, setScUsed] = useState(0);
+  const scLimit = BLOGSCORE_DAILY_LIMIT[plan] ?? BLOGSCORE_DAILY_LIMIT.free;
+  useEffect(() => {
+    if (!userId) return;
+    if (tab === "reply") getReplyDailyUsage(userId).then(setReplyUsed);
+    if (tab === "score") getBlogscoreDailyUsage(userId).then(setScUsed);
+  }, [userId, tab]);
   const [showGuide, setShowGuide] = useState(false);
 
   /* 공통: 계정 */
@@ -265,7 +334,8 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
   const [eLikeRate, setELikeRate] = useState(100);      // 공감 확률 %
   const [eCommentRate, setECommentRate] = useState(40); // 댓글 확률 % (도배 회피 기본 40)
   const [eComment, setEComment] = useState("좋은 글 잘 읽고 갑니다 😊 자주 놀러올게요!");
-  const [eCommentMode, setECommentMode] = useState<"single"|"multi">("single");
+  const [eCommentMode, setECommentMode] = useState<"single"|"multi"|"ai">("single");
+  const [eCommentTone, setECommentTone] = useState<"담백"|"다정"|"짧게">("다정"); // AI 댓글 말투
   const [eMultiComments, setEMultiComments] = useState("좋은 글 잘 읽고 갑니다 😊 자주 놀러올게요!\n유익한 정보 감사해요! 구독하고 갑니다 🙌\n정말 도움이 됐어요! 앞으로도 좋은 글 부탁드려요 ✨");
   const [eCommentIndex, setECommentIndex] = useState(0);
   const [eDelayMin, setEDelayMin] = useState(5);
@@ -487,6 +557,15 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
     addLog("✅ 분산 실행 종료");
   };
   useEffect(() => { spreadRunningRef.current = spreadRunning; }, [spreadRunning]);
+
+  // ★절전 방지(테리 요청): 서이추·공감댓글 자동작업(추출·실행·분산 자동실행) 중이면 부모(DashboardPage)에 알림.
+  //   실제 keepAwake는 항상 떠있는 DashboardPage가 통합 관리 → 작업 중 다른 탭 이동/언마운트돼도 화면 안 꺼짐.
+  useEffect(() => {
+    const busy = crawling || working || spreadRunning || eCrawling || eWorking || rWorking || rLoadingPosts || scLoading;
+    onBusyChange?.(busy);
+    return () => { onBusyChange?.(false); };
+  }, [crawling, working, spreadRunning, eCrawling, eWorking, rWorking, rLoadingPosts, scLoading, onBusyChange]);
+
   const stopSpread = () => {
     spreadRunningRef.current = false;
     setSpreadRunning(false);
@@ -544,9 +623,11 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
     eJobIdRef.current = Date.now().toString();
     const days = ePeriod === "custom" ? eCustomDays : ePeriod;
     addELog(`🚀 작업 시작 — ${list.length}개 / 최근 ${days}일 / ${eDoLike ? "공감" : ""}${eDoLike && eDoComment ? "+" : ""}${eDoComment ? "댓글" : ""}`);
-    const commentText = eCommentMode === "single" ? eComment : eMultiComments.split("\n").filter(l => l.trim()).join("|||");
+    const commentText = eCommentMode === "single" ? eComment : eCommentMode === "multi" ? eMultiComments.split("\n").filter(l => l.trim()).join("|||") : "";
+    const aiComment = eCommentMode === "ai";
+    const geminiKey = aiComment ? (localStorage.getItem("publy_gemini_key") || "") : "";
     // ★ targets를 POST body로 (URL 길이 초과 방지)
-    const body = JSON.stringify({ accountId: acc.accountId, targets: list, comment: commentText, doLike: eDoLike, doComment: eDoComment, likeRate: eLikeRate, commentRate: eCommentRate, periodDays: days, postsPerBlog: ePostsPerBlog, delayMin: eDelayMin, delayMax: eDelayMax, dailyLimit: eDailyLimit, skipDone: eSkipDone, jobId: eJobIdRef.current, ...(userId ? { userId } : {}) });
+    const body = JSON.stringify({ accountId: acc.accountId, targets: list, comment: commentText, doLike: eDoLike, doComment: eDoComment, likeRate: eLikeRate, commentRate: eCommentRate, periodDays: days, postsPerBlog: ePostsPerBlog, delayMin: eDelayMin, delayMax: eDelayMax, dailyLimit: eDailyLimit, skipDone: eSkipDone, aiComment, commentTone: eCommentTone, geminiKey, jobId: eJobIdRef.current, ...(userId ? { userId } : {}) });
     const es = new BotEventStream(`${BOT}/api/engage`, { method: "POST", headers: { "Content-Type": "application/json" }, body }); eEsRef.current = es;
     es.onmessage = e => {
       const d = JSON.parse(e.data);
@@ -565,6 +646,106 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
     if (eEsRef.current) { eEsRef.current.close(); eEsRef.current = null; }
     try { await botFetch(`${BOT}/api/stop/${eJobIdRef.current}`, { method: "POST" }); } catch {}
     addELog("⛔ 중단"); setECrawling(false); setEWorking(false);
+  };
+
+  /* 답방 1단계: 내 블로그 글 목록 불러오기(추출) */
+  const handleLoadMyPosts = () => {
+    const acc = accounts.find(a => a.sessionOk);
+    if (!acc) return alert("먼저 내 블로그 계정을 연결하세요");
+    setRLoadingPosts(true); setRMyPosts([]); addRLog("📥 내 블로그 글 불러오는 중...");
+    const q = new URLSearchParams({ accountId: acc.accountId, selectMode: rSelectMode, count: String(rTargetPosts), period: String(rPeriod), ...(userId ? { userId } : {}) });
+    const es = new BotEventStream(`${BOT}/api/my-posts?${q.toString()}`);
+    es.onmessage = e => {
+      const d = JSON.parse(e.data);
+      if (d.type === "log") addRLog(d.msg);
+      if (d.type === "posts") { setRMyPosts(d.posts || []); addRLog(`✅ 내 글 ${d.posts?.length || 0}개 불러왔어요`); setRLoadingPosts(false); es.close(); }
+      if (d.type === "error") { addRLog(`❌ ${d.msg}`); setRLoadingPosts(false); es.close(); }
+    };
+    es.onerror = () => { addRLog("❌ 불러오기 연결 오류 (다시 시도해주세요)"); setRLoadingPosts(false); es.close(); };
+  };
+
+  /* 답방 2단계: 불러온 글의 댓글에 대댓글 실행 */
+  const handleReplyStart = () => {
+    const acc = accounts.find(a => a.sessionOk);
+    if (!acc) return alert("먼저 답방할 내 블로그 계정을 연결하세요");
+    if (!rMyPosts.length) return alert("먼저 '📥 내 글 불러오기'로 대상 글을 불러오세요");
+    if (!isUnlimitedPlan && replyUsed >= replyLimit) return alert(`오늘 답방 한도(${replyLimit}건)를 모두 사용했어요. 자정에 초기화됩니다.`);
+    if (rMode === "ai" && !localStorage.getItem("publy_gemini_key")) {
+      if (!confirm("AI 답글은 Gemini(무료) 키가 필요해요. 키가 없으면 답글이 건너뛰어집니다. 그래도 시작할까요?")) return;
+    }
+    setRDoneCnt(0); setRFailCnt(0); setRWorking(true);
+    rJobIdRef.current = Date.now().toString();
+    const geminiKey = rMode === "ai" ? (localStorage.getItem("publy_gemini_key") || "") : "";
+    addRLog(`🚀 답방 시작 — 글 ${rMyPosts.length}개 / ${rMode === "ai" ? `AI 답글(${rTone})` : "고정 답글"}${rOnlyNew ? " / 미답변만" : ""}`);
+    const body = JSON.stringify({ accountId: acc.accountId, posts: rMyPosts.map(p => p.url), mode: rMode, comment: rComment, tone: rTone, onlyNew: rOnlyNew, delayMin: rDelayMin, delayMax: rDelayMax, geminiKey, jobId: rJobIdRef.current, ...(userId ? { userId } : {}) });
+    const es = new BotEventStream(`${BOT}/api/reply`, { method: "POST", headers: { "Content-Type": "application/json" }, body }); rEsRef.current = es;
+    es.onmessage = e => {
+      const d = JSON.parse(e.data);
+      if (d.type === "log") addRLog(d.msg);
+      if (d.type === "result") {
+        addRLog(`${d.status === "success" ? "✅" : d.status === "skip" ? "⏭️" : "❌"} ${d.postTitle || d.blogId || ""} ${d.message || ""}`);
+        if (d.status === "success" && userId) { incrementReplyQuota(userId).catch(() => {}); setReplyUsed(u => u + 1); }
+      }
+      if (d.type === "progress") { setRDoneCnt(d.done); setRFailCnt(d.fail); }
+      if (d.type === "done") { addRLog("🎉 답방 완료!"); setRWorking(false); es.close(); }
+      if (d.type === "error") { addRLog(`❌ 오류: ${d.msg}`); setRWorking(false); es.close(); }
+    };
+    es.onerror = () => { addRLog("❌ 연결 오류 (다시 '답방 시작'을 누르면 재시도합니다)"); setRWorking(false); es.close(); };
+    es.onclose = () => setRWorking(false);
+  };
+  const handleReplyStop = async () => {
+    if (rEsRef.current) { rEsRef.current.close(); rEsRef.current = null; }
+    try { await botFetch(`${BOT}/api/stop/${rJobIdRef.current}`, { method: "POST" }); } catch {}
+    addRLog("⛔ 중단"); setRWorking(false);
+  };
+
+  /* 블로그 건강검진 실행 */
+  const handleBlogDiagnose = () => {
+    const acc = accounts.find(a => a.sessionOk);
+    if (!acc) return alert("먼저 진단할 내 블로그 계정을 연결하세요");
+    if (!isUnlimitedPlan && scUsed >= scLimit) return alert(`오늘 블로그 진단 횟수(${scLimit}회)를 모두 사용했어요. 자정에 초기화됩니다.`);
+    setScLoading(true); setScResult(null); setScLogs([]); setScSolutions(null); addScLog("📈 블로그 지표를 수집하는 중...");
+    if (userId) { incrementBlogscoreQuota(userId).catch(() => {}); setScUsed(u => u + 1); }  // 진단 시작 시 1회 차감
+    const q = new URLSearchParams({ accountId: acc.accountId, plan, ...(userId ? { userId } : {}) });
+    const es = new BotEventStream(`${BOT}/api/blog-stats?${q.toString()}`);
+    es.onmessage = e => {
+      const d = JSON.parse(e.data);
+      if (d.type === "log") addScLog(d.msg);
+      if (d.type === "stats") { setScResult(d.stats); addScLog("✅ 진단 완료!"); setScLoading(false); es.close(); }
+      if (d.type === "error") { addScLog(`❌ ${d.msg}`); setScLoading(false); es.close(); }
+    };
+    es.onerror = () => { addScLog("❌ 연결 오류 (다시 시도해주세요)"); setScLoading(false); es.close(); };
+  };
+
+  /* 저품질/누락 글 제목·키워드 개선 솔루션 (AI) */
+  const handleGetSolutions = async () => {
+    const key = localStorage.getItem("publy_gemini_key") || "";
+    if (!key) return alert("제목·키워드 개선 솔루션은 무료 Gemini 키가 필요해요.\n설정 → 글쓰기 AI에서 Gemini 키를 먼저 등록해주세요.");
+    // 검색에 누락된(exposed===false) 글 제목만 대상 — 최대 5개
+    const missing = (scResult?.exposureChecks || []).filter(c => c.exposed === false).map(c => c.title).slice(0, 5);
+    if (!missing.length) return alert("검색에 누락된 글이 없어요. (개선이 급한 글이 없다는 좋은 신호예요!)");
+    setScSolLoading(true); setScSolutions(null);
+    const prompt = `너는 네이버 블로그 상위노출(SEO) 전문가야. 아래 블로그 글 제목들은 네이버 검색에 노출이 안 되고 있어(저품질/누락 의심). 각 제목을 검색에 잘 잡히도록 개선해줘.\n\n각 제목마다 아래 JSON 형식으로만 답해. 다른 말 절대 금지. 순수 JSON 배열만 출력:\n[{"original":"원래제목","newTitle":"개선된 제목(검색 잘되게, 30자내)","keywords":["추천키워드1","키워드2","키워드3"],"reason":"왜 이렇게 바꿨는지 한 문장"}]\n\n규칙: newTitle은 사람들이 실제 검색하는 핵심 키워드를 앞쪽에 배치, 구체적이고 클릭하고 싶게. keywords는 그 글에 넣으면 좋을 실제 검색 키워드 3개. reason은 쉽게 한 문장.\n\n[제목들]\n${missing.map((t, i) => `${i + 1}. ${t}`).join("\n")}`;
+    const models = ["gemini-2.0-flash", "gemini-2.5-flash", "gemini-1.5-flash"];
+    for (const model of models) {
+      try {
+        const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }], generationConfig: { maxOutputTokens: 2000, temperature: 0.8 } }),
+        });
+        const d: any = await r.json();
+        if (!r.ok) { if (r.status === 404) continue; throw new Error(d?.error?.message || `API ${r.status}`); }
+        let txt: string = d?.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "";
+        txt = txt.replace(/^```json\s*/i, "").replace(/^```\s*/i, "").replace(/```\s*$/i, "").trim();
+        const arr = JSON.parse(txt);
+        if (Array.isArray(arr) && arr.length) {
+          setScSolutions(arr.map((x: any) => ({ original: String(x.original || ""), newTitle: String(x.newTitle || ""), keywords: Array.isArray(x.keywords) ? x.keywords.map(String) : [], reason: String(x.reason || "") })));
+          setScSolLoading(false);
+          return;
+        }
+      } catch (e: any) { if (model === models[models.length - 1]) { alert("솔루션 생성 실패: " + e.message); } }
+    }
+    setScSolLoading(false);
   };
 
   /* CSV 저장 */
@@ -619,6 +800,29 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
   );
 
   /* ── 공통 레이아웃 헬퍼 ── */
+  // 등급별 일일 사용량 게이지 (답방·블로그진단 공용)
+  const UsageGauge = ({ label, used, limit, unit, color }: { label: string; used: number; limit: number; unit: string; color: string }) => {
+    const pct = isUnlimitedPlan ? 0 : Math.min(100, (used / Math.max(1, limit)) * 100);
+    const danger = !isUnlimitedPlan && used >= limit;
+    const remain = Math.max(0, limit - used);
+    return (
+      <div className="card" style={{ padding: "14px 18px" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 9 }}>
+          <span style={{ fontSize: 12.5, fontWeight: 700, color: "var(--text2)" }}>{label} <span style={{ fontSize: 10.5, color: "var(--text3)", fontWeight: 600 }}>(자정 초기화)</span></span>
+          <span style={{ fontSize: 13, fontWeight: 800, color: danger ? "var(--danger)" : color }}>
+            {isUnlimitedPlan ? "∞ 무제한" : <>{used} / {limit}{unit} · <span style={{ color: danger ? "var(--danger)" : "#00c896" }}>{danger ? "한도 도달" : `${remain}${unit} 남음`}</span></>}
+          </span>
+        </div>
+        <div style={{ height: 8, borderRadius: 99, background: "var(--card2)", overflow: "hidden" }}>
+          <div style={{ height: "100%", borderRadius: 99, width: isUnlimitedPlan ? "100%" : `${pct}%`, background: danger ? "var(--danger)" : color, opacity: isUnlimitedPlan ? .4 : 1, transition: "width .5s ease" }} />
+        </div>
+        <div style={{ fontSize: 11, color: "var(--text3)", marginTop: 7, fontWeight: 500 }}>
+          {isUnlimitedPlan ? "무제한 회원이라 한도 없이 사용할 수 있어요" : `내 등급(${plan==="free"?"무료":plan==="basic"?"베이직":plan==="pro"?"프로":plan}) 하루 ${limit}${unit} · 자정에 다시 채워져요`}
+        </div>
+      </div>
+    );
+  };
+
   const LogBox = ({ logs, logRef, onClear }: { logs: string[]; logRef: React.RefObject<HTMLDivElement>; onClear: () => void }) => (
     <div className="card" style={{ padding: 0, overflow: "hidden" }}>
       <div style={{ padding: "14px 18px", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
@@ -635,6 +839,13 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
 
   return (
     <div style={{ animation: "fadeUp .25s ease both" }}>
+      <style>{`
+        .npg-2col{display:grid;grid-template-columns:400px 1fr;gap:20px;align-items:start;}
+        @media(max-width:820px){
+          .npg-2col{grid-template-columns:1fr;}
+          .npg-2col .card,.npg-2col button,.npg-2col input,.npg-2col textarea{max-width:100%;box-sizing:border-box;}
+        }
+      `}</style>
 
       {/* 봇 오프라인 배너 */}
       {!botOnline && (
@@ -668,7 +879,7 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
             <span style={{ color: "#c88010", fontWeight: 700 }}>💡 네이버 하루 한도는 100건.</span> 계정 보호를 위해 <b>하루 50건 정도로 분산</b>하고, 딜레이(5~10초)와 예약 분산을 함께 쓰는 걸 권장해요.
           </div>
         </div>
-      ) : (
+      ) : tab === "engage" ? (
         <div style={{ marginBottom: 18, padding: "16px 20px", borderRadius: 16, background: "var(--card)", border: "1.5px solid var(--border)", boxShadow: "0 2px 12px rgba(0,0,0,.04)" }}>
           <div style={{ fontSize: 15, fontWeight: 800, color: "var(--text)", marginBottom: 6, display: "flex", alignItems: "center", gap: 7 }}>❤️ 공감·댓글 자동화</div>
           <div style={{ fontSize: 12.5, color: "var(--text2)", fontWeight: 600, lineHeight: 1.65 }}>
@@ -676,11 +887,27 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
             <span style={{ color: "#c88010", fontWeight: 700 }}>💡 권장: 공감은 하루 100개, 댓글은 하루 50개 미만.</span> 강제 제한은 없지만, 계정 보호를 위해 간격을 넉넉히 두고 이 범위 안에서 쓰는 걸 추천해요. (댓글이 공감보다 스팸 판정 위험이 큽니다)
           </div>
         </div>
+      ) : tab === "reply" ? (
+        <div style={{ marginBottom: 18, padding: "16px 20px", borderRadius: 16, background: "var(--card)", border: "1.5px solid var(--border)", boxShadow: "0 2px 12px rgba(0,0,0,.04)" }}>
+          <div style={{ fontSize: 15, fontWeight: 800, color: "var(--text)", marginBottom: 6, display: "flex", alignItems: "center", gap: 7 }}>💬 답방(내 블로그 댓글에 대댓글) 자동화</div>
+          <div style={{ fontSize: 12.5, color: "var(--text2)", fontWeight: 600, lineHeight: 1.65 }}>
+            내 블로그 글에 <b>이웃들이 남긴 댓글</b>을 찾아, 하나하나 <b>답글(대댓글)</b>을 자동으로 달아줘요. 답방을 부지런히 하면 이웃과의 소통이 살아나고 <b>재방문·체류시간이 늘어 블로그 지수에 도움</b>이 됩니다.<br />
+            <span style={{ color: "#c88010", fontWeight: 700 }}>💡 AI 답글을 켜면</span> 댓글 내용을 읽고 <b>매번 다른 자연스러운 답글</b>을 만들어, 똑같은 답글 반복으로 인한 어색함과 스팸 위험을 줄여줘요.
+          </div>
+        </div>
+      ) : (
+        <div style={{ marginBottom: 18, padding: "16px 20px", borderRadius: 16, background: "var(--card)", border: "1.5px solid var(--border)", boxShadow: "0 2px 12px rgba(0,0,0,.04)" }}>
+          <div style={{ fontSize: 15, fontWeight: 800, color: "var(--text)", marginBottom: 6, display: "flex", alignItems: "center", gap: 7 }}>📈 블로그 건강검진</div>
+          <div style={{ fontSize: 12.5, color: "var(--text2)", fontWeight: 600, lineHeight: 1.65 }}>
+            내 블로그의 <b>총 글 수·이웃 수·최근 발행 활동</b>을 실제로 읽어와 <b style={{color:"#00c896"}}>건강 상태를 진단</b>하고, 지금 뭘 하면 좋을지 <b style={{color:"#ff5fa2"}}>맞춤 조언</b>을 드려요.<br />
+            <span style={{ color: "#c88010", fontWeight: 700 }}>💡 참고:</span> 네이버는 공식 '지수'를 공개하지 않아요. 이 진단은 <b>실제 지표를 바탕으로 한 퍼블리 자체 건강검진</b>으로, 블로그 관리 방향을 잡는 용도예요.
+          </div>
+        </div>
       )}
 
       {/* ═══════════ 서이추 탭 ═══════════ */}
       {tab === "neighbor" && (
-        <div style={{ display: "grid", gridTemplateColumns: "400px 1fr", gap: 20, alignItems: "start" }}>
+        <div className="npg-2col">
           {/* 왼쪽 */}
           <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
             <AccountCard accounts={accounts} onLogin={handleLogin} onAdd={handleAddAccount} onRemove={handleRemoveAccount} onChange={handleAccountChange} />
@@ -697,10 +924,16 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
                 <div>
                   <label className="inp-label" style={{ fontSize: 12, marginBottom: 6, display: "block" }}>키워드당 추출 수</label>
                   <input className="inp" type="number" min={1} max={300} {...numProps(countPerKw, setCountPerKw, 1, 300, 34)} style={{ fontSize: 13, padding: "11px 14px" }} />
+                  <div style={{ fontSize: 12, color: "var(--text2)", marginTop: 6, lineHeight: 1.55, fontWeight: 500 }}>
+                    💡 키워드 하나당 서이추 신청할 블로거를 <b style={{color:"#00c896"}}>몇 명 불러올지</b> 정해요. (숫자가 클수록 더 많은 대상을 모읍니다)
+                  </div>
                 </div>
                 <div>
                   <label className="inp-label" style={{ fontSize: 12, marginBottom: 6, display: "block" }}>하루 신청 한도</label>
                   <input className="inp" type="number" min={1} max={100} {...numProps(dailyLimit, setDailyLimit, 1, 100, 100)} style={{ fontSize: 13, padding: "11px 14px" }} />
+                  <div style={{ fontSize: 12, color: "var(--text2)", marginTop: 6, lineHeight: 1.55, fontWeight: 500 }}>
+                    💡 오늘 실제로 서로이웃 신청을 보낼 <b style={{color:"#ff5fa2"}}>최대 건수</b>예요. <b style={{color:"#00c896"}}>계정 안전</b>을 위해 이 수까지만 신청하고 멈춥니다.
+                  </div>
                 </div>
               </div>
 
@@ -743,6 +976,9 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
                 </div>
               </div>
               <Toggle val={skipDone} set={setSkipDone} label="이미 처리된 블로그 건너뛰기" />
+              <div style={{ fontSize: 12, color: "var(--text2)", margin: "2px 2px 6px", lineHeight: 1.55, fontWeight: 500 }}>
+                💡 오늘 이미 서이추한 블로거는 이 설정과 상관없이 <b style={{color:"#ff5fa2"}}>자동으로 제외</b>돼요. (<b style={{color:"#00c896"}}>같은 날 중복 신청 방지</b>)
+              </div>
               <Toggle val={qualityFilter} set={setQualityFilter} label="죽은·광고 블로그 자동 거르기 (헛신청 방지)" />
               {skipDone && (
                 <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "6px 2px 2px", flexWrap: "wrap" }}>
@@ -949,7 +1185,7 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
 
       {/* ═══════════ 공감·댓글 탭 ═══════════ */}
       {tab === "engage" && (
-        <div style={{ display: "grid", gridTemplateColumns: "400px 1fr", gap: 20, alignItems: "start" }}>
+        <div className="npg-2col">
           {/* 왼쪽 */}
           <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
             <AccountCard accounts={accounts} onLogin={handleLogin} onAdd={handleAddAccount} onRemove={handleRemoveAccount} onChange={handleAccountChange} />
@@ -985,10 +1221,18 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
                 <div>
                   <label className="inp-label" style={{ fontSize: 12, marginBottom: 6, display: "block" }}>{eSource === "buddy" ? "가져올 이웃 수 (최대)" : "키워드당 추출 수"}</label>
                   <input className="inp" type="number" min={1} max={200} {...numProps(eCountPerKw, setECountPerKw, 1, 200, 20)} style={{ fontSize: 13, padding: "11px 14px" }} />
+                  <div style={{ fontSize: 12, color: "var(--text2)", marginTop: 6, lineHeight: 1.55, fontWeight: 500 }}>
+                    {eSource === "buddy"
+                      ? "💡 내 서로이웃 중 최근 글을 쓴 사람을 최대 몇 명 불러올지 정해요. (숫자가 클수록 더 많은 이웃 글을 가져옵니다)"
+                      : "💡 키워드 하나당 블로그 글을 몇 개 불러올지 정해요."}
+                  </div>
                 </div>
                 <div>
                   <label className="inp-label" style={{ fontSize: 12, marginBottom: 6, display: "block" }}>하루 작업 한도</label>
                   <input className="inp" type="number" min={1} max={200} {...numProps(eDailyLimit, setEDailyLimit, 1, 200, 50)} style={{ fontSize: 13, padding: "11px 14px" }} />
+                  <div style={{ fontSize: 12, color: "var(--text2)", marginTop: 6, lineHeight: 1.55, fontWeight: 500 }}>
+                    💡 오늘 실제로 공감·댓글을 남길 <b style={{color:"#ff5fa2"}}>최대 건수</b>예요. <b style={{color:"#00c896"}}>계정 안전</b>을 위해 이 수까지만 작업하고 멈춥니다.
+                  </div>
                 </div>
               </div>
             </div>
@@ -1046,6 +1290,9 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
                 </div>
               </div>
               <Toggle val={eSkipDone} set={setESkipDone} label="완료된 블로그 건너뛰기" />
+              <div style={{ fontSize: 12, color: "var(--text2)", margin: "2px 2px 6px", lineHeight: 1.55, fontWeight: 500 }}>
+                💡 오늘 이미 공감·댓글한 이웃은 이 설정과 상관없이 <b style={{color:"#ff5fa2"}}>자동으로 제외</b>돼요. (<b style={{color:"#00c896"}}>같은 날 중복 방지</b> · 내일은 새 글에 다시 작업)
+              </div>
               <Toggle val={eAutoStart} set={setEAutoStart} label="추출 완료 후 바로 작업 시작" />
             </div>
 
@@ -1053,19 +1300,39 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
               <div className="card" style={{ padding: "18px 20px" }}>
                 <div className="card-title" style={{ marginBottom: 14, fontSize: 15 }}>💬 댓글 내용</div>
                 <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
-                  {(["single", "multi"] as const).map(m => (
-                    <button key={m} onClick={() => setECommentMode(m)} style={{ flex: 1, padding: "10px", borderRadius: 10, border: `2px solid ${eCommentMode === m ? "var(--accent)" : "var(--border)"}`, background: eCommentMode === m ? "var(--accent-bg)" : "transparent", color: eCommentMode === m ? "var(--accent-text)" : "var(--text2)", cursor: "pointer", fontSize: 12, fontWeight: 700, fontFamily: "inherit" }}>
-                      {m === "single" ? "단일 댓글" : "여러 댓글 순환"}
-                    </button>
-                  ))}
+                  {([["single","단일 댓글"],["multi","여러 댓글 순환"],["ai","✨ AI 자동"]] as const).map(([m,lbl]) => {
+                    const on = eCommentMode === m; const isAi = m === "ai";
+                    return (
+                      <button key={m} onClick={() => setECommentMode(m)} style={{ flex: 1, padding: "10px 8px", borderRadius: 10, border: `2px solid ${on ? (isAi?"#8b5cf6":"var(--accent)") : "var(--border)"}`, background: on ? (isAi?"rgba(139,92,246,.12)":"var(--accent-bg)") : "transparent", color: on ? (isAi?"#8b5cf6":"var(--accent-text)") : (isAi?"#8b5cf6":"var(--text2)"), cursor: "pointer", fontSize: 12, fontWeight: 700, fontFamily: "inherit" }}>
+                        {lbl}
+                      </button>
+                    );
+                  })}
                 </div>
                 {eCommentMode === "single" ? (
                   <textarea className="inp" rows={3} value={eComment} onChange={e => setEComment(e.target.value)} style={{ resize: "vertical", fontSize: 13, lineHeight: 1.7, padding: "12px 14px" }} />
-                ) : (
+                ) : eCommentMode === "multi" ? (
                   <>
                     <textarea className="inp" rows={5} value={eMultiComments} onChange={e => setEMultiComments(e.target.value)} style={{ resize: "vertical", fontSize: 13, lineHeight: 1.7, padding: "12px 14px" }} placeholder="줄바꿈으로 구분 → 순서대로 사용됩니다" />
                     <div style={{ fontSize: 11, color: "var(--text3)", marginTop: 6 }}>총 {eMultiComments.split("\n").filter(l => l.trim()).length}개 댓글 등록됨</div>
                   </>
+                ) : (
+                  <div>
+                    <div style={{ display:"flex", gap:9, alignItems:"flex-start", padding:"12px 14px", borderRadius:11, background:"rgba(139,92,246,.08)", border:"1px solid rgba(139,92,246,.25)", fontSize:12.5, color:"var(--text2)", lineHeight:1.65 }}>
+                      <span style={{fontSize:17,flexShrink:0}}>✨</span>
+                      <div><b style={{color:"#8b5cf6"}}>AI가 상대방 글을 읽고</b> 매번 다른 자연스러운 댓글을 자동으로 써줘요. 똑같은 댓글 도배로 인한 <b>스팸 위험을 줄여</b> 계정을 지켜줍니다. 아래에서 <b>말투</b>만 골라주세요.</div>
+                    </div>
+                    <div style={{ fontSize:12, fontWeight:700, color:"var(--text2)", margin:"13px 0 7px" }}>댓글 말투</div>
+                    <div style={{ display:"flex", gap:8 }}>
+                      {([["담백","깔끔·담백하게"],["다정","다정·따뜻하게"],["짧게","짧고 간결하게"]] as const).map(([t,desc])=>(
+                        <button key={t} onClick={()=>setECommentTone(t)} style={{ flex:1, padding:"11px 8px", borderRadius:10, border:`2px solid ${eCommentTone===t?"#8b5cf6":"var(--border)"}`, background:eCommentTone===t?"rgba(139,92,246,.1)":"transparent", color:eCommentTone===t?"#8b5cf6":"var(--text2)", cursor:"pointer", fontFamily:"inherit", textAlign:"center" }}>
+                          <div style={{ fontSize:13.5, fontWeight:800 }}>{t}</div>
+                          <div style={{ fontSize:10.5, marginTop:3, opacity:.85 }}>{desc}</div>
+                        </button>
+                      ))}
+                    </div>
+                    <div style={{ fontSize:11, color:"var(--text3)", marginTop:11, lineHeight:1.55 }}>⚠️ AI 댓글은 <b>설정 → 글쓰기 AI의 Gemini(무료)</b> API 키가 필요해요. 키가 없으면 위 '단일·여러 댓글'을 사용하세요.</div>
+                  </div>
                 )}
               </div>
             )}
@@ -1168,6 +1435,312 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
               )}
             </div>
             <LogBox logs={eLogs} logRef={eLogRef} onClear={() => setELogs([])} />
+          </div>
+        </div>
+      )}
+
+      {/* ═══════════ 답방 탭 ═══════════ */}
+      {tab === "reply" && (
+        <div className="npg-2col">
+          {/* 왼쪽: 설정 */}
+          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+            <AccountCard accounts={accounts} onLogin={handleLogin} onAdd={handleAddAccount} onRemove={handleRemoveAccount} onChange={handleAccountChange} />
+
+            <div className="card" style={{ padding: "18px 20px" }}>
+              <div className="card-title" style={{ marginBottom: 14, fontSize: 15 }}>💬 답방 설정</div>
+
+              <div style={{ marginBottom: 14 }}>
+                <label className="inp-label" style={{ fontSize: 12, marginBottom: 6, display: "block" }}>답방할 내 글 선택</label>
+                <div style={{ display: "flex", gap: 6, marginBottom: 10 }}>
+                  {([["count","최근 개수"],["all","전체"],["period","기간"]] as const).map(([m,lbl]) => (
+                    <button key={m} onClick={() => setRSelectMode(m)} style={{ flex: 1, padding: "9px 6px", borderRadius: 9, border: `2px solid ${rSelectMode===m?"var(--accent)":"var(--border)"}`, background: rSelectMode===m?"var(--accent-bg)":"transparent", color: rSelectMode===m?"var(--accent-text)":"var(--text2)", cursor: "pointer", fontSize: 12, fontWeight: 700, fontFamily: "inherit" }}>{lbl}</button>
+                  ))}
+                </div>
+                {rSelectMode === "count" && (
+                  <input className="inp" type="number" min={1} max={100} {...numProps(rTargetPosts, setRTargetPosts, 1, 100, 10)} style={{ fontSize: 13, padding: "11px 14px" }} placeholder="최근 몇 개" />
+                )}
+                {rSelectMode === "period" && (
+                  <div style={{ display: "flex", gap: 6 }}>
+                    {([7,14,30] as const).map(p => (
+                      <button key={p} onClick={() => setRPeriod(p)} style={{ flex: 1, padding: "10px", borderRadius: 9, border: `2px solid ${rPeriod===p?"var(--accent)":"var(--border)"}`, background: rPeriod===p?"var(--accent-bg)":"transparent", color: rPeriod===p?"var(--accent-text)":"var(--text2)", cursor: "pointer", fontSize: 12.5, fontWeight: 700, fontFamily: "inherit" }}>최근 {p}일</button>
+                    ))}
+                  </div>
+                )}
+                {rSelectMode === "all" && (
+                  <div style={{ fontSize: 12.5, color: "var(--text2)", padding: "9px 12px", borderRadius: 9, background: "var(--bg)", border: "1px solid var(--border)" }}>내 블로그의 <b style={{color:"#ff5fa2"}}>모든 글</b>을 대상으로 불러와요.</div>
+                )}
+                <div style={{ fontSize: 12, color: "var(--text2)", marginTop: 8, lineHeight: 1.55, fontWeight: 500 }}>💡 <b style={{color:"#00c896"}}>최근 개수·전체·기간</b> 중 골라 아래 <b style={{color:"#ff5fa2"}}>📥 내 글 불러오기</b>를 누르면, 대상 글이 오른쪽에 리스트로 떠요. 그 글들에 달린 댓글에 답방합니다.</div>
+              </div>
+
+              <label className="inp-label" style={{ fontSize: 12, marginBottom: 6, display: "block" }}>답글 방식</label>
+              <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+                {([["ai","✨ AI 자동"],["fixed","✍️ 고정 답글"]] as const).map(([m,lbl]) => {
+                  const on = rMode === m; const isAi = m === "ai";
+                  return (
+                    <button key={m} onClick={() => setRMode(m)} style={{ flex: 1, padding: "11px 8px", borderRadius: 10, border: `2px solid ${on ? (isAi?"#8b5cf6":"var(--accent)") : "var(--border)"}`, background: on ? (isAi?"rgba(139,92,246,.12)":"var(--accent-bg)") : "transparent", color: on ? (isAi?"#8b5cf6":"var(--accent-text)") : (isAi?"#8b5cf6":"var(--text2)"), cursor: "pointer", fontSize: 12.5, fontWeight: 700, fontFamily: "inherit" }}>{lbl}</button>
+                  );
+                })}
+              </div>
+
+              {rMode === "ai" ? (
+                <div style={{ marginBottom: 12 }}>
+                  <div style={{ display:"flex", gap:9, alignItems:"flex-start", padding:"12px 14px", borderRadius:11, background:"rgba(139,92,246,.08)", border:"1px solid rgba(139,92,246,.25)", fontSize:12.5, color:"var(--text2)", lineHeight:1.65, marginBottom:12 }}>
+                    <span style={{fontSize:17,flexShrink:0}}>✨</span>
+                    <div><b style={{color:"#8b5cf6"}}>AI가 이웃의 댓글을 읽고</b> 그에 맞는 자연스러운 답글을 매번 다르게 만들어줘요. 말투만 골라주세요. <b>(설정 → 글쓰기 AI의 Gemini 무료 키 필요)</b></div>
+                  </div>
+                  <div style={{ display:"flex", gap:8 }}>
+                    {([["담백","깔끔·담백"],["다정","다정·따뜻"],["짧게","짧고 간결"]] as const).map(([t,desc])=>(
+                      <button key={t} onClick={()=>setRTone(t)} style={{ flex:1, padding:"11px 8px", borderRadius:10, border:`2px solid ${rTone===t?"#8b5cf6":"var(--border)"}`, background:rTone===t?"rgba(139,92,246,.1)":"transparent", color:rTone===t?"#8b5cf6":"var(--text2)", cursor:"pointer", fontFamily:"inherit", textAlign:"center" }}>
+                        <div style={{ fontSize:13, fontWeight:800 }}>{t}</div>
+                        <div style={{ fontSize:10, marginTop:2, opacity:.85 }}>{desc}</div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ) : (
+                <div style={{ marginBottom: 12 }}>
+                  <textarea className="inp" rows={3} value={rComment} onChange={e => setRComment(e.target.value)} style={{ resize: "vertical", fontSize: 13, lineHeight: 1.7, padding: "12px 14px" }} placeholder="댓글 감사합니다 😊 자주 놀러오세요!" />
+                  <div style={{ fontSize: 12, color: "var(--text2)", marginTop: 6, lineHeight: 1.55, fontWeight: 500 }}>💡 모든 댓글에 이 문구로 답합니다. (똑같은 답글 반복이 걱정되면 위 <b style={{color:"#ff5fa2"}}>'✨ AI 자동'</b>을 추천해요)</div>
+                </div>
+              )}
+
+              <Toggle val={rOnlyNew} set={setROnlyNew} label="아직 답글 없는 댓글만 (중복 답글 방지)" />
+
+              <div style={{ marginTop: 12 }}>
+                <label className="inp-label" style={{ fontSize: 12, marginBottom: 6, display: "block" }}>딜레이 (초)</label>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <input className="inp" type="number" min={1} max={60} {...numProps(rDelayMin, setRDelayMin, 1, 60, 5)} style={{ flex: 1, fontSize: 13, padding: "11px 14px" }} />
+                  <span style={{ color: "var(--text3)" }}>~</span>
+                  <input className="inp" type="number" min={1} max={120} {...numProps(rDelayMax, setRDelayMax, 1, 120, 10)} style={{ flex: 1, fontSize: 13, padding: "11px 14px" }} />
+                </div>
+                <div style={{ fontSize: 12, color: "var(--text2)", marginTop: 6, lineHeight: 1.55, fontWeight: 500 }}>💡 답글 사이 대기 시간이에요. <b style={{color:"#00c896"}}>넉넉히 둘수록</b> 사람이 쓰는 것처럼 자연스러워 <b style={{color:"#ff5fa2"}}>계정이 안전</b>해요.</div>
+              </div>
+            </div>
+
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              <button className="btn btn-primary btn-full" onClick={handleLoadMyPosts} disabled={rLoadingPosts || rWorking || !botOnline} style={{ padding: "14px", fontSize: 14, borderRadius: 12 }}>
+                {rLoadingPosts ? <><span className="spinner" />내 글 불러오는 중...</> : "📥 내 글 불러오기"}
+              </button>
+              <button className="btn btn-secondary" onClick={handleReplyStart} disabled={rWorking || rLoadingPosts || !rMyPosts.length || !botOnline || (!isUnlimitedPlan && replyUsed >= replyLimit)} style={{ padding: "13px", fontSize: 13, borderRadius: 12 }}>
+                {rWorking ? <><span className="spinner" />답방 중...</> : (!isUnlimitedPlan && replyUsed >= replyLimit) ? "오늘 한도 도달 (자정 초기화)" : `🚀 답방 시작${rMyPosts.length ? ` (${rMyPosts.length}개 글)` : ""}`}
+              </button>
+              {rWorking && (
+                <button className="btn-stop" onClick={handleReplyStop} style={{ width: "100%", justifyContent: "center", padding: "13px", borderRadius: 12, fontSize: 13 }}>⛔ 중단</button>
+              )}
+            </div>
+          </div>
+
+          {/* 오른쪽: 게이지 + 결과 + 로그 */}
+          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+            <UsageGauge label="💬 오늘 답방" used={replyUsed} limit={replyLimit} unit="건" color="#8b5cf6" />
+            <div className="card" style={{ padding: "20px 24px" }}>
+              <div style={{ fontSize: 13, color: "var(--text3)", fontWeight: 700, marginBottom: 14 }}>💬 답방 결과</div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                <div style={{ textAlign: "center", padding: "14px", borderRadius: 12, background: "var(--bg)", border: "1px solid var(--border)" }}>
+                  <div style={{ fontSize: 30, fontWeight: 900, color: "var(--success)" }}>{rDoneCnt}</div>
+                  <div style={{ fontSize: 12, color: "var(--text3)", marginTop: 4 }}>답글 완료</div>
+                </div>
+                <div style={{ textAlign: "center", padding: "14px", borderRadius: 12, background: "var(--bg)", border: "1px solid var(--border)" }}>
+                  <div style={{ fontSize: 30, fontWeight: 900, color: "var(--danger)" }}>{rFailCnt}</div>
+                  <div style={{ fontSize: 12, color: "var(--text3)", marginTop: 4 }}>실패</div>
+                </div>
+              </div>
+            </div>
+            {/* 불러온 내 글 리스트 (로그 위) */}
+            <div className="card" style={{ padding: "18px 20px" }}>
+              <div style={{ fontSize: 13, fontWeight: 700, color: "var(--text3)", marginBottom: 12 }}>📄 불러온 내 글 <b style={{ color: "var(--accent-text)" }}>{rMyPosts.length}</b>개</div>
+              {rMyPosts.length === 0 ? (
+                <div style={{ padding: "22px", textAlign: "center", color: "var(--text2)", fontSize: 12.5, lineHeight: 1.6 }}>왼쪽에서 대상을 고르고<br /><b style={{color:"#ff5fa2"}}>📥 내 글 불러오기</b>를 누르면 여기에 목록이 떠요.</div>
+              ) : (
+                <div style={{ maxHeight: 280, overflowY: "auto", display: "flex", flexDirection: "column", gap: 6 }}>
+                  {rMyPosts.map((p, i) => (
+                    <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 11px", borderRadius: 9, background: "var(--bg)", border: "1px solid var(--border)" }}>
+                      <span style={{ flex: 1, minWidth: 0, fontSize: 12.5, color: "var(--text)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{p.title || "(제목 없음)"}</span>
+                      {typeof p.comments === "number" && <span style={{ fontSize: 11, color: "var(--accent-text)", fontWeight: 700, flexShrink: 0 }}>💬 {p.comments}</span>}
+                      {p.date && <span style={{ fontSize: 11, color: "var(--text3)", flexShrink: 0 }}>{p.date}</span>}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+            <LogBox logs={rLogs} logRef={rLogRef} onClear={() => setRLogs([])} />
+          </div>
+        </div>
+      )}
+
+      {/* ═══════════ 블로그 건강검진 탭 ═══════════ */}
+      {tab === "score" && (
+        <div className="npg-2col">
+          {/* 왼쪽: 계정 + 진단 버튼 */}
+          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+            <AccountCard accounts={accounts} onLogin={handleLogin} onAdd={handleAddAccount} onRemove={handleRemoveAccount} onChange={handleAccountChange} />
+            <div className="card" style={{ padding: "18px 20px" }}>
+              <div className="card-title" style={{ marginBottom: 10, fontSize: 15 }}>📈 진단 방법</div>
+              <div style={{ fontSize: 12.5, color: "var(--text2)", lineHeight: 1.7, fontWeight: 500 }}>
+                <b style={{color:"#00c896"}}>① 계정 연결</b> → <b style={{color:"#ff5fa2"}}>② 진단 시작</b> 을 누르면, 내 블로그의 실제 지표를 읽어와 오른쪽에 <b>건강 리포트</b>를 보여줘요.<br /><br />
+                검사 항목: <b>검색 노출 · 최근 7일 방문자 · 유입 검색어 · 총 글 수 · 이웃 수 · 발행 활동</b>
+              </div>
+            </div>
+            <button className="btn btn-primary btn-full" onClick={handleBlogDiagnose} disabled={scLoading || !botOnline || (!isUnlimitedPlan && scUsed >= scLimit)} style={{ padding: "14px", fontSize: 14, borderRadius: 12 }}>
+              {scLoading ? <><span className="spinner" />진단 중...</> : (!isUnlimitedPlan && scUsed >= scLimit) ? "오늘 한도 도달 (자정 초기화)" : "📈 블로그 진단 시작"}
+            </button>
+          </div>
+
+          {/* 오른쪽: 게이지 + 리포트 + 로그 */}
+          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+            <UsageGauge label="📈 오늘 진단" used={scUsed} limit={scLimit} unit="회" color="#00b8d4" />
+            {!scResult ? (
+              <div className="card" style={{ padding: "48px 24px", textAlign: "center", color: "var(--text2)", fontSize: 13.5, lineHeight: 1.7 }}>
+                왼쪽에서 계정을 연결하고 <b style={{color:"#ff5fa2"}}>📈 블로그 진단 시작</b>을 누르면<br />내 블로그의 건강 리포트가 여기에 나타나요.
+              </div>
+            ) : (() => {
+              const now = Date.now();
+              const dates = [...(scResult.recentDates || [])].sort().reverse();
+              const recent30 = dates.filter(d => (now - new Date(d).getTime()) <= 30 * 86400000).length;
+              const lastDaysAgo = dates.length ? Math.floor((now - new Date(dates[0]).getTime()) / 86400000) : 999;
+              // 점수(0~100): 글수·이웃·최근발행·활동성 가중
+              const sPost = Math.min(30, (scResult.totalPosts / 100) * 30);
+              const sNbr = Math.min(25, (scResult.neighbors / 1000) * 25);
+              const sFreq = Math.min(30, (recent30 / 12) * 30);      // 월 12회면 만점
+              const sActive = lastDaysAgo <= 3 ? 15 : lastDaysAgo <= 7 ? 10 : lastDaysAgo <= 14 ? 5 : 0;
+              const score = Math.round(sPost + sNbr + sFreq + sActive);
+              const grade = score >= 80 ? { label: "최적화", emoji: "🏆", color: "#8b5cf6" } : score >= 60 ? { label: "우수", emoji: "⭐", color: "#3b82f6" } : score >= 40 ? { label: "성장중", emoji: "🌿", color: "#00c896" } : score >= 20 ? { label: "초기", emoji: "🌱", color: "#f59e0b" } : { label: "휴면", emoji: "😴", color: "#ef4444" };
+              const tips: string[] = [];
+              if (recent30 < 8) tips.push("발행이 뜸해요. 네이버는 꾸준한 발행을 좋아해요 — 최소 주 2~3회 이상을 권장해요.");
+              if (lastDaysAgo > 7) tips.push(`마지막 글이 ${lastDaysAgo}일 전이에요. 방치되면 노출이 줄어요 — 새 글을 올려보세요.`);
+              if (scResult.neighbors < 300) tips.push("이웃이 적어요. '서이추' 기능으로 이웃을 늘리면 방문·소통이 커져요.");
+              if (scResult.totalPosts < 30) tips.push("글이 아직 적어요. 주제를 정해 꾸준히 쌓으면 블로그 힘이 붙어요.");
+              if (scResult.lowQualitySuspected === true) tips.push("최근 글 대부분이 제목 검색 100위 안에서 누락됐어요. 새 글 발행 전 제목·본문의 반복 키워드와 과도한 상업성 표현을 점검하고 며칠 간격으로 다시 진단해보세요.");
+              if (scResult.visitorDrop?.detected) tips.push(`${scResult.visitorDrop.message}했어요. 유입 검색어 순위 변화와 최근 수정·삭제한 글이 있는지 확인해보세요.`);
+              if (recent30 >= 8 && lastDaysAgo <= 3) tips.push("발행 습관이 아주 좋아요! 지금처럼 꾸준히 유지하세요. 👍");
+              if (tips.length === 0) tips.push("전반적으로 건강해요. 공감·댓글과 답방으로 소통을 더 키워보세요!");
+              const metrics = [
+                { label: "총 글 수", value: scResult.totalPosts.toLocaleString(), icon: "📝", color: "#00c896" },
+                { label: "이웃 수", value: scResult.neighbors.toLocaleString(), icon: "🤝", color: "#00b8d4" },
+                { label: "최근 30일 발행", value: `${recent30}회`, icon: "🔥", color: "#ff5fa2" },
+                { label: "마지막 활동", value: lastDaysAgo >= 999 ? "-" : lastDaysAgo === 0 ? "오늘" : `${lastDaysAgo}일 전`, icon: "⏱️", color: "#f59e0b" },
+              ];
+              const exposureChecks = scResult.exposureChecks || [];
+              const checkedExposure = exposureChecks.filter(item => item.exposed !== null);
+              const exposedCount = checkedExposure.filter(item => item.exposed).length;
+              const visitorDays = scResult.visitorDays || [];
+              const maxVisitors = Math.max(1, ...visitorDays.map(day => day.visitors));
+              return (
+                <div className="card" style={{ padding: "24px 26px" }}>
+                  {/* 종합 등급 */}
+                  <div style={{ display: "flex", alignItems: "center", gap: 18, paddingBottom: 20, marginBottom: 20, borderBottom: "1px solid var(--border)" }}>
+                    <div style={{ position: "relative", width: 92, height: 92, flexShrink: 0 }}>
+                      <svg width="92" height="92" style={{ transform: "rotate(-90deg)" }}>
+                        <circle cx="46" cy="46" r="40" fill="none" stroke="var(--border)" strokeWidth="8" />
+                        <circle cx="46" cy="46" r="40" fill="none" stroke={grade.color} strokeWidth="8" strokeLinecap="round" strokeDasharray={`${(score / 100) * 251} 251`} style={{ transition: "stroke-dasharray .8s ease" }} />
+                      </svg>
+                      <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
+                        <div style={{ fontSize: 26, fontWeight: 900, color: grade.color, lineHeight: 1 }}>{score}</div>
+                        <div style={{ fontSize: 10, color: "var(--text3)", fontWeight: 600 }}>점</div>
+                      </div>
+                    </div>
+                    <div>
+                      <div style={{ fontSize: 13, color: "var(--text3)", fontWeight: 700, marginBottom: 4 }}>내 블로그 <b style={{color:"var(--text2)"}}>{scResult.blogId}</b></div>
+                      <div style={{ fontSize: 24, fontWeight: 900, color: grade.color }}>{grade.emoji} {grade.label}</div>
+                      <div style={{ fontSize: 12, color: "var(--text2)", marginTop: 4, fontWeight: 500 }}>실제 지표로 계산한 퍼블리 건강 점수예요</div>
+                    </div>
+                  </div>
+                  {/* 지표 카드 */}
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 20 }}>
+                    {metrics.map(m => (
+                      <div key={m.label} style={{ padding: "14px 16px", borderRadius: 13, background: "var(--bg)", border: "1px solid var(--border)", borderLeft: `4px solid ${m.color}` }}>
+                        <div style={{ fontSize: 11.5, color: "var(--text2)", fontWeight: 600, marginBottom: 6 }}>{m.icon} {m.label}</div>
+                        <div style={{ fontSize: 22, fontWeight: 900, color: "var(--text)" }}>{m.value}</div>
+                      </div>
+                    ))}
+                  </div>
+                  {/* 검색 노출/저품질 진단 */}
+                  <div style={{ marginBottom: 20, padding: "16px", borderRadius: 14, background: scResult.lowQualitySuspected ? "rgba(239,68,68,.08)" : "var(--bg)", border: `1px solid ${scResult.lowQualitySuspected ? "rgba(239,68,68,.35)" : "var(--border)"}` }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", marginBottom: 11 }}>
+                      <div style={{ fontSize: 14, fontWeight: 850 }}>🔎 검색 노출 진단</div>
+                      <div style={{ fontSize: 13, fontWeight: 850, color: scResult.lowQualitySuspected ? "#ef4444" : checkedExposure.length ? "#00c896" : "var(--text3)" }}>
+                        {scResult.lowQualitySuspected === true ? "🔴 저품질 의심" : checkedExposure.length ? `${exposedCount}/${checkedExposure.length}개 노출` : "확인 불가"}
+                      </div>
+                    </div>
+                    <div style={{ marginBottom: 10, padding: "8px 10px", borderRadius: 9, background: "rgba(0,184,212,.08)", color: "var(--text2)", fontSize: 11.5, fontWeight: 650, lineHeight: 1.5 }}>
+                      오늘 {(scResult.checkedTodayCount || 0).toLocaleString()}개 검사 · 전체 {(scResult.totalPostsForExposure || 0).toLocaleString()}개 중 {(scResult.exposureCompletedCount || 0).toLocaleString()}개 완료
+                      {scResult.exposureLimit == null ? " (무제한 등급 · 전체 검사)" : ` (등급 한도 ${scResult.exposureLimit.toLocaleString()}개/일)`}
+                    </div>
+                    {exposureChecks.length ? <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
+                      {exposureChecks.map((item, i) => <div key={`${item.title}-${i}`} style={{ display: "grid", gridTemplateColumns: "22px minmax(0,1fr) auto", gap: 7, alignItems: "center", fontSize: 12 }}>
+                        <span>{item.exposed === true ? "✅" : item.exposed === false ? "❌" : "➖"}</span>
+                        <span title={item.title} style={{ overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis", color: "var(--text2)" }}>{item.title}</span>
+                        <b style={{ color: item.exposed === false ? "#ef4444" : "var(--text2)" }}>{item.exposed === true ? `약 ${item.rank}위` : item.exposed === false ? "100위 내 누락" : "확인 불가"}</b>
+                      </div>)}
+                    </div> : <div style={{ fontSize: 12, color: "var(--text3)" }}>오늘 검사 한도를 모두 사용했거나 글 제목/API 응답을 읽지 못했어요.</div>}
+                    <div style={{ marginTop: 10, fontSize: 11, color: "var(--text3)", lineHeight: 1.5 }}>네이버 공식 지수가 아닌, 순환 선택한 글의 제목 검색 결과를 바탕으로 한 퍼블리 자체 진단이에요. 누락만으로 저품질을 확정할 수는 없어요.</div>
+                  </div>
+
+                  {/* ✏️ 제목·키워드 살리기 솔루션 (AI 처방) — 누락 글 있을 때만 */}
+                  {exposureChecks.some(c => c.exposed === false) && (
+                    <div style={{ marginBottom: 20, padding: "16px", borderRadius: 14, background: "linear-gradient(135deg,rgba(139,92,246,.1),rgba(255,95,162,.06))", border: "1.5px solid rgba(139,92,246,.3)" }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: scSolutions ? 14 : 0 }}>
+                        <div>
+                          <div style={{ fontSize: 14, fontWeight: 850, color: "#a855f7" }}>✏️ 제목·키워드 살리기 솔루션</div>
+                          <div style={{ fontSize: 11.5, color: "var(--text2)", marginTop: 3, fontWeight: 500 }}>검색에 안 뜨는 글의 제목·키워드를 <b style={{color:"#ff5fa2"}}>AI가 상위노출용으로 고쳐</b>드려요.</div>
+                        </div>
+                        <button onClick={handleGetSolutions} disabled={scSolLoading} style={{ padding: "10px 16px", borderRadius: 10, border: "none", background: scSolLoading ? "var(--card2)" : "linear-gradient(135deg,#8b5cf6,#a855f7)", color: scSolLoading ? "var(--text2)" : "#fff", cursor: scSolLoading ? "default" : "pointer", fontSize: 12.5, fontWeight: 800, fontFamily: "inherit", flexShrink: 0 }}>
+                          {scSolLoading ? "AI 분석 중..." : "✨ 개선안 받기"}
+                        </button>
+                      </div>
+                      {scSolutions && (
+                        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                          {scSolutions.map((s, i) => (
+                            <div key={i} style={{ padding: "13px 15px", borderRadius: 12, background: "var(--card)", border: "1px solid var(--border)" }}>
+                              <div style={{ fontSize: 11, color: "var(--text3)", marginBottom: 5 }}>원래 제목</div>
+                              <div style={{ fontSize: 12.5, color: "var(--text3)", textDecoration: "line-through", marginBottom: 9 }}>{s.original}</div>
+                              <div style={{ fontSize: 11, color: "#00c896", fontWeight: 700, marginBottom: 4 }}>✅ 이렇게 바꿔보세요</div>
+                              <div style={{ fontSize: 14, fontWeight: 800, color: "var(--text)", marginBottom: 10, lineHeight: 1.4 }}>{s.newTitle}</div>
+                              {s.keywords.length > 0 && (
+                                <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 9 }}>
+                                  {s.keywords.map((k, j) => <span key={j} style={{ padding: "4px 10px", borderRadius: 20, background: "rgba(255,95,162,.12)", color: "#ff5fa2", fontSize: 11.5, fontWeight: 700 }}># {k}</span>)}
+                                </div>
+                              )}
+                              {s.reason && <div style={{ fontSize: 11.5, color: "var(--text2)", lineHeight: 1.5, fontWeight: 500 }}>💡 {s.reason}</div>}
+                            </div>
+                          ))}
+                          <div style={{ fontSize: 10.5, color: "var(--text3)", lineHeight: 1.5 }}>AI 제안이에요. 참고해서 실제 글의 제목·본문 키워드를 다듬으면 검색 노출에 도움이 돼요.</div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* 방문자 통계 */}
+                  <div style={{ marginBottom: 20, padding: "16px", borderRadius: 14, background: "var(--bg)", border: "1px solid var(--border)" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+                      <div style={{ fontSize: 14, fontWeight: 850 }}>👥 최근 방문자</div>
+                      {scResult.visitorDrop && <b style={{ fontSize: 12, color: scResult.visitorDrop.detected ? "#ef4444" : "var(--text2)" }}>{scResult.visitorDrop.detected ? "⚠️ " : ""}{scResult.visitorDrop.message}</b>}
+                    </div>
+                    {visitorDays.length ? <div style={{ display: "flex", height: 92, alignItems: "flex-end", gap: 7, marginBottom: 14 }}>
+                      {visitorDays.map(day => <div key={day.date} style={{ flex: 1, minWidth: 0, textAlign: "center" }}>
+                        <div style={{ fontSize: 10, fontWeight: 800, marginBottom: 4 }}>{day.visitors.toLocaleString()}</div>
+                        <div title={`${day.date} ${day.visitors.toLocaleString()}명`} style={{ height: Math.max(4, (day.visitors / maxVisitors) * 55), borderRadius: "5px 5px 2px 2px", background: scResult.visitorDrop?.detected && day === visitorDays[visitorDays.length - 1] ? "#ef4444" : "#00b8d4" }} />
+                        <div style={{ fontSize: 9.5, color: "var(--text3)", marginTop: 4 }}>{day.date.slice(5).replace("-", "/")}</div>
+                      </div>)}
+                    </div> : <div style={{ fontSize: 12, color: "var(--text3)", marginBottom: 12 }}>관리자 통계에서 일별 방문자를 읽지 못했어요.</div>}
+                    <div style={{ fontSize: 12, fontWeight: 800, marginBottom: 7 }}>유입 검색어 TOP</div>
+                    {(scResult.inflowKeywords || []).length ? <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>{(scResult.inflowKeywords || []).map((item, i) => <span key={`${item.keyword}-${i}`} style={{ padding: "5px 9px", borderRadius: 20, background: "rgba(0,184,212,.1)", color: "var(--text2)", fontSize: 11.5, fontWeight: 650 }}>{i + 1}. {item.keyword}{item.count !== undefined ? ` · ${item.count}` : ""}</span>)}</div> : <div style={{ fontSize: 12, color: "var(--text3)" }}>유입 검색어를 읽지 못했거나 데이터가 없어요.</div>}
+                  </div>
+                  {/* 맞춤 조언 */}
+                  <div>
+                    <div style={{ fontSize: 14, fontWeight: 800, color: "var(--text)", marginBottom: 10 }}>💡 맞춤 조언</div>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                      {tips.map((t, i) => (
+                        <div key={i} style={{ display: "flex", gap: 9, alignItems: "flex-start", padding: "11px 14px", borderRadius: 11, background: "rgba(0,200,150,.08)", border: "1px solid rgba(0,200,150,.2)", fontSize: 12.5, color: "var(--text2)", lineHeight: 1.6, fontWeight: 500 }}>
+                          <span style={{ color: "#00c896", flexShrink: 0, fontWeight: 900 }}>✓</span><span>{t}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              );
+            })()}
+            <LogBox logs={scLogs} logRef={scLogRef} onClear={() => setScLogs([])} />
           </div>
         </div>
       )}

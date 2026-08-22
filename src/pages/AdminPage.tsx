@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import GoogleFlowCard from "../GoogleFlowCard";
-import { supabase, getAccounts, upsertAccount, PublyAccount, getHistory, PublyHistory, addHistory, deleteHistory, deleteAllHistory, setAdminPassword, saveAdminNaverApiKeys, getNaverApiKeys, NaverApiKeys, getNaverDailyUsage, NAVER_DAILY_LIMIT, checkNaverQuota, incrementNaverQuota, getUserNaverApiKeys, getReferrals, getErrorLogs, getUnreadErrorCount, markErrorsAsRead, logError, PLAN_CONFIG, getAllNeighborHistory, NeighborHistory, getAllEngageHistory, EngageHistory, InstaDmTarget, InstaDmHistory, InstaDmQuota, getInstaDmTargets, addInstaDmTarget, updateInstaDmTargetStatus, deleteInstaDmTarget, getInstaDmHistory, addInstaDmHistory, getAllInstaDmHistory, getInstaDmQuota, upsertInstaDmQuota, getAllInstaDmQuotas, INSTA_DM_DAILY_LIMIT, PublyBugReport, getBugReports, updateBugReportStatus, deleteBugReport, resetDailyPublish } from "../lib/supabase";
+import { supabase, getAccounts, upsertAccount, PublyAccount, getHistory, PublyHistory, addHistory, deleteHistory, deleteAllHistory, setAdminPassword, saveAdminNaverApiKeys, getNaverApiKeys, NaverApiKeys, getNaverDailyUsage, NAVER_DAILY_LIMIT, checkNaverQuota, incrementNaverQuota, getUserNaverApiKeys, getReferrals, getErrorLogs, getUnreadErrorCount, markErrorsAsRead, logError, PLAN_CONFIG, getAllNeighborHistory, NeighborHistory, getAllEngageHistory, EngageHistory, InstaDmTarget, InstaDmHistory, InstaDmQuota, getInstaDmTargets, addInstaDmTarget, updateInstaDmTargetStatus, deleteInstaDmTarget, getInstaDmHistory, addInstaDmHistory, getAllInstaDmHistory, getInstaDmQuota, upsertInstaDmQuota, getAllInstaDmQuotas, INSTA_DM_DAILY_LIMIT, PublyBugReport, getBugReports, updateBugReportStatus, deleteBugReport, resetDailyPublish, getAllDailyUsageToday, DailyUsageRow, getAllReplyHistory, ReplyHistory, getAllBlogscoreHistory, BlogscoreHistory } from "../lib/supabase";
 import NeighborPage from "./NeighborPage";
 import { botFetch, BotEventStream } from "../lib/botApi";
 
@@ -601,17 +601,20 @@ const TABS = [
   {k:"neighbor",        i:"🤝", l:"서이추"},
   {k:"engage",          i:"❤️", l:"공감·댓글"},
   {k:"insta_dm",        i:"📱", l:"인스타 DM"},
+  {k:"live",            i:"📡", l:"실시간 현황"},
   {k:"users",           i:"👥", l:"회원관리"},
   {k:"bug",             i:"🐞", l:"버그 신고"},
   {k:"stats",           i:"📈", l:"통계"},
-  {k:"insta_dm_manage", i:"📊", l:"DM 회원관리"},
-  {k:"neighbor_manage", i:"📋", l:"서이추 관리"},
+  {k:"insta_dm_manage", i:"📮", l:"DM 회원관리"},
+  {k:"neighbor_manage", i:"🗂️", l:"서이추 관리"},
   {k:"engage_manage",   i:"💬", l:"공감·댓글 관리"},
+  {k:"reply_manage",    i:"↩️", l:"답방 관리"},
+  {k:"blogscore_manage",i:"🩺", l:"지수 관리"},
   {k:"settings",        i:"🔐", l:"설정"},
 ] as const;
 
 export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: Props) {
-  const [tab, setTab] = useState<"keyword"|"write"|"image"|"photo"|"publish"|"manage"|"accounts"|"rank"|"calendar"|"neighbor"|"engage"|"neighbor_manage"|"engage_manage"|"insta_dm"|"insta_dm_manage"|"users"|"bug"|"stats"|"settings">("keyword");
+  const [tab, setTab] = useState<"keyword"|"write"|"image"|"photo"|"publish"|"manage"|"accounts"|"rank"|"calendar"|"neighbor"|"engage"|"neighbor_manage"|"engage_manage"|"reply_manage"|"blogscore_manage"|"insta_dm"|"insta_dm_manage"|"users"|"bug"|"stats"|"live"|"settings">("keyword");
   const [statsSubTab, setStatsSubTab] = useState<"mine"|"all">("mine");
   const [usersSubTab, setUsersSubTab] = useState<"list"|"referral">("list");
   // 버그 신고
@@ -702,6 +705,16 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
   const stopDm = ()=>{ try{esDmRef.current?.close();}catch{} setDmRunning(false); dmLog("⏹️ 중단됨"); };
   const [referralData, setReferralData] = useState<{referrer:any;referred:any[]}[]>([]);
   const [referralLoading, setReferralLoading] = useState(false);
+  // 답방·지수 이력
+  const [replyHistory, setReplyHistory] = useState<(ReplyHistory & {user_name?:string;user_email?:string})[]>([]);
+  const [replyLoading, setReplyLoading] = useState(false);
+  const [blogscoreHistory, setBlogscoreHistory] = useState<(BlogscoreHistory & {user_name?:string;user_email?:string})[]>([]);
+  const [blogscoreLoading, setBlogscoreLoading] = useState(false);
+  // 실시간 사용현황
+  const [liveUsage, setLiveUsage] = useState<DailyUsageRow[]>([]);
+  const [liveLoading, setLiveLoading] = useState(false);
+  const [liveUpdatedAt, setLiveUpdatedAt] = useState<Date|null>(null);
+  const [liveAuto, setLiveAuto] = useState(true);
   const [neighborHistory, setNeighborHistory] = useState<(NeighborHistory & {user_name?:string;user_email?:string})[]>([]);
   const [neighborLoading, setNeighborLoading] = useState(false);
   const [neighborFilter, setNeighborFilter] = useState<"all"|"success"|"fail"|"skip">("all");
@@ -1336,15 +1349,39 @@ Output format (JSON array only, no other text):
     const iv = setInterval(() => { checkBot(); loadUnreadCount(); }, 30000); return () => clearInterval(iv);
   }, [checkBot]);
 
+  // 실시간 사용현황 로드
+  const loadLiveUsage = useCallback(()=>{
+    setLiveLoading(true);
+    getAllDailyUsageToday().then(d=>{ setLiveUsage(d); setLiveUpdatedAt(new Date()); setLiveLoading(false); }).catch(()=>setLiveLoading(false));
+  },[]);
+  // 실시간 현황 탭: 진입 시 즉시 로드 + 자동(30초) 새로고침. 통계 탭도 진입 시 1회 로드(기능별 사용량 표시용)
+  useEffect(()=>{
+    if(tab==="stats"){ loadLiveUsage(); return; }
+    if(tab!=="live") return;
+    loadLiveUsage();
+    if(!liveAuto) return;
+    const t = setInterval(loadLiveUsage, 30000);
+    return ()=>clearInterval(t);
+  },[tab, liveAuto, loadLiveUsage]);
+
   // 설정탭 열 때 관리자 네이버 키 로드
   useEffect(()=>{
-    if(tab==="neighbor_manage" && neighborHistory.length === 0){
-      setNeighborLoading(true);
+    // 탭 열 때마다 최신 이력 로드(예전엔 length===0 조건 때문에 처음 한 번만 불러와 '최신 반영 안 됨' 버그)
+    if(tab==="neighbor_manage"){
+      if(neighborHistory.length === 0) setNeighborLoading(true);
       getAllNeighborHistory().then(d=>{ setNeighborHistory(d); setNeighborLoading(false); });
     }
-    if(tab==="engage_manage" && engageHistory.length === 0){
-      setEngageLoading(true);
+    if(tab==="engage_manage"){
+      if(engageHistory.length === 0) setEngageLoading(true);
       getAllEngageHistory().then(d=>{ setEngageHistory(d); setEngageLoading(false); });
+    }
+    if(tab==="reply_manage"){
+      if(replyHistory.length === 0) setReplyLoading(true);
+      getAllReplyHistory().then(d=>{ setReplyHistory(d); setReplyLoading(false); });
+    }
+    if(tab==="blogscore_manage"){
+      if(blogscoreHistory.length === 0) setBlogscoreLoading(true);
+      getAllBlogscoreHistory().then(d=>{ setBlogscoreHistory(d); setBlogscoreLoading(false); });
     }
     if(tab==="insta_dm" && dmTargets.length === 0){
       setDmLoading(true);
@@ -2302,7 +2339,7 @@ POST3: (제목)|(이유)
                 {num:"STEP 1",ico:"🎯",title:"플랫폼 + 수익화 선택",color:GREEN,desc:<>헤더에서 <b>🟢 네이버</b> 또는 <b>🟠 티스토리</b> 선택. 글쓰기 탭에서 애드포스트/애드센스 선택!</>},
                 {num:"STEP 2",ico:"🔍",title:"키워드 입력 + 제목 선택",color:YELLOW,desc:<>키워드 입력 후 Enter. 제목 30개 자동 추천. 최대 90개까지 추가 가능!</>},
                 {num:"STEP 3",ico:"📏",title:"글자수 설정 (자동 랜덤 권장)",color:PINK,desc:<><b>🎲 자동 랜덤</b>: 네이버 1800~2500자, 체험단/맛집 2000~3000자, 티스토리 2500~4000자. 매번 달라서 AI 감지 방지!</>},
-                {num:"STEP 4",ico:"🤖",title:"글 생성",color:"#8B5CF6",desc:<>인트로·소제목·마무리가 매번 달라져요. 네이버/티스토리 프롬프트도 자동 분리!</>},
+                {num:"STEP 4",ico:"✨",title:"글 생성",color:"#8B5CF6",desc:<>인트로·소제목·마무리가 매번 달라져요. 네이버/티스토리 프롬프트도 자동 분리!</>},
                 {num:"STEP 5",ico:"🚀",title:"이미지 탭으로 이동",color:RED,desc:<>글 완료 후 이미지 탭에서 캡션·영상·패턴 설정 후 발행!</>},
               ].map((s,i) => (
                 <div key={i} className="g-step" style={{borderColor:`${s.color}40`,background:`${s.color}08`}}>
@@ -2742,7 +2779,7 @@ POST3: (제목)|(이유)
                   <div style={{marginBottom:16}}>
                     <label className="inp-label">🖼️ 이미지</label>
                     <div className="toggle-group">
-                      {([{id:"ai",label:"🤖 AI 생성"},{id:"upload",label:"📁 내 이미지"},{id:"none",label:"🚫 없음"}] as const).map(s=>(
+                      {([{id:"ai",label:"✨ AI 생성"},{id:"upload",label:"📁 내 이미지"},{id:"none",label:"🚫 없음"}] as const).map(s=>(
                         <button key={s.id} className={`toggle-btn ${imgSource===s.id?"active":""}`} onClick={()=>setImgSource(s.id)}>{s.label}</button>
                       ))}
                     </div>
@@ -2837,7 +2874,7 @@ POST3: (제목)|(이유)
                   </div>
                   <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
                     <button onClick={()=>setImgGenType("ai")} style={{padding:"14px 12px",borderRadius:14,border:`2px solid ${imgGenType==="ai"?"#6366f1":"var(--border)"}`,background:imgGenType==="ai"?"linear-gradient(135deg,rgba(99,102,241,.18),rgba(99,102,241,.06))":"var(--card)",cursor:"pointer",fontFamily:"inherit",textAlign:"left",transition:"all .2s",boxShadow:imgGenType==="ai"?"0 4px 20px rgba(99,102,241,.25)":"none"}}>
-                      <div style={{fontSize:24,marginBottom:5}}>🤖</div>
+                      <div style={{fontSize:24,marginBottom:5}}>✨</div>
                       <div style={{fontSize:13,fontWeight:900,color:imgGenType==="ai"?"#818cf8":"var(--text)",marginBottom:3}}>AI 이미지</div>
                       <div style={{fontSize:10,color:"var(--text3)",lineHeight:1.5}}>DALL-E · Flux<br/>API 키 필요</div>
                       {imgGenType==="ai"&&<div style={{marginTop:6,fontSize:10,fontWeight:800,color:"#818cf8",background:"rgba(99,102,241,.15)",padding:"2px 7px",borderRadius:99,display:"inline-block"}}>✓ 선택됨</div>}
@@ -2905,7 +2942,7 @@ POST3: (제목)|(이유)
                       <div style={{marginBottom:12}}>
                         <div style={{fontSize:11,fontWeight:700,color:"var(--text3)",marginBottom:6}}>📸 생성할 이미지 수</div>
                         <div style={{display:"flex",gap:6,marginBottom:6}}>
-                          <button onClick={()=>{setFlowImgCountAuto(true);if(genContent)setFlowImgCount(Math.max(1,Math.min(10,Math.floor(genContent.length/500))));}} style={{flex:1,padding:"7px",borderRadius:8,border:`1.5px solid ${flowImgCountAuto?"#a855f7":"var(--border)"}`,background:flowImgCountAuto?"rgba(168,85,247,.15)":"transparent",cursor:"pointer",fontSize:11,fontWeight:700,color:flowImgCountAuto?"#c084fc":"var(--text2)",fontFamily:"inherit"}}>🤖 자동추천</button>
+                          <button onClick={()=>{setFlowImgCountAuto(true);if(genContent)setFlowImgCount(Math.max(1,Math.min(10,Math.floor(genContent.length/500))));}} style={{flex:1,padding:"7px",borderRadius:8,border:`1.5px solid ${flowImgCountAuto?"#a855f7":"var(--border)"}`,background:flowImgCountAuto?"rgba(168,85,247,.15)":"transparent",cursor:"pointer",fontSize:11,fontWeight:700,color:flowImgCountAuto?"#c084fc":"var(--text2)",fontFamily:"inherit"}}>✨ 자동추천</button>
                           <button onClick={()=>setFlowImgCountAuto(false)} style={{flex:1,padding:"7px",borderRadius:8,border:`1.5px solid ${!flowImgCountAuto?"#a855f7":"var(--border)"}`,background:!flowImgCountAuto?"rgba(168,85,247,.15)":"transparent",cursor:"pointer",fontSize:11,fontWeight:700,color:!flowImgCountAuto?"#c084fc":"var(--text2)",fontFamily:"inherit"}}>✏️ 직접입력</button>
                         </div>
                         {flowImgCountAuto ? (
@@ -2964,7 +3001,7 @@ POST3: (제목)|(이유)
                       <div className="card-title" style={{marginBottom:12}}>⚙️ 이미지 설정</div>
                       <label className="inp-label">이미지 소스</label>
                       <div style={{display:"flex",flexDirection:"column",gap:6,marginBottom:16}}>
-                        {([{id:"ai",ico:"🤖",label:"AI 자동 생성"},{id:"upload",ico:"📁",label:"내 이미지 업로드"},{id:"none",ico:"🚫",label:"이미지 없이 발행"}] as const).map(s=>(
+                        {([{id:"ai",ico:"✨",label:"AI 자동 생성"},{id:"upload",ico:"📁",label:"내 이미지 업로드"},{id:"none",ico:"🚫",label:"이미지 없이 발행"}] as const).map(s=>(
                           <button key={s.id} onClick={()=>setImgSource(s.id)} style={{padding:"10px 14px",borderRadius:10,border:`1.5px solid ${imgSource===s.id?"var(--accent-text)":"var(--border)"}`,background:imgSource===s.id?"var(--accent-bg)":"var(--bg)",cursor:"pointer",fontFamily:"inherit",transition:"all .15s",display:"flex",alignItems:"center",gap:9,textAlign:"left"}}>
                             <span style={{fontSize:18}}>{s.ico}</span>
                             <span style={{fontSize:13,fontWeight:600,color:imgSource===s.id?"var(--accent-text)":"var(--text2)"}}>{s.label}</span>
@@ -2977,7 +3014,7 @@ POST3: (제목)|(이유)
                         <>
                           <label className="inp-label">생성 수량</label>
                           <div style={{display:"flex",gap:6,marginBottom:10}}>
-                            <button onClick={()=>{setImgCountAuto(true);if(genContent)setImgCount(recommendImageCount(genContent));}} style={{flex:1,padding:"7px",borderRadius:8,border:`1.5px solid ${imgCountAuto?"var(--accent-text)":"var(--border)"}`,background:imgCountAuto?"var(--accent-bg)":"transparent",cursor:"pointer",fontSize:12,fontWeight:700,color:imgCountAuto?"var(--accent-text)":"var(--text2)",fontFamily:"inherit"}}>🤖 자동추천</button>
+                            <button onClick={()=>{setImgCountAuto(true);if(genContent)setImgCount(recommendImageCount(genContent));}} style={{flex:1,padding:"7px",borderRadius:8,border:`1.5px solid ${imgCountAuto?"var(--accent-text)":"var(--border)"}`,background:imgCountAuto?"var(--accent-bg)":"transparent",cursor:"pointer",fontSize:12,fontWeight:700,color:imgCountAuto?"var(--accent-text)":"var(--text2)",fontFamily:"inherit"}}>✨ 자동추천</button>
                             <button onClick={()=>setImgCountAuto(false)} style={{flex:1,padding:"7px",borderRadius:8,border:`1.5px solid ${!imgCountAuto?"var(--accent-text)":"var(--border)"}`,background:!imgCountAuto?"var(--accent-bg)":"transparent",cursor:"pointer",fontSize:12,fontWeight:700,color:!imgCountAuto?"var(--accent-text)":"var(--text2)",fontFamily:"inherit"}}>✏️ 직접입력</button>
                           </div>
                           {imgCountAuto?(
@@ -3495,7 +3532,7 @@ POST3: (제목)|(이유)
                           <span style={{fontSize:14,fontWeight:700,color:"var(--text)"}}>이미지 삽입</span>
                         </div>
                         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:10}}>
-                          {[{v:"auto",ico:"🤖",label:"자동"},{v:"manual",ico:"📁",label:"수동"}].map(m=>(
+                          {[{v:"auto",ico:"✨",label:"자동"},{v:"manual",ico:"📁",label:"수동"}].map(m=>(
                             <button key={m.v} onClick={()=>setImageMode(m.v as "auto"|"manual")} style={{padding:"10px 12px",borderRadius:10,border:`2px solid ${imageMode===m.v?"var(--accent)":"var(--border)"}`,background:imageMode===m.v?"var(--accent-bg)":"var(--bg)",cursor:"pointer",textAlign:"left",fontFamily:"inherit",transition:"all .15s"}}>
                               <div style={{display:"flex",alignItems:"center",gap:6}}>
                                 <span>{m.ico}</span>
@@ -3513,7 +3550,7 @@ POST3: (제목)|(이유)
                             {autoInserted?(
                               <button onClick={handleRemoveAutoImages} style={{padding:"8px 14px",borderRadius:8,border:"1px solid rgba(255,71,87,.4)",background:"rgba(255,71,87,.08)",color:"var(--danger)",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:"inherit"}}>✕ 제거</button>
                             ):(
-                              <button onClick={handleAutoInsert} disabled={getActiveImages().length===0} style={{padding:"8px 14px",borderRadius:8,border:"none",background:"var(--accent)",color:"#000",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:"inherit",opacity:getActiveImages().length===0?.4:1}}>🤖 자동 삽입</button>
+                              <button onClick={handleAutoInsert} disabled={getActiveImages().length===0} style={{padding:"8px 14px",borderRadius:8,border:"none",background:"var(--accent)",color:"#000",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:"inherit",opacity:getActiveImages().length===0?.4:1}}>✨ 자동 삽입</button>
                             )}
                           </div>
                         )}
@@ -3580,7 +3617,7 @@ POST3: (제목)|(이유)
                             ):(
                               <div style={{borderRadius:12,overflow:"hidden",border:`2px solid ${(block as SingleImageBlock).source==="auto"?"var(--accent-border)":"oklch(.75 .12 300 / 50%)"}`}}>
                                 <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"7px 12px",background:(block as SingleImageBlock).source==="auto"?"var(--accent-bg)":"oklch(.75 .12 300 / 8%)"}}>
-                                  <span style={{fontSize:11,fontWeight:700,color:(block as SingleImageBlock).source==="auto"?"var(--accent-text)":"oklch(.75 .12 300)"}}>{(block as SingleImageBlock).source==="auto"?"🤖 AI 생성":"📁 내 이미지"}</span>
+                                  <span style={{fontSize:11,fontWeight:700,color:(block as SingleImageBlock).source==="auto"?"var(--accent-text)":"oklch(.75 .12 300)"}}>{(block as SingleImageBlock).source==="auto"?"✨ AI 생성":"📁 내 이미지"}</span>
                                   <div style={{display:"flex",gap:6,alignItems:"center"}}>
                                     <select value={(block as SingleImageBlock).position} onChange={e=>updateBlock(block.id,{position:e.target.value as "left"|"center"|"right"})} style={{fontSize:11,padding:"2px 6px",borderRadius:5,border:"1px solid var(--border)",background:"var(--bg)",color:"var(--text)"}}>
                                       <option value="left">왼쪽</option><option value="center">가운데</option><option value="right">오른쪽</option>
@@ -4113,6 +4150,79 @@ POST3: (제목)|(이유)
             )}
 
             {/* ───── 📊 통계 ───── */}
+            {tab === "live" && (()=>{
+              const nameOf = (uid:string)=>{ const u = users.find(u=>u.id===uid); return u ? (u.name||u.email||uid.slice(0,8)) : uid.slice(0,8); };
+              const planOf = (uid:string)=>{ const u = users.find(u=>u.id===uid); return u?.plan || "-"; };
+              const sum = liveUsage.reduce((a,r)=>({publish:a.publish+r.publish,neighbor:a.neighbor+r.neighbor,engage:a.engage+r.engage,reply:a.reply+r.reply,blogscore:a.blogscore+r.blogscore}),{publish:0,neighbor:0,engage:0,reply:0,blogscore:0});
+              const cards = [
+                {label:"✍️ 발행", value:sum.publish, color:"var(--accent-text)"},
+                {label:"🤝 서이추", value:sum.neighbor, color:"#00b8d4"},
+                {label:"❤️ 공감·댓글", value:sum.engage, color:"#e5397f"},
+                {label:"💬 답방", value:sum.reply, color:"#8b5cf6"},
+                {label:"📈 지수 진단", value:sum.blogscore, color:"#00c896"},
+              ];
+              const active = liveUsage.filter(r=>r.total>0);
+              return (
+              <div style={{animation:"fadeUp .25s ease both"}}>
+                <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:10,marginBottom:16}}>
+                  <div>
+                    <div style={{fontSize:19,fontWeight:900,color:"var(--text)"}}>📡 실시간 사용현황 <span style={{fontSize:12,fontWeight:600,color:"var(--text3)"}}>(오늘 · 자정 초기화)</span></div>
+                    <div style={{fontSize:12,color:"var(--text3)",marginTop:4}}>회원들이 지금 각 기능을 얼마나 쓰고 있는지 실시간으로 봐요. {liveUpdatedAt && `· 마지막 갱신 ${liveUpdatedAt.toLocaleTimeString("ko-KR",{hour12:false})}`}</div>
+                  </div>
+                  <div style={{display:"flex",gap:8,alignItems:"center"}}>
+                    <button onClick={()=>setLiveAuto(v=>!v)} style={{padding:"8px 14px",borderRadius:9,border:`1.5px solid ${liveAuto?"var(--success)":"var(--border)"}`,background:liveAuto?"rgba(0,214,143,.1)":"transparent",color:liveAuto?"var(--success)":"var(--text2)",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:"inherit"}}>{liveAuto?"🟢 자동 갱신 켜짐":"⚪ 자동 갱신 꺼짐"}</button>
+                    <button onClick={loadLiveUsage} disabled={liveLoading} style={{padding:"8px 16px",borderRadius:9,border:"none",background:"var(--accent)",color:"#000",cursor:"pointer",fontSize:12,fontWeight:800,fontFamily:"inherit"}}>{liveLoading?"불러오는 중...":"🔄 새로고침"}</button>
+                  </div>
+                </div>
+
+                {/* 오늘 전체 합계 카드 */}
+                <div className="stats-grid" style={{marginBottom:16}}>
+                  {cards.map((c,i)=>(
+                    <div key={i} className="stats-card">
+                      <div className="stats-num" style={{color:c.color}}>{c.value.toLocaleString()}</div>
+                      <div className="stats-label">{c.label}</div>
+                      <div className="stats-sub">오늘 전체 합계</div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* 회원별 사용량 표 */}
+                <div className="card">
+                  <div className="card-title" style={{marginBottom:12}}>👤 지금 활동 중인 회원 <span style={{fontSize:12,fontWeight:600,color:"var(--text3)"}}>({active.length}명)</span></div>
+                  {liveLoading && liveUsage.length===0 ? (
+                    <div style={{padding:"40px",textAlign:"center",color:"var(--text3)"}}>불러오는 중...</div>
+                  ) : active.length===0 ? (
+                    <div style={{padding:"40px",textAlign:"center",color:"var(--text3)",fontSize:13}}>오늘 아직 활동한 회원이 없어요.</div>
+                  ) : (
+                    <div style={{overflowX:"auto"}}>
+                      <table style={{width:"100%",borderCollapse:"collapse",fontSize:13,minWidth:560}}>
+                        <thead><tr style={{borderBottom:"2px solid var(--border)"}}>
+                          {["회원","등급","✍️발행","🤝서이추","❤️공감","💬답방","📈진단","합계"].map((h,i)=>(
+                            <th key={h} style={{padding:"9px 10px",textAlign:i<2?"left":"right",fontWeight:700,color:"var(--text3)",whiteSpace:"nowrap"}}>{h}</th>
+                          ))}
+                        </tr></thead>
+                        <tbody>
+                          {active.map(r=>(
+                            <tr key={r.userId} style={{borderBottom:"1px solid var(--border)"}}>
+                              <td style={{padding:"9px 10px",fontWeight:600,color:"var(--text)",whiteSpace:"nowrap"}}>{nameOf(r.userId)}</td>
+                              <td style={{padding:"9px 10px"}}><span className={`plan-chip plan-${planOf(r.userId)}`}>{PLAN_LABELS[planOf(r.userId)]||planOf(r.userId)}</span></td>
+                              <td style={{padding:"9px 10px",textAlign:"right",color:r.publish?"var(--text)":"var(--text3)"}}>{r.publish||"-"}</td>
+                              <td style={{padding:"9px 10px",textAlign:"right",color:r.neighbor?"var(--text)":"var(--text3)"}}>{r.neighbor||"-"}</td>
+                              <td style={{padding:"9px 10px",textAlign:"right",color:r.engage?"var(--text)":"var(--text3)"}}>{r.engage||"-"}</td>
+                              <td style={{padding:"9px 10px",textAlign:"right",color:r.reply?"var(--text)":"var(--text3)"}}>{r.reply||"-"}</td>
+                              <td style={{padding:"9px 10px",textAlign:"right",color:r.blogscore?"var(--text)":"var(--text3)"}}>{r.blogscore||"-"}</td>
+                              <td style={{padding:"9px 10px",textAlign:"right",fontWeight:800,color:"var(--accent-text)"}}>{r.total}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              </div>
+              );
+            })()}
+
             {tab === "stats" && (
               <div style={{animation:"fadeUp .25s ease both"}}>
 
@@ -4227,8 +4337,94 @@ POST3: (제목)|(이유)
                         </div>
                       ))}
                     </div>
+
+                    {/* 오늘 기능별 사용 통계 (실시간 현황 데이터 재활용) */}
+                    {(()=>{
+                      const s = liveUsage.reduce((a,r)=>({publish:a.publish+r.publish,neighbor:a.neighbor+r.neighbor,engage:a.engage+r.engage,reply:a.reply+r.reply,blogscore:a.blogscore+r.blogscore}),{publish:0,neighbor:0,engage:0,reply:0,blogscore:0});
+                      const feats = [
+                        {label:"✍️ 발행", value:s.publish, color:"var(--accent-text)"},
+                        {label:"🤝 서이추", value:s.neighbor, color:"#00b8d4"},
+                        {label:"❤️ 공감·댓글", value:s.engage, color:"#e5397f"},
+                        {label:"💬 답방", value:s.reply, color:"#8b5cf6"},
+                        {label:"📈 지수 진단", value:s.blogscore, color:"#00c896"},
+                      ];
+                      const maxV = Math.max(1,...feats.map(f=>f.value));
+                      return (
+                        <div className="card">
+                          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:12,flexWrap:"wrap",gap:8}}>
+                            <div className="card-title" style={{margin:0}}>⚡ 오늘 기능별 사용량 <span style={{fontSize:11,fontWeight:600,color:"var(--text3)"}}>(자정 초기화)</span></div>
+                            <button onClick={loadLiveUsage} style={{padding:"6px 12px",borderRadius:8,border:"1px solid var(--border)",background:"var(--bg)",color:"var(--text2)",cursor:"pointer",fontSize:11.5,fontWeight:700,fontFamily:"inherit"}}>🔄 새로고침</button>
+                          </div>
+                          {feats.map((f,i)=>(
+                            <div key={i} style={{marginBottom:12}}>
+                              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:5}}>
+                                <span style={{fontSize:13,fontWeight:700,color:"var(--text2)"}}>{f.label}</span>
+                                <span style={{fontSize:13,fontWeight:800,color:f.color}}>{f.value.toLocaleString()}건</span>
+                              </div>
+                              <div style={{height:8,background:"var(--border)",borderRadius:99,overflow:"hidden"}}>
+                                <div style={{height:"100%",width:`${(f.value/maxV)*100}%`,background:f.color,borderRadius:99,transition:"width .6s"}}/>
+                              </div>
+                            </div>
+                          ))}
+                          <div style={{fontSize:11,color:"var(--text3)",marginTop:4,lineHeight:1.5}}>💡 오늘 하루 전체 회원이 각 기능을 사용한 합계예요. 더 자세한 실시간 회원별 현황은 <b style={{color:"var(--accent-text)"}}>📡 실시간 현황</b> 탭에서 볼 수 있어요.</div>
+                        </div>
+                      );
+                    })()}
                   </div>
                 )}
+              </div>
+            )}
+
+            {/* ───── ↩️ 답방 관리 ───── */}
+            {tab === "reply_manage" && (
+              <div style={{animation:"fadeUp .25s ease both"}}>
+                <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:10,marginBottom:16}}>
+                  <div>
+                    <div style={{fontSize:19,fontWeight:900,color:"var(--text)"}}>↩️ 답방 관리</div>
+                    <div style={{fontSize:12,color:"var(--text3)",marginTop:4}}>회원들이 내 블로그 댓글에 남긴 답글(대댓글) 이력이에요. {replyHistory.length>0&&`· 총 ${replyHistory.length}건`}</div>
+                  </div>
+                  <button onClick={()=>{setReplyLoading(true);getAllReplyHistory().then(d=>{setReplyHistory(d);setReplyLoading(false);});}} disabled={replyLoading} style={{padding:"8px 16px",borderRadius:9,border:"none",background:"var(--accent)",color:"#000",cursor:"pointer",fontSize:12,fontWeight:800,fontFamily:"inherit"}}>{replyLoading?"불러오는 중...":"🔄 새로고침"}</button>
+                </div>
+                <div className="card">
+                  {replyLoading&&replyHistory.length===0 ? <div style={{padding:"40px",textAlign:"center",color:"var(--text3)"}}>불러오는 중...</div>
+                  : replyHistory.length===0 ? <div style={{padding:"40px",textAlign:"center",color:"var(--text3)",fontSize:13}}>아직 답방 이력이 없어요.</div>
+                  : <div style={{overflowX:"auto"}}><table style={{width:"100%",borderCollapse:"collapse",fontSize:13,minWidth:560}}>
+                      <thead><tr style={{borderBottom:"2px solid var(--border)"}}>{["회원","글 제목","결과","메시지","시각"].map(h=><th key={h} style={{padding:"9px 10px",textAlign:"left",fontWeight:700,color:"var(--text3)",whiteSpace:"nowrap"}}>{h}</th>)}</tr></thead>
+                      <tbody>{replyHistory.map(r=>(<tr key={r.id} style={{borderBottom:"1px solid var(--border)"}}>
+                        <td style={{padding:"9px 10px",fontWeight:600,whiteSpace:"nowrap"}}>{r.user_name||r.user_email||r.user_id.slice(0,8)}</td>
+                        <td style={{padding:"9px 10px",maxWidth:220,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}} title={r.post_title}>{r.post_title||"-"}</td>
+                        <td style={{padding:"9px 10px"}}><span style={{fontSize:11.5,fontWeight:700,color:r.status==="success"?"var(--success)":r.status==="fail"?"var(--danger)":"var(--text3)"}}>{r.status==="success"?"✅ 성공":r.status==="fail"?"❌ 실패":"⏭️ 스킵"}</span></td>
+                        <td style={{padding:"9px 10px",color:"var(--text2)",maxWidth:200,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}} title={r.message}>{r.message||"-"}</td>
+                        <td style={{padding:"9px 10px",color:"var(--text3)",whiteSpace:"nowrap"}}>{new Date(r.created_at).toLocaleString("ko-KR",{month:"numeric",day:"numeric",hour:"2-digit",minute:"2-digit"})}</td>
+                      </tr>))}</tbody></table></div>}
+                </div>
+              </div>
+            )}
+
+            {/* ───── 📈 지수 관리 ───── */}
+            {tab === "blogscore_manage" && (
+              <div style={{animation:"fadeUp .25s ease both"}}>
+                <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:10,marginBottom:16}}>
+                  <div>
+                    <div style={{fontSize:19,fontWeight:900,color:"var(--text)"}}>📈 지수 관리</div>
+                    <div style={{fontSize:12,color:"var(--text3)",marginTop:4}}>회원들의 블로그 건강검진 진단 이력이에요. 저품질 의심 회원을 한눈에 볼 수 있어요. {blogscoreHistory.length>0&&`· 총 ${blogscoreHistory.length}건`}</div>
+                  </div>
+                  <button onClick={()=>{setBlogscoreLoading(true);getAllBlogscoreHistory().then(d=>{setBlogscoreHistory(d);setBlogscoreLoading(false);});}} disabled={blogscoreLoading} style={{padding:"8px 16px",borderRadius:9,border:"none",background:"var(--accent)",color:"#000",cursor:"pointer",fontSize:12,fontWeight:800,fontFamily:"inherit"}}>{blogscoreLoading?"불러오는 중...":"🔄 새로고침"}</button>
+                </div>
+                <div className="card">
+                  {blogscoreLoading&&blogscoreHistory.length===0 ? <div style={{padding:"40px",textAlign:"center",color:"var(--text3)"}}>불러오는 중...</div>
+                  : blogscoreHistory.length===0 ? <div style={{padding:"40px",textAlign:"center",color:"var(--text3)",fontSize:13}}>아직 진단 이력이 없어요.</div>
+                  : <div style={{overflowX:"auto"}}><table style={{width:"100%",borderCollapse:"collapse",fontSize:13,minWidth:560}}>
+                      <thead><tr style={{borderBottom:"2px solid var(--border)"}}>{["회원","블로그","총 글","이웃","저품질","진단 시각"].map(h=><th key={h} style={{padding:"9px 10px",textAlign:"left",fontWeight:700,color:"var(--text3)",whiteSpace:"nowrap"}}>{h}</th>)}</tr></thead>
+                      <tbody>{blogscoreHistory.map(r=>(<tr key={r.id} style={{borderBottom:"1px solid var(--border)"}}>
+                        <td style={{padding:"9px 10px",fontWeight:600,whiteSpace:"nowrap"}}>{r.user_name||r.user_email||r.user_id.slice(0,8)}</td>
+                        <td style={{padding:"9px 10px",color:"var(--text2)",whiteSpace:"nowrap"}}>{r.blog_id||"-"}</td>
+                        <td style={{padding:"9px 10px"}}>{r.total_posts?.toLocaleString()||"-"}</td>
+                        <td style={{padding:"9px 10px"}}>{r.neighbors?.toLocaleString()||"-"}</td>
+                        <td style={{padding:"9px 10px"}}>{r.low_quality_suspected===true?<span style={{fontSize:11.5,fontWeight:800,color:"var(--danger)"}}>🔴 의심</span>:r.low_quality_suspected===false?<span style={{fontSize:11.5,color:"var(--success)"}}>정상</span>:<span style={{color:"var(--text3)"}}>-</span>}</td>
+                        <td style={{padding:"9px 10px",color:"var(--text3)",whiteSpace:"nowrap"}}>{new Date(r.created_at).toLocaleString("ko-KR",{month:"numeric",day:"numeric",hour:"2-digit",minute:"2-digit"})}</td>
+                      </tr>))}</tbody></table></div>}
+                </div>
               </div>
             )}
 
@@ -4603,7 +4799,7 @@ POST3: (제목)|(이유)
                       </div>
                     </div>
                     <button onClick={crawlIg} disabled={dmRunning} style={{padding:"11px 20px",borderRadius:10,border:"none",background:dmRunning?"var(--border)":"linear-gradient(135deg,#FF6B9D,#C77DFF)",color:"#fff",cursor:dmRunning?"default":"pointer",fontSize:13,fontWeight:800,fontFamily:"inherit",display:"flex",alignItems:"center",gap:8,boxShadow:"0 4px 16px rgba(255,107,157,.3)"}}>
-                      {dmRunning?"수집 중...":<>🤖 크롤링 시작</>}
+                      {dmRunning?"수집 중...":<>✨ 크롤링 시작</>}
                     </button>
                   </div>
 
@@ -5057,7 +5253,7 @@ POST3: (제목)|(이유)
                 </div>
 
                 <div className="card">
-                  <div className="card-title">🤖 글쓰기 AI</div>
+                  <div className="card-title">✨ 글쓰기 AI</div>
                   <div className="ai-grid">
                     {ADM_WRITE_AI.map(item=>(
                       <button key={item.id} className={`ai-card ${writeAI===item.id?"selected":""}`}
