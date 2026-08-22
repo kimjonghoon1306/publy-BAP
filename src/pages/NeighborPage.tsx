@@ -216,7 +216,8 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
   // ── 답방(내 블로그 댓글에 대댓글) 상태 ──
   const [rTargetPosts, setRTargetPosts] = useState(10);   // '최근 개수' 방식일 때 글 수
   const [rSelectMode, setRSelectMode] = useState<"count"|"all"|"period">("count"); // 대상 글 선택 방식
-  const [rPeriod, setRPeriod] = useState<7|14|30>(7);      // '기간' 방식일 때 최근 N일
+  const [rPeriod, setRPeriod] = useState<7|14|30|"custom">(7);   // '기간' 방식일 때 최근 N일
+  const [rCustomDays, setRCustomDays] = useState(3);            // 직접 기간설정(일)
   const [rMyPosts, setRMyPosts] = useState<{url:string;title:string;date:string;comments?:number}[]>([]); // 불러온 내 글 목록
   const [rLoadingPosts, setRLoadingPosts] = useState(false);
   const [rMode, setRMode] = useState<"ai"|"fixed">("ai");
@@ -253,6 +254,13 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
   // ── 저품질/누락 글 제목·키워드 개선 솔루션(AI) ──
   const [scSolLoading, setScSolLoading] = useState(false);
   const [scSolutions, setScSolutions] = useState<null | { original: string; newTitle: string; keywords: string[]; reason: string }[]>(null);
+  const [scPostMode, setScPostMode] = useState<"period"|"all">("period");
+  const [scPeriod, setScPeriod] = useState<7|14|30|"custom">(7);
+  const [scCustomDays, setScCustomDays] = useState(7);
+  const [scPosts, setScPosts] = useState<{url:string;title:string;date:string}[]>([]);
+  const [scSelectedLogNos, setScSelectedLogNos] = useState<string[]>([]);
+  const [scPostsLoading, setScPostsLoading] = useState(false);
+  const [scExposureLoading, setScExposureLoading] = useState(false);
   // ── 등급별 일일 사용량 (답방·블로그진단) ──
   const isUnlimitedPlan = plan === "unlimited" || plan === "admin";
   const [replyUsed, setReplyUsed] = useState(0);
@@ -372,9 +380,8 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
       .then(d => { if (d.ok) { setQuotaUsed(d.used); setQuotaLimit(d.limit); } }).catch(() => {});
   }, [userId, botOnline]);
 
-  /* 로그 스크롤 */
-  useEffect(() => { if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight; }, [logs]);
-  useEffect(() => { if (eLogRef.current) eLogRef.current.scrollTop = eLogRef.current.scrollHeight; }, [eLogs]);
+  /* 로그 스크롤: 자동 이동 없음(테리 요청). 새 로그가 와도 화면을 강제로 옮기지 않고,
+     사용자가 스크롤한 위치에 그대로 멈춰 있게 둔다. 아래를 보려면 직접 내리면 됨. */
   // 계정 목록 자동 저장 (id/pw/연결상태 유지 → 매번 재입력 불필요)
   useEffect(() => {
     try { localStorage.setItem("publy_neighbor_accounts", JSON.stringify(accounts.map(a => ({ accountId: a.accountId, id: a.id, pw: a.pw, blogId: a.blogId, sessionOk: a.sessionOk })))); } catch {}
@@ -625,7 +632,7 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
     addELog(`🚀 작업 시작 — ${list.length}개 / 최근 ${days}일 / ${eDoLike ? "공감" : ""}${eDoLike && eDoComment ? "+" : ""}${eDoComment ? "댓글" : ""}`);
     const commentText = eCommentMode === "single" ? eComment : eCommentMode === "multi" ? eMultiComments.split("\n").filter(l => l.trim()).join("|||") : "";
     const aiComment = eCommentMode === "ai";
-    const geminiKey = aiComment ? (localStorage.getItem("publy_gemini_key") || "") : "";
+    const geminiKey = aiComment ? ((localStorage.getItem("publy_gemini_key") || "")) : "";
     // ★ targets를 POST body로 (URL 길이 초과 방지)
     const body = JSON.stringify({ accountId: acc.accountId, targets: list, comment: commentText, doLike: eDoLike, doComment: eDoComment, likeRate: eLikeRate, commentRate: eCommentRate, periodDays: days, postsPerBlog: ePostsPerBlog, delayMin: eDelayMin, delayMax: eDelayMax, dailyLimit: eDailyLimit, skipDone: eSkipDone, aiComment, commentTone: eCommentTone, geminiKey, jobId: eJobIdRef.current, ...(userId ? { userId } : {}) });
     const es = new BotEventStream(`${BOT}/api/engage`, { method: "POST", headers: { "Content-Type": "application/json" }, body }); eEsRef.current = es;
@@ -653,7 +660,8 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
     const acc = accounts.find(a => a.sessionOk);
     if (!acc) return alert("먼저 내 블로그 계정을 연결하세요");
     setRLoadingPosts(true); setRMyPosts([]); addRLog("📥 내 블로그 글 불러오는 중...");
-    const q = new URLSearchParams({ accountId: acc.accountId, selectMode: rSelectMode, count: String(rTargetPosts), period: String(rPeriod), ...(userId ? { userId } : {}) });
+    const periodDays = rPeriod === "custom" ? rCustomDays : rPeriod;   // 직접설정이면 입력 일수 사용
+    const q = new URLSearchParams({ accountId: acc.accountId, selectMode: rSelectMode, count: String(rTargetPosts), period: String(periodDays), ...(userId ? { userId } : {}) });
     const es = new BotEventStream(`${BOT}/api/my-posts?${q.toString()}`);
     es.onmessage = e => {
       const d = JSON.parse(e.data);
@@ -670,12 +678,12 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
     if (!acc) return alert("먼저 답방할 내 블로그 계정을 연결하세요");
     if (!rMyPosts.length) return alert("먼저 '📥 내 글 불러오기'로 대상 글을 불러오세요");
     if (!isUnlimitedPlan && replyUsed >= replyLimit) return alert(`오늘 답방 한도(${replyLimit}건)를 모두 사용했어요. 자정에 초기화됩니다.`);
-    if (rMode === "ai" && !localStorage.getItem("publy_gemini_key")) {
+    if (rMode === "ai" && !(localStorage.getItem("publy_gemini_key") || "")) {
       if (!confirm("AI 답글은 Gemini(무료) 키가 필요해요. 키가 없으면 답글이 건너뛰어집니다. 그래도 시작할까요?")) return;
     }
     setRDoneCnt(0); setRFailCnt(0); setRWorking(true);
     rJobIdRef.current = Date.now().toString();
-    const geminiKey = rMode === "ai" ? (localStorage.getItem("publy_gemini_key") || "") : "";
+    const geminiKey = rMode === "ai" ? ((localStorage.getItem("publy_gemini_key") || "")) : "";
     addRLog(`🚀 답방 시작 — 글 ${rMyPosts.length}개 / ${rMode === "ai" ? `AI 답글(${rTone})` : "고정 답글"}${rOnlyNew ? " / 미답변만" : ""}`);
     const body = JSON.stringify({ accountId: acc.accountId, posts: rMyPosts.map(p => p.url), mode: rMode, comment: rComment, tone: rTone, onlyNew: rOnlyNew, delayMin: rDelayMin, delayMax: rDelayMax, geminiKey, jobId: rJobIdRef.current, ...(userId ? { userId } : {}) });
     const es = new BotEventStream(`${BOT}/api/reply`, { method: "POST", headers: { "Content-Type": "application/json" }, body }); rEsRef.current = es;
@@ -717,9 +725,52 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
     es.onerror = () => { addScLog("❌ 연결 오류 (다시 시도해주세요)"); setScLoading(false); es.close(); };
   };
 
+  const scLogNo = (url: string) => url.match(/(?:logNo=|\/)(\d{6,})(?:[/?&]|$)/)?.[1] || "";
+
+  /* 블로그 지수 1단계: 기간에 맞는 내 글 불러오기 */
+  const handleLoadScorePosts = () => {
+    const acc = accounts.find(a => a.sessionOk);
+    if (!acc) return alert("먼저 검사할 내 블로그 계정을 연결하세요");
+    setScPostsLoading(true); setScPosts([]); setScSelectedLogNos([]); setScSolutions(null);
+    const periodDays = scPeriod === "custom" ? scCustomDays : scPeriod;
+    const q = new URLSearchParams({ accountId: acc.accountId, selectMode: scPostMode, count: "100", period: String(periodDays) });
+    addScLog(`📥 검색노출 검사 글 불러오는 중 (${scPostMode === "all" ? "전체" : `최근 ${periodDays}일`})...`);
+    const es = new BotEventStream(`${BOT}/api/my-posts?${q.toString()}`);
+    es.onmessage = e => {
+      const d = JSON.parse(e.data);
+      if (d.type === "log") addScLog(d.msg);
+      if (d.type === "posts") {
+        const posts = (d.posts || []) as {url:string;title:string;date:string}[];
+        const ids = posts.map(post => scLogNo(post.url)).filter(Boolean);
+        setScPosts(posts); setScSelectedLogNos(ids); setScPostsLoading(false);
+        addScLog(`✅ 검사 후보 ${posts.length}개를 불러왔어요`); es.close();
+      }
+      if (d.type === "error") { addScLog(`❌ ${d.msg}`); setScPostsLoading(false); es.close(); }
+    };
+    es.onerror = () => { addScLog("❌ 글 목록 연결 오류"); setScPostsLoading(false); es.close(); };
+  };
+
+  /* 블로그 지수 2단계: 체크한 글만 검색 노출 검사 */
+  const handleCheckSelectedExposure = async () => {
+    const acc = accounts.find(a => a.sessionOk);
+    if (!acc) return alert("먼저 검사할 내 블로그 계정을 연결하세요");
+    if (!scResult) return alert("먼저 '블로그 진단 시작'으로 기본 건강 리포트를 만들어주세요");
+    if (!scSelectedLogNos.length) return alert("검색노출을 확인할 글을 하나 이상 선택하세요");
+    setScExposureLoading(true); setScSolutions(null);
+    addScLog(`🔎 선택한 글 ${scSelectedLogNos.length}개의 검색노출을 확인하는 중...`);
+    try {
+      const response = await botFetch(`${BOT}/api/exposure-check`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ accountId: acc.accountId, plan, logNos: scSelectedLogNos }) });
+      const data = await response.json();
+      if (!response.ok || !data.ok) throw new Error(data.error || `HTTP ${response.status}`);
+      setScResult(prev => prev ? { ...prev, exposureChecks: data.checks || [], lowQualitySuspected: data.lowQualitySuspected, checkedTodayCount: data.checkedTodayCount, exposureCompletedCount: data.completedCount, totalPostsForExposure: data.totalPostsForExposure, exposureLimit: data.limit } : prev);
+      addScLog(`✅ 검색노출 ${data.checks?.length || 0}개 검사 완료`);
+    } catch (e: any) { addScLog(`❌ 검색노출 검사 실패: ${e.message}`); }
+    finally { setScExposureLoading(false); }
+  };
+
   /* 저품질/누락 글 제목·키워드 개선 솔루션 (AI) */
   const handleGetSolutions = async () => {
-    const key = localStorage.getItem("publy_gemini_key") || "";
+    const key = (localStorage.getItem("publy_gemini_key") || "");
     if (!key) return alert("제목·키워드 개선 솔루션은 무료 Gemini 키가 필요해요.\n설정 → 글쓰기 AI에서 Gemini 키를 먼저 등록해주세요.");
     // 검색에 누락된(exposed===false) 글 제목만 대상 — 최대 5개
     const missing = (scResult?.exposureChecks || []).filter(c => c.exposed === false).map(c => c.title).slice(0, 5);
@@ -1460,11 +1511,19 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
                   <input className="inp" type="number" min={1} max={100} {...numProps(rTargetPosts, setRTargetPosts, 1, 100, 10)} style={{ fontSize: 13, padding: "11px 14px" }} placeholder="최근 몇 개" />
                 )}
                 {rSelectMode === "period" && (
-                  <div style={{ display: "flex", gap: 6 }}>
-                    {([7,14,30] as const).map(p => (
-                      <button key={p} onClick={() => setRPeriod(p)} style={{ flex: 1, padding: "10px", borderRadius: 9, border: `2px solid ${rPeriod===p?"var(--accent)":"var(--border)"}`, background: rPeriod===p?"var(--accent-bg)":"transparent", color: rPeriod===p?"var(--accent-text)":"var(--text2)", cursor: "pointer", fontSize: 12.5, fontWeight: 700, fontFamily: "inherit" }}>최근 {p}일</button>
-                    ))}
-                  </div>
+                  <>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
+                      {([7,14,30,"custom"] as const).map(p => (
+                        <button key={p} onClick={() => setRPeriod(p)} style={{ padding: "10px", borderRadius: 9, border: `2px solid ${rPeriod===p?"var(--accent)":"var(--border)"}`, background: rPeriod===p?"var(--accent-bg)":"transparent", color: rPeriod===p?"var(--accent-text)":"var(--text2)", cursor: "pointer", fontSize: 12.5, fontWeight: 700, fontFamily: "inherit" }}>{p==="custom"?"직접 설정":`최근 ${p}일`}</button>
+                      ))}
+                    </div>
+                    {rPeriod === "custom" && (
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8 }}>
+                        <input className="inp" type="number" min={1} max={365} {...numProps(rCustomDays, setRCustomDays, 1, 365, 7)} style={{ flex: 1, fontSize: 13, padding: "11px 14px" }} />
+                        <span style={{ fontSize: 13, color: "var(--text3)" }}>일 이내 글</span>
+                      </div>
+                    )}
+                  </>
                 )}
                 {rSelectMode === "all" && (
                   <div style={{ fontSize: 12.5, color: "var(--text2)", padding: "9px 12px", borderRadius: 9, background: "var(--bg)", border: "1px solid var(--border)" }}>내 블로그의 <b style={{color:"#ff5fa2"}}>모든 글</b>을 대상으로 불러와요.</div>
@@ -1577,18 +1636,46 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
             <div className="card" style={{ padding: "18px 20px" }}>
               <div className="card-title" style={{ marginBottom: 10, fontSize: 15 }}>📈 진단 방법</div>
               <div style={{ fontSize: 12.5, color: "var(--text2)", lineHeight: 1.7, fontWeight: 500 }}>
-                <b style={{color:"#00c896"}}>① 계정 연결</b> → <b style={{color:"#ff5fa2"}}>② 진단 시작</b> 을 누르면, 내 블로그의 실제 지표를 읽어와 오른쪽에 <b>건강 리포트</b>를 보여줘요.<br /><br />
-                검사 항목: <b>검색 노출 · 최근 7일 방문자 · 유입 검색어 · 총 글 수 · 이웃 수 · 발행 활동</b>
+                <b style={{color:"#00c896"}}>① 진단 시작</b>으로 점수·방문자·이웃 지표를 확인하고, <b style={{color:"#ff5fa2"}}>② 글 불러오기 → 선택 글 검사</b>로 검색 노출을 따로 확인해요.<br /><br />
+                건강진단과 검색노출 검사는 분리되어 있어 원하는 글만 검사할 수 있어요.
               </div>
             </div>
             <button className="btn btn-primary btn-full" onClick={handleBlogDiagnose} disabled={scLoading || !botOnline || (!isUnlimitedPlan && scUsed >= scLimit)} style={{ padding: "14px", fontSize: 14, borderRadius: 12 }}>
               {scLoading ? <><span className="spinner" />진단 중...</> : (!isUnlimitedPlan && scUsed >= scLimit) ? "오늘 한도 도달 (자정 초기화)" : "📈 블로그 진단 시작"}
             </button>
+            <div className="card" style={{ padding: "18px 20px" }}>
+              <div className="card-title" style={{ marginBottom: 12, fontSize: 15 }}>🔎 검색노출 글 선택</div>
+              <div style={{ display: "flex", gap: 6, marginBottom: 10 }}>
+                <button onClick={() => setScPostMode("period")} style={{ flex: 1, padding: 9, borderRadius: 9, border: `2px solid ${scPostMode==="period"?"var(--accent)":"var(--border)"}`, background: scPostMode==="period"?"var(--accent-bg)":"transparent", color: "var(--text2)", fontWeight: 700, cursor: "pointer" }}>기간</button>
+                <button onClick={() => setScPostMode("all")} style={{ flex: 1, padding: 9, borderRadius: 9, border: `2px solid ${scPostMode==="all"?"var(--accent)":"var(--border)"}`, background: scPostMode==="all"?"var(--accent-bg)":"transparent", color: "var(--text2)", fontWeight: 700, cursor: "pointer" }}>전체</button>
+              </div>
+              {scPostMode === "period" && <>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
+                  {([7,14,30,"custom"] as const).map(value => <button key={value} onClick={() => setScPeriod(value)} style={{ padding: 9, borderRadius: 9, border: `2px solid ${scPeriod===value?"var(--accent)":"var(--border)"}`, background: scPeriod===value?"var(--accent-bg)":"transparent", color: "var(--text2)", fontWeight: 700, cursor: "pointer" }}>{value === "custom" ? "직접 설정" : `최근 ${value}일`}</button>)}
+                </div>
+                {scPeriod === "custom" && <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8 }}><input className="inp" type="number" min={1} max={3650} {...numProps(scCustomDays, setScCustomDays, 1, 3650, 7)} /><span style={{ fontSize: 12, color: "var(--text3)" }}>일 이내</span></div>}
+              </>}
+              <button className="btn btn-full" onClick={handleLoadScorePosts} disabled={scPostsLoading || !botOnline} style={{ marginTop: 10 }}>{scPostsLoading ? <><span className="spinner" />불러오는 중...</> : "📥 검사할 글 불러오기"}</button>
+            </div>
           </div>
 
           {/* 오른쪽: 게이지 + 리포트 + 로그 */}
           <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
             <UsageGauge label="📈 오늘 진단" used={scUsed} limit={scLimit} unit="회" color="#00b8d4" />
+            {scPosts.length > 0 && <div className="card" style={{ padding: "18px 20px" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, marginBottom: 10 }}>
+                <div style={{ fontSize: 14, fontWeight: 800 }}>📄 검사할 글 <b style={{ color: "var(--accent-text)" }}>{scSelectedLogNos.length}/{scPosts.length}</b></div>
+                <button onClick={() => setScSelectedLogNos(scSelectedLogNos.length === scPosts.length ? [] : scPosts.map(post => scLogNo(post.url)).filter(Boolean))} style={{ padding: "6px 10px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--bg)", color: "var(--text2)", cursor: "pointer", fontSize: 11.5, fontWeight: 700 }}>{scSelectedLogNos.length === scPosts.length ? "전체 해제" : "전체 선택"}</button>
+              </div>
+              <div style={{ maxHeight: 260, overflowY: "auto", display: "flex", flexDirection: "column", gap: 6 }}>
+                {scPosts.map(post => { const logNo = scLogNo(post.url); const checked = scSelectedLogNos.includes(logNo); return <label key={post.url} style={{ display: "flex", alignItems: "center", gap: 9, padding: "9px 10px", borderRadius: 9, background: checked ? "var(--accent-bg)" : "var(--bg)", border: "1px solid var(--border)", cursor: "pointer" }}>
+                  <input type="checkbox" checked={checked} onChange={() => setScSelectedLogNos(prev => checked ? prev.filter(id => id !== logNo) : [...prev, logNo])} />
+                  <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 12.5 }}>{post.title || "(제목 없음)"}</span>
+                  <span style={{ flexShrink: 0, fontSize: 11, color: "var(--text3)" }}>{post.date}</span>
+                </label>; })}
+              </div>
+              <button className="btn btn-primary btn-full" onClick={handleCheckSelectedExposure} disabled={scExposureLoading || !scSelectedLogNos.length} style={{ marginTop: 12 }}>{scExposureLoading ? <><span className="spinner" />검사 중...</> : `🔎 선택한 ${scSelectedLogNos.length}개 검색노출 확인`}</button>
+            </div>}
             {!scResult ? (
               <div className="card" style={{ padding: "48px 24px", textAlign: "center", color: "var(--text2)", fontSize: 13.5, lineHeight: 1.7 }}>
                 왼쪽에서 계정을 연결하고 <b style={{color:"#ff5fa2"}}>📈 블로그 진단 시작</b>을 누르면<br />내 블로그의 건강 리포트가 여기에 나타나요.
@@ -1610,7 +1697,7 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
               if (lastDaysAgo > 7) tips.push(`마지막 글이 ${lastDaysAgo}일 전이에요. 방치되면 노출이 줄어요 — 새 글을 올려보세요.`);
               if (scResult.neighbors < 300) tips.push("이웃이 적어요. '서이추' 기능으로 이웃을 늘리면 방문·소통이 커져요.");
               if (scResult.totalPosts < 30) tips.push("글이 아직 적어요. 주제를 정해 꾸준히 쌓으면 블로그 힘이 붙어요.");
-              if (scResult.lowQualitySuspected === true) tips.push("최근 글 대부분이 제목 검색 100위 안에서 누락됐어요. 새 글 발행 전 제목·본문의 반복 키워드와 과도한 상업성 표현을 점검하고 며칠 간격으로 다시 진단해보세요.");
+              if (scResult.lowQualitySuspected === true) tips.push("선택해 검사한 글 대부분이 제목 검색 100위 안에서 누락됐어요. 제목·본문의 반복 키워드와 과도한 상업성 표현을 점검하고 며칠 간격으로 다시 검사해보세요.");
               if (scResult.visitorDrop?.detected) tips.push(`${scResult.visitorDrop.message}했어요. 유입 검색어 순위 변화와 최근 수정·삭제한 글이 있는지 확인해보세요.`);
               if (recent30 >= 8 && lastDaysAgo <= 3) tips.push("발행 습관이 아주 좋아요! 지금처럼 꾸준히 유지하세요. 👍");
               if (tips.length === 0) tips.push("전반적으로 건강해요. 공감·댓글과 답방으로 소통을 더 키워보세요!");
@@ -1664,7 +1751,7 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
                     </div>
                     <div style={{ marginBottom: 10, padding: "8px 10px", borderRadius: 9, background: "rgba(0,184,212,.08)", color: "var(--text2)", fontSize: 11.5, fontWeight: 650, lineHeight: 1.5 }}>
                       오늘 {(scResult.checkedTodayCount || 0).toLocaleString()}개 검사 · 전체 {(scResult.totalPostsForExposure || 0).toLocaleString()}개 중 {(scResult.exposureCompletedCount || 0).toLocaleString()}개 완료
-                      {scResult.exposureLimit == null ? " (무제한 등급 · 전체 검사)" : ` (등급 한도 ${scResult.exposureLimit.toLocaleString()}개/일)`}
+                      {scResult.exposureLimit == null ? " (무제한 등급)" : ` (등급 한도 ${scResult.exposureLimit.toLocaleString()}개/일)`}
                     </div>
                     {exposureChecks.length ? <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
                       {exposureChecks.map((item, i) => <div key={`${item.title}-${i}`} style={{ display: "grid", gridTemplateColumns: "22px minmax(0,1fr) auto", gap: 7, alignItems: "center", fontSize: 12 }}>
@@ -1672,7 +1759,7 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
                         <span title={item.title} style={{ overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis", color: "var(--text2)" }}>{item.title}</span>
                         <b style={{ color: item.exposed === false ? "#ef4444" : "var(--text2)" }}>{item.exposed === true ? `약 ${item.rank}위` : item.exposed === false ? "100위 내 누락" : "확인 불가"}</b>
                       </div>)}
-                    </div> : <div style={{ fontSize: 12, color: "var(--text3)" }}>오늘 검사 한도를 모두 사용했거나 글 제목/API 응답을 읽지 못했어요.</div>}
+                    </div> : <div style={{ fontSize: 12, color: "var(--text3)" }}>위에서 글을 불러와 선택한 뒤 검색노출 확인을 실행하세요.</div>}
                     <div style={{ marginTop: 10, fontSize: 11, color: "var(--text3)", lineHeight: 1.5 }}>네이버 공식 지수가 아닌, 순환 선택한 글의 제목 검색 결과를 바탕으로 한 퍼블리 자체 진단이에요. 누락만으로 저품질을 확정할 수는 없어요.</div>
                   </div>
 

@@ -1,6 +1,6 @@
 import express from "express";
 import cors from "cors";
-import { saveSession, sessionExists, removeSession, crawlBlogIds, crawlBuddyPosts, analyzeBuddyKeywords, addNeighbors, NeighborResult, donePath, engageBlogs, EngageResult, engageDonePath, crawlMyPosts, replyToComments, crawlBlogStats } from "./naver";
+import { saveSession, sessionExists, removeSession, crawlBlogIds, crawlBuddyPosts, analyzeBuddyKeywords, addNeighbors, NeighborResult, donePath, engageBlogs, EngageResult, engageDonePath, crawlMyPosts, replyToComments, crawlBlogStats, checkSelectedBlogExposure } from "./naver";
 import { checkNeighborQuota, incrementNeighborQuota, getNeighborDailyUsage, incrementEngageQuota, getEngageDailyUsage, getUserPlan, NEIGHBOR_DAILY_LIMIT, addNeighborHistory, addReplyHistory, addBlogscoreHistory } from "./supabase";
 import fs from "fs";
 
@@ -287,6 +287,19 @@ app.get("/api/blog-stats", async (req, res) => {
     sseSend(res, { type: "error", msg: e.message });
   }
   res.end();
+});
+
+/* ── 블로그 건강검진 2단계: 사용자가 선택한 글만 검색 노출 검사 ── */
+app.post("/api/exposure-check", async (req, res) => {
+  const { accountId, plan, logNos } = req.body as { accountId?: string; plan?: string; logNos?: string[] };
+  if (!accountId) return res.status(400).json({ error: "accountId 필요" });
+  if (!Array.isArray(logNos) || !logNos.length) return res.status(400).json({ error: "검사할 logNos 필요" });
+  try {
+    const result = await checkSelectedBlogExposure({ accountId, plan, logNos });
+    res.json({ ok: true, ...result });
+  } catch (e: any) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
 });
 
 /* ── 답방 ①: 내 블로그 글 목록 불러오기 (SSE) ── */

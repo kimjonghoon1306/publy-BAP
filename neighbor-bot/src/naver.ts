@@ -1851,16 +1851,27 @@ async function checkBlogExposure(blogId: string, posts: ExposurePost[], plan: st
   for (const post of selected) {
     const { logNo, title } = post;
     try {
-      const url = `https://openapi.naver.com/v1/search/blog.json?query=${encodeURIComponent(title)}&display=100&start=1&sort=sim`;
+      // 제목 의미는 유지하되 검색을 방해하는 장식 특수문자와 과도한 공백만 제거한다.
+      const query = title.replace(/[^\p{L}\p{N}\s]/gu, " ").replace(/\s+/g, " ").trim().slice(0, 100) || title.slice(0, 100);
+      const url = `https://openapi.naver.com/v1/search/blog.json?query=${encodeURIComponent(query)}&display=100&start=1&sort=sim`;
       const response = await fetch(url, { headers: { "X-Naver-Client-Id": keys.clientId, "X-Naver-Client-Secret": keys.clientSecret } });
       if (!response.ok) throw new Error(`검색 API ${response.status}`);
       const json: any = await response.json();
       const items: any[] = Array.isArray(json?.items) ? json.items : [];
       const wanted = blogId.toLowerCase();
       const index = items.findIndex(item => {
-        const link = String(item?.link || "").toLowerCase();
+        const link = String(item?.link || "").replace(/&amp;/gi, "&").toLowerCase();
         const bloggerLink = String(item?.bloggerlink || "").toLowerCase();
-        return link.includes(`blog.naver.com/${wanted}/`) || link.includes(`blog.naver.com/${wanted}?`) || bloggerLink.replace(/\/$/, "").endsWith(`/` + wanted);
+        try {
+          const parsed = new URL(link);
+          const linkBlogId = (parsed.searchParams.get("blogId") || "").toLowerCase();
+          const linkLogNo = parsed.searchParams.get("logNo") || parsed.pathname.match(/\/(\d{6,})(?:\/)?$/)?.[1] || "";
+          const pathOwner = parsed.pathname.split("/").filter(Boolean)[0]?.toLowerCase() || "";
+          const profileOwner = bloggerLink.replace(/\/$/, "").split("/").pop() || "";
+          return (linkBlogId === wanted || pathOwner === wanted || profileOwner === wanted) && (!linkLogNo || linkLogNo === logNo);
+        } catch {
+          return link.includes(`blog.naver.com/${wanted}/${logNo}`) || bloggerLink.replace(/\/$/, "").endsWith(`/` + wanted);
+        }
       });
       checks.push({ logNo, title, exposed: index >= 0, rank: index >= 0 ? index + 1 : null, postUrl: index >= 0 ? String(items[index]?.link || "") : undefined });
       log(`[검색노출] ${index >= 0 ? `노출 약 ${index + 1}위` : "100위 내 누락"} · ${title.slice(0, 28)}`);
@@ -1876,6 +1887,26 @@ async function checkBlogExposure(blogId: string, posts: ExposurePost[], plan: st
     }
   }
   return { checks, checkedTodayCount: unlimited ? checks.length : history.dailyCount, completedCount: unlimited ? posts.length : posts.filter(post => history.lastChecked[post.logNo]).length, limit };
+}
+
+export async function checkSelectedBlogExposure(params: {
+  accountId: string; plan?: string; logNos: string[]; onLog?: (msg: string) => void;
+}): Promise<ExposureProgress & { totalPostsForExposure: number; lowQualitySuspected: boolean | null }> {
+  const { accountId, plan = "free", onLog } = params;
+  const log = onLog || console.log;
+  if (!naverSessionExists(accountId)) throw new Error("세션 없음 — 먼저 로그인하세요");
+  const { blogId, cookies } = loadSession(accountId);
+  if (!blogId) throw new Error("내 블로그 ID를 찾을 수 없어요 — 계정을 다시 연결해주세요");
+  const wanted = new Set((Array.isArray(params.logNos) ? params.logNos : []).map(String).filter(value => /^\d+$/.test(value)));
+  if (!wanted.size) throw new Error("검색노출을 확인할 글을 선택해주세요");
+  const list = await fetchNaverPostList({ blogId, cookies, maxCount: null, log });
+  const selected = list.posts.filter(post => wanted.has(post.logNo)).map(post => ({ logNo: post.logNo, title: post.title }));
+  if (!selected.length) throw new Error("선택한 글 정보를 다시 찾지 못했어요. 글 목록을 새로 불러와주세요");
+  log(`[검색노출] 선택 ${selected.length}개 · ${plan} 등급 한도 적용`);
+  const progress = await checkBlogExposure(blogId, selected, plan, log);
+  const known = progress.checks.filter(check => check.exposed !== null);
+  const missing = known.filter(check => check.exposed === false).length;
+  return { ...progress, totalPostsForExposure: list.totalCount || list.posts.length, lowQualitySuspected: known.length >= 3 ? missing / known.length > 0.5 : null };
 }
 
 export async function crawlBlogStats(params: {
@@ -1955,7 +1986,7 @@ export async function crawlBlogStats(params: {
         totalPosts = Math.max(totalPosts, postList.totalCount, postList.posts.length);
       }
     } catch (e: any) { log(`[글목록] API/RSS 처리 실패 (${e.message}) · HTML 결과 유지`); }
-    log(`[건강검진] 총 글 ${totalPosts}개 · 이웃 ${neighbors}명 · 최근 날짜 ${recentDates.length}개 수집`);
+    log(`[건강검진] 총 글 ${totalPosts}개 · 최근 날짜 ${recentDates.length}개 수집`);
 
     try {
       // API/RSS가 모두 막힌 경우에만 기존 HTML 페이지 파싱을 최종 폴백으로 사용한다.
@@ -1983,12 +2014,15 @@ export async function crawlBlogStats(params: {
           if (!pagePosts.length || added === 0) break;
         } catch { break; }
       }
-      log(`[검색노출] 검사 대상 글 ${exposurePosts.length}개 확보 · ${plan} 등급 검사 시작`);
-      const exposure = await checkBlogExposure(blogId, exposurePosts, plan, log);
-      exposureChecks = exposure.checks;
-      checkedTodayCount = exposure.checkedTodayCount;
-      exposureCompletedCount = exposure.completedCount;
-      exposureLimit = exposure.limit;
+      // 검색 API 호출은 별도 2단계(사용자가 글 선택 후)에만 수행한다.
+      const normalizedPlan = Object.prototype.hasOwnProperty.call(EXPOSURE_DAILY_LIMIT, plan) ? plan : "free";
+      exposureLimit = EXPOSURE_DAILY_LIMIT[normalizedPlan];
+      if (exposureLimit !== null) {
+        const history = readExposureHistory(blogId);
+        checkedTodayCount = history.dailyCount;
+        exposureCompletedCount = exposurePosts.filter(post => history.lastChecked[post.logNo]).length;
+      }
+      log(`[검색노출] 선택용 글 ${exposurePosts.length}개 확보 · 글 선택 후 별도로 검사하세요`);
     } catch (e: any) { log(`[검색노출] 검사 실패: ${e.message}`); }
 
     // ★방문자 수: 네이버 공개 방문자 위젯 API(NVisitorgp4Ajax) — 쿠키 없이 일별 방문자 XML을 준다(실측 2026-08-23).
@@ -2010,21 +2044,47 @@ export async function crawlBlogStats(params: {
 
     // ★이웃 수: 공감·댓글과 같은 세션 방식(section.blog.naver.com 이웃API)으로 전체 이웃 수 읽기.
     try {
-      const cnt = await page.evaluate(async () => {
+      await page.goto("https://section.blog.naver.com/BlogHome.naver", { waitUntil: "domcontentloaded", timeout: 20000 }).catch(() => {});
+      await page.waitForTimeout(800);
+      const buddyInfo = await page.evaluate(async () => {
         try {
           const r = await fetch("https://section.blog.naver.com/ajax/BuddyPostList.naver?page=1&groupId=0", { headers: { Referer: "https://section.blog.naver.com/BlogHome.naver" } });
           const raw = await r.text();
           const d = JSON.parse(raw.replace(/^\)\]\}',?\s*/, ""));
-          return Number(d?.result?.totalCount ?? d?.result?.buddyCount ?? d?.result?.count ?? 0);
-        } catch { return 0; }
-      }).catch(() => 0);
-      if (cnt > 0) neighbors = cnt;
-      log(`[이웃수] 서로이웃 ${neighbors}명`);
+          const result = d?.result || {};
+          const total = Number(result.totalCount ?? result.buddyCount ?? result.totalBuddyCount ?? result.buddyTotalCount ?? result.pagination?.totalCount ?? d?.totalCount ?? 0) || 0;
+          const list = result.buddyPostList || result.postList || result.list || [];
+          const unique = Array.isArray(list) ? new Set(list.map((item: any) => item?.domainIdOrBlogId || item?.blogId).filter(Boolean)).size : 0;
+          return { total, unique };
+        } catch { return { total: 0, unique: 0 }; }
+      }).catch(() => ({ total: 0, unique: 0 }));
+      if (buddyInfo.total > 0) neighbors = buddyInfo.total;
+      // 총계 필드가 없는 응답도 실제 이웃 글 작성자 수를 최소 실측값으로 사용한다.
+      else if (buddyInfo.unique > 0) neighbors = Math.max(neighbors, buddyInfo.unique);
+
+      if (neighbors <= 0) {
+        const manageUrls = [
+          `https://admin.blog.naver.com/${blogId}/buddy/BuddyListManage.naver`,
+          `https://blog.naver.com/BuddyListManage.naver?blogId=${blogId}`,
+          `https://blog.naver.com/BuddyMe.naver?blogId=${blogId}`,
+        ];
+        for (const url of manageUrls) {
+          try {
+            await page.goto(url, { waitUntil: "domcontentloaded", timeout: 15000 });
+            const text = `${await page.locator("body").innerText().catch(() => "")}\n${await page.content()}`;
+            const match = text.match(/(?:전체\s*이웃|이웃\s*수|이웃)[^\d]{0,20}([\d,]+)\s*명?/) || text.match(/(?:buddyCnt|buddyCount|totalBuddyCount)["'\s:=]+([\d,]+)/i);
+            if (match) neighbors = Number(match[1].replace(/,/g, "")) || 0;
+            if (neighbors > 0) break;
+          } catch {}
+        }
+      }
+      log(`[이웃수] ${neighbors > 0 ? `${neighbors}명 수집` : "확인 실패(진단은 계속)"}`);
     } catch {}
 
     // ★유입 검색어: 세션 필요(공개 불가). 이웃수처럼 로그인된 browser context 안에서 통계 유입분석 API를 fetch.
     try {
       log("[유입검색어] 통계 유입분석 수집 중...");
+      await page.goto(`https://admin.blog.naver.com/${blogId}`, { waitUntil: "domcontentloaded", timeout: 15000 }).catch(() => {});
       const kws = await page.evaluate(async (bid: string) => {
         const urls = [
           `https://admin.blog.naver.com/api/blogs/${bid}/stats/inflow-search-keyword?range=DAILY`,
