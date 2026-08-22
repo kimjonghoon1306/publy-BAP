@@ -1991,9 +1991,39 @@ export async function crawlBlogStats(params: {
       exposureLimit = exposure.limit;
     } catch (e: any) { log(`[검색노출] 검사 실패: ${e.message}`); }
 
-    // 관리자 통계 화면은 수시로 DOM/경로가 바뀌므로 여러 후보를 읽고, 일자-방문자/유입어 패턴만 보수적으로 채택한다.
+    // ★방문자 수: 네이버 공개 방문자 위젯 API(NVisitorgp4Ajax) — 쿠키 없이 일별 방문자 XML을 준다(실측 2026-08-23).
     try {
-      log("[방문자] 관리자 통계에서 최근 7일 방문자와 유입 검색어 수집 중...");
+      log("[방문자] 방문자 위젯에서 일별 방문자 수집 중...");
+      const vres = await fetch(`https://blog.naver.com/NVisitorgp4Ajax.naver?blogId=${encodeURIComponent(blogId)}`, {
+        headers: { "User-Agent": UA, Referer: `https://blog.naver.com/${blogId}` },
+      });
+      const vxml = await vres.text();
+      const vdays: { date: string; visitors: number }[] = [];
+      const vre = /<visitorcnt\s+id="(\d{8})"\s+cnt="(\d+)"/gi;
+      let vm: RegExpExecArray | null;
+      while ((vm = vre.exec(vxml))) {
+        vdays.push({ date: `${vm[1].slice(0,4)}-${vm[1].slice(4,6)}-${vm[1].slice(6,8)}`, visitors: Number(vm[2]) || 0 });
+      }
+      if (vdays.length) visitorDays = vdays.sort((a, b) => a.date.localeCompare(b.date)).slice(-7);
+      log(`[방문자] 일별 ${visitorDays.length}일 수집 완료`);
+    } catch (e: any) { log(`[방문자] 위젯 확인 실패: ${e.message}`); }
+
+    // ★이웃 수: 공감·댓글과 같은 세션 방식(section.blog.naver.com 이웃API)으로 전체 이웃 수 읽기.
+    try {
+      const cnt = await page.evaluate(async () => {
+        try {
+          const r = await fetch("https://section.blog.naver.com/ajax/BuddyPostList.naver?page=1&groupId=0", { headers: { Referer: "https://section.blog.naver.com/BlogHome.naver" } });
+          const raw = await r.text();
+          const d = JSON.parse(raw.replace(/^\)\]\}',?\s*/, ""));
+          return Number(d?.result?.totalCount ?? d?.result?.buddyCount ?? d?.result?.count ?? 0);
+        } catch { return 0; }
+      }).catch(() => 0);
+      if (cnt > 0) neighbors = cnt;
+      log(`[이웃수] 서로이웃 ${neighbors}명`);
+    } catch {}
+
+    // (구) 관리자 통계 크롤 — 위 공개 위젯 실패 시 유입 검색어 등 보조용
+    if (false) {
       const statUrls = [
         `https://admin.blog.naver.com/${blogId}/stat/visitor`,
         `https://admin.blog.naver.com/${blogId}/stat/traffic`,
@@ -2035,8 +2065,7 @@ export async function crawlBlogStats(params: {
       }
       visitorDays = visitorDays.sort((a, b) => a.date.localeCompare(b.date)).slice(-7);
       inflowKeywords = inflowKeywords.slice(0, 5);
-      log(`[방문자] 일별 ${visitorDays.length}일 · 유입 검색어 ${inflowKeywords.length}개 수집`);
-    } catch (e: any) { log(`[방문자] 통계 확인 실패: ${e.message}`); }
+    }
   } finally {
     await browser.close().catch(() => {});
   }
