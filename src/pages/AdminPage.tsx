@@ -595,26 +595,27 @@ const TABS = [
   {k:"photo",           i:"📷", l:"사진 글쓰기"},
   {k:"publish",         i:"🚀", l:"발행하기"},
   {k:"manage",          i:"📋", l:"발행 관리"},
+  {k:"blogscore",       i:"📈", l:"블로그 지수"},
   {k:"accounts",        i:"🔗", l:"계정관리"},
-  {k:"rank",            i:"📊", l:"블로그 순위"},
   {k:"calendar",        i:"📅", l:"콘텐츠 캘린더"},
   {k:"neighbor",        i:"🤝", l:"서이추"},
   {k:"engage",          i:"❤️", l:"공감·댓글"},
+  {k:"reply",           i:"💬", l:"답방"},
   {k:"insta_dm",        i:"📱", l:"인스타 DM"},
   {k:"live",            i:"📡", l:"실시간 현황"},
   {k:"users",           i:"👥", l:"회원관리"},
   {k:"bug",             i:"🐞", l:"버그 신고"},
-  {k:"stats",           i:"📈", l:"통계"},
+  {k:"stats",           i:"📊", l:"통계"},
   {k:"insta_dm_manage", i:"📮", l:"DM 회원관리"},
   {k:"neighbor_manage", i:"🗂️", l:"서이추 관리"},
-  {k:"engage_manage",   i:"💬", l:"공감·댓글 관리"},
+  {k:"engage_manage",   i:"🗒️", l:"공감·댓글 관리"},
   {k:"reply_manage",    i:"↩️", l:"답방 관리"},
   {k:"blogscore_manage",i:"🩺", l:"지수 관리"},
   {k:"settings",        i:"🔐", l:"설정"},
 ] as const;
 
 export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: Props) {
-  const [tab, setTab] = useState<"keyword"|"write"|"image"|"photo"|"publish"|"manage"|"accounts"|"rank"|"calendar"|"neighbor"|"engage"|"neighbor_manage"|"engage_manage"|"reply_manage"|"blogscore_manage"|"insta_dm"|"insta_dm_manage"|"users"|"bug"|"stats"|"live"|"settings">("keyword");
+  const [tab, setTab] = useState<"keyword"|"write"|"image"|"photo"|"publish"|"manage"|"accounts"|"rank"|"blogscore"|"calendar"|"neighbor"|"engage"|"reply"|"neighbor_manage"|"engage_manage"|"reply_manage"|"blogscore_manage"|"insta_dm"|"insta_dm_manage"|"users"|"bug"|"stats"|"live"|"settings">("keyword");
   const [statsSubTab, setStatsSubTab] = useState<"mine"|"all">("mine");
   const [usersSubTab, setUsersSubTab] = useState<"list"|"referral">("list");
   // 버그 신고
@@ -2517,7 +2518,7 @@ POST3: (제목)|(이유)
           <div className="sidebar">
             <div className="nav-section" style={{fontSize:10,fontWeight:800,color:"var(--text3)",padding:"8px 12px 4px",letterSpacing:".08em"}}>✍️ 블로그 기능</div>
             {TABS.filter(t=>["keyword","write","image","photo","publish","manage","accounts","rank","calendar"].includes(t.k)).map(t => (
-              <button key={t.k} className={`nav-item ${tab===t.k?"active":""}`} onClick={()=>{if(t.k==="rank"){window.open("https://rank.xn--zk5biyyw.com/","_blank");return;}setTab(t.k as any);}}>
+              <button key={t.k} className={`nav-item ${tab===t.k?"active":""}`} onClick={()=>setTab(t.k as any)}>
                 <span className="nav-ico">{t.i}</span>{t.l}
               </button>
             ))}
@@ -4438,6 +4439,16 @@ POST3: (제목)|(이유)
               <NeighborPage theme={theme} plan="admin" initialTab="engage" singleTab />
             )}
 
+            {/* ───── 💬 답방 (관리자 본인 사용) ───── */}
+            {tab === "reply" && (
+              <NeighborPage theme={theme} plan="admin" initialTab="reply" singleTab />
+            )}
+
+            {/* ───── 📈 블로그 지수 (관리자 본인 사용) ───── */}
+            {tab === "blogscore" && (
+              <NeighborPage theme={theme} plan="admin" initialTab="score" singleTab />
+            )}
+
             {/* ───── 📋 서이추 관리 ───── */}
             {tab === "neighbor_manage" && (
               <div style={{animation:"fadeUp .25s ease both"}}>
@@ -5433,7 +5444,7 @@ POST3: (제목)|(이유)
         {/* 모바일 탭바 */}
         <div className="mob-tabs">
           {TABS.map(t=>(
-            <button key={t.k} className={`mob-tab ${tab===t.k?"active":""}`} onClick={()=>{if(t.k==="rank"){window.open("https://rank.xn--zk5biyyw.com/","_blank");return;}setTab(t.k as any);}}>
+            <button key={t.k} className={`mob-tab ${tab===t.k?"active":""}`} onClick={()=>setTab(t.k as any)}>
               <span className="mob-tab-ico">{t.i}</span>
               <span className="mob-tab-lbl">{t.l}</span>
             </button>

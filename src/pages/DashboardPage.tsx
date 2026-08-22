@@ -430,7 +430,9 @@ textarea.inp{resize:vertical;line-height:1.75;min-height:80px;}
 .guide-footer{padding:12px 18px;background:var(--g-surface2);border-top:1px solid var(--g-line);display:flex;align-items:center;justify-content:space-between;flex-shrink:0;gap:10px;flex-wrap:wrap;}
 .guide-nav-btn{padding:9px 20px;border-radius:99px;border:1.5px solid;font-size:13px;font-weight:700;font-family:'Noto Sans KR',sans-serif;cursor:pointer;transition:all .15s;}
 .guide-page{font-size:12px;color:var(--g-fg2);font-weight:600;}
-.mob-bar{display:none;position:fixed;bottom:0;left:0;right:0;z-index:200;background:var(--header-bg);border-top:1px solid var(--border);backdrop-filter:blur(24px);padding:7px 4px max(12px,env(safe-area-inset-bottom));}
+.mob-bar{display:none;position:fixed;bottom:0;left:0;right:0;z-index:200;background:var(--header-bg);border-top:1px solid var(--border);backdrop-filter:blur(24px);padding:7px 4px max(12px,env(safe-area-inset-bottom));overflow-x:auto;overflow-y:hidden;-webkit-overflow-scrolling:touch;scrollbar-width:none;}
+.mob-bar::-webkit-scrollbar{display:none;}
+.mob-bar .mob-btn{flex:0 0 auto;min-width:60px;}
 .mob-btn{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;padding:5px 2px;border:none;background:transparent;cursor:pointer;font-family:'Noto Sans KR',sans-serif;transition:all .15s;min-height:50px;border-radius:9px;}
 .mob-btn-ico{font-size:21px;}
 .mob-btn-lbl{font-size:11px;font-weight:600;color:var(--text2);}
@@ -6271,7 +6273,10 @@ POST3: (제목)|(이유)
         </a>
 
         <div className="mob-bar">
-          {MAIN_TABS.filter(t=>["keyword","write","image","photo","publish","manage","insta_dm","settings"].includes(t.k)).map(t=>(<button key={t.k} className={`mob-btn ${tab===t.k?"active":""}`} onClick={()=>{if(t.k==="rank"){window.open("https://rank.xn--zk5biyyw.com/","_blank");return;}setTab(t.k as MainTab);}}><span className="mob-btn-ico">{t.i}</span><span className="mob-btn-lbl">{t.k==="keyword"?"키워드":t.k==="write"?"글쓰기":t.k==="image"?"이미지":t.k==="photo"?"사진글":t.k==="publish"?"발행":t.k==="manage"?"발행관리":t.k==="insta_dm"?"인스타DM":"설정"}</span></button>))}
+          {MAIN_TABS.filter(t=>["control","keyword","write","image","publish","manage","blogscore","neighbor","engage","reply","settings"].includes(t.k)).map(t=>{
+            const lbl:Record<string,string>={control:"홈",keyword:"키워드",write:"글쓰기",image:"이미지",publish:"발행",manage:"발행관리",blogscore:"지수",neighbor:"서이추",engage:"공감댓글",reply:"답방",settings:"설정"};
+            return (<button key={t.k} className={`mob-btn ${tab===t.k?"active":""}`} onClick={()=>setTab(t.k as MainTab)}><span className="mob-btn-ico">{t.i}</span><span className="mob-btn-lbl">{lbl[t.k]||t.l}</span></button>);
+          })}
         </div>
       </div>
 
