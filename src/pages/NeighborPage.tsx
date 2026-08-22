@@ -230,6 +230,7 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
   const [spreadRunning, setSpreadRunning] = useState(false);
   const [spreadInfo, setSpreadInfo] = useState<{ total: number; cur: number; nextAt: number | null }>({ total: 0, cur: 0, nextAt: null });
   const spreadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const spreadRunningRef = useRef(false);
   // 내 이웃 키워드 분석 (서이추·공감댓글 공용)
   const [buddyKw, setBuddyKw] = useState<{ word: string; count: number }[]>([]);
   const [buddyKwLoading, setBuddyKwLoading] = useState(false);
@@ -452,6 +453,7 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
 
   /* 예약·분산 실행 — 대상을 여러 배치로 나눠 간격을 두고 자동 실행 (앱 켜둔 상태) */
   const startSpread = async () => {
+    if (spreadRunningRef.current) return;   // 이미 분산 실행 중이면 중복 시작 방지(로그 반복·다중 루프 차단)
     const list = targets;
     if (!list.length) return alert("수집된 블로그가 없습니다");
     const acc = accounts.find(a => a.sessionOk);
@@ -462,6 +464,7 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
     const batches: Target[][] = Array.from({ length: n }, () => []);
     list.forEach((t, i) => batches[i % n].push(t));
     const nonEmpty = batches.filter(b => b.length);
+    spreadRunningRef.current = true;   // useEffect 갱신을 기다리지 않고 즉시 동기 설정(루프 첫 체크 오작동 방지)
     setSpreadRunning(true);
     setSpreadInfo({ total: nonEmpty.length, cur: 0, nextAt: null });
     addLog(`📅 분산 실행 시작 — ${list.length}개를 ${nonEmpty.length}회로 나눠 ${spreadGapMin}분 간격으로 진행합니다.`);
@@ -483,7 +486,6 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
     setSpreadInfo({ total: 0, cur: 0, nextAt: null });
     addLog("✅ 분산 실행 종료");
   };
-  const spreadRunningRef = useRef(false);
   useEffect(() => { spreadRunningRef.current = spreadRunning; }, [spreadRunning]);
   const stopSpread = () => {
     spreadRunningRef.current = false;
