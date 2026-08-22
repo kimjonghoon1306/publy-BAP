@@ -659,6 +659,25 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
       {/* 사용설명서 모달 */}
       {showGuide && <GuideModal tab={tab} onClose={() => setShowGuide(false)} />}
 
+      {/* 기능 설명 배너 (탭별로 항상 표시) */}
+      {tab === "neighbor" ? (
+        <div style={{ marginBottom: 18, padding: "16px 20px", borderRadius: 16, background: "var(--card)", border: "1.5px solid var(--border)", boxShadow: "0 2px 12px rgba(0,0,0,.04)" }}>
+          <div style={{ fontSize: 15, fontWeight: 800, color: "var(--text)", marginBottom: 6, display: "flex", alignItems: "center", gap: 7 }}>🤝 서이추(서로이웃 신청) 자동화</div>
+          <div style={{ fontSize: 12.5, color: "var(--text2)", fontWeight: 600, lineHeight: 1.65 }}>
+            키워드로 블로그를 모아 <b>서로이웃 신청</b>을 자동으로 보내요. 새 이웃을 늘려 방문·소통을 키우는 기능이에요.<br />
+            <span style={{ color: "#c88010", fontWeight: 700 }}>💡 네이버 하루 한도는 100건.</span> 계정 보호를 위해 <b>하루 50건 정도로 분산</b>하고, 딜레이(5~10초)와 예약 분산을 함께 쓰는 걸 권장해요.
+          </div>
+        </div>
+      ) : (
+        <div style={{ marginBottom: 18, padding: "16px 20px", borderRadius: 16, background: "var(--card)", border: "1.5px solid var(--border)", boxShadow: "0 2px 12px rgba(0,0,0,.04)" }}>
+          <div style={{ fontSize: 15, fontWeight: 800, color: "var(--text)", marginBottom: 6, display: "flex", alignItems: "center", gap: 7 }}>❤️ 공감·댓글 자동화</div>
+          <div style={{ fontSize: 12.5, color: "var(--text2)", fontWeight: 600, lineHeight: 1.65 }}>
+            키워드로 찾은 블로그 글에 <b>공감(하트)과 댓글</b>을 자동으로 남겨요. 이웃과 꾸준히 소통해 블로그 지수를 올리는 기능이에요.<br />
+            <span style={{ color: "#c88010", fontWeight: 700 }}>💡 권장: 공감은 하루 100개, 댓글은 하루 50개 미만.</span> 강제 제한은 없지만, 계정 보호를 위해 간격을 넉넉히 두고 이 범위 안에서 쓰는 걸 추천해요. (댓글이 공감보다 스팸 판정 위험이 큽니다)
+          </div>
+        </div>
+      )}
+
       {/* ═══════════ 서이추 탭 ═══════════ */}
       {tab === "neighbor" && (
         <div style={{ display: "grid", gridTemplateColumns: "400px 1fr", gap: 20, alignItems: "start" }}>
@@ -838,11 +857,14 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
 
           {/* 오른쪽 */}
           <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-            {/* 오늘 서이추 사용량 — 상단·사이드바 배지와 동일한 원래 한도(플랜별). 크게·직관적으로 */}
-            {userId && quotaLimit > 0 && (() => {
-              const pct = Math.min(100, (quotaUsed / quotaLimit) * 100);
-              const danger = quotaUsed >= quotaLimit;
-              const warn = quotaUsed >= quotaLimit * 0.8;
+            {/* 오늘 서이추 사용량 — 본인 플랜 한도 기준. 무제한은 네이버 권장(100) 안내 */}
+            {userId && (() => {
+              const NAVER_REC = 100;                          // 네이버 권장 상한(강제 아님)
+              const unlimited = plan === "unlimited" || plan === "admin";  // 무제한: 플랜 한도 없음
+              const limit = quotaLimit;                       // 본인 플랜 한도(무료10/베이직50/프로100)
+              const pct = unlimited ? Math.min(100, (quotaUsed / NAVER_REC) * 100) : Math.min(100, (quotaUsed / limit) * 100);
+              const danger = !unlimited && quotaUsed >= limit;             // 본인 한도 도달(무제한 제외)
+              const warn = unlimited ? quotaUsed >= NAVER_REC : quotaUsed >= limit * 0.8;
               const bar = danger ? "#ff5363" : warn ? "#ffb020" : "#00d68f";
               return (
                 <div style={{ padding: "20px 24px", borderRadius: 20, background: "var(--card)", border: `1.5px solid ${danger ? "rgba(255,83,99,.45)" : warn ? "rgba(255,176,32,.4)" : "var(--border)"}`, boxShadow: "0 2px 14px rgba(0,0,0,.04)" }}>
@@ -852,19 +874,20 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
                         🛡️ 오늘 서이추 사용량 <span style={{ fontSize: 11, fontWeight: 600, color: "var(--text3)", opacity: .8 }}>(자정 자동 리셋)</span>
                       </div>
                       <div style={{ fontSize: 40, fontWeight: 900, color: bar, fontFamily: "'Space Grotesk',sans-serif", lineHeight: 1 }}>
-                        {quotaUsed}<span style={{ fontSize: 20, color: "var(--text3)", fontWeight: 600 }}> / {quotaLimit}건</span>
+                        {quotaUsed}<span style={{ fontSize: 20, color: "var(--text3)", fontWeight: 600 }}> {unlimited ? "건 · 무제한" : `/ ${limit}건`}</span>
                       </div>
                     </div>
                     <div style={{ textAlign: "right" }}>
-                      <div style={{ fontSize: 26, fontWeight: 900, color: bar, fontFamily: "'Space Grotesk',sans-serif", lineHeight: 1 }}>{danger ? "마감" : `${quotaLimit - quotaUsed}건`}</div>
-                      <div style={{ fontSize: 12, color: "var(--text3)", fontWeight: 600, marginTop: 4 }}>{danger ? "자정까지 대기" : "남음"}</div>
+                      <div style={{ fontSize: 26, fontWeight: 900, color: bar, fontFamily: "'Space Grotesk',sans-serif", lineHeight: 1 }}>{unlimited ? "∞" : danger ? "마감" : `${limit - quotaUsed}건`}</div>
+                      <div style={{ fontSize: 12, color: "var(--text3)", fontWeight: 600, marginTop: 4 }}>{unlimited ? "한도 없음" : danger ? "자정까지 대기" : "남음"}</div>
                     </div>
                   </div>
-                  <div style={{ height: 12, borderRadius: 99, background: "var(--border)", overflow: "hidden" }}>
+                  <div style={{ position: "relative", height: 12, borderRadius: 99, background: "var(--border)", overflow: "hidden" }}>
                     <div style={{ height: "100%", borderRadius: 99, width: `${pct}%`, background: `linear-gradient(90deg, ${bar}, ${bar}cc)`, transition: "width .5s ease" }} />
                   </div>
-                  {danger && <div style={{ fontSize: 12.5, color: "var(--danger)", fontWeight: 700, marginTop: 10 }}>오늘 한도에 도달했어요. 계정 보호를 위해 자정 이후 다시 돌려주세요.</div>}
-                  {!danger && warn && <div style={{ fontSize: 12.5, color: "#c88010", fontWeight: 600, marginTop: 10 }}>거의 다 찼어요. 조금만 더 하면 오늘은 쉬는 게 안전해요.</div>}
+                  {danger
+                    ? <div style={{ fontSize: 12.5, color: "var(--danger)", fontWeight: 700, marginTop: 10 }}>오늘 플랜 한도에 도달했어요. 계정 보호를 위해 자정 이후 다시 돌려주세요.</div>
+                    : <div style={{ fontSize: 12.5, color: warn ? "#c88010" : "var(--text3)", fontWeight: 600, marginTop: 10 }}>💡 네이버 권장은 <b>하루 100건 미만</b>이에요. 간격을 넉넉히 두고 나눠서 진행하는 걸 추천해요.</div>}
                 </div>
               );
             })()}
@@ -1067,11 +1090,14 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
 
           {/* 오른쪽 */}
           <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-            {/* 오늘 공감·댓글 사용량 — 상단·사이드바 배지와 동일한 원래 한도(플랜별) */}
-            {userId && eLimit > 0 && (() => {
-              const pct = Math.min(100, (eUsed / eLimit) * 100);
-              const danger = eUsed >= eLimit;
-              const warn = eUsed >= eLimit * 0.8;
+            {/* 오늘 공감·댓글 사용량 — 본인 플랜 한도 기준. 무제한은 네이버 권장 안내(공감100·댓글50미만) */}
+            {userId && (() => {
+              const unlimited = plan === "unlimited" || plan === "admin";
+              const limit = eLimit;
+              const REC = 100;  // 공감 권장 상한(참고)
+              const pct = unlimited ? Math.min(100, (eUsed / REC) * 100) : Math.min(100, (eUsed / limit) * 100);
+              const danger = !unlimited && eUsed >= limit;
+              const warn = unlimited ? eUsed >= REC : eUsed >= limit * 0.8;
               const bar = danger ? "#ff5363" : warn ? "#ffb020" : "#00d68f";
               return (
                 <div style={{ padding: "20px 24px", borderRadius: 20, background: "var(--card)", border: `1.5px solid ${danger ? "rgba(255,83,99,.45)" : warn ? "rgba(255,176,32,.4)" : "var(--border)"}`, boxShadow: "0 2px 14px rgba(0,0,0,.04)" }}>
@@ -1081,19 +1107,20 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
                         ❤️ 오늘 공감·댓글 사용량 <span style={{ fontSize: 11, fontWeight: 600, color: "var(--text3)", opacity: .8 }}>(자정 자동 리셋)</span>
                       </div>
                       <div style={{ fontSize: 40, fontWeight: 900, color: bar, fontFamily: "'Space Grotesk',sans-serif", lineHeight: 1 }}>
-                        {eUsed}<span style={{ fontSize: 20, color: "var(--text3)", fontWeight: 600 }}> / {eLimit}건</span>
+                        {eUsed}<span style={{ fontSize: 20, color: "var(--text3)", fontWeight: 600 }}> {unlimited ? "건 · 무제한" : `/ ${limit}건`}</span>
                       </div>
                     </div>
                     <div style={{ textAlign: "right" }}>
-                      <div style={{ fontSize: 26, fontWeight: 900, color: bar, fontFamily: "'Space Grotesk',sans-serif", lineHeight: 1 }}>{danger ? "마감" : `${eLimit - eUsed}건`}</div>
-                      <div style={{ fontSize: 12, color: "var(--text3)", fontWeight: 600, marginTop: 4 }}>{danger ? "자정까지 대기" : "남음"}</div>
+                      <div style={{ fontSize: 26, fontWeight: 900, color: bar, fontFamily: "'Space Grotesk',sans-serif", lineHeight: 1 }}>{unlimited ? "∞" : danger ? "마감" : `${limit - eUsed}건`}</div>
+                      <div style={{ fontSize: 12, color: "var(--text3)", fontWeight: 600, marginTop: 4 }}>{unlimited ? "한도 없음" : danger ? "자정까지 대기" : "남음"}</div>
                     </div>
                   </div>
                   <div style={{ height: 12, borderRadius: 99, background: "var(--border)", overflow: "hidden" }}>
                     <div style={{ height: "100%", borderRadius: 99, width: `${pct}%`, background: `linear-gradient(90deg, ${bar}, ${bar}cc)`, transition: "width .5s ease" }} />
                   </div>
-                  {danger && <div style={{ fontSize: 12.5, color: "var(--danger)", fontWeight: 700, marginTop: 10 }}>오늘 한도에 도달했어요. 계정 보호를 위해 자정 이후 다시 돌려주세요.</div>}
-                  {!danger && warn && <div style={{ fontSize: 12.5, color: "#c88010", fontWeight: 600, marginTop: 10 }}>거의 다 찼어요. 조금만 더 하면 오늘은 쉬는 게 안전해요.</div>}
+                  {danger
+                    ? <div style={{ fontSize: 12.5, color: "var(--danger)", fontWeight: 700, marginTop: 10 }}>오늘 플랜 한도에 도달했어요. 계정 보호를 위해 자정 이후 다시 돌려주세요.</div>
+                    : <div style={{ fontSize: 12.5, color: warn ? "#c88010" : "var(--text3)", fontWeight: 600, marginTop: 10 }}>💡 네이버 권장은 <b>공감 하루 100개, 댓글 50개 미만</b>이에요. 댓글은 더 보수적으로 쓰는 걸 추천해요.</div>}
                 </div>
               );
             })()}
