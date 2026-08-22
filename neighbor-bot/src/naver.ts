@@ -1671,6 +1671,112 @@ export type BlogExposureCheck = {
 
 export type BlogVisitorDay = { date: string; visitors: number };
 
+type NaverPostItem = { logNo: string; title: string; date: string; dateMs: number; url: string };
+
+function koreanDate(date: Date): string {
+  try { return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Seoul", year: "numeric", month: "2-digit", day: "2-digit" }).format(date); }
+  catch { return date.toISOString().slice(0, 10); }
+}
+
+function decodeNaverText(value: unknown): string {
+  let text = String(value ?? "").replace(/\+/g, " ");
+  try { text = decodeURIComponent(text); } catch {}
+  return text
+    .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&nbsp;/gi, " ").replace(/&amp;/gi, "&").replace(/&quot;/gi, '"')
+    .replace(/&#39;|&apos;/gi, "'").replace(/&lt;/gi, "<").replace(/&gt;/gi, ">")
+    .replace(/&#(\d+);/g, (_m, n) => String.fromCodePoint(Number(n)))
+    .replace(/&#x([0-9a-f]+);/gi, (_m, n) => String.fromCodePoint(parseInt(n, 16)))
+    .replace(/\s+/g, " ").trim();
+}
+
+function normalizePostDate(value: unknown): { date: string; dateMs: number } {
+  const raw = String(value ?? "").trim();
+  if (/^\d{10,13}$/.test(raw)) {
+    const numeric = Number(raw) * (raw.length === 10 ? 1000 : 1);
+    const d = new Date(numeric);
+    if (!Number.isNaN(d.getTime())) return { date: koreanDate(d), dateMs: d.getTime() };
+  }
+  const match = raw.match(/(\d{4})[^\d]+(\d{1,2})[^\d]+(\d{1,2})/);
+  if (match) {
+    const date = `${match[1]}-${match[2].padStart(2, "0")}-${match[3].padStart(2, "0")}`;
+    return { date, dateMs: new Date(`${date}T00:00:00+09:00`).getTime() };
+  }
+  const parsed = Date.parse(raw);
+  return Number.isNaN(parsed) ? { date: raw.slice(0, 20), dateMs: 0 } : { date: koreanDate(new Date(parsed)), dateMs: parsed };
+}
+
+function cookieHeader(cookies: any[]): string {
+  return (Array.isArray(cookies) ? cookies : []).filter(cookie => cookie?.name).map(cookie => `${cookie.name}=${cookie.value}`).join("; ");
+}
+
+async function fetchNaverPostList(params: {
+  blogId: string; cookies: any[]; maxCount?: number | null; log?: (msg: string) => void;
+}): Promise<{ posts: NaverPostItem[]; source: "api" | "rss" | "none"; totalCount: number }> {
+  const { blogId, cookies, maxCount = null } = params;
+  const log = params.log || console.log;
+  const posts: NaverPostItem[] = [];
+  const seen = new Set<string>();
+  let totalCount = 0;
+  try {
+    // ★공개 요청(쿠키 없이). 세션 쿠키를 넣으면 네이버가 막아 빈 응답을 주는 것을 실측 확인(2026-08-23).
+    //   PostTitleListAsync/RSS는 공개 데이터라 쿠키 불필요. review-check(체험단 심사)의 검증된 방식과 동일.
+    const headers = { "User-Agent": UA, Referer: `https://blog.naver.com/${blogId}`, Accept: "application/json,text/plain,*/*" };
+    for (let pageNo = 1; pageNo <= 1000 && (maxCount === null || posts.length < maxCount); pageNo++) {
+      const url = `https://blog.naver.com/PostTitleListAsync.naver?blogId=${encodeURIComponent(blogId)}&viewdate=&currentPage=${pageNo}&categoryNo=&parentCategoryNo=&countPerPage=30`;
+      const response = await fetch(url, { headers });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const raw = await response.text();
+      const start = raw.indexOf("{");
+      const end = raw.lastIndexOf("}");
+      if (start < 0 || end < start) throw new Error("JSON 본문 없음");
+      // ★네이버 PostTitleListAsync 응답의 pagingHtml에 잘못된 이스케이프(\')가 있어 JSON.parse가 죽는다(실측 2026-08-23).
+      //   JSON에서 작은따옴표는 이스케이프 불필요 → \' 를 ' 로 정리한 뒤 파싱. (이게 posts 0개의 진짜 원인이었음)
+      const jsonText = raw.slice(start, end + 1).replace(/\\'/g, "'");
+      const json: any = JSON.parse(jsonText);
+      const list: any[] = Array.isArray(json?.postList) ? json.postList : Array.isArray(json?.result?.postList) ? json.result.postList : [];
+      const countCandidate = Number(json?.totalCount ?? json?.totalPostCount ?? json?.result?.totalCount ?? json?.result?.totalPostCount ?? json?.count ?? 0);
+      if (Number.isFinite(countCandidate) && countCandidate > totalCount) totalCount = countCandidate;
+      if (!list.length) break;
+      let added = 0;
+      for (const item of list) {
+        const logNo = String(item?.logNo ?? item?.logno ?? item?.postNo ?? "").trim();
+        const title = decodeNaverText(item?.title ?? item?.postTitle);
+        if (!/^\d+$/.test(logNo) || !title || seen.has(logNo)) continue;
+        const normalized = normalizePostDate(item?.addDate ?? item?.writeDate ?? item?.regDate ?? item?.date);
+        seen.add(logNo); added++;
+        posts.push({ logNo, title, ...normalized, url: `https://blog.naver.com/${blogId}/${logNo}` });
+        if (maxCount !== null && posts.length >= maxCount) break;
+      }
+      if (!added || (totalCount > 0 ? posts.length >= totalCount : list.length < 30)) break;
+    }
+    if (posts.length) {
+      log(`[글목록] PostTitleListAsync API에서 ${posts.length}개 수집`);
+      return { posts, source: "api", totalCount: Math.max(totalCount, posts.length) };
+    }
+  } catch (e: any) { log(`[글목록] PostTitleListAsync 실패 (${e.message}) · RSS로 재시도`); }
+
+  try {
+    const response = await fetch(`https://rss.blog.naver.com/${encodeURIComponent(blogId)}.xml`, { headers: { "User-Agent": UA, Accept: "application/rss+xml,application/xml,text/xml" } });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const xml = await response.text();
+    const items = xml.match(/<item\b[\s\S]*?<\/item>/gi) || [];
+    for (const item of items) {
+      const title = decodeNaverText(item.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1]);
+      const link = decodeNaverText(item.match(/<link[^>]*>([\s\S]*?)<\/link>/i)?.[1]);
+      const logNo = link.match(/(?:logNo=|\/)(\d{6,})(?:[/?&]|$)/)?.[1] || "";
+      if (!logNo || !title || seen.has(logNo)) continue;
+      const normalized = normalizePostDate(decodeNaverText(item.match(/<pubDate[^>]*>([\s\S]*?)<\/pubDate>/i)?.[1]));
+      seen.add(logNo);
+      posts.push({ logNo, title, ...normalized, url: `https://blog.naver.com/${blogId}/${logNo}` });
+      if (maxCount !== null && posts.length >= maxCount) break;
+    }
+    if (posts.length) { log(`[글목록] RSS 폴백에서 최근 글 ${posts.length}개 수집`); return { posts, source: "rss", totalCount: posts.length }; }
+  } catch (e: any) { log(`[글목록] RSS 폴백 실패 (${e.message})`); }
+  return { posts: [], source: "none", totalCount: 0 };
+}
+
 export type BlogStats = {
   blogId: string;
   totalPosts: number;
@@ -1791,6 +1897,7 @@ export async function crawlBlogStats(params: {
   let totalPosts = 0, neighbors = 0;
   const recentDates: string[] = [];
   let exposurePosts: ExposurePost[] = [];
+  let postListSource: "api" | "rss" | "none" = "none";
   let exposureChecks: BlogExposureCheck[] = [];
   let visitorDays: BlogVisitorDay[] = [];
   let inflowKeywords: { keyword: string; count?: number }[] = [];
@@ -1838,13 +1945,23 @@ export async function crawlBlogStats(params: {
     totalPosts = data.total;
     recentDates.push(...data.dates);
     exposurePosts = data.posts;
+    // 공식 비동기 글목록 API가 1순위. 실패하면 헬퍼 내부 RSS, 그마저 실패하면 위 HTML 결과를 유지한다.
+    try {
+      const postList = await fetchNaverPostList({ blogId, cookies, maxCount: null, log });
+      postListSource = postList.source;
+      if (postList.posts.length) {
+        exposurePosts = postList.posts.map(post => ({ logNo: post.logNo, title: post.title }));
+        recentDates.splice(0, recentDates.length, ...postList.posts.map(post => post.date).filter(Boolean).slice(0, 30));
+        totalPosts = Math.max(totalPosts, postList.totalCount, postList.posts.length);
+      }
+    } catch (e: any) { log(`[글목록] API/RSS 처리 실패 (${e.message}) · HTML 결과 유지`); }
     log(`[건강검진] 총 글 ${totalPosts}개 · 이웃 ${neighbors}명 · 최근 날짜 ${recentDates.length}개 수집`);
 
     try {
-      // 순환 검사를 위해 첫 페이지만이 아니라 목록 끝까지 logNo/제목을 확보한다.
+      // API/RSS가 모두 막힌 경우에만 기존 HTML 페이지 파싱을 최종 폴백으로 사용한다.
       const seenExposure = new Set(exposurePosts.map(post => post.logNo));
       const expectedPages = totalPosts > 0 ? Math.ceil(totalPosts / Math.max(1, exposurePosts.length || 5)) + 2 : 100;
-      for (let pg = 2; pg <= expectedPages && (totalPosts <= 0 || exposurePosts.length < totalPosts); pg++) {
+      for (let pg = 2; postListSource === "none" && pg <= expectedPages && (totalPosts <= 0 || exposurePosts.length < totalPosts); pg++) {
         try {
           await page.goto(`https://blog.naver.com/PostList.naver?blogId=${blogId}&categoryNo=0&currentPage=${pg}&widgetTypeCall=true`, { waitUntil: "domcontentloaded", timeout: 15000 });
           await page.waitForTimeout(500);
@@ -1951,7 +2068,7 @@ export async function crawlMyPosts(params: {
   const { blogId, cookies } = loadSession(accountId);
   if (!blogId) throw new Error("내 블로그 ID를 찾을 수 없어요 — 계정을 다시 연결해주세요");
 
-  const limit = selectMode === "count" ? Math.max(1, count) : selectMode === "period" ? 300 : 500;
+  const limit = selectMode === "count" ? Math.max(1, count) : Number.MAX_SAFE_INTEGER;
   const cutoff = selectMode === "period" ? Date.now() - period * 86400000 : 0;
 
   const browser = await chromium.launch({ headless: true, args: LAUNCH_ARGS });
@@ -1963,7 +2080,16 @@ export async function crawlMyPosts(params: {
   const seen = new Set<string>();
   try {
     log(`[답방] 내 블로그(${blogId}) 글 목록 불러오는 중...`);
-    for (let pg = 1; pg <= 15 && out.length < limit; pg++) {
+    let sharedSource: "api" | "rss" | "none" = "none";
+    try {
+      const shared = await fetchNaverPostList({ blogId, cookies, maxCount: selectMode === "count" ? limit : null, log });
+      sharedSource = shared.source;
+      for (const post of shared.posts) {
+        if (selectMode === "period" && post.dateMs && post.dateMs < cutoff) continue;
+        out.push(post);
+      }
+    } catch (e: any) { log(`[답방] API/RSS 글목록 처리 실패 (${e.message}) · HTML로 재시도`); }
+    for (let pg = 1; sharedSource === "none" && pg <= 15 && out.length < limit; pg++) {
       await page.goto(`https://blog.naver.com/PostList.naver?blogId=${blogId}&categoryNo=0&currentPage=${pg}&widgetTypeCall=true&topReferer=`, { waitUntil: "domcontentloaded", timeout: 20000 }).catch(() => {});
       await page.waitForTimeout(1000);
       const frame = page.frames().find(f => f.name() === "mainFrame") ?? page.frames().find(f => f.url().includes("blog.naver.com")) ?? null;
