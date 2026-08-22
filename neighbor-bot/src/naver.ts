@@ -2022,14 +2022,34 @@ export async function crawlBlogStats(params: {
       log(`[이웃수] 서로이웃 ${neighbors}명`);
     } catch {}
 
-    // (구) 관리자 통계 크롤 — 위 공개 위젯 실패 시 유입 검색어 등 보조용
+    // ★유입 검색어: 세션 필요(공개 불가). 이웃수처럼 로그인된 browser context 안에서 통계 유입분석 API를 fetch.
+    try {
+      log("[유입검색어] 통계 유입분석 수집 중...");
+      const kws = await page.evaluate(async (bid: string) => {
+        const urls = [
+          `https://admin.blog.naver.com/api/blogs/${bid}/stats/inflow-search-keyword?range=DAILY`,
+          `https://admin.blog.naver.com/api/blogs/${bid}/stats/keyword`,
+          `https://blog.naver.com/RabbitAsync.naver?blogId=${bid}&countPerPage=10&type=inflow`,
+        ];
+        for (const u of urls) {
+          try {
+            const r = await fetch(u, { headers: { Referer: `https://admin.blog.naver.com/${bid}` } });
+            const raw = await r.text();
+            const j = JSON.parse(raw.replace(/^\)\]\}',?\s*/, ""));
+            const arr = j?.result?.searchKeywordList || j?.result?.keywordList || j?.searchKeywords || (Array.isArray(j?.result) ? j.result : []);
+            if (Array.isArray(arr) && arr.length) {
+              return arr.slice(0, 5).map((x: any) => ({ keyword: String(x.keyword ?? x.searchKeyword ?? x.query ?? x.name ?? "").trim(), count: Number(x.count ?? x.cnt ?? x.pv ?? x.value ?? 0) || undefined })).filter((k: any) => k.keyword);
+            }
+          } catch {}
+        }
+        return [] as { keyword: string; count?: number }[];
+      }, blogId).catch(() => [] as { keyword: string; count?: number }[]);
+      if (Array.isArray(kws) && kws.length) inflowKeywords = kws;
+      log(`[유입검색어] ${inflowKeywords.length}개 수집`);
+    } catch (e: any) { log(`[유입검색어] 확인 실패: ${e.message}`); }
+
     if (false) {
-      const statUrls = [
-        `https://admin.blog.naver.com/${blogId}/stat/visitor`,
-        `https://admin.blog.naver.com/${blogId}/stat/traffic`,
-        `https://admin.blog.naver.com/${blogId}/stat/keyword`,
-        `https://admin.blog.naver.com/${blogId}`,
-      ];
+      const statUrls = [`https://admin.blog.naver.com/${blogId}`];
       for (const statUrl of statUrls) {
         try {
           await page.goto(statUrl, { waitUntil: "domcontentloaded", timeout: 15000 });
