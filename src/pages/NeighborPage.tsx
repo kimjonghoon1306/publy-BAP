@@ -285,7 +285,8 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
   // ── 저품질/누락 글 제목·키워드 개선 솔루션(AI) ──
   const [scSolLoading, setScSolLoading] = useState(false);
   const [scSolutions, setScSolutions] = useState<null | { original: string; diagnosis: string; newTitle: string; newTitle2: string; keywords: string[]; bodyTip: string; expectedEffect: string; reason: string }[]>(null);
-  const [scSolPage, setScSolPage] = useState(0);   // AI 팁 페이지네이션(10개 단위)
+  const [scSolPage, setScSolPage] = useState(0);   // AI 팁 페이지네이션(5개 단위)
+  const [scSolSearch, setScSolSearch] = useState(""); // AI 팁 원래 제목 검색
   const [scExpPage, setScExpPage] = useState(0);   // 검색노출 결과 페이지네이션(30개 단위)
   const [scExpSearch, setScExpSearch] = useState(""); // 검색노출 결과 제목 검색
   const [scPostPage, setScPostPage] = useState(0);    // 검사할 글 목록 페이지네이션(30개 단위)
@@ -1859,12 +1860,16 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
                         </button>
                       </div>
                       {scSolutions && (() => {
-                        const PER = 10; const totalPages = Math.ceil(scSolutions.length / PER);
+                        const sq = scSolSearch.trim().toLowerCase();
+                        const solFiltered = sq ? scSolutions.filter(s => (s.original || "").toLowerCase().includes(sq)) : scSolutions;
+                        const PER = 5; const totalPages = Math.max(1, Math.ceil(solFiltered.length / PER));
                         const page = Math.min(scSolPage, totalPages - 1);
-                        const shown = scSolutions.slice(page * PER, page * PER + PER);
+                        const shown = solFiltered.slice(page * PER, page * PER + PER);
                         return (
                         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
                           <div style={{ fontSize: 11.5, color: "var(--text3)", fontWeight: 600 }}>총 {scSolutions.length}개 글의 개선안 · {page + 1}/{totalPages} 페이지</div>
+                          <input className="inp" value={scSolSearch} onChange={e => { setScSolSearch(e.target.value); setScSolPage(0); }} placeholder="🔍 원래 제목으로 검색..." style={{ fontSize: 12.5, padding: "9px 12px" }} />
+                          {solFiltered.length === 0 && <div style={{ fontSize: 12, color: "var(--text3)", padding: "16px 0", textAlign: "center" }}>검색 결과가 없어요.</div>}
                           {shown.map((s, i) => (
                             <div key={i} style={{ padding: "15px 16px", borderRadius: 13, background: "var(--card)", border: "1px solid var(--border)" }}>
                               <div style={{ fontSize: 12.5, color: "var(--text3)", textDecoration: "line-through", marginBottom: 6 }}>{s.original}</div>

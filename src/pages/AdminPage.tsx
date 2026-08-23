@@ -2517,7 +2517,7 @@ POST3: (제목)|(이유)
           {/* 사이드바 */}
           <div className="sidebar">
             <div className="nav-section" style={{fontSize:10,fontWeight:800,color:"var(--text3)",padding:"8px 12px 4px",letterSpacing:".08em"}}>✍️ 블로그 기능</div>
-            {TABS.filter(t=>["keyword","write","image","photo","publish","manage","accounts","rank","calendar"].includes(t.k)).map(t => (
+            {TABS.filter(t=>["keyword","write","image","photo","publish","manage","blogscore","accounts","rank","calendar"].includes(t.k)).map(t => (
               <button key={t.k} className={`nav-item ${tab===t.k?"active":""}`} onClick={()=>setTab(t.k as any)}>
                 <span className="nav-ico">{t.i}</span>{t.l}
               </button>
@@ -2530,7 +2530,7 @@ POST3: (제목)|(이유)
               <span className="nav-ico">📱</span>인스타 DM
             </button>
             <div className="nav-section" style={{fontSize:10,fontWeight:800,color:"var(--text3)",padding:"10px 12px 4px",letterSpacing:".08em",borderTop:"1px solid var(--border)",marginTop:6}}>🤝 이웃 활동</div>
-            {TABS.filter(t=>["neighbor","engage"].includes(t.k)).map(t => (
+            {TABS.filter(t=>["neighbor","engage","reply"].includes(t.k)).map(t => (
               <button key={t.k} className={`nav-item ${tab===t.k?"active":""}`} onClick={()=>setTab(t.k as any)}>
                 <span className="nav-ico">{t.i}</span>{t.l}
               </button>
@@ -2545,7 +2545,7 @@ POST3: (제목)|(이유)
             <button className={`nav-item ${tab==="insta_dm_manage"?"active":""}`} onClick={()=>setTab("insta_dm_manage")}>
               <span className="nav-ico">📊</span>DM 회원관리
             </button>
-            {TABS.filter(t=>["neighbor_manage","engage_manage","settings"].includes(t.k)).map(t => (
+            {TABS.filter(t=>["neighbor_manage","engage_manage","reply_manage","blogscore_manage","settings"].includes(t.k)).map(t => (
               <button key={t.k} className={`nav-item ${tab===t.k?"active":""}`} onClick={()=>setTab(t.k as any)}>
                 <span className="nav-ico">{t.i}</span>{t.l}
               </button>
