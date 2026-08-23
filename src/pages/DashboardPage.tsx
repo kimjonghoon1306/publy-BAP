@@ -870,6 +870,8 @@ export default function DashboardPage({user, onLogout, onAdminLogin, onThemeTogg
   }
   const [titles, setTitles] = useState<string[]>(()=>{try{return JSON.parse(localStorage.getItem("publy_titles")||"[]");}catch{return[];}});
   const [selectedTitle, setSelectedTitle] = useState("");
+  // ★캘린더에서 넘어온 우리 서비스 홍보(글 본문에 자연스럽게 링크 삽입용). 글 생성 후 자동 해제.
+  const [pendingPromo, setPendingPromo] = useState<{name:string;url:string;blurb:string}|null>(null);
   const [loadingTitles, setLoadingTitles] = useState(false);
   const [kwData, setKwData] = useState<{keyword:string;volume:number;competition:string;cpc:number;clicks:number}[]>([]);
   const [loadingKw, setLoadingKw] = useState(false);
@@ -957,6 +959,21 @@ Output format (JSON array only, no other text):
       const clean=raw.replace(/```json|```/g,"").trim();
       const parsed=JSON.parse(clean);
       const sched=parsed.slice(0,calDays);
+      // ★우리 서비스 주제 1개를 스케줄에 자연스럽게 랜덤 삽입 → 그 글 쓰면 본문에 링크가 녹아듦(promo)
+      const SERVICE_TOPICS=[
+        {name:"온종일팜",url:"https://app.yuanfnb.com",keyword:"제철 농수산물 온라인 주문",title:"산지직송 제철 농수산물 온라인으로 편하게 사는 법",blurb:"산지에서 바로 보내주는 신선한 농수산물 쇼핑몰"},
+        {name:"온종일 체험단",url:"https://pick.온종일.com",keyword:"블로그 체험단 신청 방법",title:"블로그 체험단 처음 신청하는 법과 후기 잘 쓰는 팁",blurb:"블로그 체험단·협찬을 신청하고 리뷰하는 플랫폼"},
+        {name:"온파트너",url:"https://partner.yuanfnb.com",keyword:"제휴마케팅 부업",title:"초보도 시작하는 제휴마케팅 부업, 이렇게 하면 됩니다",blurb:"상품을 소개하고 수익을 얻는 제휴마케팅 서비스"},
+        {name:"온캐치",url:"https://game.온종일.com",keyword:"무료 웹게임 추천",title:"설치 없이 바로 즐기는 무료 웹게임 추천 모음",blurb:"회원가입만으로 즐기는 무료 게임 14종"},
+        {name:"온종일뉴스",url:"https://news.온종일.com",keyword:"정부지원금 정보",title:"놓치기 쉬운 정부지원금·창업 정보 한눈에 챙기는 법",blurb:"AI·창업·지원금·마케팅 실용 정보를 다루는 뉴스"},
+        {name:"온종일 스튜디오",url:"https://studio.온종일.com",keyword:"소상공인 홍보 영상 제작",title:"소상공인을 위한 홍보 영상·홈페이지 제작 시작하기",blurb:"홈페이지·홍보 영상을 만들어주는 제작 서비스"},
+      ];
+      if(sched.length>0){
+        const svc=SERVICE_TOPICS[Math.floor(Math.random()*SERVICE_TOPICS.length)];
+        const insertAt=Math.floor(Math.random()*sched.length);
+        const base=sched[insertAt];
+        sched[insertAt]={...base,keyword:svc.keyword,title:svc.title,style:base?.style||"정보글",adType:base?.adType||"adsense",promo:{name:svc.name,url:svc.url,blurb:svc.blurb}};
+      }
       setCalSchedule(sched);
       localStorage.setItem("publy_cal_schedule",JSON.stringify(sched));  // 앱 재접속해도 유지
       setCalCompleted({}); localStorage.setItem("publy_cal_done","{}");  // 새 스케줄이면 완료기록 초기화
@@ -975,9 +992,10 @@ Output format (JSON array only, no other text):
     });
   }
   // 스케줄 항목 → 글쓰기 탭으로(키워드·제목 자동 채움)
-  function writeFromSchedule(s:{keyword:string;title:string}){
+  function writeFromSchedule(s:{keyword:string;title:string;promo?:{name:string;url:string;blurb:string}}){
     setKeyword(s.keyword);
     setSelectedTitle(s.title);
+    setPendingPromo(s.promo||null);   // 우리 서비스 주제면 글 본문에 자연 삽입
     setTab("write");
     showToast(`✍️ "${s.title}" 글쓰기로 이동했어요!`);
   }
@@ -1131,7 +1149,7 @@ Output format (JSON array only, no other text):
   const [calPlatform, setCalPlatform] = useState<"naver"|"tistory">("naver");
   const [calDays, setCalDays] = useState(30);
   // ★캘린더 스케줄·완료기록은 localStorage에 저장 → 앱 재접속해도 유지(꾸준히 쓰게)
-  const [calSchedule, setCalSchedule] = useState<{date:string;keyword:string;title:string;style:string;adType:string}[]>(()=>{try{return JSON.parse(localStorage.getItem("publy_cal_schedule")||"[]");}catch{return[];}});
+  const [calSchedule, setCalSchedule] = useState<{date:string;keyword:string;title:string;style:string;adType:string;promo?:{name:string;url:string;blurb:string}}[]>(()=>{try{return JSON.parse(localStorage.getItem("publy_cal_schedule")||"[]");}catch{return[];}});
   const [calCompleted, setCalCompleted] = useState<Record<string,string>>(()=>{try{return JSON.parse(localStorage.getItem("publy_cal_done")||"{}");}catch{return{};}});
   const [calLoading, setCalLoading] = useState(false);
   const [calDone, setCalDone] = useState(false);
@@ -2387,6 +2405,10 @@ Output format (JSON array only, no other text):
 - 광고처럼 딱딱하지 말고, 실제 경험담·추천 말투로 자연스럽게. 과장·거짓 정보는 금지(위 내용 범위에서만).
 - ⛔ 본문에 URL·웹사이트 주소(http… 같은 링크)를 직접 쓰지 말 것. 링크는 퍼블리가 따로 카드로 넣으니, 글에는 "홈페이지에서", "사이트에서" 처럼 말로만 안내한다.`
       : "";
+    // ★캘린더에서 넘어온 우리 서비스 홍보: 글 마지막에 자연스러운 소개 문단 + 실제 링크를 본문에 삽입
+    const promoGuide=pendingPromo
+      ? `\n\n=== 🔗 마무리 소개(필수) ===\n이 글의 주제와 관련해, 글 맨 마지막 문단에서 "${pendingPromo.name}"(${pendingPromo.blurb})를 딱 1~2문장으로 자연스럽게 소개하고, 바로 그 다음 줄에 아래 링크를 그대로 한 줄로 넣어라(광고 티 나지 않게, 도움 주는 말투로):\n${pendingPromo.url}\n※ 링크는 이 마무리 1곳에만. 위 다른 규칙의 "링크 쓰지 말 것"은 이 서비스 링크에는 예외.`
+      : "";
     const prompt=`당신은 대한민국 최고의 블로그 작가입니다.
 
 키워드: "${keyword}"  제목: "${title}"
@@ -2433,7 +2455,7 @@ ${catGuide}
 
 ${adGuide}
 ${platGuide}
-${styleGuide}${personaGuide?"\n\n[말투/페르소나]\n"+personaGuide:""}${templateGuide?"\n\n"+templateGuide:""}${serviceGuide}
+${styleGuide}${personaGuide?"\n\n[말투/페르소나]\n"+personaGuide:""}${templateGuide?"\n\n"+templateGuide:""}${serviceGuide}${promoGuide}
 
 === 출력 형식 ===
 태그: 태그1, 태그2, 태그3, 태그4, 태그5
@@ -2462,6 +2484,7 @@ POST3: (제목)|(이유)
       setGenTitle(title);if(tgm)setGenTags(tgm[1].trim());
       const generatedBody=ensureQuestionHeadings(bm?bm[1].trim():cleaned,keyword||title);
       const body=onPartnerItems.length>0?placeOnPartnerProduct(generatedBody,onPartnerItems.map(it=>it.product)):generatedBody.trim();setGenContent(body);setQualityScore(calcQualityScore(body,keyword));
+      setPendingPromo(null);   // 홍보 삽입 1회용 → 사용 후 해제(다음 글에 안 남게)
       // 비동기 글 생성 도중 직접입력으로 바뀌었으면 추천값으로 절대 덮지 않는다.
       if(imgCountAutoRef.current){
         const recommended=recommendImgCount(body);
@@ -5092,6 +5115,19 @@ POST3: (제목)|(이유)
                   </div>
                 </div>
 
+                {/* ℹ️ 발행 한도 공유 안내 */}
+                {(()=>{const cfg=PLAN_CONFIG[user.plan]??PLAN_CONFIG.free;const unlimited=cfg.dailyPublish>=9999;const remain=Math.max(0,cfg.dailyPublish-dailyPublishUsed);return(
+                  <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap",padding:"11px 15px",borderRadius:12,background:"var(--card2)",border:"1px solid var(--border)",marginBottom:14,fontSize:12.5,color:"var(--text2)",lineHeight:1.55}}>
+                    <span style={{fontSize:16}}>ℹ️</span>
+                    <div style={{flex:1,minWidth:180}}>
+                      <b>사진 글쓰기는 만드는 건 무제한</b>이에요. 단, <b style={{color:"#FF6B9D"}}>발행 한도는 일반 글쓰기와 함께 사용</b>돼요(둘이 같은 하루 발행 수를 나눠 써요).
+                    </div>
+                    <span style={{fontWeight:800,color:remain>0?"var(--text)":"var(--danger)",whiteSpace:"nowrap",padding:"4px 10px",borderRadius:99,background:"var(--bg)",border:"1px solid var(--border)"}}>
+                      오늘 발행 {unlimited?"∞ 무제한":`${dailyPublishUsed}/${cfg.dailyPublish}건 · ${remain}건 남음`}
+                    </span>
+                  </div>
+                );})()}
+
                 {/* 사진 업로드 */}
                 <div className="card" style={{padding:"18px",marginBottom:14}}>
                   <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
@@ -5852,31 +5888,28 @@ POST3: (제목)|(이유)
                       </div>}
                 </div>
 
-                {/* 🌿 우리 서비스 자연스러운 추천 (회원들에게 노출) */}
+                {/* 💡 추천 글감 — 우리 서비스를 '주제'로 자연스럽게 녹임(링크 X, 클릭 시 키워드에 추가) */}
                 {(()=>{
-                  const promos=[
-                    {emoji:"🥬",name:"온종일팜",desc:"산지직송 농수산물 쇼핑몰",url:"https://app.yuanfnb.com",tag:"쇼핑"},
-                    {emoji:"📝",name:"온종일 체험단",desc:"블로그 체험단 신청·리뷰",url:"https://pick.온종일.com",tag:"체험단"},
-                    {emoji:"🤝",name:"온파트너",desc:"제휴마케팅으로 수익내기",url:"https://partner.yuanfnb.com",tag:"제휴"},
-                    {emoji:"🎮",name:"온캐치",desc:"무료 게임 14종 + 랭킹·쿠폰",url:"https://game.온종일.com",tag:"게임"},
-                    {emoji:"💬",name:"온메신저",desc:"커뮤니티 채팅",url:"https://talk.온종일.com",tag:"채팅"},
-                    {emoji:"📰",name:"온종일 뉴스",desc:"실용정보·지원금·마케팅",url:"https://news.온종일.com",tag:"뉴스"},
-                    {emoji:"🎨",name:"온종일 스튜디오",desc:"홈페이지·영상 제작",url:"https://studio.온종일.com",tag:"제작"},
-                    {emoji:"🏠",name:"온종일 본사",desc:"온종일 통합 포털",url:"https://www.온종일.com",tag:"포털"},
-                    {emoji:"🤖",name:"블로그오토프로",desc:"AI 블로그 자동생성",url:"https://blogautopro.com",tag:"AI글"},
+                  // 각 서비스가 블로그 글 주제로 자연스럽게 들어가는 글감들
+                  const ideas=[
+                    "제철 농수산물 고르는 법","산지직송 장보기 후기","집밥 식재료 추천",
+                    "블로그 체험단 신청 꿀팁","협찬 후기 잘 쓰는 법","무료로 즐기는 웹게임 추천",
+                    "부업으로 제휴마케팅 시작하기","소자본 창업 아이템","정부지원금 신청 방법",
+                    "AI로 블로그 글 쓰는 법","무료 마케팅 툴 모음","홈페이지 없이 브랜드 알리기",
+                    "온라인 부수입 만드는 법","1인 창업 준비 체크리스트","요즘 뜨는 부업 트렌드",
                   ];
                   return (
                   <div className="card" style={{marginBottom:14,padding:"13px 15px"}}>
-                    <div style={{fontSize:12,fontWeight:800,color:"var(--text2)",marginBottom:9}}>🌿 이런 서비스도 있어요 <span style={{fontSize:10.5,color:"var(--text3)",fontWeight:600}}>· 블로그 주제로도 좋아요</span></div>
-                    <div style={{display:"flex",gap:9,overflowX:"auto",paddingBottom:2}}>
-                      {promos.map(p=>(
-                        <a key={p.name} href={p.url} target="_blank" rel="noopener noreferrer"
-                          style={{flex:"0 0 auto",display:"flex",alignItems:"center",gap:9,padding:"9px 13px",borderRadius:12,border:"1px solid var(--border)",background:"var(--bg)",textDecoration:"none",cursor:"pointer",transition:"all .15s",minWidth:0}}
-                          onMouseEnter={e=>{e.currentTarget.style.borderColor="var(--accent)";e.currentTarget.style.transform="translateY(-2px)";}}
-                          onMouseLeave={e=>{e.currentTarget.style.borderColor="var(--border)";e.currentTarget.style.transform="none";}}>
-                          <span style={{fontSize:22}}>{p.emoji}</span>
-                          <div><div style={{fontSize:12.5,fontWeight:800,color:"var(--text)"}}>{p.name} <span style={{fontSize:9.5,color:"var(--accent-text)",background:"var(--accent-bg)",padding:"1px 6px",borderRadius:99,marginLeft:2}}>{p.tag}</span></div><div style={{fontSize:10.5,color:"var(--text3)",marginTop:1,whiteSpace:"nowrap"}}>{p.desc}</div></div>
-                        </a>
+                    <div style={{fontSize:12,fontWeight:800,color:"var(--text2)",marginBottom:4}}>💡 오늘의 추천 글감 <span style={{fontSize:10.5,color:"var(--text3)",fontWeight:600}}>· 탭하면 키워드에 추가돼요</span></div>
+                    <div style={{fontSize:11,color:"var(--text3)",lineHeight:1.5,marginBottom:10}}>뭘 쓸지 막막할 때, 반응 좋은 <b>실생활·수익·창업</b> 주제를 골라 바로 시작해보세요.</div>
+                    <div style={{display:"flex",flexWrap:"wrap",gap:7}}>
+                      {ideas.map((it,i)=>(
+                        <button key={i} onClick={()=>{setCalKeywords(prev=>{const list=prev.split(/[,\n]+/).map(s=>s.trim()).filter(Boolean); if(!list.includes(it)) list.push(it); return list.join(", ");}); showToast(`➕ "${it}" 키워드에 추가!`);}}
+                          style={{padding:"7px 12px",borderRadius:10,border:"1px solid var(--border)",background:"var(--bg)",color:"var(--text)",cursor:"pointer",fontSize:12.5,fontWeight:600,fontFamily:"inherit",transition:"all .12s"}}
+                          onMouseEnter={e=>{e.currentTarget.style.borderColor="#03c75a";e.currentTarget.style.background="rgba(3,199,90,.07)";}}
+                          onMouseLeave={e=>{e.currentTarget.style.borderColor="var(--border)";e.currentTarget.style.background="var(--bg)";}}>
+                          {it}
+                        </button>
                       ))}
                     </div>
                   </div>
@@ -6012,7 +6045,7 @@ POST3: (제목)|(이유)
                                     {isToday&&<span style={{fontSize:9,marginLeft:5,padding:"1px 6px",borderRadius:99,background:"var(--accent)",color:"#000",fontWeight:900}}>오늘</span>}
                                   </td>
                                   <td style={{padding:"10px 12px",color:"var(--accent-text)",fontWeight:700,whiteSpace:"nowrap"}}>{s.keyword}</td>
-                                  <td style={{padding:"10px 12px",color:"var(--text)",maxWidth:260,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",textDecoration:done?"line-through":"none"}}>{s.title}</td>
+                                  <td style={{padding:"10px 12px",color:"var(--text)",maxWidth:260,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",textDecoration:done?"line-through":"none"}}>{s.promo&&<span title={`${s.promo.name} 소개가 글 마지막에 자연스럽게 들어가요`} style={{fontSize:9,fontWeight:800,color:"#03c75a",background:"rgba(3,199,90,.12)",padding:"1px 6px",borderRadius:99,marginRight:5}}>🌿추천</span>}{s.title}</td>
                                   <td style={{padding:"10px 12px",whiteSpace:"nowrap"}}>
                                     <span style={{fontSize:11,padding:"2px 8px",borderRadius:99,background:"var(--card2)",color:"var(--text2)",border:"1px solid var(--border)"}}>{s.style}</span>
                                   </td>
