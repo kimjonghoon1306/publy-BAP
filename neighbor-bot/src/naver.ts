@@ -2460,6 +2460,18 @@ function savePumasiPairs(m: Record<string, number>) {
 }
 const PUMASI_PAIR_COOLDOWN_MS = 2 * 24 * 3600 * 1000; // 같은 조합 2일 쿨다운
 
+/* ── 품앗이 댓글 이력: (actor→target) 조합마다 이미 댓글 단 글(logNo)을 저장 ──
+   같은 글에 두 번 댓글 달지 않게(도배 방지). 최신→과거로 거슬러 올라가며 안 단 글에만 단다.
+   파일 하나에 { "actorId>targetId": ["logNo", …] } 로 모아 관리. */
+const PUMASI_COMMENTED_PATH = path.join(SESSION_DIR, "pumasi_commented.json");
+function loadPumasiCommented(): Record<string, string[]> {
+  try { return fs.existsSync(PUMASI_COMMENTED_PATH) ? JSON.parse(fs.readFileSync(PUMASI_COMMENTED_PATH, "utf-8")) : {}; }
+  catch { return {}; }
+}
+function savePumasiCommented(m: Record<string, string[]>) {
+  try { fs.writeFileSync(PUMASI_COMMENTED_PATH, JSON.stringify(m)); } catch {}
+}
+
 /* ── 품앗이 실행 로그: 효과 리포트용(대상 blogId가 언제 품앗이 방문을 받았는지 기록) ── */
 const PUMASI_RUNS_PATH = path.join(SESSION_DIR, "pumasi_runs.json");
 function appendPumasiRun(targetBlogId: string, actorBlogId: string) {
@@ -2542,6 +2554,7 @@ export async function pumasiEngage(params: {
   // ★계정 순환 매칭: 이력을 보고 '아직 안 갔거나 가장 오래된' 조합을 우선 배정
   //   (고정된 계정끼리만 반복 소통하는 패턴↓). 같은 actor→target 조합은 2일 쿨다운.
   const pairs = loadPumasiPairs();
+  const commentedAll = loadPumasiCommented();   // (actor→target)별 이미 댓글 단 글 이력(도배 방지·최신→과거)
   const now = Date.now();
   const pairKey = (a: string, t: string) => `${a}>${t}`;
   const visitPlan: { actor: typeof valid[number]; target: typeof valid[number] }[] = [];
@@ -2573,6 +2586,9 @@ export async function pumasiEngage(params: {
     savePumasiPairs(pairs);
     appendPumasiRun(target.blogId, actor.blogId);                   // 효과 리포트용 실행 로그
     try {
+      // ★도배 방지: 이 (actor→target) 조합에서 이미 댓글 단 글은 제외 → 최신부터 안 단 글에만 단다(과거로 자동 진행)
+      const ckey = `${actor.accountId}>${target.accountId}`;
+      const commentedSet = new Set<string>(commentedAll[ckey] || []);
       await engageBlogs({
         accountId: actor.accountId,
         targets: [{ keyword: "품앗이", blogId: target.blogId }],
@@ -2581,9 +2597,11 @@ export async function pumasiEngage(params: {
         postsPerBlog: Math.max(1, target.posts),
         delayMin, delayMax,
         dailyLimit: 999999,
-        skipDone: false,                // 서로 계속 달 수 있게(중복방지 안함)
+        skipDone: false,                // 서로 계속 달 수 있게(당일 중복방지는 아래 excludeLogNos가 담당)
         commentRate: 100, likeRate: 100,
         aiComment, commentTone, geminiKey, readRelated, readRelatedMode,
+        excludeLogNos: commentedSet,
+        onCommented: (logNo) => { commentedSet.add(logNo); commentedAll[ckey] = [...commentedSet]; savePumasiCommented(commentedAll); },
         onLog: (m) => log(m),
         onResult: async (r) => { if (r.status === "success") done++; else if (r.status === "fail") fail++; else if (r.status === "skip") skip++; await onResult?.({ ...r, actor: actor.blogId }); onProgress?.(done, fail, skip); },
         stopSignal,
@@ -2621,6 +2639,8 @@ export async function engageBlogs(params: {
   geminiKey?: string;     // 사용자 Gemini API 키
   readRelated?: boolean;  // ★관련 글 1편 더 읽기: 각 대상 글 처리 직후 같은 블로그 다른 글 1편 정독(공감·댓글 없음)
   readRelatedMode?: "always" | "random";  // ★매번=각 대상 글마다 항상 1편 / 가끔=확률 60%
+  excludeLogNos?: Set<string>;   // ★이미 댓글 단 글(logNo) 제외 → 최신→과거로 안 단 글에만 단다(품앗이 도배 방지)
+  onCommented?: (logNo: string) => void;   // ★댓글 성공 시 그 글 logNo 통보(이력 저장용)
   onLog?: (msg: string) => void;
   onResult?: (r: EngageResult) => Promise<void>;
   onProgress?: (done: number, fail: number) => void;
@@ -2632,7 +2652,7 @@ export async function engageBlogs(params: {
     dailyLimit, skipDone, commentRate = 100, likeRate = 100,
     // ★readRelated 기본 false: 일반 공감·댓글(여러 블로그 순회)은 관련글 더 읽기를 켜지 않음(시간 급증 방지).
     //   품앗이(pumasiEngage)만 명시적으로 true를 넘겨 켠다.
-    aiComment = false, commentTone = "다정", geminiKey = "", readRelated = false, readRelatedMode = "random", onLog, onResult, onProgress, stopSignal,
+    aiComment = false, commentTone = "다정", geminiKey = "", readRelated = false, readRelatedMode = "random", excludeLogNos, onCommented, onLog, onResult, onProgress, stopSignal,
   } = params;
   const log = onLog || console.log;
 
@@ -2691,8 +2711,10 @@ export async function engageBlogs(params: {
 
       const { keyword, blogId } = target;
 
-      const doneToday = doneMap[blogId] === today;               // 오늘 이미 처리 → 항상 스킵(당일 중복방지)
-      const donePerm = skipDone && (blogId in doneMap);          // 완료 스킵 ON → 과거 처리분도 스킵
+      // ★품앗이(excludeLogNos 사용)는 글 단위 이력으로 중복을 관리하므로 blogId 단위 당일 스킵을 건너뛴다.
+      //   (같은 계정이 하루에 여러 번 돌려도 과거 글로 계속 내려갈 수 있게)
+      const doneToday = !excludeLogNos && doneMap[blogId] === today;   // 오늘 이미 처리 → 스킵(당일 중복방지)
+      const donePerm = skipDone && (blogId in doneMap);               // 완료 스킵 ON → 과거 처리분도 스킵
       if (doneToday || donePerm) {
         await onResult?.({ keyword, blogId, postUrl: "", liked: false, commented: false, status: "skip", message: doneToday ? "오늘 이미 처리됨(당일 중복방지)" : "이미 처리됨" });
         onProgress?.(done, fail);
@@ -2703,17 +2725,22 @@ export async function engageBlogs(params: {
         log(`[공감·댓글] ${blogId} 방문 중...`);
 
         // 검증된 PostTitleListAsync 기반 목록만 사용 — target blogId 소유 글 외 링크가 섞이지 않는다.
-        // ★관련 글 읽기(매번 모드=각 대상 글마다 1편)용으로 대상 글의 2배+3편 가져와 여분 풀을 넉넉히 확보
-        const postList = await fetchNaverPostList({ blogId, cookies, maxCount: Math.max(1, postsPerBlog) * 2 + 3, log });
-        const periodOk = postList.posts.filter(post => post.dateMs === 0 || post.dateMs >= cutoff);
-        const filtered = periodOk.slice(0, Math.max(1, postsPerBlog));
+        // ★관련 글 읽기용 여분 풀 + 품앗이 이력 제외(excludeLogNos) 시엔 과거까지 훑도록 넉넉히 가져온다.
+        const wantCount = Math.max(1, postsPerBlog);
+        const fetchCount = excludeLogNos ? 100 : wantCount * 2 + 3;
+        const postList = await fetchNaverPostList({ blogId, cookies, maxCount: fetchCount, log });
+        let periodOk = postList.posts.filter(post => post.dateMs === 0 || post.dateMs >= cutoff);
+        // ★품앗이: 이미 댓글 단 글은 제외 → 최신부터 훑어 아직 안 단 글에만 단다(같은 글 도배 방지, 자동으로 과거로 내려감)
+        if (excludeLogNos) periodOk = periodOk.filter(post => !excludeLogNos.has(String(post.logNo)));
+        const filtered = periodOk.slice(0, wantCount);
         // 댓글 안 다는 여분 글(관련 글 1편 더 읽기용): 대상 글 이후의 글들
         const extraPool = periodOk.slice(filtered.length);
         const relRead = new Set<string>();   // ★이미 관련글로 읽은 URL(사이클마다 다른 글 고르기 위한 중복 방지)
 
         if (filtered.length === 0) {
-          log(`[공감·댓글] ${blogId} — 기간 내 글 없음, 스킵`);
-          await onResult?.({ keyword, blogId, postUrl: "", liked: false, commented: false, status: "skip", message: `최근 ${periodDays}일 내 글 없음` });
+          const msg = excludeLogNos ? "댓글 달 새 글이 없어요(모든 글에 이미 댓글 완료)" : `최근 ${periodDays}일 내 글 없음`;
+          log(`[공감·댓글] ${blogId} — ${msg}, 스킵`);
+          await onResult?.({ keyword, blogId, postUrl: "", liked: false, commented: false, status: "skip", message: msg });
           onProgress?.(done, fail);
           continue;
         }
@@ -2994,6 +3021,8 @@ export async function engageBlogs(params: {
           doneMap[blogId] = today;
           fs.writeFileSync(engageDonePath, JSON.stringify(doneMap, null, 2));
           done++;
+          // ★품앗이 도배 방지: 댓글 단 글은 이력에 기록 → 다음엔 이 글 건너뛰고 과거 글로
+          if (commented && onCommented && targetPost.logNo) onCommented(String(targetPost.logNo));
           const msg = commented ? "통과 (댓글 작성)" : "공감 완료";
           await onResult?.({ keyword, blogId, postUrl: targetPost.url, liked, commented, status: "success", message: msg });
           log(`[공감·댓글] ✅ ${blogId} ${msg} (${done}/${dailyLimit})`);
