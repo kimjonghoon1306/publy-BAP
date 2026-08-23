@@ -2990,45 +2990,51 @@ export async function engageBlogs(params: {
         if (doComment && !aiComment && comment.trim() && !rollComment) log(`[공감·댓글] ${blogId} 댓글 건너뜀(확률 ${commentRate}%)`);
 
         // ── 공감 클릭 ──
-        //  실측(2026-08): 네이버 공감버튼 = a.u_likeit_list_button (텍스트 "공감"), 이미 눌렀으면 class에 'on'
+        //  ★실측(2026-08-23): 메인 공감버튼 = a.u_likeit_button._face. 안 눌렸으면 class에 'off', 누르면 'on'으로 바뀐다.
+        //   (기존 "on 있고 off 없으면 눌림" 판정이 이 버튼과 안 맞아 공감이 안 눌렸음)
         if (rollLike) {
           try {
             const likeSels = [
-              // 실제 보이는 메인 버튼. list_button은 닫힌 리액션 레이어 안의 0x0 요소다.
-              "a.u_likeit_button._face",
+              "a.u_likeit_button._face",   // 메인 공감 버튼(실측)
               "a.u_likeit_button",
-              ".u_likeit_list_btn._button",
               "a[data-clk*='like']",
-              // 구버전 폴백
-              ".sympathy_toggle_btn",
+              ".sympathy_toggle_btn",      // 구버전 폴백
               "a[class*='sympathy']",
             ];
+            // off/on/aria-pressed로 현재 공감 상태 판정
+            const likedState = (cls: string, pressed: string | null) => {
+              if (pressed === "true") return true;
+              if (/\boff\b/.test(cls)) return false;        // off 클래스 = 아직 공감 안 함
+              return /\bon\b/.test(cls);                    // on 클래스 = 공감함
+            };
             for (const sel of likeSels) {
               try {
                 const el = await ctx.$(sel);
                 if (!el) continue;
-                // 이미 공감했는지: aria-pressed=true 또는 class에 'on'(off 없음)이면 눌린 상태
-                const isActive = await ctx.evaluate((s: string) => {
-                  const btn = document.querySelector(s);
-                  if (!btn) return false;
-                  const c = btn.className || "";
-                  return btn.getAttribute("aria-pressed") === "true" || (/\bon\b/.test(c) && !/\boff\b/.test(c));
+                const before = await ctx.evaluate((s: string) => {
+                  const b = document.querySelector(s); if (!b) return null;
+                  return { cls: b.className || "", pressed: b.getAttribute("aria-pressed") };
                 }, sel);
-                if (isActive) { liked = true; log(`[공감·댓글] ${blogId} 이미 공감됨`); break; }
+                if (!before) continue;
+                if (likedState(before.cls, before.pressed)) { liked = true; log(`[공감·댓글] ${blogId} 이미 공감됨`); break; }
                 await scrollFrameElementIntoView(el);
                 // force 클릭 + 좌표 폴백(오버레이·0x0 대응)
                 try { await el.click({ force: true, timeout: 5000 }); }
                 catch { const b = await el.boundingBox(); if (b) await page.mouse.click(b.x + b.width / 2, b.y + b.height / 2); }
-                await page.waitForTimeout(1200);
-                // 상태 전환 확인(관대하게: 확인되면 확실, 확인 안 돼도 클릭은 됐으니 liked 처리)
-                const nowActive = await ctx.evaluate((s: string) => {
-                  const btn = document.querySelector(s);
-                  if (!btn) return false;
-                  return btn.getAttribute("aria-pressed") === "true" || (/\bon\b/.test(btn.className || "") && !/\boff\b/.test(btn.className || ""));
-                }, sel).catch(() => false);
-                liked = true;
-                log(`[공감·댓글] ❤️ ${blogId} 공감 클릭${nowActive ? " 완료(상태 확인)" : "(상태 미확인이나 클릭됨)"} · 셀렉터=${sel}`);
-                break;
+                await page.waitForTimeout(1500);
+                // off→on 전환(또는 aria-pressed=true) 확인. 안 바뀌면 한 번 더 클릭 시도.
+                let after = await ctx.evaluate((s: string) => {
+                  const b = document.querySelector(s); if (!b) return null;
+                  return { cls: b.className || "", pressed: b.getAttribute("aria-pressed") };
+                }, sel).catch(() => null);
+                if (after && !likedState(after.cls, after.pressed)) {
+                  try { await el.click({ force: true, timeout: 3000 }); } catch {}
+                  await page.waitForTimeout(1200);
+                  after = await ctx.evaluate((s: string) => { const b = document.querySelector(s); return b ? { cls: b.className || "", pressed: b.getAttribute("aria-pressed") } : null; }, sel).catch(() => null);
+                }
+                const ok = after ? likedState(after.cls, after.pressed) : false;
+                if (ok) { liked = true; log(`[공감·댓글] ❤️ ${blogId} 공감 완료 (off→on 확인) · ${sel}`); break; }
+                else { log(`[공감·댓글] ${blogId} 공감 클릭했으나 상태 전환 미확인(${sel}) — 다음 셀렉터 시도`); }
               } catch {}
             }
             if (!liked) {
