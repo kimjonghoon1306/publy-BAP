@@ -282,11 +282,12 @@ export async function saveNaverSession(
     console.log(`[naver] ✅ blogId: ${blogId}`);
 
     const cookies = await context.cookies();
-    // 비밀번호 저장 (자동 재로그인용, base64)
+    // ★비밀번호 저장 (자동 재로그인용, base64) — 재진입 시 세션 만료돼도 저장된 정보로 원터치 재연결되게 함
     writeSession(sessionName(userId), {
       loginId: id,
       blogId,
       cookies,
+      pw: Buffer.from(pw, "utf-8").toString("base64"),
     });
     await browser.close();
     return { blogId };
@@ -352,7 +353,8 @@ export async function reloginNaverSilent(userId: string): Promise<boolean> {
 
     const cookies = await context.cookies();
     const oldSession = loadSession(userId);
-    writeSession(sessionName(userId), { ...oldSession, pw: undefined, cookies });
+    // ★비번 유지(지우면 다음 자동재로그인 불가). 쿠키만 새 것으로 갱신.
+    writeSession(sessionName(userId), { ...oldSession, cookies });
     await browser.close();
     console.log("[naver] ✅ 자동 재로그인 성공");
     return true;
@@ -360,6 +362,32 @@ export async function reloginNaverSilent(userId: string): Promise<boolean> {
     await browser.close().catch(() => {});
     return false;
   }
+}
+
+/* ★쿠키로 로그인이 실제로 살아있는지 확인(가벼운 fetch). 만료 시 nidlogin으로 리다이렉트됨. */
+async function isSessionAlive(cookies: any[]): Promise<boolean> {
+  try {
+    const cookieHeader = (cookies || []).map((c: any) => `${c.name}=${c.value}`).join("; ");
+    if (!cookieHeader) return false;
+    const r = await fetch("https://blog.naver.com/GoBlogWrite.naver", { headers: { cookie: cookieHeader, "user-agent": UA } as any, redirect: "manual" as any });
+    const loc = r.headers.get("location") || "";
+    if (/nidlogin|nid\.naver\.com|\/login/i.test(loc)) return false;       // 만료 = 로그인 페이지로 튕김
+    if (/PostWriteForm|RedirectWriteView|blogId=/i.test(loc)) return true;  // 유효 = 글쓰기 폼으로
+    return r.status >= 200 && r.status < 400;                                // 애매하면 유효로 가정(실작업서 재확인)
+  } catch { return true; }   // 네트워크 오류는 만료로 오판하지 않는다
+}
+
+/* ★★세션 원터치 재연결: 실행 시작 시 세션이 살아있으면 그대로, 만료면 저장된 비번으로 자동 재로그인.
+   성공하면 최신 쿠키 반환, 실패(비번없음·캡차)면 명확한 재연결 안내를 throw → 프론트가 "재연결 필요"로 표시. */
+export async function ensureLiveSession(accountId: string, log: (m: string) => void = console.log): Promise<any[]> {
+  if (!naverSessionExists(accountId)) throw new Error("세션 없음 — 먼저 로그인하세요");
+  const cookies = loadSession(accountId).cookies;
+  if (await isSessionAlive(cookies)) return cookies;
+  log("[세션] 로그인이 만료돼 저장된 정보로 자동 재연결을 시도해요...");
+  const ok = await reloginNaverSilent(accountId);
+  if (!ok) throw new Error("로그인이 만료됐어요. 저장된 비밀번호로 자동 재연결에 실패했어요(캡차 등) — 계정 관리에서 '연결하기'를 한 번 눌러주세요.");
+  log("[세션] ✅ 자동 재연결 성공 (계속 진행해요)");
+  return loadSession(accountId).cookies;
 }
 
 /* ── 카테고리 목록 조회 ── */
@@ -1355,8 +1383,8 @@ export async function updatePostTitle(params: {
 }): Promise<{ ok: boolean; message: string }> {
   const { accountId, logNo, newTitle, onLog } = params;
   const log = onLog || console.log;
-  if (!naverSessionExists(accountId)) throw new Error("세션 없음 — 먼저 로그인하세요");
-  const { blogId, cookies } = loadSession(accountId);
+  const blogId = loadSession(accountId).blogId;
+  const cookies = await ensureLiveSession(accountId, log);   // ★세션 만료면 저장된 비번으로 자동 재연결
   if (!blogId) throw new Error("내 블로그 ID를 찾을 수 없어요 — 계정을 다시 연결해주세요");
   if (!/^\d+$/.test(String(logNo))) throw new Error("글 번호(logNo)가 올바르지 않아요");
   if (!newTitle || !newTitle.trim()) throw new Error("새 제목이 비어 있어요");
@@ -1514,8 +1542,7 @@ export async function addNeighbors(params: {
   if (msgs.length === 0) msgs.push(message);
   let msgIdx = 0;
 
-  if (!naverSessionExists(accountId)) throw new Error("세션 없음 — 먼저 로그인하세요");
-  const { cookies } = loadSession(accountId);
+  const cookies = await ensureLiveSession(accountId, log);   // ★세션 만료면 저장된 비번으로 자동 재연결
 
   const dp = donePath(accountId);
   const doneMap = loadDoneMap(dp);   // { blogId: "YYYY-MM-DD" | "legacy" }
@@ -2324,9 +2351,8 @@ export async function checkSelectedBlogExposure(params: {
 }): Promise<ExposureProgress & { totalPostsForExposure: number; lowQualitySuspected: boolean | null }> {
   const { accountId, plan = "free", onLog } = params;
   const log = onLog || console.log;
-  if (!naverSessionExists(accountId)) throw new Error("세션 없음 — 먼저 로그인하세요");
-  const sess0 = loadSession(accountId);
-  let blogId = sess0.blogId; const cookies = sess0.cookies;
+  let blogId = loadSession(accountId).blogId;
+  const cookies = await ensureLiveSession(accountId, log);   // ★세션 만료면 저장된 비번으로 자동 재연결
   if (!blogId) throw new Error("내 블로그 ID를 찾을 수 없어요 — 계정을 다시 연결해주세요");
   // ★실제 blogId 확정(네이버ID≠blogId 대비) — 가벼운 fetch(창 안 뜸)
   blogId = await resolveBlogIdFast(blogId, cookies, accountId, log);
@@ -2358,9 +2384,8 @@ export async function crawlBlogStats(params: {
 }): Promise<BlogStats> {
   const { accountId, plan = "free", onLog } = params;
   const log = onLog || console.log;
-  if (!naverSessionExists(accountId)) throw new Error("세션 없음 — 먼저 로그인하세요");
-  const sess0 = loadSession(accountId);
-  let blogId = sess0.blogId; const cookies = sess0.cookies;
+  let blogId = loadSession(accountId).blogId;
+  const cookies = await ensureLiveSession(accountId, log);   // ★세션 만료면 저장된 비번으로 자동 재연결
   if (!blogId) throw new Error("내 블로그 ID를 찾을 수 없어요 — 계정을 다시 연결해주세요");
 
   const browser = await chromium.launch({ headless: true, args: LAUNCH_ARGS });
@@ -2748,8 +2773,7 @@ export async function replyToComments(params: {
 }): Promise<void> {
   const { accountId, posts, mode, comment, tone, onlyNew, delayMin, delayMax, geminiKey = "", onLog, onResult, onProgress, stopSignal } = params;
   const log = onLog || console.log;
-  if (!naverSessionExists(accountId)) throw new Error("세션 없음 — 먼저 로그인하세요");
-  const { cookies } = loadSession(accountId);
+  const cookies = await ensureLiveSession(accountId, log);   // ★세션 만료면 저장된 비번으로 자동 재연결(테리: "연결됨"인데 로그인풀림 방지)
 
   const browser = await chromium.launch({ headless: false, args: [...LAUNCH_ARGS, "--start-maximized"] });
   const context = await browser.newContext({ userAgent: UA, viewport: { width: 1280, height: 900 }, locale: "ko-KR" });
@@ -3167,8 +3191,7 @@ export async function engageBlogs(params: {
   if (comments.length === 0 && comment.trim()) comments.push(comment);
   let commentIdx = 0;
 
-  if (!naverSessionExists(accountId)) throw new Error("세션 없음 — 먼저 로그인하세요");
-  const { cookies } = loadSession(accountId);
+  const cookies = await ensureLiveSession(accountId, log);   // ★세션 만료면 저장된 비번으로 자동 재연결
 
   // 완료 기록 (서이추와 별도 파일)
   const engageDonePath = path.join(SESSION_DIR, `engage_done_${accountId}.json`);
