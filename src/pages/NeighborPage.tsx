@@ -2251,10 +2251,17 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
 
                 {/* 시간 분산 큐 (분 단위) */}
                 {(() => {
-                  // 실제 방문 수 추정: 설정한 받을 수는 등급 한도까지 가능하지만, 실제 방문은 연결 계정 수(나 제외)로 제한됨
+                  // ★실제 설정과 연동: 받을 수는 연결 계정 수(나 제외)로 제한되고, 각 방문마다 그 계정의 '대상 글 수'만큼 댓글을 단다.
+                  //   → 총 방문(블로그 진입 수)과 실제 댓글 수를 둘 다 계산해 보여준다(받을 수·대상 글 수 바꾸면 즉시 반영).
                   const physMax = Math.max(1, connected.length - 1);
                   const gradeMax = isUnlimitedPlan ? 999 : pumasiAccountLimit;
-                  const totalVisits = connected.reduce((s, a) => s + Math.min(physMax, pumReceiveByAcc[a.accountId] ?? Math.min(3, gradeMax)), 0) || 1;
+                  const postsMax = isUnlimitedPlan ? 999 : pumasiPostsLimit;
+                  const per = connected.map(a => ({
+                    recv: Math.min(physMax, pumReceiveByAcc[a.accountId] ?? Math.min(3, gradeMax)),   // 이 계정을 방문할 실제 계정 수
+                    posts: Math.min(postsMax, pumPostsByAcc[a.accountId] ?? 3),                        // 방문 1회당 댓글 달 글 수
+                  }));
+                  const totalVisits = per.reduce((s, x) => s + x.recv, 0) || 1;                        // 총 방문(블로그 진입) 횟수
+                  const totalComments = per.reduce((s, x) => s + x.recv * x.posts, 0) || 1;            // 실제 총 댓글 수
                   const gapMin = pumSpread > 0 ? pumSpread / totalVisits : 0;   // 방문 사이 평균 간격(분)
                   const fmtGap = gapMin >= 1 ? `약 ${Math.round(gapMin)}분` : `약 ${Math.round(gapMin * 60)}초`;
                   const fmtTotal = pumSpread >= 60 ? `${Math.floor(pumSpread/60)}시간 ${pumSpread%60 ? `${pumSpread%60}분` : ""}`.trim() : `${pumSpread}분`;

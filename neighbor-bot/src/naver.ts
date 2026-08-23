@@ -2337,17 +2337,20 @@ export async function replyToComments(params: {
         }
         await ctx.waitForSelector(".u_cbox_comment, li.u_cbox_comment, .u_cbox_list", { timeout: 6000 }).catch(() => {});
 
-        // 이 글의 댓글 목록 파악 (작성자·내용·이미 답글있는지)
-        const commentInfos: { idx: number; author: string; text: string; hasReply: boolean }[] = await ctx.evaluate(() => {
-          const items = Array.from(document.querySelectorAll("li.u_cbox_comment, .u_cbox_comment"));
-          const res: { idx: number; author: string; text: string; hasReply: boolean }[] = [];
-          items.forEach((li, i) => {
-            // 답글(대댓글)은 보통 u_cbox_reply_area 안 → 원댓글만 대상
-            if (li.closest(".u_cbox_reply_area")) return;
+        // 이 글의 댓글 목록 파악 (작성자·내용·commentNo·이미 답글있는지)
+        //  ★2026-08 실측: 답글 버튼 a.u_cbox_btn_reply[data-param='{commentNo}'], 입력창 id는 …__reply_textarea_{commentNo}(contenteditable),
+        //    답글 등록 버튼 [data-ui-selector='replyButton_{commentNo}']. commentNo로 타겟해야 순번 어긋남이 없다(기존 idx 매칭 버그 제거).
+        const commentInfos: { commentNo: string; author: string; text: string; hasReply: boolean }[] = await ctx.evaluate(() => {
+          // 원댓글만: 대댓글(u_cbox_reply_area 안)은 제외
+          const items = Array.from(document.querySelectorAll("li.u_cbox_comment")).filter(li => !li.closest(".u_cbox_reply_area"));
+          const res: { commentNo: string; author: string; text: string; hasReply: boolean }[] = [];
+          items.forEach((li) => {
             const author = (li.querySelector(".u_cbox_nick")?.textContent || "").trim();
             const text = (li.querySelector(".u_cbox_contents")?.textContent || "").trim();
+            const replyBtn = li.querySelector("a.u_cbox_btn_reply[data-action='reply#toggle'], a.u_cbox_btn_reply");
+            const commentNo = replyBtn?.getAttribute("data-param") || "";
             const hasReply = !!li.querySelector(".u_cbox_reply_area .u_cbox_comment, .u_cbox_reply_cnt");
-            if (text) res.push({ idx: i, author, text, hasReply });
+            if (text && commentNo) res.push({ commentNo, author, text, hasReply });
           });
           return res;
         }).catch(() => []);
@@ -2365,38 +2368,46 @@ export async function replyToComments(params: {
             replyText = await generateAiReply(geminiKey, tone, c.text, log);
             if (!replyText) { log(`[답방] AI 답글 생성 실패 — 이 댓글 스킵`); continue; }
           }
-          // 해당 댓글의 '답글' 버튼 클릭 → 입력창 → 등록
-          const ok = await ctx.evaluate((args: { idx: number }) => {
-            const items = Array.from(document.querySelectorAll("li.u_cbox_comment, .u_cbox_comment")).filter(li => !li.closest(".u_cbox_reply_area"));
-            const li = items[args.idx] as HTMLElement | undefined;
-            if (!li) return false;
-            const replyBtn = li.querySelector(".u_cbox_btn_reply, a[class*='reply']") as HTMLElement | null;
-            if (replyBtn) { replyBtn.click(); return true; }
-            return false;
-          }, { idx: c.idx }).catch(() => false);
-          if (!ok) { log(`[답방] 답글 버튼 못찾음 — 스킵`); continue; }
+          // ① 해당 댓글의 '답글' 버튼 클릭(commentNo로 정확히 타겟) → 답글 입력 영역 펼침
+          const opened = await ctx.evaluate((cno: string) => {
+            const btns = Array.from(document.querySelectorAll(`a.u_cbox_btn_reply[data-param='${cno}']`)) as HTMLElement[];
+            // 열기(off) 상태이면서 화면에 보이는 버튼 우선
+            const btn = btns.find(b => !b.classList.contains("u_cbox_btn_reply_on") && b.style.display !== "none") || btns[0];
+            if (!btn) return false;
+            btn.click();
+            return true;
+          }, c.commentNo).catch(() => false);
+          if (!opened) { log(`[답방] 답글 버튼 못찾음 — 스킵`); continue; }
           await page.waitForTimeout(1000);
 
-          // 펼쳐진 답글 입력창(u_cbox_reply_wrap 안 textarea)에 입력
-          const wrote = await ctx.evaluate((txt: string) => {
-            const areas = Array.from(document.querySelectorAll(".u_cbox_reply_wrap textarea, .u_cbox_write_area textarea, textarea.u_cbox_text"));
-            const ta = areas[areas.length - 1] as HTMLTextAreaElement | undefined;
-            if (!ta) return false;
-            ta.focus(); ta.value = txt;
-            ta.dispatchEvent(new Event("input", { bubbles: true }));
-            ta.dispatchEvent(new Event("keyup", { bubbles: true }));
-            return true;
-          }, replyText).catch(() => false);
-          if (!wrote) { log(`[답방] 답글 입력창 못찾음 — 스킵`); continue; }
-          await page.waitForTimeout(700);
+          // ② 펼쳐진 답글 입력창(contenteditable div, id가 …reply_textarea_{commentNo}로 끝남)에 키보드로 입력
+          const inputSel = `[id$='reply_textarea_${c.commentNo}']`;
+          const inputEl = await ctx.$(inputSel);
+          if (!inputEl) { log(`[답방] 답글 입력창 못찾음 — 스킵`); continue; }
+          try { await inputEl.scrollIntoViewIfNeeded({ timeout: 2000 }); } catch {}
+          // placeholder 안내(.u_cbox_guide)가 클릭을 가로챌 수 있어 force 클릭으로 포커스
+          try { await inputEl.click({ force: true, timeout: 3000 }); }
+          catch { const b = await inputEl.boundingBox(); if (b) await page.mouse.click(b.x + b.width / 2, b.y + b.height / 2); }
+          await page.waitForTimeout(400);
+          // contenteditable은 value 대입이 안 먹음 → 전체선택·삭제 후 사람처럼 타이핑
+          await page.keyboard.press(process.platform === "darwin" ? "Meta+A" : "Control+A").catch(() => {});
+          await page.keyboard.press("Backspace").catch(() => {});
+          await humanType(page, naturalizeMsg(replyText));
+          await page.waitForTimeout(500);
+          // 실제 입력됐는지 확인(안 됐으면 이 댓글 스킵)
+          const typedOk = await ctx.evaluate((sel: string) => {
+            const el = document.querySelector(sel) as HTMLElement | null;
+            return !!el && (el.textContent || "").trim().length > 0;
+          }, inputSel).catch(() => false);
+          if (!typedOk) { log(`[답방] 답글 입력 실패 — 스킵`); continue; }
 
-          // 등록 버튼
-          const submitted = await ctx.evaluate(() => {
-            const btns = Array.from(document.querySelectorAll(".u_cbox_reply_wrap .u_cbox_btn_upload, .u_cbox_btn_upload, button.u_cbox_btn_upload"));
-            const btn = btns[btns.length - 1] as HTMLElement | undefined;
+          // ③ 등록 버튼(해당 commentNo의 답글 등록)
+          const submitted = await ctx.evaluate((cno: string) => {
+            const btn = (document.querySelector(`[data-ui-selector='replyButton_${cno}']`)
+              || document.querySelector(`button.u_cbox_btn_upload[data-action*='reply']`)) as HTMLElement | null;
             if (btn) { btn.click(); return true; }
             return false;
-          }).catch(() => false);
+          }, c.commentNo).catch(() => false);
           await page.waitForTimeout(1500);
 
           if (submitted) { done++; log(`[답방] ✅ ${c.author}님 댓글에 답글: "${replyText}"`); await onResult?.({ postTitle: c.author, status: "success", message: replyText.slice(0, 30) }); }
@@ -2867,7 +2878,10 @@ export async function engageBlogs(params: {
             } catch {}
 
             // 댓글 입력창 셀렉터 (u_cbox = 네이버 공용 댓글 위젯)
+            //  ★2026-08 실측: 메인 댓글 입력창은 contenteditable div(.u_cbox_text). 옛 textarea 셀렉터는 죽었지만 폴백으로 남겨둠.
+            //   contenteditable엔 value 대입 불가 → 아래 humanType(키보드 입력)으로 처리.
             const commentSels = [
+              ".u_cbox_text[contenteditable='true']",
               ".u_cbox_text",
               "textarea.u_cbox_text",
               ".u_cbox_write_wrap textarea",
