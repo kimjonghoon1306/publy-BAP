@@ -2099,13 +2099,13 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
               <div style={{ fontSize: 11, color: "var(--text3)", marginBottom: 10, lineHeight: 1.5 }}>내 등급에서 <b>연결 계정 수 · 계정당 대상 글 · 받을 수</b>를 얼마나 쓸 수 있는지 보여줘요.</div>
               {(() => {
                 const cols = { display: "grid", gridTemplateColumns: "1.1fr 1fr 1fr 1fr", alignItems: "center", gap: 4 } as const;
+                // 무제한은 관리자·특별 승인자 전용이라 일반 등급표에는 노출하지 않음(기능은 그대로).
                 const rows = [
                   { key: "free", name: "무료", acc: "2개", posts: "3개", recv: "2명" },
                   { key: "basic", name: "베이직", acc: "3개", posts: "5개", recv: "3명" },
                   { key: "pro", name: "프로", acc: "5개", posts: "10개", recv: "5명" },
-                  { key: "unlimited", name: "무제한", acc: "∞", posts: "∞", recv: "∞" },
                 ];
-                const myKey = plan === "admin" ? "unlimited" : plan;
+                const myKey = plan;
                 return (<>
                   <div style={{ ...cols, padding: "0 8px 6px", fontSize: 10.5, color: "var(--text3)", fontWeight: 700 }}>
                     <span>등급</span>
