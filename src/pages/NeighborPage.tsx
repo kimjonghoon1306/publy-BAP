@@ -453,6 +453,8 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
   const [titleEditUsed, setTitleEditUsed] = useState(0);
   const [titleEditLimit, setTitleEditLimit] = useState(3);
   const [titleEditingKey, setTitleEditingKey] = useState<string>("");   // 지금 수정 중인 "logNo|번호"
+  // ★재발행 알림: 기간 설정(기본 30일) + 누적 대상(localStorage). 재설치돼도 발행이력(서버)은 안전, 이 캐시만 재검사로 복구.
+  const [republishDays, setRepublishDays] = useState<number>(()=>{ const v=parseInt(localStorage.getItem("publy_republish_days")||"30",10); return Number.isFinite(v)?v:30; });
   const [scSolPage, setScSolPage] = useState(0);   // AI 팁 페이지네이션(5개 단위)
   const [scSolSearch, setScSolSearch] = useState(""); // AI 팁 원래 제목 검색
   const [scExpPage, setScExpPage] = useState(0);   // 검색노출 결과 페이지네이션(30개 단위)
@@ -1206,6 +1208,23 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
       scPosts.forEach(p => { const ln = scLogNo(p.url); if (ln) dateByLog[ln] = p.date; });
       const checksWithDate = (data.checks || []).map((c: any) => ({ ...c, date: c.logNo ? dateByLog[String(c.logNo)] : undefined }));
       setScResult(prev => prev ? { ...prev, exposureChecks: checksWithDate, lowQualitySuspected: data.lowQualitySuspected, checkedTodayCount: data.checkedTodayCount, exposureCompletedCount: data.completedCount, totalPostsForExposure: data.totalPostsForExposure, exposureLimit: data.limit } : prev);
+      // ★재발행 대상 누적 저장(순환 검사로 며칠에 걸쳐 전체 커버): 30일+ 미노출 글을 localStorage에 쌓고, 노출되면 제거.
+      try {
+        const KEY = "publy_republish_targets";
+        const store: Record<string, any> = JSON.parse(localStorage.getItem(KEY) || "{}");
+        const now = Date.now();
+        for (const c of checksWithDate) {
+          if (!c.logNo) continue;
+          const ageOk = c.date && (now - new Date(c.date).getTime()) >= republishDays*86400000;
+          if (c.exposed === false && ageOk) {
+            store[c.logNo] = { logNo: c.logNo, title: c.title, date: c.date, blogId: acc.blogId || "", at: now };
+          } else if (c.exposed === true) {
+            delete store[c.logNo];   // 이제 노출되면 대상에서 제거
+          }
+        }
+        localStorage.setItem(KEY, JSON.stringify(store));
+        window.dispatchEvent(new Event("publy-republish-updated"));   // 홈 배너·뱃지 갱신 신호
+      } catch {}
       addScLog(`✅ 검색노출 ${data.checks?.length || 0}개 검사 완료`);
     } catch (e: any) { addScLog(`❌ 검색노출 검사 실패: ${e.message}`); }
     finally { setScExposureLoading(false); }
@@ -2103,6 +2122,18 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
         <div className="npg-2col">
           {/* 왼쪽: 계정 + 진단 버튼 */}
           <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+            {/* 📖 아주 쉬운 안내 (누구나 이해) */}
+            <div style={{ background: "linear-gradient(135deg,rgba(0,200,150,.1),rgba(0,165,255,.06))", border: "1.5px solid rgba(0,200,150,.3)", borderRadius: 14, padding: "15px 17px" }}>
+              <div style={{ fontSize: 14.5, fontWeight: 900, color: "#00c896", marginBottom: 8 }}>📈 블로그 지수가 뭐예요?</div>
+              <div style={{ fontSize: 13, color: "var(--text2)", lineHeight: 1.75, fontWeight: 500 }}>
+                내 블로그가 <b>얼마나 건강한지, 검색에 잘 나오는지</b> 알려주는 곳이에요.<br/><br/>
+                <b style={{ color: "#00c896" }}>① 진단하기</b> — 버튼 하나 누르면 내 블로그 상태(글 수·이웃·방문자·발행 습관)를 검사해요.<br/>
+                <b style={{ color: "#00c896" }}>② 검색 순위 확인</b> — 내 글이 네이버 검색에서 <b>몇 위인지</b> 알려줘요.<br/>
+                <b style={{ color: "#00c896" }}>③ 안 뜨는 글 살리기</b> — 검색에 안 나오는 글은 <b>AI가 새 제목을 추천</b>하고, 버튼 한 번으로 <b>제목을 바꿔 다시 발행</b>해줘요.<br/>
+                <b style={{ color: "#f59e0b" }}>④ ♻️ 오래된 글 알림</b> — 발행한 지 오래됐는데 검색에 안 뜨는 글을 모아서 <b>"이 글 살려보세요"</b>라고 알려줘요.
+              </div>
+              <div style={{ fontSize: 11.5, color: "var(--text3)", marginTop: 10, lineHeight: 1.6 }}>💡 순서대로 하면 돼요: <b>진단하기 → 글 선택 → 검색 순위 확인 → 안 뜨는 글은 제목 바꾸기</b>. 어려우면 그냥 위에서부터 하나씩 눌러보세요.</div>
+            </div>
             {tierTableNode}
             <div style={{ fontSize: 12, color: "var(--text2)", background: "var(--card2)", borderRadius: 10, padding: "10px 13px", lineHeight: 1.5, fontWeight: 600 }}>
               🔒 <b>{tabName}</b> 전용 계정 <b style={{ color: "#00c896" }}>{accounts.length}</b>/{isUnlimitedPlan ? "∞" : accountLimit}개 · 다른 탭과 <b>완전히 분리</b>돼요(한 곳에서 문제가 생겨도 다른 탭엔 영향 없어요).
@@ -2308,27 +2339,41 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
                     <div style={{ marginTop: 10, fontSize: 11, color: "var(--text3)", lineHeight: 1.5 }}>네이버 공식 지수가 아닌, 순환 선택한 글의 제목 검색 결과를 바탕으로 한 퍼블리 자체 진단이에요. 누락만으로 저품질을 확정할 수는 없어요.</div>
                   </div>
 
-                  {/* ♻️ 오래된 글 재발행 알림 — 발행 30일+ 지났는데 검색 노출 안 되는 글 */}
+                  {/* ♻️ 오래된 글 재발행 알림 — 누적 저장분(순환 검사로 며칠에 걸쳐 전체 커버) + 기간 설정 */}
                   {(() => {
                     const now = Date.now();
-                    const stale = exposureChecks.filter(c => c.exposed === false && c.date && (now - new Date(c.date).getTime()) >= 30*86400000);
-                    if (!stale.length) return null;
+                    let store: Record<string, any> = {};
+                    try { store = JSON.parse(localStorage.getItem("publy_republish_targets") || "{}"); } catch {}
+                    const list = Object.values(store).filter((t: any) => t.date && (now - new Date(t.date).getTime()) >= republishDays*86400000)
+                      .sort((a: any, b: any) => new Date(a.date).getTime() - new Date(b.date).getTime());
                     return (
                       <div style={{ marginBottom: 20, padding: "16px", borderRadius: 14, background: "rgba(245,158,11,.08)", border: "1.5px solid rgba(245,158,11,.4)" }}>
-                        <div style={{ fontSize: 14, fontWeight: 850, color: "#f59e0b", marginBottom: 4 }}>♻️ 오래된 글 재발행 추천 <span style={{ fontSize: 11, fontWeight: 700, color: "var(--text3)" }}>{stale.length}개</span></div>
-                        <div style={{ fontSize: 11.5, color: "var(--text2)", lineHeight: 1.6, marginBottom: 12, fontWeight: 500 }}>발행한 지 <b>30일이 지났는데도 검색에 안 잡히는</b> 글이에요. 이 제목으론 노출이 어려우니, <b style={{ color: "#f59e0b" }}>제목을 바꿔 재발행</b>하면 다시 기회를 얻어요. 아래 <b>AI 개선안</b>으로 새 제목을 받아 <b>제목 변경하러 가기</b>를 눌러보세요.</div>
-                        <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
-                          {stale.slice(0, 8).map((c, i) => {
-                            const days = Math.floor((now - new Date(c.date!).getTime())/86400000);
-                            return (
-                              <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 12px", borderRadius: 10, background: "var(--bg)", border: "1px solid var(--border)" }}>
-                                <span style={{ fontSize: 13 }}>⏳</span>
-                                <span style={{ flex: 1, minWidth: 0, fontSize: 12.5, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.title}</span>
-                                <span style={{ fontSize: 10.5, color: "#f59e0b", fontWeight: 800, whiteSpace: "nowrap" }}>{days}일째 미노출</span>
-                              </div>
-                            );
-                          })}
+                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap", marginBottom: 6 }}>
+                          <div style={{ fontSize: 14, fontWeight: 850, color: "#f59e0b" }}>♻️ 오래된 글 재발행 추천 <span style={{ fontSize: 11, fontWeight: 700, color: "var(--text3)" }}>{list.length}개</span></div>
+                          {/* 기간 설정 */}
+                          <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
+                            <span style={{ fontSize: 10.5, color: "var(--text3)", fontWeight: 700 }}>기준</span>
+                            {[15,30,60,90].map(d => (
+                              <button key={d} onClick={() => { setRepublishDays(d); localStorage.setItem("publy_republish_days", String(d)); }}
+                                style={{ padding: "3px 8px", borderRadius: 7, border: `1.5px solid ${republishDays===d?"#f59e0b":"var(--border)"}`, background: republishDays===d?"rgba(245,158,11,.15)":"transparent", color: republishDays===d?"#f59e0b":"var(--text3)", cursor: "pointer", fontSize: 10.5, fontWeight: 800, fontFamily: "inherit" }}>{d}일</button>
+                            ))}
+                          </div>
                         </div>
+                        <div style={{ fontSize: 12, color: "var(--text2)", lineHeight: 1.7, marginBottom: 12, fontWeight: 500 }}>쓴 지 <b>{republishDays}일이 넘었는데도 네이버 검색에 안 나오는</b> 글이에요. 이런 글은 <b style={{ color: "#f59e0b" }}>제목만 바꿔서 다시 올리면</b> 검색에 뜰 기회가 다시 생겨요.<br/>아래에서 <b>AI가 추천한 새 제목</b>을 받아서 <b>제목 변경하러 가기</b>만 누르면, 알아서 제목을 바꿔 다시 발행해줘요. <span style={{ color: "var(--text3)" }}>(검색 순위 확인을 며칠 하면 오래된 글이 여기 차곡차곡 모여요)</span></div>
+                        {list.length === 0
+                          ? <div style={{ fontSize: 12, color: "var(--text3)" }}>아직 재발행 대상이 없어요. 위에서 검색노출 검사를 하면 {republishDays}일+ 미노출 글이 여기 모여요.</div>
+                          : <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
+                              {list.slice(0, 12).map((c: any, i) => {
+                                const days = Math.floor((now - new Date(c.date).getTime())/86400000);
+                                return (
+                                  <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 12px", borderRadius: 10, background: "var(--bg)", border: "1px solid var(--border)" }}>
+                                    <span style={{ fontSize: 13 }}>⏳</span>
+                                    <span style={{ flex: 1, minWidth: 0, fontSize: 12.5, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.title}</span>
+                                    <span style={{ fontSize: 10.5, color: "#f59e0b", fontWeight: 800, whiteSpace: "nowrap" }}>{days}일째 미노출</span>
+                                  </div>
+                                );
+                              })}
+                            </div>}
                       </div>
                     );
                   })()}
