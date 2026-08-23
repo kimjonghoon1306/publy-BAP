@@ -270,6 +270,34 @@ const SearchEntryToggle = ({ on, set, extra }: { on: boolean; set: (v: boolean) 
   </div>
 );
 
+/* ── 등급별 한도표(재사용) — 각 탭에 맞는 컬럼·행을 받아 내 등급 행을 강조해서 보여준다 ── */
+const TierTable = ({ title, desc, cols, rows, myPlan, note, accent = "#ec4899" }: {
+  title: string; desc: string; cols: string[]; rows: { key: string; name: string; vals: string[] }[]; myPlan: string; note?: string; accent?: string;
+}) => {
+  const grid = { display: "grid", gridTemplateColumns: `1.1fr ${cols.slice(1).map(() => "1fr").join(" ")}`, alignItems: "center", gap: 4 } as const;
+  return (
+    <div className="card" style={{ padding: "14px 16px" }}>
+      <div style={{ fontSize: 13, fontWeight: 800, color: "var(--text)", marginBottom: 3 }}>📋 {title}</div>
+      <div style={{ fontSize: 11, color: "var(--text3)", marginBottom: 10, lineHeight: 1.5 }}>{desc}</div>
+      <div style={{ ...grid, padding: "0 8px 6px", fontSize: 10.5, color: "var(--text3)", fontWeight: 700 }}>
+        {cols.map((c, i) => <span key={i} style={i === 0 ? {} : { textAlign: "center" }}>{c}</span>)}
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+        {rows.map(r => {
+          const mine = r.key === myPlan;
+          return (
+            <div key={r.key} style={{ ...grid, padding: "9px 8px", borderRadius: 9, background: mine ? `${accent}1f` : "var(--bg)", border: `1.5px solid ${mine ? accent : "var(--border)"}`, fontSize: 12.5 }}>
+              <span style={{ fontWeight: 800, color: mine ? accent : "var(--text2)" }}>{r.name}{mine && <span style={{ fontSize: 9.5, marginLeft: 4, color: accent, fontWeight: 700 }}>내 등급</span>}</span>
+              {r.vals.map((v, i) => <span key={i} style={{ textAlign: "center", fontWeight: mine ? 800 : 600, color: mine ? "var(--text)" : "var(--text2)" }}>{v}</span>)}
+            </div>
+          );
+        })}
+      </div>
+      {note && <div style={{ fontSize: 10.5, color: "var(--text3)", lineHeight: 1.5, marginTop: 9 }}>💡 {note}</div>}
+    </div>
+  );
+};
+
 /* ── 사용설명서 내용 ── */
 const GUIDE = {
   neighbor: [
@@ -427,6 +455,35 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
   const accountLimit = tabKey === "pumasi" ? pumasiAccountLimit : (TAB_ACCOUNT_LIMIT[plan] ?? TAB_ACCOUNT_LIMIT.free);
   const planLabel = plan === "free" ? "무료" : plan === "basic" ? "베이직" : plan === "pro" ? "프로" : plan === "unlimited" ? "무제한" : plan;
   const tabName = tabKey === "neighbor" ? "서이추" : tabKey === "engage" ? "공감·댓글" : tabKey === "reply" ? "답방" : tabKey === "score" ? "지수" : "품앗이";
+  // ★탭별 등급 한도표 데이터 — 각 탭의 모든 등급 제한을 빠짐없이 담는다(무료/베이직/프로).
+  const tierTableNode = (() => {
+    const myKey = plan;
+    if (tabKey === "neighbor") return (
+      <TierTable myPlan={myKey} accent="#00b8d4" title="등급별 서이추 한도" desc="내 등급에서 연결 계정 수와 하루 서이추 신청 수를 얼마나 쓸 수 있는지 보여줘요."
+        cols={["등급", "연결 계정", "하루 서이추"]}
+        rows={[{ key: "free", name: "무료", vals: ["1개", "10건"] }, { key: "basic", name: "베이직", vals: ["2개", "50건"] }, { key: "pro", name: "프로", vals: ["3개", "100건"] }]}
+        note="하루 신청 수는 자정에 초기화돼요. 딜레이를 넉넉히 두면 계정이 안전해요." />
+    );
+    if (tabKey === "engage") return (
+      <TierTable myPlan={myKey} accent="#e5397f" title="등급별 공감·댓글 한도" desc="내 등급에서 연결 계정 수와 하루 공감·댓글 수를 얼마나 쓸 수 있는지 보여줘요."
+        cols={["등급", "연결 계정", "하루 공감·댓글"]}
+        rows={[{ key: "free", name: "무료", vals: ["1개", "10건"] }, { key: "basic", name: "베이직", vals: ["2개", "50건"] }, { key: "pro", name: "프로", vals: ["3개", "100건"] }]}
+        note="하루 건수는 자정에 초기화돼요." />
+    );
+    if (tabKey === "reply") return (
+      <TierTable myPlan={myKey} accent="#8b5cf6" title="등급별 답방 한도" desc="내 등급에서 연결 계정 수와 하루 답방(답글) 수를 얼마나 쓸 수 있는지 보여줘요."
+        cols={["등급", "연결 계정", "하루 답방"]}
+        rows={[{ key: "free", name: "무료", vals: ["1개", "10건"] }, { key: "basic", name: "베이직", vals: ["2개", "50건"] }, { key: "pro", name: "프로", vals: ["3개", "100건"] }]}
+        note="하루 답글 수는 자정에 초기화돼요." />
+    );
+    if (tabKey === "score") return (
+      <TierTable myPlan={myKey} accent="#00c896" title="등급별 지수 한도" desc="내 등급에서 진단·검색노출 검사·제목 수정을 하루에 얼마나 쓸 수 있는지 보여줘요."
+        cols={["등급", "연결 계정", "하루 진단", "검색노출", "제목 수정"]}
+        rows={[{ key: "free", name: "무료", vals: ["1개", "1회", "5개", "3회"] }, { key: "basic", name: "베이직", vals: ["2개", "5회", "10개", "10회"] }, { key: "pro", name: "프로", vals: ["3개", "20회", "20개", "30회"] }]}
+        note="진단=지표 수집 횟수, 검색노출=한 번에 검사할 글 수, 제목 수정=개선 제목으로 실제 변경한 수예요. 모두 자정 초기화." />
+    );
+    return null;
+  })();
   const pumasiPostsLimit = PUMASI_POSTS_LIMIT[plan] ?? PUMASI_POSTS_LIMIT.free;        // 계정당 대상 글 수 상한
   const [pumUsed, setPumUsed] = useState(0);                                            // 오늘 품앗이 공감·댓글 건수
   const [pumPostsByAcc, setPumPostsByAcc] = useState<Record<string, number>>({});       // 계정별 대상 글 수
@@ -1315,6 +1372,7 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
         <div className="npg-2col">
           {/* 왼쪽 */}
           <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+            {tierTableNode}
             <div style={{ fontSize: 12, color: "var(--text2)", background: "var(--card2)", borderRadius: 10, padding: "10px 13px", lineHeight: 1.5, fontWeight: 600 }}>
               🔒 <b>{tabName}</b> 전용 계정 <b style={{ color: "#00c896" }}>{accounts.length}</b>/{isUnlimitedPlan ? "∞" : accountLimit}개 · 다른 탭과 <b>완전히 분리</b>돼요(한 곳에서 문제가 생겨도 다른 탭엔 영향 없어요).
             </div>
@@ -1599,6 +1657,7 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
         <div className="npg-2col">
           {/* 왼쪽 */}
           <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+            {tierTableNode}
             <div style={{ fontSize: 12, color: "var(--text2)", background: "var(--card2)", borderRadius: 10, padding: "10px 13px", lineHeight: 1.5, fontWeight: 600 }}>
               🔒 <b>{tabName}</b> 전용 계정 <b style={{ color: "#00c896" }}>{accounts.length}</b>/{isUnlimitedPlan ? "∞" : accountLimit}개 · 다른 탭과 <b>완전히 분리</b>돼요(한 곳에서 문제가 생겨도 다른 탭엔 영향 없어요).
             </div>
@@ -1861,6 +1920,7 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
         <div className="npg-2col">
           {/* 왼쪽: 설정 */}
           <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+            {tierTableNode}
             <div style={{ fontSize: 12, color: "var(--text2)", background: "var(--card2)", borderRadius: 10, padding: "10px 13px", lineHeight: 1.5, fontWeight: 600 }}>
               🔒 <b>{tabName}</b> 전용 계정 <b style={{ color: "#00c896" }}>{accounts.length}</b>/{isUnlimitedPlan ? "∞" : accountLimit}개 · 다른 탭과 <b>완전히 분리</b>돼요(한 곳에서 문제가 생겨도 다른 탭엔 영향 없어요).
             </div>
@@ -2002,6 +2062,7 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
         <div className="npg-2col">
           {/* 왼쪽: 계정 + 진단 버튼 */}
           <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+            {tierTableNode}
             <div style={{ fontSize: 12, color: "var(--text2)", background: "var(--card2)", borderRadius: 10, padding: "10px 13px", lineHeight: 1.5, fontWeight: 600 }}>
               🔒 <b>{tabName}</b> 전용 계정 <b style={{ color: "#00c896" }}>{accounts.length}</b>/{isUnlimitedPlan ? "∞" : accountLimit}개 · 다른 탭과 <b>완전히 분리</b>돼요(한 곳에서 문제가 생겨도 다른 탭엔 영향 없어요).
             </div>
