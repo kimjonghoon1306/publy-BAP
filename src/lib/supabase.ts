@@ -436,6 +436,30 @@ export async function incrementBlogscoreQuota(userId: string): Promise<void> {
   await supabase.from("publy_settings").upsert({ key, value: String(used + 1) }, { onConflict: "key" });
 }
 
+// ── 품앗이(내 계정들끼리 상호 공감·댓글) 등급 한도 ──
+//   계정 수 한도(등록 가능한 내 계정 개수) + 계정당 대상 글 수 한도.
+export const PUMASI_ACCOUNT_LIMIT: Record<string, number> = {
+  free: 2, basic: 3, pro: 5, unlimited: 999, admin: 999,
+};
+export const PUMASI_POSTS_LIMIT: Record<string, number> = {
+  free: 3, basic: 5, pro: 10, unlimited: 999, admin: 999,
+};
+// 하루 품앗이로 남긴 공감·댓글 총 건수(사용량 게이지용) — 자정 자동 리셋
+function pumasiQuotaKey(userId: string): string {
+  return `pumasi_daily_${userId}_${new Date().toISOString().slice(0, 10)}`;
+}
+export async function getPumasiDailyUsage(userId: string): Promise<number> {
+  try {
+    const { data } = await supabase.from("publy_settings").select("value").eq("key", pumasiQuotaKey(userId)).maybeSingle();
+    return data?.value ? parseInt(data.value) || 0 : 0;
+  } catch { return 0; }
+}
+export async function incrementPumasiQuota(userId: string, by = 1): Promise<void> {
+  const key = pumasiQuotaKey(userId);
+  const used = await getPumasiDailyUsage(userId);
+  await supabase.from("publy_settings").upsert({ key, value: String(used + by) }, { onConflict: "key" });
+}
+
 // ── 관리자용: 전체 회원의 "오늘" 기능별 사용량 한 번에 집계 ──
 //    모든 사용량이 publy_settings의 `{기능}_daily_{userId}_{날짜}` 키로 저장되므로 오늘 날짜로 끝나는 키를 통째로 조회해 집계.
 export interface DailyUsageRow { userId: string; publish: number; neighbor: number; engage: number; reply: number; blogscore: number; total: number; }

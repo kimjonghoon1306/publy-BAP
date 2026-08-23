@@ -601,6 +601,7 @@ const TABS = [
   {k:"neighbor",        i:"🤝", l:"서이추"},
   {k:"engage",          i:"❤️", l:"공감·댓글"},
   {k:"reply",           i:"💬", l:"답방"},
+  {k:"pumasi",          i:"💞", l:"품앗이"},
   {k:"insta_dm",        i:"📱", l:"인스타 DM"},
   {k:"live",            i:"📡", l:"실시간 현황"},
   {k:"users",           i:"👥", l:"회원관리"},
@@ -615,7 +616,7 @@ const TABS = [
 ] as const;
 
 export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: Props) {
-  const [tab, setTab] = useState<"keyword"|"write"|"image"|"photo"|"publish"|"manage"|"accounts"|"rank"|"blogscore"|"calendar"|"neighbor"|"engage"|"reply"|"neighbor_manage"|"engage_manage"|"reply_manage"|"blogscore_manage"|"insta_dm"|"insta_dm_manage"|"users"|"bug"|"stats"|"live"|"settings">("keyword");
+  const [tab, setTab] = useState<"keyword"|"write"|"image"|"photo"|"publish"|"manage"|"accounts"|"rank"|"blogscore"|"calendar"|"neighbor"|"engage"|"reply"|"pumasi"|"neighbor_manage"|"engage_manage"|"reply_manage"|"blogscore_manage"|"insta_dm"|"insta_dm_manage"|"users"|"bug"|"stats"|"live"|"settings">("keyword");
   const [statsSubTab, setStatsSubTab] = useState<"mine"|"all">("mine");
   const [usersSubTab, setUsersSubTab] = useState<"list"|"referral">("list");
   // 버그 신고
@@ -2530,7 +2531,7 @@ POST3: (제목)|(이유)
               <span className="nav-ico">📱</span>인스타 DM
             </button>
             <div className="nav-section" style={{fontSize:10,fontWeight:800,color:"var(--text3)",padding:"10px 12px 4px",letterSpacing:".08em",borderTop:"1px solid var(--border)",marginTop:6}}>🤝 이웃 활동</div>
-            {TABS.filter(t=>["neighbor","engage","reply"].includes(t.k)).map(t => (
+            {TABS.filter(t=>["neighbor","engage","reply","pumasi"].includes(t.k)).map(t => (
               <button key={t.k} className={`nav-item ${tab===t.k?"active":""}`} onClick={()=>setTab(t.k as any)}>
                 <span className="nav-ico">{t.i}</span>{t.l}
               </button>
@@ -4442,6 +4443,11 @@ POST3: (제목)|(이유)
             {/* ───── 💬 답방 (관리자 본인 사용) ───── */}
             {tab === "reply" && (
               <NeighborPage theme={theme} plan="admin" initialTab="reply" singleTab />
+            )}
+
+            {/* ───── 💞 품앗이 (관리자 본인 사용) ───── */}
+            {tab === "pumasi" && (
+              <NeighborPage theme={theme} plan="admin" initialTab="pumasi" singleTab />
             )}
 
             {/* ───── 📈 블로그 지수 (관리자 본인 사용) ───── */}

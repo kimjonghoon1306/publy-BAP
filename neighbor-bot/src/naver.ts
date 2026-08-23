@@ -2397,6 +2397,60 @@ async function generateAiReply(key: string, tone: string, commentText: string, l
 }
 
 /* ── 공감·댓글 작업 ── */
+// ── 품앗이: 내 여러 계정끼리 서로 글에 공감·댓글 ──
+//   각 계정(작성자)의 세션으로 로그인 상태에서, 나머지 계정(대상)의 blogId 글에 engageBlogs 호출.
+//   계정별 postsPerBlog(대상 글 수)를 다르게 지정 가능. 세션은 이미 저장돼 있어 재로그인 불필요.
+export async function pumasiEngage(params: {
+  accounts: { accountId: string; blogId: string; posts: number }[];  // posts=이 계정 글에 남들이 몇 개 달지
+  comment: string;                 // 고정/순환(|||) 멘트
+  doLike: boolean;
+  doComment: boolean;
+  aiComment: boolean;
+  commentTone: string;
+  geminiKey: string;
+  delayMin: number;
+  delayMax: number;
+  onLog?: (msg: string) => void;
+  onResult?: (r: EngageResult & { actor?: string }) => Promise<void>;
+  onProgress?: (done: number, fail: number) => void;
+  stopSignal?: () => boolean;
+}): Promise<void> {
+  const { accounts, comment, doLike, doComment, aiComment, commentTone, geminiKey, delayMin, delayMax, onLog, onResult, onProgress, stopSignal } = params;
+  const log = onLog || console.log;
+  let done = 0, fail = 0;
+  const valid = accounts.filter(a => a.accountId && a.blogId && naverSessionExists(a.accountId));
+  if (valid.length < 2) throw new Error("품앗이는 세션 연결된 계정이 2개 이상 필요해요");
+  log(`[품앗이] 시작 — 계정 ${valid.length}개가 서로 글에 공감·댓글`);
+
+  for (const actor of valid) {
+    if (stopSignal?.()) { log("[품앗이] 중단 신호 수신"); break; }
+    // actor(작성자) 세션으로, 나머지 계정(대상) 글에 공감·댓글
+    const targets = valid.filter(t => t.accountId !== actor.accountId);
+    for (const target of targets) {
+      if (stopSignal?.()) break;
+      log(`[품앗이] ${actor.blogId} → ${target.blogId} 글 ${target.posts}개에 ${doLike ? "공감" : ""}${doLike && doComment ? "+" : ""}${doComment ? "댓글" : ""}`);
+      try {
+        await engageBlogs({
+          accountId: actor.accountId,
+          targets: [{ keyword: "품앗이", blogId: target.blogId }],
+          comment, doLike, doComment,
+          periodDays: 3650,               // 품앗이는 기간 제한 없이(오래된 글도 대상)
+          postsPerBlog: Math.max(1, target.posts),
+          delayMin, delayMax,
+          dailyLimit: 999999,
+          skipDone: false,                // 서로 계속 달 수 있게(중복방지 안함)
+          commentRate: 100, likeRate: 100,
+          aiComment, commentTone, geminiKey,
+          onLog: (m) => log(m),
+          onResult: async (r) => { if (r.status === "success") done++; else if (r.status === "fail") fail++; await onResult?.({ ...r, actor: actor.blogId }); onProgress?.(done, fail); },
+          stopSignal,
+        });
+      } catch (e: any) { fail++; log(`[품앗이] ${actor.blogId}→${target.blogId} 오류: ${e.message}`); onProgress?.(done, fail); }
+    }
+  }
+  log(`[품앗이] 완료 — 성공 ${done} / 실패 ${fail}`);
+}
+
 export async function engageBlogs(params: {
   accountId: string;
   targets: { keyword: string; blogId: string }[];

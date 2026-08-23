@@ -6,7 +6,7 @@ import NeighborPage from "./NeighborPage";
 import { botFetch, BotEventStream } from "../lib/botApi";
 import WebInstallNotice from "../WebInstallNotice";
 
-type MainTab = "control" | "keyword" | "write" | "image" | "photo" | "publish" | "manage" | "accounts" | "rank" | "blogscore" | "calendar" | "settings" | "neighbor" | "engage" | "reply" | "insta_dm";
+type MainTab = "control" | "keyword" | "write" | "image" | "photo" | "publish" | "manage" | "accounts" | "rank" | "blogscore" | "calendar" | "settings" | "neighbor" | "engage" | "reply" | "pumasi" | "insta_dm";
 type OnPartnerProduct = {id:string|null;name:string;image:string;price:number|null;available:boolean;partnerUrl:string;shopUrl:string};
 type OnPartnerPlacement = "auto"|"adpost"|"after_first"|"middle"|"before_last"|"bottom";
 type PublishConcept = "full" | "body_faq" | "body_only";
@@ -152,7 +152,7 @@ const NAV_GROUPS = [
     {k:"manage",i:"📋",l:"발행 관리"},{k:"blogscore",i:"📈",l:"블로그 지수"},{k:"calendar",i:"📅",l:"콘텐츠 캘린더"},
   ]},
   {label:"관계·소통 자동화",tabs:[
-    {k:"neighbor",i:"🤝",l:"서이추"},{k:"engage",i:"❤️",l:"공감·댓글"},{k:"reply",i:"💬",l:"답방"},{k:"insta_dm",i:"📱",l:"인스타 DM"},
+    {k:"neighbor",i:"🤝",l:"서이추"},{k:"engage",i:"❤️",l:"공감·댓글"},{k:"reply",i:"💬",l:"답방"},{k:"pumasi",i:"💞",l:"품앗이"},{k:"insta_dm",i:"📱",l:"인스타 DM"},
   ]},
   {label:"계정·설정",tabs:[
     {k:"accounts",i:"🔗",l:"계정 관리"},{k:"settings",i:"⚙️",l:"설정"},
@@ -3817,7 +3817,7 @@ POST3: (제목)|(이유)
                 {group.tabs.map(t=>(
                   <button key={t.k} className={`nav-item ${tab===t.k?"active":""} ${t.k==="control"?"nav-control":""} ${t.k==="insta_dm"?"nav-soon":""}`} onClick={()=>{if(t.k==="insta_dm"){showToast("📱 인스타 DM은 곧 출시됩니다!","info");return;}setTab(t.k);}}>
                     <span className="nav-ico">{t.i}</span>{t.l}
-                    {(t.k==="control"||t.k==="reply"||t.k==="blogscore")&&<span className="nav-new">NEW</span>}
+                    {(t.k==="control"||t.k==="reply"||t.k==="blogscore"||t.k==="pumasi")&&<span className="nav-new">NEW</span>}
                     {t.k==="insta_dm"&&<span className="nav-soon-badge">곧 출시</span>}
                     {t.k==="keyword"&&titles.length>0&&<span className="nav-badge">{titles.length}</span>}
                     {t.k==="manage"&&history.length>0&&<span className="nav-badge">{history.length}</span>}
@@ -6111,6 +6111,9 @@ POST3: (제목)|(이유)
             {tab==="reply"&&(
               <NeighborPage theme={theme as "dark"|"light"} userId={user.id} plan={user.plan} initialTab="reply" singleTab onBusyChange={setNeighborBusy} />
             )}
+            {tab==="pumasi"&&(
+              <NeighborPage theme={theme as "dark"|"light"} userId={user.id} plan={user.plan} initialTab="pumasi" singleTab onBusyChange={setNeighborBusy} />
+            )}
             {tab==="blogscore"&&(
               <NeighborPage theme={theme as "dark"|"light"} userId={user.id} plan={user.plan} initialTab="score" singleTab onBusyChange={setNeighborBusy} />
             )}
@@ -6280,8 +6283,8 @@ POST3: (제목)|(이유)
         </a>
 
         <div className="mob-bar">
-          {MAIN_TABS.filter(t=>["control","keyword","write","image","publish","manage","blogscore","neighbor","engage","reply","settings"].includes(t.k)).map(t=>{
-            const lbl:Record<string,string>={control:"홈",keyword:"키워드",write:"글쓰기",image:"이미지",publish:"발행",manage:"발행관리",blogscore:"지수",neighbor:"서이추",engage:"공감댓글",reply:"답방",settings:"설정"};
+          {MAIN_TABS.filter(t=>["control","keyword","write","image","publish","manage","blogscore","neighbor","engage","reply","pumasi","settings"].includes(t.k)).map(t=>{
+            const lbl:Record<string,string>={control:"홈",keyword:"키워드",write:"글쓰기",image:"이미지",publish:"발행",manage:"발행관리",blogscore:"지수",neighbor:"서이추",engage:"공감댓글",reply:"답방",pumasi:"품앗이",settings:"설정"};
             return (<button key={t.k} className={`mob-btn ${tab===t.k?"active":""}`} onClick={()=>setTab(t.k as MainTab)}><span className="mob-btn-ico">{t.i}</span><span className="mob-btn-lbl">{lbl[t.k]||t.l}</span></button>);
           })}
         </div>

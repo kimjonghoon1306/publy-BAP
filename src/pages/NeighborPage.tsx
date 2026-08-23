@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { botFetch, BotEventStream } from "../lib/botApi";
-import { getReplyDailyUsage, incrementReplyQuota, REPLY_DAILY_LIMIT, getBlogscoreDailyUsage, incrementBlogscoreQuota, BLOGSCORE_DAILY_LIMIT } from "../lib/supabase";
+import { getReplyDailyUsage, incrementReplyQuota, REPLY_DAILY_LIMIT, getBlogscoreDailyUsage, incrementBlogscoreQuota, BLOGSCORE_DAILY_LIMIT, PUMASI_ACCOUNT_LIMIT, PUMASI_POSTS_LIMIT, getPumasiDailyUsage } from "../lib/supabase";
 
 const BOT = "http://127.0.0.1:3334";
 
@@ -86,7 +86,7 @@ const DEFAULT_MULTI_MSGS = "안녕하세요! 좋은 글 잘 읽고 갑니다. �
 interface EngageResult { keyword: string; blogId: string; postUrl: string; liked: boolean; commented: boolean; status: "success"|"fail"|"skip"|"pending"|"running"; message: string; }
 // 상단·사이드바 배지와 동일한 플랜별 하루 한도 (lib/supabase.ts의 NEIGHBOR/ENGAGE_DAILY_LIMIT와 일치)
 const DAILY_LIMIT_BY_PLAN: Record<string, number> = { free: 10, basic: 50, pro: 100, admin: 9999 };
-interface Props { theme: "dark"|"light"; userId?: string; plan?: string; initialTab?: "neighbor"|"engage"|"reply"|"score"; singleTab?: boolean; onEngageUsageChange?: (used:number)=>void; initialNeighborUsed?: number; initialEngageUsed?: number; onBusyChange?: (busy:boolean)=>void; }
+interface Props { theme: "dark"|"light"; userId?: string; plan?: string; initialTab?: "neighbor"|"engage"|"reply"|"score"|"pumasi"; singleTab?: boolean; onEngageUsageChange?: (used:number)=>void; initialNeighborUsed?: number; initialEngageUsed?: number; onBusyChange?: (busy:boolean)=>void; }
 
 /* ── 내 이웃 키워드 분석 카드 (서이추·공감댓글 공용) ── */
 const KeywordAnalyzer = ({ keywords, loading, onAnalyze, onPick }: {
@@ -210,7 +210,7 @@ const GUIDE = {
 };
 
 /* ── 사용설명서 모달 ── */
-const GuideModal = ({ tab, onClose }: { tab: "neighbor"|"engage"|"reply"|"score"; onClose: () => void }) => {
+const GuideModal = ({ tab, onClose }: { tab: "neighbor"|"engage"|"reply"|"score"|"pumasi"; onClose: () => void }) => {
   const steps = (GUIDE as any)[tab] ?? [];
   const title = tab === "neighbor" ? "🤝 서이추 사용방법" : tab === "engage" ? "❤️ 공감·댓글 사용방법" : tab === "reply" ? "💬 답방 사용방법" : "📈 블로그 건강검진";
   return (
@@ -243,7 +243,7 @@ const GuideModal = ({ tab, onClose }: { tab: "neighbor"|"engage"|"reply"|"score"
 
 /* ── 메인 컴포넌트 ── */
 export default function NeighborPage({ theme, userId, plan = "free", initialTab, singleTab, onEngageUsageChange, initialNeighborUsed = 0, initialEngageUsed = 0, onBusyChange }: Props) {
-  const [tab, setTab] = useState<"neighbor"|"engage"|"reply"|"score">(initialTab || "neighbor");
+  const [tab, setTab] = useState<"neighbor"|"engage"|"reply"|"score"|"pumasi">(initialTab || "neighbor");
   // ── 답방(내 블로그 댓글에 대댓글) 상태 ──
   const [rTargetPosts, setRTargetPosts] = useState(10);   // '최근 개수' 방식일 때 글 수
   const [rSelectMode, setRSelectMode] = useState<"count"|"all"|"period">("count"); // 대상 글 선택 방식
@@ -304,10 +304,32 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
   const replyLimit = REPLY_DAILY_LIMIT[plan] ?? REPLY_DAILY_LIMIT.free;
   const [scUsed, setScUsed] = useState(0);
   const scLimit = BLOGSCORE_DAILY_LIMIT[plan] ?? BLOGSCORE_DAILY_LIMIT.free;
+  // ── 품앗이 상태 ──
+  const pumasiAccountLimit = PUMASI_ACCOUNT_LIMIT[plan] ?? PUMASI_ACCOUNT_LIMIT.free;  // 등록 가능한 계정 수
+  const pumasiPostsLimit = PUMASI_POSTS_LIMIT[plan] ?? PUMASI_POSTS_LIMIT.free;        // 계정당 대상 글 수 상한
+  const [pumUsed, setPumUsed] = useState(0);                                            // 오늘 품앗이 공감·댓글 건수
+  const [pumPostsByAcc, setPumPostsByAcc] = useState<Record<string, number>>({});       // 계정별 대상 글 수
+  const [pumDoLike, setPumDoLike] = useState(true);
+  const [pumDoComment, setPumDoComment] = useState(true);
+  const [pumCommentMode, setPumCommentMode] = useState<"single"|"multi"|"ai">("ai");
+  const [pumComment, setPumComment] = useState("좋은 글 잘 보고 가요 😊");
+  const [pumMultiComments, setPumMultiComments] = useState("좋은 글 잘 보고 가요 😊\n오늘도 좋은 하루 보내세요!\n잘 보고 갑니다 ✨");
+  const [pumTone, setPumTone] = useState<"담백"|"다정"|"짧게">("다정");
+  const [pumDelayMin, setPumDelayMin] = useState(8);
+  const [pumDelayMax, setPumDelayMax] = useState(15);
+  const [pumWorking, setPumWorking] = useState(false);
+  const [pumLogs, setPumLogs] = useState<string[]>([]);
+  const [pumDone, setPumDone] = useState(0);
+  const [pumFail, setPumFail] = useState(0);
+  const pumJobIdRef = useRef<string>("");
+  const pumEsRef = useRef<BotEventStream|null>(null);
+  const pumLogRef = useRef<HTMLDivElement>(null);
+  const addPumLog = (m: string) => setPumLogs(p => [...p, `${new Date().toLocaleTimeString("ko-KR",{hour12:false})}  ${m}`]);
   useEffect(() => {
     if (!userId) return;
     if (tab === "reply") getReplyDailyUsage(userId).then(setReplyUsed);
     if (tab === "score") getBlogscoreDailyUsage(userId).then(setScUsed);
+    if (tab === "pumasi") getPumasiDailyUsage(userId).then(setPumUsed);
   }, [userId, tab]);
   const [showGuide, setShowGuide] = useState(false);
 
@@ -605,10 +627,10 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
   // ★절전 방지(테리 요청): 서이추·공감댓글 자동작업(추출·실행·분산 자동실행) 중이면 부모(DashboardPage)에 알림.
   //   실제 keepAwake는 항상 떠있는 DashboardPage가 통합 관리 → 작업 중 다른 탭 이동/언마운트돼도 화면 안 꺼짐.
   useEffect(() => {
-    const busy = crawling || working || spreadRunning || eCrawling || eWorking || rWorking || rLoadingPosts || scLoading;
+    const busy = crawling || working || spreadRunning || eCrawling || eWorking || rWorking || rLoadingPosts || scLoading || pumWorking;
     onBusyChange?.(busy);
     return () => { onBusyChange?.(false); };
-  }, [crawling, working, spreadRunning, eCrawling, eWorking, rWorking, rLoadingPosts, scLoading, onBusyChange]);
+  }, [crawling, working, spreadRunning, eCrawling, eWorking, rWorking, rLoadingPosts, scLoading, pumWorking, onBusyChange]);
 
   const stopSpread = () => {
     spreadRunningRef.current = false;
@@ -742,6 +764,39 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
     if (rEsRef.current) { rEsRef.current.close(); rEsRef.current = null; }
     try { await botFetch(`${BOT}/api/stop/${rJobIdRef.current}`, { method: "POST" }); } catch {}
     addRLog("⛔ 중단"); setRWorking(false);
+  };
+
+  /* 품앗이 실행: 연결된 계정들끼리 서로 공감·댓글 */
+  const handlePumasiStart = () => {
+    const connected = accounts.filter(a => a.sessionOk && a.blogId);
+    if (connected.length < 2) return alert("품앗이는 연결된(비번 확인된) 계정이 2개 이상 필요해요.\n계정을 추가하고 '계정 연결하기'로 먼저 연결해주세요.");
+    if (pumDoComment && pumCommentMode === "ai" && !localStorage.getItem("publy_gemini_key")) {
+      if (!confirm("AI 자동 댓글은 Gemini(무료) 키가 필요해요. 키가 없으면 댓글이 건너뛰어져요. 그래도 시작할까요?")) return;
+    }
+    setPumLogs([]); setPumDone(0); setPumFail(0); setPumWorking(true);
+    pumJobIdRef.current = Date.now().toString();
+    const comment = pumCommentMode === "single" ? pumComment
+      : pumCommentMode === "multi" ? pumMultiComments.split("\n").filter(l => l.trim()).join("|||") : "";
+    const geminiKey = pumCommentMode === "ai" ? (localStorage.getItem("publy_gemini_key") || "") : "";
+    const accs = connected.map(a => ({ accountId: a.accountId, blogId: a.blogId, posts: Math.min(pumasiPostsLimit, pumPostsByAcc[a.accountId] || 3) }));
+    addPumLog(`🤝 품앗이 시작 — 계정 ${accs.length}개 (${accs.map(a => `${a.blogId}:${a.posts}개`).join(", ")})`);
+    const body = JSON.stringify({ accounts: accs, comment, doLike: pumDoLike, doComment: pumDoComment, aiComment: pumCommentMode === "ai", commentTone: pumTone, geminiKey, delayMin: pumDelayMin, delayMax: pumDelayMax, jobId: pumJobIdRef.current, ...(userId ? { userId } : {}) });
+    const es = new BotEventStream(`${BOT}/api/pumasi`, { method: "POST", headers: { "Content-Type": "application/json" }, body }); pumEsRef.current = es;
+    es.onmessage = e => {
+      const d = JSON.parse(e.data);
+      if (d.type === "log") addPumLog(d.msg);
+      if (d.type === "result" && userId) { getPumasiDailyUsage(userId).then(setPumUsed); }
+      if (d.type === "progress") { setPumDone(d.done); setPumFail(d.fail); }
+      if (d.type === "done") { addPumLog("🎉 품앗이 완료!"); setPumWorking(false); es.close(); }
+      if (d.type === "error") { addPumLog(`❌ 오류: ${d.msg}`); setPumWorking(false); es.close(); }
+    };
+    es.onerror = () => { addPumLog("❌ 연결 오류 (다시 시작을 누르면 재시도)"); setPumWorking(false); es.close(); };
+    es.onclose = () => setPumWorking(false);
+  };
+  const handlePumasiStop = async () => {
+    if (pumEsRef.current) { pumEsRef.current.close(); pumEsRef.current = null; }
+    try { await botFetch(`${BOT}/api/stop/${pumJobIdRef.current}`, { method: "POST" }); } catch {}
+    addPumLog("⛔ 중단"); setPumWorking(false);
   };
 
   /* 블로그 건강검진 실행 */
@@ -1935,6 +1990,131 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
           </div>
         </div>
       )}
+
+      {/* ═══════════ 💞 품앗이 탭 ═══════════ */}
+      {tab === "pumasi" && (() => {
+        const connected = accounts.filter(a => a.sessionOk && a.blogId);
+        const overAccountLimit = !isUnlimitedPlan && accounts.length > pumasiAccountLimit;
+        return (
+        <div className="npg-2col">
+          {/* 왼쪽: 계정 + 설정 */}
+          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+            {/* 기능설명 배너 */}
+            <div style={{ padding: "16px 18px", borderRadius: 14, background: "linear-gradient(135deg,rgba(236,72,153,.1),rgba(139,92,246,.08))", border: "1.5px solid rgba(236,72,153,.3)" }}>
+              <div style={{ fontSize: 15, fontWeight: 800, color: "#ec4899", marginBottom: 6 }}>💞 품앗이(내 계정끼리 서로 공감·댓글)</div>
+              <div style={{ fontSize: 12.5, color: "var(--text2)", lineHeight: 1.65, fontWeight: 500 }}>
+                내 <b style={{color:"#ec4899"}}>여러 계정</b>을 등록해두면, 봇이 <b>계정을 자동으로 전환</b>하며 서로의 글에 공감·댓글을 남겨줘요. 계정 간 소통량을 만들어 블로그를 살리는 기능이에요.<br />
+                <span style={{ color: "#c88010", fontWeight: 700 }}>💡 한 번만 계정 연결</span>해두면, 다음부턴 <b>'품앗이 시작'</b>만 눌러도 자동 로그인·전환하며 알아서 돌아가요. 딜레이를 넉넉히 두면 계정이 안전해요.
+              </div>
+            </div>
+
+            {/* 내 등급 안내 — 몇 개 연결 가능 / 지금 몇 개 */}
+            <div style={{ padding: "13px 16px", borderRadius: 12, background: "var(--card)", border: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+              <div style={{ fontSize: 12.5, color: "var(--text2)", fontWeight: 600 }}>
+                내 등급 <b style={{color:"#ec4899"}}>{plan === "free" ? "무료" : plan === "basic" ? "베이직" : plan === "pro" ? "프로" : plan === "unlimited" ? "무제한" : plan}</b> · 계정 <b style={{color: overAccountLimit ? "var(--danger)" : "#00c896"}}>{accounts.length}</b>{isUnlimitedPlan ? "" : `/${pumasiAccountLimit}`}개 등록 · 연결됨 <b style={{color:"#00c896"}}>{connected.length}</b>개
+              </div>
+              <div style={{ fontSize: 11.5, color: "var(--text3)" }}>계정당 대상 글 최대 {isUnlimitedPlan ? "무제한" : `${pumasiPostsLimit}개`}</div>
+            </div>
+            {overAccountLimit && <div style={{ fontSize: 12, color: "var(--danger)", fontWeight: 700, padding: "2px 4px" }}>⚠️ 등록 계정이 등급 한도({pumasiAccountLimit}개)를 넘었어요. 초과분은 품앗이에서 제외돼요. 더 많이 쓰려면 상위 등급이나 추가 결제가 필요해요.</div>}
+
+            <AccountCard accounts={accounts} onLogin={handleLogin} onAdd={handleAddAccount} onRemove={handleRemoveAccount} onChange={handleAccountChange} />
+
+            {/* 계정별 대상 글 수 */}
+            {connected.length >= 2 && (
+              <div className="card" style={{ padding: "16px 18px" }}>
+                <div className="card-title" style={{ marginBottom: 6, fontSize: 15 }}>📝 계정별 대상 글 수</div>
+                <div style={{ fontSize: 11.5, color: "var(--text2)", marginBottom: 12, lineHeight: 1.5, fontWeight: 500 }}>💡 각 계정의 <b>최근 글 몇 개에</b> 다른 계정들이 공감·댓글을 남길지 정해요. (예: 홍길동 3개 = 다른 계정들이 홍길동 최근 글 3개에 남김)</div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  {connected.map(a => (
+                    <div key={a.accountId} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 11px", borderRadius: 9, background: "var(--bg)", border: "1px solid var(--border)" }}>
+                      <span style={{ flex: 1, minWidth: 0, fontSize: 13, fontWeight: 700, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>🔗 {a.blogId || a.accountId}</span>
+                      <input className="inp" type="number" min={1} max={isUnlimitedPlan ? 999 : pumasiPostsLimit} value={pumPostsByAcc[a.accountId] ?? 3} onChange={e => { const v = Math.max(1, Math.min(isUnlimitedPlan ? 999 : pumasiPostsLimit, parseInt(e.target.value) || 1)); setPumPostsByAcc(prev => ({ ...prev, [a.accountId]: v })); }} style={{ width: 72, fontSize: 13, padding: "8px 10px", textAlign: "center" }} />
+                      <span style={{ fontSize: 12, color: "var(--text3)" }}>개</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* 작업 종류 (공감/댓글 둘 다) */}
+            <div className="card" style={{ padding: "16px 18px" }}>
+              <div className="card-title" style={{ marginBottom: 10, fontSize: 15 }}>⚙️ 작업 설정</div>
+              <Toggle val={pumDoLike} set={setPumDoLike} label="❤️ 공감 클릭하기" />
+              <Toggle val={pumDoComment} set={setPumDoComment} label="💬 댓글 작성하기" />
+
+              {pumDoComment && (
+                <div style={{ marginTop: 12 }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text2)", marginBottom: 7 }}>댓글 방식</div>
+                  <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
+                    {([["single","단일"],["multi","여러개 순환"],["ai","✨ AI 자동"]] as const).map(([m,lbl]) => {
+                      const on = pumCommentMode === m; const isAi = m === "ai";
+                      return <button key={m} onClick={() => setPumCommentMode(m)} style={{ flex: 1, padding: "10px 6px", borderRadius: 10, border: `2px solid ${on ? (isAi?"#8b5cf6":"var(--accent)") : "var(--border)"}`, background: on ? (isAi?"rgba(139,92,246,.12)":"var(--accent-bg)") : "transparent", color: on ? (isAi?"#8b5cf6":"var(--accent-text)") : (isAi?"#8b5cf6":"var(--text2)"), cursor: "pointer", fontSize: 12, fontWeight: 700, fontFamily: "inherit" }}>{lbl}</button>;
+                    })}
+                  </div>
+                  {pumCommentMode === "single" && <textarea className="inp" rows={2} value={pumComment} onChange={e => setPumComment(e.target.value)} style={{ resize: "vertical", fontSize: 13, lineHeight: 1.6, padding: "11px 13px" }} />}
+                  {pumCommentMode === "multi" && <>
+                    <textarea className="inp" rows={4} value={pumMultiComments} onChange={e => setPumMultiComments(e.target.value)} style={{ resize: "vertical", fontSize: 13, lineHeight: 1.6, padding: "11px 13px" }} placeholder="줄바꿈으로 구분 → 순서대로 사용" />
+                    <div style={{ fontSize: 11, color: "var(--text3)", marginTop: 6 }}>총 {pumMultiComments.split("\n").filter(l => l.trim()).length}개 댓글 등록됨</div>
+                  </>}
+                  {pumCommentMode === "ai" && <>
+                    <div style={{ fontSize: 12, color: "var(--text2)", lineHeight: 1.6, fontWeight: 500, marginBottom: 9, padding: "10px 12px", borderRadius: 10, background: "rgba(139,92,246,.08)", border: "1px solid rgba(139,92,246,.2)" }}>✨ <b style={{color:"#8b5cf6"}}>AI가 글을 읽고</b> 매번 다른 자연스러운 댓글을 써요. 말투만 골라주세요. <b>(설정→글쓰기AI의 Gemini 무료키 필요)</b></div>
+                    <div style={{ display: "flex", gap: 8 }}>
+                      {(["담백","다정","짧게"] as const).map(t => <button key={t} onClick={() => setPumTone(t)} style={{ flex: 1, padding: "9px", borderRadius: 9, border: `2px solid ${pumTone===t?"#8b5cf6":"var(--border)"}`, background: pumTone===t?"rgba(139,92,246,.1)":"transparent", color: pumTone===t?"#8b5cf6":"var(--text2)", cursor: "pointer", fontSize: 12.5, fontWeight: 800, fontFamily: "inherit" }}>{t}</button>)}
+                    </div>
+                  </>}
+                </div>
+              )}
+
+              <div style={{ marginTop: 14 }}>
+                <label className="inp-label" style={{ fontSize: 12, marginBottom: 6, display: "block" }}>딜레이 (초)</label>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <input className="inp" type="number" min={1} max={120} {...numProps(pumDelayMin, setPumDelayMin, 1, 120, 8)} style={{ flex: 1, fontSize: 13, padding: "11px 14px" }} />
+                  <span style={{ color: "var(--text3)" }}>~</span>
+                  <input className="inp" type="number" min={1} max={300} {...numProps(pumDelayMax, setPumDelayMax, 1, 300, 15)} style={{ flex: 1, fontSize: 13, padding: "11px 14px" }} />
+                </div>
+                <div style={{ fontSize: 11.5, color: "var(--text2)", marginTop: 6, lineHeight: 1.5, fontWeight: 500 }}>💡 댓글 사이 대기 시간이에요. <b style={{color:"#00c896"}}>넉넉히 둘수록</b> 사람처럼 자연스러워 <b style={{color:"#ff5fa2"}}>계정이 안전</b>해요.</div>
+              </div>
+            </div>
+
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              <button className="btn btn-primary btn-full" onClick={handlePumasiStart} disabled={pumWorking || !botOnline || connected.length < 2} style={{ padding: "14px", fontSize: 14, borderRadius: 12 }}>
+                {pumWorking ? <><span className="spinner" />품앗이 진행 중...</> : `🤝 품앗이 시작${connected.length >= 2 ? ` (${connected.length}개 계정)` : ""}`}
+              </button>
+              {connected.length < 2 && <div style={{ fontSize: 12, color: "var(--text3)", textAlign: "center" }}>계정을 <b>2개 이상 연결</b>하면 시작할 수 있어요.</div>}
+              {pumWorking && <button className="btn-stop" onClick={handlePumasiStop} style={{ width: "100%", justifyContent: "center", padding: "13px", borderRadius: 12, fontSize: 13 }}>⛔ 중단</button>}
+            </div>
+          </div>
+
+          {/* 오른쪽: 게이지 + 결과 + 로그 */}
+          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+            <div className="card" style={{ padding: "14px 18px" }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 9 }}>
+                <span style={{ fontSize: 12.5, fontWeight: 700, color: "var(--text2)" }}>💞 오늘 품앗이 <span style={{ fontSize: 10.5, color: "var(--text3)", fontWeight: 600 }}>(자정 초기화)</span></span>
+                <span style={{ fontSize: 13, fontWeight: 800, color: "#ec4899" }}>{pumUsed}건 남김</span>
+              </div>
+              <div style={{ height: 8, borderRadius: 99, background: "var(--card2)", overflow: "hidden" }}>
+                <div style={{ height: "100%", borderRadius: 99, width: `${Math.min(100, pumUsed)}%`, background: "#ec4899", transition: "width .5s ease" }} />
+              </div>
+              <div style={{ fontSize: 11, color: "var(--text3)", marginTop: 7, fontWeight: 500 }}>품앗이는 등급별 계정 수·글 수만 제한하고, 하루 총 건수 제한은 없어요(딜레이로 자연 조절).</div>
+            </div>
+            <div className="card" style={{ padding: "20px 24px" }}>
+              <div style={{ fontSize: 13, color: "var(--text3)", fontWeight: 700, marginBottom: 14 }}>🤝 품앗이 결과</div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                <div style={{ textAlign: "center", padding: "14px", borderRadius: 12, background: "var(--bg)", border: "1px solid var(--border)" }}>
+                  <div style={{ fontSize: 30, fontWeight: 900, color: "var(--success)" }}>{pumDone}</div>
+                  <div style={{ fontSize: 12, color: "var(--text3)", marginTop: 4 }}>완료</div>
+                </div>
+                <div style={{ textAlign: "center", padding: "14px", borderRadius: 12, background: "var(--bg)", border: "1px solid var(--border)" }}>
+                  <div style={{ fontSize: 30, fontWeight: 900, color: "var(--danger)" }}>{pumFail}</div>
+                  <div style={{ fontSize: 12, color: "var(--text3)", marginTop: 4 }}>실패</div>
+                </div>
+              </div>
+            </div>
+            <LogBox logs={pumLogs} logRef={pumLogRef} onClear={() => setPumLogs([])} />
+          </div>
+        </div>
+        );
+      })()}
     </div>
   );
 }

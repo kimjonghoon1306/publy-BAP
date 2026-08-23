@@ -129,6 +129,23 @@ export async function incrementEngageQuota(userId: string): Promise<void> {
   await supabase.from("publy_settings").upsert({ key, value: String(used + 1) }, { onConflict: "key" });
 }
 
+// 품앗이 하루 사용량(공감·댓글 총건수) — 자정 자동 리셋
+function pumasiQuotaKey(userId: string): string {
+  const today = new Date().toISOString().slice(0, 10);
+  return `pumasi_daily_${userId}_${today}`;
+}
+export async function getPumasiDailyUsage(userId: string): Promise<number> {
+  try {
+    const { data } = await supabase.from("publy_settings").select("value").eq("key", pumasiQuotaKey(userId)).maybeSingle();
+    return data?.value ? parseInt(data.value) || 0 : 0;
+  } catch { return 0; }
+}
+export async function incrementPumasiQuota(userId: string): Promise<void> {
+  const key = pumasiQuotaKey(userId);
+  const used = await getPumasiDailyUsage(userId);
+  await supabase.from("publy_settings").upsert({ key, value: String(used + 1) }, { onConflict: "key" });
+}
+
 /* ── 회원 플랜 조회 ── */
 export async function getUserPlan(userId: string): Promise<string> {
   try {
