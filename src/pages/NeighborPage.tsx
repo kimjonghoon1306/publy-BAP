@@ -560,7 +560,10 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
     accounts.forEach(acc => {
       if (!acc.id) return;
       botFetch(`${BOT}/api/session/${acc.accountId}`).then(r => r.json())
-        .then(d => { if (d.exists) setAccounts(p => p.map(a => a.accountId === acc.accountId ? { ...a, sessionOk: true } : a)); })
+        // ★봇의 실제 세션 상태로 sessionOk를 정확히 맞춘다. 봇에 세션이 없으면(exists=false) '연결됨'을 내려
+        //   재연결을 유도한다. (예전엔 exists일 때만 true로 올리고 false로 안 내려서 "연결됨인데 봇엔 세션 없음"
+        //   → 시작해도 크롬이 안 뜨는 불일치가 있었음)
+        .then(d => setAccounts(p => p.map(a => a.accountId === acc.accountId ? { ...a, sessionOk: !!d.exists } : a)))
         .catch(() => {});
     });
     // 상단·사이드바와 같은 원래 서이추 한도(플랜별)를 초기 로드 → 게이지 연동

@@ -2578,8 +2578,14 @@ export async function pumasiEngage(params: {
   const { accounts, comment, doLike, doComment, aiComment, commentTone, geminiKey, delayMin, delayMax, readRelated = true, readRelatedMode = "random", readSpeed = "natural", periodDays = 0, spreadHours = 0, onLog, onResult, onProgress, stopSignal } = params;
   const log = onLog || console.log;
   let done = 0, fail = 0, skip = 0;
+  // ★세션 상태를 계정별로 로그에 남긴다(크롬이 안 뜰 때 어느 계정이 문제인지 즉시 파악).
+  const sessionState = accounts.map(a => ({ blogId: a.blogId || a.accountId, ok: !!(a.accountId && naverSessionExists(a.accountId)), hasBlog: !!a.blogId }));
+  log(`[품앗이] 세션 확인 — ${sessionState.map(s => `${s.blogId}:${s.ok ? "세션OK" : "세션없음"}${s.hasBlog ? "" : "·blogId없음"}`).join(", ")}`);
   const valid = accounts.filter(a => a.accountId && a.blogId && naverSessionExists(a.accountId));
-  if (valid.length < 2) throw new Error("품앗이는 세션 연결된 계정이 2개 이상 필요해요");
+  if (valid.length < 2) {
+    const bad = sessionState.filter(s => !s.ok).map(s => s.blogId).join(", ");
+    throw new Error(`품앗이는 세션 연결된 계정이 2개 이상 필요해요. 연결이 풀린 계정을 다시 연결해주세요${bad ? ` (${bad})` : ""}.`);
+  }
   log(`[품앗이] 시작 — 계정 ${valid.length}개가 서로 글에 공감·댓글`);
   // ★계정 순환 매칭: 이력을 보고 '아직 안 갔거나 가장 오래된' 조합을 우선 배정
   //   (고정된 계정끼리만 반복 소통하는 패턴↓). 같은 actor→target 조합은 2일 쿨다운.
