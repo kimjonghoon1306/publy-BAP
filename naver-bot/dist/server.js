@@ -52079,6 +52079,41 @@ app.get("/api/hot-issues", async (req, res) => {
     res.status(500).json({ ok: false, error: e.message });
   }
 });
+function extractCoreQuery(title) {
+  const cleaned = String(title || "").replace(/[^\p{L}\p{N}\s]/gu, " ").replace(/\s+/g, " ").trim();
+  const drop = /* @__PURE__ */ new Set(["\uADF8\uB9AC\uACE0", "\uD558\uB294", "\uBC0F", "\uC758", "\uAC00", "\uC774", "\uC740", "\uB294", "\uC744", "\uB97C", "\uC5D0", "\uC5D0\uC11C", "\uC73C\uB85C", "\uC640", "\uACFC", "\uB3C4", "\uB9CC", "best", "BEST", "top", "TOP", "\uCD94\uCC9C", "\uD6C4\uAE30", "\uBC29\uBC95", "\uC815\uB9AC", "\uCD1D\uC815\uB9AC", "\uC644\uBCBD", "\uAFC0\uD301", "\uB9AC\uBDF0"]);
+  const words = cleaned.split(" ").filter((w) => w.length >= 2 && !drop.has(w));
+  return (words.length ? words : cleaned.split(" ")).slice(0, 6).join(" ").slice(0, 80) || cleaned.slice(0, 80);
+}
+app.post("/api/post-rank", async (req, res) => {
+  const { items } = req.body;
+  if (!Array.isArray(items) || !items.length)
+    return res.status(400).json({ error: "items \uD544\uC694" });
+  const MUA = "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1";
+  const out = [];
+  for (const it of items.slice(0, 30)) {
+    const query = extractCoreQuery(it.title);
+    try {
+      const r = await fetch(`https://m.search.naver.com/search.naver?ssc=tab.m_blog.all&query=${encodeURIComponent(query)}`, { headers: { "User-Agent": MUA } });
+      const t = await r.text();
+      const seq = [];
+      const seen = /* @__PURE__ */ new Set();
+      for (const m of t.matchAll(/blog\.naver\.com\/([a-zA-Z0-9_-]+)\/(\d{6,})/g)) {
+        const k = `${m[1].toLowerCase()}/${m[2]}`;
+        if (!seen.has(k)) {
+          seen.add(k);
+          seq.push(k);
+        }
+      }
+      const idx = seq.indexOf(`${String(it.blogId).toLowerCase()}/${String(it.logNo)}`);
+      out.push({ logNo: String(it.logNo), rank: idx >= 0 ? idx + 1 : null, query });
+    } catch {
+      out.push({ logNo: String(it.logNo), rank: null, query });
+    }
+    await new Promise((r) => setTimeout(r, 300));
+  }
+  res.json({ ok: true, ranks: out });
+});
 app.listen(PORT, "127.0.0.1", () => {
   console.log(`[bot] Publy \uBD07 \uC11C\uBC84 v2.0 \u2192 http://localhost:${PORT}`);
 });

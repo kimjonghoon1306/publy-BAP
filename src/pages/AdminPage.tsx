@@ -785,6 +785,25 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
   // 회원
   const [users, setUsers] = useState<UserFull[]>([]); const [loading, setLoading] = useState(true); const [search, setSearch] = useState(""); const [selUser, setSelUser] = useState<UserFull|null>(null);
   const [history, setHistory] = useState<PublyHistory[]>([]);
+  // 📈 순위 성과 추적(회원과 동일)
+  const [rankData, setRankData] = useState<Record<string,{rank:number|null;prev:number|null;at:number}>>(()=>{try{return JSON.parse(localStorage.getItem("publy_adm_rank_track")||"{}");}catch{return{};}});
+  const [rankChecking, setRankChecking] = useState(false);
+  const scLogNoOf=(url?:string)=>url?.match(/(?:logNo=|\/)(\d{6,})(?:[/?&]|$)/)?.[1]||"";
+  const scBlogIdOf=(url?:string)=>url?.match(/blog\.naver\.com\/([a-zA-Z0-9_-]+)/)?.[1]||"";
+  async function checkPostRanks(){
+    const naverPosts=history.filter(h=>h.status==="success"&&h.platform==="naver"&&h.post_url&&scLogNoOf(h.post_url)&&scBlogIdOf(h.post_url));
+    if(naverPosts.length===0){showToast("순위를 확인할 네이버 발행 글이 없어요","error");return;}
+    setRankChecking(true);
+    try{
+      const items=naverPosts.slice(0,30).map(h=>({title:h.title,blogId:scBlogIdOf(h.post_url),logNo:scLogNoOf(h.post_url)}));
+      const r=await fetch(`${BOT}/api/post-rank`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({items})});
+      const d=await r.json();
+      if(!d.ok) throw new Error(d.error||"조회 실패");
+      setRankData(prev=>{const next={...prev};for(const rk of d.ranks){const old=prev[rk.logNo];next[rk.logNo]={rank:rk.rank,prev:old?old.rank:null,at:Date.now()};}localStorage.setItem("publy_adm_rank_track",JSON.stringify(next));return next;});
+      showToast("📈 순위 성과를 확인했어요!");
+    }catch(e:any){showToast("❌ "+e.message,"error");}
+    finally{setRankChecking(false);}
+  }
   const [editMap, setEditMap] = useState<Record<string,any>>({}); const [saving, setSaving] = useState<string|null>(null);
   const [newNote, setNewNote] = useState(""); const [newPayAmt, setNewPayAmt] = useState(""); const [newPayNote, setNewPayNote] = useState(""); const [addingPay, setAddingPay] = useState(false);
   const [pubSub, setPubSub] = useState<"full"|"body_faq"|"body_only">("full");
@@ -3308,6 +3327,7 @@ POST3: (제목)|(이유)
                   <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:14}}>
                     <div className="card-title" style={{margin:0}}>📋 전체 발행 기록</div>
                     <div style={{display:"flex",gap:8,alignItems:"center"}}>
+                      <button onClick={checkPostRanks} disabled={rankChecking} style={{padding:"6px 12px",borderRadius:8,border:"none",background:rankChecking?"var(--card2)":"linear-gradient(135deg,#00c896,#00a5ff)",color:rankChecking?"var(--text3)":"#fff",cursor:rankChecking?"default":"pointer",fontSize:12,fontWeight:800,fontFamily:"inherit",whiteSpace:"nowrap"}}>{rankChecking?"📈 확인 중...":"📈 순위 성과"}</button>
                       <span style={{fontSize:13,color:"var(--text2)"}}>총 {history.length}건</span>
                       {history.length>0&&<button className="btn btn-danger btn-sm" onClick={async()=>{if(!confirm("전체 삭제할까요?"))return;await deleteAllHistory(ADM_UID);setHistory([]);}}>🗑 전체삭제</button>}
                     </div>
@@ -3323,6 +3343,7 @@ POST3: (제목)|(이유)
                       <div style={{flex:1,minWidth:0}}>
                         <div style={{fontSize:13,fontWeight:700,color:"var(--text)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{h.title}</div>
                         <div style={{fontSize:11,color:"var(--text2)",marginTop:2}}>{new Date(h.published_at).toLocaleString("ko-KR")}</div>
+                        {(()=>{const ln=scLogNoOf(h.post_url);const rd=ln?rankData[ln]:null;if(!rd)return null;const diff=(rd.prev!=null&&rd.rank!=null)?rd.prev-rd.rank:null;return(<div style={{fontSize:11,marginTop:3,display:"flex",gap:6,flexWrap:"wrap"}}><span style={{fontWeight:800,color:rd.rank!=null?"#00c896":"var(--text3)"}}>{rd.rank!=null?`🔍 현재 ${rd.rank}위`:"🔍 순위권 밖"}</span>{diff!=null&&diff!==0&&<span style={{fontWeight:800,color:diff>0?"#00c896":"#ff6b6b"}}>{diff>0?`▲${diff}`:`▼${-diff}`}</span>}</div>);})()}
                       </div>
                       <span style={{fontSize:11,fontWeight:700,padding:"3px 8px",borderRadius:99,flexShrink:0,
                         background:h.status==="success"?"var(--accent-bg)":h.status==="fail"?"rgba(255,71,87,.1)":"rgba(255,179,71,.1)",

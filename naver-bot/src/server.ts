@@ -554,6 +554,36 @@ app.get("/api/hot-issues", async (req, res) => {
   }
 });
 
+/* ── 📈 성과 추적: 발행한 글의 현재 검색 순위 조회(브라우저 불필요, 공개 통합검색) ──
+   제목에서 핵심 키워드를 뽑아 모바일 통합검색 블로그탭에서 내 (blogId/logNo) 위치를 찾는다. */
+function extractCoreQuery(title: string): string {
+  const cleaned = String(title||"").replace(/[^\p{L}\p{N}\s]/gu, " ").replace(/\s+/g, " ").trim();
+  const drop = new Set(["그리고","하는","및","의","가","이","은","는","을","를","에","에서","으로","와","과","도","만","best","BEST","top","TOP","추천","후기","방법","정리","총정리","완벽","꿀팁","리뷰"]);
+  const words = cleaned.split(" ").filter(w => w.length >= 2 && !drop.has(w));
+  return (words.length ? words : cleaned.split(" ")).slice(0, 6).join(" ").slice(0, 80) || cleaned.slice(0,80);
+}
+app.post("/api/post-rank", async (req, res) => {
+  const { items } = req.body as { items?: {title:string; blogId:string; logNo:string}[] };
+  if (!Array.isArray(items) || !items.length) return res.status(400).json({ error: "items 필요" });
+  const MUA = "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1";
+  const out: { logNo:string; rank:number|null; query:string }[] = [];
+  for (const it of items.slice(0, 30)) {
+    const query = extractCoreQuery(it.title);
+    try {
+      const r = await fetch(`https://m.search.naver.com/search.naver?ssc=tab.m_blog.all&query=${encodeURIComponent(query)}`, { headers: { "User-Agent": MUA } });
+      const t = await r.text();
+      const seq: string[] = []; const seen = new Set<string>();
+      for (const m of t.matchAll(/blog\.naver\.com\/([a-zA-Z0-9_-]+)\/(\d{6,})/g)) {
+        const k = `${m[1].toLowerCase()}/${m[2]}`; if (!seen.has(k)) { seen.add(k); seq.push(k); }
+      }
+      const idx = seq.indexOf(`${String(it.blogId).toLowerCase()}/${String(it.logNo)}`);
+      out.push({ logNo: String(it.logNo), rank: idx >= 0 ? idx + 1 : null, query });
+    } catch { out.push({ logNo: String(it.logNo), rank: null, query }); }
+    await new Promise(r => setTimeout(r, 300));
+  }
+  res.json({ ok: true, ranks: out });
+});
+
 /* ── 서버 시작 ── */
 app.listen(PORT, "127.0.0.1", () => {
   console.log(`[bot] Publy 봇 서버 v2.0 → http://localhost:${PORT}`);

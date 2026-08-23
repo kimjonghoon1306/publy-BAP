@@ -850,6 +850,32 @@ export default function DashboardPage({user, onLogout, onAdminLogin, onThemeTogg
   }
   const [accounts, setAccounts] = useState<PublyAccount[]>([]);
   const [history, setHistory] = useState<PublyHistory[]>([]);
+  // 사진 글쓰기 안내 모달(모바일 최적화 — window.open 대신 앱 내 모달)
+  const [photoGuideModal, setPhotoGuideModal] = useState<null|"guide"|"caution"|"example">(null);
+  // 📈 성과 추적: 발행 글 현재 순위 + 이전 스냅샷 비교(로컬 저장)
+  const [rankData, setRankData] = useState<Record<string,{rank:number|null;prev:number|null;at:number}>>(()=>{try{return JSON.parse(localStorage.getItem("publy_rank_track")||"{}");}catch{return{};}});
+  const [rankChecking, setRankChecking] = useState(false);
+  const scLogNoOf=(url?:string)=>url?.match(/(?:logNo=|\/)(\d{6,})(?:[/?&]|$)/)?.[1]||"";
+  const scBlogIdOf=(url?:string)=>url?.match(/blog\.naver\.com\/([a-zA-Z0-9_-]+)/)?.[1]||"";
+  async function checkPostRanks(){
+    const naverPosts=history.filter(h=>h.status==="success"&&h.platform==="naver"&&h.post_url&&scLogNoOf(h.post_url)&&scBlogIdOf(h.post_url));
+    if(naverPosts.length===0){showToast("순위를 확인할 네이버 발행 글이 없어요","error");return;}
+    setRankChecking(true);
+    try{
+      const items=naverPosts.slice(0,30).map(h=>({title:h.title,blogId:scBlogIdOf(h.post_url),logNo:scLogNoOf(h.post_url)}));
+      const r=await botFetch(`${BOT}/api/post-rank`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({items})});
+      const d=await r.json();
+      if(!d.ok) throw new Error(d.error||"조회 실패");
+      setRankData(prev=>{
+        const next={...prev};
+        for(const rk of d.ranks){ const old=prev[rk.logNo]; next[rk.logNo]={rank:rk.rank,prev:old?old.rank:null,at:Date.now()}; }
+        localStorage.setItem("publy_rank_track",JSON.stringify(next));
+        return next;
+      });
+      showToast("📈 순위 성과를 확인했어요!");
+    }catch(e:any){showToast("❌ "+e.message,"error");}
+    finally{setRankChecking(false);}
+  }
   const [adType, setAdType] = useState<"adpost"|"adsense">("adpost");
   const [platform, setPlatform] = useState<"naver"|"tistory">("naver");
   const [keyword, setKeyword] = useState("");
@@ -5234,7 +5260,7 @@ POST3: (제목)|(이유)
                       style={{padding:"5px 12px",borderRadius:20,background:(photoSuggesting||photoFiles.length===0)?"var(--card2)":"linear-gradient(135deg,#80FFDB,#C77DFF)",color:(photoSuggesting||photoFiles.length===0)?"var(--text3)":"#12203a",border:"none",cursor:(photoSuggesting||photoFiles.length===0)?"default":"pointer",fontSize:11,fontWeight:800,fontFamily:"inherit",whiteSpace:"nowrap"}}>
                       {photoSuggesting?"🤖 분석 중...":"🤖 AI 추천"}
                     </button>
-                    <button onClick={()=>{const html=`<!DOCTYPE html><html><head><meta charset="utf-8"><title>키포인트 예시</title><style>*{box-sizing:border-box;margin:0;padding:0}body{font-family:'Malgun Gothic',sans-serif;background:#fdf0ff;color:#111}h1{background:linear-gradient(135deg,#FF6B9D,#C77DFF);color:#fff;padding:20px 24px;font-size:18px;line-height:1.4}.content{padding:20px}.intro{font-size:14px;color:#555;line-height:1.8;margin-bottom:18px;padding:12px 16px;background:#fff;border-radius:12px;border-left:4px solid #C77DFF}.cat-title{font-size:13px;font-weight:800;color:#FF6B9D;margin:16px 0 8px;padding:4px 10px;background:#FF6B9D11;border-radius:6px;display:inline-block}.bad{background:#fff0f0;border:1px solid #ffcccc;border-radius:10px;padding:10px 14px;margin-bottom:6px;font-size:13px;color:#c00;line-height:1.7}.good{background:#f0fff4;border:1px solid #99ddaa;border-radius:10px;padding:10px 14px;font-size:13px;color:#005c1a;line-height:1.8;margin-bottom:16px}.lbl{font-size:10px;font-weight:800;margin-bottom:3px}.tip{background:linear-gradient(135deg,#FF6B9D11,#C77DFF11);border:1px solid #C77DFF33;border-radius:12px;padding:14px;margin-top:4px;font-size:13px;line-height:1.9}</style></head><body><h1>✏️ 키포인트 이렇게 쓰면 글이 잘 나와요</h1><div class="content"><div class="intro">구체적으로 쓸수록 실제 경험처럼 자연스러운 글이 나옵니다.<br>장소 + 가격 + 시간 + 특징 + 개인 의견을 담아주세요.</div><div class="cat-title">🍽️ 맛집 방문</div><div class="bad"><div class="lbl">❌ 아쉬운 예</div>강원도 맛집, 고기집, 맛있었음</div><div class="good"><div class="lbl">✅ 좋은 예</div>강원도 홍천 태장동 / 한우 소갈비찜 전문점 / 2인 45,000원 / 웨이팅 40분 / 주차 무료 / 반찬 10가지 / 아이 동반 가능 / 재방문 의향 있음</div><div class="cat-title">✈️ 여행 후기</div><div class="bad"><div class="lbl">❌ 아쉬운 예</div>제주도 여행, 경치 좋았다</div><div class="good"><div class="lbl">✅ 좋은 예</div>제주 성산읍 성산일출봉 / 오전 6시 방문 / 입장료 5,000원 / 일출 40분 전 도착 권장 / 주차장에서 도보 10분 / 공항에서 1시간 소요</div><div class="cat-title">☕ 카페 방문</div><div class="bad"><div class="lbl">❌ 아쉬운 예</div>서울 카페, 인테리어 예쁨</div><div class="good"><div class="lbl">✅ 좋은 예</div>서울 성수동 공장 리모델링 카페 / 아메리카노 6,500원 / 대기 없이 입장 / 오전 11시 방문 / 좌석 80개 / 지하철 권장 주차 불가</div><div class="cat-title">📦 제품 리뷰</div><div class="bad"><div class="lbl">❌ 아쉬운 예</div>에어프라이어 구매, 좋음</div><div class="good"><div class="lbl">✅ 좋은 예</div>필립스 에어프라이어 5.6L / 129,000원 / 3인 가족 6개월 사용 / 치킨 20분 바삭 / 세척 쉬움 / 단점: 크기 커서 수납 불편 / 만족도 9점</div><div class="cat-title">💬 체험단 후기</div><div class="bad"><div class="lbl">❌ 아쉬운 예</div>협찬 받은 피부과, 좋았음</div><div class="good"><div class="lbl">✅ 좋은 예</div>[협찬] 강남 청담 피부과 / 리프팅 시술 1회 / 40분 소요 / 붓기 거의 없음 / 직원 친절 / 주차 2시간 무료 / 다음 달 추가 예약</div><div class="tip">💡 핵심: 장소 + 가격 + 소요시간 + 특징 2~3개 + 내 솔직한 의견<br>이렇게만 써도 AI가 훨씬 풍부하고 자연스러운 글을 써드려요!</div></div></body></html>`;if((window as any).electron?.openPreview){(window as any).electron.openPreview(html);}else{const w=window.open("","_blank","width=560,height=820");if(w){w.document.write(html);w.document.close();}}}} style={{padding:"5px 12px",borderRadius:20,background:"linear-gradient(135deg,#FF6B9D,#C77DFF)",color:"#fff",border:"none",cursor:"pointer",fontSize:11,fontWeight:800,fontFamily:"inherit",whiteSpace:"nowrap",flexShrink:0}}>📝 예시 보기</button>
+                    <button onClick={()=>{const html=`<!DOCTYPE html><html><head><meta charset="utf-8"><title>키포인트 예시</title><style>*{box-sizing:border-box;margin:0;padding:0}body{font-family:'Malgun Gothic',sans-serif;background:#fdf0ff;color:#111}h1{background:linear-gradient(135deg,#FF6B9D,#C77DFF);color:#fff;padding:20px 24px;font-size:18px;line-height:1.4}.content{padding:20px}.intro{font-size:14px;color:#555;line-height:1.8;margin-bottom:18px;padding:12px 16px;background:#fff;border-radius:12px;border-left:4px solid #C77DFF}.cat-title{font-size:13px;font-weight:800;color:#FF6B9D;margin:16px 0 8px;padding:4px 10px;background:#FF6B9D11;border-radius:6px;display:inline-block}.bad{background:#fff0f0;border:1px solid #ffcccc;border-radius:10px;padding:10px 14px;margin-bottom:6px;font-size:13px;color:#c00;line-height:1.7}.good{background:#f0fff4;border:1px solid #99ddaa;border-radius:10px;padding:10px 14px;font-size:13px;color:#005c1a;line-height:1.8;margin-bottom:16px}.lbl{font-size:10px;font-weight:800;margin-bottom:3px}.tip{background:linear-gradient(135deg,#FF6B9D11,#C77DFF11);border:1px solid #C77DFF33;border-radius:12px;padding:14px;margin-top:4px;font-size:13px;line-height:1.9}</style></head><body><h1>✏️ 키포인트 이렇게 쓰면 글이 잘 나와요</h1><div class="content"><div class="intro">구체적으로 쓸수록 실제 경험처럼 자연스러운 글이 나옵니다.<br>장소 + 가격 + 시간 + 특징 + 개인 의견을 담아주세요.</div><div class="cat-title">🍽️ 맛집 방문</div><div class="bad"><div class="lbl">❌ 아쉬운 예</div>강원도 맛집, 고기집, 맛있었음</div><div class="good"><div class="lbl">✅ 좋은 예</div>강원도 홍천 태장동 / 한우 소갈비찜 전문점 / 2인 45,000원 / 웨이팅 40분 / 주차 무료 / 반찬 10가지 / 아이 동반 가능 / 재방문 의향 있음</div><div class="cat-title">✈️ 여행 후기</div><div class="bad"><div class="lbl">❌ 아쉬운 예</div>제주도 여행, 경치 좋았다</div><div class="good"><div class="lbl">✅ 좋은 예</div>제주 성산읍 성산일출봉 / 오전 6시 방문 / 입장료 5,000원 / 일출 40분 전 도착 권장 / 주차장에서 도보 10분 / 공항에서 1시간 소요</div><div class="cat-title">☕ 카페 방문</div><div class="bad"><div class="lbl">❌ 아쉬운 예</div>서울 카페, 인테리어 예쁨</div><div class="good"><div class="lbl">✅ 좋은 예</div>서울 성수동 공장 리모델링 카페 / 아메리카노 6,500원 / 대기 없이 입장 / 오전 11시 방문 / 좌석 80개 / 지하철 권장 주차 불가</div><div class="cat-title">📦 제품 리뷰</div><div class="bad"><div class="lbl">❌ 아쉬운 예</div>에어프라이어 구매, 좋음</div><div class="good"><div class="lbl">✅ 좋은 예</div>필립스 에어프라이어 5.6L / 129,000원 / 3인 가족 6개월 사용 / 치킨 20분 바삭 / 세척 쉬움 / 단점: 크기 커서 수납 불편 / 만족도 9점</div><div class="cat-title">💬 체험단 후기</div><div class="bad"><div class="lbl">❌ 아쉬운 예</div>협찬 받은 피부과, 좋았음</div><div class="good"><div class="lbl">✅ 좋은 예</div>[협찬] 강남 청담 피부과 / 리프팅 시술 1회 / 40분 소요 / 붓기 거의 없음 / 직원 친절 / 주차 2시간 무료 / 다음 달 추가 예약</div><div class="tip">💡 핵심: 장소 + 가격 + 소요시간 + 특징 2~3개 + 내 솔직한 의견<br>이렇게만 써도 AI가 훨씬 풍부하고 자연스러운 글을 써드려요!</div></div></body></html>`;setPhotoGuideModal("example");}} style={{padding:"5px 12px",borderRadius:20,background:"linear-gradient(135deg,#FF6B9D,#C77DFF)",color:"#fff",border:"none",cursor:"pointer",fontSize:11,fontWeight:800,fontFamily:"inherit",whiteSpace:"nowrap",flexShrink:0}}>📝 예시 보기</button>
                     </div>
                   </div>
                   <textarea
@@ -5370,11 +5396,64 @@ POST3: (제목)|(이유)
                   </div>
                 )}
 
-                {/* Gemini 사용법 고정 버튼 */}
-                <div style={{position:"fixed",bottom:80,right:16,display:"flex",flexDirection:"column",gap:8,zIndex:100}}>
-                  <button className="photo-guide-btn" onClick={()=>{const html=`<!DOCTYPE html><html><head><meta charset="utf-8"><title>사진 글쓰기 사용방법</title><style>*{box-sizing:border-box;margin:0;padding:0}body{font-family:'Malgun Gothic',sans-serif;background:#fdf0ff;color:#111}h1{background:linear-gradient(135deg,#FF6B9D,#C77DFF);color:#fff;padding:24px;font-size:20px;line-height:1.4}.content{padding:20px}.step{background:#fff;border-radius:14px;padding:18px;margin-bottom:14px;border:1px solid #FF6B9D22}.num{display:inline-block;background:linear-gradient(135deg,#FF6B9D,#C77DFF);color:#fff;width:26px;height:26px;border-radius:50%;text-align:center;line-height:26px;font-weight:900;font-size:13px;margin-bottom:8px}.title{font-size:15px;font-weight:800;color:#FF6B9D;margin-bottom:6px}.desc{font-size:14px;line-height:1.9;color:#333}.tip{background:#FF6B9D11;border:1px solid #FF6B9D33;border-radius:12px;padding:14px;margin-top:14px;font-size:13px;line-height:1.8}</style></head><body><h1>📷 사진으로 블로그 글 쓰는 방법</h1><div class="content"><div class="step"><div class="num">1</div><div class="title">사진을 올려주세요</div><div class="desc">사진 업로드 버튼을 누르거나 사진을 끌어다 놓으세요.<br>스마트폰으로 찍은 사진도 괜찮아요.<br>최대 20장까지 올릴 수 있어요.<br>첫 번째 사진이 대표 사진이 됩니다.</div></div><div class="step"><div class="num">2</div><div class="title">키포인트를 적어주세요 (안 적어도 돼요)</div><div class="desc">글에 꼭 넣고 싶은 내용을 간단히 적으세요.<br>예시: 강원도 홍천 맛집, 갈비탕 12,000원, 웨이팅 30분<br>예시: 제주 카페, 아메리카노 6,000원, 바다가 보여요<br>안 적어도 AI가 사진만 보고 글을 써드려요.</div></div><div class="step"><div class="num">3</div><div class="title">글 스타일을 선택하세요</div><div class="desc">맛집 후기, 여행기, 감성일기, 정보글 중 선택하세요.<br>말투도 선택하면 더 자연스러운 글이 만들어져요.</div></div><div class="step"><div class="num">4</div><div class="title">🌸 사진으로 글 생성하기 버튼을 눌러요</div><div class="desc">AI가 사진을 꼼꼼히 분석해서 글을 써드립니다.<br>30초에서 1분 정도 기다려 주세요.</div></div><div class="step"><div class="num">5</div><div class="title">블로그에 발행하세요</div><div class="desc">발행하기 탭으로 이동해서 계정을 선택하고<br>발행 버튼을 누르면 자동으로 블로그에 올라갑니다.</div></div><div class="tip">💡 꿀팁: 밝고 선명한 사진일수록 더 좋은 글이 나와요!</div></div></body></html>`;if((window as any).electron?.openPreview){(window as any).electron.openPreview(html);}else{const w=window.open("","_blank","width=520,height=760");if(w){w.document.write(html);w.document.close();}}}}>📖 사용방법</button>
-                  <button className="photo-guide-btn" style={{background:"linear-gradient(135deg,#FF8C00,#FF6B9D)"}} onClick={()=>{const html=`<!DOCTYPE html><html><head><meta charset="utf-8"><title>유의할점</title><style>*{box-sizing:border-box;margin:0;padding:0}body{font-family:'Malgun Gothic',sans-serif;background:#fff8e1;color:#111}h1{background:linear-gradient(135deg,#FF8C00,#FF6B9D);color:#fff;padding:20px 24px;font-size:18px;line-height:1.4}.content{padding:20px}.step{background:#fff;border-radius:14px;padding:16px 18px;margin-bottom:14px;border:1px solid #FF8C0022}.title{font-size:14px;font-weight:800;color:#FF8C00;margin-bottom:8px}.desc{font-size:14px;line-height:1.9;color:#333}.tip{background:#FF8C0011;border:1px solid #FF8C0033;border-radius:12px;padding:14px 16px;margin-top:4px;font-size:13px;line-height:1.9}</style></head><body><h1>⚠️ 사진 글쓰기 유의할점</h1><div class="content"><div class="step"><div class="title">🔑 Gemini 키가 없다면?</div><div class="desc">왼쪽 메뉴 맨 아래 <b>설정</b>을 클릭하세요.<br>AI 설정 항목에서 <b>Gemini 발급받기</b> 버튼을 누르고<br>발급받은 키를 입력하고 저장하면 됩니다.</div></div><div class="step"><div class="title">⏱️ 분당 한도 초과 오류가 뜬다면?</div><div class="desc">무료 Gemini는 분당 사용 횟수에 제한이 있어요.<br>오류가 나면 <b>1분 정도 기다렸다가</b> 다시 눌러주세요.<br>자꾸 오류나면 키를 새로 발급받아서 바꿔주세요.</div></div><div class="step"><div class="title">🖼️ 사진 주의사항</div><div class="desc">사진은 20장 올릴 수 있지만 AI 분석은 처음 10장만 해요.<br>첫 번째 사진이 블로그 대표 사진이 됩니다.<br>밝고 선명한 사진일수록 글이 잘 나와요.</div></div><div class="step"><div class="title">⏳ 생성 시간</div><div class="desc">사진이 많을수록 시간이 걸려요.<br>보통 30초~1분 정도 기다리시면 됩니다.<br>생성 중에 다른 버튼을 누르지 마세요.</div></div><div class="tip">💡 잘 안 된다면 사진을 3~5장으로 줄이고<br>키포인트에 내용을 자세히 적어보세요!</div></div></body></html>`;if((window as any).electron?.openPreview){(window as any).electron.openPreview(html);}else{const w=window.open("","_blank","width=500,height=680");if(w){w.document.write(html);w.document.close();}}}}>⚠️ 유의할점</button>
+                {/* 안내 버튼 — 결제문의(우하단) 안 가리게 좌하단 배치, 모바일에선 인라인 */}
+                <div style={{display:"flex",gap:8,flexWrap:"wrap",justifyContent:"center",marginTop:18,marginBottom:8}}>
+                  <button className="photo-guide-btn" onClick={()=>setPhotoGuideModal("guide")}>📖 사용방법</button>
+                  <button className="photo-guide-btn" style={{background:"linear-gradient(135deg,#FF8C00,#FF6B9D)"}} onClick={()=>setPhotoGuideModal("caution")}>⚠️ 유의할점</button>
                 </div>
+                <div style={{height:80}} aria-hidden="true" />
+
+                {/* 📱 모바일 최적화 안내 모달 */}
+                {photoGuideModal&&(
+                  <div onClick={()=>setPhotoGuideModal(null)} style={{position:"fixed",inset:0,zIndex:9999,background:"rgba(0,0,0,.6)",backdropFilter:"blur(4px)",display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
+                    <div onClick={e=>e.stopPropagation()} style={{width:"100%",maxWidth:460,maxHeight:"85vh",overflowY:"auto",background:"var(--card)",borderRadius:18,border:"1px solid var(--border)",boxShadow:"0 20px 60px rgba(0,0,0,.4)"}}>
+                      <div style={{position:"sticky",top:0,padding:"16px 20px",background:photoGuideModal==="caution"?"linear-gradient(135deg,#FF8C00,#FF6B9D)":"linear-gradient(135deg,#FF6B9D,#C77DFF)",color:"#fff",display:"flex",alignItems:"center",justifyContent:"space-between",gap:10}}>
+                        <span style={{fontSize:16,fontWeight:900}}>{photoGuideModal==="caution"?"⚠️ 사진 글쓰기 유의할점":photoGuideModal==="example"?"✏️ 키포인트 이렇게 쓰면 잘 나와요":"📷 사진으로 글 쓰는 방법"}</span>
+                        <button onClick={()=>setPhotoGuideModal(null)} style={{width:30,height:30,borderRadius:8,border:"none",background:"rgba(255,255,255,.25)",color:"#fff",cursor:"pointer",fontSize:16,fontWeight:900,flexShrink:0}}>✕</button>
+                      </div>
+                      <div style={{padding:"16px 18px",display:"flex",flexDirection:"column",gap:12}}>
+                        {photoGuideModal==="example"?(()=>{
+                          const ex=[
+                            ["🍽️ 맛집","강원도 맛집, 고기집, 맛있었음","강원도 홍천 태장동 / 한우 소갈비찜 / 2인 45,000원 / 웨이팅 40분 / 주차 무료 / 반찬 10가지 / 재방문 의향"],
+                            ["✈️ 여행","제주도 여행, 경치 좋았다","제주 성산일출봉 / 오전 6시 방문 / 입장료 5,000원 / 일출 40분 전 도착 / 주차장서 도보 10분"],
+                            ["☕ 카페","서울 카페, 인테리어 예쁨","서울 성수동 공장 리모델링 카페 / 아메리카노 6,500원 / 오전 11시 방문 / 좌석 80개 / 주차 불가"],
+                            ["📦 제품","에어프라이어 구매, 좋음","필립스 5.6L / 129,000원 / 3인가족 6개월 / 치킨 20분 바삭 / 단점: 커서 수납 불편 / 만족 9점"],
+                            ["💬 체험단","협찬 받은 피부과, 좋았음","[협찬] 강남 청담 피부과 / 리프팅 1회 / 40분 / 붓기 없음 / 직원 친절 / 주차 2시간 무료"],
+                          ];
+                          return ex.map(([cat,bad,good])=>(
+                            <div key={cat} style={{background:"var(--bg)",borderRadius:12,padding:"13px 15px",border:"1px solid var(--border)"}}>
+                              <div style={{fontSize:13,fontWeight:800,color:"#FF6B9D",marginBottom:7}}>{cat}</div>
+                              <div style={{fontSize:12,color:"#e06",background:"rgba(255,80,80,.08)",borderRadius:8,padding:"7px 10px",marginBottom:5,lineHeight:1.5}}>❌ {bad}</div>
+                              <div style={{fontSize:12,color:"var(--text)",background:"rgba(0,200,120,.1)",borderRadius:8,padding:"7px 10px",lineHeight:1.6}}>✅ {good}</div>
+                            </div>
+                          ));
+                        })():photoGuideModal==="guide"?[
+                          ["1","사진을 올려주세요","업로드 버튼을 누르거나 끌어다 놓으세요. 최대 20장, 첫 사진이 대표 사진이 돼요."],
+                          ["2","키포인트를 적어요 (선택)","장소·가격·시간 등 넣고 싶은 내용을 간단히. 안 적어도 AI가 사진만 보고 써요."],
+                          ["3","글 스타일·말투 선택","맛집후기·여행기·감성일기·정보글 중에서. 말투까지 고르면 더 자연스러워요."],
+                          ["4","🌸 사진으로 글 생성하기","AI가 사진을 분석해 글을 써요. 30초~1분 기다려주세요."],
+                          ["5","블로그에 발행","발행하기 탭에서 계정 선택 후 발행하면 자동으로 올라가요."],
+                        ].map(([n,t,d])=>(
+                          <div key={n} style={{background:"var(--bg)",borderRadius:12,padding:"13px 15px",border:"1px solid var(--border)"}}>
+                            <div style={{fontSize:13.5,fontWeight:800,color:"#FF6B9D",marginBottom:5}}>{n}. {t}</div>
+                            <div style={{fontSize:13,lineHeight:1.7,color:"var(--text2)"}}>{d}</div>
+                          </div>
+                        )):[
+                          ["🔑 Gemini 키가 없다면?","왼쪽 메뉴 맨 아래 설정 → AI 설정에서 Gemini 발급받기 → 키 입력·저장."],
+                          ["⏱️ 분당 한도 초과 오류","무료 Gemini는 분당 제한이 있어요. 1분 기다렸다 다시. 자주 나면 키 새로 발급."],
+                          ["🖼️ 사진 주의사항","20장 올려도 AI 분석은 처음 10장. 첫 사진=대표. 밝고 선명할수록 좋아요."],
+                          ["⏳ 생성 시간","사진 많으면 오래 걸려요(30초~1분). 생성 중엔 다른 버튼 누르지 마세요."],
+                        ].map(([t,d])=>(
+                          <div key={t} style={{background:"var(--bg)",borderRadius:12,padding:"13px 15px",border:"1px solid var(--border)"}}>
+                            <div style={{fontSize:13.5,fontWeight:800,color:"#FF8C00",marginBottom:5}}>{t}</div>
+                            <div style={{fontSize:13,lineHeight:1.7,color:"var(--text2)"}}>{d}</div>
+                          </div>
+                        ))}
+                        <div style={{background:"rgba(255,107,157,.1)",border:"1px solid rgba(255,107,157,.3)",borderRadius:12,padding:"12px 14px",fontSize:12.5,lineHeight:1.7,color:"var(--text2)"}}>💡 밝고 선명한 사진일수록, 키포인트를 자세히 적을수록 글이 잘 나와요!</div>
+                      </div>
+                    </div>
+                  </div>
+                )}
 
               </div>
             )}
@@ -5707,9 +5786,9 @@ POST3: (제목)|(이유)
                   const estRevenue=Math.round(estViews*0.35);
                   return(
                     <div className="card" style={{marginBottom:14}}>
-                      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:14}}>
+                      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:14,gap:8,flexWrap:"wrap"}}>
                         <div className="card-title" style={{margin:0}}>📊 발행 통계 & 수익 예측</div>
-                        <span style={{fontSize:11,color:"var(--text3)"}}>* 예측값은 평균 조회수 기준 추산</span>
+                        <button onClick={checkPostRanks} disabled={rankChecking} style={{padding:"7px 13px",borderRadius:9,border:"none",background:rankChecking?"var(--card2)":"linear-gradient(135deg,#00c896,#00a5ff)",color:rankChecking?"var(--text3)":"#fff",cursor:rankChecking?"default":"pointer",fontSize:12,fontWeight:800,fontFamily:"inherit",whiteSpace:"nowrap"}}>{rankChecking?"📈 순위 확인 중...":"📈 순위 성과 확인"}</button>
                       </div>
                       <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(120px,1fr))",gap:10,marginBottom:14}}>
                         {[
@@ -5765,6 +5844,17 @@ POST3: (제목)|(이유)
                       <div className="hist-info">
                         <div className="hist-title">{h.title}</div>
                         <div className="hist-meta">{new Date(h.published_at).toLocaleString("ko-KR")}</div>
+                        {/* 📈 순위 성과 배지 */}
+                        {(()=>{const ln=scLogNoOf(h.post_url); const rd=ln?rankData[ln]:null; if(!rd)return null;
+                          const diff=(rd.prev!=null&&rd.rank!=null)?rd.prev-rd.rank:null;   // +면 순위 상승
+                          return(
+                            <div style={{fontSize:11,marginTop:3,display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
+                              <span style={{fontWeight:800,color:rd.rank!=null?"#00c896":"var(--text3)"}}>{rd.rank!=null?`🔍 현재 ${rd.rank}위`:"🔍 순위권 밖"}</span>
+                              {diff!=null&&diff!==0&&<span style={{fontWeight:800,color:diff>0?"#00c896":"#ff6b6b"}}>{diff>0?`▲${diff} 상승`:`▼${-diff} 하락`}</span>}
+                              {diff===0&&<span style={{color:"var(--text3)"}}>변동 없음</span>}
+                            </div>
+                          );
+                        })()}
                         {h.error_message&&<div style={{fontSize:11,color:"var(--danger)",marginTop:2}}>❌ {h.error_message}</div>}
                       </div>
                       <span className={`sbadge ${h.status==="success"?"sbadge-ok":h.status==="fail"?"sbadge-fail":"sbadge-pend"}`}>
