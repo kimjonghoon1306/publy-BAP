@@ -5783,9 +5783,14 @@ POST3: (제목)|(이유)
                 {(()=>{
                   const promos=[
                     {emoji:"🥬",name:"온종일팜",desc:"산지직송 농수산물 쇼핑몰",url:"https://app.yuanfnb.com",tag:"쇼핑"},
-                    {emoji:"🎮",name:"온캐치",desc:"무료 게임 14종 + 랭킹·쿠폰",url:"https://game.온종일.com",tag:"게임"},
                     {emoji:"📝",name:"온종일 체험단",desc:"블로그 체험단 신청·리뷰",url:"https://pick.온종일.com",tag:"체험단"},
+                    {emoji:"🤝",name:"온파트너",desc:"제휴마케팅으로 수익내기",url:"https://partner.yuanfnb.com",tag:"제휴"},
+                    {emoji:"🎮",name:"온캐치",desc:"무료 게임 14종 + 랭킹·쿠폰",url:"https://game.온종일.com",tag:"게임"},
+                    {emoji:"💬",name:"온메신저",desc:"커뮤니티 채팅",url:"https://talk.온종일.com",tag:"채팅"},
+                    {emoji:"📰",name:"온종일 뉴스",desc:"실용정보·지원금·마케팅",url:"https://news.온종일.com",tag:"뉴스"},
                     {emoji:"🎨",name:"온종일 스튜디오",desc:"홈페이지·영상 제작",url:"https://studio.온종일.com",tag:"제작"},
+                    {emoji:"🏠",name:"온종일 본사",desc:"온종일 통합 포털",url:"https://www.온종일.com",tag:"포털"},
+                    {emoji:"🤖",name:"블로그오토프로",desc:"AI 블로그 자동생성",url:"https://blogautopro.com",tag:"AI글"},
                   ];
                   return (
                   <div className="card" style={{marginBottom:14,padding:"13px 15px"}}>
