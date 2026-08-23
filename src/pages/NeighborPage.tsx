@@ -432,7 +432,7 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
   const [scLoading, setScLoading] = useState(false);
   const [scResult, setScResult] = useState<null | {
     blogId: string; totalPosts: number; neighbors: number; recentDates: string[];
-    exposureChecks?: { title: string; exposed: boolean | null; rank: number | null; postUrl?: string; logNo?: string }[];
+    exposureChecks?: { title: string; exposed: boolean | null; rank: number | null; postUrl?: string; logNo?: string; date?: string }[];
     lowQualitySuspected?: boolean | null;
     visitorDays?: { date: string; visitors: number }[];
     inflowKeywords?: { keyword: string; count?: number }[];
@@ -1201,7 +1201,11 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
       const response = await botFetch(`${BOT}/api/exposure-check`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ accountId: acc.accountId, plan, logNos: scSelectedLogNos }) });
       const data = await response.json();
       if (!response.ok || !data.ok) throw new Error(data.error || `HTTP ${response.status}`);
-      setScResult(prev => prev ? { ...prev, exposureChecks: data.checks || [], lowQualitySuspected: data.lowQualitySuspected, checkedTodayCount: data.checkedTodayCount, exposureCompletedCount: data.completedCount, totalPostsForExposure: data.totalPostsForExposure, exposureLimit: data.limit } : prev);
+      // ★재발행 알림용: 각 글의 발행 날짜(scPosts)를 logNo로 매칭해 checks에 붙인다(30일+노출안됨 판별).
+      const dateByLog: Record<string,string> = {};
+      scPosts.forEach(p => { const ln = scLogNo(p.url); if (ln) dateByLog[ln] = p.date; });
+      const checksWithDate = (data.checks || []).map((c: any) => ({ ...c, date: c.logNo ? dateByLog[String(c.logNo)] : undefined }));
+      setScResult(prev => prev ? { ...prev, exposureChecks: checksWithDate, lowQualitySuspected: data.lowQualitySuspected, checkedTodayCount: data.checkedTodayCount, exposureCompletedCount: data.completedCount, totalPostsForExposure: data.totalPostsForExposure, exposureLimit: data.limit } : prev);
       addScLog(`✅ 검색노출 ${data.checks?.length || 0}개 검사 완료`);
     } catch (e: any) { addScLog(`❌ 검색노출 검사 실패: ${e.message}`); }
     finally { setScExposureLoading(false); }
@@ -2303,6 +2307,31 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
                     })() : <div style={{ fontSize: 12, color: "var(--text3)" }}>위에서 글을 불러와 선택한 뒤 검색노출 확인을 실행하세요.</div>}
                     <div style={{ marginTop: 10, fontSize: 11, color: "var(--text3)", lineHeight: 1.5 }}>네이버 공식 지수가 아닌, 순환 선택한 글의 제목 검색 결과를 바탕으로 한 퍼블리 자체 진단이에요. 누락만으로 저품질을 확정할 수는 없어요.</div>
                   </div>
+
+                  {/* ♻️ 오래된 글 재발행 알림 — 발행 30일+ 지났는데 검색 노출 안 되는 글 */}
+                  {(() => {
+                    const now = Date.now();
+                    const stale = exposureChecks.filter(c => c.exposed === false && c.date && (now - new Date(c.date).getTime()) >= 30*86400000);
+                    if (!stale.length) return null;
+                    return (
+                      <div style={{ marginBottom: 20, padding: "16px", borderRadius: 14, background: "rgba(245,158,11,.08)", border: "1.5px solid rgba(245,158,11,.4)" }}>
+                        <div style={{ fontSize: 14, fontWeight: 850, color: "#f59e0b", marginBottom: 4 }}>♻️ 오래된 글 재발행 추천 <span style={{ fontSize: 11, fontWeight: 700, color: "var(--text3)" }}>{stale.length}개</span></div>
+                        <div style={{ fontSize: 11.5, color: "var(--text2)", lineHeight: 1.6, marginBottom: 12, fontWeight: 500 }}>발행한 지 <b>30일이 지났는데도 검색에 안 잡히는</b> 글이에요. 이 제목으론 노출이 어려우니, <b style={{ color: "#f59e0b" }}>제목을 바꿔 재발행</b>하면 다시 기회를 얻어요. 아래 <b>AI 개선안</b>으로 새 제목을 받아 <b>제목 변경하러 가기</b>를 눌러보세요.</div>
+                        <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
+                          {stale.slice(0, 8).map((c, i) => {
+                            const days = Math.floor((now - new Date(c.date!).getTime())/86400000);
+                            return (
+                              <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 12px", borderRadius: 10, background: "var(--bg)", border: "1px solid var(--border)" }}>
+                                <span style={{ fontSize: 13 }}>⏳</span>
+                                <span style={{ flex: 1, minWidth: 0, fontSize: 12.5, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.title}</span>
+                                <span style={{ fontSize: 10.5, color: "#f59e0b", fontWeight: 800, whiteSpace: "nowrap" }}>{days}일째 미노출</span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                  })()}
 
                   {/* ✏️ 제목·키워드 살리기 솔루션 (AI 처방) — 누락 글 있을 때만 */}
                   {exposureChecks.some(c => c.exposed === false) && (
