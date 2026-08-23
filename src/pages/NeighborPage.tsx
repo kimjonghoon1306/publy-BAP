@@ -448,7 +448,7 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
   const addScLog = (m: string) => setScLogs(p => [...p, `${new Date().toLocaleTimeString("ko-KR",{hour12:false})}  ${m}`]);
   // ── 저품질/누락 글 제목·키워드 개선 솔루션(AI) ──
   const [scSolLoading, setScSolLoading] = useState(false);
-  const [scSolutions, setScSolutions] = useState<null | { original: string; diagnosis: string; newTitle: string; newTitle2: string; keywords: string[]; bodyTip: string; expectedEffect: string; reason: string }[]>(null);
+  const [scSolutions, setScSolutions] = useState<null | { original: string; logNo: string; diagnosis: string; newTitle: string; newTitle2: string; keywords: string[]; bodyTip: string; expectedEffect: string; reason: string }[]>(null);
   // ★제목 자동수정 상태
   const [titleEditUsed, setTitleEditUsed] = useState(0);
   const [titleEditLimit, setTitleEditLimit] = useState(3);
@@ -1140,12 +1140,12 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
   }, [tab, userId]);
 
   /* 개선 제목 → 실제 글 제목 자동 변경(재발행) */
-  const handleApplyTitle = async (originalTitle: string, newTitle: string, key: string) => {
+  const handleApplyTitle = async (originalTitle: string, newTitle: string, key: string, logNoArg?: string) => {
     const acc = activeAccount;
     if (!acc) return alert("먼저 계정을 연결하세요");
-    // 원제목 → logNo 매핑 (검색노출 결과에서 찾음)
+    // logNo: 솔루션에 직접 붙여둔 값 우선, 없으면 원제목 매칭으로 폴백
     const match = (scResult?.exposureChecks || []).find(c => c.title === originalTitle);
-    const logNo = match?.logNo || "";
+    const logNo = logNoArg || match?.logNo || "";
     if (!logNo) return alert("이 글의 번호를 못 찾았어요. '검색노출 검사'를 다시 실행한 뒤 시도해주세요.");
     if (!isUnlimitedPlan && titleEditUsed >= titleEditLimit) return alert(`오늘 제목 수정 한도(${titleEditLimit}회)를 모두 사용했어요. 자정에 초기화됩니다.`);
     if (!window.confirm(`이 글의 제목을 아래로 바꿀까요?\n\n"${newTitle}"\n\n※ 네이버 블로그에서 실제로 수정·재발행돼요. 이미 노출 중인 글은 순위가 바뀔 수 있어요.`)) return;
@@ -1235,8 +1235,9 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
     const key = (localStorage.getItem("publy_gemini_key") || "");
     if (!key) return alert("제목·키워드 개선 솔루션은 무료 Gemini 키가 필요해요.\n설정 → 글쓰기 AI에서 Gemini 키를 먼저 등록해주세요.");
     const checks = scResult?.exposureChecks || [];
-    // 검색에 누락된(exposed===false) 글 = 고칠 대상 (최대 10개)
-    const missing = checks.filter(c => c.exposed === false).map(c => c.title).slice(0, 10);
+    // 검색에 누락된(exposed===false) 글 = 고칠 대상 (최대 10개). ★logNo까지 들고 있어야 나중에 제목변경 버튼이 활성화됨
+    const missingChecks = checks.filter(c => c.exposed === false).slice(0, 10);
+    const missing = missingChecks.map(c => c.title);
     if (!missing.length) return alert("검색에 누락된 글이 없어요. (개선이 급한 글이 없다는 좋은 신호예요!)");
     // ★내 블로그에서 실제로 검색 상위에 잡힌 성공 제목(순위 낮을수록 상위) = AI가 학습할 실전 성공 패턴
     const winners = checks.filter(c => c.exposed === true && c.rank != null).sort((a, b) => (a.rank! - b.rank!)).slice(0, 12).map(c => `${c.title} (검색 약 ${c.rank}위)`);
@@ -1264,7 +1265,15 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
         if (s >= 0 && e2 > s) txt = txt.slice(s, e2 + 1);
         const arr = JSON.parse(txt);
         if (Array.isArray(arr) && arr.length) {
-          setScSolutions(arr.map((x: any) => ({ original: String(x.original || ""), diagnosis: String(x.diagnosis || ""), newTitle: String(x.newTitle || ""), newTitle2: String(x.newTitle2 || ""), keywords: Array.isArray(x.keywords) ? x.keywords.map(String) : [], bodyTip: String(x.bodyTip || ""), expectedEffect: String(x.expectedEffect || ""), reason: String(x.reason || "") })));
+          // ★AI가 돌려준 original이 실제 제목과 미세하게 달라도(공백·재작성) logNo를 확실히 붙인다: 정확→정규화→순서 폴백
+          const norm = (t: string) => t.replace(/\s+/g, "").toLowerCase();
+          setScSolutions(arr.map((x: any, idx: number) => {
+            const aiOrig = String(x.original || "");
+            const mc = missingChecks.find(c => c.title === aiOrig)
+              || missingChecks.find(c => norm(c.title) === norm(aiOrig))
+              || missingChecks[idx];   // 같은 순서로 생성되므로 마지막 폴백
+            return { original: mc?.title || aiOrig, logNo: mc?.logNo || "", diagnosis: String(x.diagnosis || ""), newTitle: String(x.newTitle || ""), newTitle2: String(x.newTitle2 || ""), keywords: Array.isArray(x.keywords) ? x.keywords.map(String) : [], bodyTip: String(x.bodyTip || ""), expectedEffect: String(x.expectedEffect || ""), reason: String(x.reason || "") };
+          }));
           setScSolLoading(false);
           addScLog(`✅ AI 개선안 ${arr.length}개 생성 완료 (${model})`);
           return;
@@ -2406,12 +2415,12 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
                               <div style={{ fontSize: 12.5, color: "var(--text3)", textDecoration: "line-through", marginBottom: 6 }}>{s.original}</div>
                               {s.diagnosis && <div style={{ fontSize: 11.5, color: "#ff5fa2", fontWeight: 600, marginBottom: 11, lineHeight: 1.5 }}>🔍 {s.diagnosis}</div>}
                               {(() => {
-                                const hasLogNo = !!(scResult?.exposureChecks || []).find(c => c.title === s.original)?.logNo;
+                                const hasLogNo = !!s.logNo || !!(scResult?.exposureChecks || []).find(c => c.title === s.original)?.logNo;
                                 const overLimit = !isUnlimitedPlan && titleEditUsed >= titleEditLimit;
                                 const ApplyBtn = ({ nt, k }: { nt: string; k: string }) => (
-                                  <button onClick={() => handleApplyTitle(s.original, nt, k)} disabled={!hasLogNo || overLimit || !!titleEditingKey}
-                                    style={{ flexShrink: 0, padding: "7px 12px", borderRadius: 8, border: "none", background: (!hasLogNo || overLimit) ? "var(--border)" : "#00c896", color: (!hasLogNo || overLimit) ? "var(--text3)" : "#fff", fontSize: 11.5, fontWeight: 800, cursor: (!hasLogNo || overLimit || titleEditingKey) ? "not-allowed" : "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}>
-                                    {titleEditingKey === k ? "변경 중..." : "제목 변경하러 가기"}
+                                  <button onClick={() => handleApplyTitle(s.original, nt, k, s.logNo)} disabled={!hasLogNo || overLimit || !!titleEditingKey}
+                                    style={{ flexShrink: 0, padding: "7px 12px", borderRadius: 8, border: "none", background: (!hasLogNo || overLimit) ? "#8a8a99" : "#00c896", color: "#fff", fontSize: 11.5, fontWeight: 800, cursor: (!hasLogNo || overLimit || titleEditingKey) ? "not-allowed" : "pointer", fontFamily: "inherit", whiteSpace: "nowrap", opacity: (!hasLogNo || overLimit) ? 0.6 : 1 }}>
+                                    {titleEditingKey === k ? "변경 중..." : (!hasLogNo ? "글 번호 없음" : "제목 변경하러 가기")}
                                   </button>
                                 );
                                 return (<>

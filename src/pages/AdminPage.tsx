@@ -3482,9 +3482,9 @@ POST3: (제목)|(이유)
                     )}
                   </div>
                 )}
-                <div style={{display:"flex",gap:8,flexWrap:"wrap",justifyContent:"center",marginTop:18,marginBottom:8}}>
-                  <button className="photo-guide-btn" style={{position:"static",boxShadow:"none"}} onClick={()=>setPhotoGuideModal("guide")}>📖 사용방법</button>
-                  <button className="photo-guide-btn" style={{position:"static",boxShadow:"none",background:"linear-gradient(135deg,#FF8C00,#FF6B9D)"}} onClick={()=>setPhotoGuideModal("caution")}>⚠️ 유의할점</button>
+                <div className="photo-guides">
+                  <button className="photo-guide-btn" onClick={()=>setPhotoGuideModal("guide")}>📖 사용방법</button>
+                  <button className="photo-guide-btn" style={{background:"linear-gradient(135deg,#FF8C00,#FF6B9D)"}} onClick={()=>setPhotoGuideModal("caution")}>⚠️ 유의할점</button>
                 </div>
                 <div style={{height:70}} aria-hidden="true" />
                 {photoGuideModal&&(

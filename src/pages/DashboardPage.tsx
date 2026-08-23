@@ -689,8 +689,14 @@ textarea.inp{resize:vertical;line-height:1.75;min-height:80px;}
 .photo-gen-btn{width:100%;padding:18px;border-radius:16px;border:none;cursor:pointer;font-size:16px;font-weight:900;font-family:inherit;transition:all .2s;background:linear-gradient(135deg,#FF6B9D,#C77DFF);color:#fff;box-shadow:0 4px 20px rgba(255,107,157,.4);margin-top:8px;}
 .photo-gen-btn:hover{transform:translateY(-2px);box-shadow:0 8px 28px rgba(255,107,157,.5);}
 .photo-gen-btn:disabled{opacity:.6;cursor:not-allowed;transform:none;}
-.photo-guide-btn{position:fixed;bottom:80px;right:16px;padding:10px 16px;border-radius:99px;background:linear-gradient(135deg,#FF6B9D,#C77DFF);border:none;cursor:pointer;box-shadow:0 4px 16px rgba(255,107,157,.5);font-size:13px;font-weight:800;color:#fff;display:flex;align-items:center;gap:6px;z-index:100;transition:all .2s;white-space:nowrap;font-family:inherit;}
-.photo-guide-btn:hover{transform:scale(1.1);}
+.photo-guides{display:flex;gap:8px;flex-wrap:wrap;justify-content:center;margin-top:18px;margin-bottom:8px;}
+.photo-guide-btn{padding:10px 16px;border-radius:99px;background:linear-gradient(135deg,#FF6B9D,#C77DFF);border:none;cursor:pointer;font-size:13px;font-weight:800;color:#fff;display:flex;align-items:center;gap:6px;transition:all .2s;white-space:nowrap;font-family:inherit;}
+.photo-guide-btn:hover{transform:scale(1.05);}
+/* 모바일: 좌하단 고정(결제문의는 우하단이라 안 겹침), 항상 보이게 */
+@media(max-width:768px){
+  .photo-guides{position:fixed;left:12px;bottom:150px;z-index:400;flex-direction:column;gap:8px;margin:0;width:auto;align-items:flex-start;}
+  .photo-guide-btn{box-shadow:0 4px 16px rgba(255,107,157,.5);font-size:12px;padding:9px 14px;}
+}
 .photo-guide-modal{position:fixed;inset:0;z-index:200;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;padding:20px;}
 .photo-guide-card{background:var(--card);border-radius:20px;padding:28px;max-width:420px;width:100%;max-height:80vh;overflow-y:auto;}
 @keyframes flowerFloat{0%,100%{transform:translateY(0) rotate(0deg);}50%{transform:translateY(-6px) rotate(3deg);}}
@@ -5396,10 +5402,10 @@ POST3: (제목)|(이유)
                   </div>
                 )}
 
-                {/* 안내 버튼 — 결제문의(우하단) 안 가리게 좌하단 배치, 모바일에선 인라인 */}
-                <div style={{display:"flex",gap:8,flexWrap:"wrap",justifyContent:"center",marginTop:18,marginBottom:8}}>
-                  <button className="photo-guide-btn" style={{position:"static",boxShadow:"none"}} onClick={()=>setPhotoGuideModal("guide")}>📖 사용방법</button>
-                  <button className="photo-guide-btn" style={{position:"static",boxShadow:"none",background:"linear-gradient(135deg,#FF8C00,#FF6B9D)"}} onClick={()=>setPhotoGuideModal("caution")}>⚠️ 유의할점</button>
+                {/* 안내 버튼 — 데스크톱=인라인 중앙, 모바일=좌하단 고정(결제문의 우하단과 안 겹침) */}
+                <div className="photo-guides">
+                  <button className="photo-guide-btn" onClick={()=>setPhotoGuideModal("guide")}>📖 사용방법</button>
+                  <button className="photo-guide-btn" style={{background:"linear-gradient(135deg,#FF8C00,#FF6B9D)"}} onClick={()=>setPhotoGuideModal("caution")}>⚠️ 유의할점</button>
                 </div>
                 <div style={{height:80}} aria-hidden="true" />
 

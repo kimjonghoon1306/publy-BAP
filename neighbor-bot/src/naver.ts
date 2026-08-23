@@ -1309,6 +1309,33 @@ async function crawlMobileFallback(context: BrowserContext, keyword: string, lim
   return out;
 }
 
+/* ★★내 실제 blogId 확정 — 발행(글쓰기)이 쓰는 검증된 방식 그대로.
+   GoBlogWrite.naver로 가면 네이버가 '로그인된 계정 기준'으로 진짜 blogId가 담긴 URL로 리다이렉트해줌.
+   → 네이버 아이디와 blogId가 다른 계정(예: bb9653)이어도 정확한 blogId를 얻는다.
+   저장된 값이 틀리면 실제 값으로 교정하고 세션에 저장 → 이후 진단·카테고리·검색노출 등 모든 탭이 정확한 blogId를 공유한다. */
+const RESOLVE_INVALID = ["PostList", "BlogHome", "FeedList", "neighborPostList", "TagList", "GoBlogWrite", "RedirectWriteView", "PostWriteForm", "MyBlog", "section", "m"];
+async function resolveRealBlogId(page: import("playwright").Page, storedBlogId: string, accountId: string, log: (m: string) => void): Promise<string> {
+  let real = storedBlogId;
+  await page.goto("https://blog.naver.com/GoBlogWrite.naver", { waitUntil: "domcontentloaded", timeout: 30000 }).catch(() => {});
+  await page.waitForTimeout(2500);
+  if (/nidlogin|login\.naver/.test(page.url())) throw new Error("네이버 로그인이 풀렸어요. 계정을 다시 연결(로그인)한 뒤 시도해주세요.");
+  let m = page.url().match(/[?&]blogId=([a-zA-Z0-9_-]+)/);
+  if (m && m[1] && !RESOLVE_INVALID.includes(m[1])) real = m[1];
+  else {
+    await page.goto("https://m.blog.naver.com", { waitUntil: "domcontentloaded", timeout: 20000 }).catch(() => {});
+    await page.waitForTimeout(1500);
+    m = page.url().match(/blog\.naver\.com\/([a-zA-Z0-9_-]+)/);
+    if (m && m[1] && !RESOLVE_INVALID.includes(m[1])) real = m[1];
+  }
+  if (real && real !== storedBlogId) {
+    log(`[blogId교정] 저장된 '${storedBlogId}' → 실제 로그인 '${real}' (네이버 아이디와 블로그 주소가 달라요 — 이제 자동으로 맞췄어요)`);
+    try { const s = loadSession(accountId); s.blogId = real; writeSession(sessionName(accountId), s); } catch {}
+  } else {
+    log(`[제목수정] 로그인 blogId 확인: ${real}`);
+  }
+  return real;
+}
+
 /* ── 글 제목 수정(기존 글 편집·재발행) ──
    실측(2026-08-23): 수정 URL = PostWriteForm.naver?blogId=&logNo=&Redirect=Update (자기 글만).
    스마트에디터라 발행과 동일: 제목칸 .se-section-documentTitle 교체 → publish_btn → confirm_btn 재발행. */
@@ -1331,19 +1358,38 @@ export async function updatePostTitle(params: {
   const page = await context.newPage();
   await page.bringToFront().catch(() => {});
   try {
-    const editUrl = `https://blog.naver.com/PostWriteForm.naver?blogId=${blogId}&logNo=${logNo}&Redirect=Update`;
-    log(`[제목수정] ① 수정 페이지 여는 중... (${blogId}/${logNo})`);
-    await page.goto(editUrl, { waitUntil: "domcontentloaded", timeout: 30000 });
-    await page.waitForTimeout(3000);
-    log(`[제목수정] 페이지 도착: ${page.url().slice(0, 60)}`);
-    // 자기 글이 아니거나 세션 만료면 홈으로 튕김 → 감지
-    if (/section\.blog\.naver\.com|BlogHome/.test(page.url())) {
-      throw new Error("수정 페이지를 열 수 없어요(내 글이 아니거나 로그인이 풀렸어요). 계정을 다시 연결해주세요.");
+    // ★★다중계정 튕김 방지(테리 지적: bb9653은 네이버ID≠blogId): 발행과 동일 방식으로 실제 blogId 확정.
+    const realBlogId = await resolveRealBlogId(page, blogId, accountId, log);
+    // ★수정 페이지 URL을 여러 형태로 시도(네이버가 파라미터 순서/경로를 바꿔도 열리게). 성공 판정=실제 에디터(mainFrame)가 뜨는지.
+    const editUrls = [
+      `https://blog.naver.com/PostWriteForm.naver?blogId=${realBlogId}&logNo=${logNo}&Redirect=Update`,
+      `https://blog.naver.com/PostWriteForm.naver?blogId=${realBlogId}&Redirect=Update&logNo=${logNo}&categoryNo=0`,
+      `https://blog.naver.com/RedirectWriteView.naver?blogId=${realBlogId}&logNo=${logNo}`,
+    ];
+    let frame: import("playwright").Frame | null = null;
+    let landed = "";
+    for (let u = 0; u < editUrls.length && !frame; u++) {
+      log(`[제목수정] ① 수정 페이지 여는 중... (${realBlogId}/${logNo}) [시도 ${u + 1}/${editUrls.length}]`);
+      await page.goto(editUrls[u], { waitUntil: "domcontentloaded", timeout: 30000 }).catch(() => {});
+      await page.waitForTimeout(3500);
+      landed = page.url();
+      log(`[제목수정] 페이지 도착: ${landed.slice(0, 80)}`);
+      // 로그인 자체가 풀린 경우는 즉시 중단(다른 URL도 소용없음)
+      if (/nid\.naver\.com|nidlogin|\/login/i.test(landed)) {
+        throw new Error("네이버 로그인이 풀렸어요. 계정을 다시 연결(로그인)한 뒤 시도해주세요.");
+      }
+      // 실제 에디터 프레임(mainFrame)이 뜨는지 확인 — 뜨면 성공(상단 URL이 홈처럼 보여도 진행)
+      log(`[제목수정] ② 에디터 프레임 찾는 중...`);
+      for (let i = 0; i < 10 && !frame; i++) {
+        frame = page.frames().find(f => f.name() === "mainFrame" && /PostWriteForm|blog\.naver\.com/.test(f.url()))
+          ?? page.frames().find(f => f.name() === "mainFrame") ?? null;
+        if (!frame) await page.waitForTimeout(700);
+      }
+      if (!frame) log(`[제목수정] 이 URL로는 에디터가 안 떠서 다음 형태로 재시도`);
     }
-    log(`[제목수정] ② 에디터 프레임 찾는 중...`);
-    let frame = page.frames().find(f => f.name() === "mainFrame") ?? page.frames().find(f => f.url().includes("blog.naver.com")) ?? null;
-    for (let i = 0; i < 12 && !frame; i++) { await page.waitForTimeout(700); frame = page.frames().find(f => f.name() === "mainFrame") ?? null; }
-    if (!frame) throw new Error("에디터 프레임을 찾지 못했어요");
+    if (!frame) {
+      throw new Error(`수정 페이지를 열 수 없어요 (마지막 착지: ${landed.slice(0, 50)}). 내 글이 아니거나 로그인이 풀렸을 수 있어요. 계정을 다시 연결한 뒤, 그래도 안 되면 알려주세요.`);
+    }
     // 에디터 로드 대기
     log(`[제목수정] ③ 에디터 로딩 대기 중...`);
     const edLoaded = await frame.waitForSelector(".se-section-documentTitle, .se-editor, .se-container", { timeout: 40000 }).then(() => true).catch(() => false);
@@ -1396,21 +1442,30 @@ export async function updatePostTitle(params: {
     }
     if (!panelOpened) throw new Error("발행 버튼을 찾지 못했어요");
     log(`[제목수정] 발행 패널 열림, 최종 확인 누르는 중...`);
-    await page.waitForTimeout(2000);
-    // 발행 패널의 최종 확인 버튼
+    await page.waitForTimeout(2000).catch(() => {});
+    // 발행 패널의 최종 확인 버튼 (누르면 네이버가 완성된 글로 이동 → 이 창이 닫히거나 URL이 바뀔 수 있음)
     let finalDone = false;
     for (const sel of ["button.confirm_btn__xiHQQ", "button[class*='confirm_btn']", "button:has-text('발행')"]) {
-      try { const el = await frame.$(sel); if (el) { await frame.click(sel, { timeout: 8000 }); finalDone = true; break; } } catch {}
+      try { const el = await frame.$(sel); if (el) { await frame.click(sel, { timeout: 8000 }); finalDone = true; break; } } catch (err: any) { if (/closed/i.test(err?.message || "")) { finalDone = true; break; } }
     }
     if (!finalDone) {
-      const btns = await frame.$$("button");
-      for (const btn of btns.reverse()) { const t = await btn.textContent(); if (t && t.includes("발행")) { await btn.click().catch(() => {}); finalDone = true; break; } }
+      try {
+        const btns = await frame.$$("button");
+        for (const btn of btns.reverse()) { const t = await btn.textContent().catch(() => ""); if (t && t.includes("발행")) { await btn.click().catch(() => {}); finalDone = true; break; } }
+      } catch (err: any) { if (/closed/i.test(err?.message || "")) finalDone = true; }
     }
-    await page.waitForTimeout(4000);
-    // 세션 쿠키 갱신
-    try { const nc = await context.cookies(); const s = loadSession(accountId); s.cookies = nc; writeSession(sessionName(accountId), s); } catch {}
-    if (!finalDone) throw new Error("발행 확인 버튼을 누르지 못했어요");
-    log(`[제목수정] ✅ ${blogId}/${logNo} 제목 변경 완료`);
+    // ★발행 성공 신호: 완성된 글(PostView/logNo)로 이동하거나 창이 닫히면 성공으로 간주(닫힘=성공)
+    let published = false;
+    try {
+      await page.waitForURL(u => /blog\.naver\.com\/.*(logNo=|\/\d{6,})/.test(String(u)) && !/PostWriteForm|RedirectWriteView/.test(String(u)), { timeout: 12000 });
+      published = true;
+    } catch (err: any) {
+      if (page.isClosed() || /closed/i.test(err?.message || "")) published = true;
+    }
+    // 세션 쿠키 갱신(창이 아직 살아있을 때만)
+    try { if (!page.isClosed()) { const nc = await context.cookies(); const s = loadSession(accountId); s.cookies = nc; writeSession(sessionName(accountId), s); } } catch {}
+    if (!finalDone && !published) throw new Error("발행 확인 버튼을 누르지 못했어요");
+    log(`[제목수정] ✅ ${blogId}/${logNo} 제목 변경 완료${published ? " (발행 후 글로 이동 확인)" : ""}`);
     return { ok: true, message: `제목을 "${title}"로 변경했어요` };
   } catch (e: any) {
     log(`[제목수정] ❌ 실패: ${e.message}`);
@@ -2258,8 +2313,17 @@ export async function checkSelectedBlogExposure(params: {
   const { accountId, plan = "free", onLog } = params;
   const log = onLog || console.log;
   if (!naverSessionExists(accountId)) throw new Error("세션 없음 — 먼저 로그인하세요");
-  const { blogId, cookies } = loadSession(accountId);
+  const sess0 = loadSession(accountId);
+  let blogId = sess0.blogId; const cookies = sess0.cookies;
   if (!blogId) throw new Error("내 블로그 ID를 찾을 수 없어요 — 계정을 다시 연결해주세요");
+  // ★실제 blogId 확정(네이버ID≠blogId 대비) — 임시 페이지로 GoBlogWrite 리다이렉트 확인
+  try {
+    const rb = await chromium.launch({ headless: true, args: LAUNCH_ARGS });
+    const rc = await rb.newContext({ userAgent: UA, locale: "ko-KR" }); await rc.addCookies(cookies).catch(() => {});
+    const rp = await rc.newPage();
+    try { blogId = await resolveRealBlogId(rp, blogId, accountId, log); } catch (e: any) { log(`[검색노출] blogId 확인 건너뜀: ${e?.message || e}`); }
+    await rb.close().catch(() => {});
+  } catch {}
   const wanted = new Set((Array.isArray(params.logNos) ? params.logNos : []).map(String).filter(value => /^\d+$/.test(value)));
   if (!wanted.size) throw new Error("검색노출을 확인할 글을 선택해주세요");
   const list = await fetchNaverPostList({ blogId, cookies, maxCount: null, log });
@@ -2289,7 +2353,8 @@ export async function crawlBlogStats(params: {
   const { accountId, plan = "free", onLog } = params;
   const log = onLog || console.log;
   if (!naverSessionExists(accountId)) throw new Error("세션 없음 — 먼저 로그인하세요");
-  const { blogId, cookies } = loadSession(accountId);
+  const sess0 = loadSession(accountId);
+  let blogId = sess0.blogId; const cookies = sess0.cookies;
   if (!blogId) throw new Error("내 블로그 ID를 찾을 수 없어요 — 계정을 다시 연결해주세요");
 
   const browser = await chromium.launch({ headless: true, args: LAUNCH_ARGS });
@@ -2297,6 +2362,8 @@ export async function crawlBlogStats(params: {
   await applyAntiDetection(context);
   await context.addCookies(cookies);
   const page = await context.newPage();
+  // ★진단 시작 시 실제 blogId 확정(네이버ID≠blogId 대비). 교정되면 세션에 저장돼 이후 모든 탭이 정확한 값 공유.
+  try { blogId = await resolveRealBlogId(page, blogId, accountId, log); } catch (e: any) { log(`[건강검진] blogId 확인 건너뜀: ${e?.message || e}`); }
   let totalPosts = 0, neighbors = 0;
   const recentDates: string[] = [];
   let exposurePosts: ExposurePost[] = [];
