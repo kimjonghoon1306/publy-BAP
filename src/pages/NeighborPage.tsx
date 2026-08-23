@@ -2245,7 +2245,7 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
                   <div style={{ fontSize: 14, fontWeight: 800, color: "var(--text)" }}>📊 계정별 진행 현황</div>
                   <button onClick={handlePumasiPreview} disabled={pumPreviewLoading} style={{ fontSize: 11, padding: "5px 10px", borderRadius: 8, border: "1px solid var(--border)", background: "transparent", color: "var(--text2)", cursor: "pointer", fontFamily: "inherit", fontWeight: 700 }}>{pumPreviewLoading ? "확인 중..." : "🔄 새로고침"}</button>
                 </div>
-                <div style={{ fontSize: 11, color: "var(--text3)", lineHeight: 1.5, marginBottom: 10 }}>각 계정 글에 <b>이미 단 댓글</b>과 <b>남은 글</b>이에요. 품앗이는 이미 단 글은 건너뛰고 <b style={{ color: "#ec4899" }}>남은 글</b>에만 최신순으로 달아요.</div>
+                <div style={{ fontSize: 11, color: "var(--text3)", lineHeight: 1.5, marginBottom: 10 }}>계정마다 <b>전체 글(총)</b> 중 <b>댓글 단 글(완료)</b>과 <b style={{ color: "#ec4899" }}>아직 안 단 글(남음)</b>을 보여줘요. 이미 단 글은 다시 안 달고, <b>최신 글부터</b> 남은 글에 달아요.</div>
                 {!pumPreview && pumPreviewLoading && <div style={{ fontSize: 12, color: "var(--text3)" }}><span className="spinner" /> 글 수를 확인하는 중...</div>}
                 {pumPreview && pumPreview.length > 0 ? (
                   <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
@@ -2477,12 +2477,12 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
             <div className="card" style={{ padding: "14px 18px" }}>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 9 }}>
                 <span style={{ fontSize: 12.5, fontWeight: 700, color: "var(--text2)" }}>💞 오늘 품앗이 <span style={{ fontSize: 10.5, color: "var(--text3)", fontWeight: 600 }}>(자정 초기화)</span></span>
-                <span style={{ fontSize: 13, fontWeight: 800, color: "#ec4899" }}>{pumUsed}건 남김</span>
+                <span style={{ fontSize: 13, fontWeight: 800, color: "#ec4899" }}>오늘 {pumUsed}건 완료</span>
               </div>
               <div style={{ height: 8, borderRadius: 99, background: "var(--card2)", overflow: "hidden" }}>
                 <div style={{ height: "100%", borderRadius: 99, width: `${Math.min(100, pumUsed)}%`, background: "#ec4899", transition: "width .5s ease" }} />
               </div>
-              <div style={{ fontSize: 11, color: "var(--text3)", marginTop: 7, fontWeight: 500 }}>품앗이는 등급별 계정 수·글 수만 제한하고, 하루 총 건수 제한은 없어요(딜레이로 자연 조절).</div>
+              <div style={{ fontSize: 11, color: "var(--text3)", marginTop: 7, fontWeight: 500 }}>오늘 품앗이로 남긴 공감·댓글 수예요. 품앗이는 <b>하루 몇 건까지</b> 같은 제한이 없어요 — 딜레이를 두고 천천히 진행돼요.</div>
             </div>
             <div className="card" style={{ padding: "20px 24px" }}>
               <div style={{ fontSize: 13, color: "var(--text3)", fontWeight: 700, marginBottom: 14 }}>🤝 품앗이 결과</div>

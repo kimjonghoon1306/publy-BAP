@@ -1327,13 +1327,14 @@ export async function addNeighbors(params: {
 
   // 서이추 신청 페이지가 모바일(m.blog.naver.com)만 작동 → 모바일 UA/뷰포트로 실행
   const MOBILE_UA = "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1";
-  const browser = await chromium.launch({ headless: false, args: LAUNCH_ARGS });
+  const browser = await chromium.launch({ headless: false, args: [...LAUNCH_ARGS, "--start-maximized"] });
   const context = await browser.newContext({
     userAgent: MOBILE_UA, viewport: { width: 390, height: 844 }, locale: "ko-KR", isMobile: true, hasTouch: true,
   });
   await applyAntiDetection(context);
   await context.addCookies(cookies);
   const page = await context.newPage();
+  await page.bringToFront().catch(() => {});   // ★크롬 창을 화면 앞으로
 
   let done = 0;
   let fail = 0;
@@ -1809,7 +1810,41 @@ async function fetchNaverPostList(params: {
       log(`[글목록] PostTitleListAsync API에서 ${posts.length}개 수집`);
       return { posts, source: "api", totalCount: Math.max(totalCount, posts.length) };
     }
-  } catch (e: any) { log(`[글목록] PostTitleListAsync 실패 (${e.message}) · RSS로 재시도`); }
+  } catch (e: any) { log(`[글목록] PostTitleListAsync 실패 (${e.message}) · 모바일 API로 재시도`); }
+
+  // ★모바일 블로그 API 폴백 (실측 2026-08-23): PostTitleListAsync가 막힌 블로그(에러 페이지)도
+  //   m.blog.naver.com/api 는 JSON으로 전체 글(logNo·제목·작성일 epoch)을 안정적으로 준다. RSS(최근 몇 개)보다 정확.
+  if (posts.length === 0) {
+    try {
+      const MUA = "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1";
+      for (let pageNo = 1; pageNo <= 1000 && (maxCount === null || posts.length < maxCount); pageNo++) {
+        const u = `https://m.blog.naver.com/api/blogs/${encodeURIComponent(blogId)}/post-list?categoryNo=0&itemCount=30&page=${pageNo}`;
+        const resp = await fetch(u, { headers: { "User-Agent": MUA, Referer: `https://m.blog.naver.com/${blogId}` } });
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const jt = (await resp.text()).replace(/^\)\]\}',?\s*/, "");
+        const j: any = JSON.parse(jt);
+        const items: any[] = j?.result?.items || [];
+        const tc = Number(j?.result?.totalCount ?? 0);
+        if (Number.isFinite(tc) && tc > totalCount) totalCount = tc;
+        if (!items.length) break;
+        let added = 0;
+        for (const it of items) {
+          const logNo = String(it?.logNo ?? "").trim();
+          const title = decodeNaverText(it?.titleWithInspectMessage ?? it?.title);
+          if (!/^\d+$/.test(logNo) || !title || seen.has(logNo)) continue;
+          const ms = Number(it?.addDate) || 0;
+          seen.add(logNo); added++;
+          posts.push({ logNo, title, date: ms > 0 ? koreanDate(new Date(ms)) : "", dateMs: ms > 0 ? ms : 0, url: `https://blog.naver.com/${blogId}/${logNo}` });
+          if (maxCount !== null && posts.length >= maxCount) break;
+        }
+        if (!added || items.length < 30) break;
+      }
+      if (posts.length) {
+        log(`[글목록] 모바일 API에서 ${posts.length}개 수집`);
+        return { posts, source: "api", totalCount: Math.max(totalCount, posts.length) };
+      }
+    } catch (e: any) { log(`[글목록] 모바일 API 실패 (${e.message}) · RSS로 재시도`); }
+  }
 
   try {
     const response = await fetch(`https://rss.blog.naver.com/${encodeURIComponent(blogId)}.xml`, { headers: { "User-Agent": UA, Accept: "application/rss+xml,application/xml,text/xml" } });
@@ -2330,11 +2365,12 @@ export async function replyToComments(params: {
   if (!naverSessionExists(accountId)) throw new Error("세션 없음 — 먼저 로그인하세요");
   const { cookies } = loadSession(accountId);
 
-  const browser = await chromium.launch({ headless: false, args: LAUNCH_ARGS });
+  const browser = await chromium.launch({ headless: false, args: [...LAUNCH_ARGS, "--start-maximized"] });
   const context = await browser.newContext({ userAgent: UA, viewport: { width: 1280, height: 900 }, locale: "ko-KR" });
   await applyAntiDetection(context);
   await context.addCookies(cookies);
   const page = await context.newPage();
+  await page.bringToFront().catch(() => {});   // ★크롬 창을 화면 앞으로
   let done = 0, fail = 0;
 
   try {
@@ -2515,7 +2551,9 @@ export async function pumasiPreview(accounts: { accountId: string; blogId: strin
       (commentedAll[`${actor.accountId}>${target.accountId}`] || []).forEach(l => doneSet.add(String(l)));
     }
     let total = 0;
-    try { const list = await fetchNaverPostList({ blogId: target.blogId, cookies: [], maxCount: 1, log }); total = list.totalCount || list.posts.length; }
+    // maxCount=null(전체) → PostTitleListAsync는 첫 응답의 totalCount가 정확하고, 모바일 API/RSS 폴백 블로그는
+    //   실제 글을 다 세어 정확한 총 글 수를 얻는다(1개만 가져와 "총 1"로 잘못 나오던 문제 해결).
+    try { const list = await fetchNaverPostList({ blogId: target.blogId, cookies: [], maxCount: null, log }); total = Math.max(list.totalCount || 0, list.posts.length); }
     catch { total = 0; }
     const commented = doneSet.size;
     res.push({ blogId: target.blogId, total, commented, remaining: Math.max(0, total - commented) });
@@ -2627,6 +2665,20 @@ export async function pumasiEngage(params: {
   log(`[품앗이] 순환 매칭 완료 — 이번엔 총 ${totalCombos}회 방문 예정(받을 수·쿨다운 반영)`);
   let comboIdx = 0;
 
+  // ★크롬 창을 한 번만 띄워 계속 유지(방문 사이 대기에도 창이 안 닫혀 "멈춘 것처럼" 보이지 않음).
+  //   대기 안내 페이지를 하나 열어두어 시간 분산으로 쉬는 동안에도 창이 보이게 한다.
+  const sharedBrowser = await chromium.launch({ headless: false, args: [...LAUNCH_ARGS, "--start-maximized"] });
+  const holdPage = await sharedBrowser.newPage().catch(() => null);
+  const showHold = async (msg: string) => {
+    if (!holdPage) return;
+    try {
+      await holdPage.setContent(`<html><head><meta charset="utf-8"><style>body{margin:0;height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;font-family:-apple-system,'Malgun Gothic',sans-serif;background:linear-gradient(135deg,#fdf2f8,#fce7f3);color:#831843}h1{font-size:26px;margin:0 0 10px}p{font-size:15px;color:#9d174d;margin:4px}</style></head><body><h1>💞 품앗이 진행 중…</h1><p>${msg}</p><p style="color:#be185d;font-size:13px">이 창은 작업이 끝날 때까지 켜져 있어요. 닫지 마세요.</p></body></html>`);
+      await holdPage.bringToFront().catch(() => {});
+    } catch {}
+  };
+  await showHold("계정을 전환하며 서로의 글에 공감·댓글을 남기고 있어요.");
+
+  try {
   for (const { actor, target } of visitPlan) {
     if (stopSignal?.()) { log("[품앗이] 중단 신호 수신"); break; }
     log(`[품앗이] ${actor.blogId} → ${target.blogId} 글 ${target.posts}개에 ${doLike ? "공감" : ""}${doLike && doComment ? "+" : ""}${doComment ? "댓글" : ""}`);
@@ -2648,6 +2700,7 @@ export async function pumasiEngage(params: {
         skipDone: false,                // 서로 계속 달 수 있게(당일 중복방지는 아래 excludeLogNos가 담당)
         commentRate: 100, likeRate: 100,
         aiComment, commentTone, geminiKey, readRelated, readRelatedMode, readSpeed,
+        sharedBrowser,   // ★공유 크롬 재사용(방문 사이에도 창 유지)
         excludeLogNos: commentedSet,
         onCommented: (logNo) => { commentedSet.add(logNo); commentedAll[ckey] = [...commentedSet]; savePumasiCommented(commentedAll); },
         onLog: (m) => log(m),
@@ -2661,9 +2714,14 @@ export async function pumasiEngage(params: {
     if (spreadGapMs > 0 && comboIdx < totalCombos && !stopSignal?.()) {
       const wait = Math.round(spreadGapMs * (0.7 + Math.random() * 0.6));
       log(`[품앗이] ⏰ 다음 방문까지 ${Math.round(wait/60000)}분 ${Math.round((wait%60000)/1000)}초 대기(시간 분산)...`);
+      await showHold(`다음 방문까지 잠시 쉬는 중이에요 (약 ${Math.round(wait/60000)}분). 자연스럽게 시간을 나눠 방문하고 있어요.`);
       const until = Date.now() + wait;
       while (Date.now() < until) { if (stopSignal?.()) break; await new Promise(r => setTimeout(r, Math.min(5000, until - Date.now()))); }
+      await showHold("계정을 전환하며 서로의 글에 공감·댓글을 남기고 있어요.");
     }
+  }
+  } finally {
+    await sharedBrowser.close().catch(() => {});   // 작업 완료/중단 시 공유 크롬 닫기
   }
   log(`[품앗이] 완료 — 성공 ${done} / 스킵 ${skip} / 실패 ${fail}`);
 }
@@ -2690,6 +2748,7 @@ export async function engageBlogs(params: {
   excludeLogNos?: Set<string>;   // ★이미 댓글 단 글(logNo) 제외 → 최신→과거로 안 단 글에만 단다(품앗이 도배 방지)
   onCommented?: (logNo: string) => void;   // ★댓글 성공 시 그 글 logNo 통보(이력 저장용)
   readSpeed?: ReadSpeed;         // ★체류 속도(fast/normal/natural)
+  sharedBrowser?: any;           // ★품앗이: 여러 방문이 크롬 창 하나를 공유(대기 중에도 창 유지). 있으면 이 browser 재사용·안 닫음
   onLog?: (msg: string) => void;
   onResult?: (r: EngageResult) => Promise<void>;
   onProgress?: (done: number, fail: number) => void;
@@ -2701,7 +2760,7 @@ export async function engageBlogs(params: {
     dailyLimit, skipDone, commentRate = 100, likeRate = 100,
     // ★readRelated 기본 false: 일반 공감·댓글(여러 블로그 순회)은 관련글 더 읽기를 켜지 않음(시간 급증 방지).
     //   품앗이(pumasiEngage)만 명시적으로 true를 넘겨 켠다.
-    aiComment = false, commentTone = "다정", geminiKey = "", readRelated = false, readRelatedMode = "random", excludeLogNos, onCommented, readSpeed = "natural", onLog, onResult, onProgress, stopSignal,
+    aiComment = false, commentTone = "다정", geminiKey = "", readRelated = false, readRelatedMode = "random", excludeLogNos, onCommented, readSpeed = "natural", sharedBrowser, onLog, onResult, onProgress, stopSignal,
   } = params;
   const log = onLog || console.log;
 
@@ -2720,13 +2779,17 @@ export async function engageBlogs(params: {
 
   const cutoff = Date.now() - periodDays * 24 * 60 * 60 * 1000;
 
-  const browser = await chromium.launch({ headless: false, args: LAUNCH_ARGS });
+  // ★품앗이는 sharedBrowser(공유 크롬)를 재사용 → 방문 사이 대기에도 창이 안 닫힌다. 없으면(공감·댓글 단독) 자체 생성.
+  const ownBrowser = !sharedBrowser;
+  const browser = sharedBrowser || await chromium.launch({ headless: false, args: [...LAUNCH_ARGS, "--start-maximized"] });
   const context = await browser.newContext({
     userAgent: UA, viewport: { width: 1280, height: 800 }, locale: "ko-KR",
   });
   await applyAntiDetection(context);
   await context.addCookies(cookies);
   const page = await context.newPage();
+  await page.bringToFront().catch(() => {});   // ★크롬 창을 화면 앞으로(백그라운드로 뜨는 것 방지)
+  if (ownBrowser) log(`[공감·댓글] 🌐 작업용 크롬 창을 띄웠어요 (화면에 안 보이면 작업표시줄/독을 확인하세요)`);
 
   let done = 0;
   let fail = 0;
@@ -3134,7 +3197,9 @@ export async function engageBlogs(params: {
       }
     }
   } finally {
-    await browser.close().catch(() => {});
+    // 공유 크롬(품앗이)이면 context만 닫아 창을 유지하고, 단독 실행이면 browser까지 닫는다.
+    await context.close().catch(() => {});
+    if (ownBrowser) await browser.close().catch(() => {});
   }
 }
 
