@@ -1907,6 +1907,8 @@ export type BlogStats = {
   visitorDays: BlogVisitorDay[];
   inflowKeywords: { keyword: string; count?: number }[];
   visitorDrop: { detected: boolean; rate: number | null; message: string } | null;
+  // ★발행 활성도(상위노출 핵심): 최근 발행 간격으로 활성/보통/비활성 판정
+  activity: { level: "active" | "normal" | "inactive"; daysSinceLast: number | null; postsIn7d: number; postsIn30d: number; message: string } | null;
   totalPostsForExposure: number;
   checkedTodayCount: number;
   exposureCompletedCount: number;
@@ -1951,7 +1953,49 @@ function writeExposureHistory(blogId: string, history: ExposureHistory): void {
   } catch (e: any) { console.warn(`[검색노출] 검사 기록 저장 실패: ${e.message}`); }
 }
 
-async function checkBlogExposure(blogId: string, posts: ExposurePost[], plan: string, log: (msg: string) => void): Promise<ExposureProgress> {
+/* ── 제목에서 검색용 핵심 키워드 뽑기 ──
+   제목 전체로 검색하면 실제 노출 순위와 안 맞는다(네이버가 여러 단어 조합으로 처리).
+   장식·조사·흔한 단어를 걷어내고 의미 있는 명사 위주로 6단어 이내로 줄인다. */
+function extractSearchQuery(title: string): string {
+  const cleaned = title.replace(/[^\p{L}\p{N}\s]/gu, " ").replace(/\s+/g, " ").trim();
+  const drop = new Set(["그리고","하는","한","및","의","가","이","은","는","을","를","에","에서","으로","와","과","도","만","best","BEST","top","TOP","추천","후기","방법","정리","총정리","완벽","꿀팁","리뷰"]);
+  const words = cleaned.split(" ").filter(w => w.length >= 2 && !drop.has(w));
+  const q = (words.length ? words : cleaned.split(" ")).slice(0, 6).join(" ").trim();
+  return q.slice(0, 80) || title.slice(0, 80);
+}
+
+/* ── 실제 통합검색(모바일 블로그탭) 순위 크롤 ──
+   개발자 API(openapi, sort=sim)는 실제 노출 순위와 다르다. 실제 사용자가 보는 순서를 그대로 읽으려면
+   m.search.naver.com 블로그탭 결과의 blog링크 순서에서 내 (blogId + logNo) 위치를 찾는다. 세션 쿠키 사용. */
+async function searchRealRank(context: BrowserContext, blogId: string, logNo: string, query: string, log: (m: string) => void): Promise<{ rank: number | null; total: number }> {
+  const MUA = "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1";
+  const page = await context.newPage();
+  try {
+    await page.setExtraHTTPHeaders({ "User-Agent": MUA });
+    await page.goto(`https://m.search.naver.com/search.naver?ssc=tab.m_blog.all&query=${encodeURIComponent(query)}`, { waitUntil: "domcontentloaded", timeout: 20000 });
+    await page.waitForTimeout(1200);
+    // 더 많은 결과 로드(스크롤)
+    for (let i = 0; i < 4; i++) { await page.mouse.wheel(0, 3000); await page.waitForTimeout(600); }
+    const links: string[] = await page.$$eval('a[href*="blog.naver.com"]', els => els.map(e => (e as HTMLAnchorElement).href));
+    // 블로그 글 링크만 순서대로(중복 제거). 각 링크에서 blogId/logNo 추출.
+    const seq: { blogId: string; logNo: string }[] = [];
+    const seen = new Set<string>();
+    for (const h of links) {
+      const m = h.match(/blog\.naver\.com\/([a-zA-Z0-9_-]+)\/(\d{6,})/) || h.match(/blog\.naver\.com\/([a-zA-Z0-9_-]+)[?].*logNo=(\d{6,})/);
+      if (!m) continue;
+      const key = `${m[1]}/${m[2]}`;
+      if (seen.has(key)) continue;
+      seen.add(key); seq.push({ blogId: m[1].toLowerCase(), logNo: m[2] });
+    }
+    const idx = seq.findIndex(s => s.blogId === blogId.toLowerCase() && s.logNo === String(logNo));
+    return { rank: idx >= 0 ? idx + 1 : null, total: seq.length };
+  } catch (e: any) {
+    log(`[검색노출] 실검색 실패(${(e.message || "").slice(0, 30)})`);
+    return { rank: null, total: 0 };
+  } finally { await page.close().catch(() => {}); }
+}
+
+async function checkBlogExposure(blogId: string, posts: ExposurePost[], plan: string, log: (msg: string) => void, searchContext?: BrowserContext): Promise<ExposureProgress> {
   const normalizedPlan = Object.prototype.hasOwnProperty.call(EXPOSURE_DAILY_LIMIT, plan) ? plan : "free";
   const limit = EXPOSURE_DAILY_LIMIT[normalizedPlan];
   if (!posts.length) return { checks: [], checkedTodayCount: 0, completedCount: 0, limit };
@@ -1971,30 +2015,44 @@ async function checkBlogExposure(blogId: string, posts: ExposurePost[], plan: st
   for (const post of selected) {
     const { logNo, title } = post;
     try {
-      // 제목 의미는 유지하되 검색을 방해하는 장식 특수문자와 과도한 공백만 제거한다.
-      const query = title.replace(/[^\p{L}\p{N}\s]/gu, " ").replace(/\s+/g, " ").trim().slice(0, 100) || title.slice(0, 100);
-      const url = `https://openapi.naver.com/v1/search/blog.json?query=${encodeURIComponent(query)}&display=100&start=1&sort=sim`;
-      const response = await fetch(url, { headers: { "X-Naver-Client-Id": keys.clientId, "X-Naver-Client-Secret": keys.clientSecret } });
-      if (!response.ok) throw new Error(`검색 API ${response.status}`);
-      const json: any = await response.json();
-      const items: any[] = Array.isArray(json?.items) ? json.items : [];
-      const wanted = blogId.toLowerCase();
-      const index = items.findIndex(item => {
-        const link = String(item?.link || "").replace(/&amp;/gi, "&").toLowerCase();
-        const bloggerLink = String(item?.bloggerlink || "").toLowerCase();
-        try {
-          const parsed = new URL(link);
-          const linkBlogId = (parsed.searchParams.get("blogId") || "").toLowerCase();
-          const linkLogNo = parsed.searchParams.get("logNo") || parsed.pathname.match(/\/(\d{6,})(?:\/)?$/)?.[1] || "";
-          const pathOwner = parsed.pathname.split("/").filter(Boolean)[0]?.toLowerCase() || "";
-          const profileOwner = bloggerLink.replace(/\/$/, "").split("/").pop() || "";
-          return (linkBlogId === wanted || pathOwner === wanted || profileOwner === wanted) && (!linkLogNo || linkLogNo === logNo);
-        } catch {
-          return link.includes(`blog.naver.com/${wanted}/${logNo}`) || bloggerLink.replace(/\/$/, "").endsWith(`/` + wanted);
+      // ★핵심 키워드로 검색(제목 전체X). 실제 노출 순위와 맞추기 위해 의미 단어만 추린다.
+      const query = extractSearchQuery(title);
+      let rank: number | null = null;
+      let exposed = false;
+      let via = "";
+      // ① 실제 통합검색(모바일 블로그탭) 순위 우선 — 사용자가 실제 보는 순서. 세션 context 있을 때.
+      if (searchContext) {
+        const real = await searchRealRank(searchContext, blogId, logNo, query, log);
+        if (real.rank !== null) { rank = real.rank; exposed = true; via = "실검색"; }
+        else if (real.total > 0) { exposed = false; via = `실검색 ${real.total}개 중 없음`; }
+      }
+      // ② 실검색에서 못 찾았고 개발자 API 키 있으면 보조 확인(참고용)
+      if (rank === null && keys) {
+        const url = `https://openapi.naver.com/v1/search/blog.json?query=${encodeURIComponent(query)}&display=100&start=1&sort=sim`;
+        const response = await fetch(url, { headers: { "X-Naver-Client-Id": keys.clientId, "X-Naver-Client-Secret": keys.clientSecret } });
+        if (response.ok) {
+          const json: any = await response.json();
+          const items: any[] = Array.isArray(json?.items) ? json.items : [];
+          const wanted = blogId.toLowerCase();
+          const index = items.findIndex(item => {
+            const link = String(item?.link || "").replace(/&amp;/gi, "&").toLowerCase();
+            const bloggerLink = String(item?.bloggerlink || "").toLowerCase();
+            try {
+              const parsed = new URL(link);
+              const linkBlogId = (parsed.searchParams.get("blogId") || "").toLowerCase();
+              const linkLogNo = parsed.searchParams.get("logNo") || parsed.pathname.match(/\/(\d{6,})(?:\/)?$/)?.[1] || "";
+              const pathOwner = parsed.pathname.split("/").filter(Boolean)[0]?.toLowerCase() || "";
+              const profileOwner = bloggerLink.replace(/\/$/, "").split("/").pop() || "";
+              return (linkBlogId === wanted || pathOwner === wanted || profileOwner === wanted) && (!linkLogNo || linkLogNo === logNo);
+            } catch {
+              return link.includes(`blog.naver.com/${wanted}/${logNo}`) || bloggerLink.replace(/\/$/, "").endsWith(`/` + wanted);
+            }
+          });
+          if (index >= 0 && !via) { rank = index + 1; exposed = true; via = "API참고"; }
         }
-      });
-      checks.push({ logNo, title, exposed: index >= 0, rank: index >= 0 ? index + 1 : null, postUrl: index >= 0 ? String(items[index]?.link || "") : undefined });
-      log(`[검색노출] ${index >= 0 ? `노출 약 ${index + 1}위` : "100위 내 누락"} · ${title.slice(0, 28)}`);
+      }
+      checks.push({ logNo, title, exposed, rank, postUrl: undefined });
+      log(`[검색노출] "${query}" → ${rank !== null ? `${rank}위(${via})` : `노출 안됨(${via || "확인불가"})`} · ${title.slice(0, 24)}`);
     } catch (e: any) {
       log(`[검색노출] 확인 실패 · ${title.slice(0, 28)} (${e.message})`);
       checks.push({ logNo, title, exposed: null, rank: null });
@@ -2022,8 +2080,17 @@ export async function checkSelectedBlogExposure(params: {
   const list = await fetchNaverPostList({ blogId, cookies, maxCount: null, log });
   const selected = list.posts.filter(post => wanted.has(post.logNo)).map(post => ({ logNo: post.logNo, title: post.title }));
   if (!selected.length) throw new Error("선택한 글 정보를 다시 찾지 못했어요. 글 목록을 새로 불러와주세요");
-  log(`[검색노출] 선택 ${selected.length}개 · ${plan} 등급 한도 적용`);
-  const progress = await checkBlogExposure(blogId, selected, plan, log);
+  log(`[검색노출] 선택 ${selected.length}개 · ${plan} 등급 한도 적용 · 실제 통합검색 순위 확인`);
+  // ★실제 통합검색 순위 확인용 browser context(세션 쿠키). 개발자 API보다 실제 노출 순위에 맞다.
+  const exBrowser = await chromium.launch({ headless: true, args: LAUNCH_ARGS });
+  const exContext = await exBrowser.newContext({ locale: "ko-KR" });
+  await exContext.addCookies(cookies).catch(() => {});
+  let progress;
+  try {
+    progress = await checkBlogExposure(blogId, selected, plan, log, exContext);
+  } finally {
+    await exBrowser.close().catch(() => {});
+  }
   const known = progress.checks.filter(check => check.exposed !== null);
   const missing = known.filter(check => check.exposed === false).length;
   return { ...progress, totalPostsForExposure: list.totalCount || list.posts.length, lowQualitySuspected: known.length >= 3 ? missing / known.length > 0.5 : null };
@@ -2285,7 +2352,25 @@ export async function crawlBlogStats(params: {
     const rate = prev > 0 ? Math.round(((curr - prev) / prev) * 100) : null;
     visitorDrop = { detected: rate !== null && rate <= -30, rate, message: rate === null ? "전일 비교 불가" : rate <= -30 ? `전일 대비 ${Math.abs(rate)}% 급감` : `전일 대비 ${rate >= 0 ? "+" : ""}${rate}%` };
   }
-  return { blogId, totalPosts, neighbors, recentDates, exposureChecks, lowQualitySuspected, visitorDays, inflowKeywords, visitorDrop, totalPostsForExposure: exposurePosts.length, checkedTodayCount, exposureCompletedCount, exposureLimit };
+  // ★발행 활성도: 최근 글 날짜로 마지막 발행 경과일 + 7일/30일 발행 수 → 활성/보통/비활성 판정(상위노출 핵심 지표)
+  let activity: BlogStats["activity"] = null;
+  {
+    const now = Date.now();
+    const dayMs = 86400000;
+    const times = recentDates.map(d => new Date(`${d}T00:00:00+09:00`).getTime()).filter(t => Number.isFinite(t) && t > 0).sort((a, b) => b - a);
+    if (times.length) {
+      const daysSinceLast = Math.floor((now - times[0]) / dayMs);
+      const postsIn7d = times.filter(t => now - t <= 7 * dayMs).length;
+      const postsIn30d = times.filter(t => now - t <= 30 * dayMs).length;
+      let level: "active" | "normal" | "inactive"; let message: string;
+      if (daysSinceLast >= 14) { level = "inactive"; message = `${daysSinceLast}일째 새 글이 없어요 — 지수가 떨어지는 중. 지금 발행이 가장 급해요.`; }
+      else if (postsIn7d >= 3) { level = "active"; message = `최근 7일 ${postsIn7d}개 발행 중 — 좋은 페이스예요. 이 꾸준함을 유지하세요.`; }
+      else if (postsIn30d >= 4) { level = "normal"; message = `최근 30일 ${postsIn30d}개 — 나쁘지 않지만, 주 3회 이상이면 지수에 더 유리해요.`; }
+      else { level = "inactive"; message = `발행이 뜸해요(30일 ${postsIn30d}개) — 꾸준히 올릴수록 상위노출에 유리해요.`; }
+      activity = { level, daysSinceLast, postsIn7d, postsIn30d, message };
+    }
+  }
+  return { blogId, totalPosts, neighbors, recentDates, exposureChecks, lowQualitySuspected, visitorDays, inflowKeywords, visitorDrop, activity, totalPostsForExposure: exposurePosts.length, checkedTodayCount, exposureCompletedCount, exposureLimit };
 }
 
 /* ── 답방 ①: 내 블로그 글 목록 불러오기 ──

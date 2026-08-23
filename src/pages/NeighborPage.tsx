@@ -363,6 +363,7 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
     visitorDays?: { date: string; visitors: number }[];
     inflowKeywords?: { keyword: string; count?: number }[];
     visitorDrop?: { detected: boolean; rate: number | null; message: string } | null;
+    activity?: { level: "active" | "normal" | "inactive"; daysSinceLast: number | null; postsIn7d: number; postsIn30d: number; message: string } | null;
     totalPostsForExposure?: number;
     checkedTodayCount?: number;
     exposureCompletedCount?: number;
@@ -2052,6 +2053,21 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
                       <div style={{ fontSize: 12, color: "var(--text2)", marginTop: 4, fontWeight: 500 }}>실제 지표로 계산한 퍼블리 건강 점수예요</div>
                     </div>
                   </div>
+                  {/* ★발행 활성도 (상위노출 핵심) */}
+                  {scResult.activity && (() => {
+                    const a = scResult.activity!;
+                    const c = a.level === "active" ? "#00c896" : a.level === "normal" ? "#f59e0b" : "#ef4444";
+                    const label = a.level === "active" ? "🟢 활성 블로그" : a.level === "normal" ? "🟡 보통" : "🔴 비활성 (관리 필요)";
+                    return (
+                      <div style={{ marginBottom: 20, padding: "16px 18px", borderRadius: 14, background: `${c}14`, border: `1.5px solid ${c}55` }}>
+                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
+                          <div style={{ fontSize: 15, fontWeight: 900, color: c }}>{label}</div>
+                          <div style={{ fontSize: 12, color: "var(--text2)", fontWeight: 700 }}>최근 7일 {a.postsIn7d}개 · 30일 {a.postsIn30d}개 · 마지막 {a.daysSinceLast === 0 ? "오늘" : `${a.daysSinceLast}일 전`}</div>
+                        </div>
+                        <div style={{ fontSize: 12.5, color: "var(--text)", marginTop: 7, lineHeight: 1.5, fontWeight: 500 }}>{a.message}</div>
+                      </div>
+                    );
+                  })()}
                   {/* 지표 카드 */}
                   <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 20 }}>
                     {metrics.map(m => (
