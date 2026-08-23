@@ -367,7 +367,8 @@ export async function getNaverCategories(
   userId: string
 ): Promise<{ id: string; name: string }[]> {
   if (!naverSessionExists(userId)) throw new Error("네이버 세션 없음");
-  const { blogId, cookies } = loadSession(userId);
+  const _s = loadSession(userId); const cookies = _s.cookies;
+  const blogId = await resolveBlogIdFast(_s.blogId, cookies, userId, console.log);  // ★네이버ID≠blogId 대비
   const browser = await chromium.launch({ headless: true, args: LAUNCH_ARGS });
   const context = await browser.newContext({
     userAgent: UA, viewport: { width: 1280, height: 800 },
@@ -459,7 +460,8 @@ export async function publishNaver(params: {
 }): Promise<string> {
   const { userId, title, content, tags, imageUrl, categoryId, visibility = "public", scheduleTime, blocks } = params;
   if (!naverSessionExists(userId)) throw new Error("네이버 세션 없음. 계정 재연결 필요");
-  const { blogId, cookies } = loadSession(userId);
+  const _ps = loadSession(userId); const cookies = _ps.cookies;
+  const blogId = await resolveBlogIdFast(_ps.blogId, cookies, userId, console.log);  // ★네이버ID≠blogId 대비(모든 탭 공용)
 
   const browser = await chromium.launch({ headless: false, args: LAUNCH_ARGS });
   const context = await browser.newContext({
@@ -1309,31 +1311,40 @@ async function crawlMobileFallback(context: BrowserContext, keyword: string, lim
   return out;
 }
 
-/* ★★내 실제 blogId 확정 — 발행(글쓰기)이 쓰는 검증된 방식 그대로.
-   GoBlogWrite.naver로 가면 네이버가 '로그인된 계정 기준'으로 진짜 blogId가 담긴 URL로 리다이렉트해줌.
-   → 네이버 아이디와 blogId가 다른 계정(예: bb9653)이어도 정확한 blogId를 얻는다.
-   저장된 값이 틀리면 실제 값으로 교정하고 세션에 저장 → 이후 진단·카테고리·검색노출 등 모든 탭이 정확한 blogId를 공유한다. */
-const RESOLVE_INVALID = ["PostList", "BlogHome", "FeedList", "neighborPostList", "TagList", "GoBlogWrite", "RedirectWriteView", "PostWriteForm", "MyBlog", "section", "m"];
-async function resolveRealBlogId(page: import("playwright").Page, storedBlogId: string, accountId: string, log: (m: string) => void): Promise<string> {
-  let real = storedBlogId;
-  await page.goto("https://blog.naver.com/GoBlogWrite.naver", { waitUntil: "domcontentloaded", timeout: 30000 }).catch(() => {});
-  await page.waitForTimeout(2500);
-  if (/nidlogin|login\.naver/.test(page.url())) throw new Error("네이버 로그인이 풀렸어요. 계정을 다시 연결(로그인)한 뒤 시도해주세요.");
-  let m = page.url().match(/[?&]blogId=([a-zA-Z0-9_-]+)/);
-  if (m && m[1] && !RESOLVE_INVALID.includes(m[1])) real = m[1];
-  else {
-    await page.goto("https://m.blog.naver.com", { waitUntil: "domcontentloaded", timeout: 20000 }).catch(() => {});
-    await page.waitForTimeout(1500);
-    m = page.url().match(/blog\.naver\.com\/([a-zA-Z0-9_-]+)/);
-    if (m && m[1] && !RESOLVE_INVALID.includes(m[1])) real = m[1];
-  }
-  if (real && real !== storedBlogId) {
-    log(`[blogId교정] 저장된 '${storedBlogId}' → 실제 로그인 '${real}' (네이버 아이디와 블로그 주소가 달라요 — 이제 자동으로 맞췄어요)`);
-    try { const s = loadSession(accountId); s.blogId = real; writeSession(sessionName(accountId), s); } catch {}
-  } else {
-    log(`[제목수정] 로그인 blogId 확인: ${real}`);
-  }
-  return real;
+/* ★★내 실제 blogId 확정(모든 기능·탭 공용) — 발행(글쓰기)이 쓰는 검증된 방식 그대로, 단 가볍게 fetch로.
+   GoBlogWrite.naver를 쿠키로 요청하면 네이버가 '로그인 계정 기준' 진짜 blogId가 담긴 URL로 302 리다이렉트한다.
+   → 네이버 아이디와 blogId가 다른 계정(예: bb9653)이어도 정확한 blogId를 얻는다. 창을 안 띄워 가볍고 계정에도 안전.
+   저장값이 틀리면 실제 값으로 교정+세션 저장 → 이후 발행·카테고리·진단·검색노출·제목수정 등 모든 탭이 정확한 blogId 공유. */
+const RESOLVE_INVALID = ["PostList", "BlogHome", "FeedList", "neighborPostList", "TagList", "GoBlogWrite", "RedirectWriteView", "PostWriteForm", "MyBlog", "section", "m", "manage", "admin", "GoMyblog"];
+async function resolveBlogIdFast(storedBlogId: string, cookies: any[], accountId: string, log: (m: string) => void): Promise<string> {
+  const pickFrom = (s: string): string => {
+    let m = s.match(/[?&]blogId=([a-zA-Z0-9_-]+)/) || s.match(/blog\.naver\.com\/([a-zA-Z0-9_-]+)/);
+    return (m && m[1] && !RESOLVE_INVALID.includes(m[1])) ? m[1] : "";
+  };
+  try {
+    const cookieHeader = (cookies || []).map((c: any) => `${c.name}=${c.value}`).join("; ");
+    if (!cookieHeader) return storedBlogId;
+    const headers = { cookie: cookieHeader, "user-agent": UA } as any;
+    let real = "";
+    // 1순위: GoBlogWrite 302 Location에서 blogId
+    try {
+      const r = await fetch("https://blog.naver.com/GoBlogWrite.naver", { headers, redirect: "manual" as any });
+      const loc = r.headers.get("location") || "";
+      real = pickFrom(loc);
+      if (!real && r.status >= 200 && r.status < 300) real = pickFrom((r as any).url || "");
+    } catch {}
+    // 2순위: 모바일 내블로그 리다이렉트
+    if (!real) try {
+      const r2 = await fetch("https://m.blog.naver.com/MyBlog.naver", { headers, redirect: "manual" as any });
+      real = pickFrom(r2.headers.get("location") || "") || pickFrom((r2 as any).url || "");
+    } catch {}
+    if (real && real !== storedBlogId) {
+      log(`[blogId교정] '${storedBlogId}' → '${real}' (네이버 아이디와 블로그 주소가 달라 자동으로 맞췄어요)`);
+      try { const s = loadSession(accountId); s.blogId = real; writeSession(sessionName(accountId), s); } catch {}
+      return real;
+    }
+  } catch {}
+  return storedBlogId;
 }
 
 /* ── 글 제목 수정(기존 글 편집·재발행) ──
@@ -1358,8 +1369,9 @@ export async function updatePostTitle(params: {
   const page = await context.newPage();
   await page.bringToFront().catch(() => {});
   try {
-    // ★★다중계정 튕김 방지(테리 지적: bb9653은 네이버ID≠blogId): 발행과 동일 방식으로 실제 blogId 확정.
-    const realBlogId = await resolveRealBlogId(page, blogId, accountId, log);
+    // ★★다중계정 튕김 방지(테리 지적: bb9653은 네이버ID≠blogId): 발행과 동일 방식으로 실제 blogId 확정(가벼운 fetch).
+    const realBlogId = await resolveBlogIdFast(blogId, cookies, accountId, log);
+    log(`[제목수정] 로그인 blogId 확인: ${realBlogId}`);
     // ★수정 페이지 URL을 여러 형태로 시도(네이버가 파라미터 순서/경로를 바꿔도 열리게). 성공 판정=실제 에디터(mainFrame)가 뜨는지.
     const editUrls = [
       `https://blog.naver.com/PostWriteForm.naver?blogId=${realBlogId}&logNo=${logNo}&Redirect=Update`,
@@ -2316,14 +2328,8 @@ export async function checkSelectedBlogExposure(params: {
   const sess0 = loadSession(accountId);
   let blogId = sess0.blogId; const cookies = sess0.cookies;
   if (!blogId) throw new Error("내 블로그 ID를 찾을 수 없어요 — 계정을 다시 연결해주세요");
-  // ★실제 blogId 확정(네이버ID≠blogId 대비) — 임시 페이지로 GoBlogWrite 리다이렉트 확인
-  try {
-    const rb = await chromium.launch({ headless: true, args: LAUNCH_ARGS });
-    const rc = await rb.newContext({ userAgent: UA, locale: "ko-KR" }); await rc.addCookies(cookies).catch(() => {});
-    const rp = await rc.newPage();
-    try { blogId = await resolveRealBlogId(rp, blogId, accountId, log); } catch (e: any) { log(`[검색노출] blogId 확인 건너뜀: ${e?.message || e}`); }
-    await rb.close().catch(() => {});
-  } catch {}
+  // ★실제 blogId 확정(네이버ID≠blogId 대비) — 가벼운 fetch(창 안 뜸)
+  blogId = await resolveBlogIdFast(blogId, cookies, accountId, log);
   const wanted = new Set((Array.isArray(params.logNos) ? params.logNos : []).map(String).filter(value => /^\d+$/.test(value)));
   if (!wanted.size) throw new Error("검색노출을 확인할 글을 선택해주세요");
   const list = await fetchNaverPostList({ blogId, cookies, maxCount: null, log });
@@ -2363,7 +2369,7 @@ export async function crawlBlogStats(params: {
   await context.addCookies(cookies);
   const page = await context.newPage();
   // ★진단 시작 시 실제 blogId 확정(네이버ID≠blogId 대비). 교정되면 세션에 저장돼 이후 모든 탭이 정확한 값 공유.
-  try { blogId = await resolveRealBlogId(page, blogId, accountId, log); } catch (e: any) { log(`[건강검진] blogId 확인 건너뜀: ${e?.message || e}`); }
+  blogId = await resolveBlogIdFast(blogId, cookies, accountId, log);
   let totalPosts = 0, neighbors = 0;
   const recentDates: string[] = [];
   let exposurePosts: ExposurePost[] = [];
