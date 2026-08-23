@@ -60,6 +60,26 @@ function emojiToSafeText(s: string): string {
   return out.replace(/ {2,}/g, " ").trim();
 }
 
+// ★AI 한도 소진 시 자동 전환용 순환 댓글 풀(다양한 시작·자연스러운 표현, "와~" 편중 없음).
+//   Gemini 무료 한도(하루 제한)를 넘겨도 댓글이 끊기지 않도록 이 중에서 랜덤으로 단다.
+const FALLBACK_COMMENTS = [
+  "좋은 정보 얻어가요, 잘 보고 갑니다!",
+  "정성스러운 글이네요, 잘 읽었어요.",
+  "오늘도 유익한 글 감사합니다.",
+  "덕분에 많이 배우고 가요, 감사해요.",
+  "글이 깔끔해서 읽기 편했어요!",
+  "필요했던 내용인데 도움 많이 됐어요.",
+  "꼼꼼하게 정리해주셔서 감사합니다.",
+  "잘 보고 갑니다, 다음 글도 기대할게요!",
+  "공감하며 읽었어요, 좋은 하루 보내세요.",
+  "사진이랑 설명이 딱 좋네요, 잘 봤어요.",
+  "유용한 팁 감사해요, 참고할게요!",
+  "정보 감사합니다, 자주 들를게요.",
+];
+function pickFallbackComment(): string {
+  return FALLBACK_COMMENTS[Math.floor(Math.random() * FALLBACK_COMMENTS.length)];
+}
+
 function naturalizeMsg(msg: string): string {
   let result = msg;
 
@@ -1794,7 +1814,10 @@ async function readPostNaturally(page: any, ctx: any, log?: (m: string) => void,
     if (Math.random() < 0.18) { await page.mouse.wheel(0, -(180 + Math.random() * 260)); await page.waitForTimeout(per * 0.5); } // 가끔 위로(다시 읽는 척)
   }
 }
+// ★한도 초과 여부를 밖으로 알리기 위한 플래그(모델 로직은 그대로, 반환만 유지). true면 순환 댓글로 자동 전환.
+let __aiQuotaExhausted = false;
 async function generateAiComment(key: string, tone: string, postText: string, log: (m: string) => void): Promise<string> {
+  __aiQuotaExhausted = false;
   if (!key) { log("[AI댓글] ⚠️ Gemini 키가 없어 건너뜁니다 (설정 → 글쓰기 AI에서 Gemini 키 입력)"); return ""; }
   if (!postText || postText.length < 10) { log("[AI댓글] 글 내용을 못 읽어 건너뜀"); return ""; }
   const toneGuide = tone === "담백" ? "깔끔하고 담백한" : tone === "짧게" ? "짧고 간결한" : "다정하고 따뜻한";
@@ -1814,6 +1837,8 @@ async function generateAiComment(key: string, tone: string, postText: string, lo
         body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }], generationConfig }),
       });
       const d: any = await r.json();
+      // ★한도 초과(429 또는 quota 메시지) 감지 — 모델 로직은 건드리지 않고 플래그만 세운다.
+      if (r.status === 429 || /quota|exceeded|rate.?limit/i.test(d?.error?.message || "")) __aiQuotaExhausted = true;
       if (!r.ok) { if (r.status === 404 || r.status === 400) continue; log(`[AI댓글] 생성 실패(${model}): ${d?.error?.message || r.status}`); return ""; }
       const cand = d?.candidates?.[0];
       const raw = cand?.content?.parts?.[0]?.text?.trim();
@@ -3067,6 +3092,7 @@ export async function engageBlogs(params: {
 
   let done = 0;
   let fail = 0;
+  let aiFallbackActive = false;   // ★AI 한도 소진 → 순환 댓글로 자동 전환된 상태(한 번 전환하면 이번 실행 내내 유지)
 
   try {
     // 키워드 교차 셔플
@@ -3219,10 +3245,23 @@ export async function engageBlogs(params: {
         let rollComment = doComment && (commentRate >= 100 || Math.random() * 100 < commentRate);
         // ★AI 자동 댓글: 이 글 내용을 읽고 Gemini로 생성 → comments에 반영(실패 시 이 글 댓글만 건너뜀)
         if (rollComment && aiComment) {
-          const postText = await extractPostText(ctx);
-          const gen = await generateAiComment(geminiKey, commentTone, postText, log);
-          if (gen) { comments.length = 0; comments.push(gen); commentIdx = 0; log(`[AI댓글] ${blogId}: "${gen}"`); }
-          else { rollComment = false; }
+          if (aiFallbackActive) {
+            // 이미 한도 소진으로 전환됨 → 순환 댓글 사용(AI 호출 안 함)
+            const fb = pickFallbackComment(); comments.length = 0; comments.push(fb); commentIdx = 0;
+            log(`[AI댓글] (순환 댓글) ${blogId}: "${fb}"`);
+          } else {
+            const postText = await extractPostText(ctx);
+            const gen = await generateAiComment(geminiKey, commentTone, postText, log);
+            if (gen) { comments.length = 0; comments.push(gen); commentIdx = 0; log(`[AI댓글] ${blogId}: "${gen}"`); }
+            else if (__aiQuotaExhausted) {
+              // ★한도 소진 → 지금부터 순환 댓글로 자동 전환(댓글이 끊기지 않게). 프론트가 감지할 특수 로그 + 안내.
+              aiFallbackActive = true;
+              log(`AI_FALLBACK::⚠️ Gemini 무료 한도 소진 — 지금부터 순환 댓글로 자동 전환합니다`);
+              const fb = pickFallbackComment(); comments.length = 0; comments.push(fb); commentIdx = 0;
+              log(`[AI댓글] (순환 댓글) ${blogId}: "${fb}"`);
+            }
+            else { rollComment = false; }
+          }
         } else if (rollComment && comments.length === 0) {
           rollComment = false;
         }

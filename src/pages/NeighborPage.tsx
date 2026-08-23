@@ -887,9 +887,17 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
     // ★ targets를 POST body로 (URL 길이 초과 방지)
     const body = JSON.stringify({ accountId: acc.accountId, targets: list, comment: commentText, doLike: eDoLike, doComment: eDoComment, likeRate: eLikeRate, commentRate: eCommentRate, periodDays: days, postsPerBlog: ePostsPerBlog, delayMin: eDelayMin, delayMax: eDelayMax, dailyLimit: eDailyLimit, skipDone: eSkipDone, aiComment, commentTone: eCommentTone, geminiKey, minVisitors: visMin, maxVisitors: visMax, searchEntry, jobId: eJobIdRef.current, ...(userId ? { userId } : {}) });
     const es = new BotEventStream(`${BOT}/api/engage`, { method: "POST", headers: { "Content-Type": "application/json" }, body }); eEsRef.current = es;
+    let aiFbShown = false;
     es.onmessage = e => {
       const d = JSON.parse(e.data);
-      if (d.type === "log") addELog(d.msg);
+      if (d.type === "log") {
+        // ★AI 한도 소진 → 순환 댓글 자동 전환: 팝업 한 번 + 로그엔 보기 좋게 표시
+        if (typeof d.msg === "string" && d.msg.startsWith("AI_FALLBACK::")) {
+          const clean = d.msg.replace("AI_FALLBACK::", "");
+          addELog(clean);
+          if (!aiFbShown) { aiFbShown = true; alert("⚠️ Gemini 무료 한도를 다 써서\nAI 댓글 대신 '순환 댓글'로 자동 전환했어요.\n\n작업은 계속 진행돼요. (한도는 내일 초기화)"); }
+        } else addELog(d.msg);
+      }
       if (d.type === "quota_info" && Number.isFinite(Number(d.used))) { setEUsed(Number(d.used)); onEngageUsageChange?.(Number(d.used)); }
       if (d.type === "result") setEResults(p => p.map(r => r.blogId === d.blogId ? { ...r, status: d.status, postUrl: d.postUrl || "", liked: d.liked, commented: d.commented, message: d.message } : r));
       if (d.type === "progress") { setEDoneCnt(d.done); setEFailCnt(d.fail); }
@@ -976,9 +984,15 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
     addPumLog(`🤝 품앗이 시작 — 계정 ${accs.length}개 (${accs.map(a => `${a.blogId}:글${a.posts}·받기${a.receiveLimit}명`).join(", ")})`);
     const body = JSON.stringify({ accounts: accs, comment, doLike: pumDoLike, doComment: pumDoComment, aiComment: pumCommentMode === "ai", commentTone: pumTone, geminiKey, delayMin: pumDelayMin, delayMax: pumDelayMax, readRelated: pumReadRelated, readRelatedMode: pumReadRelatedMode, readSpeed: pumReadSpeed, periodDays: pumPeriodDays, searchEntry, searchKeyword: pumSearchKeyword, spreadHours: pumSpread / 60, jobId: pumJobIdRef.current, ...(userId ? { userId } : {}) });
     const es = new BotEventStream(`${BOT}/api/pumasi`, { method: "POST", headers: { "Content-Type": "application/json" }, body }); pumEsRef.current = es;
+    let pumAiFbShown = false;
     es.onmessage = e => {
       const d = JSON.parse(e.data);
-      if (d.type === "log") addPumLog(d.msg);
+      if (d.type === "log") {
+        if (typeof d.msg === "string" && d.msg.startsWith("AI_FALLBACK::")) {
+          addPumLog(d.msg.replace("AI_FALLBACK::", ""));
+          if (!pumAiFbShown) { pumAiFbShown = true; alert("⚠️ Gemini 무료 한도를 다 써서\nAI 댓글 대신 '순환 댓글'로 자동 전환했어요.\n\n품앗이는 계속 진행돼요. (한도는 내일 초기화)"); }
+        } else addPumLog(d.msg);
+      }
       if (d.type === "result" && userId) { getPumasiDailyUsage(userId).then(setPumUsed); }
       if (d.type === "progress") { setPumDone(d.done); setPumFail(d.fail); setPumSkip(d.skip ?? 0); }
       if (d.type === "done") { addPumLog("🎉 품앗이 완료!"); setPumWorking(false); es.close(); }
