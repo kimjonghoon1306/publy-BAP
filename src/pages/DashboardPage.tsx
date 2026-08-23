@@ -149,7 +149,7 @@ const NAV_GROUPS = [
     {k:"keyword",i:"🔍",l:"키워드/제목"},{k:"write",i:"✍️",l:"글 생성"},{k:"image",i:"🖼️",l:"이미지 생성"},{k:"photo",i:"📷",l:"사진 글쓰기"},{k:"publish",i:"🚀",l:"발행하기"},
   ]},
   {label:"블로그 운영",tabs:[
-    {k:"manage",i:"📋",l:"발행 관리"},{k:"blogscore",i:"📈",l:"블로그 지수"},{k:"calendar",i:"📅",l:"콘텐츠 캘린더"},
+    {k:"calendar",i:"📅",l:"콘텐츠 캘린더",shine:true},{k:"manage",i:"📋",l:"발행 관리"},{k:"blogscore",i:"📈",l:"블로그 지수"},
   ]},
   {label:"관계·소통 자동화",tabs:[
     {k:"neighbor",i:"🤝",l:"서이추"},{k:"engage",i:"❤️",l:"공감·댓글"},{k:"reply",i:"💬",l:"답방"},{k:"pumasi",i:"💞",l:"품앗이"},{k:"insta_dm",i:"📱",l:"인스타 DM"},
@@ -157,7 +157,7 @@ const NAV_GROUPS = [
   {label:"계정·설정",tabs:[
     {k:"accounts",i:"🔗",l:"계정 관리"},{k:"settings",i:"⚙️",l:"설정"},
   ]},
-] as const satisfies ReadonlyArray<{label:string;tabs:ReadonlyArray<{k:MainTab;i:string;l:string}>}>;
+] as const satisfies ReadonlyArray<{label:string;tabs:ReadonlyArray<{k:MainTab;i:string;l:string;shine?:boolean}>}>;
 const MAIN_TABS: ReadonlyArray<{k:MainTab;i:string;l:string}> = NAV_GROUPS.flatMap(group=>
   group.tabs as unknown as ReadonlyArray<{k:MainTab;i:string;l:string}>
 );
@@ -540,6 +540,14 @@ textarea.inp{resize:vertical;line-height:1.75;min-height:80px;}
 /* ══ 🎛️ 컨트롤타워 ══ */
 .nav-new{margin-left:auto;font-size:9px;font-weight:900;letter-spacing:.5px;color:#fff;background:linear-gradient(135deg,#f43f5e,#f59e0b);padding:2px 7px;border-radius:99px;animation:navNewPulse 2s ease-in-out infinite;}
 @keyframes navNewPulse{0%,100%{opacity:1}50%{opacity:.5}}
+/* ★콘텐츠 캘린더 '금덩어리' 반짝 강조 — 골드 그라데이션 흐름 + 은은한 빛 테두리 */
+.nav-item.nav-shine{position:relative;background:linear-gradient(100deg,rgba(255,196,0,.14),rgba(255,146,10,.10),rgba(255,196,0,.14));background-size:220% 100%;animation:navShineFlow 2.6s linear infinite;border:1px solid rgba(255,180,0,.35);border-radius:10px;overflow:hidden;}
+.nav-item.nav-shine::after{content:"";position:absolute;top:0;left:-60%;width:45%;height:100%;background:linear-gradient(90deg,transparent,rgba(255,255,255,.55),transparent);transform:skewX(-20deg);animation:navShineSweep 2.6s ease-in-out infinite;}
+.nav-item.nav-shine.active{border-color:rgba(255,180,0,.7);}
+@keyframes navShineFlow{0%{background-position:0% 0}100%{background-position:220% 0}}
+@keyframes navShineSweep{0%{left:-60%}45%,100%{left:130%}}
+.nav-hot{margin-left:auto;font-size:9px;font-weight:900;letter-spacing:.5px;color:#3a2500;background:linear-gradient(135deg,#ffd85e,#ffab2e);padding:2px 7px;border-radius:99px;box-shadow:0 0 8px rgba(255,180,0,.6);animation:navHotGlow 1.6s ease-in-out infinite;}
+@keyframes navHotGlow{0%,100%{box-shadow:0 0 6px rgba(255,180,0,.5);transform:scale(1)}50%{box-shadow:0 0 14px rgba(255,180,0,.9);transform:scale(1.06)}}
 .nav-item.nav-control{font-weight:800;}
 .nav-item.nav-soon{opacity:.6;}
 .nav-item.nav-soon:hover{opacity:.8;}
@@ -1121,6 +1129,22 @@ Output format (JSON array only, no other text):
   const [calCompleted, setCalCompleted] = useState<Record<string,string>>(()=>{try{return JSON.parse(localStorage.getItem("publy_cal_done")||"{}");}catch{return{};}});
   const [calLoading, setCalLoading] = useState(false);
   const [calDone, setCalDone] = useState(false);
+  // 🔥 핫이슈 추천(무료·누구나): 카테고리별 실시간 인기 주제
+  const HOT_CATS = ["실시간","경제","증권","산업","정치","사회","전국","세계","문화","연예","스포츠","건강"];
+  const [hotCat, setHotCat] = useState("실시간");
+  const [hotItems, setHotItems] = useState<string[]>([]);
+  const [hotLoading, setHotLoading] = useState(false);
+  const loadHotIssues = async (cat: string) => {
+    setHotCat(cat); setHotLoading(true);
+    try {
+      const r = await botFetch(`${BOT}/api/hot-issues?category=${encodeURIComponent(cat)}`, { signal: AbortSignal.timeout(15000) } as any);
+      const d = await r.json();
+      setHotItems(d.ok ? (d.items || []) : []);
+    } catch { setHotItems([]); }
+    setHotLoading(false);
+  };
+  // 캘린더 탭 첫 진입 시 실시간 핫이슈 자동 로드
+  useEffect(() => { if (tab === "calendar" && hotItems.length === 0 && !hotLoading) loadHotIssues("실시간"); /* eslint-disable-next-line */ }, [tab]);
   // ── 카테고리 / 공개 설정 / 예약 발행 ──
   const [category, setCategory] = useState("");
   const [categories, setCategories] = useState<{id:string;name:string}[]>([]);
@@ -3890,8 +3914,9 @@ POST3: (제목)|(이유)
               <div key={group.label}>
                 {group.label&&<div className="nav-lbl">{group.label}</div>}
                 {group.tabs.map(t=>(
-                  <button key={t.k} className={`nav-item ${tab===t.k?"active":""} ${t.k==="control"?"nav-control":""} ${t.k==="insta_dm"?"nav-soon":""}`} onClick={()=>{if(t.k==="insta_dm"){showToast("📱 인스타 DM은 곧 출시됩니다!","info");return;}setTab(t.k);}}>
+                  <button key={t.k} className={`nav-item ${tab===t.k?"active":""} ${t.k==="control"?"nav-control":""} ${t.k==="insta_dm"?"nav-soon":""} ${(t as any).shine?"nav-shine":""}`} onClick={()=>{if(t.k==="insta_dm"){showToast("📱 인스타 DM은 곧 출시됩니다!","info");return;}setTab(t.k);}}>
                     <span className="nav-ico">{t.i}</span>{t.l}
+                    {(t as any).shine&&<span className="nav-hot">HOT</span>}
                     {(t.k==="control"||t.k==="reply"||t.k==="blogscore"||t.k==="pumasi")&&<span className="nav-new">NEW</span>}
                     {t.k==="insta_dm"&&<span className="nav-soon-badge">곧 출시</span>}
                     {t.k==="keyword"&&titles.length>0&&<span className="nav-badge" title="추출한 제목 수">{titles.length}</span>}
@@ -5721,6 +5746,64 @@ POST3: (제목)|(이유)
             {/* ===== 📅 콘텐츠 캘린더 ===== */}
             {tab==="calendar"&&(
               <div style={{animation:"fadeUp .25s ease both"}}>
+
+                {/* 🔥 핫이슈 추천 (무료·누구나) */}
+                <div className="card" style={{marginBottom:14,border:"1.5px solid rgba(255,180,0,.35)",background:"linear-gradient(135deg,rgba(255,196,0,.06),rgba(255,146,10,.03))"}}>
+                  <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,flexWrap:"wrap",marginBottom:8}}>
+                    <div className="card-title" style={{margin:0}}>🔥 오늘의 핫이슈 <span style={{fontSize:11,fontWeight:800,color:"#ff8c00",background:"rgba(255,180,0,.15)",padding:"2px 8px",borderRadius:99,marginLeft:4}}>무료</span></div>
+                    <button onClick={()=>loadHotIssues(hotCat)} disabled={hotLoading} style={{fontSize:11,padding:"5px 10px",borderRadius:8,border:"1px solid var(--border)",background:"var(--card2)",color:"var(--text2)",cursor:"pointer",fontWeight:700,fontFamily:"inherit"}}>{hotLoading?"불러오는 중...":"🔄 새로고침"}</button>
+                  </div>
+                  <div style={{fontSize:11.5,color:"var(--text2)",lineHeight:1.5,marginBottom:11}}>지금 <b>실시간·분야별로 뜨는 주제</b>예요. 관심 있는 걸 <b style={{color:"#ff8c00"}}>탭하면 아래 키워드에 바로 추가</b>돼요. (실시간=구글 트렌드, 분야별=연합뉴스)</div>
+                  {/* 카테고리 탭 */}
+                  <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:12}}>
+                    {HOT_CATS.map(c=>(
+                      <button key={c} onClick={()=>loadHotIssues(c)}
+                        style={{padding:"6px 12px",borderRadius:99,border:`1.5px solid ${hotCat===c?"#ff8c00":"var(--border)"}`,background:hotCat===c?"rgba(255,140,0,.12)":"var(--bg)",color:hotCat===c?"#ff8c00":"var(--text2)",cursor:"pointer",fontSize:12,fontWeight:800,fontFamily:"inherit",transition:"all .15s"}}>
+                        {c==="실시간"?"🔥 실시간":c}
+                      </button>
+                    ))}
+                  </div>
+                  {/* 핫이슈 칩 */}
+                  {hotLoading ? <div style={{fontSize:12.5,color:"var(--text3)",padding:"10px 0"}}><span className="spinner"/> 인기 주제 불러오는 중...</div>
+                    : hotItems.length===0 ? <div style={{fontSize:12.5,color:"var(--text3)",padding:"10px 0"}}>카테고리를 눌러 지금 뜨는 주제를 확인하세요.</div>
+                    : <div style={{display:"flex",flexWrap:"wrap",gap:7}}>
+                        {hotItems.map((it,i)=>(
+                          <button key={i} onClick={()=>{setCalKeywords(prev=>{const list=prev.split(/[,\n]+/).map(s=>s.trim()).filter(Boolean); if(!list.includes(it)) list.push(it); return list.join(", ");}); showToast(`➕ "${it.slice(0,18)}" 키워드에 추가!`);}}
+                            title="클릭하면 아래 키워드에 추가돼요"
+                            style={{padding:"7px 12px",borderRadius:10,border:"1px solid var(--border)",background:"var(--card)",color:"var(--text)",cursor:"pointer",fontSize:12.5,fontWeight:600,fontFamily:"inherit",lineHeight:1.3,textAlign:"left",maxWidth:"100%",transition:"all .12s"}}
+                            onMouseEnter={e=>{e.currentTarget.style.borderColor="#ff8c00";e.currentTarget.style.background="rgba(255,140,0,.08)";}}
+                            onMouseLeave={e=>{e.currentTarget.style.borderColor="var(--border)";e.currentTarget.style.background="var(--card)";}}>
+                            <span style={{color:"#ff8c00",fontWeight:800,marginRight:4}}>{i+1}</span>{it.length>34?it.slice(0,34)+"…":it}
+                          </button>
+                        ))}
+                      </div>}
+                </div>
+
+                {/* 🌿 우리 서비스 자연스러운 추천 (회원들에게 노출) */}
+                {(()=>{
+                  const promos=[
+                    {emoji:"🥬",name:"온종일팜",desc:"산지직송 농수산물 쇼핑몰",url:"https://app.yuanfnb.com",tag:"쇼핑"},
+                    {emoji:"🎮",name:"온캐치",desc:"무료 게임 14종 + 랭킹·쿠폰",url:"https://game.온종일.com",tag:"게임"},
+                    {emoji:"📝",name:"온종일 체험단",desc:"블로그 체험단 신청·리뷰",url:"https://pick.온종일.com",tag:"체험단"},
+                    {emoji:"🎨",name:"온종일 스튜디오",desc:"홈페이지·영상 제작",url:"https://studio.온종일.com",tag:"제작"},
+                  ];
+                  return (
+                  <div className="card" style={{marginBottom:14,padding:"13px 15px"}}>
+                    <div style={{fontSize:12,fontWeight:800,color:"var(--text2)",marginBottom:9}}>🌿 이런 서비스도 있어요 <span style={{fontSize:10.5,color:"var(--text3)",fontWeight:600}}>· 블로그 주제로도 좋아요</span></div>
+                    <div style={{display:"flex",gap:9,overflowX:"auto",paddingBottom:2}}>
+                      {promos.map(p=>(
+                        <a key={p.name} href={p.url} target="_blank" rel="noopener noreferrer"
+                          style={{flex:"0 0 auto",display:"flex",alignItems:"center",gap:9,padding:"9px 13px",borderRadius:12,border:"1px solid var(--border)",background:"var(--bg)",textDecoration:"none",cursor:"pointer",transition:"all .15s",minWidth:0}}
+                          onMouseEnter={e=>{e.currentTarget.style.borderColor="var(--accent)";e.currentTarget.style.transform="translateY(-2px)";}}
+                          onMouseLeave={e=>{e.currentTarget.style.borderColor="var(--border)";e.currentTarget.style.transform="none";}}>
+                          <span style={{fontSize:22}}>{p.emoji}</span>
+                          <div><div style={{fontSize:12.5,fontWeight:800,color:"var(--text)"}}>{p.name} <span style={{fontSize:9.5,color:"var(--accent-text)",background:"var(--accent-bg)",padding:"1px 6px",borderRadius:99,marginLeft:2}}>{p.tag}</span></div><div style={{fontSize:10.5,color:"var(--text3)",marginTop:1,whiteSpace:"nowrap"}}>{p.desc}</div></div>
+                        </a>
+                      ))}
+                    </div>
+                  </div>
+                  );
+                })()}
 
                 {/* 설정 카드 */}
                 <div className="card">

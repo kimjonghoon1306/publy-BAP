@@ -515,6 +515,45 @@ app.post("/api/ai-proxy", async (req, res) => {
   }
 });
 
+/* ── 🔥 핫이슈 추천 (무료·키 불필요·누구나) — 카테고리별 실시간 인기 주제 ──
+   실시간 종합=구글 트렌드 KR RSS, 분야별=연합뉴스 섹션 RSS. 서버에서 fetch(브라우저 CORS 회피). 30분 캐시. */
+const HOT_CACHE: Record<string, { at: number; items: string[] }> = {};
+const YNA_SECTIONS: Record<string, string> = {
+  경제: "economy", 증권: "market", 산업: "industry", 정치: "politics", 사회: "society",
+  전국: "local", 세계: "international", 문화: "culture", 연예: "entertainment", 스포츠: "sports", 건강: "health",
+};
+function cleanHeadline(s: string): string {
+  return s.replace(/<!\[CDATA\[|\]\]>/g, "").replace(/&[a-z]+;/g, " ")
+    .replace(/^\[[^\]]*\]\s*/g, "").replace(/\([^)]*종합[^)]*\)/g, "").replace(/\.{2,}$/, "")
+    .replace(/\s+/g, " ").trim();
+}
+app.get("/api/hot-issues", async (req, res) => {
+  const category = String(req.query.category || "실시간");
+  const now = Date.now();
+  const cached = HOT_CACHE[category];
+  if (cached && now - cached.at < 30 * 60 * 1000) return res.json({ ok: true, category, items: cached.items, cached: true });
+  try {
+    let items: string[] = [];
+    if (category === "실시간") {
+      const r = await fetch("https://trends.google.com/trending/rss?geo=KR", { headers: { "User-Agent": "Mozilla/5.0" } });
+      const t = await r.text();
+      items = [...t.matchAll(/<title>(.*?)<\/title>/g)].map(m => cleanHeadline(m[1])).filter(x => x && !/trends|google|피드/i.test(x)).slice(0, 20);
+    } else {
+      const sec = YNA_SECTIONS[category];
+      if (!sec) return res.status(400).json({ ok: false, error: "알 수 없는 카테고리" });
+      const r = await fetch(`https://www.yna.co.kr/rss/${sec}.xml`, { headers: { "User-Agent": "Mozilla/5.0" } });
+      const t = await r.text();
+      const raw = [...t.matchAll(/<title[^>]*>([\s\S]*?)<\/title>/g)].map(m => cleanHeadline(m[1]))
+        .filter(x => x && !/연합뉴스|저작권|헤드라인|알림|RSS/i.test(x));
+      items = raw.slice(0, 20);
+    }
+    HOT_CACHE[category] = { at: now, items };
+    res.json({ ok: true, category, items });
+  } catch (e: any) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
 /* ── 서버 시작 ── */
 app.listen(PORT, "127.0.0.1", () => {
   console.log(`[bot] Publy 봇 서버 v2.0 → http://localhost:${PORT}`);
