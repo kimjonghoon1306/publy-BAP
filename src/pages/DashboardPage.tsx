@@ -203,7 +203,7 @@ const CSS = `
 .app.dark{
   --bg:#080c10;--bg2:#0d1117;--card:#111820;--card2:#161d27;--card-hover:#1a2230;
   --border:#1e2836;--border2:#2a3a4f;--border-focus:#4da6ff;
-  --text:#e8f4ff;--text2:#7a9ab5;--text3:#4a6478;
+  --text:#e8f4ff;--text2:#b0c4d8;--text3:#ff9ec4;
   --accent:#00ff9d;--accent-dim:rgba(0,255,157,.08);--accent-30:rgba(0,255,157,.3);
   --accent-text:#00ff9d;--accent-bg:rgba(0,255,157,.08);--accent-border:rgba(0,255,157,.25);
   --pink:#FF6B9D;--pink-bg:rgba(255,107,157,.08);--pink-border:rgba(255,107,157,.25);

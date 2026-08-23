@@ -129,7 +129,7 @@ const CSS = `
 .app.dark{
   --bg:#0d1117;--bg2:#161b22;--card:#1c2128;--card-hover:#21262d;
   --border:#30363d;--border-focus:#58a6ff;
-  --text:#e6edf3;--text2:#8b949e;--text3:#6e7681;
+  --text:#e6edf3;--text2:#b0c4d8;--text3:#ff9ec4;
   --accent:#00ff88;--accent-bg:rgba(0,255,136,.1);--accent-border:rgba(0,255,136,.3);--accent-text:#00ff88;
   --naver:#03C75A;--tistory:#FF6B35;
   --danger:#f85149;--warn:#f0883e;--info:#58a6ff;--success:#3fb950;
