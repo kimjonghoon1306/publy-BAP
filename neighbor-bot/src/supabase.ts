@@ -11,11 +11,13 @@ const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZ
 
 export const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
-/* ── 등급별 서이추 일일 한도 ── */
+/* ── 등급별 서이추 일일 한도 (프론트 src/lib/supabase.ts와 동일하게 유지!) ── */
+//  ★unlimited 누락 주의: 이 키가 없으면 무제한 회원이 free(10)로 폴백돼 "오늘 한도(10명) 모두 사용"으로 막힌다(실측 버그).
 export const NEIGHBOR_DAILY_LIMIT: Record<string, number> = {
   free: 10,
   basic: 50,
   pro: 100,
+  unlimited: 999999,
   admin: 9999,
 };
 

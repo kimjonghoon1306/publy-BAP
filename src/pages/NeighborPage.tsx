@@ -92,7 +92,7 @@ const DEFAULT_SINGLE_MSG = "안녕하세요! 좋은 글 잘 읽고 갑니다. �
 const DEFAULT_MULTI_MSGS = "안녕하세요! 좋은 글 잘 읽고 갑니다. 서이추 신청드려요 😊\n공감가는 글이 많네요. 서이추 해요!\n좋은 정보 잘 보고 갑니다. 이웃 신청드려요^^";
 interface EngageResult { keyword: string; blogId: string; postUrl: string; liked: boolean; commented: boolean; status: "success"|"fail"|"skip"|"pending"|"running"; message: string; }
 // 상단·사이드바 배지와 동일한 플랜별 하루 한도 (lib/supabase.ts의 NEIGHBOR/ENGAGE_DAILY_LIMIT와 일치)
-const DAILY_LIMIT_BY_PLAN: Record<string, number> = { free: 10, basic: 50, pro: 100, admin: 9999 };
+const DAILY_LIMIT_BY_PLAN: Record<string, number> = { free: 10, basic: 50, pro: 100, unlimited: 999999, admin: 9999 };
 interface Props { theme: "dark"|"light"; userId?: string; plan?: string; initialTab?: "neighbor"|"engage"|"reply"|"score"|"pumasi"; singleTab?: boolean; onEngageUsageChange?: (used:number)=>void; initialNeighborUsed?: number; initialEngageUsed?: number; onBusyChange?: (busy:boolean)=>void; }
 
 /* ── 내 이웃 키워드 분석 카드 (서이추·공감댓글 공용) ── */
