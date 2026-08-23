@@ -3970,6 +3970,8 @@ POST3: (제목)|(이유)
                 {label:"글 쓰러 가기", icon:"✍️", go:"keyword" as MainTab,    color:"var(--accent)"},
                 {label:"서이추 시작",  icon:"🤝", go:"neighbor" as MainTab, color:"#00b8d4"},
                 {label:"공감·댓글",    icon:"❤️", go:"engage" as MainTab,   color:"#e5397f"},
+                {label:"답방",        icon:"💬", go:"reply" as MainTab,    color:"#8b5cf6"},
+                {label:"품앗이",       icon:"💞", go:"pumasi" as MainTab,   color:"#ec4899"},
                 {label:"발행 관리",    icon:"📋", go:"manage" as MainTab,   color:"#f59e0b"},
               ];
               const recent = history.slice(0,5);
