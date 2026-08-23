@@ -297,43 +297,50 @@ export async function saveNaverSession(
   }
 }
 
-/* ── 자동 재로그인 (세션 만료 시) ── */
-export async function reloginNaverSilent(userId: string): Promise<boolean> {
+/* ── 자동 재로그인 (세션 만료 시) ──
+   visible=false: 창 없이 조용히(캡차 안 뜨면 성공). visible=true: 창 띄워 아이디·비번 자동입력 후
+   캡차만 사용자가 풀도록 넉넉히 대기(반자동). ★캡차 회피 3종: 실제 브라우저 모드+기존 쿠키/기기신뢰 재사용+사람같은 타이핑. */
+export async function reloginNaverSilent(userId: string, visible = false): Promise<boolean> {
   if (!naverSessionExists(userId)) return false;
   const session = loadSession(userId);
-  let loginId: string = session.loginId;
+  const loginId: string = session.loginId;
   let pw: string | null = null;
-
-  // 1순위: 세션 파일에 저장된 pw
-  if (session.pw) {
-    try { pw = Buffer.from(session.pw, "base64").toString("utf-8"); } catch {}
-  }
-  // DB 비밀번호 조회는 보안상 지원하지 않는다.
+  if (session.pw) { try { pw = Buffer.from(session.pw, "base64").toString("utf-8"); } catch {} }
   if (!pw) { console.log("[naver] 자동재로그인 실패: 비밀번호 없음"); return false; }
 
-  const browser = await chromium.launch({ headless: true, args: LAUNCH_ARGS });
+  const browser = await chromium.launch({ headless: !visible, args: visible ? [...LAUNCH_ARGS, "--start-maximized"] : LAUNCH_ARGS });
   const context = await browser.newContext({
     userAgent: UA, viewport: { width: 1280, height: 800 },
     locale: "ko-KR", timezoneId: "Asia/Seoul",
   });
   await applyAntiDetection(context);
+  // ★캡차 회피: 이전 로그인 쿠키(기기 신뢰 정보)를 미리 넣고 로그인 → 네이버가 '알던 기기'로 인식해 보안문자 빈도↓
+  try { if (Array.isArray(session.cookies) && session.cookies.length) await context.addCookies(session.cookies); } catch {}
   const page = await context.newPage();
+  if (visible) await page.bringToFront().catch(() => {});
+
+  const hasCaptcha = async (): Promise<boolean> => {
+    try {
+      return await page.evaluate(() => {
+        const sel = "#captcha, .captcha, #chptcha, img[src*='captcha'], #captchaimg, [id*='captcha' i], [class*='captcha' i]";
+        const el = document.querySelector(sel) as HTMLElement | null;
+        return !!(el && el.offsetParent !== null);
+      });
+    } catch { return false; }
+  };
 
   try {
     await page.goto("https://nid.naver.com/nidlogin.login", { waitUntil: "domcontentloaded", timeout: 20000 });
     await page.waitForTimeout(600);
-
-    await page.evaluate((v) => {
-      const el = document.querySelector("#id") as HTMLInputElement;
-      if (el) { el.focus(); el.value = v; el.dispatchEvent(new Event("input", { bubbles: true })); }
-    }, loginId);
+    // 사람같은 타이핑(봇 탐지·캡차 유발 감소)
+    try { await page.click("#id"); await page.type("#id", loginId, { delay: 60 }); } catch {
+      await page.evaluate((v) => { const el = document.querySelector("#id") as HTMLInputElement; if (el) { el.focus(); el.value = v; el.dispatchEvent(new Event("input", { bubbles: true })); } }, loginId);
+    }
+    await page.waitForTimeout(250);
+    try { await page.click("#pw"); await page.type("#pw", pw, { delay: 55 }); } catch {
+      await page.evaluate((v) => { const el = document.querySelector("#pw") as HTMLInputElement; if (el) { el.focus(); el.value = v; el.dispatchEvent(new Event("input", { bubbles: true })); } }, pw);
+    }
     await page.waitForTimeout(300);
-    await page.evaluate((v) => {
-      const el = document.querySelector("#pw") as HTMLInputElement;
-      if (el) { el.focus(); el.value = v; el.dispatchEvent(new Event("input", { bubbles: true })); }
-    }, pw);
-    await page.waitForTimeout(300);
-    // 로그인 버튼 (네이버 개편: #loginBtn_row/#loginBtn_column)
     {
       let _c = false;
       for (const _s of ["#loginBtn_row", "#loginBtn_column"]) { try { const _e = await page.$(_s); if (_e && await _e.isVisible()) { await _e.click(); _c = true; break; } } catch {} }
@@ -342,21 +349,24 @@ export async function reloginNaverSilent(userId: string): Promise<boolean> {
       if (!_c) { await page.keyboard.press("Enter"); }
     }
 
-    // 캡차가 나오면 실패 (헤드리스라 처리 불가)
-    await page.waitForFunction(
-      () => !location.href.includes("nid.naver.com/nidlogin"),
-      { timeout: 15000 }
-    );
+    // 로그인 완료(=nidlogin 벗어남) 대기. visible이면 캡차를 직접 풀 시간을 넉넉히(2분).
+    const timeout = visible ? 120000 : 15000;
+    try {
+      await page.waitForFunction(() => !location.href.includes("nid.naver.com/nidlogin"), { timeout });
+    } catch {
+      // 아직 로그인 페이지 = 캡차/2단계 등으로 막힘
+      if (!visible && await hasCaptcha()) console.log("[naver] 자동재로그인: 보안문자(캡차) 감지 — 창 모드로 재시도 필요");
+      await browser.close().catch(() => {});
+      return false;
+    }
     await page.waitForTimeout(1500);
-
     if (page.url().includes("nidlogin")) { await browser.close(); return false; }
 
     const cookies = await context.cookies();
     const oldSession = loadSession(userId);
-    // ★비번 유지(지우면 다음 자동재로그인 불가). 쿠키만 새 것으로 갱신.
-    writeSession(sessionName(userId), { ...oldSession, cookies });
+    writeSession(sessionName(userId), { ...oldSession, cookies });   // ★비번 유지, 쿠키만 갱신
     await browser.close();
-    console.log("[naver] ✅ 자동 재로그인 성공");
+    console.log(`[naver] ✅ 자동 재로그인 성공${visible ? " (창 모드)" : ""}`);
     return true;
   } catch {
     await browser.close().catch(() => {});
@@ -384,10 +394,12 @@ export async function ensureLiveSession(accountId: string, log: (m: string) => v
   const cookies = loadSession(accountId).cookies;
   if (await isSessionAlive(cookies)) return cookies;
   log("[세션] 로그인이 만료돼 저장된 정보로 자동 재연결을 시도해요...");
-  const ok = await reloginNaverSilent(accountId);
-  if (!ok) throw new Error("로그인이 만료됐어요. 저장된 비밀번호로 자동 재연결에 실패했어요(캡차 등) — 계정 관리에서 '연결하기'를 한 번 눌러주세요.");
-  log("[세션] ✅ 자동 재연결 성공 (계속 진행해요)");
-  return loadSession(accountId).cookies;
+  // 1차: 조용히(창 없이) 재로그인 — 캡차 안 뜨면 바로 성공
+  if (await reloginNaverSilent(accountId, false)) { log("[세션] ✅ 자동 재연결 성공 (계속 진행해요)"); return loadSession(accountId).cookies; }
+  // 2차: 창을 띄워 아이디·비번 자동입력 → 보안문자(캡차)만 직접 풀면 이어서 진행(반자동)
+  log("[세션] 🔐 보안문자(캡차)가 필요해요. 로그인 창을 띄웠어요 — 아이디·비번은 자동으로 채웠으니 보안문자만 입력해주세요(최대 2분 대기).");
+  if (await reloginNaverSilent(accountId, true)) { log("[세션] ✅ 재연결 성공 (계속 진행해요)"); return loadSession(accountId).cookies; }
+  throw new Error("로그인 재연결에 실패했어요. 계정 관리에서 '연결하기'를 한 번 눌러 직접 로그인해주세요.");
 }
 
 /* ── 카테고리 목록 조회 ── */
