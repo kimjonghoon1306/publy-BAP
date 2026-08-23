@@ -2147,9 +2147,13 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
               </div>
             ) : (() => {
               const now = Date.now();
+              // ★KST 달력 날짜 기준 경과일(자정 넘으면 바로 +1일). 경과 '시간'이 아니라 '날짜 차이'로 계산.
+              const kstDayNum = (ms: number) => Math.floor((ms + 9 * 3600000) / 86400000);
+              const todayNum = kstDayNum(now);
+              const dayNumOf = (d: string) => kstDayNum(new Date(`${d}T00:00:00+09:00`).getTime());
               const dates = [...(scResult.recentDates || [])].sort().reverse();
-              const recent30 = dates.filter(d => (now - new Date(d).getTime()) <= 30 * 86400000).length;
-              const lastDaysAgo = dates.length ? Math.floor((now - new Date(dates[0]).getTime()) / 86400000) : 999;
+              const recent30 = dates.filter(d => (todayNum - dayNumOf(d)) <= 30).length;
+              const lastDaysAgo = dates.length ? (todayNum - dayNumOf(dates[0])) : 999;
               // 점수(0~100): 글수·이웃·최근발행·활동성 가중
               const sPost = Math.min(30, (scResult.totalPosts / 100) * 30);
               const sNbr = Math.min(25, (scResult.neighbors / 1000) * 25);

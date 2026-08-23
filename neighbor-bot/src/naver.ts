@@ -2414,8 +2414,18 @@ export async function crawlBlogStats(params: {
       log(`[방문자] 일별 ${visitorDays.length}일 수집 완료`);
     } catch (e: any) { log(`[방문자] 위젯 확인 실패: ${e.message}`); }
 
-    // ★이웃 수: 공감·댓글과 같은 세션 방식(section.blog.naver.com 이웃API)으로 전체 이웃 수 읽기.
+    // ★이웃 수 1순위: 모바일 공개 API의 subscriberCount(=이웃/구독자 수, 실측 정확). 세션 불필요.
+    //   (예전 BuddyPostList totalCount는 '최근 글 쓴 이웃'만 세어 실제와 크게 달랐음 — bb9653 실제 97인데 8로 뜸)
     try {
+      const MUA = "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1";
+      const r = await fetch(`https://m.blog.naver.com/api/blogs/${encodeURIComponent(blogId)}`, { headers: { "User-Agent": MUA, Referer: `https://m.blog.naver.com/${blogId}` } });
+      const j: any = JSON.parse((await r.text()).replace(/^\)\]\}',?\s*/, ""));
+      const sub = Number(j?.result?.subscriberCount ?? j?.subscriberCount ?? 0);
+      if (Number.isFinite(sub) && sub > 0) { neighbors = sub; log(`[이웃수] ${sub}명 (공개 API subscriberCount)`); }
+    } catch (e: any) { log(`[이웃수] 공개 API 실패(${(e.message || "").slice(0, 25)}) · 세션 방식으로 재시도`); }
+
+    // 폴백: 공개 API 실패 시 세션 방식(section.blog.naver.com 이웃API).
+    if (neighbors <= 0) try {
       await page.goto("https://section.blog.naver.com/BlogHome.naver", { waitUntil: "domcontentloaded", timeout: 20000 }).catch(() => {});
       await page.waitForTimeout(800);
       const buddyInfo = await page.evaluate(async () => {
@@ -2541,12 +2551,14 @@ export async function crawlBlogStats(params: {
   let activity: BlogStats["activity"] = null;
   {
     const now = Date.now();
-    const dayMs = 86400000;
-    const times = recentDates.map(d => new Date(`${d}T00:00:00+09:00`).getTime()).filter(t => Number.isFinite(t) && t > 0).sort((a, b) => b - a);
-    if (times.length) {
-      const daysSinceLast = Math.floor((now - times[0]) / dayMs);
-      const postsIn7d = times.filter(t => now - t <= 7 * dayMs).length;
-      const postsIn30d = times.filter(t => now - t <= 30 * dayMs).length;
+    // ★KST 달력 날짜 기준(자정 넘으면 바로 +1일). 경과 '시간'이 아니라 '날짜 차이'로.
+    const kstDayNum = (ms: number) => Math.floor((ms + 9 * 3600000) / 86400000);
+    const todayNum = kstDayNum(now);
+    const dayNums = recentDates.map(d => new Date(`${d}T00:00:00+09:00`).getTime()).filter(t => Number.isFinite(t) && t > 0).map(kstDayNum).sort((a, b) => b - a);
+    if (dayNums.length) {
+      const daysSinceLast = todayNum - dayNums[0];
+      const postsIn7d = dayNums.filter(n => todayNum - n <= 7).length;
+      const postsIn30d = dayNums.filter(n => todayNum - n <= 30).length;
       let level: "active" | "normal" | "inactive"; let message: string;
       if (daysSinceLast >= 14) { level = "inactive"; message = `${daysSinceLast}일째 새 글이 없어요 — 지수가 떨어지는 중. 지금 발행이 가장 급해요.`; }
       else if (postsIn7d >= 3) { level = "active"; message = `최근 7일 ${postsIn7d}개 발행 중 — 좋은 페이스예요. 이 꾸준함을 유지하세요.`; }
