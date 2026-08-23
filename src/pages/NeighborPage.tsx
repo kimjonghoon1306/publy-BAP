@@ -805,25 +805,32 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
       ? `\n\n[⭐이 블로그에서 실제로 검색 상위에 잡힌 '성공 제목'들 — 반드시 이 패턴을 학습해서 반영]\n${winners.join("\n")}\n→ 위 성공 제목들의 공통 패턴(구체적 지명·제품명·상황·숫자·검색어 배치)을 분석해서, 아래 누락 제목을 '같은 블로그에서 통한 방식'으로 고쳐라. 일반론 말고 이 블로그에 실제로 통한 스타일로.`
       : "";
     const prompt = `너는 네이버 블로그 상위노출(SEO) 전문가야. 이 블로그의 아래 글들은 네이버 검색에 노출이 안 되고 있어(누락). 각 제목을 검색에 잘 잡히게 정교하게 고쳐줘.${winnerBlock}\n\n각 누락 제목마다 아래 JSON 형식으로만 답해. 다른 말 절대 금지. 순수 JSON 배열만:\n[{"original":"원래제목","diagnosis":"이 제목이 왜 검색 안 되는지 핵심 원인 1문장(과장/낚시/검색어없음/너무추상 등)","newTitle":"개선안1 (실제 검색어를 앞에 배치, 25~35자, 구체적)","newTitle2":"개선안2 (다른 각도의 대안)","keywords":["이 글 본문에 넣을 실제 검색 키워드5개"],"bodyTip":"본문/태그를 어떻게 손보면 좋은지 실전 팁 1문장","expectedEffect":"이렇게 바꾸면 기대되는 효과 1문장"}]\n\n[핵심 규칙]\n- newTitle: 사람들이 진짜 네이버에 치는 검색어(지명+대상+상황) 형태. 과장·감탄사(대박/진짜/1등/충격) 절대 금지.\n- 위 '성공 제목' 패턴이 있으면 그 스타일을 최대한 따라라.\n- keywords: 검색량 있을 법한 구체 키워드 5개(롱테일 포함).\n- 모든 답변은 실행 가능하고 구체적으로. 뻔한 일반론 금지.\n\n[누락 제목들]\n${missing.map((t, i) => `${i + 1}. ${t}`).join("\n")}`;
-    const models = ["gemini-2.0-flash", "gemini-2.5-flash", "gemini-1.5-flash"];
+    // 2.0-flash 우선(thinking 토큰 안 먹어 JSON 안정적). 토큰 넉넉히(8000)+JSON 강제로 응답 잘림·설명 섞임 방지.
+    const models = ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-2.5-flash"];
+    let lastErr = "";
     for (const model of models) {
       try {
         const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`, {
           method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }], generationConfig: { maxOutputTokens: 2000, temperature: 0.8 } }),
+          body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }], generationConfig: { maxOutputTokens: 8000, temperature: 0.8, responseMimeType: "application/json" } }),
         });
         const d: any = await r.json();
-        if (!r.ok) { if (r.status === 404) continue; throw new Error(d?.error?.message || `API ${r.status}`); }
+        if (!r.ok) { lastErr = d?.error?.message || `API ${r.status}`; if (r.status === 404 || r.status === 400) continue; continue; }
         let txt: string = d?.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "";
         txt = txt.replace(/^```json\s*/i, "").replace(/^```\s*/i, "").replace(/```\s*$/i, "").trim();
+        // 배열 부분만 안전하게 추출(앞뒤에 설명이 붙어도 파싱되게)
+        const s = txt.indexOf("["), e2 = txt.lastIndexOf("]");
+        if (s >= 0 && e2 > s) txt = txt.slice(s, e2 + 1);
         const arr = JSON.parse(txt);
         if (Array.isArray(arr) && arr.length) {
           setScSolutions(arr.map((x: any) => ({ original: String(x.original || ""), diagnosis: String(x.diagnosis || ""), newTitle: String(x.newTitle || ""), newTitle2: String(x.newTitle2 || ""), keywords: Array.isArray(x.keywords) ? x.keywords.map(String) : [], bodyTip: String(x.bodyTip || ""), expectedEffect: String(x.expectedEffect || ""), reason: String(x.reason || "") })));
           setScSolLoading(false);
           return;
         }
-      } catch (e: any) { if (model === models[models.length - 1]) { alert("솔루션 생성 실패: " + e.message); } }
+      } catch (e: any) { lastErr = e.message; }
     }
+    setScSolLoading(false);
+    alert("솔루션 생성에 실패했어요. 잠시 후 다시 시도해주세요.\n(" + (lastErr || "응답 형식 오류") + ")");
     setScSolLoading(false);
   };
 
