@@ -8,20 +8,27 @@ const BOT = "http://127.0.0.1:3334";
 //   NeighborPage 안에 정의하면 부모 리렌더마다 새 컴포넌트로 취급→통째 리마운트→스크롤 위치가 맨 위로 리셋됐다.
 //   밖으로 빼면 같은 컴포넌트로 유지돼 사용자가 스크롤한 위치가 그대로 남는다.
 const LogBox = ({ logs, logRef, onClear }: { logs: string[]; logRef: React.RefObject<HTMLDivElement>; onClear: () => void }) => {
-  const copyAll = () => {
+  const [copied, setCopied] = useState(false);
+  const copyAll = async () => {
     const text = logs.join("\n");
     if (!text) return;
-    navigator.clipboard?.writeText(text).catch(() => {
+    try {
+      if (!navigator.clipboard) throw new Error("clipboard unavailable");
+      await navigator.clipboard.writeText(text);
+    } catch {
       // 클립보드 API 실패 시 폴백(구형/권한): 임시 textarea로 복사
-      try { const ta = document.createElement("textarea"); ta.value = text; document.body.appendChild(ta); ta.select(); document.execCommand("copy"); document.body.removeChild(ta); } catch {}
-    });
+      try { const ta = document.createElement("textarea"); ta.value = text; document.body.appendChild(ta); ta.select(); const ok = document.execCommand("copy"); document.body.removeChild(ta); if (!ok) throw new Error("copy failed"); }
+      catch { alert("로그 복사에 실패했어요. 로그를 드래그해 직접 복사해주세요."); return; }
+    }
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1600);
   };
   return (
   <div className="card" style={{ padding: 0, overflow: "hidden" }}>
     <div style={{ padding: "14px 18px", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
       <div className="card-title" style={{ margin: 0 }}>📟 작업 로그</div>
       <div style={{ display: "flex", gap: 6 }}>
-        <button onClick={copyAll} style={{ padding: "5px 12px", borderRadius: 8, border: "1px solid var(--border)", background: "transparent", color: "var(--text2)", cursor: "pointer", fontSize: 12, fontFamily: "inherit", fontWeight: 700 }}>📋 전체 복사</button>
+        <button onClick={copyAll} style={{ padding: "5px 12px", borderRadius: 8, border: "1px solid var(--border)", background: copied ? "rgba(0,200,150,.12)" : "transparent", color: copied ? "#00c896" : "var(--text2)", cursor: "pointer", fontSize: 12, fontFamily: "inherit", fontWeight: 700 }}>{copied ? "✅ 복사되었습니다" : "📋 전체 복사"}</button>
         <button onClick={onClear} style={{ padding: "5px 12px", borderRadius: 8, border: "1px solid var(--border)", background: "transparent", color: "var(--text3)", cursor: "pointer", fontSize: 12, fontFamily: "inherit" }}>지우기</button>
       </div>
     </div>
@@ -123,15 +130,27 @@ const KeywordAnalyzer = ({ keywords, loading, onAnalyze, onPick }: {
 };
 
 /* ── 계정 카드 (외부 컴포넌트 — 렌더마다 재생성 방지) ── */
-const AccountCard = React.memo(({ accounts, onLogin, onAdd, onRemove, onChange }: {
+const AccountCard = React.memo(({ accounts, onLogin, onAdd, onRemove, onChange, onConnectAll, connectingAll }: {
   accounts: Account[];
   onLogin: (id: string) => void;
   onAdd: () => void;
   onRemove: (id: string) => void;
   onChange: (accountId: string, field: keyof Account, value: any) => void;
-}) => (
+  onConnectAll?: () => void;          // 있으면 '전체 연결' 버튼 표시(품앗이용)
+  connectingAll?: boolean;
+}) => {
+  const pendingCount = accounts.filter(a => a.id && a.pw && !a.sessionOk).length;
+  return (
   <div className="card" style={{ padding: "18px 20px" }}>
-    <div className="card-title" style={{ marginBottom: 14, fontSize: 15 }}>👤 작업 계정</div>
+    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 14 }}>
+      <div className="card-title" style={{ margin: 0, fontSize: 15 }}>👤 작업 계정</div>
+      {onConnectAll && accounts.length >= 2 && (
+        <button onClick={onConnectAll} disabled={connectingAll || pendingCount === 0}
+          style={{ padding: "7px 14px", borderRadius: 9, border: "none", background: connectingAll || pendingCount === 0 ? "var(--card2)" : "linear-gradient(135deg,#ec4899,#a855f7)", color: connectingAll || pendingCount === 0 ? "var(--text3)" : "#fff", cursor: connectingAll || pendingCount === 0 ? "default" : "pointer", fontSize: 12, fontWeight: 800, fontFamily: "inherit", whiteSpace: "nowrap" }}>
+          {connectingAll ? "🔄 연결 중..." : `🔗 전체 연결${pendingCount ? ` (${pendingCount})` : ""}`}
+        </button>
+      )}
+    </div>
     {accounts.map((acc, i) => (
       <div key={acc.accountId} style={{ marginBottom: 12, padding: "14px 16px", borderRadius: 14, border: `2px solid ${acc.sessionOk ? "rgba(0,214,143,.5)" : "var(--border)"}`, background: acc.sessionOk ? "rgba(0,214,143,.06)" : "var(--bg)", transition: "border .2s" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
@@ -170,7 +189,8 @@ const AccountCard = React.memo(({ accounts, onLogin, onAdd, onRemove, onChange }
       + 계정 추가
     </button>
   </div>
-));
+  );
+});
 
 /* ── 사용설명서 내용 ── */
 const GUIDE = {
@@ -207,12 +227,19 @@ const GUIDE = {
     { step: "팁", title: "등급별 검사 개수", desc: "검색 노출 검사는 하루 검사 글 수가 등급별로 달라요(무료 5·베이직 10·프로 20개, 무제한은 전체).\n이미 검사한 글은 건너뛰고 새 글부터 검사하니, 매일 진단하면 전체 글을 골고루 살펴봐요." },
     { step: "팁", title: "네이버 공식 지수가 아니에요", desc: "네이버는 공식 '지수'를 공개하지 않아요. 이 진단은 실제 검색 결과·방문 데이터를 바탕으로 한 퍼블리 자체 건강검진으로, 블로그 관리 방향을 잡는 용도예요." },
   ],
+  pumasi: [
+    { step: "1", title: "계정 2개 이상 연결", desc: "품앗이에 사용할 내 네이버 계정을 등록하고 한 번씩 연결해 세션을 저장하세요." },
+    { step: "2", title: "계정별 글 수·받을 수 설정", desc: "대상 글 수는 계정마다 최근 몇 개 글을 돌지, 받을 수는 최대 몇 개의 다른 계정에게 방문·공감·댓글을 받을지 정해요. 기본은 각각 3이에요." },
+    { step: "3", title: "공감·댓글 방식 설정", desc: "공감과 댓글을 켜고, 고정·순환·AI 맞춤 댓글 중 원하는 방식을 고르세요." },
+    { step: "4", title: "품앗이 시작", desc: "봇이 계정을 자동 전환하며 상대 계정의 실제 글을 읽고 공감·댓글을 남겨요. 받을 수에 도달한 계정은 더 방문하지 않아요." },
+    { step: "팁", title: "과도한 집중을 피하세요", desc: "받을 수를 낮게 유지하고 딜레이를 넉넉히 두세요. 많은 계정이 한 글에 한꺼번에 몰리는 패턴은 피하는 게 안전해요." },
+  ],
 };
 
 /* ── 사용설명서 모달 ── */
 const GuideModal = ({ tab, onClose }: { tab: "neighbor"|"engage"|"reply"|"score"|"pumasi"; onClose: () => void }) => {
   const steps = (GUIDE as any)[tab] ?? [];
-  const title = tab === "neighbor" ? "🤝 서이추 사용방법" : tab === "engage" ? "❤️ 공감·댓글 사용방법" : tab === "reply" ? "💬 답방 사용방법" : "📈 블로그 건강검진";
+  const title = tab === "neighbor" ? "🤝 서이추 사용방법" : tab === "engage" ? "❤️ 공감·댓글 사용방법" : tab === "reply" ? "💬 답방 사용방법" : tab === "pumasi" ? "💞 품앗이 사용방법" : "📈 블로그 건강검진";
   return (
     <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.6)", zIndex: 9999, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "60px 20px 20px", overflowY: "auto" }}>
       <div onClick={e => e.stopPropagation()} style={{ background: "var(--card)", borderRadius: 20, padding: "28px 32px", maxWidth: 560, width: "100%", boxShadow: "0 20px 60px rgba(0,0,0,.4)" }}>
@@ -309,6 +336,7 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
   const pumasiPostsLimit = PUMASI_POSTS_LIMIT[plan] ?? PUMASI_POSTS_LIMIT.free;        // 계정당 대상 글 수 상한
   const [pumUsed, setPumUsed] = useState(0);                                            // 오늘 품앗이 공감·댓글 건수
   const [pumPostsByAcc, setPumPostsByAcc] = useState<Record<string, number>>({});       // 계정별 대상 글 수
+  const [pumReceiveByAcc, setPumReceiveByAcc] = useState<Record<string, number>>({});   // 계정별 방문 받을 actor 수
   const [pumDoLike, setPumDoLike] = useState(true);
   const [pumDoComment, setPumDoComment] = useState(true);
   const [pumCommentMode, setPumCommentMode] = useState<"single"|"multi"|"ai">("ai");
@@ -470,9 +498,10 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
   }, []);
 
   /* 계정 핸들러 */
-  const handleLogin = async (accountId: string) => {
+  //  silent=true면 개별 alert 없이 조용히(전체 연결에서 사용). 성공 여부를 boolean으로 반환.
+  const handleLogin = async (accountId: string, silent = false): Promise<boolean> => {
     const acc = accounts.find(a => a.accountId === accountId);
-    if (!acc || !acc.id || !acc.pw) return alert("아이디와 비밀번호를 입력하세요");
+    if (!acc || !acc.id || !acc.pw) { if (!silent) alert("아이디와 비밀번호를 입력하세요"); return false; }
     setAccounts(p => p.map(a => a.accountId === accountId ? { ...a, loginLoading: true } : a));
     try {
       const r = await botFetch(`${BOT}/api/login`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ accountId, id: acc.id, pw: acc.pw }) });
@@ -481,12 +510,32 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
         setAccounts(p => p.map(a => a.accountId === accountId ? { ...a, sessionOk: true, blogId: d.blogId, loginLoading: false } : a));
         addLog(`✅ [${acc.id}] 로그인 성공 (blogId: ${d.blogId})`);
         addELog(`✅ [${acc.id}] 로그인 성공`);
+        return true;
       } else throw new Error(d.error || "로그인 실패");
     } catch (e: any) {
       setAccounts(p => p.map(a => a.accountId === accountId ? { ...a, loginLoading: false } : a));
-      addLog(`❌ 로그인 오류: ${e.message}`);
-      alert(`로그인 오류: ${e.message}`);
+      addLog(`❌ [${acc.id}] 로그인 오류: ${e.message}`);
+      if (!silent) alert(`로그인 오류: ${e.message}`);
+      return false;
     }
+  };
+
+  /* 전체 계정 연결: 아이디·비번 입력된 계정을 순서대로 자동 로그인(개별 연결과 별개, 둘 다 사용 가능) */
+  const [connectingAll, setConnectingAll] = useState(false);
+  const handleConnectAll = async () => {
+    const targets = accounts.filter(a => a.id && a.pw && !a.sessionOk);
+    if (!targets.length) return alert("연결할 계정이 없어요. (아이디·비번을 입력한 미연결 계정이 있어야 해요)");
+    setConnectingAll(true);
+    addLog(`🔗 전체 연결 시작 — ${targets.length}개 계정을 순서대로 로그인합니다`);
+    let ok = 0, fail = 0;
+    for (const a of targets) {
+      const success = await handleLogin(a.accountId, true);   // 조용히(개별 alert 없이)
+      if (success) ok++; else fail++;
+      await new Promise(res => setTimeout(res, 800));          // 계정 사이 약간 텀
+    }
+    setConnectingAll(false);
+    addLog(`🔗 전체 연결 완료 — 성공 ${ok} / 실패 ${fail}`);
+    alert(`전체 연결 완료!\n성공 ${ok}개${fail ? ` · 실패 ${fail}개(아이디·비번 확인)` : ""}`);
   };
 
   const handleAddAccount = useCallback(() =>
@@ -778,8 +827,9 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
     const comment = pumCommentMode === "single" ? pumComment
       : pumCommentMode === "multi" ? pumMultiComments.split("\n").filter(l => l.trim()).join("|||") : "";
     const geminiKey = pumCommentMode === "ai" ? (localStorage.getItem("publy_gemini_key") || "") : "";
-    const accs = connected.map(a => ({ accountId: a.accountId, blogId: a.blogId, posts: Math.min(pumasiPostsLimit, pumPostsByAcc[a.accountId] || 3) }));
-    addPumLog(`🤝 품앗이 시작 — 계정 ${accs.length}개 (${accs.map(a => `${a.blogId}:${a.posts}개`).join(", ")})`);
+    const maxReceivers = Math.max(1, connected.length - 1);
+    const accs = connected.map(a => ({ accountId: a.accountId, blogId: a.blogId, posts: Math.min(pumasiPostsLimit, pumPostsByAcc[a.accountId] || 3), receiveLimit: Math.min(maxReceivers, Math.max(1, pumReceiveByAcc[a.accountId] || 3)) }));
+    addPumLog(`🤝 품앗이 시작 — 계정 ${accs.length}개 (${accs.map(a => `${a.blogId}:글${a.posts}·받기${a.receiveLimit}명`).join(", ")})`);
     const body = JSON.stringify({ accounts: accs, comment, doLike: pumDoLike, doComment: pumDoComment, aiComment: pumCommentMode === "ai", commentTone: pumTone, geminiKey, delayMin: pumDelayMin, delayMax: pumDelayMax, jobId: pumJobIdRef.current, ...(userId ? { userId } : {}) });
     const es = new BotEventStream(`${BOT}/api/pumasi`, { method: "POST", headers: { "Content-Type": "application/json" }, body }); pumEsRef.current = es;
     es.onmessage = e => {
@@ -2003,7 +2053,7 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
             <div style={{ padding: "16px 18px", borderRadius: 14, background: "linear-gradient(135deg,rgba(236,72,153,.1),rgba(139,92,246,.08))", border: "1.5px solid rgba(236,72,153,.3)" }}>
               <div style={{ fontSize: 15, fontWeight: 800, color: "#ec4899", marginBottom: 6 }}>💞 품앗이(내 계정끼리 서로 공감·댓글)</div>
               <div style={{ fontSize: 12.5, color: "var(--text2)", lineHeight: 1.65, fontWeight: 500 }}>
-                내 <b style={{color:"#ec4899"}}>여러 계정</b>을 등록해두면, 봇이 <b>계정을 자동으로 전환</b>하며 서로의 글에 공감·댓글을 남겨줘요. 계정 간 소통량을 만들어 블로그를 살리는 기능이에요.<br />
+                내 <b style={{color:"#ec4899"}}>여러 계정</b>을 등록해두면, 봇이 <b>계정을 자동으로 전환</b>하며 서로의 글을 읽고 공감·댓글을 남겨줘요. 계정별 <b>받을 수</b>를 정해 한 계정에 방문이 과하게 몰리는 것도 막을 수 있어요.<br />
                 <span style={{ color: "#c88010", fontWeight: 700 }}>💡 한 번만 계정 연결</span>해두면, 다음부턴 <b>'품앗이 시작'</b>만 눌러도 자동 로그인·전환하며 알아서 돌아가요. 딜레이를 넉넉히 두면 계정이 안전해요.
               </div>
             </div>
@@ -2017,19 +2067,20 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
             </div>
             {overAccountLimit && <div style={{ fontSize: 12, color: "var(--danger)", fontWeight: 700, padding: "2px 4px" }}>⚠️ 등록 계정이 등급 한도({pumasiAccountLimit}개)를 넘었어요. 초과분은 품앗이에서 제외돼요. 더 많이 쓰려면 상위 등급이나 추가 결제가 필요해요.</div>}
 
-            <AccountCard accounts={accounts} onLogin={handleLogin} onAdd={handleAddAccount} onRemove={handleRemoveAccount} onChange={handleAccountChange} />
+            <AccountCard accounts={accounts} onLogin={handleLogin} onAdd={handleAddAccount} onRemove={handleRemoveAccount} onChange={handleAccountChange} onConnectAll={handleConnectAll} connectingAll={connectingAll} />
 
-            {/* 계정별 대상 글 수 */}
+            {/* 계정별 대상 글 수 + 받을 계정 수 */}
             {connected.length >= 2 && (
               <div className="card" style={{ padding: "16px 18px" }}>
-                <div className="card-title" style={{ marginBottom: 6, fontSize: 15 }}>📝 계정별 대상 글 수</div>
-                <div style={{ fontSize: 11.5, color: "var(--text2)", marginBottom: 12, lineHeight: 1.5, fontWeight: 500 }}>💡 각 계정의 <b>최근 글 몇 개에</b> 다른 계정들이 공감·댓글을 남길지 정해요. (예: 홍길동 3개 = 다른 계정들이 홍길동 최근 글 3개에 남김)</div>
+                <div className="card-title" style={{ marginBottom: 6, fontSize: 15 }}>📝 계정별 글 수 · 받을 수</div>
+                <div style={{ fontSize: 11.5, color: "var(--text2)", marginBottom: 12, lineHeight: 1.5, fontWeight: 500 }}>💡 <b>대상 글</b>은 최근 몇 개 글을 돌지, <b>받을 수</b>는 최대 몇 개의 다른 계정에게 방문·공감·댓글을 받을지 정해요. 기본은 3명이에요.</div>
+                <div style={{ display: "flex", justifyContent: "flex-end", gap: 18, padding: "0 8px 5px", fontSize: 10.5, color: "var(--text3)", fontWeight: 700 }}><span>대상 글</span><span>받을 수</span></div>
                 <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                   {connected.map(a => (
                     <div key={a.accountId} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 11px", borderRadius: 9, background: "var(--bg)", border: "1px solid var(--border)" }}>
                       <span style={{ flex: 1, minWidth: 0, fontSize: 13, fontWeight: 700, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>🔗 {a.blogId || a.accountId}</span>
                       <input className="inp" type="number" min={1} max={isUnlimitedPlan ? 999 : pumasiPostsLimit} value={pumPostsByAcc[a.accountId] ?? 3} onChange={e => { const v = Math.max(1, Math.min(isUnlimitedPlan ? 999 : pumasiPostsLimit, parseInt(e.target.value) || 1)); setPumPostsByAcc(prev => ({ ...prev, [a.accountId]: v })); }} style={{ width: 72, fontSize: 13, padding: "8px 10px", textAlign: "center" }} />
-                      <span style={{ fontSize: 12, color: "var(--text3)" }}>개</span>
+                      <input className="inp" type="number" min={1} max={Math.max(1, connected.length - 1)} value={pumReceiveByAcc[a.accountId] ?? Math.min(3, Math.max(1, connected.length - 1))} onChange={e => { const v = Math.max(1, Math.min(Math.max(1, connected.length - 1), parseInt(e.target.value) || 1)); setPumReceiveByAcc(prev => ({ ...prev, [a.accountId]: v })); }} style={{ width: 72, fontSize: 13, padding: "8px 10px", textAlign: "center" }} />
                     </div>
                   ))}
                 </div>

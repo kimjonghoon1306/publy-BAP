@@ -430,7 +430,7 @@ app.post("/api/pumasi", async (req, res) => {
   try {
     sseSend(res, { type: "start", total: accounts.length });
     await pumasiEngage({
-      accounts: accounts.map((a: any) => ({ accountId: String(a.accountId), blogId: String(a.blogId), posts: parseInt(String(a.posts ?? "3"), 10) || 3 })),
+      accounts: accounts.map((a: any) => ({ accountId: String(a.accountId), blogId: String(a.blogId), posts: parseInt(String(a.posts ?? "3"), 10) || 3, receiveLimit: Math.max(1, parseInt(String(a.receiveLimit ?? "3"), 10) || 3) })),
       comment: comment || "",
       doLike: doLike !== false && doLike !== "false",
       doComment: doComment !== false && doComment !== "false",

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import GoogleFlowCard from "../GoogleFlowCard";
-import { supabase, getAccounts, upsertAccount, PublyAccount, getHistory, PublyHistory, addHistory, deleteHistory, deleteAllHistory, setAdminPassword, saveAdminNaverApiKeys, getNaverApiKeys, NaverApiKeys, getNaverDailyUsage, NAVER_DAILY_LIMIT, checkNaverQuota, incrementNaverQuota, getUserNaverApiKeys, getReferrals, getErrorLogs, getUnreadErrorCount, markErrorsAsRead, logError, PLAN_CONFIG, getAllNeighborHistory, NeighborHistory, getAllEngageHistory, EngageHistory, InstaDmTarget, InstaDmHistory, InstaDmQuota, getInstaDmTargets, addInstaDmTarget, updateInstaDmTargetStatus, deleteInstaDmTarget, getInstaDmHistory, addInstaDmHistory, getAllInstaDmHistory, getInstaDmQuota, upsertInstaDmQuota, getAllInstaDmQuotas, INSTA_DM_DAILY_LIMIT, PublyBugReport, getBugReports, updateBugReportStatus, deleteBugReport, resetDailyPublish, getAllDailyUsageToday, DailyUsageRow, getAllReplyHistory, ReplyHistory, getAllBlogscoreHistory, BlogscoreHistory } from "../lib/supabase";
+import { supabase, getAccounts, upsertAccount, PublyAccount, getHistory, PublyHistory, addHistory, deleteHistory, deleteAllHistory, setAdminPassword, saveAdminNaverApiKeys, getNaverApiKeys, NaverApiKeys, getNaverDailyUsage, NAVER_DAILY_LIMIT, checkNaverQuota, incrementNaverQuota, getUserNaverApiKeys, getReferrals, getErrorLogs, getUnreadErrorCount, markErrorsAsRead, logError, PLAN_CONFIG, getAllNeighborHistory, NeighborHistory, getAllEngageHistory, EngageHistory, InstaDmTarget, InstaDmHistory, InstaDmQuota, getInstaDmTargets, addInstaDmTarget, updateInstaDmTargetStatus, deleteInstaDmTarget, getInstaDmHistory, addInstaDmHistory, getAllInstaDmHistory, getInstaDmQuota, upsertInstaDmQuota, getAllInstaDmQuotas, INSTA_DM_DAILY_LIMIT, PublyBugReport, getBugReports, updateBugReportStatus, deleteBugReport, resetDailyPublish, getAllDailyUsageToday, DailyUsageRow, getAllReplyHistory, ReplyHistory, getAllBlogscoreHistory, BlogscoreHistory, NEIGHBOR_DAILY_LIMIT, ENGAGE_DAILY_LIMIT, REPLY_DAILY_LIMIT, BLOGSCORE_DAILY_LIMIT, PUMASI_ACCOUNT_LIMIT, PUMASI_POSTS_LIMIT } from "../lib/supabase";
 import NeighborPage from "./NeighborPage";
 import { botFetch, BotEventStream } from "../lib/botApi";
 
@@ -3852,6 +3852,32 @@ POST3: (제목)|(이유)
                                   <span style={{fontSize:11,color:"var(--text3)"}}>(개인키 있으면 무제한)</span>
                                 </div>
                               </div>
+                              {/* ★이 등급의 모든 기능 한도 한눈에 (새 기능 추가 시 여기에 다 나와야 함) */}
+                              {(()=>{ const pl=editMap[u.id]?.plan??u.plan; const unlim=pl==="unlimited"||pl==="admin"; const fmt=(n:number)=>unlim?"무제한":String(n);
+                                const rows=[
+                                  {label:"✍️ 하루 발행",val:`${fmt(PLAN_CONFIG[pl]?.dailyPublish??2)}건`},
+                                  {label:"🤝 서이추",val:`${fmt(NEIGHBOR_DAILY_LIMIT[pl]??10)}건/일`},
+                                  {label:"❤️ 공감·댓글",val:`${fmt(ENGAGE_DAILY_LIMIT[pl]??10)}건/일`},
+                                  {label:"💬 답방",val:`${fmt(REPLY_DAILY_LIMIT[pl]??10)}건/일`},
+                                  {label:"📈 블로그 지수 진단",val:`${fmt(BLOGSCORE_DAILY_LIMIT[pl]??1)}회/일`},
+                                  {label:"💞 품앗이 계정",val:`${fmt(PUMASI_ACCOUNT_LIMIT[pl]??2)}개`},
+                                  {label:"💞 품앗이 계정당 글",val:`${fmt(PUMASI_POSTS_LIMIT[pl]??3)}개`},
+                                ];
+                                return (
+                                <div className="detail-field" style={{gridColumn:"1 / -1"}}>
+                                  <span className="field-label">📊 이 등급의 기능별 한도</span>
+                                  <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(150px,1fr))",gap:6,marginTop:4,padding:"10px 12px",borderRadius:10,background:"var(--bg)",border:"1px solid var(--border)"}}>
+                                    {rows.map(r=>(
+                                      <div key={r.label} style={{display:"flex",justifyContent:"space-between",gap:6,fontSize:11.5}}>
+                                        <span style={{color:"var(--text2)"}}>{r.label}</span>
+                                        <b style={{color:unlim?"#8b5cf6":"var(--accent-text)",whiteSpace:"nowrap"}}>{r.val}</b>
+                                      </div>
+                                    ))}
+                                  </div>
+                                  <div style={{fontSize:10.5,color:"var(--text3)",marginTop:5}}>플랜을 바꾸면 위 한도가 자동으로 적용돼요. (자정 초기화)</div>
+                                </div>
+                                );
+                              })()}
                               <div className="detail-field"><span className="field-label">총 발행 건수</span>
                                 <input className="field-inp" type="number" value={editMap[u.id]?.quota??u.quota?.total_quota??10} onChange={e=>setEditMap(p=>({...p,[u.id]:{...p[u.id],quota:e.target.value}}))}/>
                               </div>
@@ -4136,7 +4162,7 @@ POST3: (제목)|(이유)
                           {b.status==="resolved"&&b.admin_reply&&<div style={{marginTop:8,fontSize:12,color:"var(--text3)"}}>💬 보낸 답변: {b.admin_reply}</div>}
                           <div style={{display:"flex",gap:8,marginTop:10,flexWrap:"wrap"}}>
                             <button onClick={()=>setBugExpanded(bugExpanded===b.id?null:b.id)} style={{padding:"6px 12px",borderRadius:8,border:"1px solid var(--border)",background:"var(--bg)",color:"var(--text2)",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:"inherit"}}>{bugExpanded===b.id?"로그 접기":"📄 로그 보기"}</button>
-                            {b.log_text&&<button onClick={()=>{navigator.clipboard.writeText(b.log_text||"");}} style={{padding:"6px 12px",borderRadius:8,border:"1px solid var(--border)",background:"var(--bg)",color:"var(--text2)",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:"inherit"}}>📋 로그 복사</button>}
+                            {b.log_text&&<button onClick={async()=>{try{await navigator.clipboard.writeText(b.log_text||"");showToast("📋 로그가 복사되었습니다.","success");}catch{showToast("로그 복사에 실패했어요.","error");}}} style={{padding:"6px 12px",borderRadius:8,border:"1px solid var(--border)",background:"var(--bg)",color:"var(--text2)",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:"inherit"}}>📋 로그 복사</button>}
                             <button onClick={async()=>{await updateBugReportStatus(b.id,b.status==="resolved"?"open":"resolved",bugReply[b.id]);loadBugReports();}} style={{padding:"6px 12px",borderRadius:8,border:"none",background:b.status==="resolved"?"var(--card2)":"#3fb950",color:b.status==="resolved"?"var(--text2)":"#fff",cursor:"pointer",fontSize:12,fontWeight:800,fontFamily:"inherit"}}>{b.status==="resolved"?"미처리로":"✓ 처리완료 (회원에게 알림)"}</button>
                             <button onClick={async()=>{if(confirm("이 신고를 삭제할까요?")){await deleteBugReport(b.id);loadBugReports();}}} style={{padding:"6px 12px",borderRadius:8,border:"1px solid rgba(248,81,73,.3)",background:"transparent",color:"var(--danger)",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:"inherit"}}>삭제</button>
                           </div>

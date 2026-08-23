@@ -2401,7 +2401,7 @@ async function generateAiReply(key: string, tone: string, commentText: string, l
 //   각 계정(작성자)의 세션으로 로그인 상태에서, 나머지 계정(대상)의 blogId 글에 engageBlogs 호출.
 //   계정별 postsPerBlog(대상 글 수)를 다르게 지정 가능. 세션은 이미 저장돼 있어 재로그인 불필요.
 export async function pumasiEngage(params: {
-  accounts: { accountId: string; blogId: string; posts: number }[];  // posts=이 계정 글에 남들이 몇 개 달지
+  accounts: { accountId: string; blogId: string; posts: number; receiveLimit: number }[];  // posts=대상 글 수, receiveLimit=방문 받을 actor 수
   comment: string;                 // 고정/순환(|||) 멘트
   doLike: boolean;
   doComment: boolean;
@@ -2421,6 +2421,7 @@ export async function pumasiEngage(params: {
   const valid = accounts.filter(a => a.accountId && a.blogId && naverSessionExists(a.accountId));
   if (valid.length < 2) throw new Error("품앗이는 세션 연결된 계정이 2개 이상 필요해요");
   log(`[품앗이] 시작 — 계정 ${valid.length}개가 서로 글에 공감·댓글`);
+  const receivedVisits = new Map<string, number>();
 
   for (const actor of valid) {
     if (stopSignal?.()) { log("[품앗이] 중단 신호 수신"); break; }
@@ -2428,7 +2429,14 @@ export async function pumasiEngage(params: {
     const targets = valid.filter(t => t.accountId !== actor.accountId);
     for (const target of targets) {
       if (stopSignal?.()) break;
+      const received = receivedVisits.get(target.accountId) || 0;
+      const receiveLimit = Math.max(1, target.receiveLimit || 3);
+      if (received >= receiveLimit) {
+        log(`[품앗이] ${target.blogId} — 받을 수 ${receiveLimit}명 도달, 건너뜀`);
+        continue;
+      }
       log(`[품앗이] ${actor.blogId} → ${target.blogId} 글 ${target.posts}개에 ${doLike ? "공감" : ""}${doLike && doComment ? "+" : ""}${doComment ? "댓글" : ""}`);
+      receivedVisits.set(target.accountId, received + 1); // 이 actor가 대상에 방문 시도한 순간 1명으로 계산
       try {
         await engageBlogs({
           accountId: actor.accountId,
@@ -2547,45 +2555,9 @@ export async function engageBlogs(params: {
       try {
         log(`[공감·댓글] ${blogId} 방문 중...`);
 
-        // ── 블로그 최근 글 목록 수집 ──
-        await page.goto(`https://blog.naver.com/PostList.naver?blogId=${blogId}&widgetTypeCall=true`, {
-          waitUntil: "domcontentloaded", timeout: 20000,
-        });
-        await page.waitForTimeout(1500);
-
-        // 글 링크 + 날짜 추출
-        type PostInfo = { url: string; date: number };
-        const posts: PostInfo[] = await page.evaluate((cutoffMs: number) => {
-          const results: { url: string; date: number }[] = [];
-          // 포스트 링크 후보
-          const links = Array.from(document.querySelectorAll("a[href*='blog.naver.com'], a[href*='/PostView']"));
-          for (const link of links) {
-            const href = (link as HTMLAnchorElement).href;
-            if (!href.match(/blog\.naver\.com\/[a-zA-Z0-9_-]+\/\d+/)) continue;
-            // 날짜 텍스트 탐색 (부모 컨테이너 내)
-            const container = link.closest("li,div[class*='post'],div[class*='item'],div[class*='list']");
-            let dateMs = 0;
-            if (container) {
-              const dateEl = container.querySelector("[class*='date'],[class*='time'],span[class*='date']");
-              if (dateEl) {
-                const txt = dateEl.textContent?.trim() || "";
-                // 형식: "2025. 01. 15." or "2025.01.15" or "01-15"
-                const m = txt.match(/(\d{4})[.\-\s]+(\d{1,2})[.\-\s]+(\d{1,2})/);
-                if (m) {
-                  dateMs = new Date(`${m[1]}-${m[2].padStart(2,"0")}-${m[3].padStart(2,"0")}`).getTime();
-                }
-              }
-            }
-            if (dateMs === 0 || dateMs >= cutoffMs) {
-              results.push({ url: href, date: dateMs });
-            }
-            if (results.length >= 10) break;
-          }
-          return results;
-        }, cutoff);
-
-        // 기간 내 글 필터 (날짜 파싱 실패한 글은 일단 포함)
-        const filtered = posts.filter(p => p.date === 0 || p.date >= cutoff).slice(0, postsPerBlog);
+        // 검증된 PostTitleListAsync 기반 목록만 사용 — target blogId 소유 글 외 링크가 섞이지 않는다.
+        const postList = await fetchNaverPostList({ blogId, cookies, maxCount: Math.max(1, postsPerBlog), log });
+        const filtered = postList.posts.filter(post => post.dateMs === 0 || post.dateMs >= cutoff).slice(0, Math.max(1, postsPerBlog));
 
         if (filtered.length === 0) {
           log(`[공감·댓글] ${blogId} — 기간 내 글 없음, 스킵`);
@@ -2594,11 +2566,13 @@ export async function engageBlogs(params: {
           continue;
         }
 
+        for (let postIndex = 0; postIndex < filtered.length; postIndex++) {
+        if (done >= dailyLimit || stopSignal?.()) break;
+        const targetPost = filtered[postIndex];
         let liked = false;
         let commented = false;
         let likeReason = "";     // 공감 못한 이유 (결과 표시용)
         let commentReason = "";  // 댓글 못단 이유 (결과 표시용)
-        const targetPost = filtered[0];
 
         log(`[공감·댓글] ${blogId} → 글 진입: ${targetPost.url}`);
         await page.goto(targetPost.url, { waitUntil: "domcontentloaded", timeout: 20000 });
@@ -2866,6 +2840,14 @@ export async function engageBlogs(params: {
           const msg = parts.join(" / ") || "대상 아님";
           await onResult?.({ keyword, blogId, postUrl: targetPost.url, liked, commented, status: "skip", message: msg });
           log(`[공감·댓글] ⏭ ${blogId} 스킵: ${msg}`);
+        }
+
+        onProgress?.(done, fail);
+        if (postIndex < filtered.length - 1 && done < dailyLimit && !stopSignal?.()) {
+          const postDelay = humanDelay(delayMin, delayMax);
+          log(`[공감·댓글] ⏱ 다음 글까지 ${(postDelay / 1000).toFixed(1)}초 대기...`);
+          await page.waitForTimeout(postDelay);
+        }
         }
 
       } catch (e: any) {
