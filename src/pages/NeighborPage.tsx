@@ -231,8 +231,10 @@ const GUIDE = {
     { step: "1", title: "계정 2개 이상 연결", desc: "품앗이에 사용할 내 네이버 계정을 등록하고 한 번씩 연결해 세션을 저장하세요." },
     { step: "2", title: "계정별 글 수·받을 수 설정", desc: "대상 글 수는 계정마다 최근 몇 개 글을 돌지, 받을 수는 최대 몇 개의 다른 계정에게 방문·공감·댓글을 받을지 정해요. 기본은 각각 3이에요." },
     { step: "3", title: "공감·댓글 방식 설정", desc: "공감과 댓글을 켜고, 고정·순환·AI 맞춤 댓글 중 원하는 방식을 고르세요." },
-    { step: "4", title: "품앗이 시작", desc: "봇이 계정을 자동 전환하며 상대 계정의 실제 글을 읽고 공감·댓글을 남겨요. 받을 수에 도달한 계정은 더 방문하지 않아요." },
-    { step: "팁", title: "과도한 집중을 피하세요", desc: "받을 수를 낮게 유지하고 딜레이를 넉넉히 두세요. 많은 계정이 한 글에 한꺼번에 몰리는 패턴은 피하는 게 안전해요." },
+    { step: "4", title: "자연스러운 방문 강화(선택)", desc: "체류시간 엔진은 글 분량을 읽어 짧은 글은 빨리·긴 글은 오래 머물러요(자동). 관련 글 1편 더 읽기를 켜면 댓글 뒤 다른 글도 읽어 진짜 방문자처럼 보여요. 시간 분산을 고르면 방문을 여러 시간에 나눠 투데이 폭증을 막아 더 안전해요." },
+    { step: "5", title: "품앗이 시작", desc: "봇이 계정을 자동 전환하며 상대 계정의 실제 글을 읽고 공감·댓글을 남겨요. 받을 수에 도달한 계정은 더 방문하지 않고, 최근 안 간 계정부터 골고루 순환해요." },
+    { step: "6", title: "효과 리포트로 확인", desc: "우측 '품앗이 효과 리포트'에서 방문자 추이 위에 품앗이한 날을 표시해요. 실제로 도움이 됐는지 보고 과도하게 하지 않도록 조절하세요." },
+    { step: "팁", title: "과도한 집중을 피하세요", desc: "받을 수를 낮게 유지하고 딜레이를 넉넉히, 시간 분산을 활용하세요. 많은 계정이 한 글에 한꺼번에 몰리는 패턴은 피하는 게 안전해요." },
   ],
 };
 
@@ -345,10 +347,15 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
   const [pumTone, setPumTone] = useState<"담백"|"다정"|"짧게">("다정");
   const [pumDelayMin, setPumDelayMin] = useState(8);
   const [pumDelayMax, setPumDelayMax] = useState(15);
+  const [pumReadRelated, setPumReadRelated] = useState(true);   // 관련 글 1편 더 읽기(체류·투데이↑)
+  const [pumSpread, setPumSpread] = useState(0);                // 시간 분산(시간, 0=즉시 연속)
   const [pumWorking, setPumWorking] = useState(false);
   const [pumLogs, setPumLogs] = useState<string[]>([]);
   const [pumDone, setPumDone] = useState(0);
   const [pumFail, setPumFail] = useState(0);
+  const [pumReport, setPumReport] = useState<{ blogId: string; days: { date: string; visitors: number; pumasiVisits: number }[]; totalReceived7d: number; avgWithPumasi: number|null; avgWithoutPumasi: number|null } | null>(null);
+  const [pumReportBlog, setPumReportBlog] = useState<string>("");
+  const [pumReportLoading, setPumReportLoading] = useState(false);
   const pumJobIdRef = useRef<string>("");
   const pumEsRef = useRef<BotEventStream|null>(null);
   const pumLogRef = useRef<HTMLDivElement>(null);
@@ -830,7 +837,7 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
     const maxReceivers = Math.max(1, connected.length - 1);
     const accs = connected.map(a => ({ accountId: a.accountId, blogId: a.blogId, posts: Math.min(pumasiPostsLimit, pumPostsByAcc[a.accountId] || 3), receiveLimit: Math.min(maxReceivers, Math.max(1, pumReceiveByAcc[a.accountId] || 3)) }));
     addPumLog(`🤝 품앗이 시작 — 계정 ${accs.length}개 (${accs.map(a => `${a.blogId}:글${a.posts}·받기${a.receiveLimit}명`).join(", ")})`);
-    const body = JSON.stringify({ accounts: accs, comment, doLike: pumDoLike, doComment: pumDoComment, aiComment: pumCommentMode === "ai", commentTone: pumTone, geminiKey, delayMin: pumDelayMin, delayMax: pumDelayMax, jobId: pumJobIdRef.current, ...(userId ? { userId } : {}) });
+    const body = JSON.stringify({ accounts: accs, comment, doLike: pumDoLike, doComment: pumDoComment, aiComment: pumCommentMode === "ai", commentTone: pumTone, geminiKey, delayMin: pumDelayMin, delayMax: pumDelayMax, readRelated: pumReadRelated, spreadHours: pumSpread, jobId: pumJobIdRef.current, ...(userId ? { userId } : {}) });
     const es = new BotEventStream(`${BOT}/api/pumasi`, { method: "POST", headers: { "Content-Type": "application/json" }, body }); pumEsRef.current = es;
     es.onmessage = e => {
       const d = JSON.parse(e.data);
@@ -847,6 +854,17 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
     if (pumEsRef.current) { pumEsRef.current.close(); pumEsRef.current = null; }
     try { await botFetch(`${BOT}/api/stop/${pumJobIdRef.current}`, { method: "POST" }); } catch {}
     addPumLog("⛔ 중단"); setPumWorking(false);
+  };
+  const handlePumasiReport = async (blogId: string) => {
+    if (!blogId) return;
+    setPumReportLoading(true); setPumReport(null); setPumReportBlog(blogId);
+    try {
+      const r = await botFetch(`${BOT}/api/pumasi-report?blogId=${encodeURIComponent(blogId)}`);
+      const d = await r.json();
+      if (d.error) { alert(`리포트를 불러오지 못했어요: ${d.error}`); }
+      else setPumReport(d);
+    } catch (e: any) { alert(`리포트 오류: ${e.message}`); }
+    setPumReportLoading(false);
   };
 
   /* 블로그 건강검진 실행 */
@@ -2125,6 +2143,41 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
                 </div>
                 <div style={{ fontSize: 11.5, color: "var(--text2)", marginTop: 6, lineHeight: 1.5, fontWeight: 500 }}>💡 댓글 사이 대기 시간이에요. <b style={{color:"#00c896"}}>넉넉히 둘수록</b> 사람처럼 자연스러워 <b style={{color:"#ff5fa2"}}>계정이 안전</b>해요.</div>
               </div>
+
+              {/* ★자연스러운 방문 강화 (체류시간·관련글·시간분산) */}
+              <div style={{ marginTop: 16, padding: "14px 16px", borderRadius: 12, border: "1px solid rgba(139,92,246,.25)", background: "rgba(139,92,246,.06)" }}>
+                <div style={{ fontSize: 13, fontWeight: 900, color: "#8b5cf6", marginBottom: 4 }}>🌿 자연스러운 방문 강화</div>
+                <div style={{ fontSize: 11.5, color: "var(--text2)", lineHeight: 1.6, fontWeight: 500, marginBottom: 12 }}>
+                  똑같이 빨리 처리하는 매크로가 아니라 <b>실제 사람처럼 읽고 머물게</b> 만들어요.
+                  <b style={{color:"#ec4899"}}> 체류시간·투데이가 자연스럽게 늘어</b> 블로그 지수에 도움되고, 오히려 <b style={{color:"#00c896"}}>더 안전</b>해요.
+                </div>
+
+                {/* 체류시간 엔진 (항상 켜짐 안내) */}
+                <div style={{ display: "flex", alignItems: "flex-start", gap: 8, padding: "8px 0", borderTop: "1px dashed var(--border)" }}>
+                  <span style={{ fontSize: 15 }}>⏱️</span>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 12.5, fontWeight: 800, color: "var(--text)" }}>체류시간 엔진 <span style={{ fontSize: 10.5, color: "#00c896", fontWeight: 700 }}>자동 적용</span></div>
+                    <div style={{ fontSize: 11, color: "var(--text3)", lineHeight: 1.5, marginTop: 2 }}>글의 <b>글자·이미지 수를 읽어</b> 짧은 글은 빨리, 긴 글은 오래(최대 40초) 스크롤하며 머물러요. 즉시 이탈 패턴을 줄여요.</div>
+                  </div>
+                </div>
+
+                {/* 관련 글 1편 더 읽기 토글 */}
+                <div style={{ padding: "8px 0", borderTop: "1px dashed var(--border)" }}>
+                  <Toggle val={pumReadRelated} set={setPumReadRelated} label="📖 관련 글 1편 더 읽기" />
+                  <div style={{ fontSize: 11, color: "var(--text3)", lineHeight: 1.5, marginTop: 4, paddingLeft: 2 }}>댓글을 단 뒤 <b>같은 블로그의 다른 글 1편</b>을 공감·댓글 없이 더 읽어요. 댓글 달자마자 나가는 패턴을 줄여 <b style={{color:"#ec4899"}}>진짜 방문자처럼</b> 보이게 해요.</div>
+                </div>
+
+                {/* 시간 분산 큐 */}
+                <div style={{ padding: "8px 0 2px", borderTop: "1px dashed var(--border)" }}>
+                  <label className="inp-label" style={{ fontSize: 12, marginBottom: 6, display: "block", fontWeight: 800 }}>⏰ 시간 분산 (방문을 여러 시간에 나눠서)</label>
+                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                    {[{v:0,t:"즉시 연속"},{v:1,t:"1시간"},{v:2,t:"2시간"},{v:3,t:"3시간"},{v:6,t:"6시간"}].map(o => (
+                      <button key={o.v} onClick={() => setPumSpread(o.v)} style={{ flex: "1 1 auto", padding: "8px 6px", borderRadius: 9, border: `2px solid ${pumSpread===o.v?"#8b5cf6":"var(--border)"}`, background: pumSpread===o.v?"rgba(139,92,246,.12)":"transparent", color: pumSpread===o.v?"#8b5cf6":"var(--text2)", cursor: "pointer", fontSize: 11.5, fontWeight: 800, fontFamily: "inherit", minWidth: 0 }}>{o.t}</button>
+                    ))}
+                  </div>
+                  <div style={{ fontSize: 11, color: "var(--text3)", lineHeight: 1.5, marginTop: 6 }}>여러 계정의 방문을 한 번에 몰지 않고 <b>정한 시간에 걸쳐 나눠서</b> 진행해요. 투데이·댓글이 짧은 시간에 폭증하는 걸 막아 <b style={{color:"#00c896"}}>훨씬 안전</b>해요. <span style={{color:"var(--text2)"}}>(선택하면 그 시간 동안 앱이 켜져 있어야 해요)</span></div>
+                </div>
+              </div>
             </div>
 
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
@@ -2161,6 +2214,65 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
                 </div>
               </div>
             </div>
+
+            {/* ★품앗이 효과 리포트 */}
+            <div className="card" style={{ padding: "18px 20px" }}>
+              <div style={{ fontSize: 14, fontWeight: 900, color: "#ec4899", marginBottom: 4 }}>📊 품앗이 효과 리포트</div>
+              <div style={{ fontSize: 11.5, color: "var(--text2)", lineHeight: 1.6, fontWeight: 500, marginBottom: 12 }}>
+                품앗이가 <b>실제로 방문자(투데이)에 도움이 됐는지</b> 확인해요. 최근 방문자 추이 위에 <b style={{color:"#8b5cf6"}}>품앗이한 날</b>을 표시해 비교하니, 효과 없이 과하게 하는 걸 줄일 수 있어요.
+                <br/><span style={{ color: "var(--text3)" }}>※ 방문자 증가를 품앗이 효과라고 단정할 순 없어요. 발행·검색·계절 등 다른 요인과 함께 참고하세요.</span>
+              </div>
+              {connected.length === 0 ? (
+                <div style={{ fontSize: 12, color: "var(--text3)" }}>계정을 연결하면 블로그별 리포트를 볼 수 있어요.</div>
+              ) : (
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
+                  {connected.map(a => (
+                    <button key={a.accountId} onClick={() => handlePumasiReport(a.blogId)} disabled={pumReportLoading}
+                      style={{ padding: "8px 12px", borderRadius: 9, border: `2px solid ${pumReportBlog===a.blogId?"#ec4899":"var(--border)"}`, background: pumReportBlog===a.blogId?"rgba(236,72,153,.1)":"transparent", color: pumReportBlog===a.blogId?"#ec4899":"var(--text2)", cursor: "pointer", fontSize: 12, fontWeight: 800, fontFamily: "inherit" }}>
+                      {a.blogId}
+                    </button>
+                  ))}
+                </div>
+              )}
+              {pumReportLoading && <div style={{ fontSize: 12.5, color: "var(--text2)" }}><span className="spinner" /> 방문자·품앗이 이력 집계 중...</div>}
+              {pumReport && !pumReportLoading && (() => {
+                const days = pumReport.days;
+                if (days.length === 0) return <div style={{ fontSize: 12, color: "var(--text3)" }}>아직 방문자 데이터가 없어요. 하루 이상 지난 뒤 다시 확인해주세요.</div>;
+                const maxV = Math.max(1, ...days.map(d => d.visitors));
+                return (
+                  <div>
+                    {/* 요약 */}
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginBottom: 14 }}>
+                      <div style={{ textAlign: "center", padding: "10px 6px", borderRadius: 10, background: "var(--bg)", border: "1px solid var(--border)" }}>
+                        <div style={{ fontSize: 20, fontWeight: 900, color: "#ec4899" }}>{pumReport.totalReceived7d}</div>
+                        <div style={{ fontSize: 10.5, color: "var(--text3)", marginTop: 2 }}>최근 받은 품앗이</div>
+                      </div>
+                      <div style={{ textAlign: "center", padding: "10px 6px", borderRadius: 10, background: "var(--bg)", border: "1px solid var(--border)" }}>
+                        <div style={{ fontSize: 20, fontWeight: 900, color: "#8b5cf6" }}>{pumReport.avgWithPumasi ?? "–"}</div>
+                        <div style={{ fontSize: 10.5, color: "var(--text3)", marginTop: 2 }}>품앗이한 날<br/>평균 방문자</div>
+                      </div>
+                      <div style={{ textAlign: "center", padding: "10px 6px", borderRadius: 10, background: "var(--bg)", border: "1px solid var(--border)" }}>
+                        <div style={{ fontSize: 20, fontWeight: 900, color: "var(--text2)" }}>{pumReport.avgWithoutPumasi ?? "–"}</div>
+                        <div style={{ fontSize: 10.5, color: "var(--text3)", marginTop: 2 }}>안 한 날<br/>평균 방문자</div>
+                      </div>
+                    </div>
+                    {/* 막대 그래프 */}
+                    <div style={{ display: "flex", alignItems: "flex-end", gap: 6, height: 120, padding: "0 2px" }}>
+                      {days.map(d => (
+                        <div key={d.date} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 4, minWidth: 0 }}>
+                          <div style={{ fontSize: 10, fontWeight: 800, color: d.pumasiVisits>0?"#8b5cf6":"var(--text3)" }}>{d.visitors}</div>
+                          <div style={{ width: "100%", height: `${Math.round((d.visitors/maxV)*80)}px`, minHeight: 3, borderRadius: "5px 5px 0 0", background: d.pumasiVisits>0 ? "linear-gradient(180deg,#ec4899,#8b5cf6)" : "var(--border)", transition: "height .4s ease" }} title={`${d.date} · 방문자 ${d.visitors} · 품앗이 ${d.pumasiVisits}회`} />
+                          <div style={{ fontSize: 9.5, color: "var(--text3)" }}>{d.date.slice(5)}</div>
+                          {d.pumasiVisits>0 && <div style={{ fontSize: 9, color: "#8b5cf6", fontWeight: 800 }}>💞{d.pumasiVisits}</div>}
+                        </div>
+                      ))}
+                    </div>
+                    <div style={{ fontSize: 10.5, color: "var(--text3)", marginTop: 10, textAlign: "center" }}><span style={{color:"#8b5cf6"}}>■</span> 품앗이한 날 · <span style={{color:"var(--text3)"}}>■</span> 안 한 날</div>
+                  </div>
+                );
+              })()}
+            </div>
+
             <LogBox logs={pumLogs} logRef={pumLogRef} onClear={() => setPumLogs([])} />
           </div>
         </div>

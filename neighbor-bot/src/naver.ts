@@ -1636,6 +1636,30 @@ async function extractPostText(ctx: any): Promise<string> {
     });
   } catch { return ""; }
 }
+// ── 체류시간 엔진: 글 분량(글자·이미지 수)을 읽어 실제 독서처럼 스크롤·머무름 ──
+//   짧은 글은 빨리, 긴 글은 오래(단 상한 있음). 즉시 이탈 패턴을 줄여 체류시간을 자연스럽게 높인다.
+async function readPostNaturally(page: any, ctx: any, log?: (m: string) => void): Promise<void> {
+  let chars = 0, imgs = 0;
+  try {
+    const info = await ctx.evaluate(() => {
+      const body = (document.querySelector(".se-main-container") as HTMLElement) || (document.querySelector("#postViewArea") as HTMLElement) || document.body;
+      const text = (body?.innerText || "").replace(/\s+/g, "").length;
+      const images = body?.querySelectorAll("img").length || 0;
+      return { text, images };
+    });
+    chars = info.text || 0; imgs = info.images || 0;
+  } catch {}
+  // 목표 체류시간(초): 글자 500자당 약 2.5초 + 이미지 1장당 1.2초. 최소 4초, 최대 40초(상한으로 어뷰징 방지).
+  const target = Math.min(40, Math.max(4, (chars / 500) * 2.5 + imgs * 1.2));
+  const scrolls = Math.min(14, Math.max(3, Math.round(target / 2.2)));   // 체류시간에 비례한 스크롤 횟수
+  log?.(`[체류] 글 약 ${chars}자·이미지 ${imgs}장 → ${Math.round(target)}초 정독(스크롤 ${scrolls}회)`);
+  const per = (target * 1000) / scrolls;
+  for (let s = 0; s < scrolls; s++) {
+    await page.mouse.wheel(0, 140 + Math.random() * 260);
+    await page.waitForTimeout(per * (0.7 + Math.random() * 0.6));       // 스크롤 간 텀 편차
+    if (Math.random() < 0.18) { await page.mouse.wheel(0, -(180 + Math.random() * 260)); await page.waitForTimeout(per * 0.5); } // 가끔 위로(다시 읽는 척)
+  }
+}
 async function generateAiComment(key: string, tone: string, postText: string, log: (m: string) => void): Promise<string> {
   if (!key) { log("[AI댓글] ⚠️ Gemini 키가 없어 건너뜁니다 (설정 → 글쓰기 AI에서 Gemini 키 입력)"); return ""; }
   if (!postText || postText.length < 10) { log("[AI댓글] 글 내용을 못 읽어 건너뜀"); return ""; }
@@ -2396,6 +2420,68 @@ async function generateAiReply(key: string, tone: string, commentText: string, l
   return "";
 }
 
+/* ── 품앗이 순환 매칭 이력: 같은 actor→target 조합 최근 방문시각 기록 ── */
+const PUMASI_PAIRS_PATH = path.join(SESSION_DIR, "pumasi_pairs.json");
+function loadPumasiPairs(): Record<string, number> {
+  try { return fs.existsSync(PUMASI_PAIRS_PATH) ? JSON.parse(fs.readFileSync(PUMASI_PAIRS_PATH, "utf-8")) : {}; }
+  catch { return {}; }
+}
+function savePumasiPairs(m: Record<string, number>) {
+  try { fs.writeFileSync(PUMASI_PAIRS_PATH, JSON.stringify(m)); } catch {}
+}
+const PUMASI_PAIR_COOLDOWN_MS = 2 * 24 * 3600 * 1000; // 같은 조합 2일 쿨다운
+
+/* ── 품앗이 실행 로그: 효과 리포트용(대상 blogId가 언제 품앗이 방문을 받았는지 기록) ── */
+const PUMASI_RUNS_PATH = path.join(SESSION_DIR, "pumasi_runs.json");
+function appendPumasiRun(targetBlogId: string, actorBlogId: string) {
+  try {
+    const arr: { target: string; actor: string; ts: number }[] = fs.existsSync(PUMASI_RUNS_PATH) ? JSON.parse(fs.readFileSync(PUMASI_RUNS_PATH, "utf-8")) : [];
+    arr.push({ target: targetBlogId, actor: actorBlogId, ts: Date.now() });
+    // 90일 이전 로그는 정리(파일 비대 방지)
+    const cutoff = Date.now() - 90 * 24 * 3600 * 1000;
+    fs.writeFileSync(PUMASI_RUNS_PATH, JSON.stringify(arr.filter(r => r.ts >= cutoff)));
+  } catch {}
+}
+function pumasiRunsFor(targetBlogId: string): { actor: string; ts: number }[] {
+  try {
+    const arr: { target: string; actor: string; ts: number }[] = fs.existsSync(PUMASI_RUNS_PATH) ? JSON.parse(fs.readFileSync(PUMASI_RUNS_PATH, "utf-8")) : [];
+    return arr.filter(r => r.target === targetBlogId).map(r => ({ actor: r.actor, ts: r.ts }));
+  } catch { return []; }
+}
+
+// ── 품앗이 효과 리포트: 방문자 추이(위젯) + 일별 품앗이 방문 횟수 상관 ──
+//   순위 상승을 품앗이 효과라고 단정하지 않고, 방문자·품앗이 실행일을 함께 보여줘 스스로 판단하게 함.
+export async function crawlPumasiReport(blogId: string, log: (m: string) => void = console.log): Promise<{
+  blogId: string;
+  days: { date: string; visitors: number; pumasiVisits: number }[];
+  totalReceived7d: number;
+  avgWithPumasi: number | null;
+  avgWithoutPumasi: number | null;
+}> {
+  const koDate = (ms: number) => new Date(ms + 9 * 3600 * 1000).toISOString().slice(0, 10);
+  // 1) 방문자 위젯(최근 ~7일)
+  const visitor: Record<string, number> = {};
+  try {
+    const vres = await fetch(`https://blog.naver.com/NVisitorgp4Ajax.naver?blogId=${encodeURIComponent(blogId)}`, { headers: { "User-Agent": UA, Referer: `https://blog.naver.com/${blogId}` } });
+    const vxml = await vres.text();
+    const vre = /<visitorcnt\s+id="(\d{8})"\s+cnt="(\d+)"/gi; let vm: RegExpExecArray | null;
+    while ((vm = vre.exec(vxml))) visitor[`${vm[1].slice(0,4)}-${vm[1].slice(4,6)}-${vm[1].slice(6,8)}`] = Number(vm[2]) || 0;
+  } catch (e: any) { log(`[리포트] 방문자 위젯 실패: ${e.message}`); }
+  // 2) 일별 품앗이 방문 횟수
+  const runs = pumasiRunsFor(blogId);
+  const runsByDay: Record<string, number> = {};
+  for (const r of runs) { const d = koDate(r.ts); runsByDay[d] = (runsByDay[d] || 0) + 1; }
+  // 3) 최근 7일 병합
+  const dates = Object.keys(visitor).sort();
+  const days = dates.map(date => ({ date, visitors: visitor[date] || 0, pumasiVisits: runsByDay[date] || 0 }));
+  const withP = days.filter(d => d.pumasiVisits > 0);
+  const withoutP = days.filter(d => d.pumasiVisits === 0);
+  const avg = (arr: typeof days) => arr.length ? Math.round(arr.reduce((s, d) => s + d.visitors, 0) / arr.length) : null;
+  const totalReceived7d = days.reduce((s, d) => s + d.pumasiVisits, 0);
+  log(`[리포트] ${blogId} — ${days.length}일 방문자·품앗이 상관 집계 완료`);
+  return { blogId, days, totalReceived7d, avgWithPumasi: avg(withP), avgWithoutPumasi: avg(withoutP) };
+}
+
 /* ── 공감·댓글 작업 ── */
 // ── 품앗이: 내 여러 계정끼리 서로 글에 공감·댓글 ──
 //   각 계정(작성자)의 세션으로 로그인 상태에서, 나머지 계정(대상)의 blogId 글에 engageBlogs 호출.
@@ -2410,50 +2496,77 @@ export async function pumasiEngage(params: {
   geminiKey: string;
   delayMin: number;
   delayMax: number;
+  readRelated?: boolean;   // ★관련 글 1편 더 읽기(체류·투데이↑)
+  spreadHours?: number;    // ★시간 분산 큐: 방문을 N시간에 걸쳐 분산(0=즉시 연속)
   onLog?: (msg: string) => void;
   onResult?: (r: EngageResult & { actor?: string }) => Promise<void>;
   onProgress?: (done: number, fail: number) => void;
   stopSignal?: () => boolean;
 }): Promise<void> {
-  const { accounts, comment, doLike, doComment, aiComment, commentTone, geminiKey, delayMin, delayMax, onLog, onResult, onProgress, stopSignal } = params;
+  const { accounts, comment, doLike, doComment, aiComment, commentTone, geminiKey, delayMin, delayMax, readRelated = true, spreadHours = 0, onLog, onResult, onProgress, stopSignal } = params;
   const log = onLog || console.log;
   let done = 0, fail = 0;
   const valid = accounts.filter(a => a.accountId && a.blogId && naverSessionExists(a.accountId));
   if (valid.length < 2) throw new Error("품앗이는 세션 연결된 계정이 2개 이상 필요해요");
   log(`[품앗이] 시작 — 계정 ${valid.length}개가 서로 글에 공감·댓글`);
-  const receivedVisits = new Map<string, number>();
+  // ★계정 순환 매칭: 이력을 보고 '아직 안 갔거나 가장 오래된' 조합을 우선 배정
+  //   (고정된 계정끼리만 반복 소통하는 패턴↓). 같은 actor→target 조합은 2일 쿨다운.
+  const pairs = loadPumasiPairs();
+  const now = Date.now();
+  const pairKey = (a: string, t: string) => `${a}>${t}`;
+  const visitPlan: { actor: typeof valid[number]; target: typeof valid[number] }[] = [];
+  for (const target of valid) {
+    const receiveLimit = Math.max(1, target.receiveLimit || 3);
+    // 후보 actor(자기 자신 제외)를 최근 방문시각 오름차순(안 간 계정=0 최우선)으로 정렬
+    const cands = valid.filter(a => a.accountId !== target.accountId)
+      .map(a => ({ a, last: pairs[pairKey(a.accountId, target.accountId)] || 0 }))
+      .sort((x, y) => x.last - y.last);
+    // 쿨다운(2일) 안 지난 조합은 뒤로 미루되, 받을 수를 못 채우면 오래된 순으로 채움
+    const fresh = cands.filter(c => now - c.last >= PUMASI_PAIR_COOLDOWN_MS);
+    const chosen = (fresh.length >= receiveLimit ? fresh : cands).slice(0, receiveLimit);
+    for (const c of chosen) visitPlan.push({ actor: c.a, target });
+  }
+  // 같은 대상·같은 actor가 연달아 오지 않도록 라운드로빈 인터리브(actor별로 흩뿌림)
+  visitPlan.sort((p, q) => valid.indexOf(p.actor) - valid.indexOf(q.actor));
 
-  for (const actor of valid) {
+  // ★시간 분산 큐: 전체 방문을 spreadHours 시간에 걸쳐 고르게 분산(투데이·댓글 폭증 방지)
+  const totalCombos = visitPlan.length;
+  const spreadGapMs = spreadHours > 0 && totalCombos > 1 ? (spreadHours * 3600 * 1000) / totalCombos : 0;
+  if (spreadGapMs > 0) log(`[품앗이] ⏰ 시간 분산: 총 ${totalCombos}회 방문을 약 ${spreadHours}시간에 걸쳐(방문 간 평균 ${Math.round(spreadGapMs/60000)}분) 진행`);
+  log(`[품앗이] 순환 매칭 완료 — 이번엔 총 ${totalCombos}회 방문 예정(받을 수·쿨다운 반영)`);
+  let comboIdx = 0;
+
+  for (const { actor, target } of visitPlan) {
     if (stopSignal?.()) { log("[품앗이] 중단 신호 수신"); break; }
-    // actor(작성자) 세션으로, 나머지 계정(대상) 글에 공감·댓글
-    const targets = valid.filter(t => t.accountId !== actor.accountId);
-    for (const target of targets) {
-      if (stopSignal?.()) break;
-      const received = receivedVisits.get(target.accountId) || 0;
-      const receiveLimit = Math.max(1, target.receiveLimit || 3);
-      if (received >= receiveLimit) {
-        log(`[품앗이] ${target.blogId} — 받을 수 ${receiveLimit}명 도달, 건너뜀`);
-        continue;
-      }
-      log(`[품앗이] ${actor.blogId} → ${target.blogId} 글 ${target.posts}개에 ${doLike ? "공감" : ""}${doLike && doComment ? "+" : ""}${doComment ? "댓글" : ""}`);
-      receivedVisits.set(target.accountId, received + 1); // 이 actor가 대상에 방문 시도한 순간 1명으로 계산
-      try {
-        await engageBlogs({
-          accountId: actor.accountId,
-          targets: [{ keyword: "품앗이", blogId: target.blogId }],
-          comment, doLike, doComment,
-          periodDays: 3650,               // 품앗이는 기간 제한 없이(오래된 글도 대상)
-          postsPerBlog: Math.max(1, target.posts),
-          delayMin, delayMax,
-          dailyLimit: 999999,
-          skipDone: false,                // 서로 계속 달 수 있게(중복방지 안함)
-          commentRate: 100, likeRate: 100,
-          aiComment, commentTone, geminiKey,
-          onLog: (m) => log(m),
-          onResult: async (r) => { if (r.status === "success") done++; else if (r.status === "fail") fail++; await onResult?.({ ...r, actor: actor.blogId }); onProgress?.(done, fail); },
-          stopSignal,
-        });
-      } catch (e: any) { fail++; log(`[품앗이] ${actor.blogId}→${target.blogId} 오류: ${e.message}`); onProgress?.(done, fail); }
+    log(`[품앗이] ${actor.blogId} → ${target.blogId} 글 ${target.posts}개에 ${doLike ? "공감" : ""}${doLike && doComment ? "+" : ""}${doComment ? "댓글" : ""}`);
+    pairs[pairKey(actor.accountId, target.accountId)] = Date.now(); // 조합 방문시각 기록(쿨다운·순환용)
+    savePumasiPairs(pairs);
+    appendPumasiRun(target.blogId, actor.blogId);                   // 효과 리포트용 실행 로그
+    try {
+      await engageBlogs({
+        accountId: actor.accountId,
+        targets: [{ keyword: "품앗이", blogId: target.blogId }],
+        comment, doLike, doComment,
+        periodDays: 3650,               // 품앗이는 기간 제한 없이(오래된 글도 대상)
+        postsPerBlog: Math.max(1, target.posts),
+        delayMin, delayMax,
+        dailyLimit: 999999,
+        skipDone: false,                // 서로 계속 달 수 있게(중복방지 안함)
+        commentRate: 100, likeRate: 100,
+        aiComment, commentTone, geminiKey, readRelated,
+        onLog: (m) => log(m),
+        onResult: async (r) => { if (r.status === "success") done++; else if (r.status === "fail") fail++; await onResult?.({ ...r, actor: actor.blogId }); onProgress?.(done, fail); },
+        stopSignal,
+      });
+    } catch (e: any) { fail++; log(`[품앗이] ${actor.blogId}→${target.blogId} 오류: ${e.message}`); onProgress?.(done, fail); }
+
+    // ★시간 분산: 다음 방문까지 계산된 간격만큼 대기(±30% 편차). 마지막 방문 뒤엔 대기 안 함.
+    comboIdx++;
+    if (spreadGapMs > 0 && comboIdx < totalCombos && !stopSignal?.()) {
+      const wait = Math.round(spreadGapMs * (0.7 + Math.random() * 0.6));
+      log(`[품앗이] ⏰ 다음 방문까지 ${Math.round(wait/60000)}분 ${Math.round((wait%60000)/1000)}초 대기(시간 분산)...`);
+      const until = Date.now() + wait;
+      while (Date.now() < until) { if (stopSignal?.()) break; await new Promise(r => setTimeout(r, Math.min(5000, until - Date.now()))); }
     }
   }
   log(`[품앗이] 완료 — 성공 ${done} / 실패 ${fail}`);
@@ -2476,6 +2589,7 @@ export async function engageBlogs(params: {
   aiComment?: boolean;    // ★AI 자동 댓글: 글 내용을 읽고 Gemini로 매번 다른 댓글 생성
   commentTone?: string;   // AI 댓글 말투(담백/다정/짧게)
   geminiKey?: string;     // 사용자 Gemini API 키
+  readRelated?: boolean;  // ★관련 글 1편 더 읽기: 댓글 뒤 같은 블로그 다른 글 1편 정독(공감·댓글 없음)
   onLog?: (msg: string) => void;
   onResult?: (r: EngageResult) => Promise<void>;
   onProgress?: (done: number, fail: number) => void;
@@ -2485,7 +2599,7 @@ export async function engageBlogs(params: {
     accountId, targets, comment, doLike, doComment,
     periodDays, postsPerBlog, delayMin, delayMax,
     dailyLimit, skipDone, commentRate = 100, likeRate = 100,
-    aiComment = false, commentTone = "다정", geminiKey = "", onLog, onResult, onProgress, stopSignal,
+    aiComment = false, commentTone = "다정", geminiKey = "", readRelated = true, onLog, onResult, onProgress, stopSignal,
   } = params;
   const log = onLog || console.log;
 
@@ -2556,8 +2670,12 @@ export async function engageBlogs(params: {
         log(`[공감·댓글] ${blogId} 방문 중...`);
 
         // 검증된 PostTitleListAsync 기반 목록만 사용 — target blogId 소유 글 외 링크가 섞이지 않는다.
-        const postList = await fetchNaverPostList({ blogId, cookies, maxCount: Math.max(1, postsPerBlog), log });
-        const filtered = postList.posts.filter(post => post.dateMs === 0 || post.dateMs >= cutoff).slice(0, Math.max(1, postsPerBlog));
+        // 관련 글 읽기용으로 대상 글보다 3편 더 가져와 여분 풀 확보
+        const postList = await fetchNaverPostList({ blogId, cookies, maxCount: Math.max(1, postsPerBlog) + 3, log });
+        const periodOk = postList.posts.filter(post => post.dateMs === 0 || post.dateMs >= cutoff);
+        const filtered = periodOk.slice(0, Math.max(1, postsPerBlog));
+        // 댓글 안 다는 여분 글(관련 글 1편 더 읽기용): 대상 글 이후의 글들
+        const extraPool = periodOk.slice(filtered.length);
 
         if (filtered.length === 0) {
           log(`[공감·댓글] ${blogId} — 기간 내 글 없음, 스킵`);
@@ -2578,18 +2696,6 @@ export async function engageBlogs(params: {
         await page.goto(targetPost.url, { waitUntil: "domcontentloaded", timeout: 20000 });
         await page.waitForTimeout(2000);
 
-        // 글 읽는 척 스크롤 (3~8초)
-        const readScrolls = 3 + Math.floor(Math.random() * 4);
-        for (let s = 0; s < readScrolls; s++) {
-          await page.mouse.wheel(0, 150 + Math.random() * 250);
-          await page.waitForTimeout(humanDelay(0.5, 2));
-        }
-        // 가끔 위로 다시 스크롤 (다시 읽는 척, 20% 확률)
-        if (Math.random() < 0.2) {
-          await page.mouse.wheel(0, -(200 + Math.random() * 300));
-          await page.waitForTimeout(humanDelay(0.5, 1.5));
-        }
-
         // iframe 처리 (네이버 블로그는 mainFrame 안에 있음)
         const getFrame = () => {
           const frames = page.frames();
@@ -2604,6 +2710,9 @@ export async function engageBlogs(params: {
           if (frame) break;
         }
         const ctx = frame ?? page as any;
+
+        // ★체류시간 엔진: 글 분량 읽어 실제 독서처럼 스크롤·머무름(즉시 이탈 방지)
+        await readPostNaturally(page, ctx, log);
 
         // mainFrame은 높이 800px인 iframe 안에서 자체 문서를 스크롤한다.
         // frame locator의 scrollIntoViewIfNeeded()는 네이버의 스크롤 동기화와 충돌해
@@ -2848,6 +2957,23 @@ export async function engageBlogs(params: {
           log(`[공감·댓글] ⏱ 다음 글까지 ${(postDelay / 1000).toFixed(1)}초 대기...`);
           await page.waitForTimeout(postDelay);
         }
+        }
+
+        // ★관련 글 1편 더 읽기: 댓글 단 뒤 같은 블로그의 다른 글 1편을 공감·댓글 없이 정독
+        //   (댓글 달자마자 나가는 패턴↓·블로그 내 콘텐츠 소비↑ → 자연스러운 방문 행동). 확률 60%, 최대 1편.
+        if (readRelated && extraPool.length > 0 && !stopSignal?.() && Math.random() < 0.6) {
+          try {
+            const relPost = extraPool[Math.floor(Math.random() * extraPool.length)];
+            await page.waitForTimeout(humanDelay(delayMin, delayMax));
+            log(`[관련글] 📖 ${blogId} — 다른 글 1편 더 읽기(공감·댓글 없음): ${relPost.url}`);
+            await page.goto(relPost.url, { waitUntil: "domcontentloaded", timeout: 20000 });
+            await page.waitForTimeout(1500);
+            const relFrame = page.frames().find((f: any) => f.name() === "mainFrame")
+              ?? page.frames().find((f: any) => f.url().includes("blog.naver.com")) ?? page;
+            await readPostNaturally(page, relFrame as any, log);
+          } catch (e: any) {
+            log(`[관련글] ⏭ 추가 읽기 건너뜀 (${(e.message || "").slice(0, 30)})`);
+          }
         }
 
       } catch (e: any) {
