@@ -1065,6 +1065,14 @@ Output format (JSON array only, no other text):
   const [pubTags, setPubTags] = useState("");
   const [publishing, setPublishing] = useState(false);
   const [neighborBusy, setNeighborBusy] = useState(false);  // 서이추·공감댓글 자동작업 중(NeighborPage에서 통보) → 절전방지에 반영
+  // ★자동화 탭(서이추·공감댓글·답방·품앗이·지수)은 한 번 열면 계속 살려둔다(언마운트 X).
+  //   다른 탭 갔다 와도 작업(SSE)·로그·데이터가 유지되도록 keep-alive. 방문한 탭만 마운트하고 CSS로 숨김.
+  const [visitedAutoTabs, setVisitedAutoTabs] = useState<Set<string>>(new Set());
+  useEffect(() => {
+    if (["neighbor", "engage", "reply", "pumasi", "blogscore"].includes(tab)) {
+      setVisitedAutoTabs(prev => prev.has(tab) ? prev : new Set(prev).add(tab));
+    }
+  }, [tab]);
   const [liveLog, setLiveLog] = useState("");
   const [liveLogCollapsed, setLiveLogCollapsed] = useState(false);
   const [fullLog, setFullLog] = useState<string|null>(null);
@@ -6236,21 +6244,31 @@ POST3: (제목)|(이유)
               </div>
             )}
 
-            {tab==="neighbor"&&(
-              <NeighborPage theme={theme as "dark"|"light"} userId={user.id} plan={user.plan} singleTab initialNeighborUsed={neighborUsed} onBusyChange={setNeighborBusy} />
+            {/* ★자동화 탭 keep-alive: 방문한 탭은 언마운트하지 않고 display로만 숨김 → 탭 이동해도 작업·데이터 유지 */}
+            {visitedAutoTabs.has("neighbor") && (
+              <div style={{ display: tab==="neighbor" ? "block" : "none" }}>
+                <NeighborPage theme={theme as "dark"|"light"} userId={user.id} plan={user.plan} singleTab initialNeighborUsed={neighborUsed} onBusyChange={setNeighborBusy} />
+              </div>
             )}
-
-            {tab==="engage"&&(
-              <NeighborPage theme={theme as "dark"|"light"} userId={user.id} plan={user.plan} initialTab="engage" singleTab onEngageUsageChange={setEngageUsed} initialEngageUsed={engageUsed} onBusyChange={setNeighborBusy} />
+            {visitedAutoTabs.has("engage") && (
+              <div style={{ display: tab==="engage" ? "block" : "none" }}>
+                <NeighborPage theme={theme as "dark"|"light"} userId={user.id} plan={user.plan} initialTab="engage" singleTab onEngageUsageChange={setEngageUsed} initialEngageUsed={engageUsed} onBusyChange={setNeighborBusy} />
+              </div>
             )}
-            {tab==="reply"&&(
-              <NeighborPage theme={theme as "dark"|"light"} userId={user.id} plan={user.plan} initialTab="reply" singleTab onBusyChange={setNeighborBusy} />
+            {visitedAutoTabs.has("reply") && (
+              <div style={{ display: tab==="reply" ? "block" : "none" }}>
+                <NeighborPage theme={theme as "dark"|"light"} userId={user.id} plan={user.plan} initialTab="reply" singleTab onBusyChange={setNeighborBusy} />
+              </div>
             )}
-            {tab==="pumasi"&&(
-              <NeighborPage theme={theme as "dark"|"light"} userId={user.id} plan={user.plan} initialTab="pumasi" singleTab onBusyChange={setNeighborBusy} />
+            {visitedAutoTabs.has("pumasi") && (
+              <div style={{ display: tab==="pumasi" ? "block" : "none" }}>
+                <NeighborPage theme={theme as "dark"|"light"} userId={user.id} plan={user.plan} initialTab="pumasi" singleTab onBusyChange={setNeighborBusy} />
+              </div>
             )}
-            {tab==="blogscore"&&(
-              <NeighborPage theme={theme as "dark"|"light"} userId={user.id} plan={user.plan} initialTab="score" singleTab onBusyChange={setNeighborBusy} />
+            {visitedAutoTabs.has("blogscore") && (
+              <div style={{ display: tab==="blogscore" ? "block" : "none" }}>
+                <NeighborPage theme={theme as "dark"|"light"} userId={user.id} plan={user.plan} initialTab="score" singleTab onBusyChange={setNeighborBusy} />
+              </div>
             )}
 
             {tab==="settings"&&(

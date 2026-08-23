@@ -618,6 +618,13 @@ const TABS = [
 export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: Props) {
   const [tab, setTab] = useState<"keyword"|"write"|"image"|"photo"|"publish"|"manage"|"accounts"|"rank"|"blogscore"|"calendar"|"neighbor"|"engage"|"reply"|"pumasi"|"neighbor_manage"|"engage_manage"|"reply_manage"|"blogscore_manage"|"insta_dm"|"insta_dm_manage"|"users"|"bug"|"stats"|"live"|"settings">("keyword");
   const [statsSubTab, setStatsSubTab] = useState<"mine"|"all">("mine");
+  // ★자동화 탭 keep-alive(대시보드와 동일): 방문한 탭은 언마운트 안 하고 숨김 → 작업·데이터 유지
+  const [visitedAutoTabs, setVisitedAutoTabs] = useState<Set<string>>(new Set());
+  useEffect(() => {
+    if (["neighbor", "engage", "reply", "pumasi", "blogscore"].includes(tab)) {
+      setVisitedAutoTabs(prev => prev.has(tab) ? prev : new Set(prev).add(tab));
+    }
+  }, [tab]);
   const [usersSubTab, setUsersSubTab] = useState<"list"|"referral">("list");
   // 버그 신고
   const [bugReports, setBugReports] = useState<PublyBugReport[]>([]);
@@ -4533,29 +4540,31 @@ POST3: (제목)|(이유)
               </div>
             )}
 
-            {/* ───── 🤝 서이추 ───── */}
-            {tab === "neighbor" && (
-              <NeighborPage theme={theme} plan="admin" singleTab />
+            {/* ───── 자동화 탭 keep-alive: 방문한 탭은 숨기기만(작업·데이터 유지) ───── */}
+            {visitedAutoTabs.has("neighbor") && (
+              <div style={{ display: tab === "neighbor" ? "block" : "none" }}>
+                <NeighborPage theme={theme} plan="admin" singleTab />
+              </div>
             )}
-
-            {/* ───── ❤️ 공감·댓글 ───── */}
-            {tab === "engage" && (
-              <NeighborPage theme={theme} plan="admin" initialTab="engage" singleTab />
+            {visitedAutoTabs.has("engage") && (
+              <div style={{ display: tab === "engage" ? "block" : "none" }}>
+                <NeighborPage theme={theme} plan="admin" initialTab="engage" singleTab />
+              </div>
             )}
-
-            {/* ───── 💬 답방 (관리자 본인 사용) ───── */}
-            {tab === "reply" && (
-              <NeighborPage theme={theme} plan="admin" initialTab="reply" singleTab />
+            {visitedAutoTabs.has("reply") && (
+              <div style={{ display: tab === "reply" ? "block" : "none" }}>
+                <NeighborPage theme={theme} plan="admin" initialTab="reply" singleTab />
+              </div>
             )}
-
-            {/* ───── 💞 품앗이 (관리자 본인 사용) ───── */}
-            {tab === "pumasi" && (
-              <NeighborPage theme={theme} plan="admin" initialTab="pumasi" singleTab />
+            {visitedAutoTabs.has("pumasi") && (
+              <div style={{ display: tab === "pumasi" ? "block" : "none" }}>
+                <NeighborPage theme={theme} plan="admin" initialTab="pumasi" singleTab />
+              </div>
             )}
-
-            {/* ───── 📈 블로그 지수 (관리자 본인 사용) ───── */}
-            {tab === "blogscore" && (
-              <NeighborPage theme={theme} plan="admin" initialTab="score" singleTab />
+            {visitedAutoTabs.has("blogscore") && (
+              <div style={{ display: tab === "blogscore" ? "block" : "none" }}>
+                <NeighborPage theme={theme} plan="admin" initialTab="score" singleTab />
+              </div>
             )}
 
             {/* ───── 📋 서이추 관리 ───── */}
