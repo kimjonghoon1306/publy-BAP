@@ -421,7 +421,7 @@ app.post("/api/reply", async (req, res) => {
 
 /* ── 품앗이: 내 계정들끼리 서로 공감·댓글 (SSE) ── */
 app.post("/api/pumasi", async (req, res) => {
-  const { userId, accounts, comment, doLike, doComment, aiComment, commentTone, geminiKey, delayMin, delayMax, readRelated, spreadHours, jobId } = req.body as Record<string, any>;
+  const { userId, accounts, comment, doLike, doComment, aiComment, commentTone, geminiKey, delayMin, delayMax, readRelated, readRelatedMode, spreadHours, jobId } = req.body as Record<string, any>;
   if (!Array.isArray(accounts) || accounts.length < 2)
     return res.status(400).json({ error: "품앗이는 계정 2개 이상 필요" });
   sseSetup(res);
@@ -440,10 +440,11 @@ app.post("/api/pumasi", async (req, res) => {
       delayMin: parseFloat(String(delayMin ?? "8")),
       delayMax: parseFloat(String(delayMax ?? "15")),
       readRelated: readRelated !== false && readRelated !== "false",
+      readRelatedMode: readRelatedMode === "always" ? "always" : "random",
       spreadHours: Math.max(0, parseFloat(String(spreadHours ?? "0")) || 0),
       onLog: (msg) => sseSend(res, { type: "log", msg }),
       onResult: async (r) => { sseSend(res, { type: "result", ...r }); if (userId && r.status === "success") await incrementPumasiQuota(userId); },
-      onProgress: (done, fail) => sseSend(res, { type: "progress", done, fail }),
+      onProgress: (done, fail, skip) => sseSend(res, { type: "progress", done, fail, skip }),
       stopSignal: () => stopMap.get(jid) === true,
     });
     sseSend(res, { type: "done" });

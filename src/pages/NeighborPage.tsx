@@ -353,10 +353,12 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
   const [pumDelayMin, setPumDelayMin] = useState(8);
   const [pumDelayMax, setPumDelayMax] = useState(15);
   const [pumReadRelated, setPumReadRelated] = useState(true);   // 관련 글 1편 더 읽기(체류·투데이↑)
+  const [pumReadRelatedMode, setPumReadRelatedMode] = useState<"always" | "random">("random");  // 매번=각 대상 글마다 / 가끔=확률 60%
   const [pumSpread, setPumSpread] = useState(0);                // 시간 분산(분, 0=즉시 연속). 서버엔 시간으로 변환해 전달
   const [pumWorking, setPumWorking] = useState(false);
   const [pumLogs, setPumLogs] = useState<string[]>([]);
   const [pumDone, setPumDone] = useState(0);
+  const [pumSkip, setPumSkip] = useState(0);
   const [pumFail, setPumFail] = useState(0);
   const [pumReport, setPumReport] = useState<{ blogId: string; days: { date: string; visitors: number; pumasiVisits: number }[]; totalReceived7d: number; avgWithPumasi: number|null; avgWithoutPumasi: number|null } | null>(null);
   const [pumReportBlog, setPumReportBlog] = useState<string>("");
@@ -834,21 +836,22 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
     if (pumDoComment && pumCommentMode === "ai" && !localStorage.getItem("publy_gemini_key")) {
       if (!confirm("AI 자동 댓글은 Gemini(무료) 키가 필요해요. 키가 없으면 댓글이 건너뛰어져요. 그래도 시작할까요?")) return;
     }
-    setPumLogs([]); setPumDone(0); setPumFail(0); setPumWorking(true);
+    setPumLogs([]); setPumDone(0); setPumSkip(0); setPumFail(0); setPumWorking(true);
     pumJobIdRef.current = Date.now().toString();
     const comment = pumCommentMode === "single" ? pumComment
       : pumCommentMode === "multi" ? pumMultiComments.split("\n").filter(l => l.trim()).join("|||") : "";
     const geminiKey = pumCommentMode === "ai" ? (localStorage.getItem("publy_gemini_key") || "") : "";
-    const maxReceivers = Math.max(1, connected.length - 1);
-    const accs = connected.map(a => ({ accountId: a.accountId, blogId: a.blogId, posts: Math.min(pumasiPostsLimit, pumPostsByAcc[a.accountId] || 3), receiveLimit: Math.min(maxReceivers, Math.max(1, pumReceiveByAcc[a.accountId] || 3)) }));
+    // ★받을 수 상한 = 등급 기준(무료2·베3·프5·무제한999). 연결 계정 수가 적으면 봇·서버가 자연스럽게 실제 방문 수로 제한(초과 설정해도 손해 없음).
+    const maxReceivers = isUnlimitedPlan ? 999 : pumasiAccountLimit;
+    const accs = connected.map(a => ({ accountId: a.accountId, blogId: a.blogId, posts: Math.min(isUnlimitedPlan ? 999 : pumasiPostsLimit, pumPostsByAcc[a.accountId] || 3), receiveLimit: Math.min(maxReceivers, Math.max(1, pumReceiveByAcc[a.accountId] || 3)) }));
     addPumLog(`🤝 품앗이 시작 — 계정 ${accs.length}개 (${accs.map(a => `${a.blogId}:글${a.posts}·받기${a.receiveLimit}명`).join(", ")})`);
-    const body = JSON.stringify({ accounts: accs, comment, doLike: pumDoLike, doComment: pumDoComment, aiComment: pumCommentMode === "ai", commentTone: pumTone, geminiKey, delayMin: pumDelayMin, delayMax: pumDelayMax, readRelated: pumReadRelated, spreadHours: pumSpread / 60, jobId: pumJobIdRef.current, ...(userId ? { userId } : {}) });
+    const body = JSON.stringify({ accounts: accs, comment, doLike: pumDoLike, doComment: pumDoComment, aiComment: pumCommentMode === "ai", commentTone: pumTone, geminiKey, delayMin: pumDelayMin, delayMax: pumDelayMax, readRelated: pumReadRelated, readRelatedMode: pumReadRelatedMode, spreadHours: pumSpread / 60, jobId: pumJobIdRef.current, ...(userId ? { userId } : {}) });
     const es = new BotEventStream(`${BOT}/api/pumasi`, { method: "POST", headers: { "Content-Type": "application/json" }, body }); pumEsRef.current = es;
     es.onmessage = e => {
       const d = JSON.parse(e.data);
       if (d.type === "log") addPumLog(d.msg);
       if (d.type === "result" && userId) { getPumasiDailyUsage(userId).then(setPumUsed); }
-      if (d.type === "progress") { setPumDone(d.done); setPumFail(d.fail); }
+      if (d.type === "progress") { setPumDone(d.done); setPumFail(d.fail); setPumSkip(d.skip ?? 0); }
       if (d.type === "done") { addPumLog("🎉 품앗이 완료!"); setPumWorking(false); es.close(); }
       if (d.type === "error") { addPumLog(`❌ 오류: ${d.msg}`); setPumWorking(false); es.close(); }
     };
@@ -2090,6 +2093,44 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
             </div>
             {overAccountLimit && <div style={{ fontSize: 12, color: "var(--danger)", fontWeight: 700, padding: "2px 4px" }}>⚠️ 등록 계정이 등급 한도({pumasiAccountLimit}개)를 넘었어요. 초과분은 품앗이에서 제외돼요. 더 많이 쓰려면 상위 등급이나 추가 결제가 필요해요.</div>}
 
+            {/* ★등급별 한도표 — 내가 몇 개까지 쓸 수 있는지 한눈에(내 등급 행 강조). 회원·관리자 공용 */}
+            <div className="card" style={{ padding: "14px 16px" }}>
+              <div style={{ fontSize: 13, fontWeight: 800, color: "var(--text)", marginBottom: 3 }}>📋 등급별 품앗이 한도</div>
+              <div style={{ fontSize: 11, color: "var(--text3)", marginBottom: 10, lineHeight: 1.5 }}>내 등급에서 <b>연결 계정 수 · 계정당 대상 글 · 받을 수</b>를 얼마나 쓸 수 있는지 보여줘요.</div>
+              {(() => {
+                const cols = { display: "grid", gridTemplateColumns: "1.1fr 1fr 1fr 1fr", alignItems: "center", gap: 4 } as const;
+                const rows = [
+                  { key: "free", name: "무료", acc: "2개", posts: "3개", recv: "2명" },
+                  { key: "basic", name: "베이직", acc: "3개", posts: "5개", recv: "3명" },
+                  { key: "pro", name: "프로", acc: "5개", posts: "10개", recv: "5명" },
+                  { key: "unlimited", name: "무제한", acc: "∞", posts: "∞", recv: "∞" },
+                ];
+                const myKey = plan === "admin" ? "unlimited" : plan;
+                return (<>
+                  <div style={{ ...cols, padding: "0 8px 6px", fontSize: 10.5, color: "var(--text3)", fontWeight: 700 }}>
+                    <span>등급</span>
+                    <span style={{ textAlign: "center" }}>연결 계정</span>
+                    <span style={{ textAlign: "center" }}>대상 글</span>
+                    <span style={{ textAlign: "center" }}>받을 수</span>
+                  </div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+                    {rows.map(r => {
+                      const mine = r.key === myKey;
+                      return (
+                        <div key={r.key} style={{ ...cols, padding: "9px 8px", borderRadius: 9, background: mine ? "rgba(236,72,153,.12)" : "var(--bg)", border: `1.5px solid ${mine ? "#ec4899" : "var(--border)"}`, fontSize: 12.5 }}>
+                          <span style={{ fontWeight: 800, color: mine ? "#ec4899" : "var(--text2)" }}>{r.name}{mine && <span style={{ fontSize: 9.5, marginLeft: 4, color: "#ec4899", fontWeight: 700 }}>내 등급</span>}</span>
+                          <span style={{ textAlign: "center", fontWeight: mine ? 800 : 600, color: mine ? "var(--text)" : "var(--text2)" }}>{r.acc}</span>
+                          <span style={{ textAlign: "center", fontWeight: mine ? 800 : 600, color: mine ? "var(--text)" : "var(--text2)" }}>{r.posts}</span>
+                          <span style={{ textAlign: "center", fontWeight: mine ? 800 : 600, color: mine ? "var(--text)" : "var(--text2)" }}>{r.recv}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <div style={{ fontSize: 10.5, color: "var(--text3)", lineHeight: 1.5, marginTop: 9 }}>💡 <b>받을 수</b>는 내 글에 몇 개의 다른 계정이 방문할지, <b>대상 글</b>은 각 계정이 상대 글 몇 개를 돌지예요(곱하기 관계). 하루 총 건수 제한은 없어요 — 딜레이로 자연 조절돼요.</div>
+                </>);
+              })()}
+            </div>
+
             <AccountCard accounts={accounts} onLogin={handleLogin} onAdd={handleAddAccount} onRemove={handleRemoveAccount} onChange={handleAccountChange} onConnectAll={handleConnectAll} connectingAll={connectingAll} />
 
             {/* 계정별 대상 글 수 + 받을 계정 수 */}
@@ -2098,7 +2139,11 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
                 <div className="card-title" style={{ marginBottom: 6, fontSize: 15 }}>📝 계정별 글 수 · 받을 수</div>
                 <div style={{ fontSize: 11.5, color: "var(--text2)", marginBottom: 12, lineHeight: 1.5, fontWeight: 500 }}>💡 <b>대상 글</b>은 최근 몇 개 글을 돌지, <b>받을 수</b>는 최대 몇 개의 다른 계정에게 방문·공감·댓글을 받을지 정해요. 기본은 3명이에요.</div>
                 {(() => {
-                  const maxReceive = Math.max(1, connected.length - 1);  // 나를 뺀 다른 계정 수만큼만 받을 수 있음
+                  // ★받을 수 상한 = 등급 기준(무료2·베3·프5·무제한999). 대상 글과 같은 방식(정답 모델).
+                  const maxReceive = isUnlimitedPlan ? 999 : pumasiAccountLimit;
+                  // 실제 방문 가능한 계정 수(나 제외) — 이보다 크게 설정해도 봇이 자연스럽게 이 수로 제한(손해 없음)
+                  const physMax = Math.max(1, connected.length - 1);
+                  const anyOverPhys = connected.some(a => Math.min(maxReceive, pumReceiveByAcc[a.accountId] ?? Math.min(3, maxReceive)) > physMax);
                   const colStyle = { display: "grid", gridTemplateColumns: "1fr 76px 76px", alignItems: "center", gap: 10 } as const;
                   return (<>
                     {/* 헤더: 입력칸과 같은 grid로 맞춰 칸 위에 정확히 정렬 */}
@@ -2112,15 +2157,14 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
                         <div key={a.accountId} style={{ ...colStyle, padding: "8px 11px", borderRadius: 9, background: "var(--bg)", border: "1px solid var(--border)" }}>
                           <span style={{ minWidth: 0, fontSize: 13, fontWeight: 700, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>🔗 {a.blogId || a.accountId}</span>
                           <input className="inp" type="number" min={1} max={isUnlimitedPlan ? 999 : pumasiPostsLimit} value={pumPostsByAcc[a.accountId] ?? 3} onChange={e => { const v = Math.max(1, Math.min(isUnlimitedPlan ? 999 : pumasiPostsLimit, parseInt(e.target.value) || 1)); setPumPostsByAcc(prev => ({ ...prev, [a.accountId]: v })); }} style={{ width: "100%", fontSize: 13, padding: "8px 6px", textAlign: "center" }} />
-                          <input className="inp" type="number" min={1} max={maxReceive} disabled={maxReceive <= 1} value={Math.min(maxReceive, pumReceiveByAcc[a.accountId] ?? Math.min(3, maxReceive))} onChange={e => { const v = Math.max(1, Math.min(maxReceive, parseInt(e.target.value) || 1)); setPumReceiveByAcc(prev => ({ ...prev, [a.accountId]: v })); }} style={{ width: "100%", fontSize: 13, padding: "8px 6px", textAlign: "center", opacity: maxReceive <= 1 ? 0.55 : 1, cursor: maxReceive <= 1 ? "not-allowed" : "auto" }} />
+                          <input className="inp" type="number" min={1} max={maxReceive} value={Math.min(maxReceive, pumReceiveByAcc[a.accountId] ?? Math.min(3, maxReceive))} onChange={e => { const v = Math.max(1, Math.min(maxReceive, parseInt(e.target.value) || 1)); setPumReceiveByAcc(prev => ({ ...prev, [a.accountId]: v })); }} style={{ width: "100%", fontSize: 13, padding: "8px 6px", textAlign: "center" }} />
                         </div>
                       ))}
                     </div>
-                    {maxReceive <= 1 && (
-                      <div style={{ fontSize: 11, color: "var(--text3)", marginTop: 9, lineHeight: 1.5, background: "var(--card2)", borderRadius: 8, padding: "8px 11px" }}>
-                        ℹ️ 지금은 계정이 <b>2개</b>라 서로 1명씩만 주고받을 수 있어 <b>받을 수가 1로 고정</b>돼요. 계정을 <b>더 추가</b>하면(3개 이상) 받을 수를 늘릴 수 있어요.
-                      </div>
-                    )}
+                    <div style={{ fontSize: 11, color: "var(--text3)", marginTop: 9, lineHeight: 1.5, background: "var(--card2)", borderRadius: 8, padding: "8px 11px" }}>
+                      ℹ️ <b>받을 수</b>는 내 등급 한도(<b style={{ color: "#ec4899" }}>{isUnlimitedPlan ? "무제한" : `${maxReceive}명`}</b>)까지 설정할 수 있어요.
+                      {anyOverPhys && <> 지금은 연결된 계정이 <b>{connected.length}개</b>라 실제로는 최대 <b>{physMax}명</b>까지 방문해요(더 설정해도 손해 없어요). 계정을 더 연결하면 그만큼 늘어나요.</>}
+                    </div>
                   </>);
                 })()}
               </div>
@@ -2182,16 +2226,35 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
                   </div>
                 </div>
 
-                {/* 관련 글 1편 더 읽기 토글 */}
+                {/* 관련 글 1편 더 읽기 토글 + 매번/가끔 모드 */}
                 <div style={{ padding: "8px 0", borderTop: "1px dashed var(--border)" }}>
                   <Toggle val={pumReadRelated} set={setPumReadRelated} label="📖 관련 글 1편 더 읽기" />
-                  <div style={{ fontSize: 11, color: "var(--text3)", lineHeight: 1.5, marginTop: 4, paddingLeft: 2 }}>댓글을 단 뒤 <b>같은 블로그의 다른 글 1편</b>을 공감·댓글 없이 더 읽어요. 댓글 달자마자 나가는 패턴을 줄여 <b style={{color:"#ec4899"}}>진짜 방문자처럼</b> 보이게 해요.</div>
+                  <div style={{ fontSize: 11, color: "var(--text3)", lineHeight: 1.5, marginTop: 4, paddingLeft: 2 }}>각 <b>대상 글에 공감·댓글을 단 직후</b> 같은 블로그의 <b>다른 글 1편</b>을 공감·댓글 없이 더 읽어요(1사이클 = 댓글+공감+관련글). 댓글 달자마자 나가는 패턴을 줄여 <b style={{color:"#ec4899"}}>진짜 방문자처럼</b> 보이게 해요.</div>
+                  {pumReadRelated && (
+                    <div style={{ marginTop: 9, paddingLeft: 2 }}>
+                      <div style={{ fontSize: 11, color: "var(--text2)", fontWeight: 700, marginBottom: 6 }}>언제 읽을까요?</div>
+                      <div style={{ display: "flex", gap: 8 }}>
+                        {([["always", "매번", "각 대상 글마다 항상 1편"], ["random", "가끔", "확률 60%로 가끔만"]] as const).map(([m, lbl, desc]) => {
+                          const on = pumReadRelatedMode === m;
+                          return (
+                            <button key={m} onClick={() => setPumReadRelatedMode(m)} style={{ flex: 1, padding: "9px 8px", borderRadius: 10, border: `2px solid ${on ? "#8b5cf6" : "var(--border)"}`, background: on ? "rgba(139,92,246,.12)" : "transparent", color: on ? "#8b5cf6" : "var(--text2)", cursor: "pointer", fontFamily: "inherit", textAlign: "center" }}>
+                              <div style={{ fontSize: 12.5, fontWeight: 800 }}>{lbl}</div>
+                              <div style={{ fontSize: 10, color: on ? "#8b5cf6" : "var(--text3)", marginTop: 2, fontWeight: 500 }}>{desc}</div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                      <div style={{ fontSize: 10.5, color: "var(--text3)", lineHeight: 1.5, marginTop: 6 }}>💡 <b>매번</b>은 체류·투데이가 더 많이 늘지만 시간이 더 걸려요. 여분 글이 부족하면 그때만 건너뛰어요.</div>
+                    </div>
+                  )}
                 </div>
 
                 {/* 시간 분산 큐 (분 단위) */}
                 {(() => {
-                  const maxReceive = Math.max(1, connected.length - 1);
-                  const totalVisits = connected.reduce((s, a) => s + Math.min(maxReceive, pumReceiveByAcc[a.accountId] ?? Math.min(3, maxReceive)), 0) || 1;
+                  // 실제 방문 수 추정: 설정한 받을 수는 등급 한도까지 가능하지만, 실제 방문은 연결 계정 수(나 제외)로 제한됨
+                  const physMax = Math.max(1, connected.length - 1);
+                  const gradeMax = isUnlimitedPlan ? 999 : pumasiAccountLimit;
+                  const totalVisits = connected.reduce((s, a) => s + Math.min(physMax, pumReceiveByAcc[a.accountId] ?? Math.min(3, gradeMax)), 0) || 1;
                   const gapMin = pumSpread > 0 ? pumSpread / totalVisits : 0;   // 방문 사이 평균 간격(분)
                   const fmtGap = gapMin >= 1 ? `약 ${Math.round(gapMin)}분` : `약 ${Math.round(gapMin * 60)}초`;
                   const fmtTotal = pumSpread >= 60 ? `${Math.floor(pumSpread/60)}시간 ${pumSpread%60 ? `${pumSpread%60}분` : ""}`.trim() : `${pumSpread}분`;
@@ -2244,16 +2307,21 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
             </div>
             <div className="card" style={{ padding: "20px 24px" }}>
               <div style={{ fontSize: 13, color: "var(--text3)", fontWeight: 700, marginBottom: 14 }}>🤝 품앗이 결과</div>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-                <div style={{ textAlign: "center", padding: "14px", borderRadius: 12, background: "var(--bg)", border: "1px solid var(--border)" }}>
-                  <div style={{ fontSize: 30, fontWeight: 900, color: "var(--success)" }}>{pumDone}</div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10 }}>
+                <div style={{ textAlign: "center", padding: "14px 8px", borderRadius: 12, background: "var(--bg)", border: "1px solid var(--border)" }}>
+                  <div style={{ fontSize: 28, fontWeight: 900, color: "var(--success)" }}>{pumDone}</div>
                   <div style={{ fontSize: 12, color: "var(--text3)", marginTop: 4 }}>완료</div>
                 </div>
-                <div style={{ textAlign: "center", padding: "14px", borderRadius: 12, background: "var(--bg)", border: "1px solid var(--border)" }}>
-                  <div style={{ fontSize: 30, fontWeight: 900, color: "var(--danger)" }}>{pumFail}</div>
+                <div style={{ textAlign: "center", padding: "14px 8px", borderRadius: 12, background: "var(--bg)", border: "1px solid var(--border)" }}>
+                  <div style={{ fontSize: 28, fontWeight: 900, color: "#f59e0b" }}>{pumSkip}</div>
+                  <div style={{ fontSize: 12, color: "var(--text3)", marginTop: 4 }}>스킵</div>
+                </div>
+                <div style={{ textAlign: "center", padding: "14px 8px", borderRadius: 12, background: "var(--bg)", border: "1px solid var(--border)" }}>
+                  <div style={{ fontSize: 28, fontWeight: 900, color: "var(--danger)" }}>{pumFail}</div>
                   <div style={{ fontSize: 12, color: "var(--text3)", marginTop: 4 }}>실패</div>
                 </div>
               </div>
+              <div style={{ fontSize: 11, color: "var(--text3)", marginTop: 9, lineHeight: 1.5 }}>💡 <b>스킵</b>은 실패가 아니에요 — 이미 처리했거나 공감·댓글이 막힌 글, 본문 로딩이 늦은 글을 자연스럽게 건너뛴 거예요.</div>
             </div>
 
             {/* ★품앗이 효과 리포트 */}

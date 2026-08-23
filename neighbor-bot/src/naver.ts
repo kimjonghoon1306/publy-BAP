@@ -2515,15 +2515,16 @@ export async function pumasiEngage(params: {
   delayMin: number;
   delayMax: number;
   readRelated?: boolean;   // ★관련 글 1편 더 읽기(체류·투데이↑)
+  readRelatedMode?: "always" | "random";  // ★매번=각 대상 글마다 항상 / 가끔=확률 60%
   spreadHours?: number;    // ★시간 분산 큐: 방문을 N시간에 걸쳐 분산(0=즉시 연속)
   onLog?: (msg: string) => void;
   onResult?: (r: EngageResult & { actor?: string }) => Promise<void>;
-  onProgress?: (done: number, fail: number) => void;
+  onProgress?: (done: number, fail: number, skip?: number) => void;
   stopSignal?: () => boolean;
 }): Promise<void> {
-  const { accounts, comment, doLike, doComment, aiComment, commentTone, geminiKey, delayMin, delayMax, readRelated = true, spreadHours = 0, onLog, onResult, onProgress, stopSignal } = params;
+  const { accounts, comment, doLike, doComment, aiComment, commentTone, geminiKey, delayMin, delayMax, readRelated = true, readRelatedMode = "random", spreadHours = 0, onLog, onResult, onProgress, stopSignal } = params;
   const log = onLog || console.log;
-  let done = 0, fail = 0;
+  let done = 0, fail = 0, skip = 0;
   const valid = accounts.filter(a => a.accountId && a.blogId && naverSessionExists(a.accountId));
   if (valid.length < 2) throw new Error("품앗이는 세션 연결된 계정이 2개 이상 필요해요");
   log(`[품앗이] 시작 — 계정 ${valid.length}개가 서로 글에 공감·댓글`);
@@ -2571,12 +2572,12 @@ export async function pumasiEngage(params: {
         dailyLimit: 999999,
         skipDone: false,                // 서로 계속 달 수 있게(중복방지 안함)
         commentRate: 100, likeRate: 100,
-        aiComment, commentTone, geminiKey, readRelated,
+        aiComment, commentTone, geminiKey, readRelated, readRelatedMode,
         onLog: (m) => log(m),
-        onResult: async (r) => { if (r.status === "success") done++; else if (r.status === "fail") fail++; await onResult?.({ ...r, actor: actor.blogId }); onProgress?.(done, fail); },
+        onResult: async (r) => { if (r.status === "success") done++; else if (r.status === "fail") fail++; else if (r.status === "skip") skip++; await onResult?.({ ...r, actor: actor.blogId }); onProgress?.(done, fail, skip); },
         stopSignal,
       });
-    } catch (e: any) { fail++; log(`[품앗이] ${actor.blogId}→${target.blogId} 오류: ${e.message}`); onProgress?.(done, fail); }
+    } catch (e: any) { fail++; log(`[품앗이] ${actor.blogId}→${target.blogId} 오류: ${e.message}`); onProgress?.(done, fail, skip); }
 
     // ★시간 분산: 다음 방문까지 계산된 간격만큼 대기(±30% 편차). 마지막 방문 뒤엔 대기 안 함.
     comboIdx++;
@@ -2587,7 +2588,7 @@ export async function pumasiEngage(params: {
       while (Date.now() < until) { if (stopSignal?.()) break; await new Promise(r => setTimeout(r, Math.min(5000, until - Date.now()))); }
     }
   }
-  log(`[품앗이] 완료 — 성공 ${done} / 실패 ${fail}`);
+  log(`[품앗이] 완료 — 성공 ${done} / 스킵 ${skip} / 실패 ${fail}`);
 }
 
 export async function engageBlogs(params: {
@@ -2607,7 +2608,8 @@ export async function engageBlogs(params: {
   aiComment?: boolean;    // ★AI 자동 댓글: 글 내용을 읽고 Gemini로 매번 다른 댓글 생성
   commentTone?: string;   // AI 댓글 말투(담백/다정/짧게)
   geminiKey?: string;     // 사용자 Gemini API 키
-  readRelated?: boolean;  // ★관련 글 1편 더 읽기: 댓글 뒤 같은 블로그 다른 글 1편 정독(공감·댓글 없음)
+  readRelated?: boolean;  // ★관련 글 1편 더 읽기: 각 대상 글 처리 직후 같은 블로그 다른 글 1편 정독(공감·댓글 없음)
+  readRelatedMode?: "always" | "random";  // ★매번=각 대상 글마다 항상 1편 / 가끔=확률 60%
   onLog?: (msg: string) => void;
   onResult?: (r: EngageResult) => Promise<void>;
   onProgress?: (done: number, fail: number) => void;
@@ -2619,7 +2621,7 @@ export async function engageBlogs(params: {
     dailyLimit, skipDone, commentRate = 100, likeRate = 100,
     // ★readRelated 기본 false: 일반 공감·댓글(여러 블로그 순회)은 관련글 더 읽기를 켜지 않음(시간 급증 방지).
     //   품앗이(pumasiEngage)만 명시적으로 true를 넘겨 켠다.
-    aiComment = false, commentTone = "다정", geminiKey = "", readRelated = false, onLog, onResult, onProgress, stopSignal,
+    aiComment = false, commentTone = "다정", geminiKey = "", readRelated = false, readRelatedMode = "random", onLog, onResult, onProgress, stopSignal,
   } = params;
   const log = onLog || console.log;
 
@@ -2690,12 +2692,13 @@ export async function engageBlogs(params: {
         log(`[공감·댓글] ${blogId} 방문 중...`);
 
         // 검증된 PostTitleListAsync 기반 목록만 사용 — target blogId 소유 글 외 링크가 섞이지 않는다.
-        // 관련 글 읽기용으로 대상 글보다 3편 더 가져와 여분 풀 확보
-        const postList = await fetchNaverPostList({ blogId, cookies, maxCount: Math.max(1, postsPerBlog) + 3, log });
+        // ★관련 글 읽기(매번 모드=각 대상 글마다 1편)용으로 대상 글의 2배+3편 가져와 여분 풀을 넉넉히 확보
+        const postList = await fetchNaverPostList({ blogId, cookies, maxCount: Math.max(1, postsPerBlog) * 2 + 3, log });
         const periodOk = postList.posts.filter(post => post.dateMs === 0 || post.dateMs >= cutoff);
         const filtered = periodOk.slice(0, Math.max(1, postsPerBlog));
         // 댓글 안 다는 여분 글(관련 글 1편 더 읽기용): 대상 글 이후의 글들
         const extraPool = periodOk.slice(filtered.length);
+        const relRead = new Set<string>();   // ★이미 관련글로 읽은 URL(사이클마다 다른 글 고르기 위한 중복 방지)
 
         if (filtered.length === 0) {
           log(`[공감·댓글] ${blogId} — 기간 내 글 없음, 스킵`);
@@ -2729,7 +2732,26 @@ export async function engageBlogs(params: {
           frame = getFrame();
           if (frame) break;
         }
-        const ctx = frame ?? page as any;
+        let ctx = frame ?? page as any;
+
+        // ★본문 로딩 확인(재시도): iframe이 덜 로딩되면 본문·공감·댓글 버튼을 못 잡아 글이 통째로 스킵된다.
+        //   본문이 비어 있으면 2.5초씩 최대 2번 더 기다렸다 frame 재취득 후 재확인(순간 로딩 지연 대응).
+        let bodyLen = (await extractPostText(ctx).catch(() => "")).length;
+        for (let rtry = 0; rtry < 2 && bodyLen < 10; rtry++) {
+          log(`[공감·댓글] ${blogId} 본문 로딩 대기 후 재확인 ${rtry + 1}/2...`);
+          await page.waitForTimeout(2500);
+          frame = getFrame();
+          ctx = frame ?? page as any;
+          bodyLen = (await extractPostText(ctx).catch(() => "")).length;
+        }
+        // 그래도 본문을 못 읽으면 이 글만 건너뛰고 다음 글로(그 글 하나 때문에 방문 전체가 막히는 것 방지).
+        if (bodyLen < 10) {
+          await onResult?.({ keyword, blogId, postUrl: targetPost.url, liked: false, commented: false, status: "skip", message: "본문을 못 읽음(로딩 지연) — 다음 글로" });
+          log(`[공감·댓글] ⏭ ${blogId} 본문 못 읽어 이 글 건너뜀`);
+          onProgress?.(done, fail);
+          if (postIndex < filtered.length - 1 && !stopSignal?.()) await page.waitForTimeout(humanDelay(delayMin, delayMax));
+          continue;
+        }
 
         // ★체류시간 엔진: 글 분량 읽어 실제 독서처럼 스크롤·머무름(즉시 이탈 방지)
         await readPostNaturally(page, ctx, log);
@@ -2972,18 +2994,16 @@ export async function engageBlogs(params: {
         }
 
         onProgress?.(done, fail);
-        if (postIndex < filtered.length - 1 && done < dailyLimit && !stopSignal?.()) {
-          const postDelay = humanDelay(delayMin, delayMax);
-          log(`[공감·댓글] ⏱ 다음 글까지 ${(postDelay / 1000).toFixed(1)}초 대기...`);
-          await page.waitForTimeout(postDelay);
-        }
-        }
 
-        // ★관련 글 1편 더 읽기: 댓글 단 뒤 같은 블로그의 다른 글 1편을 공감·댓글 없이 정독
-        //   (댓글 달자마자 나가는 패턴↓·블로그 내 콘텐츠 소비↑ → 자연스러운 방문 행동). 확률 60%, 최대 1편.
-        if (readRelated && extraPool.length > 0 && !stopSignal?.() && Math.random() < 0.6) {
+        // ★관련 글 1편 더 읽기(1사이클 = 이 대상 글 공감·댓글 + 같은 블로그 다른 글 1편 정독).
+        //   각 대상 글 처리 직후 실행 → 대상 글 3개면 관련글도 최대 3번(테리 정의). 관련글엔 공감·댓글 안 함.
+        //   매번=항상 1편 / 가끔=확률 60%. 이미 읽은 글은 빼고 골라 사이클마다 다른 글을 읽는다(여분 부족 시에만 스킵).
+        if (readRelated && extraPool.length > 0 && !stopSignal?.() && (readRelatedMode === "always" || Math.random() < 0.6)) {
+          const unread = extraPool.filter(p => !relRead.has(p.url));
+          const pool = unread.length ? unread : extraPool;
+          const relPost = pool[Math.floor(Math.random() * pool.length)];
+          relRead.add(relPost.url);
           try {
-            const relPost = extraPool[Math.floor(Math.random() * extraPool.length)];
             await page.waitForTimeout(humanDelay(delayMin, delayMax));
             log(`[관련글] 📖 ${blogId} — 다른 글 1편 더 읽기(공감·댓글 없음): ${relPost.url}`);
             await page.goto(relPost.url, { waitUntil: "domcontentloaded", timeout: 20000 });
@@ -2994,6 +3014,13 @@ export async function engageBlogs(params: {
           } catch (e: any) {
             log(`[관련글] ⏭ 추가 읽기 건너뜀 (${(e.message || "").slice(0, 30)})`);
           }
+        }
+
+        if (postIndex < filtered.length - 1 && done < dailyLimit && !stopSignal?.()) {
+          const postDelay = humanDelay(delayMin, delayMax);
+          log(`[공감·댓글] ⏱ 다음 글까지 ${(postDelay / 1000).toFixed(1)}초 대기...`);
+          await page.waitForTimeout(postDelay);
+        }
         }
 
       } catch (e: any) {
