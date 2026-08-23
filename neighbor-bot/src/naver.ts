@@ -1668,14 +1668,26 @@ async function generateAiComment(key: string, tone: string, postText: string, lo
   const models = ["gemini-2.0-flash", "gemini-2.5-flash", "gemini-1.5-flash"];
   for (const model of models) {
     try {
+      // ★2.5계열은 thinking 토큰을 먼저 소비 → maxOutputTokens가 작으면 실제 댓글이 잘려나옴.
+      //   그래서 thinking 끄고(thinkingBudget 0), 토큰도 넉넉히(800) 준다.
+      const generationConfig: any = { maxOutputTokens: 800, temperature: 1.0 };
+      if (model.startsWith("gemini-2.5")) generationConfig.thinkingConfig = { thinkingBudget: 0 };
       const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`, {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }], generationConfig: { maxOutputTokens: 200, temperature: 1.0 } }),
+        body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }], generationConfig }),
       });
       const d: any = await r.json();
-      if (!r.ok) { if (r.status === 404) continue; log(`[AI댓글] 생성 실패(${model}): ${d?.error?.message || r.status}`); return ""; }
-      const txt = d?.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
-      if (txt) return txt.replace(/^["'\s]+|["'\s]+$/g, "").split("\n")[0].slice(0, 120);
+      if (!r.ok) { if (r.status === 404 || r.status === 400) continue; log(`[AI댓글] 생성 실패(${model}): ${d?.error?.message || r.status}`); return ""; }
+      const cand = d?.candidates?.[0];
+      const raw = cand?.content?.parts?.[0]?.text?.trim();
+      const finish = cand?.finishReason;
+      // ★응답이 토큰 상한에 걸려 잘렸거나(MAX_TOKENS) 비어있으면 → 잘린 댓글을 등록하지 말고 다음 모델 재시도
+      if (!raw) { log(`[AI댓글] ${model} 빈 응답(${finish || "?"}) → 다음 모델 시도`); continue; }
+      if (finish === "MAX_TOKENS") { log(`[AI댓글] ${model} 응답이 잘림(MAX_TOKENS) → 다음 모델 시도`); continue; }
+      // 줄바꿈은 첫 줄만 자르지 말고 공백으로 합쳐 전체 문장을 살린다.
+      const cleaned = raw.replace(/^["'\s]+|["'\s]+$/g, "").replace(/\s*[\r\n]+\s*/g, " ").replace(/\s{2,}/g, " ").trim().slice(0, 120);
+      if (cleaned.length < 4) { log(`[AI댓글] ${model} 응답이 너무 짧음("${cleaned}") → 다음 모델 시도`); continue; }
+      return cleaned;
     } catch (e: any) { log(`[AI댓글] 오류(${model}): ${e.message}`); }
   }
   log("[AI댓글] 모든 모델 생성 실패");
@@ -2407,14 +2419,20 @@ async function generateAiReply(key: string, tone: string, commentText: string, l
   const prompt = `너는 네이버 블로그 주인이야. 내 글에 아래 댓글이 달렸어. 이 댓글에 ${toneGuide} 말투로 고마움을 담은 자연스러운 한국어 답글을 딱 1개만 써줘.\n규칙: 1문장, 35자 이내, 댓글 내용에 구체적으로 반응, 이모지 1개 정도, 광고·링크 금지, 따옴표 없이 답글만 출력.\n\n[받은 댓글]\n${commentText}`;
   for (const model of ["gemini-2.0-flash", "gemini-2.5-flash", "gemini-1.5-flash"]) {
     try {
+      // ★2.5계열 thinking 끄고 토큰 넉넉히 — 답글이 중간에 잘리는 것 방지
+      const generationConfig: any = { maxOutputTokens: 800, temperature: 1.0 };
+      if (model.startsWith("gemini-2.5")) generationConfig.thinkingConfig = { thinkingBudget: 0 };
       const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`, {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }], generationConfig: { maxOutputTokens: 150, temperature: 1.0 } }),
+        body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }], generationConfig }),
       });
       const d: any = await r.json();
-      if (!r.ok) { if (r.status === 404) continue; return ""; }
-      const txt = d?.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
-      if (txt) return txt.replace(/^["'\s]+|["'\s]+$/g, "").split("\n")[0].slice(0, 100);
+      if (!r.ok) { if (r.status === 404 || r.status === 400) continue; return ""; }
+      const cand = d?.candidates?.[0];
+      const raw = cand?.content?.parts?.[0]?.text?.trim();
+      if (!raw || cand?.finishReason === "MAX_TOKENS") { log(`[답방] ${model} 답글 잘림/빈응답 → 다음 모델`); continue; }
+      const cleaned = raw.replace(/^["'\s]+|["'\s]+$/g, "").replace(/\s*[\r\n]+\s*/g, " ").replace(/\s{2,}/g, " ").trim().slice(0, 100);
+      if (cleaned.length >= 3) return cleaned;
     } catch {}
   }
   return "";
@@ -2599,7 +2617,9 @@ export async function engageBlogs(params: {
     accountId, targets, comment, doLike, doComment,
     periodDays, postsPerBlog, delayMin, delayMax,
     dailyLimit, skipDone, commentRate = 100, likeRate = 100,
-    aiComment = false, commentTone = "다정", geminiKey = "", readRelated = true, onLog, onResult, onProgress, stopSignal,
+    // ★readRelated 기본 false: 일반 공감·댓글(여러 블로그 순회)은 관련글 더 읽기를 켜지 않음(시간 급증 방지).
+    //   품앗이(pumasiEngage)만 명시적으로 true를 넘겨 켠다.
+    aiComment = false, commentTone = "다정", geminiKey = "", readRelated = false, onLog, onResult, onProgress, stopSignal,
   } = params;
   const log = onLog || console.log;
 

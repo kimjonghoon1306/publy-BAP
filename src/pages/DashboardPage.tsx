@@ -3819,10 +3819,12 @@ POST3: (제목)|(이유)
                     <span className="nav-ico">{t.i}</span>{t.l}
                     {(t.k==="control"||t.k==="reply"||t.k==="blogscore"||t.k==="pumasi")&&<span className="nav-new">NEW</span>}
                     {t.k==="insta_dm"&&<span className="nav-soon-badge">곧 출시</span>}
-                    {t.k==="keyword"&&titles.length>0&&<span className="nav-badge">{titles.length}</span>}
-                    {t.k==="manage"&&history.length>0&&<span className="nav-badge">{history.length}</span>}
-                    {t.k==="neighbor"&&<span className="nav-badge">{neighborUsed}</span>}
-                    {t.k==="engage"&&<span className="nav-badge">{engageUsed}</span>}
+                    {t.k==="keyword"&&titles.length>0&&<span className="nav-badge" title="추출한 제목 수">{titles.length}</span>}
+                    {t.k==="manage"&&history.length>0&&<span className="nav-badge" title="발행 이력 수">{history.length}</span>}
+                    {/* ↓ 사용량 배지: '오늘 그 기능으로 작업한 횟수'. 0이면 헷갈리므로 숨김 + 툴팁으로 의미 표시 */}
+                    {t.k==="neighbor"&&neighborUsed>0&&<span className="nav-badge" title="오늘 보낸 서이추 수">{neighborUsed}</span>}
+                    {t.k==="engage"&&engageUsed>0&&<span className="nav-badge" title="오늘 남긴 공감·댓글 수">{engageUsed}</span>}
+                    {t.k==="reply"&&replyUsed>0&&<span className="nav-badge" title="오늘 남긴 답방 수">{replyUsed}</span>}
                   </button>
                 ))}
               </div>

@@ -151,6 +151,11 @@ const AccountCard = React.memo(({ accounts, onLogin, onAdd, onRemove, onChange, 
         </button>
       )}
     </div>
+    {onConnectAll && accounts.length >= 2 && (
+      <div style={{ fontSize: 11.5, color: "var(--text2)", lineHeight: 1.55, marginBottom: 14, padding: "9px 12px", borderRadius: 9, background: "var(--card2)", border: "1px solid var(--border)" }}>
+        💡 계정마다 <b>아이디·비밀번호를 미리 입력</b>해두면, <b style={{ color: "#c026d3" }}>전체 연결</b> 버튼 하나로 <b>아직 연결 안 된 계정을 순서대로 한 번에 로그인</b>해요. 계정을 하나씩만 연결하려면 각 계정의 <b>계정 연결하기</b>를 누르세요. <span style={{ color: "var(--text3)" }}>(연결은 처음 한 번만 — 이후엔 저장된 로그인으로 봇이 자동 진행해요)</span>
+      </div>
+    )}
     {accounts.map((acc, i) => (
       <div key={acc.accountId} style={{ marginBottom: 12, padding: "14px 16px", borderRadius: 14, border: `2px solid ${acc.sessionOk ? "rgba(0,214,143,.5)" : "var(--border)"}`, background: acc.sessionOk ? "rgba(0,214,143,.06)" : "var(--bg)", transition: "border .2s" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
@@ -231,7 +236,7 @@ const GUIDE = {
     { step: "1", title: "계정 2개 이상 연결", desc: "품앗이에 사용할 내 네이버 계정을 등록하고 한 번씩 연결해 세션을 저장하세요." },
     { step: "2", title: "계정별 글 수·받을 수 설정", desc: "대상 글 수는 계정마다 최근 몇 개 글을 돌지, 받을 수는 최대 몇 개의 다른 계정에게 방문·공감·댓글을 받을지 정해요. 기본은 각각 3이에요." },
     { step: "3", title: "공감·댓글 방식 설정", desc: "공감과 댓글을 켜고, 고정·순환·AI 맞춤 댓글 중 원하는 방식을 고르세요." },
-    { step: "4", title: "자연스러운 방문 강화(선택)", desc: "체류시간 엔진은 글 분량을 읽어 짧은 글은 빨리·긴 글은 오래 머물러요(자동). 관련 글 1편 더 읽기를 켜면 댓글 뒤 다른 글도 읽어 진짜 방문자처럼 보여요. 시간 분산을 고르면 방문을 여러 시간에 나눠 투데이 폭증을 막아 더 안전해요." },
+    { step: "4", title: "자연스러운 방문 강화(선택)", desc: "체류시간 엔진은 글 분량을 읽어 짧은 글은 빨리·긴 글은 오래 머물러요(자동). 관련 글 1편 더 읽기를 켜면 댓글 뒤 다른 글도 읽어 진짜 방문자처럼 보여요. 시간 분산은 전체 방문을 정한 시간(분 단위)에 고르게 나눠 투데이 폭증을 막아 더 안전해요. (계정당이 아니라 전체를 합친 시간이에요)" },
     { step: "5", title: "품앗이 시작", desc: "봇이 계정을 자동 전환하며 상대 계정의 실제 글을 읽고 공감·댓글을 남겨요. 받을 수에 도달한 계정은 더 방문하지 않고, 최근 안 간 계정부터 골고루 순환해요." },
     { step: "6", title: "효과 리포트로 확인", desc: "우측 '품앗이 효과 리포트'에서 방문자 추이 위에 품앗이한 날을 표시해요. 실제로 도움이 됐는지 보고 과도하게 하지 않도록 조절하세요." },
     { step: "팁", title: "과도한 집중을 피하세요", desc: "받을 수를 낮게 유지하고 딜레이를 넉넉히, 시간 분산을 활용하세요. 많은 계정이 한 글에 한꺼번에 몰리는 패턴은 피하는 게 안전해요." },
@@ -348,7 +353,7 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
   const [pumDelayMin, setPumDelayMin] = useState(8);
   const [pumDelayMax, setPumDelayMax] = useState(15);
   const [pumReadRelated, setPumReadRelated] = useState(true);   // 관련 글 1편 더 읽기(체류·투데이↑)
-  const [pumSpread, setPumSpread] = useState(0);                // 시간 분산(시간, 0=즉시 연속)
+  const [pumSpread, setPumSpread] = useState(0);                // 시간 분산(분, 0=즉시 연속). 서버엔 시간으로 변환해 전달
   const [pumWorking, setPumWorking] = useState(false);
   const [pumLogs, setPumLogs] = useState<string[]>([]);
   const [pumDone, setPumDone] = useState(0);
@@ -837,7 +842,7 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
     const maxReceivers = Math.max(1, connected.length - 1);
     const accs = connected.map(a => ({ accountId: a.accountId, blogId: a.blogId, posts: Math.min(pumasiPostsLimit, pumPostsByAcc[a.accountId] || 3), receiveLimit: Math.min(maxReceivers, Math.max(1, pumReceiveByAcc[a.accountId] || 3)) }));
     addPumLog(`🤝 품앗이 시작 — 계정 ${accs.length}개 (${accs.map(a => `${a.blogId}:글${a.posts}·받기${a.receiveLimit}명`).join(", ")})`);
-    const body = JSON.stringify({ accounts: accs, comment, doLike: pumDoLike, doComment: pumDoComment, aiComment: pumCommentMode === "ai", commentTone: pumTone, geminiKey, delayMin: pumDelayMin, delayMax: pumDelayMax, readRelated: pumReadRelated, spreadHours: pumSpread, jobId: pumJobIdRef.current, ...(userId ? { userId } : {}) });
+    const body = JSON.stringify({ accounts: accs, comment, doLike: pumDoLike, doComment: pumDoComment, aiComment: pumCommentMode === "ai", commentTone: pumTone, geminiKey, delayMin: pumDelayMin, delayMax: pumDelayMax, readRelated: pumReadRelated, spreadHours: pumSpread / 60, jobId: pumJobIdRef.current, ...(userId ? { userId } : {}) });
     const es = new BotEventStream(`${BOT}/api/pumasi`, { method: "POST", headers: { "Content-Type": "application/json" }, body }); pumEsRef.current = es;
     es.onmessage = e => {
       const d = JSON.parse(e.data);
@@ -2092,16 +2097,32 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
               <div className="card" style={{ padding: "16px 18px" }}>
                 <div className="card-title" style={{ marginBottom: 6, fontSize: 15 }}>📝 계정별 글 수 · 받을 수</div>
                 <div style={{ fontSize: 11.5, color: "var(--text2)", marginBottom: 12, lineHeight: 1.5, fontWeight: 500 }}>💡 <b>대상 글</b>은 최근 몇 개 글을 돌지, <b>받을 수</b>는 최대 몇 개의 다른 계정에게 방문·공감·댓글을 받을지 정해요. 기본은 3명이에요.</div>
-                <div style={{ display: "flex", justifyContent: "flex-end", gap: 18, padding: "0 8px 5px", fontSize: 10.5, color: "var(--text3)", fontWeight: 700 }}><span>대상 글</span><span>받을 수</span></div>
-                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                  {connected.map(a => (
-                    <div key={a.accountId} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 11px", borderRadius: 9, background: "var(--bg)", border: "1px solid var(--border)" }}>
-                      <span style={{ flex: 1, minWidth: 0, fontSize: 13, fontWeight: 700, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>🔗 {a.blogId || a.accountId}</span>
-                      <input className="inp" type="number" min={1} max={isUnlimitedPlan ? 999 : pumasiPostsLimit} value={pumPostsByAcc[a.accountId] ?? 3} onChange={e => { const v = Math.max(1, Math.min(isUnlimitedPlan ? 999 : pumasiPostsLimit, parseInt(e.target.value) || 1)); setPumPostsByAcc(prev => ({ ...prev, [a.accountId]: v })); }} style={{ width: 72, fontSize: 13, padding: "8px 10px", textAlign: "center" }} />
-                      <input className="inp" type="number" min={1} max={Math.max(1, connected.length - 1)} value={pumReceiveByAcc[a.accountId] ?? Math.min(3, Math.max(1, connected.length - 1))} onChange={e => { const v = Math.max(1, Math.min(Math.max(1, connected.length - 1), parseInt(e.target.value) || 1)); setPumReceiveByAcc(prev => ({ ...prev, [a.accountId]: v })); }} style={{ width: 72, fontSize: 13, padding: "8px 10px", textAlign: "center" }} />
+                {(() => {
+                  const maxReceive = Math.max(1, connected.length - 1);  // 나를 뺀 다른 계정 수만큼만 받을 수 있음
+                  const colStyle = { display: "grid", gridTemplateColumns: "1fr 76px 76px", alignItems: "center", gap: 10 } as const;
+                  return (<>
+                    {/* 헤더: 입력칸과 같은 grid로 맞춰 칸 위에 정확히 정렬 */}
+                    <div style={{ ...colStyle, padding: "0 11px 6px", fontSize: 10.5, color: "var(--text3)", fontWeight: 700 }}>
+                      <span />
+                      <span style={{ textAlign: "center" }}>대상 글</span>
+                      <span style={{ textAlign: "center" }}>받을 수</span>
                     </div>
-                  ))}
-                </div>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                      {connected.map(a => (
+                        <div key={a.accountId} style={{ ...colStyle, padding: "8px 11px", borderRadius: 9, background: "var(--bg)", border: "1px solid var(--border)" }}>
+                          <span style={{ minWidth: 0, fontSize: 13, fontWeight: 700, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>🔗 {a.blogId || a.accountId}</span>
+                          <input className="inp" type="number" min={1} max={isUnlimitedPlan ? 999 : pumasiPostsLimit} value={pumPostsByAcc[a.accountId] ?? 3} onChange={e => { const v = Math.max(1, Math.min(isUnlimitedPlan ? 999 : pumasiPostsLimit, parseInt(e.target.value) || 1)); setPumPostsByAcc(prev => ({ ...prev, [a.accountId]: v })); }} style={{ width: "100%", fontSize: 13, padding: "8px 6px", textAlign: "center" }} />
+                          <input className="inp" type="number" min={1} max={maxReceive} disabled={maxReceive <= 1} value={Math.min(maxReceive, pumReceiveByAcc[a.accountId] ?? Math.min(3, maxReceive))} onChange={e => { const v = Math.max(1, Math.min(maxReceive, parseInt(e.target.value) || 1)); setPumReceiveByAcc(prev => ({ ...prev, [a.accountId]: v })); }} style={{ width: "100%", fontSize: 13, padding: "8px 6px", textAlign: "center", opacity: maxReceive <= 1 ? 0.55 : 1, cursor: maxReceive <= 1 ? "not-allowed" : "auto" }} />
+                        </div>
+                      ))}
+                    </div>
+                    {maxReceive <= 1 && (
+                      <div style={{ fontSize: 11, color: "var(--text3)", marginTop: 9, lineHeight: 1.5, background: "var(--card2)", borderRadius: 8, padding: "8px 11px" }}>
+                        ℹ️ 지금은 계정이 <b>2개</b>라 서로 1명씩만 주고받을 수 있어 <b>받을 수가 1로 고정</b>돼요. 계정을 <b>더 추가</b>하면(3개 이상) 받을 수를 늘릴 수 있어요.
+                      </div>
+                    )}
+                  </>);
+                })()}
               </div>
             )}
 
@@ -2167,16 +2188,36 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
                   <div style={{ fontSize: 11, color: "var(--text3)", lineHeight: 1.5, marginTop: 4, paddingLeft: 2 }}>댓글을 단 뒤 <b>같은 블로그의 다른 글 1편</b>을 공감·댓글 없이 더 읽어요. 댓글 달자마자 나가는 패턴을 줄여 <b style={{color:"#ec4899"}}>진짜 방문자처럼</b> 보이게 해요.</div>
                 </div>
 
-                {/* 시간 분산 큐 */}
+                {/* 시간 분산 큐 (분 단위) */}
+                {(() => {
+                  const maxReceive = Math.max(1, connected.length - 1);
+                  const totalVisits = connected.reduce((s, a) => s + Math.min(maxReceive, pumReceiveByAcc[a.accountId] ?? Math.min(3, maxReceive)), 0) || 1;
+                  const gapMin = pumSpread > 0 ? pumSpread / totalVisits : 0;   // 방문 사이 평균 간격(분)
+                  const fmtGap = gapMin >= 1 ? `약 ${Math.round(gapMin)}분` : `약 ${Math.round(gapMin * 60)}초`;
+                  const fmtTotal = pumSpread >= 60 ? `${Math.floor(pumSpread/60)}시간 ${pumSpread%60 ? `${pumSpread%60}분` : ""}`.trim() : `${pumSpread}분`;
+                  return (
                 <div style={{ padding: "8px 0 2px", borderTop: "1px dashed var(--border)" }}>
-                  <label className="inp-label" style={{ fontSize: 12, marginBottom: 6, display: "block", fontWeight: 800 }}>⏰ 시간 분산 (방문을 여러 시간에 나눠서)</label>
-                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                    {[{v:0,t:"즉시 연속"},{v:1,t:"1시간"},{v:2,t:"2시간"},{v:3,t:"3시간"},{v:6,t:"6시간"}].map(o => (
-                      <button key={o.v} onClick={() => setPumSpread(o.v)} style={{ flex: "1 1 auto", padding: "8px 6px", borderRadius: 9, border: `2px solid ${pumSpread===o.v?"#8b5cf6":"var(--border)"}`, background: pumSpread===o.v?"rgba(139,92,246,.12)":"transparent", color: pumSpread===o.v?"#8b5cf6":"var(--text2)", cursor: "pointer", fontSize: 11.5, fontWeight: 800, fontFamily: "inherit", minWidth: 0 }}>{o.t}</button>
+                  <label className="inp-label" style={{ fontSize: 12, marginBottom: 4, display: "block", fontWeight: 800 }}>⏰ 시간 분산 (방문을 이 시간 안에 고르게 나눔)</label>
+                  <div style={{ fontSize: 11, color: "var(--text3)", lineHeight: 1.5, marginBottom: 8 }}>모든 방문을 <b>합쳐서 정한 시간 안에</b> 나눠 진행해요(전체 시간이지 계정당 시간이 아니에요). 짧은 시간에 방문이 몰리는 걸 막아 <b style={{color:"#00c896"}}>안전</b>해요.</div>
+                  <div style={{ display: "flex", gap: 5, flexWrap: "wrap", marginBottom: 8 }}>
+                    {[{v:0,t:"즉시"},{v:10,t:"10분"},{v:20,t:"20분"},{v:30,t:"30분"},{v:60,t:"1시간"},{v:120,t:"2시간"}].map(o => (
+                      <button key={o.v} onClick={() => setPumSpread(o.v)} style={{ flex: "1 1 auto", padding: "8px 4px", borderRadius: 9, border: `2px solid ${pumSpread===o.v?"#8b5cf6":"var(--border)"}`, background: pumSpread===o.v?"rgba(139,92,246,.12)":"transparent", color: pumSpread===o.v?"#8b5cf6":"var(--text2)", cursor: "pointer", fontSize: 11.5, fontWeight: 800, fontFamily: "inherit", minWidth: 0 }}>{o.t}</button>
                     ))}
                   </div>
-                  <div style={{ fontSize: 11, color: "var(--text3)", lineHeight: 1.5, marginTop: 6 }}>여러 계정의 방문을 한 번에 몰지 않고 <b>정한 시간에 걸쳐 나눠서</b> 진행해요. 투데이·댓글이 짧은 시간에 폭증하는 걸 막아 <b style={{color:"#00c896"}}>훨씬 안전</b>해요. <span style={{color:"var(--text2)"}}>(선택하면 그 시간 동안 앱이 켜져 있어야 해요)</span></div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <span style={{ fontSize: 11.5, color: "var(--text2)", fontWeight: 700, whiteSpace: "nowrap" }}>직접 입력</span>
+                    <input className="inp" type="number" min={0} max={720} value={pumSpread} onChange={e => setPumSpread(Math.max(0, Math.min(720, parseInt(e.target.value) || 0)))} style={{ width: 90, fontSize: 13, padding: "8px 10px", textAlign: "center" }} />
+                    <span style={{ fontSize: 11.5, color: "var(--text2)", fontWeight: 700 }}>분</span>
+                    <span style={{ fontSize: 10.5, color: "var(--text3)" }}>(0=즉시, 최대 720분=12시간)</span>
+                  </div>
+                  <div style={{ fontSize: 11, marginTop: 8, lineHeight: 1.5, background: "var(--card2)", borderRadius: 8, padding: "8px 11px", color: "var(--text2)" }}>
+                    {pumSpread === 0
+                      ? <>지금은 <b>즉시 연속</b>이에요 — 딜레이만 두고 쉬지 않고 이어서 방문해요.</>
+                      : <>이번 설정: 총 방문 <b style={{color:"#8b5cf6"}}>{totalVisits}회</b>를 <b style={{color:"#8b5cf6"}}>{fmtTotal}</b>에 걸쳐 → 방문 사이 <b style={{color:"#ec4899"}}>{fmtGap}</b> 간격. <span style={{color:"var(--text3)"}}>그동안 앱이 켜져 있어야 해요.</span></>}
+                  </div>
                 </div>
+                  );
+                })()}
               </div>
             </div>
 
