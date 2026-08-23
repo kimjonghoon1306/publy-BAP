@@ -158,7 +158,7 @@ app.get("/api/crawl", async (req, res) => {
 app.post("/api/add-neighbor", async (req, res) => {
   const {
     userId, accountId, targets: targetsRaw, message,
-    delayMin, delayMax, skipDone, qualityFilter, retryDays, jobId,
+    delayMin, delayMax, skipDone, qualityFilter, retryDays, minVisitors, maxVisitors, jobId,
   } = req.body as Record<string, any>;
 
   if (!accountId || !targetsRaw)
@@ -197,6 +197,8 @@ app.post("/api/add-neighbor", async (req, res) => {
       skipDone: skipDone === true || skipDone === "true",
       qualityFilter: qualityFilter !== false && qualityFilter !== "false",   // 기본 ON
       retryDays: retryDays === undefined ? 30 : parseInt(String(retryDays), 10),
+      minVisitors: Math.max(0, parseInt(String(minVisitors ?? "0"), 10) || 0),
+      maxVisitors: Math.max(0, parseInt(String(maxVisitors ?? "0"), 10) || 0),
       onLog: (msg) => sseSend(res, { type: "log", msg }),
       onResult: async (r: NeighborResult) => {
         sseSend(res, { type: "result", ...r });
@@ -329,7 +331,7 @@ app.post("/api/engage", async (req, res) => {
     userId, accountId, targets: targetsRaw, comment,
     doLike, doComment, periodDays, postsPerBlog,
     delayMin, delayMax, dailyLimit, skipDone, commentRate, likeRate, jobId,
-    aiComment, commentTone, geminiKey,
+    aiComment, commentTone, geminiKey, minVisitors, maxVisitors,
   } = req.body as Record<string, any>;
   const isAiComment = aiComment === true || aiComment === "true";
 
@@ -361,6 +363,8 @@ app.post("/api/engage", async (req, res) => {
       skipDone: skipDone === true || skipDone === "true",
       commentRate: commentRate === undefined ? 100 : parseInt(String(commentRate), 10),
       likeRate: likeRate === undefined ? 100 : parseInt(String(likeRate), 10),
+      minVisitors: Math.max(0, parseInt(String(minVisitors ?? "0"), 10) || 0),
+      maxVisitors: Math.max(0, parseInt(String(maxVisitors ?? "0"), 10) || 0),
       onLog: (msg) => sseSend(res, { type: "log", msg }),
       onResult: async (r: EngageResult) => {
         sseSend(res, { type: "result", ...r });

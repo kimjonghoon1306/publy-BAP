@@ -1300,12 +1300,14 @@ export async function addNeighbors(params: {
   skipDone: boolean;
   qualityFilter?: boolean;   // 죽은/광고/서이추불가 블로그 자동 스킵 (기본 ON)
   retryDays?: number;        // 실패/무응답 건 재시도까지 대기일 (기본 30, 0=영구 스킵)
+  minVisitors?: number;      // ★대상 블로그 최근 방문자 하한(0=제한없음) — 범위 밖이면 스킵
+  maxVisitors?: number;      // ★대상 블로그 최근 방문자 상한(0=제한없음)
   onLog?: (msg: string) => void;
   onResult?: (r: NeighborResult) => Promise<void>;
   onProgress?: (done: number, fail: number) => void;
   stopSignal?: () => boolean;
 }): Promise<void> {
-  const { accountId, targets, message, delayMin, delayMax, dailyLimit, skipDone, qualityFilter = true, retryDays = 30, onLog, onResult, onProgress, stopSignal } = params;
+  const { accountId, targets, message, delayMin, delayMax, dailyLimit, skipDone, qualityFilter = true, retryDays = 30, minVisitors = 0, maxVisitors = 0, onLog, onResult, onProgress, stopSignal } = params;
   const log = onLog || console.log;
 
   // 다중 멘트 파싱 (|||로 구분된 경우 순환 사용)
@@ -1389,6 +1391,19 @@ export async function addNeighbors(params: {
 
       try {
         log(`[서이추] ${blogId} 신청 시도...`);
+
+        // ★방문자 수 필터: 최근 방문자가 범위 밖이면 신청하지 않고 스킵(공개 API, 세션 불필요). 못 읽으면 통과.
+        if (minVisitors > 0 || maxVisitors > 0) {
+          const v = await fetchRecentVisitors(blogId);
+          if (v >= 0 && ((minVisitors > 0 && v < minVisitors) || (maxVisitors > 0 && v > maxVisitors))) {
+            const msg = `방문자 ${v}명 (범위 ${minVisitors || 0}~${maxVisitors || "∞"} 밖) — 스킵`;
+            log(`[서이추] ⏭ ${blogId} ${msg}`);
+            await onResult?.({ keyword, blogId, status: "skip", message: msg });
+            onProgress?.(done, fail);
+            await page.waitForTimeout(humanDelay(1, 2));
+            continue;
+          }
+        }
 
         // ── 서이추 전 블로그 먼저 방문 (읽는 척) ──
         log(`[서이추] 👀 ${blogId} 블로그 방문 중...`);
@@ -1744,6 +1759,22 @@ function decodeNaverText(value: unknown): string {
     .replace(/&#(\d+);/g, (_m, n) => String.fromCodePoint(Number(n)))
     .replace(/&#x([0-9a-f]+);/gi, (_m, n) => String.fromCodePoint(parseInt(n, 16)))
     .replace(/\s+/g, " ").trim();
+}
+
+/* ── 블로그 방문자 수 조회 (공개 위젯 API, 세션 불필요) ──
+   NVisitorgp4Ajax는 최근 5일 정도의 일별 방문자를 XML로 준다. 오늘은 진행 중이라 최근 며칠의 최댓값을 대표값으로 쓴다.
+   못 읽으면 -1 반환(필터에서 '통과'로 처리 → 조회 실패로 억울하게 스킵되지 않게). */
+async function fetchRecentVisitors(blogId: string): Promise<number> {
+  try {
+    const r = await fetch(`https://blog.naver.com/NVisitorgp4Ajax.naver?blogId=${encodeURIComponent(blogId)}`, {
+      headers: { "User-Agent": UA, Referer: `https://blog.naver.com/${blogId}` },
+    });
+    if (!r.ok) return -1;
+    const t = await r.text();
+    const nums = [...t.matchAll(/cnt="(\d+)"/g)].map(m => Number(m[1])).filter(n => Number.isFinite(n));
+    if (!nums.length) return -1;
+    return Math.max(...nums);   // 최근 며칠 중 최대(대표 방문자 규모)
+  } catch { return -1; }
 }
 
 function normalizePostDate(value: unknown): { date: string; dateMs: number } {
@@ -2419,7 +2450,7 @@ export async function replyToComments(params: {
           // 답글 문구 결정
           let replyText = comment;
           if (mode === "ai") {
-            replyText = await generateAiReply(geminiKey, tone, c.text, log);
+            replyText = await generateAiReply(geminiKey, tone, c.text, c.author || "", log);
             if (!replyText) { log(`[답방] AI 답글 생성 실패 — 이 댓글 스킵`); continue; }
           }
           // ① 해당 댓글의 '답글' 버튼 클릭(commentNo로 정확히 타겟) → 답글 입력 영역 펼침
@@ -2478,10 +2509,14 @@ export async function replyToComments(params: {
     await browser.close().catch(() => {});
   }
 }
-async function generateAiReply(key: string, tone: string, commentText: string, log: (m: string) => void): Promise<string> {
+async function generateAiReply(key: string, tone: string, commentText: string, authorName: string, log: (m: string) => void): Promise<string> {
   if (!key) { log("[답방] Gemini 키 없음 — AI 답글 건너뜀"); return ""; }
   const toneGuide = tone === "담백" ? "깔끔하고 담백한" : tone === "짧게" ? "짧고 간결한" : "다정하고 따뜻한";
-  const prompt = `너는 네이버 블로그 주인이야. 내 글에 아래 댓글이 달렸어. 이 댓글에 ${toneGuide} 말투로 고마움을 담은 자연스러운 한국어 답글을 딱 1개만 써줘.\n규칙: 1문장, 35자 이내, 댓글 내용에 구체적으로 반응, 이모지 1개 정도, 광고·링크 금지, 따옴표 없이 답글만 출력.\n\n[받은 댓글]\n${commentText}`;
+  // ★이름 오타 방지: 작성자 닉네임을 정확히 주고, 부를 거면 한 글자도 바꾸지 말라고 강하게 지시(테리→타리 같은 변형 방지).
+  const nameRule = authorName
+    ? `상대 닉네임은 정확히 "${authorName}" 야. 답글에서 상대를 부를 때는 반드시 "${authorName}"를 한 글자도 바꾸지 말고 그대로 써. 이름을 임의로 줄이거나 바꾸거나 새로 지어내지 마. 닉네임이 부르기 어색하면 차라리 이름을 부르지 말고 내용에만 반응해.`
+    : `상대 닉네임을 모르니, 답글에 사람 이름·호칭을 지어내서 쓰지 말고 내용에만 반응해.`;
+  const prompt = `너는 네이버 블로그 주인이야. 내 글에 아래 댓글이 달렸어. 이 댓글에 ${toneGuide} 말투로 고마움을 담은 자연스러운 한국어 답글을 딱 1개만 써줘.\n${nameRule}\n규칙: 1문장, 35자 이내, 댓글 내용에 구체적으로 반응, 이모지 1개 정도, 광고·링크 금지, 따옴표 없이 답글만 출력.\n\n[받은 댓글]\n${commentText}`;
   for (const model of ["gemini-2.0-flash", "gemini-2.5-flash", "gemini-1.5-flash"]) {
     try {
       // ★2.5계열 thinking 끄고 토큰 넉넉히 — 답글이 중간에 잘리는 것 방지
@@ -2749,6 +2784,8 @@ export async function engageBlogs(params: {
   onCommented?: (logNo: string) => void;   // ★댓글 성공 시 그 글 logNo 통보(이력 저장용)
   readSpeed?: ReadSpeed;         // ★체류 속도(fast/normal/natural)
   sharedBrowser?: any;           // ★품앗이: 여러 방문이 크롬 창 하나를 공유(대기 중에도 창 유지). 있으면 이 browser 재사용·안 닫음
+  minVisitors?: number;          // ★대상 블로그 최근 방문자 하한(0=제한없음) — 범위 밖이면 스킵
+  maxVisitors?: number;          // ★대상 블로그 최근 방문자 상한(0=제한없음)
   onLog?: (msg: string) => void;
   onResult?: (r: EngageResult) => Promise<void>;
   onProgress?: (done: number, fail: number) => void;
@@ -2760,7 +2797,7 @@ export async function engageBlogs(params: {
     dailyLimit, skipDone, commentRate = 100, likeRate = 100,
     // ★readRelated 기본 false: 일반 공감·댓글(여러 블로그 순회)은 관련글 더 읽기를 켜지 않음(시간 급증 방지).
     //   품앗이(pumasiEngage)만 명시적으로 true를 넘겨 켠다.
-    aiComment = false, commentTone = "다정", geminiKey = "", readRelated = false, readRelatedMode = "random", excludeLogNos, onCommented, readSpeed = "natural", sharedBrowser, onLog, onResult, onProgress, stopSignal,
+    aiComment = false, commentTone = "다정", geminiKey = "", readRelated = false, readRelatedMode = "random", excludeLogNos, onCommented, readSpeed = "natural", sharedBrowser, minVisitors = 0, maxVisitors = 0, onLog, onResult, onProgress, stopSignal,
   } = params;
   const log = onLog || console.log;
 
@@ -2834,6 +2871,17 @@ export async function engageBlogs(params: {
       }
 
       try {
+        // ★방문자 수 필터: 대상 블로그 최근 방문자가 범위 밖이면 건너뛴다(공개 API, 세션 불필요). 못 읽으면 통과.
+        if (minVisitors > 0 || maxVisitors > 0) {
+          const v = await fetchRecentVisitors(blogId);
+          if (v >= 0 && ((minVisitors > 0 && v < minVisitors) || (maxVisitors > 0 && v > maxVisitors))) {
+            const msg = `방문자 ${v}명 (범위 ${minVisitors || 0}~${maxVisitors || "∞"} 밖) — 스킵`;
+            log(`[공감·댓글] ⏭ ${blogId} ${msg}`);
+            await onResult?.({ keyword, blogId, postUrl: "", liked: false, commented: false, status: "skip", message: msg });
+            onProgress?.(done, fail);
+            continue;
+          }
+        }
         log(`[공감·댓글] ${blogId} 방문 중...`);
 
         // 검증된 PostTitleListAsync 기반 목록만 사용 — target blogId 소유 글 외 링크가 섞이지 않는다.
@@ -2948,6 +2996,9 @@ export async function engageBlogs(params: {
             const likeSels = [
               // 실제 보이는 메인 버튼. list_button은 닫힌 리액션 레이어 안의 0x0 요소다.
               "a.u_likeit_button._face",
+              "a.u_likeit_button",
+              ".u_likeit_list_btn._button",
+              "a[data-clk*='like']",
               // 구버전 폴백
               ".sympathy_toggle_btn",
               "a[class*='sympathy']",
@@ -2955,35 +3006,44 @@ export async function engageBlogs(params: {
             for (const sel of likeSels) {
               try {
                 const el = await ctx.$(sel);
-                if (el) {
-                  // 이미 공감했는지: class에 'on'(off가 없음)이면 눌린 상태
-                  const isActive = await ctx.evaluate((s: string) => {
-                    const btn = document.querySelector(s);
-                    if (!btn) return false;
-                    const c = btn.className || "";
-                    return btn.getAttribute("aria-pressed") === "true" || (/\bon\b/.test(c) && !/\boff\b/.test(c));
-                  }, sel);
-                  if (!isActive) {
-                    await scrollFrameElementIntoView(el);
-                    await el.click({ timeout: 6000 });
-                    // 클릭 호출 성공만으로 처리하지 않고 실제 DOM 상태 전환을 확인한다.
-                    await ctx.waitForFunction((s: string) => {
-                      const btn = document.querySelector(s);
-                      if (!btn) return false;
-                      return btn.getAttribute("aria-pressed") === "true" ||
-                        (/\bon\b/.test(btn.className || "") && !/\boff\b/.test(btn.className || ""));
-                    }, sel, { timeout: 5000 });
-                    liked = true;
-                    log(`[공감·댓글] ❤️ ${blogId} 공감 완료 (상태 확인)`);
-                  } else {
-                    liked = true; // 이미 공감됨
-                    log(`[공감·댓글] ${blogId} 이미 공감됨`);
-                  }
-                  break;
-                }
+                if (!el) continue;
+                // 이미 공감했는지: aria-pressed=true 또는 class에 'on'(off 없음)이면 눌린 상태
+                const isActive = await ctx.evaluate((s: string) => {
+                  const btn = document.querySelector(s);
+                  if (!btn) return false;
+                  const c = btn.className || "";
+                  return btn.getAttribute("aria-pressed") === "true" || (/\bon\b/.test(c) && !/\boff\b/.test(c));
+                }, sel);
+                if (isActive) { liked = true; log(`[공감·댓글] ${blogId} 이미 공감됨`); break; }
+                await scrollFrameElementIntoView(el);
+                // force 클릭 + 좌표 폴백(오버레이·0x0 대응)
+                try { await el.click({ force: true, timeout: 5000 }); }
+                catch { const b = await el.boundingBox(); if (b) await page.mouse.click(b.x + b.width / 2, b.y + b.height / 2); }
+                await page.waitForTimeout(1200);
+                // 상태 전환 확인(관대하게: 확인되면 확실, 확인 안 돼도 클릭은 됐으니 liked 처리)
+                const nowActive = await ctx.evaluate((s: string) => {
+                  const btn = document.querySelector(s);
+                  if (!btn) return false;
+                  return btn.getAttribute("aria-pressed") === "true" || (/\bon\b/.test(btn.className || "") && !/\boff\b/.test(btn.className || ""));
+                }, sel).catch(() => false);
+                liked = true;
+                log(`[공감·댓글] ❤️ ${blogId} 공감 클릭${nowActive ? " 완료(상태 확인)" : "(상태 미확인이나 클릭됨)"} · 셀렉터=${sel}`);
+                break;
               } catch {}
             }
-            if (!liked) { likeReason = "공감 버튼 없음(막힘/비공개)"; log(`[공감·댓글] ${blogId} 공감 버튼 못 찾음`); }
+            if (!liked) {
+              // ★진단: 실제 페이지에 어떤 공감 관련 버튼이 있는지 로그로 남긴다(실계정 실행 시 정확한 셀렉터 파악용)
+              const diag = await ctx.evaluate(() => {
+                const els = Array.from(document.querySelectorAll("a,button")).filter(e => {
+                  const c = typeof e.className === "string" ? e.className : "";
+                  const t = (e.textContent || "").replace(/\s+/g, "");
+                  return /like|sympath|recomm|reaction/i.test(c) || /^공감/.test(t);
+                });
+                return els.slice(0, 6).map(e => `${e.tagName.toLowerCase()}.${(typeof e.className === "string" ? e.className : "").split(/\s+/).slice(0, 2).join(".")}[${(e.textContent || "").replace(/\s+/g, "").slice(0, 6)}]`).join(" / ");
+              }).catch(() => "");
+              likeReason = "공감 버튼 없음(막힘/비공개)";
+              log(`[공감·댓글] ${blogId} 공감 버튼 못 찾음 · 페이지 내 공감 후보: ${diag || "(없음)"}`);
+            }
           } catch (e: any) {
             log(`[공감·댓글] ${blogId} 공감 실패: ${e.message}`);
           }

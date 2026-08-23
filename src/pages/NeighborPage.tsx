@@ -223,6 +223,30 @@ const AccountSelector = ({ accounts, selectedId, onSelect }: {
   );
 };
 
+/* ── 방문자 수 필터: 서이추·공감댓글에서 대상 블로그를 방문자 규모로 거른다(공개 API 기반) ── */
+const VisitorFilter = ({ min, max, setMin, setMax }: { min: number; max: number; setMin: (n: number) => void; setMax: (n: number) => void }) => {
+  const presets = [{ v: 0, t: "전체" }, { v: 1000, t: "1천↑" }, { v: 3000, t: "3천↑" }, { v: 5000, t: "5천↑" }, { v: 10000, t: "1만↑" }];
+  return (
+    <div className="card" style={{ padding: "14px 16px" }}>
+      <div style={{ fontSize: 13, fontWeight: 800, color: "var(--text)", marginBottom: 3 }}>👥 방문자 수로 대상 고르기</div>
+      <div style={{ fontSize: 11, color: "var(--text3)", marginBottom: 10, lineHeight: 1.5 }}>최근 방문자가 <b>이 범위인 블로그에만</b> 작업해요. 활발한 블로그를 고르면 효과가 좋아요. <b>(0 = 제한 없음)</b></div>
+      <div style={{ display: "flex", gap: 5, flexWrap: "wrap", marginBottom: 8 }}>
+        {presets.map(o => (
+          <button key={o.v} onClick={() => setMin(o.v)} style={{ flex: "1 1 auto", padding: "8px 4px", borderRadius: 9, border: `2px solid ${min === o.v ? "var(--accent)" : "var(--border)"}`, background: min === o.v ? "var(--accent-bg)" : "transparent", color: min === o.v ? "var(--accent-text)" : "var(--text2)", cursor: "pointer", fontSize: 11.5, fontWeight: 800, fontFamily: "inherit", minWidth: 0 }}>{o.t}</button>
+        ))}
+      </div>
+      <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "var(--text2)", flexWrap: "wrap" }}>
+        <span style={{ fontWeight: 700 }}>직접</span>
+        <input className="inp" type="number" min={0} value={min} onChange={e => setMin(Math.max(0, parseInt(e.target.value) || 0))} style={{ width: 78, fontSize: 13, padding: "7px 8px", textAlign: "center" }} placeholder="최소" />
+        <span>명 이상 ~</span>
+        <input className="inp" type="number" min={0} value={max} onChange={e => setMax(Math.max(0, parseInt(e.target.value) || 0))} style={{ width: 78, fontSize: 13, padding: "7px 8px", textAlign: "center" }} placeholder="최대" />
+        <span style={{ fontSize: 11, color: "var(--text3)" }}>명 이하 (0=무제한)</span>
+      </div>
+      <div style={{ fontSize: 10.5, color: "var(--text3)", lineHeight: 1.5, marginTop: 7 }}>💡 방문자 수를 못 읽는 블로그는 그냥 진행해요(놓치지 않게). 방문자는 공개 정보라 계정 연결 없이도 확인해요.</div>
+    </div>
+  );
+};
+
 /* ── 사용설명서 내용 ── */
 const GUIDE = {
   neighbor: [
@@ -402,6 +426,9 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
   const [pumPeriodDays, setPumPeriodDays] = useState(0);                                      // 대상 글 기간(0=전체 무제한, 30/90/180/365)
   const [pumPreview, setPumPreview] = useState<{ blogId: string; total: number; commented: number; remaining: number }[] | null>(null);
   const [pumPreviewLoading, setPumPreviewLoading] = useState(false);
+  // ★서이추·공감댓글 대상 블로그 방문자 수 필터(0=제한없음). 탭 격리라 각 탭 인스턴스가 자기 값을 가짐.
+  const [visMin, setVisMin] = useState(0);
+  const [visMax, setVisMax] = useState(0);
   const pumJobIdRef = useRef<string>("");
   const pumEsRef = useRef<BotEventStream|null>(null);
   const pumLogRef = useRef<HTMLDivElement>(null);
@@ -702,7 +729,7 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
     addLog(`🚀 작업 시작 — ${list.length}개 대상 / 한도 ${dailyLimit}개 / 딜레이 ${delayMin}~${delayMax}초`);
     const msg = msgMode === "single" ? singleMsg : multiMsgs.split("\n").filter(l => l.trim()).join("|||");
     // ★ targets(수십~수백개)를 GET URL에 실으면 길이 초과로 연결 실패 → POST body로 전송
-    const body = JSON.stringify({ accountId: acc.accountId, targets: list, message: msg, delayMin, delayMax, skipDone, qualityFilter, retryDays, jobId: jobIdRef.current, ...(userId ? { userId } : {}) });
+    const body = JSON.stringify({ accountId: acc.accountId, targets: list, message: msg, delayMin, delayMax, skipDone, qualityFilter, retryDays, minVisitors: visMin, maxVisitors: visMax, jobId: jobIdRef.current, ...(userId ? { userId } : {}) });
     return new Promise<"done" | "limit" | "error">((resolve) => {
       let outcome: "done" | "limit" | "error" = "done";
       const es = new BotEventStream(`${BOT}/api/add-neighbor`, { method: "POST", headers: { "Content-Type": "application/json" }, body }); esRef.current = es;
@@ -827,7 +854,7 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
     const aiComment = eCommentMode === "ai";
     const geminiKey = aiComment ? ((localStorage.getItem("publy_gemini_key") || "")) : "";
     // ★ targets를 POST body로 (URL 길이 초과 방지)
-    const body = JSON.stringify({ accountId: acc.accountId, targets: list, comment: commentText, doLike: eDoLike, doComment: eDoComment, likeRate: eLikeRate, commentRate: eCommentRate, periodDays: days, postsPerBlog: ePostsPerBlog, delayMin: eDelayMin, delayMax: eDelayMax, dailyLimit: eDailyLimit, skipDone: eSkipDone, aiComment, commentTone: eCommentTone, geminiKey, jobId: eJobIdRef.current, ...(userId ? { userId } : {}) });
+    const body = JSON.stringify({ accountId: acc.accountId, targets: list, comment: commentText, doLike: eDoLike, doComment: eDoComment, likeRate: eLikeRate, commentRate: eCommentRate, periodDays: days, postsPerBlog: ePostsPerBlog, delayMin: eDelayMin, delayMax: eDelayMax, dailyLimit: eDailyLimit, skipDone: eSkipDone, aiComment, commentTone: eCommentTone, geminiKey, minVisitors: visMin, maxVisitors: visMax, jobId: eJobIdRef.current, ...(userId ? { userId } : {}) });
     const es = new BotEventStream(`${BOT}/api/engage`, { method: "POST", headers: { "Content-Type": "application/json" }, body }); eEsRef.current = es;
     es.onmessage = e => {
       const d = JSON.parse(e.data);
@@ -1223,6 +1250,7 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
               <div className="card-title" style={{ marginBottom: 14, fontSize: 15 }}>🔍 추출 설정</div>
               <KeywordAnalyzer keywords={buddyKw} loading={buddyKwLoading} onAnalyze={analyzeBuddyKeywords}
                 onPick={w => setKeywords(prev => { const list = prev.split(",").map(s => s.trim()).filter(Boolean); if (!list.includes(w)) list.push(w); return list.join(", "); })} />
+              <div style={{ marginBottom: 14 }}><VisitorFilter min={visMin} max={visMax} setMin={setVisMin} setMax={setVisMax} /></div>
               <div style={{ marginBottom: 14 }}>
                 <label className="inp-label" style={{ fontSize: 12, marginBottom: 6, display: "block" }}>키워드 (쉼표로 구분)</label>
                 <input className="inp" placeholder="예: 원주맛집, 강원도여행, 육아일기" value={keywords} onChange={e => setKeywords(e.target.value)} style={{ fontSize: 13, padding: "11px 14px" }} />
@@ -1518,6 +1546,7 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
                 <>
                   <KeywordAnalyzer keywords={buddyKw} loading={buddyKwLoading} onAnalyze={analyzeBuddyKeywords}
                     onPick={w => setEKeywords(prev => { const list = prev.split(",").map(s => s.trim()).filter(Boolean); if (!list.includes(w)) list.push(w); return list.join(", "); })} />
+                  <div style={{ marginBottom: 14 }}><VisitorFilter min={visMin} max={visMax} setMin={setVisMin} setMax={setVisMax} /></div>
                   <div style={{ marginBottom: 14 }}>
                     <label className="inp-label" style={{ fontSize: 12, marginBottom: 6, display: "block" }}>키워드 (쉼표로 구분)</label>
                     <input className="inp" placeholder="예: 맛집, 육아, 인테리어" value={eKeywords} onChange={e => setEKeywords(e.target.value)} style={{ fontSize: 13, padding: "11px 14px" }} />
