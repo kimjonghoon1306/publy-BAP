@@ -943,11 +943,30 @@ Output format (JSON array only, no other text):
       if(!raw){throw new Error("AI 응답이 비어있어요. API 키를 확인해주세요.");}
       const clean=raw.replace(/```json|```/g,"").trim();
       const parsed=JSON.parse(clean);
-      setCalSchedule(parsed.slice(0,calDays));
+      const sched=parsed.slice(0,calDays);
+      setCalSchedule(sched);
+      localStorage.setItem("publy_cal_schedule",JSON.stringify(sched));  // 앱 재접속해도 유지
+      setCalCompleted({}); localStorage.setItem("publy_cal_done","{}");  // 새 스케줄이면 완료기록 초기화
       setCalDone(true);
-      showToast(`📅 ${parsed.slice(0,calDays).length}일치 스케줄 생성 완료!`);
+      showToast(`📅 ${sched.length}일치 스케줄 생성 완료!`);
     }catch(e:any){showToast("❌ "+e.message,"error");}
     finally{setCalLoading(false);}
+  }
+  // 스케줄 항목 완료 토글(날짜 기준) + localStorage 저장
+  function toggleCalDone(date:string){
+    setCalCompleted(prev=>{
+      const next={...prev};
+      if(next[date]) delete next[date]; else next[date]=new Date().toISOString();
+      localStorage.setItem("publy_cal_done",JSON.stringify(next));
+      return next;
+    });
+  }
+  // 스케줄 항목 → 글쓰기 탭으로(키워드·제목 자동 채움)
+  function writeFromSchedule(s:{keyword:string;title:string}){
+    setKeyword(s.keyword);
+    setSelectedTitle(s.title);
+    setTab("write");
+    showToast(`✍️ "${s.title}" 글쓰기로 이동했어요!`);
   }
 
   async function fetchKeywordData(){
@@ -1059,6 +1078,7 @@ Output format (JSON array only, no other text):
   const [photoGenerating, setPhotoGenerating] = useState(false);
   const [photoGenDone, setPhotoGenDone] = useState(false);
   const [photoDragOver, setPhotoDragOver] = useState(false);
+  const [photoSuggesting, setPhotoSuggesting] = useState(false);   // 키포인트 AI 자동 제안 중
   const [newPlat, setNewPlat] = useState<"naver"|"tistory">("naver");
   const [newUser, setNewUser] = useState("");
   const [newPw, setNewPw] = useState("");
@@ -1085,7 +1105,9 @@ Output format (JSON array only, no other text):
   const [calKeywords, setCalKeywords] = useState("");
   const [calPlatform, setCalPlatform] = useState<"naver"|"tistory">("naver");
   const [calDays, setCalDays] = useState(30);
-  const [calSchedule, setCalSchedule] = useState<{date:string;keyword:string;title:string;style:string;adType:string}[]>([]);
+  // ★캘린더 스케줄·완료기록은 localStorage에 저장 → 앱 재접속해도 유지(꾸준히 쓰게)
+  const [calSchedule, setCalSchedule] = useState<{date:string;keyword:string;title:string;style:string;adType:string}[]>(()=>{try{return JSON.parse(localStorage.getItem("publy_cal_schedule")||"[]");}catch{return[];}});
+  const [calCompleted, setCalCompleted] = useState<Record<string,string>>(()=>{try{return JSON.parse(localStorage.getItem("publy_cal_done")||"{}");}catch{return{};}});
   const [calLoading, setCalLoading] = useState(false);
   const [calDone, setCalDone] = useState(false);
   // ── 카테고리 / 공개 설정 / 예약 발행 ──
@@ -3122,6 +3144,45 @@ ${segList}`;
       refreshSessionStatus();
     }catch(e:any){alert("연결 실패: "+e.message);}finally{setConnId(null);}
   }
+  // 🤖 키포인트 AI 자동 제안: 사진을 분석해 글에 쓸 핵심 포인트 초안을 채워줌(초보자·글감 막힘 해소)
+  async function suggestKeypoints() {
+    if(photoFiles.length===0){showToast("사진을 먼저 올려주세요","error");return;}
+    const geminiKey=localStorage.getItem("publy_gemini_key")||"";
+    if(!geminiKey){showToast("설정에서 Gemini API 키를 입력해주세요","error");return;}
+    setPhotoSuggesting(true);
+    try{
+      const imgParts = photoFiles.slice(0,20).map(f=>{
+        const b64 = f.src.split(",")[1]||f.src;
+        const mime = f.src.startsWith("data:image/png")?"image/png":"image/jpeg";
+        return {inlineData:{mimeType:mime,data:b64}};
+      });
+      const prompt = `이 사진들을 보고 블로그 글에 넣을 핵심 포인트를 뽑아줘.
+사진에서 실제로 보이는 것만: 장소·가게 이름 느낌, 음식/제품, 대략 가격대, 분위기, 눈에 띄는 특징 등.
+규칙: 5~8개 항목, 각 항목은 한 줄로 짧게, 앞에 "- " 붙여서, 설명·인사말 없이 항목만 출력. 확실하지 않은 건 "(확인 필요)"로 표시.`;
+      let text = "";
+      try{
+        const pr=await botFetch(`${BOT}/api/gemini-vision`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({apiKey:geminiKey,parts:imgParts,prompt}),signal:AbortSignal.timeout(30000)});
+        if(pr.ok){const pd=await pr.json();if(pd.text)text=pd.text;}
+      }catch{}
+      if(!text){
+        for(const model of ["gemini-2.0-flash","gemini-2.5-flash","gemini-1.5-flash"]){
+          try{
+            const cfg:any={maxOutputTokens:2000,temperature:0.7};
+            if(model.startsWith("gemini-2.5"))cfg.thinkingConfig={thinkingBudget:0};
+            const r=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiKey}`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({contents:[{parts:[...imgParts,{text:prompt}]}],generationConfig:cfg}),signal:AbortSignal.timeout(60000)});
+            if(!r.ok)continue;const d=await r.json();const c=d.candidates?.[0];const t=c?.content?.parts?.[0]?.text;
+            if(t&&c?.finishReason!=="MAX_TOKENS"){text=t;break;}
+          }catch{}
+        }
+      }
+      if(!text) throw new Error("사진 분석에 실패했어요. 잠시 후 다시 시도해주세요.");
+      const cleaned=text.replace(/```/g,"").trim();
+      setPhotoKeypoints(prev=>prev.trim()?prev.trim()+"\n"+cleaned:cleaned);
+      showToast("🤖 키포인트 초안을 채웠어요! 가격·시간 등 아는 정보를 더 다듬으면 글이 훨씬 좋아져요","success");
+    }catch(e:any){showToast("❌ "+e.message,"error");}
+    finally{setPhotoSuggesting(false);}
+  }
+
   async function generateFromPhotos() {
     if(photoFiles.length===0){showToast("사진을 먼저 업로드해주세요","error");return;}
     const geminiKey=localStorage.getItem("publy_gemini_key")||"";
@@ -3216,20 +3277,23 @@ POST3: (제목)|(이유)
         }
       } catch {}
 
-      // 봇 없거나 실패 시 직접 호출
+      // 봇 없거나 실패 시 직접 호출 (토큰 8000·2.5 thinking 끄기·잘림 재시도)
       if(!text){
         const MODELS = ["gemini-2.0-flash","gemini-2.5-flash","gemini-1.5-flash"];
-        const bodyDirect = {contents:[{parts:[...imgParts,{text:prompt}]}],generationConfig:{maxOutputTokens:4000,temperature:0.9}};
         for(const model of MODELS){
           try{
+            const genCfg:any = {maxOutputTokens:8000,temperature:0.9};
+            if(model.startsWith("gemini-2.5")) genCfg.thinkingConfig={thinkingBudget:0};
+            const bodyDirect = {contents:[{parts:[...imgParts,{text:prompt}]}],generationConfig:genCfg};
             const r = await fetch(
               `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiKey}`,
               {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(bodyDirect),signal:AbortSignal.timeout(120000)}
             );
             if(!r.ok) continue;
             const d = await r.json();
-            const t = d.candidates?.[0]?.content?.parts?.[0]?.text;
-            if(t){text=t;break;}
+            const cand = d.candidates?.[0];
+            const t = cand?.content?.parts?.[0]?.text;
+            if(t && cand?.finishReason!=="MAX_TOKENS"){text=t;break;}   // 잘리면 다음 모델
           }catch{}
         }
       }
@@ -4992,9 +5056,15 @@ POST3: (제목)|(이유)
 
                 {/* 키포인트 입력 */}
                 <div className="card" style={{padding:"18px",marginBottom:14}}>
-                  <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:8}}>
+                  <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:8,gap:8,flexWrap:"wrap"}}>
                     <label className="inp-label" style={{margin:0}}>✏️ 키포인트 <span style={{fontSize:11,color:"var(--text3)"}}>(선택사항)</span></label>
+                    <div style={{display:"flex",gap:7,flexShrink:0}}>
+                    <button onClick={suggestKeypoints} disabled={photoSuggesting||photoFiles.length===0} title={photoFiles.length===0?"사진을 먼저 올려주세요":"사진을 분석해 키포인트 초안을 자동으로 채워줘요"}
+                      style={{padding:"5px 12px",borderRadius:20,background:(photoSuggesting||photoFiles.length===0)?"var(--card2)":"linear-gradient(135deg,#80FFDB,#C77DFF)",color:(photoSuggesting||photoFiles.length===0)?"var(--text3)":"#12203a",border:"none",cursor:(photoSuggesting||photoFiles.length===0)?"default":"pointer",fontSize:11,fontWeight:800,fontFamily:"inherit",whiteSpace:"nowrap"}}>
+                      {photoSuggesting?"🤖 분석 중...":"🤖 AI 추천"}
+                    </button>
                     <button onClick={()=>{const html=`<!DOCTYPE html><html><head><meta charset="utf-8"><title>키포인트 예시</title><style>*{box-sizing:border-box;margin:0;padding:0}body{font-family:'Malgun Gothic',sans-serif;background:#fdf0ff;color:#111}h1{background:linear-gradient(135deg,#FF6B9D,#C77DFF);color:#fff;padding:20px 24px;font-size:18px;line-height:1.4}.content{padding:20px}.intro{font-size:14px;color:#555;line-height:1.8;margin-bottom:18px;padding:12px 16px;background:#fff;border-radius:12px;border-left:4px solid #C77DFF}.cat-title{font-size:13px;font-weight:800;color:#FF6B9D;margin:16px 0 8px;padding:4px 10px;background:#FF6B9D11;border-radius:6px;display:inline-block}.bad{background:#fff0f0;border:1px solid #ffcccc;border-radius:10px;padding:10px 14px;margin-bottom:6px;font-size:13px;color:#c00;line-height:1.7}.good{background:#f0fff4;border:1px solid #99ddaa;border-radius:10px;padding:10px 14px;font-size:13px;color:#005c1a;line-height:1.8;margin-bottom:16px}.lbl{font-size:10px;font-weight:800;margin-bottom:3px}.tip{background:linear-gradient(135deg,#FF6B9D11,#C77DFF11);border:1px solid #C77DFF33;border-radius:12px;padding:14px;margin-top:4px;font-size:13px;line-height:1.9}</style></head><body><h1>✏️ 키포인트 이렇게 쓰면 글이 잘 나와요</h1><div class="content"><div class="intro">구체적으로 쓸수록 실제 경험처럼 자연스러운 글이 나옵니다.<br>장소 + 가격 + 시간 + 특징 + 개인 의견을 담아주세요.</div><div class="cat-title">🍽️ 맛집 방문</div><div class="bad"><div class="lbl">❌ 아쉬운 예</div>강원도 맛집, 고기집, 맛있었음</div><div class="good"><div class="lbl">✅ 좋은 예</div>강원도 홍천 태장동 / 한우 소갈비찜 전문점 / 2인 45,000원 / 웨이팅 40분 / 주차 무료 / 반찬 10가지 / 아이 동반 가능 / 재방문 의향 있음</div><div class="cat-title">✈️ 여행 후기</div><div class="bad"><div class="lbl">❌ 아쉬운 예</div>제주도 여행, 경치 좋았다</div><div class="good"><div class="lbl">✅ 좋은 예</div>제주 성산읍 성산일출봉 / 오전 6시 방문 / 입장료 5,000원 / 일출 40분 전 도착 권장 / 주차장에서 도보 10분 / 공항에서 1시간 소요</div><div class="cat-title">☕ 카페 방문</div><div class="bad"><div class="lbl">❌ 아쉬운 예</div>서울 카페, 인테리어 예쁨</div><div class="good"><div class="lbl">✅ 좋은 예</div>서울 성수동 공장 리모델링 카페 / 아메리카노 6,500원 / 대기 없이 입장 / 오전 11시 방문 / 좌석 80개 / 지하철 권장 주차 불가</div><div class="cat-title">📦 제품 리뷰</div><div class="bad"><div class="lbl">❌ 아쉬운 예</div>에어프라이어 구매, 좋음</div><div class="good"><div class="lbl">✅ 좋은 예</div>필립스 에어프라이어 5.6L / 129,000원 / 3인 가족 6개월 사용 / 치킨 20분 바삭 / 세척 쉬움 / 단점: 크기 커서 수납 불편 / 만족도 9점</div><div class="cat-title">💬 체험단 후기</div><div class="bad"><div class="lbl">❌ 아쉬운 예</div>협찬 받은 피부과, 좋았음</div><div class="good"><div class="lbl">✅ 좋은 예</div>[협찬] 강남 청담 피부과 / 리프팅 시술 1회 / 40분 소요 / 붓기 거의 없음 / 직원 친절 / 주차 2시간 무료 / 다음 달 추가 예약</div><div class="tip">💡 핵심: 장소 + 가격 + 소요시간 + 특징 2~3개 + 내 솔직한 의견<br>이렇게만 써도 AI가 훨씬 풍부하고 자연스러운 글을 써드려요!</div></div></body></html>`;if((window as any).electron?.openPreview){(window as any).electron.openPreview(html);}else{const w=window.open("","_blank","width=560,height=820");if(w){w.document.write(html);w.document.close();}}}} style={{padding:"5px 12px",borderRadius:20,background:"linear-gradient(135deg,#FF6B9D,#C77DFF)",color:"#fff",border:"none",cursor:"pointer",fontSize:11,fontWeight:800,fontFamily:"inherit",whiteSpace:"nowrap",flexShrink:0}}>📝 예시 보기</button>
+                    </div>
                   </div>
                   <textarea
                     className="photo-keypoints"
@@ -5641,7 +5711,10 @@ POST3: (제목)|(이유)
 
                 {/* 설정 카드 */}
                 <div className="card">
-                  <div className="card-title" style={{marginBottom:16}}>📅 콘텐츠 캘린더 생성</div>
+                  <div className="card-title" style={{marginBottom:8}}>📅 콘텐츠 캘린더 생성</div>
+                  <div style={{fontSize:12.5,color:"var(--text2)",lineHeight:1.6,marginBottom:16,padding:"11px 14px",borderRadius:11,background:"var(--card2)",border:"1px solid var(--border)"}}>
+                    💡 <b>키워드만 넣으면 AI가 며칠치 발행 계획표를 자동으로</b> 짜줘요. 날짜별로 <b>어떤 키워드·제목</b>으로 쓸지 정해주고(주말=감성/맛집, 평일=정보성), 각 줄의 <b style={{color:"var(--accent-text)"}}>✍️ 글쓰기</b>를 누르면 그 제목으로 바로 글 생성으로 이동해요. <b>발행한 글은 ✓ 체크</b>하면 진행률과 <b style={{color:"#ff7a30"}}>🔥 연속 발행일</b>이 쌓여요. <span style={{color:"var(--text3)"}}>계획표는 저장돼서 다시 들어와도 그대로 있어요.</span>
+                  </div>
                   <div style={{marginBottom:14}}>
                     <label className="inp-label">🔑 키워드 입력 (쉼표 또는 줄바꿈으로 구분)</label>
                     <textarea className="inp" rows={4} placeholder={"예: 다이어트 방법, 제주도 여행, 강남 맛집\n오징어 젓갈, 홈카페 레시피"}
@@ -5676,68 +5749,123 @@ POST3: (제목)|(이유)
                   </button>
                 </div>
 
-                {/* 스케줄 결과 */}
-                {calDone&&calSchedule.length>0&&(
-                  <div className="card" style={{marginTop:0,padding:0,overflow:"hidden",animation:"fadeUp .2s ease both"}}>
-                    <div style={{padding:"14px 16px",borderBottom:"1px solid var(--border)",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
-                      <div className="card-title" style={{margin:0}}>📋 {calSchedule.length}일치 발행 스케줄</div>
-                      <button onClick={()=>{
-                        const csv=["날짜,키워드,제목,스타일,수익유형",...calSchedule.map(s=>`${s.date},${s.keyword},"${s.title}",${s.style},${s.adType}`)].join("\n");
-                        const a=document.createElement("a");a.href=URL.createObjectURL(new Blob(["﻿"+csv],{type:"text/csv"}));a.download="콘텐츠캘린더.csv";a.click();
-                      }} style={{padding:"6px 14px",borderRadius:8,border:"1px solid var(--border)",background:"var(--card2)",color:"var(--text2)",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:"inherit"}}>
-                        📥 CSV 다운로드
-                      </button>
+                {/* 스케줄 결과 (저장된 것도 표시) */}
+                {calSchedule.length>0&&(()=>{
+                  const todayStr=new Date().toISOString().slice(0,10);
+                  const total=calSchedule.length;
+                  const doneCount=calSchedule.filter(s=>calCompleted[s.date]).length;
+                  const pct=total?Math.round(doneCount/total*100):0;
+                  // 🔥연속 발행 스트릭: 완료한 날짜가 오늘(또는 어제)부터 며칠 연속 이어졌는지
+                  const doneDates=new Set(calSchedule.filter(s=>calCompleted[s.date]).map(s=>s.date));
+                  let streak=0; const cur=new Date();
+                  if(!doneDates.has(todayStr)) cur.setDate(cur.getDate()-1);   // 오늘 아직이면 어제부터
+                  while(doneDates.has(cur.toISOString().slice(0,10))){streak++;cur.setDate(cur.getDate()-1);}
+                  const todayItem=calSchedule.find(s=>s.date===todayStr);
+                  const todayDone=todayItem&&!!calCompleted[todayItem.date];
+                  const cheer=pct===100?"🎉 완주했어요! 정말 대단해요":pct>=70?"🔥 거의 다 왔어요, 조금만 더!":pct>=40?"👍 절반 넘었어요, 이 페이스 유지!":pct>0?"💪 시작이 반이에요":"✨ 오늘 한 편부터 가볍게 시작해요";
+                  return(
+                  <>
+                    {/* ===== 후킹: 진행률 + 스트릭 + 오늘의 글 ===== */}
+                    <div className="card" style={{marginBottom:14,animation:"fadeUp .2s ease both"}}>
+                      <div style={{display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
+                        <div style={{display:"flex",alignItems:"center",gap:9,padding:"10px 15px",borderRadius:13,background:"linear-gradient(135deg,rgba(255,107,53,.14),rgba(255,159,63,.10))",border:"1px solid rgba(255,127,50,.28)"}}>
+                          <span style={{fontSize:26,filter:streak>0?"none":"grayscale(1) opacity(.5)"}}>🔥</span>
+                          <div><div style={{fontSize:22,fontWeight:900,color:"#ff7a30",lineHeight:1}}>{streak}<span style={{fontSize:12,marginLeft:2}}>일</span></div><div style={{fontSize:10.5,color:"var(--text3)",fontWeight:700,marginTop:2}}>연속 발행</div></div>
+                        </div>
+                        <div style={{flex:1,minWidth:160}}>
+                          <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:6}}>
+                            <span style={{fontSize:13,fontWeight:800,color:"var(--text)"}}>{cheer}</span>
+                            <span style={{fontSize:12,fontWeight:800,color:"var(--accent-text)"}}>{doneCount}/{total} · {pct}%</span>
+                          </div>
+                          <div style={{height:10,borderRadius:99,background:"var(--card2)",overflow:"hidden"}}>
+                            <div style={{height:"100%",width:`${pct}%`,borderRadius:99,background:"linear-gradient(90deg,#03c75a,#00a5ff)",transition:"width .5s cubic-bezier(.2,.8,.2,1)"}}/>
+                          </div>
+                        </div>
+                      </div>
+                      {/* 오늘 쓸 글 배너 */}
+                      {todayItem&&(
+                        <div style={{marginTop:13,padding:"13px 15px",borderRadius:12,background:todayDone?"rgba(3,199,90,.08)":"var(--accent-bg)",border:`1.5px solid ${todayDone?"rgba(3,199,90,.35)":"var(--accent-border)"}`,display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
+                          <div style={{flex:1,minWidth:180}}>
+                            <div style={{fontSize:11,fontWeight:800,color:todayDone?"var(--success)":"var(--accent-text)",marginBottom:3,letterSpacing:".02em"}}>{todayDone?"✅ 오늘 글 완료!":"📌 오늘 쓸 글"}</div>
+                            <div style={{fontSize:14,fontWeight:800,color:"var(--text)",lineHeight:1.35,textDecoration:todayDone?"line-through":"none",opacity:todayDone?.6:1}}>{todayItem.title}</div>
+                            <div style={{fontSize:11,color:"var(--text3)",marginTop:3}}>🔑 {todayItem.keyword} · {todayItem.style}</div>
+                          </div>
+                          {!todayDone&&<button onClick={()=>writeFromSchedule(todayItem)} className="btn btn-primary" style={{padding:"11px 18px",fontSize:13,whiteSpace:"nowrap"}}>✍️ 지금 쓰기 →</button>}
+                        </div>
+                      )}
                     </div>
-                    <div style={{overflowX:"auto"}}>
-                      <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
-                        <thead>
-                          <tr style={{background:"var(--bg2)"}}>
-                            {["날짜","키워드","제목","스타일","수익"].map(h=>(
-                              <th key={h} style={{padding:"9px 12px",textAlign:"left",fontWeight:700,color:"var(--text3)",whiteSpace:"nowrap",borderBottom:"1px solid var(--border)"}}>{h}</th>
-                            ))}
-                            <th style={{padding:"9px 12px",borderBottom:"1px solid var(--border)"}}></th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {calSchedule.map((s,i)=>{
-                            const d=new Date(s.date);
-                            const dow=["일","월","화","수","목","금","토"][d.getDay()];
-                            const isWeekend=d.getDay()===0||d.getDay()===6;
-                            return(
-                              <tr key={i} style={{borderBottom:"1px solid var(--border)",transition:"background .1s"}}
-                                onMouseEnter={e=>(e.currentTarget.style.background="var(--card-hover)")}
-                                onMouseLeave={e=>(e.currentTarget.style.background="")}>
-                                <td style={{padding:"10px 12px",whiteSpace:"nowrap"}}>
-                                  <span style={{fontWeight:700,color:isWeekend?"var(--warn)":"var(--text)"}}>{s.date}</span>
-                                  <span style={{fontSize:10,marginLeft:4,color:"var(--text3)"}}>({dow})</span>
-                                </td>
-                                <td style={{padding:"10px 12px",color:"var(--accent-text)",fontWeight:700,whiteSpace:"nowrap"}}>{s.keyword}</td>
-                                <td style={{padding:"10px 12px",color:"var(--text)",maxWidth:260,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{s.title}</td>
-                                <td style={{padding:"10px 12px",whiteSpace:"nowrap"}}>
-                                  <span style={{fontSize:11,padding:"2px 8px",borderRadius:99,background:"var(--card2)",color:"var(--text2)",border:"1px solid var(--border)"}}>{s.style}</span>
-                                </td>
-                                <td style={{padding:"10px 12px",whiteSpace:"nowrap"}}>
-                                  <span style={{fontSize:11,padding:"2px 8px",borderRadius:99,
-                                    background:s.adType==="adpost"?"rgba(3,199,90,.1)":"rgba(66,133,244,.1)",
-                                    color:s.adType==="adpost"?"var(--naver)":"#4285F4",
-                                    border:`1px solid ${s.adType==="adpost"?"rgba(3,199,90,.3)":"rgba(66,133,244,.3)"}`}}>
-                                    {s.adType==="adpost"?"애드포스트":"애드센스"}
-                                  </span>
-                                </td>
-                                <td style={{padding:"10px 12px"}}>
-                                  <button onClick={()=>{setKeyword(s.keyword);setSelectedTitle(s.title);setTab("write");showToast("키워드와 제목이 적용됐어요!");}}
-                                    style={{padding:"4px 10px",borderRadius:7,border:"1px solid var(--accent-border)",background:"var(--accent-bg)",color:"var(--accent-text)",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:"inherit",whiteSpace:"nowrap"}}>
-                                    글 생성 →
-                                  </button>
-                                </td>
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
+
+                    {/* ===== 발행 스케줄 표 ===== */}
+                    <div className="card" style={{marginTop:0,padding:0,overflow:"hidden",animation:"fadeUp .2s ease both"}}>
+                      <div style={{padding:"14px 16px",borderBottom:"1px solid var(--border)",display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,flexWrap:"wrap"}}>
+                        <div className="card-title" style={{margin:0}}>📋 {total}일치 발행 스케줄</div>
+                        <div style={{display:"flex",gap:8}}>
+                          <button onClick={()=>{
+                            const csv=["날짜,키워드,제목,스타일,수익유형,완료",...calSchedule.map(s=>`${s.date},${s.keyword},"${s.title}",${s.style},${s.adType},${calCompleted[s.date]?"완료":""}`)].join("\n");
+                            const a=document.createElement("a");a.href=URL.createObjectURL(new Blob(["﻿"+csv],{type:"text/csv"}));a.download="콘텐츠캘린더.csv";a.click();
+                          }} style={{padding:"6px 14px",borderRadius:8,border:"1px solid var(--border)",background:"var(--card2)",color:"var(--text2)",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:"inherit"}}>📥 CSV</button>
+                          <button onClick={()=>{if(window.confirm("이 스케줄을 지울까요? 완료 기록도 함께 삭제돼요.")){setCalSchedule([]);setCalCompleted({});setCalDone(false);localStorage.removeItem("publy_cal_schedule");localStorage.removeItem("publy_cal_done");}}}
+                            style={{padding:"6px 14px",borderRadius:8,border:"1px solid var(--border)",background:"var(--card2)",color:"var(--text3)",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:"inherit"}}>🗑 초기화</button>
+                        </div>
+                      </div>
+                      <div style={{overflowX:"auto"}}>
+                        <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
+                          <thead>
+                            <tr style={{background:"var(--bg2)"}}>
+                              {["","날짜","키워드","제목","스타일","수익",""].map((h,hi)=>(
+                                <th key={hi} style={{padding:"9px 12px",textAlign:"left",fontWeight:700,color:"var(--text3)",whiteSpace:"nowrap",borderBottom:"1px solid var(--border)"}}>{h}</th>
+                              ))}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {calSchedule.map((s,i)=>{
+                              const d=new Date(s.date);
+                              const dow=["일","월","화","수","목","금","토"][d.getDay()];
+                              const isWeekend=d.getDay()===0||d.getDay()===6;
+                              const done=!!calCompleted[s.date];
+                              const isToday=s.date===todayStr;
+                              return(
+                                <tr key={i} style={{borderBottom:"1px solid var(--border)",transition:"background .1s",background:isToday?"var(--accent-bg)":done?"rgba(3,199,90,.05)":"",opacity:done?.6:1}}
+                                  onMouseEnter={e=>(e.currentTarget.style.background=isToday?"var(--accent-bg)":"var(--card-hover)")}
+                                  onMouseLeave={e=>(e.currentTarget.style.background=isToday?"var(--accent-bg)":done?"rgba(3,199,90,.05)":"")}>
+                                  <td style={{padding:"10px 8px 10px 12px",whiteSpace:"nowrap"}}>
+                                    <button onClick={()=>toggleCalDone(s.date)} title={done?"완료 취소":"발행 완료 표시"}
+                                      style={{width:24,height:24,borderRadius:7,border:`2px solid ${done?"var(--success)":"var(--border)"}`,background:done?"var(--success)":"transparent",color:"#fff",cursor:"pointer",fontSize:13,fontWeight:900,display:"flex",alignItems:"center",justifyContent:"center",padding:0,lineHeight:1}}>{done?"✓":""}</button>
+                                  </td>
+                                  <td style={{padding:"10px 12px",whiteSpace:"nowrap"}}>
+                                    <span style={{fontWeight:700,color:isWeekend?"var(--warn)":"var(--text)",textDecoration:done?"line-through":"none"}}>{s.date}</span>
+                                    <span style={{fontSize:10,marginLeft:4,color:"var(--text3)"}}>({dow})</span>
+                                    {isToday&&<span style={{fontSize:9,marginLeft:5,padding:"1px 6px",borderRadius:99,background:"var(--accent)",color:"#000",fontWeight:900}}>오늘</span>}
+                                  </td>
+                                  <td style={{padding:"10px 12px",color:"var(--accent-text)",fontWeight:700,whiteSpace:"nowrap"}}>{s.keyword}</td>
+                                  <td style={{padding:"10px 12px",color:"var(--text)",maxWidth:260,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",textDecoration:done?"line-through":"none"}}>{s.title}</td>
+                                  <td style={{padding:"10px 12px",whiteSpace:"nowrap"}}>
+                                    <span style={{fontSize:11,padding:"2px 8px",borderRadius:99,background:"var(--card2)",color:"var(--text2)",border:"1px solid var(--border)"}}>{s.style}</span>
+                                  </td>
+                                  <td style={{padding:"10px 12px",whiteSpace:"nowrap"}}>
+                                    <span style={{fontSize:11,padding:"2px 8px",borderRadius:99,
+                                      background:s.adType==="adpost"?"rgba(3,199,90,.1)":"rgba(66,133,244,.1)",
+                                      color:s.adType==="adpost"?"var(--naver)":"#4285F4",
+                                      border:`1px solid ${s.adType==="adpost"?"rgba(3,199,90,.3)":"rgba(66,133,244,.3)"}`}}>
+                                      {s.adType==="adpost"?"애드포스트":"애드센스"}
+                                    </span>
+                                  </td>
+                                  <td style={{padding:"10px 12px"}}>
+                                    <button onClick={()=>writeFromSchedule(s)}
+                                      style={{padding:"4px 10px",borderRadius:7,border:"1px solid var(--accent-border)",background:"var(--accent-bg)",color:"var(--accent-text)",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:"inherit",whiteSpace:"nowrap"}}>
+                                      ✍️ 글쓰기 →
+                                    </button>
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
                     </div>
-                  </div>
-                )}
+                  </>
+                  );
+                })()}
               </div>
             )}
 

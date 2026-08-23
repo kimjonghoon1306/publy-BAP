@@ -843,7 +843,9 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
   const [calKeywords, setCalKeywords] = useState("");
   const [calPlatform, setCalPlatform] = useState<"naver"|"tistory">("naver");
   const [calDays, setCalDays] = useState(30);
-  const [calSchedule, setCalSchedule] = useState<{date:string;keyword:string;title:string;style:string;adType:string}[]>([]);
+  // ★캘린더 스케줄·완료기록 localStorage 저장(관리자용 키) → 재접속해도 유지
+  const [calSchedule, setCalSchedule] = useState<{date:string;keyword:string;title:string;style:string;adType:string}[]>(()=>{try{return JSON.parse(localStorage.getItem("publy_adm_cal_schedule")||"[]");}catch{return[];}});
+  const [calCompleted, setCalCompleted] = useState<Record<string,string>>(()=>{try{return JSON.parse(localStorage.getItem("publy_adm_cal_done")||"{}");}catch{return{};}});
   const [calLoading, setCalLoading] = useState(false);
   const [calDone, setCalDone] = useState(false);
   function showToast(msg:string, type:"success"|"error"|"info"="success"){
@@ -927,11 +929,28 @@ Output format (JSON array only, no other text):
       if(!raw){throw new Error("Gemini 응답이 비어있어요. API 키를 확인해주세요.");}
       const clean=raw.replace(/```json|```/g,"").trim();
       const parsed=JSON.parse(clean);
-      setCalSchedule(parsed.slice(0,calDays));
+      const sched=parsed.slice(0,calDays);
+      setCalSchedule(sched);
+      localStorage.setItem("publy_adm_cal_schedule",JSON.stringify(sched));
+      setCalCompleted({}); localStorage.setItem("publy_adm_cal_done","{}");
       setCalDone(true);
-      showToast(`${parsed.slice(0,calDays).length}일치 스케줄 생성 완료!`);
+      showToast(`${sched.length}일치 스케줄 생성 완료!`);
     }catch(e:any){showToast("❌ "+e.message,"error");}
     finally{setCalLoading(false);}
+  }
+  function toggleCalDone(date:string){
+    setCalCompleted(prev=>{
+      const next={...prev};
+      if(next[date]) delete next[date]; else next[date]=new Date().toISOString();
+      localStorage.setItem("publy_adm_cal_done",JSON.stringify(next));
+      return next;
+    });
+  }
+  function writeFromSchedule(s:{keyword:string;title:string}){
+    setKeyword(s.keyword);
+    setSelectedTitle(s.title);
+    setTab("write");
+    showToast(`✍️ "${s.title}" 글쓰기로 이동했어요!`);
   }
 
   async function fetchKeywordData(){
@@ -1245,14 +1264,17 @@ Output format (JSON array only, no other text):
 
       if(!text){
         const MODELS = ["gemini-2.0-flash","gemini-2.5-flash","gemini-1.5-flash"];
-        const bodyDirect = {contents:[{parts:[...imgParts,{text:prompt}]}],generationConfig:{maxOutputTokens:4000,temperature:0.9}};
         for(const model of MODELS){
           try{
+            const genCfg:any={maxOutputTokens:8000,temperature:0.9};   // 사진글 길어서 8000·2.5 thinking 끄기
+            if(model.startsWith("gemini-2.5")) genCfg.thinkingConfig={thinkingBudget:0};
+            const bodyDirect = {contents:[{parts:[...imgParts,{text:prompt}]}],generationConfig:genCfg};
             const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiKey}`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(bodyDirect),signal:AbortSignal.timeout(120000)});
             if(!r.ok) continue;
             const d = await r.json();
-            const t = d.candidates?.[0]?.content?.parts?.[0]?.text;
-            if(t){text=t;break;}
+            const c = d.candidates?.[0];
+            const t = c?.content?.parts?.[0]?.text;
+            if(t&&c?.finishReason!=="MAX_TOKENS"){text=t;break;}
           }catch{}
         }
       }
@@ -4026,7 +4048,10 @@ POST3: (제목)|(이유)
             {tab === "calendar" && (
               <div style={{animation:"fadeUp .25s ease both"}}>
                 <div className="card">
-                  <div className="card-title" style={{marginBottom:16}}>📅 콘텐츠 캘린더 생성</div>
+                  <div className="card-title" style={{marginBottom:8}}>📅 콘텐츠 캘린더 생성</div>
+                  <div style={{fontSize:12.5,color:"var(--text2)",lineHeight:1.6,marginBottom:16,padding:"11px 14px",borderRadius:11,background:"var(--card2)",border:"1px solid var(--border)"}}>
+                    💡 <b>키워드만 넣으면 AI가 며칠치 발행 계획표를 자동으로</b> 짜줘요. 각 줄의 <b style={{color:"var(--accent-text)"}}>✍️ 글쓰기</b>를 누르면 그 제목으로 바로 글 생성으로 이동하고, <b>발행한 글은 ✓ 체크</b>하면 진행률·<b style={{color:"#ff7a30"}}>🔥 연속 발행일</b>이 쌓여요. <span style={{color:"var(--text3)"}}>계획표는 저장돼 다시 들어와도 유지돼요.</span>
+                  </div>
                   <div style={{marginBottom:14}}>
                     <label className="inp-label">🔑 키워드 입력 (쉼표 또는 줄바꿈으로 구분)</label>
                     <textarea className="inp" rows={4} placeholder={"예: 다이어트 방법, 제주도 여행, 강남 맛집\n오징어 젓갈, 홈카페 레시피"}
@@ -4061,66 +4086,118 @@ POST3: (제목)|(이유)
                   </button>
                 </div>
 
-                {calDone&&calSchedule.length>0&&(
-                  <div className="card" style={{marginTop:0,padding:0,overflow:"hidden",animation:"fadeUp .2s ease both"}}>
-                    <div style={{padding:"14px 16px",borderBottom:"1px solid var(--border)",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
-                      <div className="card-title" style={{margin:0}}>📋 {calSchedule.length}일치 발행 스케줄</div>
-                      <button onClick={()=>{
-                        const csv=["날짜,키워드,제목,스타일,수익유형",...calSchedule.map(s=>`${s.date},${s.keyword},"${s.title}",${s.style},${s.adType}`)].join("\n");
-                        const a=document.createElement("a");a.href=URL.createObjectURL(new Blob(["﻿"+csv],{type:"text/csv"}));a.download="콘텐츠캘린더.csv";a.click();
-                      }} style={{padding:"6px 14px",borderRadius:8,border:"1px solid var(--border)",background:"var(--card2)",color:"var(--text2)",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:"inherit"}}>
-                        📥 CSV 다운로드
-                      </button>
+                {calSchedule.length>0&&(()=>{
+                  const todayStr=new Date().toISOString().slice(0,10);
+                  const total=calSchedule.length;
+                  const doneCount=calSchedule.filter(s=>calCompleted[s.date]).length;
+                  const pct=total?Math.round(doneCount/total*100):0;
+                  const doneDates=new Set(calSchedule.filter(s=>calCompleted[s.date]).map(s=>s.date));
+                  let streak=0; const cur=new Date();
+                  if(!doneDates.has(todayStr)) cur.setDate(cur.getDate()-1);
+                  while(doneDates.has(cur.toISOString().slice(0,10))){streak++;cur.setDate(cur.getDate()-1);}
+                  const todayItem=calSchedule.find(s=>s.date===todayStr);
+                  const todayDone=todayItem&&!!calCompleted[todayItem.date];
+                  const cheer=pct===100?"🎉 완주했어요! 정말 대단해요":pct>=70?"🔥 거의 다 왔어요, 조금만 더!":pct>=40?"👍 절반 넘었어요, 이 페이스 유지!":pct>0?"💪 시작이 반이에요":"✨ 오늘 한 편부터 가볍게 시작해요";
+                  return(
+                  <>
+                    <div className="card" style={{marginBottom:14,animation:"fadeUp .2s ease both"}}>
+                      <div style={{display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
+                        <div style={{display:"flex",alignItems:"center",gap:9,padding:"10px 15px",borderRadius:13,background:"linear-gradient(135deg,rgba(255,107,53,.14),rgba(255,159,63,.10))",border:"1px solid rgba(255,127,50,.28)"}}>
+                          <span style={{fontSize:26,filter:streak>0?"none":"grayscale(1) opacity(.5)"}}>🔥</span>
+                          <div><div style={{fontSize:22,fontWeight:900,color:"#ff7a30",lineHeight:1}}>{streak}<span style={{fontSize:12,marginLeft:2}}>일</span></div><div style={{fontSize:10.5,color:"var(--text3)",fontWeight:700,marginTop:2}}>연속 발행</div></div>
+                        </div>
+                        <div style={{flex:1,minWidth:160}}>
+                          <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:6}}>
+                            <span style={{fontSize:13,fontWeight:800,color:"var(--text)"}}>{cheer}</span>
+                            <span style={{fontSize:12,fontWeight:800,color:"var(--accent-text)"}}>{doneCount}/{total} · {pct}%</span>
+                          </div>
+                          <div style={{height:10,borderRadius:99,background:"var(--card2)",overflow:"hidden"}}>
+                            <div style={{height:"100%",width:`${pct}%`,borderRadius:99,background:"linear-gradient(90deg,#03c75a,#00a5ff)",transition:"width .5s cubic-bezier(.2,.8,.2,1)"}}/>
+                          </div>
+                        </div>
+                      </div>
+                      {todayItem&&(
+                        <div style={{marginTop:13,padding:"13px 15px",borderRadius:12,background:todayDone?"rgba(3,199,90,.08)":"var(--accent-bg)",border:`1.5px solid ${todayDone?"rgba(3,199,90,.35)":"var(--accent-border)"}`,display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
+                          <div style={{flex:1,minWidth:180}}>
+                            <div style={{fontSize:11,fontWeight:800,color:todayDone?"var(--success)":"var(--accent-text)",marginBottom:3}}>{todayDone?"✅ 오늘 글 완료!":"📌 오늘 쓸 글"}</div>
+                            <div style={{fontSize:14,fontWeight:800,color:"var(--text)",lineHeight:1.35,textDecoration:todayDone?"line-through":"none",opacity:todayDone?.6:1}}>{todayItem.title}</div>
+                            <div style={{fontSize:11,color:"var(--text3)",marginTop:3}}>🔑 {todayItem.keyword} · {todayItem.style}</div>
+                          </div>
+                          {!todayDone&&<button onClick={()=>writeFromSchedule(todayItem)} className="btn btn-primary" style={{padding:"11px 18px",fontSize:13,whiteSpace:"nowrap"}}>✍️ 지금 쓰기 →</button>}
+                        </div>
+                      )}
                     </div>
-                    <div style={{overflowX:"auto"}}>
-                      <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
-                        <thead>
-                          <tr style={{background:"var(--bg2)"}}>
-                            {["날짜","키워드","제목","스타일","수익",""].map(h=>(
-                              <th key={h} style={{padding:"9px 12px",textAlign:"left",fontWeight:700,color:"var(--text3)",whiteSpace:"nowrap",borderBottom:"1px solid var(--border)"}}>{h}</th>
-                            ))}
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {calSchedule.map((s,i)=>{
-                            const d=new Date(s.date);
-                            const dow=["일","월","화","수","목","금","토"][d.getDay()];
-                            const isWeekend=d.getDay()===0||d.getDay()===6;
-                            return(
-                              <tr key={i} style={{borderBottom:"1px solid var(--border)",transition:"background .1s"}}
-                                onMouseEnter={e=>(e.currentTarget.style.background="var(--card-hover)")}
-                                onMouseLeave={e=>(e.currentTarget.style.background="")}>
-                                <td style={{padding:"10px 12px",whiteSpace:"nowrap"}}>
-                                  <span style={{fontWeight:700,color:isWeekend?"var(--warn)":"var(--text)"}}>{s.date}</span>
-                                  <span style={{fontSize:10,marginLeft:4,color:"var(--text3)"}}>({dow})</span>
-                                </td>
-                                <td style={{padding:"10px 12px",color:"var(--accent-text)",fontWeight:700,whiteSpace:"nowrap"}}>{s.keyword}</td>
-                                <td style={{padding:"10px 12px",color:"var(--text)",maxWidth:260,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{s.title}</td>
-                                <td style={{padding:"10px 12px",whiteSpace:"nowrap"}}>
-                                  <span style={{fontSize:11,padding:"2px 8px",borderRadius:99,background:"var(--card2)",color:"var(--text2)",border:"1px solid var(--border)"}}>{s.style}</span>
-                                </td>
-                                <td style={{padding:"10px 12px",whiteSpace:"nowrap"}}>
-                                  <span style={{fontSize:11,padding:"2px 8px",borderRadius:99,
-                                    background:s.adType==="adpost"?"rgba(3,199,90,.1)":"rgba(66,133,244,.1)",
-                                    color:s.adType==="adpost"?"var(--naver)":"#4285F4",
-                                    border:`1px solid ${s.adType==="adpost"?"rgba(3,199,90,.3)":"rgba(66,133,244,.3)"}`}}>
-                                    {s.adType==="adpost"?"애드포스트":"애드센스"}
-                                  </span>
-                                </td>
-                                <td style={{padding:"10px 12px"}}>
-                                  <button onClick={()=>{setKeyword(s.keyword);setSelectedTitle(s.title);setTab("write" as any);showToast("키워드와 제목이 적용됐어요!");}}
-                                    style={{padding:"4px 10px",borderRadius:7,border:"1px solid var(--accent-border)",background:"var(--accent-bg)",color:"var(--accent-text)",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:"inherit",whiteSpace:"nowrap"}}>
-                                    글 생성 →
-                                  </button>
-                                </td>
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
+
+                    <div className="card" style={{marginTop:0,padding:0,overflow:"hidden",animation:"fadeUp .2s ease both"}}>
+                      <div style={{padding:"14px 16px",borderBottom:"1px solid var(--border)",display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,flexWrap:"wrap"}}>
+                        <div className="card-title" style={{margin:0}}>📋 {total}일치 발행 스케줄</div>
+                        <div style={{display:"flex",gap:8}}>
+                          <button onClick={()=>{
+                            const csv=["날짜,키워드,제목,스타일,수익유형,완료",...calSchedule.map(s=>`${s.date},${s.keyword},"${s.title}",${s.style},${s.adType},${calCompleted[s.date]?"완료":""}`)].join("\n");
+                            const a=document.createElement("a");a.href=URL.createObjectURL(new Blob(["﻿"+csv],{type:"text/csv"}));a.download="콘텐츠캘린더.csv";a.click();
+                          }} style={{padding:"6px 14px",borderRadius:8,border:"1px solid var(--border)",background:"var(--card2)",color:"var(--text2)",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:"inherit"}}>📥 CSV</button>
+                          <button onClick={()=>{if(window.confirm("이 스케줄을 지울까요? 완료 기록도 함께 삭제돼요.")){setCalSchedule([]);setCalCompleted({});setCalDone(false);localStorage.removeItem("publy_adm_cal_schedule");localStorage.removeItem("publy_adm_cal_done");}}}
+                            style={{padding:"6px 14px",borderRadius:8,border:"1px solid var(--border)",background:"var(--card2)",color:"var(--text3)",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:"inherit"}}>🗑 초기화</button>
+                        </div>
+                      </div>
+                      <div style={{overflowX:"auto"}}>
+                        <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
+                          <thead>
+                            <tr style={{background:"var(--bg2)"}}>
+                              {["","날짜","키워드","제목","스타일","수익",""].map((h,hi)=>(
+                                <th key={hi} style={{padding:"9px 12px",textAlign:"left",fontWeight:700,color:"var(--text3)",whiteSpace:"nowrap",borderBottom:"1px solid var(--border)"}}>{h}</th>
+                              ))}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {calSchedule.map((s,i)=>{
+                              const d=new Date(s.date);
+                              const dow=["일","월","화","수","목","금","토"][d.getDay()];
+                              const isWeekend=d.getDay()===0||d.getDay()===6;
+                              const done=!!calCompleted[s.date];
+                              const isToday=s.date===todayStr;
+                              return(
+                                <tr key={i} style={{borderBottom:"1px solid var(--border)",transition:"background .1s",background:isToday?"var(--accent-bg)":done?"rgba(3,199,90,.05)":"",opacity:done?.6:1}}
+                                  onMouseEnter={e=>(e.currentTarget.style.background=isToday?"var(--accent-bg)":"var(--card-hover)")}
+                                  onMouseLeave={e=>(e.currentTarget.style.background=isToday?"var(--accent-bg)":done?"rgba(3,199,90,.05)":"")}>
+                                  <td style={{padding:"10px 8px 10px 12px",whiteSpace:"nowrap"}}>
+                                    <button onClick={()=>toggleCalDone(s.date)} title={done?"완료 취소":"발행 완료 표시"}
+                                      style={{width:24,height:24,borderRadius:7,border:`2px solid ${done?"var(--success)":"var(--border)"}`,background:done?"var(--success)":"transparent",color:"#fff",cursor:"pointer",fontSize:13,fontWeight:900,display:"flex",alignItems:"center",justifyContent:"center",padding:0,lineHeight:1}}>{done?"✓":""}</button>
+                                  </td>
+                                  <td style={{padding:"10px 12px",whiteSpace:"nowrap"}}>
+                                    <span style={{fontWeight:700,color:isWeekend?"var(--warn)":"var(--text)",textDecoration:done?"line-through":"none"}}>{s.date}</span>
+                                    <span style={{fontSize:10,marginLeft:4,color:"var(--text3)"}}>({dow})</span>
+                                    {isToday&&<span style={{fontSize:9,marginLeft:5,padding:"1px 6px",borderRadius:99,background:"var(--accent)",color:"#000",fontWeight:900}}>오늘</span>}
+                                  </td>
+                                  <td style={{padding:"10px 12px",color:"var(--accent-text)",fontWeight:700,whiteSpace:"nowrap"}}>{s.keyword}</td>
+                                  <td style={{padding:"10px 12px",color:"var(--text)",maxWidth:260,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",textDecoration:done?"line-through":"none"}}>{s.title}</td>
+                                  <td style={{padding:"10px 12px",whiteSpace:"nowrap"}}>
+                                    <span style={{fontSize:11,padding:"2px 8px",borderRadius:99,background:"var(--card2)",color:"var(--text2)",border:"1px solid var(--border)"}}>{s.style}</span>
+                                  </td>
+                                  <td style={{padding:"10px 12px",whiteSpace:"nowrap"}}>
+                                    <span style={{fontSize:11,padding:"2px 8px",borderRadius:99,
+                                      background:s.adType==="adpost"?"rgba(3,199,90,.1)":"rgba(66,133,244,.1)",
+                                      color:s.adType==="adpost"?"var(--naver)":"#4285F4",
+                                      border:`1px solid ${s.adType==="adpost"?"rgba(3,199,90,.3)":"rgba(66,133,244,.3)"}`}}>
+                                      {s.adType==="adpost"?"애드포스트":"애드센스"}
+                                    </span>
+                                  </td>
+                                  <td style={{padding:"10px 12px"}}>
+                                    <button onClick={()=>writeFromSchedule(s)}
+                                      style={{padding:"4px 10px",borderRadius:7,border:"1px solid var(--accent-border)",background:"var(--accent-bg)",color:"var(--accent-text)",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:"inherit",whiteSpace:"nowrap"}}>
+                                      ✍️ 글쓰기 →
+                                    </button>
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
                     </div>
-                  </div>
-                )}
+                  </>
+                  );
+                })()}
               </div>
             )}
 

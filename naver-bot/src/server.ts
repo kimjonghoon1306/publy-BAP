@@ -382,20 +382,23 @@ app.post("/api/gemini-vision", async (req, res) => {
   const { apiKey, parts, prompt } = req.body;
   if (!apiKey || !parts || !prompt) return res.status(400).json({ error: "파라미터 누락" });
   const models = ["gemini-2.0-flash", "gemini-2.5-flash", "gemini-1.5-flash"];
-  const body = {
-    contents: [{ parts: [...parts, { text: prompt }] }],
-    generationConfig: { maxOutputTokens: 4000, temperature: 0.9 }
-  };
   for (const model of models) {
     try {
+      // ★사진글은 길어서 4000토큰이면 잘림 → 8000 + 2.5계열 thinking 끄기(사고에 토큰 뺏겨 본문 잘리는 것 방지)
+      const generationConfig: any = { maxOutputTokens: 8000, temperature: 0.9 };
+      if (model.startsWith("gemini-2.5")) generationConfig.thinkingConfig = { thinkingBudget: 0 };
+      const body = { contents: [{ parts: [...parts, { text: prompt }] }], generationConfig };
       const r = await fetch(
         `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
         { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }
       );
       if (!r.ok) continue;
       const d = await r.json();
-      const text = d?.candidates?.[0]?.content?.parts?.[0]?.text;
-      if (text) return res.json({ text });
+      const cand = d?.candidates?.[0];
+      const text = cand?.content?.parts?.[0]?.text;
+      // 잘렸으면(MAX_TOKENS) 다음 모델로 재시도 — 잘린 글을 그대로 주지 않음
+      if (text && cand?.finishReason !== "MAX_TOKENS") return res.json({ text });
+      if (text && cand?.finishReason === "MAX_TOKENS") { console.log(`[vision] ${model} 응답 잘림 → 다음 모델`); continue; }
     } catch {}
   }
   return res.status(500).json({ error: "생성 실패. Gemini 키를 확인하거나 잠시 후 다시 시도해주세요." });
