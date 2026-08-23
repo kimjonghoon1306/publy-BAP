@@ -495,22 +495,32 @@ app.get("/api/title-edit-quota/:userId", async (req, res) => {
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
-/* ── 글 제목 자동 수정(재발행) ── */
+/* ── 글 제목 자동 수정(재발행) — SSE로 모든 단계 로그를 실시간 전송 ── */
 app.post("/api/update-title", async (req, res) => {
   const { userId, accountId, logNo, newTitle } = req.body as Record<string, any>;
   if (!accountId || !logNo || !newTitle) return res.status(400).json({ error: "accountId, logNo, newTitle 필요" });
+  sseSetup(res);
   try {
+    sseSend(res, { type: "log", msg: `✏️ 제목 수정 시작 — 글 ${logNo}` });
     // 등급 한도 체크
     if (userId) {
       const plan = await getUserPlan(userId);
       const limit = TITLE_EDIT_DAILY_LIMIT[plan] ?? TITLE_EDIT_DAILY_LIMIT.free;
       const used = await getTitleEditDailyUsage(userId);
-      if (used >= limit) return res.status(429).json({ error: `오늘 제목 수정 한도(${limit}회)를 모두 사용했어요. 자정에 초기화됩니다.`, quotaExceeded: true, used, limit });
+      if (used >= limit) {
+        sseSend(res, { type: "log", msg: `⛔ 오늘 제목 수정 한도(${limit}회)를 모두 사용했어요` });
+        sseSend(res, { type: "done", ok: false, message: `오늘 제목 수정 한도(${limit}회)를 모두 사용했어요. 자정에 초기화됩니다.`, quotaExceeded: true });
+        return res.end();
+      }
     }
-    const result = await updatePostTitle({ accountId: String(accountId), logNo: String(logNo), newTitle: String(newTitle), onLog: (m) => console.log(m) });
+    const result = await updatePostTitle({ accountId: String(accountId), logNo: String(logNo), newTitle: String(newTitle), onLog: (m) => sseSend(res, { type: "log", msg: m }) });
     if (result.ok && userId) await incrementTitleEditQuota(userId);
-    res.json(result);
-  } catch (e: any) { res.status(500).json({ ok: false, error: e.message }); }
+    sseSend(res, { type: "done", ok: result.ok, message: result.message });
+  } catch (e: any) {
+    sseSend(res, { type: "log", msg: `❌ 제목 수정 오류: ${e.message}` });
+    sseSend(res, { type: "done", ok: false, message: e.message });
+  }
+  res.end();
 });
 
 /* ── 공감·댓글 완료 목록 조회/초기화 ── */

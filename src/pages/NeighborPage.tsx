@@ -1123,17 +1123,20 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
     if (!isUnlimitedPlan && titleEditUsed >= titleEditLimit) return alert(`오늘 제목 수정 한도(${titleEditLimit}회)를 모두 사용했어요. 자정에 초기화됩니다.`);
     if (!window.confirm(`이 글의 제목을 아래로 바꿀까요?\n\n"${newTitle}"\n\n※ 네이버 블로그에서 실제로 수정·재발행돼요. 이미 노출 중인 글은 순위가 바뀔 수 있어요.`)) return;
     setTitleEditingKey(key);
-    try {
-      const r = await botFetch(`${BOT}/api/update-title`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ accountId: acc.accountId, logNo, newTitle, ...(userId ? { userId } : {}) }) });
-      const d = await r.json();
-      if (d.ok) {
-        setTitleEditUsed(u => u + 1);
-        alert(`✅ 제목을 변경했어요!\n"${newTitle}"\n\n검색 반영에는 시간이 걸릴 수 있어요.`);
-      } else {
-        alert(`제목 변경 실패: ${d.error || d.message || "알 수 없는 오류"}`);
+    addScLog(`✏️ 제목 변경 시작 — "${originalTitle.slice(0, 20)}" → "${newTitle.slice(0, 20)}"`);
+    // ★SSE로 모든 단계를 지수 로그창에 실시간 표시(어디서 멈추는지 다 보이게)
+    const body = JSON.stringify({ accountId: acc.accountId, logNo, newTitle, ...(userId ? { userId } : {}) });
+    const es = new BotEventStream(`${BOT}/api/update-title`, { method: "POST", headers: { "Content-Type": "application/json" }, body });
+    es.onmessage = e => {
+      const d = JSON.parse(e.data);
+      if (d.type === "log") addScLog(d.msg);
+      if (d.type === "done") {
+        if (d.ok) { setTitleEditUsed(u => u + 1); addScLog(`✅ 제목 변경 완료!`); alert(`✅ 제목을 변경했어요!\n"${newTitle}"\n\n검색 반영에는 시간이 걸릴 수 있어요.`); }
+        else { addScLog(`❌ 제목 변경 실패: ${d.message || "알 수 없는 오류"}`); alert(`제목 변경 실패: ${d.message || "알 수 없는 오류"}`); }
+        setTitleEditingKey(""); es.close();
       }
-    } catch (e: any) { alert(`오류: ${e.message}`); }
-    setTitleEditingKey("");
+    };
+    es.onerror = () => { addScLog("❌ 제목 변경 연결 오류 (다시 시도해주세요)"); setTitleEditingKey(""); es.close(); };
   };
 
   const scLogNo = (url: string) => url.match(/(?:logNo=|\/)(\d{6,})(?:[/?&]|$)/)?.[1] || "";
@@ -1190,6 +1193,7 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
     // ★내 블로그에서 실제로 검색 상위에 잡힌 성공 제목(순위 낮을수록 상위) = AI가 학습할 실전 성공 패턴
     const winners = checks.filter(c => c.exposed === true && c.rank != null).sort((a, b) => (a.rank! - b.rank!)).slice(0, 12).map(c => `${c.title} (검색 약 ${c.rank}위)`);
     setScSolLoading(true); setScSolutions(null); setScSolPage(0);
+    addScLog(`✏️ AI 개선안 생성 중 — 누락 글 ${missing.length}개${winners.length ? ` (성공 제목 ${winners.length}개 패턴 학습)` : ""}...`);
     const winnerBlock = winners.length
       ? `\n\n[⭐이 블로그에서 실제로 검색 상위에 잡힌 '성공 제목'들 — 반드시 이 패턴을 학습해서 반영]\n${winners.join("\n")}\n→ 위 성공 제목들의 공통 패턴(구체적 지명·제품명·상황·숫자·검색어 배치)을 분석해서, 아래 누락 제목을 '같은 블로그에서 통한 방식'으로 고쳐라. 일반론 말고 이 블로그에 실제로 통한 스타일로.`
       : "";
@@ -1214,11 +1218,13 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
         if (Array.isArray(arr) && arr.length) {
           setScSolutions(arr.map((x: any) => ({ original: String(x.original || ""), diagnosis: String(x.diagnosis || ""), newTitle: String(x.newTitle || ""), newTitle2: String(x.newTitle2 || ""), keywords: Array.isArray(x.keywords) ? x.keywords.map(String) : [], bodyTip: String(x.bodyTip || ""), expectedEffect: String(x.expectedEffect || ""), reason: String(x.reason || "") })));
           setScSolLoading(false);
+          addScLog(`✅ AI 개선안 ${arr.length}개 생성 완료 (${model})`);
           return;
         }
       } catch (e: any) { lastErr = e.message; }
     }
     setScSolLoading(false);
+    addScLog(`❌ AI 개선안 생성 실패: ${lastErr || "응답 형식 오류"}`);
     alert("솔루션 생성에 실패했어요. 잠시 후 다시 시도해주세요.\n(" + (lastErr || "응답 형식 오류") + ")");
     setScSolLoading(false);
   };

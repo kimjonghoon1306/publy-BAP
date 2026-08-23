@@ -1332,22 +1332,33 @@ export async function updatePostTitle(params: {
   await page.bringToFront().catch(() => {});
   try {
     const editUrl = `https://blog.naver.com/PostWriteForm.naver?blogId=${blogId}&logNo=${logNo}&Redirect=Update`;
-    log(`[제목수정] ${blogId}/${logNo} 수정 페이지 진입...`);
+    log(`[제목수정] ① 수정 페이지 여는 중... (${blogId}/${logNo})`);
     await page.goto(editUrl, { waitUntil: "domcontentloaded", timeout: 30000 });
     await page.waitForTimeout(3000);
+    log(`[제목수정] 페이지 도착: ${page.url().slice(0, 60)}`);
     // 자기 글이 아니거나 세션 만료면 홈으로 튕김 → 감지
     if (/section\.blog\.naver\.com|BlogHome/.test(page.url())) {
       throw new Error("수정 페이지를 열 수 없어요(내 글이 아니거나 로그인이 풀렸어요). 계정을 다시 연결해주세요.");
     }
+    log(`[제목수정] ② 에디터 프레임 찾는 중...`);
     let frame = page.frames().find(f => f.name() === "mainFrame") ?? page.frames().find(f => f.url().includes("blog.naver.com")) ?? null;
     for (let i = 0; i < 12 && !frame; i++) { await page.waitForTimeout(700); frame = page.frames().find(f => f.name() === "mainFrame") ?? null; }
     if (!frame) throw new Error("에디터 프레임을 찾지 못했어요");
-    // 에디터 로드 대기 + '작성 중 글 이어쓰기' 팝업 있으면 닫기(취소)
-    await frame.waitForSelector(".se-section-documentTitle, .se-editor, .se-container", { timeout: 40000 }).catch(() => {});
+    // 에디터 로드 대기
+    log(`[제목수정] ③ 에디터 로딩 대기 중...`);
+    const edLoaded = await frame.waitForSelector(".se-section-documentTitle, .se-editor, .se-container", { timeout: 40000 }).then(() => true).catch(() => false);
+    log(`[제목수정] 에디터 ${edLoaded ? "로드됨" : "로드 확인 실패(계속 시도)"}`);
     await page.waitForTimeout(2000);
-    for (const cancelSel of ["button:has-text('취소')", "button:has-text('아니오')", "button[class*='cancel']"]) {
-      try { const c = await frame.$(cancelSel); if (c) { await c.click({ timeout: 2000 }).catch(() => {}); await page.waitForTimeout(800); break; } } catch {}
+    // '작성 중 글 이어쓰기'·도움말 등 팝업/레이어 닫기(있으면)
+    let popupClosed = false;
+    for (const cancelSel of ["button:has-text('취소')", "button:has-text('아니오')", "button:has-text('닫기')", "button[class*='cancel']", "button[class*='close']", ".se-help-panel-close-button", "button[class*='_close']"]) {
+      try { const c = await frame.$(cancelSel); if (c) { await c.click({ timeout: 2000 }).catch(() => {}); await page.waitForTimeout(600); popupClosed = true; } } catch {}
     }
+    if (popupClosed) log(`[제목수정] 방해 팝업/패널 닫음`);
+
+    // 현재(원래) 제목 읽어서 로그
+    const before = await frame.evaluate(() => (document.querySelector(".se-section-documentTitle")?.textContent || "").trim().slice(0, 40)).catch(() => "");
+    log(`[제목수정] ④ 현재 제목: "${before}" → 바꿀 제목: "${title}"`);
 
     // ── 제목 교체 (발행 코드와 동일 셀렉터) ──
     const titleSels = [
@@ -1370,18 +1381,21 @@ export async function updatePostTitle(params: {
       } catch {}
     }
     if (!replaced) {
+      log(`[제목수정] 기본 셀렉터 실패 → 키보드 입력으로 재시도`);
       try { await frame.click(".se-section-documentTitle", { timeout: 5000 }); await page.keyboard.press(process.platform === "darwin" ? "Meta+A" : "Control+A"); await page.keyboard.press("Backspace"); await page.keyboard.type(title, { delay: 35 }); replaced = true; } catch {}
     }
     if (!replaced) throw new Error("제목 입력칸을 찾지 못했어요(에디터 구조 변경 가능)");
-    log(`[제목수정] 새 제목 입력: "${title}"`);
+    log(`[제목수정] ⑤ 새 제목 입력 완료: "${title}"`);
 
     // ── 발행(재발행) ──
     await page.waitForTimeout(500);
+    log(`[제목수정] ⑥ 발행 버튼 누르는 중...`);
     let panelOpened = false;
     for (const sel of ["button.publish_btn__m9KHH", "button[class*='publish_btn']", "button:has-text('발행')"]) {
       try { const el = await frame.$(sel); if (el) { await frame.click(sel, { timeout: 6000 }); panelOpened = true; break; } } catch {}
     }
     if (!panelOpened) throw new Error("발행 버튼을 찾지 못했어요");
+    log(`[제목수정] 발행 패널 열림, 최종 확인 누르는 중...`);
     await page.waitForTimeout(2000);
     // 발행 패널의 최종 확인 버튼
     let finalDone = false;
