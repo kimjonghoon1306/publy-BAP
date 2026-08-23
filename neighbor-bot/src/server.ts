@@ -1,6 +1,6 @@
 import express from "express";
 import cors from "cors";
-import { saveSession, sessionExists, removeSession, crawlBlogIds, crawlBuddyPosts, analyzeBuddyKeywords, addNeighbors, NeighborResult, donePath, engageBlogs, EngageResult, engageDonePath, crawlMyPosts, replyToComments, crawlBlogStats, checkSelectedBlogExposure, pumasiEngage, crawlPumasiReport } from "./naver";
+import { saveSession, sessionExists, removeSession, crawlBlogIds, crawlBuddyPosts, analyzeBuddyKeywords, addNeighbors, NeighborResult, donePath, engageBlogs, EngageResult, engageDonePath, crawlMyPosts, replyToComments, crawlBlogStats, checkSelectedBlogExposure, pumasiEngage, crawlPumasiReport, pumasiPreview } from "./naver";
 import { checkNeighborQuota, incrementNeighborQuota, getNeighborDailyUsage, incrementEngageQuota, getEngageDailyUsage, getUserPlan, NEIGHBOR_DAILY_LIMIT, addNeighborHistory, addReplyHistory, addBlogscoreHistory, incrementPumasiQuota } from "./supabase";
 import fs from "fs";
 
@@ -421,7 +421,7 @@ app.post("/api/reply", async (req, res) => {
 
 /* ── 품앗이: 내 계정들끼리 서로 공감·댓글 (SSE) ── */
 app.post("/api/pumasi", async (req, res) => {
-  const { userId, accounts, comment, doLike, doComment, aiComment, commentTone, geminiKey, delayMin, delayMax, readRelated, readRelatedMode, spreadHours, jobId } = req.body as Record<string, any>;
+  const { userId, accounts, comment, doLike, doComment, aiComment, commentTone, geminiKey, delayMin, delayMax, readRelated, readRelatedMode, readSpeed, periodDays, spreadHours, jobId } = req.body as Record<string, any>;
   if (!Array.isArray(accounts) || accounts.length < 2)
     return res.status(400).json({ error: "품앗이는 계정 2개 이상 필요" });
   sseSetup(res);
@@ -441,6 +441,8 @@ app.post("/api/pumasi", async (req, res) => {
       delayMax: parseFloat(String(delayMax ?? "15")),
       readRelated: readRelated !== false && readRelated !== "false",
       readRelatedMode: readRelatedMode === "always" ? "always" : "random",
+      readSpeed: readSpeed === "fast" ? "fast" : readSpeed === "normal" ? "normal" : "natural",
+      periodDays: Math.max(0, parseInt(String(periodDays ?? "0"), 10) || 0),
       spreadHours: Math.max(0, parseFloat(String(spreadHours ?? "0")) || 0),
       onLog: (msg) => sseSend(res, { type: "log", msg }),
       onResult: async (r) => { sseSend(res, { type: "result", ...r }); if (userId && r.status === "success") await incrementPumasiQuota(userId); },
@@ -462,6 +464,16 @@ app.get("/api/pumasi-report", async (req, res) => {
   try {
     const report = await crawlPumasiReport(blogId, (m) => console.log(m));
     res.json(report);
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+/* ── 품앗이 시작 전 미리보기: 대상별 총 글 / 이미 댓글 단 글 / 남은 글 ── */
+app.post("/api/pumasi-preview", async (req, res) => {
+  const { accounts } = req.body as Record<string, any>;
+  if (!Array.isArray(accounts)) return res.status(400).json({ error: "accounts 필요" });
+  try {
+    const rows = await pumasiPreview(accounts.map((a: any) => ({ accountId: String(a.accountId), blogId: String(a.blogId) })), (m) => console.log(m));
+    res.json({ rows });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 

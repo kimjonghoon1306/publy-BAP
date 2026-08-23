@@ -398,6 +398,10 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
   const [pumReport, setPumReport] = useState<{ blogId: string; days: { date: string; visitors: number; pumasiVisits: number }[]; totalReceived7d: number; avgWithPumasi: number|null; avgWithoutPumasi: number|null } | null>(null);
   const [pumReportBlog, setPumReportBlog] = useState<string>("");
   const [pumReportLoading, setPumReportLoading] = useState(false);
+  const [pumReadSpeed, setPumReadSpeed] = useState<"fast"|"normal"|"natural">("natural");   // 체류 속도(빠름/보통/자연)
+  const [pumPeriodDays, setPumPeriodDays] = useState(0);                                      // 대상 글 기간(0=전체 무제한, 30/90/180/365)
+  const [pumPreview, setPumPreview] = useState<{ blogId: string; total: number; commented: number; remaining: number }[] | null>(null);
+  const [pumPreviewLoading, setPumPreviewLoading] = useState(false);
   const pumJobIdRef = useRef<string>("");
   const pumEsRef = useRef<BotEventStream|null>(null);
   const pumLogRef = useRef<HTMLDivElement>(null);
@@ -509,6 +513,12 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
   const eLogRef = useRef<HTMLDivElement>(null);
   const eJobIdRef = useRef<string>(Date.now().toString());
   const eEsRef = useRef<BotEventStream|null>(null);
+
+  /* 품앗이 탭 진입/계정 변화 시 미리보기 자동 조회 */
+  useEffect(() => {
+    if (tab === "pumasi" && botOnline) handlePumasiPreview();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab, botOnline, accounts.filter(a => a.sessionOk && a.blogId).map(a => a.accountId).join(",")]);
 
   /* 봇 상태 체크 */
   useEffect(() => {
@@ -903,7 +913,7 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
     const maxReceivers = isUnlimitedPlan ? 999 : pumasiAccountLimit;
     const accs = connected.map(a => ({ accountId: a.accountId, blogId: a.blogId, posts: Math.min(isUnlimitedPlan ? 999 : pumasiPostsLimit, pumPostsByAcc[a.accountId] || 3), receiveLimit: Math.min(maxReceivers, Math.max(1, pumReceiveByAcc[a.accountId] || 3)) }));
     addPumLog(`🤝 품앗이 시작 — 계정 ${accs.length}개 (${accs.map(a => `${a.blogId}:글${a.posts}·받기${a.receiveLimit}명`).join(", ")})`);
-    const body = JSON.stringify({ accounts: accs, comment, doLike: pumDoLike, doComment: pumDoComment, aiComment: pumCommentMode === "ai", commentTone: pumTone, geminiKey, delayMin: pumDelayMin, delayMax: pumDelayMax, readRelated: pumReadRelated, readRelatedMode: pumReadRelatedMode, spreadHours: pumSpread / 60, jobId: pumJobIdRef.current, ...(userId ? { userId } : {}) });
+    const body = JSON.stringify({ accounts: accs, comment, doLike: pumDoLike, doComment: pumDoComment, aiComment: pumCommentMode === "ai", commentTone: pumTone, geminiKey, delayMin: pumDelayMin, delayMax: pumDelayMax, readRelated: pumReadRelated, readRelatedMode: pumReadRelatedMode, readSpeed: pumReadSpeed, periodDays: pumPeriodDays, spreadHours: pumSpread / 60, jobId: pumJobIdRef.current, ...(userId ? { userId } : {}) });
     const es = new BotEventStream(`${BOT}/api/pumasi`, { method: "POST", headers: { "Content-Type": "application/json" }, body }); pumEsRef.current = es;
     es.onmessage = e => {
       const d = JSON.parse(e.data);
@@ -921,6 +931,19 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
     try { await botFetch(`${BOT}/api/stop/${pumJobIdRef.current}`, { method: "POST" }); } catch {}
     addPumLog("⛔ 중단"); setPumWorking(false);
   };
+  // 품앗이 미리보기: 각 대상 계정의 총 글 / 이미 댓글 단 글 / 남은 글(시작 전에 눈으로 확인)
+  const handlePumasiPreview = async () => {
+    const conn = accounts.filter(a => a.sessionOk && a.blogId);
+    if (conn.length < 2) { setPumPreview(null); return; }
+    setPumPreviewLoading(true);
+    try {
+      const r = await botFetch(`${BOT}/api/pumasi-preview`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ accounts: conn.map(a => ({ accountId: a.accountId, blogId: a.blogId })) }) });
+      const d = await r.json();
+      setPumPreview(d.rows || []);
+    } catch { setPumPreview(null); }
+    setPumPreviewLoading(false);
+  };
+
   const handlePumasiReport = async (blogId: string) => {
     if (!blogId) return;
     setPumReportLoading(true); setPumReport(null); setPumReportBlog(blogId);
@@ -2212,6 +2235,41 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
               </button>
             )}
 
+            {/* ★진행 현황 미리보기: 각 대상별 총 글 / 이미 댓글 단 글 / 남은 글(시작 전 확인) */}
+            {connected.length >= 2 && (
+              <div className="card" style={{ padding: "16px 18px" }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 3 }}>
+                  <div style={{ fontSize: 14, fontWeight: 800, color: "var(--text)" }}>📊 계정별 진행 현황</div>
+                  <button onClick={handlePumasiPreview} disabled={pumPreviewLoading} style={{ fontSize: 11, padding: "5px 10px", borderRadius: 8, border: "1px solid var(--border)", background: "transparent", color: "var(--text2)", cursor: "pointer", fontFamily: "inherit", fontWeight: 700 }}>{pumPreviewLoading ? "확인 중..." : "🔄 새로고침"}</button>
+                </div>
+                <div style={{ fontSize: 11, color: "var(--text3)", lineHeight: 1.5, marginBottom: 10 }}>각 계정 글에 <b>이미 단 댓글</b>과 <b>남은 글</b>이에요. 품앗이는 이미 단 글은 건너뛰고 <b style={{ color: "#ec4899" }}>남은 글</b>에만 최신순으로 달아요.</div>
+                {!pumPreview && pumPreviewLoading && <div style={{ fontSize: 12, color: "var(--text3)" }}><span className="spinner" /> 글 수를 확인하는 중...</div>}
+                {pumPreview && pumPreview.length > 0 ? (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                    {pumPreview.map(r => {
+                      const pct = r.total > 0 ? Math.min(100, (r.commented / r.total) * 100) : 0;
+                      const allDone = r.total > 0 && r.remaining === 0;
+                      return (
+                        <div key={r.blogId} style={{ padding: "10px 12px", borderRadius: 10, background: "var(--bg)", border: "1px solid var(--border)" }}>
+                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6, gap: 8 }}>
+                            <span style={{ fontSize: 13, fontWeight: 700, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>🔗 {r.blogId}</span>
+                            <span style={{ fontSize: 11.5, fontWeight: 700, color: allDone ? "#00c896" : "var(--text2)", whiteSpace: "nowrap" }}>
+                              {allDone ? "✅ 모두 완료" : <>남음 <b style={{ color: "#ec4899" }}>{r.remaining}</b> · 완료 {r.commented} / 총 {r.total}</>}
+                            </span>
+                          </div>
+                          <div style={{ height: 6, borderRadius: 99, background: "var(--card2)", overflow: "hidden" }}>
+                            <div style={{ height: "100%", borderRadius: 99, width: `${pct}%`, background: allDone ? "#00c896" : "#8b5cf6", transition: "width .4s ease" }} />
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : pumPreview && !pumPreviewLoading ? (
+                  <div style={{ fontSize: 12, color: "var(--text3)" }}>표시할 계정이 없어요. 계정을 연결하면 진행 현황이 나와요.</div>
+                ) : null}
+              </div>
+            )}
+
             {/* 계정별 대상 글 수 + 받을 계정 수 */}
             {connected.length >= 2 && (
               <div className="card" style={{ padding: "16px 18px" }}>
@@ -2296,13 +2354,43 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
                   <b style={{color:"#ec4899"}}> 체류시간·투데이가 자연스럽게 늘어</b> 블로그 지수에 도움되고, 오히려 <b style={{color:"#00c896"}}>더 안전</b>해요.
                 </div>
 
-                {/* 체류시간 엔진 (항상 켜짐 안내) */}
-                <div style={{ display: "flex", alignItems: "flex-start", gap: 8, padding: "8px 0", borderTop: "1px dashed var(--border)" }}>
-                  <span style={{ fontSize: 15 }}>⏱️</span>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 12.5, fontWeight: 800, color: "var(--text)" }}>체류시간 엔진 <span style={{ fontSize: 10.5, color: "#00c896", fontWeight: 700 }}>자동 적용</span></div>
-                    <div style={{ fontSize: 11, color: "var(--text3)", lineHeight: 1.5, marginTop: 2 }}>글의 <b>글자·이미지 수를 읽어</b> 짧은 글은 빨리, 긴 글은 오래(최대 40초) 스크롤하며 머물러요. 즉시 이탈 패턴을 줄여요.</div>
+                {/* 체류시간 엔진 + 속도 모드 */}
+                <div style={{ padding: "8px 0", borderTop: "1px dashed var(--border)" }}>
+                  <div style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
+                    <span style={{ fontSize: 15 }}>⏱️</span>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 12.5, fontWeight: 800, color: "var(--text)" }}>체류시간 엔진 <span style={{ fontSize: 10.5, color: "#00c896", fontWeight: 700 }}>자동 적용</span></div>
+                      <div style={{ fontSize: 11, color: "var(--text3)", lineHeight: 1.5, marginTop: 2 }}>글의 <b>글자·이미지 수를 읽어</b> 짧은 글은 빨리, 긴 글은 오래 스크롤하며 머물러요. 즉시 이탈 패턴을 줄여요.</div>
+                    </div>
                   </div>
+                  {/* 속도 모드: 글 많은 블로그를 자주 돌릴 때 시간 단축 */}
+                  <div style={{ marginTop: 9, paddingLeft: 2 }}>
+                    <div style={{ fontSize: 11, color: "var(--text2)", fontWeight: 700, marginBottom: 6 }}>읽는 속도 (한 글에 머무는 시간)</div>
+                    <div style={{ display: "flex", gap: 8 }}>
+                      {([["fast", "빠르게", "최대 10초 · 시간 절약"], ["normal", "보통", "최대 22초"], ["natural", "자연스럽게", "최대 40초 · 가장 안전"]] as const).map(([m, lbl, desc]) => {
+                        const on = pumReadSpeed === m;
+                        return (
+                          <button key={m} onClick={() => setPumReadSpeed(m)} style={{ flex: 1, padding: "9px 6px", borderRadius: 10, border: `2px solid ${on ? "#8b5cf6" : "var(--border)"}`, background: on ? "rgba(139,92,246,.12)" : "transparent", color: on ? "#8b5cf6" : "var(--text2)", cursor: "pointer", fontFamily: "inherit", textAlign: "center" }}>
+                            <div style={{ fontSize: 12, fontWeight: 800 }}>{lbl}</div>
+                            <div style={{ fontSize: 9.5, color: on ? "#8b5cf6" : "var(--text3)", marginTop: 2, fontWeight: 500, lineHeight: 1.3 }}>{desc}</div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <div style={{ fontSize: 10.5, color: "var(--text3)", lineHeight: 1.5, marginTop: 6 }}>💡 글이 많은 블로그를 <b>자주</b> 돌릴 땐 <b>빠르게</b>가 편해요. 급하지 않으면 <b>자연스럽게</b>가 가장 사람처럼 보여 안전해요.</div>
+                  </div>
+                </div>
+
+                {/* 대상 글 기간 제한 */}
+                <div style={{ padding: "8px 0", borderTop: "1px dashed var(--border)" }}>
+                  <div style={{ fontSize: 12.5, fontWeight: 800, color: "var(--text)", marginBottom: 2 }}>📆 어디까지의 글에 댓글 달까요?</div>
+                  <div style={{ fontSize: 11, color: "var(--text3)", lineHeight: 1.5, marginBottom: 8 }}>최신 글부터 과거로 내려가며 <b>안 단 글</b>에만 달아요. 너무 오래된 글까지 가는 게 부담되면 <b>기간</b>을 정할 수 있어요.</div>
+                  <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
+                    {[{ v: 0, t: "전체" }, { v: 30, t: "최근 1개월" }, { v: 90, t: "3개월" }, { v: 180, t: "6개월" }, { v: 365, t: "1년" }].map(o => (
+                      <button key={o.v} onClick={() => setPumPeriodDays(o.v)} style={{ flex: "1 1 auto", padding: "8px 4px", borderRadius: 9, border: `2px solid ${pumPeriodDays === o.v ? "#8b5cf6" : "var(--border)"}`, background: pumPeriodDays === o.v ? "rgba(139,92,246,.12)" : "transparent", color: pumPeriodDays === o.v ? "#8b5cf6" : "var(--text2)", cursor: "pointer", fontSize: 11.5, fontWeight: 800, fontFamily: "inherit", minWidth: 0 }}>{o.t}</button>
+                    ))}
+                  </div>
+                  <div style={{ fontSize: 10.5, color: "var(--text3)", lineHeight: 1.5, marginTop: 6 }}>💡 <b>전체</b>는 과거 글까지 전부 대상(글을 다 돌 때까지 매번 다른 글로 진행). 기간을 정하면 그 안의 글만 돌고 다 달면 멈춰요.</div>
                 </div>
 
                 {/* 관련 글 1편 더 읽기 토글 + 매번/가끔 모드 */}
@@ -2323,7 +2411,9 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
                           );
                         })}
                       </div>
-                      <div style={{ fontSize: 10.5, color: "var(--text3)", lineHeight: 1.5, marginTop: 6 }}>💡 <b>매번</b>은 체류·투데이가 더 많이 늘지만 시간이 더 걸려요. 여분 글이 부족하면 그때만 건너뛰어요.</div>
+                      <div style={{ fontSize: 10.5, color: "var(--text3)", lineHeight: 1.5, marginTop: 6 }}>💡 <b>매번</b>은 체류·투데이가 더 많이 늘지만 시간이 더 걸려요. 여분 글이 부족하면 그때만 건너뛰어요.
+                        {pumReadRelatedMode === "always" && <span style={{ color: "var(--danger)", fontWeight: 700 }}> ⚠️ 대상 글이 많으면 시간이 크게 늘어요 — 읽는 속도를 <b>빠르게</b>로 두거나 <b>가끔</b>을 쓰는 걸 추천해요.</span>}
+                      </div>
                     </div>
                   )}
                 </div>

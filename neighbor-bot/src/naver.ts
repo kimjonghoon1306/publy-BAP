@@ -1638,7 +1638,10 @@ async function extractPostText(ctx: any): Promise<string> {
 }
 // ── 체류시간 엔진: 글 분량(글자·이미지 수)을 읽어 실제 독서처럼 스크롤·머무름 ──
 //   짧은 글은 빨리, 긴 글은 오래(단 상한 있음). 즉시 이탈 패턴을 줄여 체류시간을 자연스럽게 높인다.
-async function readPostNaturally(page: any, ctx: any, log?: (m: string) => void): Promise<void> {
+// ★체류 속도 모드: 글 많은 블로그를 자주 돌릴 때 시간을 줄일 수 있게 3단계.
+//   fast=빠르게(최대 10초)·normal=보통(최대 22초)·natural=자연스럽게(최대 40초, 기본). 딜레이로 안전은 별도 유지.
+type ReadSpeed = "fast" | "normal" | "natural";
+async function readPostNaturally(page: any, ctx: any, log?: (m: string) => void, speed: ReadSpeed = "natural"): Promise<void> {
   let chars = 0, imgs = 0;
   try {
     const info = await ctx.evaluate(() => {
@@ -1649,10 +1652,13 @@ async function readPostNaturally(page: any, ctx: any, log?: (m: string) => void)
     });
     chars = info.text || 0; imgs = info.images || 0;
   } catch {}
-  // 목표 체류시간(초): 글자 500자당 약 2.5초 + 이미지 1장당 1.2초. 최소 4초, 최대 40초(상한으로 어뷰징 방지).
-  const target = Math.min(40, Math.max(4, (chars / 500) * 2.5 + imgs * 1.2));
-  const scrolls = Math.min(14, Math.max(3, Math.round(target / 2.2)));   // 체류시간에 비례한 스크롤 횟수
-  log?.(`[체류] 글 약 ${chars}자·이미지 ${imgs}장 → ${Math.round(target)}초 정독(스크롤 ${scrolls}회)`);
+  // 목표 체류시간(초): 글자 500자당 약 2.5초 + 이미지 1장당 1.2초. 속도 모드에 따라 배율·상한·하한을 다르게.
+  const mul = speed === "fast" ? 0.25 : speed === "normal" ? 0.55 : 1;
+  const cap = speed === "fast" ? 10 : speed === "normal" ? 22 : 40;
+  const floor = speed === "fast" ? 2 : speed === "normal" ? 3 : 4;
+  const target = Math.min(cap, Math.max(floor, ((chars / 500) * 2.5 + imgs * 1.2) * mul));
+  const scrolls = Math.min(14, Math.max(2, Math.round(target / 2.2)));   // 체류시간에 비례한 스크롤 횟수
+  log?.(`[체류] 글 약 ${chars}자·이미지 ${imgs}장 → ${Math.round(target)}초 정독(스크롤 ${scrolls}회, ${speed === "fast" ? "빠르게" : speed === "normal" ? "보통" : "자연스럽게"})`);
   const per = (target * 1000) / scrolls;
   for (let s = 0; s < scrolls; s++) {
     await page.mouse.wheel(0, 140 + Math.random() * 260);
@@ -2483,6 +2489,28 @@ function appendPumasiRun(targetBlogId: string, actorBlogId: string) {
     fs.writeFileSync(PUMASI_RUNS_PATH, JSON.stringify(arr.filter(r => r.ts >= cutoff)));
   } catch {}
 }
+// ★품앗이 시작 전 미리보기: 각 대상 계정의 총 글 수와, 이 계정을 향한 조합들이 이미 댓글 단 글 수를 요약해 반환.
+//   (누가 얼마나 남았는지 눈으로 확인 → "이미 단 글은 건너뛴다"를 시작 전에 보여줌). 공개 API로 빠르게 총 글 수만 조회.
+export async function pumasiPreview(accounts: { accountId: string; blogId: string }[], log: (m: string) => void = console.log): Promise<{ blogId: string; total: number; commented: number; remaining: number }[]> {
+  const commentedAll = loadPumasiCommented();
+  const res: { blogId: string; total: number; commented: number; remaining: number }[] = [];
+  for (const target of accounts) {
+    if (!target.blogId) continue;
+    // 이 target을 향한 모든 (actor→target) 조합에서 이미 댓글 단 글(logNo) 합집합
+    const doneSet = new Set<string>();
+    for (const actor of accounts) {
+      if (actor.accountId === target.accountId) continue;
+      (commentedAll[`${actor.accountId}>${target.accountId}`] || []).forEach(l => doneSet.add(String(l)));
+    }
+    let total = 0;
+    try { const list = await fetchNaverPostList({ blogId: target.blogId, cookies: [], maxCount: 1, log }); total = list.totalCount || list.posts.length; }
+    catch { total = 0; }
+    const commented = doneSet.size;
+    res.push({ blogId: target.blogId, total, commented, remaining: Math.max(0, total - commented) });
+  }
+  return res;
+}
+
 function pumasiRunsFor(targetBlogId: string): { actor: string; ts: number }[] {
   try {
     const arr: { target: string; actor: string; ts: number }[] = fs.existsSync(PUMASI_RUNS_PATH) ? JSON.parse(fs.readFileSync(PUMASI_RUNS_PATH, "utf-8")) : [];
@@ -2539,13 +2567,15 @@ export async function pumasiEngage(params: {
   delayMax: number;
   readRelated?: boolean;   // ★관련 글 1편 더 읽기(체류·투데이↑)
   readRelatedMode?: "always" | "random";  // ★매번=각 대상 글마다 항상 / 가끔=확률 60%
+  readSpeed?: ReadSpeed;   // ★체류 속도(fast/normal/natural)
+  periodDays?: number;     // ★대상 글 기간 제한(최근 N일 이내 글만, 0/미지정=전체 무제한)
   spreadHours?: number;    // ★시간 분산 큐: 방문을 N시간에 걸쳐 분산(0=즉시 연속)
   onLog?: (msg: string) => void;
   onResult?: (r: EngageResult & { actor?: string }) => Promise<void>;
   onProgress?: (done: number, fail: number, skip?: number) => void;
   stopSignal?: () => boolean;
 }): Promise<void> {
-  const { accounts, comment, doLike, doComment, aiComment, commentTone, geminiKey, delayMin, delayMax, readRelated = true, readRelatedMode = "random", spreadHours = 0, onLog, onResult, onProgress, stopSignal } = params;
+  const { accounts, comment, doLike, doComment, aiComment, commentTone, geminiKey, delayMin, delayMax, readRelated = true, readRelatedMode = "random", readSpeed = "natural", periodDays = 0, spreadHours = 0, onLog, onResult, onProgress, stopSignal } = params;
   const log = onLog || console.log;
   let done = 0, fail = 0, skip = 0;
   const valid = accounts.filter(a => a.accountId && a.blogId && naverSessionExists(a.accountId));
@@ -2593,13 +2623,13 @@ export async function pumasiEngage(params: {
         accountId: actor.accountId,
         targets: [{ keyword: "품앗이", blogId: target.blogId }],
         comment, doLike, doComment,
-        periodDays: 3650,               // 품앗이는 기간 제한 없이(오래된 글도 대상)
+        periodDays: periodDays > 0 ? periodDays : 3650,   // 0=전체(무제한), 값 있으면 최근 N일 글만
         postsPerBlog: Math.max(1, target.posts),
         delayMin, delayMax,
         dailyLimit: 999999,
         skipDone: false,                // 서로 계속 달 수 있게(당일 중복방지는 아래 excludeLogNos가 담당)
         commentRate: 100, likeRate: 100,
-        aiComment, commentTone, geminiKey, readRelated, readRelatedMode,
+        aiComment, commentTone, geminiKey, readRelated, readRelatedMode, readSpeed,
         excludeLogNos: commentedSet,
         onCommented: (logNo) => { commentedSet.add(logNo); commentedAll[ckey] = [...commentedSet]; savePumasiCommented(commentedAll); },
         onLog: (m) => log(m),
@@ -2641,6 +2671,7 @@ export async function engageBlogs(params: {
   readRelatedMode?: "always" | "random";  // ★매번=각 대상 글마다 항상 1편 / 가끔=확률 60%
   excludeLogNos?: Set<string>;   // ★이미 댓글 단 글(logNo) 제외 → 최신→과거로 안 단 글에만 단다(품앗이 도배 방지)
   onCommented?: (logNo: string) => void;   // ★댓글 성공 시 그 글 logNo 통보(이력 저장용)
+  readSpeed?: ReadSpeed;         // ★체류 속도(fast/normal/natural)
   onLog?: (msg: string) => void;
   onResult?: (r: EngageResult) => Promise<void>;
   onProgress?: (done: number, fail: number) => void;
@@ -2652,7 +2683,7 @@ export async function engageBlogs(params: {
     dailyLimit, skipDone, commentRate = 100, likeRate = 100,
     // ★readRelated 기본 false: 일반 공감·댓글(여러 블로그 순회)은 관련글 더 읽기를 켜지 않음(시간 급증 방지).
     //   품앗이(pumasiEngage)만 명시적으로 true를 넘겨 켠다.
-    aiComment = false, commentTone = "다정", geminiKey = "", readRelated = false, readRelatedMode = "random", excludeLogNos, onCommented, onLog, onResult, onProgress, stopSignal,
+    aiComment = false, commentTone = "다정", geminiKey = "", readRelated = false, readRelatedMode = "random", excludeLogNos, onCommented, readSpeed = "natural", onLog, onResult, onProgress, stopSignal,
   } = params;
   const log = onLog || console.log;
 
@@ -2725,13 +2756,15 @@ export async function engageBlogs(params: {
         log(`[공감·댓글] ${blogId} 방문 중...`);
 
         // 검증된 PostTitleListAsync 기반 목록만 사용 — target blogId 소유 글 외 링크가 섞이지 않는다.
-        // ★관련 글 읽기용 여분 풀 + 품앗이 이력 제외(excludeLogNos) 시엔 과거까지 훑도록 넉넉히 가져온다.
+        // ★관련 글 읽기용 여분 풀 + 품앗이 이력 제외(excludeLogNos) 시엔 과거 글까지 전부(무제한) 훑는다.
         const wantCount = Math.max(1, postsPerBlog);
-        const fetchCount = excludeLogNos ? 100 : wantCount * 2 + 3;
+        const fetchCount = excludeLogNos ? null : wantCount * 2 + 3;   // null=전체(무제한). 품앗이는 과거 글까지 다 확보
         const postList = await fetchNaverPostList({ blogId, cookies, maxCount: fetchCount, log });
-        let periodOk = postList.posts.filter(post => post.dateMs === 0 || post.dateMs >= cutoff);
+        const inPeriod = postList.posts.filter(post => post.dateMs === 0 || post.dateMs >= cutoff);
         // ★품앗이: 이미 댓글 단 글은 제외 → 최신부터 훑어 아직 안 단 글에만 단다(같은 글 도배 방지, 자동으로 과거로 내려감)
-        if (excludeLogNos) periodOk = periodOk.filter(post => !excludeLogNos.has(String(post.logNo)));
+        const alreadyDone = excludeLogNos ? inPeriod.filter(post => excludeLogNos.has(String(post.logNo))).length : 0;
+        const periodOk = excludeLogNos ? inPeriod.filter(post => !excludeLogNos.has(String(post.logNo))) : inPeriod;
+        if (excludeLogNos) log(`[품앗이] ${blogId} — 기간 내 글 ${inPeriod.length}개 중 이미 댓글 단 글 ${alreadyDone}개 건너뜀, 새로 달 수 있는 글 ${periodOk.length}개`);
         const filtered = periodOk.slice(0, wantCount);
         // 댓글 안 다는 여분 글(관련 글 1편 더 읽기용): 대상 글 이후의 글들
         const extraPool = periodOk.slice(filtered.length);
@@ -2791,8 +2824,8 @@ export async function engageBlogs(params: {
           continue;
         }
 
-        // ★체류시간 엔진: 글 분량 읽어 실제 독서처럼 스크롤·머무름(즉시 이탈 방지)
-        await readPostNaturally(page, ctx, log);
+        // ★체류시간 엔진: 글 분량 읽어 실제 독서처럼 스크롤·머무름(즉시 이탈 방지). 속도 모드 반영.
+        await readPostNaturally(page, ctx, log, readSpeed);
 
         // mainFrame은 높이 800px인 iframe 안에서 자체 문서를 스크롤한다.
         // frame locator의 scrollIntoViewIfNeeded()는 네이버의 스크롤 동기화와 충돌해
@@ -3053,7 +3086,7 @@ export async function engageBlogs(params: {
             await page.waitForTimeout(1500);
             const relFrame = page.frames().find((f: any) => f.name() === "mainFrame")
               ?? page.frames().find((f: any) => f.url().includes("blog.naver.com")) ?? page;
-            await readPostNaturally(page, relFrame as any, log);
+            await readPostNaturally(page, relFrame as any, log, readSpeed);
           } catch (e: any) {
             log(`[관련글] ⏭ 추가 읽기 건너뜀 (${(e.message || "").slice(0, 30)})`);
           }
