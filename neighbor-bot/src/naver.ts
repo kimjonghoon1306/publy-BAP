@@ -1302,12 +1302,13 @@ export async function addNeighbors(params: {
   retryDays?: number;        // 실패/무응답 건 재시도까지 대기일 (기본 30, 0=영구 스킵)
   minVisitors?: number;      // ★대상 블로그 최근 방문자 하한(0=제한없음) — 범위 밖이면 스킵
   maxVisitors?: number;      // ★대상 블로그 최근 방문자 상한(0=제한없음)
+  searchEntry?: boolean;     // ★검색 경유 진입(검색 유입): 블로그 방문을 검색→클릭으로. 못 찾으면 URL 폴백
   onLog?: (msg: string) => void;
   onResult?: (r: NeighborResult) => Promise<void>;
   onProgress?: (done: number, fail: number) => void;
   stopSignal?: () => boolean;
 }): Promise<void> {
-  const { accountId, targets, message, delayMin, delayMax, dailyLimit, skipDone, qualityFilter = true, retryDays = 30, minVisitors = 0, maxVisitors = 0, onLog, onResult, onProgress, stopSignal } = params;
+  const { accountId, targets, message, delayMin, delayMax, dailyLimit, skipDone, qualityFilter = true, retryDays = 30, minVisitors = 0, maxVisitors = 0, searchEntry = false, onLog, onResult, onProgress, stopSignal } = params;
   const log = onLog || console.log;
 
   // 다중 멘트 파싱 (|||로 구분된 경우 순환 사용)
@@ -1407,10 +1408,12 @@ export async function addNeighbors(params: {
 
         // ── 서이추 전 블로그 먼저 방문 (읽는 척) ──
         log(`[서이추] 👀 ${blogId} 블로그 방문 중...`);
-        await page.goto(
-          `https://blog.naver.com/${blogId}`,
-          { waitUntil: "domcontentloaded", timeout: 20000 }
-        );
+        // ★검색 경유 진입(켜진 경우): 그 키워드로 검색해 이 블로그 글을 찾아 클릭(검색 유입). 못 찾으면 URL 직행.
+        let nbEntered = false;
+        if (searchEntry) nbEntered = await enterViaSearch(page, keyword, blogId, null, log);
+        if (!nbEntered) {
+          await page.goto(`https://blog.naver.com/${blogId}`, { waitUntil: "domcontentloaded", timeout: 20000 });
+        }
         await page.waitForTimeout(humanDelay(2, 5));
 
         // ── ★품질 필터: 죽은/광고/마켓 블로그 자동 스킵(헛신청 방지, 한도 절약) ──
@@ -1951,6 +1954,49 @@ function writeExposureHistory(blogId: string, history: ExposureHistory): void {
     fs.writeFileSync(temp, JSON.stringify(history, null, 2), { mode: 0o600 });
     fs.renameSync(temp, target);
   } catch (e: any) { console.warn(`[검색노출] 검사 기록 저장 실패: ${e.message}`); }
+}
+
+/* ── 검색 경유 진입: 네이버 통합검색(블로그탭)에서 대상 글/블로그를 찾아 클릭해 들어간다 ──
+   URL 직행 대신 검색을 거쳐 방문하면 상대 블로그에 "검색 유입"으로 잡혀 자연스럽고 지수(홈판)에 유리.
+   찾아서 클릭 진입하면 true, 검색 결과에 없으면 false(호출부에서 URL로 폴백). keyword로 검색.
+   targetLogNo가 있으면 그 글을, 없으면 그 블로그의 아무 글이나 클릭. */
+async function enterViaSearch(page: any, keyword: string, blogId: string, targetLogNo: string | null, log: (m: string) => void): Promise<boolean> {
+  if (!keyword || !keyword.trim()) return false;
+  const wanted = blogId.toLowerCase();
+  try {
+    await page.goto(`https://m.search.naver.com/search.naver?ssc=tab.m_blog.all&query=${encodeURIComponent(keyword.trim())}`, { waitUntil: "domcontentloaded", timeout: 20000 });
+    await page.waitForTimeout(1000);
+    for (let i = 0; i < 4; i++) { await page.mouse.wheel(0, 3000); await page.waitForTimeout(500); }
+    // 대상 블로그(+글) 링크를 찾는다
+    const sel = await page.evaluate((args: { wanted: string; logNo: string | null }) => {
+      const as = Array.from(document.querySelectorAll('a[href*="blog.naver.com"]')) as HTMLAnchorElement[];
+      for (let i = 0; i < as.length; i++) {
+        const h = as[i].href || "";
+        const m = h.match(/blog\.naver\.com\/([a-zA-Z0-9_-]+)\/(\d{6,})/) || h.match(/blog\.naver\.com\/([a-zA-Z0-9_-]+)[?].*logNo=(\d{6,})/);
+        if (!m) continue;
+        if (m[1].toLowerCase() !== args.wanted) continue;
+        if (args.logNo && m[2] !== args.logNo) continue;
+        as[i].setAttribute("data-publy-hit", "1");   // 클릭 대상 표시
+        return true;
+      }
+      return false;
+    }, { wanted, logNo: targetLogNo });
+    if (!sel) return false;
+    const el = await page.$('a[data-publy-hit="1"]');
+    if (!el) return false;
+    await el.scrollIntoViewIfNeeded().catch(() => {});
+    await page.waitForTimeout(400 + Math.random() * 600);   // 사람처럼 잠깐
+    await Promise.all([
+      page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 20000 }).catch(() => {}),
+      el.click({ timeout: 5000 }).catch(() => {}),
+    ]);
+    await page.waitForTimeout(800);
+    log(`[검색유입] 🔎 "${keyword}" 검색 결과에서 ${blogId} 클릭 진입`);
+    return true;
+  } catch (e: any) {
+    log(`[검색유입] 검색 경유 실패(${(e.message || "").slice(0, 25)}) — 링크로 진입`);
+    return false;
+  }
 }
 
 /* ── 제목에서 검색용 핵심 키워드 뽑기 ──
@@ -2739,13 +2785,15 @@ export async function pumasiEngage(params: {
   readRelatedMode?: "always" | "random";  // ★매번=각 대상 글마다 항상 / 가끔=확률 60%
   readSpeed?: ReadSpeed;   // ★체류 속도(fast/normal/natural)
   periodDays?: number;     // ★대상 글 기간 제한(최근 N일 이내 글만, 0/미지정=전체 무제한)
+  searchEntry?: boolean;   // ★검색 경유 진입(검색 유입)
+  searchKeyword?: string;  // ★검색 경유 시 사용할 키워드(내 글 목표 키워드). 없으면 blogId로 검색
   spreadHours?: number;    // ★시간 분산 큐: 방문을 N시간에 걸쳐 분산(0=즉시 연속)
   onLog?: (msg: string) => void;
   onResult?: (r: EngageResult & { actor?: string }) => Promise<void>;
   onProgress?: (done: number, fail: number, skip?: number) => void;
   stopSignal?: () => boolean;
 }): Promise<void> {
-  const { accounts, comment, doLike, doComment, aiComment, commentTone, geminiKey, delayMin, delayMax, readRelated = true, readRelatedMode = "random", readSpeed = "natural", periodDays = 0, spreadHours = 0, onLog, onResult, onProgress, stopSignal } = params;
+  const { accounts, comment, doLike, doComment, aiComment, commentTone, geminiKey, delayMin, delayMax, readRelated = true, readRelatedMode = "random", readSpeed = "natural", periodDays = 0, searchEntry = false, searchKeyword = "", spreadHours = 0, onLog, onResult, onProgress, stopSignal } = params;
   const log = onLog || console.log;
   let done = 0, fail = 0, skip = 0;
   // ★세션 상태를 계정별로 로그에 남긴다(크롬이 안 뜰 때 어느 계정이 문제인지 즉시 파악).
@@ -2811,7 +2859,8 @@ export async function pumasiEngage(params: {
       const commentedSet = new Set<string>(commentedAll[ckey] || []);
       await engageBlogs({
         accountId: actor.accountId,
-        targets: [{ keyword: "품앗이", blogId: target.blogId }],
+        // 검색 경유 진입 시 목표 키워드로 검색(없으면 대상 blogId로 검색). 아니면 기존처럼 "품앗이"(URL 직행)
+        targets: [{ keyword: searchEntry ? (searchKeyword.trim() || target.blogId) : "품앗이", blogId: target.blogId }],
         comment, doLike, doComment,
         periodDays: periodDays > 0 ? periodDays : 3650,   // 0=전체(무제한), 값 있으면 최근 N일 글만
         postsPerBlog: Math.max(1, target.posts),
@@ -2819,7 +2868,7 @@ export async function pumasiEngage(params: {
         dailyLimit: 999999,
         skipDone: false,                // 서로 계속 달 수 있게(당일 중복방지는 아래 excludeLogNos가 담당)
         commentRate: 100, likeRate: 100,
-        aiComment, commentTone, geminiKey, readRelated, readRelatedMode, readSpeed,
+        aiComment, commentTone, geminiKey, readRelated, readRelatedMode, readSpeed, searchEntry,
         sharedBrowser,   // ★공유 크롬 재사용(방문 사이에도 창 유지)
         excludeLogNos: commentedSet,
         onCommented: (logNo) => { commentedSet.add(logNo); commentedAll[ckey] = [...commentedSet]; savePumasiCommented(commentedAll); },
@@ -2871,6 +2920,7 @@ export async function engageBlogs(params: {
   sharedBrowser?: any;           // ★품앗이: 여러 방문이 크롬 창 하나를 공유(대기 중에도 창 유지). 있으면 이 browser 재사용·안 닫음
   minVisitors?: number;          // ★대상 블로그 최근 방문자 하한(0=제한없음) — 범위 밖이면 스킵
   maxVisitors?: number;          // ★대상 블로그 최근 방문자 상한(0=제한없음)
+  searchEntry?: boolean;         // ★검색 경유 진입: 글에 URL직행 대신 네이버 검색→클릭(검색 유입 발생). 못 찾으면 URL 폴백
   onLog?: (msg: string) => void;
   onResult?: (r: EngageResult) => Promise<void>;
   onProgress?: (done: number, fail: number) => void;
@@ -2882,7 +2932,7 @@ export async function engageBlogs(params: {
     dailyLimit, skipDone, commentRate = 100, likeRate = 100,
     // ★readRelated 기본 false: 일반 공감·댓글(여러 블로그 순회)은 관련글 더 읽기를 켜지 않음(시간 급증 방지).
     //   품앗이(pumasiEngage)만 명시적으로 true를 넘겨 켠다.
-    aiComment = false, commentTone = "다정", geminiKey = "", readRelated = false, readRelatedMode = "random", excludeLogNos, onCommented, readSpeed = "natural", sharedBrowser, minVisitors = 0, maxVisitors = 0, onLog, onResult, onProgress, stopSignal,
+    aiComment = false, commentTone = "다정", geminiKey = "", readRelated = false, readRelatedMode = "random", excludeLogNos, onCommented, readSpeed = "natural", sharedBrowser, minVisitors = 0, maxVisitors = 0, searchEntry = false, onLog, onResult, onProgress, stopSignal,
   } = params;
   const log = onLog || console.log;
 
@@ -3001,7 +3051,10 @@ export async function engageBlogs(params: {
         let commentReason = "";  // 댓글 못단 이유 (결과 표시용)
 
         log(`[공감·댓글] ${blogId} → 글 진입: ${targetPost.url}`);
-        await page.goto(targetPost.url, { waitUntil: "domcontentloaded", timeout: 20000 });
+        // ★검색 경유 진입(켜진 경우): 키워드로 검색해 이 글을 찾아 클릭(검색 유입). 못 찾으면 URL 직행.
+        let entered = false;
+        if (searchEntry) entered = await enterViaSearch(page, keyword, blogId, targetPost.logNo, log);
+        if (!entered) { await page.goto(targetPost.url, { waitUntil: "domcontentloaded", timeout: 20000 }); }
         await page.waitForTimeout(2000);
 
         // iframe 처리 (네이버 블로그는 mainFrame 안에 있음)

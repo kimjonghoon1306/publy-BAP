@@ -158,7 +158,7 @@ app.get("/api/crawl", async (req, res) => {
 app.post("/api/add-neighbor", async (req, res) => {
   const {
     userId, accountId, targets: targetsRaw, message,
-    delayMin, delayMax, skipDone, qualityFilter, retryDays, minVisitors, maxVisitors, jobId,
+    delayMin, delayMax, skipDone, qualityFilter, retryDays, minVisitors, maxVisitors, searchEntry, jobId,
   } = req.body as Record<string, any>;
 
   if (!accountId || !targetsRaw)
@@ -199,6 +199,7 @@ app.post("/api/add-neighbor", async (req, res) => {
       retryDays: retryDays === undefined ? 30 : parseInt(String(retryDays), 10),
       minVisitors: Math.max(0, parseInt(String(minVisitors ?? "0"), 10) || 0),
       maxVisitors: Math.max(0, parseInt(String(maxVisitors ?? "0"), 10) || 0),
+      searchEntry: searchEntry === true || searchEntry === "true",
       onLog: (msg) => sseSend(res, { type: "log", msg }),
       onResult: async (r: NeighborResult) => {
         sseSend(res, { type: "result", ...r });
@@ -331,7 +332,7 @@ app.post("/api/engage", async (req, res) => {
     userId, accountId, targets: targetsRaw, comment,
     doLike, doComment, periodDays, postsPerBlog,
     delayMin, delayMax, dailyLimit, skipDone, commentRate, likeRate, jobId,
-    aiComment, commentTone, geminiKey, minVisitors, maxVisitors,
+    aiComment, commentTone, geminiKey, minVisitors, maxVisitors, searchEntry,
   } = req.body as Record<string, any>;
   const isAiComment = aiComment === true || aiComment === "true";
 
@@ -365,6 +366,7 @@ app.post("/api/engage", async (req, res) => {
       likeRate: likeRate === undefined ? 100 : parseInt(String(likeRate), 10),
       minVisitors: Math.max(0, parseInt(String(minVisitors ?? "0"), 10) || 0),
       maxVisitors: Math.max(0, parseInt(String(maxVisitors ?? "0"), 10) || 0),
+      searchEntry: searchEntry === true || searchEntry === "true",
       onLog: (msg) => sseSend(res, { type: "log", msg }),
       onResult: async (r: EngageResult) => {
         sseSend(res, { type: "result", ...r });
@@ -425,7 +427,7 @@ app.post("/api/reply", async (req, res) => {
 
 /* ── 품앗이: 내 계정들끼리 서로 공감·댓글 (SSE) ── */
 app.post("/api/pumasi", async (req, res) => {
-  const { userId, accounts, comment, doLike, doComment, aiComment, commentTone, geminiKey, delayMin, delayMax, readRelated, readRelatedMode, readSpeed, periodDays, spreadHours, jobId } = req.body as Record<string, any>;
+  const { userId, accounts, comment, doLike, doComment, aiComment, commentTone, geminiKey, delayMin, delayMax, readRelated, readRelatedMode, readSpeed, periodDays, searchEntry, searchKeyword, spreadHours, jobId } = req.body as Record<string, any>;
   if (!Array.isArray(accounts) || accounts.length < 2)
     return res.status(400).json({ error: "품앗이는 계정 2개 이상 필요" });
   sseSetup(res);
@@ -447,6 +449,8 @@ app.post("/api/pumasi", async (req, res) => {
       readRelatedMode: readRelatedMode === "always" ? "always" : "random",
       readSpeed: readSpeed === "fast" ? "fast" : readSpeed === "normal" ? "normal" : "natural",
       periodDays: Math.max(0, parseInt(String(periodDays ?? "0"), 10) || 0),
+      searchEntry: searchEntry === true || searchEntry === "true",
+      searchKeyword: String(searchKeyword ?? "").slice(0, 80),
       spreadHours: Math.max(0, parseFloat(String(spreadHours ?? "0")) || 0),
       onLog: (msg) => sseSend(res, { type: "log", msg }),
       onResult: async (r) => { sseSend(res, { type: "result", ...r }); if (userId && r.status === "success") await incrementPumasiQuota(userId); },

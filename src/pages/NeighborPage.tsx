@@ -247,6 +247,23 @@ const VisitorFilter = ({ min, max, setMin, setMax }: { min: number; max: number;
   );
 };
 
+/* ── 검색 경유 진입 토글: URL 직행 대신 네이버 검색→클릭으로 들어가 "검색 유입"을 만든다(홈판·지수에 유리) ── */
+const SearchEntryToggle = ({ on, set, extra }: { on: boolean; set: (v: boolean) => void; extra?: React.ReactNode }) => (
+  <div className="card" style={{ padding: "14px 16px", border: `1.5px solid ${on ? "rgba(59,130,246,.4)" : "var(--border)"}`, background: on ? "rgba(59,130,246,.06)" : "var(--card)" }}>
+    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+      <div style={{ minWidth: 0 }}>
+        <div style={{ fontSize: 13, fontWeight: 800, color: "var(--text)" }}>🔎 검색으로 들어가기 <span style={{ fontSize: 10, color: "#3b82f6", fontWeight: 700 }}>추천</span></div>
+        <div style={{ fontSize: 11, color: "var(--text3)", marginTop: 3, lineHeight: 1.5 }}>바로 주소로 가지 않고 <b>네이버 검색을 거쳐</b> 들어가요. 상대 블로그에 <b style={{ color: "#3b82f6" }}>검색 유입</b>이 남아 더 자연스럽고 노출에 도움돼요.</div>
+      </div>
+      <button onClick={() => set(!on)} style={{ flexShrink: 0, width: 52, height: 30, borderRadius: 99, border: "none", background: on ? "#3b82f6" : "var(--border)", cursor: "pointer", position: "relative", transition: "background .2s" }}>
+        <span style={{ position: "absolute", top: 3, left: on ? 25 : 3, width: 24, height: 24, borderRadius: "50%", background: "#fff", transition: "left .2s" }} />
+      </button>
+    </div>
+    {on && extra}
+    {on && <div style={{ fontSize: 10.5, color: "var(--text3)", lineHeight: 1.5, marginTop: 8 }}>💡 검색 결과에 그 글이 없으면(아직 노출 전) 자동으로 주소로 들어가요 — 놓치지 않아요. 검색을 거치니 조금 더 느려요.</div>}
+  </div>
+);
+
 /* ── 사용설명서 내용 ── */
 const GUIDE = {
   neighbor: [
@@ -430,6 +447,9 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
   // ★서이추·공감댓글 대상 블로그 방문자 수 필터(0=제한없음). 탭 격리라 각 탭 인스턴스가 자기 값을 가짐.
   const [visMin, setVisMin] = useState(0);
   const [visMax, setVisMax] = useState(0);
+  // ★검색 경유 진입: URL 직행 대신 네이버 검색→클릭(검색 유입 발생). 기본 ON.
+  const [searchEntry, setSearchEntry] = useState(true);
+  const [pumSearchKeyword, setPumSearchKeyword] = useState("");   // 품앗이 검색 진입용 목표 키워드
   const pumJobIdRef = useRef<string>("");
   const pumEsRef = useRef<BotEventStream|null>(null);
   const pumLogRef = useRef<HTMLDivElement>(null);
@@ -730,7 +750,7 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
     addLog(`🚀 작업 시작 — ${list.length}개 대상 / 한도 ${dailyLimit}개 / 딜레이 ${delayMin}~${delayMax}초`);
     const msg = msgMode === "single" ? singleMsg : multiMsgs.split("\n").filter(l => l.trim()).join("|||");
     // ★ targets(수십~수백개)를 GET URL에 실으면 길이 초과로 연결 실패 → POST body로 전송
-    const body = JSON.stringify({ accountId: acc.accountId, targets: list, message: msg, delayMin, delayMax, skipDone, qualityFilter, retryDays, minVisitors: visMin, maxVisitors: visMax, jobId: jobIdRef.current, ...(userId ? { userId } : {}) });
+    const body = JSON.stringify({ accountId: acc.accountId, targets: list, message: msg, delayMin, delayMax, skipDone, qualityFilter, retryDays, minVisitors: visMin, maxVisitors: visMax, searchEntry, jobId: jobIdRef.current, ...(userId ? { userId } : {}) });
     return new Promise<"done" | "limit" | "error">((resolve) => {
       let outcome: "done" | "limit" | "error" = "done";
       const es = new BotEventStream(`${BOT}/api/add-neighbor`, { method: "POST", headers: { "Content-Type": "application/json" }, body }); esRef.current = es;
@@ -855,7 +875,7 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
     const aiComment = eCommentMode === "ai";
     const geminiKey = aiComment ? ((localStorage.getItem("publy_gemini_key") || "")) : "";
     // ★ targets를 POST body로 (URL 길이 초과 방지)
-    const body = JSON.stringify({ accountId: acc.accountId, targets: list, comment: commentText, doLike: eDoLike, doComment: eDoComment, likeRate: eLikeRate, commentRate: eCommentRate, periodDays: days, postsPerBlog: ePostsPerBlog, delayMin: eDelayMin, delayMax: eDelayMax, dailyLimit: eDailyLimit, skipDone: eSkipDone, aiComment, commentTone: eCommentTone, geminiKey, minVisitors: visMin, maxVisitors: visMax, jobId: eJobIdRef.current, ...(userId ? { userId } : {}) });
+    const body = JSON.stringify({ accountId: acc.accountId, targets: list, comment: commentText, doLike: eDoLike, doComment: eDoComment, likeRate: eLikeRate, commentRate: eCommentRate, periodDays: days, postsPerBlog: ePostsPerBlog, delayMin: eDelayMin, delayMax: eDelayMax, dailyLimit: eDailyLimit, skipDone: eSkipDone, aiComment, commentTone: eCommentTone, geminiKey, minVisitors: visMin, maxVisitors: visMax, searchEntry, jobId: eJobIdRef.current, ...(userId ? { userId } : {}) });
     const es = new BotEventStream(`${BOT}/api/engage`, { method: "POST", headers: { "Content-Type": "application/json" }, body }); eEsRef.current = es;
     es.onmessage = e => {
       const d = JSON.parse(e.data);
@@ -944,7 +964,7 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
     const maxReceivers = isUnlimitedPlan ? 999 : pumasiAccountLimit;
     const accs = connected.map(a => ({ accountId: a.accountId, blogId: a.blogId, posts: Math.min(isUnlimitedPlan ? 999 : pumasiPostsLimit, pumPostsByAcc[a.accountId] || 3), receiveLimit: Math.min(maxReceivers, Math.max(1, pumReceiveByAcc[a.accountId] || 3)) }));
     addPumLog(`🤝 품앗이 시작 — 계정 ${accs.length}개 (${accs.map(a => `${a.blogId}:글${a.posts}·받기${a.receiveLimit}명`).join(", ")})`);
-    const body = JSON.stringify({ accounts: accs, comment, doLike: pumDoLike, doComment: pumDoComment, aiComment: pumCommentMode === "ai", commentTone: pumTone, geminiKey, delayMin: pumDelayMin, delayMax: pumDelayMax, readRelated: pumReadRelated, readRelatedMode: pumReadRelatedMode, readSpeed: pumReadSpeed, periodDays: pumPeriodDays, spreadHours: pumSpread / 60, jobId: pumJobIdRef.current, ...(userId ? { userId } : {}) });
+    const body = JSON.stringify({ accounts: accs, comment, doLike: pumDoLike, doComment: pumDoComment, aiComment: pumCommentMode === "ai", commentTone: pumTone, geminiKey, delayMin: pumDelayMin, delayMax: pumDelayMax, readRelated: pumReadRelated, readRelatedMode: pumReadRelatedMode, readSpeed: pumReadSpeed, periodDays: pumPeriodDays, searchEntry, searchKeyword: pumSearchKeyword, spreadHours: pumSpread / 60, jobId: pumJobIdRef.current, ...(userId ? { userId } : {}) });
     const es = new BotEventStream(`${BOT}/api/pumasi`, { method: "POST", headers: { "Content-Type": "application/json" }, body }); pumEsRef.current = es;
     es.onmessage = e => {
       const d = JSON.parse(e.data);
@@ -1252,6 +1272,7 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
               <KeywordAnalyzer keywords={buddyKw} loading={buddyKwLoading} onAnalyze={analyzeBuddyKeywords}
                 onPick={w => setKeywords(prev => { const list = prev.split(",").map(s => s.trim()).filter(Boolean); if (!list.includes(w)) list.push(w); return list.join(", "); })} />
               <div style={{ marginBottom: 14 }}><VisitorFilter min={visMin} max={visMax} setMin={setVisMin} setMax={setVisMax} /></div>
+              <div style={{ marginBottom: 14 }}><SearchEntryToggle on={searchEntry} set={setSearchEntry} /></div>
               <div style={{ marginBottom: 14 }}>
                 <label className="inp-label" style={{ fontSize: 12, marginBottom: 6, display: "block" }}>키워드 (쉼표로 구분)</label>
                 <input className="inp" placeholder="예: 원주맛집, 강원도여행, 육아일기" value={keywords} onChange={e => setKeywords(e.target.value)} style={{ fontSize: 13, padding: "11px 14px" }} />
@@ -1548,6 +1569,7 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
                   <KeywordAnalyzer keywords={buddyKw} loading={buddyKwLoading} onAnalyze={analyzeBuddyKeywords}
                     onPick={w => setEKeywords(prev => { const list = prev.split(",").map(s => s.trim()).filter(Boolean); if (!list.includes(w)) list.push(w); return list.join(", "); })} />
                   <div style={{ marginBottom: 14 }}><VisitorFilter min={visMin} max={visMax} setMin={setVisMin} setMax={setVisMax} /></div>
+              <div style={{ marginBottom: 14 }}><SearchEntryToggle on={searchEntry} set={setSearchEntry} /></div>
                   <div style={{ marginBottom: 14 }}>
                     <label className="inp-label" style={{ fontSize: 12, marginBottom: 6, display: "block" }}>키워드 (쉼표로 구분)</label>
                     <input className="inp" placeholder="예: 맛집, 육아, 인테리어" value={eKeywords} onChange={e => setEKeywords(e.target.value)} style={{ fontSize: 13, padding: "11px 14px" }} />
@@ -2427,6 +2449,17 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
                     </div>
                     <div style={{ fontSize: 10.5, color: "var(--text3)", lineHeight: 1.5, marginTop: 6 }}>💡 글이 많은 블로그를 <b>자주</b> 돌릴 땐 <b>빠르게</b>가 편해요. 급하지 않으면 <b>자연스럽게</b>가 가장 사람처럼 보여 안전해요.</div>
                   </div>
+                </div>
+
+                {/* 검색 경유 진입 (품앗이: 목표 키워드로 검색해 유입) */}
+                <div style={{ padding: "8px 0", borderTop: "1px dashed var(--border)" }}>
+                  <SearchEntryToggle on={searchEntry} set={setSearchEntry} extra={
+                    <div style={{ marginTop: 10 }}>
+                      <label style={{ fontSize: 11.5, fontWeight: 700, color: "var(--text2)", display: "block", marginBottom: 5 }}>검색할 키워드 (내 글이 노리는 주제)</label>
+                      <input className="inp" value={pumSearchKeyword} onChange={e => setPumSearchKeyword(e.target.value)} placeholder="예: 온종일팜 굴비" style={{ width: "100%", fontSize: 13, padding: "9px 11px" }} />
+                      <div style={{ fontSize: 10.5, color: "var(--text3)", marginTop: 5, lineHeight: 1.5 }}>이 키워드로 검색해 내 글을 찾아 들어가요(검색 유입↑). 비우면 블로그ID로 검색해요.</div>
+                    </div>
+                  } />
                 </div>
 
                 {/* 대상 글 기간 제한 */}
