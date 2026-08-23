@@ -548,6 +548,8 @@ textarea.inp{resize:vertical;line-height:1.75;min-height:80px;}
 @keyframes navShineSweep{0%{left:-60%}45%,100%{left:130%}}
 .nav-hot{margin-left:auto;font-size:9px;font-weight:900;letter-spacing:.5px;color:#3a2500;background:linear-gradient(135deg,#ffd85e,#ffab2e);padding:2px 7px;border-radius:99px;box-shadow:0 0 8px rgba(255,180,0,.6);animation:navHotGlow 1.6s ease-in-out infinite;}
 @keyframes navHotGlow{0%,100%{box-shadow:0 0 6px rgba(255,180,0,.5);transform:scale(1)}50%{box-shadow:0 0 14px rgba(255,180,0,.9);transform:scale(1.06)}}
+/* 🎉 사진 글쓰기 완성 꽃가루 */
+@keyframes confettiFall{0%{transform:translateY(-20px) rotate(0);opacity:1}100%{transform:translateY(105vh) rotate(720deg);opacity:.2}}
 .nav-item.nav-control{font-weight:800;}
 .nav-item.nav-soon{opacity:.6;}
 .nav-item.nav-soon:hover{opacity:.8;}
@@ -1096,6 +1098,10 @@ Output format (JSON array only, no other text):
   const [photoKeypoints, setPhotoKeypoints] = useState("");
   const [photoGenerating, setPhotoGenerating] = useState(false);
   const [photoGenDone, setPhotoGenDone] = useState(false);
+  // ★사진 글쓰기 강화: 제목 후보 여러 개 / 생성 단계 로딩 / 꽃가루 축하
+  const [photoTitleOptions, setPhotoTitleOptions] = useState<string[]>([]);
+  const [photoGenStep, setPhotoGenStep] = useState(0);   // 0=대기,1~3 단계 로딩
+  const [photoConfetti, setPhotoConfetti] = useState(false);
   const [photoDragOver, setPhotoDragOver] = useState(false);
   const [photoSuggesting, setPhotoSuggesting] = useState(false);   // 키포인트 AI 자동 제안 중
   const [newPlat, setNewPlat] = useState<"naver"|"tistory">("naver");
@@ -3222,7 +3228,10 @@ ${segList}`;
     if(photoFiles.length===0){showToast("사진을 먼저 업로드해주세요","error");return;}
     const geminiKey=localStorage.getItem("publy_gemini_key")||"";
     if(!geminiKey){showToast("설정에서 Gemini API 키를 입력해주세요","error");return;}
-    setPhotoGenerating(true);setPhotoGenDone(false);
+    setPhotoGenerating(true);setPhotoGenDone(false);setPhotoTitleOptions([]);setPhotoConfetti(false);
+    // ★단계별 로딩 연출(📸 사진 구경 → ✏️ 글감 찾기 → 🌸 문장 다듬기)
+    setPhotoGenStep(1);
+    const stepTimer = setInterval(()=>setPhotoGenStep(s=>s>=3?3:s+1), 4500);
 
     try {
       // 이미지 parts 구성 (최대 20장 Vision 전송 - 체험단 실무 기준. 리사이즈로 용량 적음)
@@ -3272,7 +3281,8 @@ ${personaGuide}`:""}
 
 === 출력 형식 (반드시 준수) ===
 제목: (SEO 최적화 제목, 15~25자)
-태그: 태그1, 태그2, 태그3, 태그4, 태그5
+제목후보: 후보1 | 후보2 | 후보3 (서로 다른 각도의 SEO 제목 3개, 검색어를 앞에 배치, 과장·낚시 금지)
+태그: 태그1, 태그2, 태그3, 태그4, 태그5, 태그6, 태그7 (사진·내용 기반 실제 검색 키워드)
 
 [사진1]
 (1번 사진을 보고 쓴 문단)
@@ -3335,10 +3345,16 @@ POST3: (제목)|(이유)
       if(!text) throw new Error("생성 실패. Gemini 키를 확인하거나 잠시 후 다시 시도해주세요.");
 
       const titleM = text.match(/제목[:\s]*([^\n]+)/);
+      const titleOptM = text.match(/제목후보[:\s]*([^\n]+)/);
       const tagM = text.match(/태그[:\s]*([^\n]+)/);
       const bodyM = text.match(/태그[^\n]*\n([\s\S]+)/);
 
       const title = titleM?.[1]?.trim()||"사진으로 작성된 글";
+      // ★제목 후보 여러 개 (사용자가 골라 쓰게)
+      if(titleOptM?.[1]){
+        const opts = titleOptM[1].split(/\s*\|\s*/).map(s=>s.replace(/^[0-9.\-\s]+/,"").trim()).filter(s=>s.length>=4);
+        setPhotoTitleOptions([title,...opts].filter((v,i,a)=>a.indexOf(v)===i).slice(0,4));
+      } else setPhotoTitleOptions([title]);
       if(tagM?.[1]){
         setHashtags(tagM[1].trim().split(",").map((t:string)=>{
           const clean=t.trim().replace(/\s+/g,"");
@@ -3346,7 +3362,8 @@ POST3: (제목)|(이유)
         }).filter((t:string)=>t.replace(/^#+/,"").length>=2).slice(0,Math.floor(Math.random()*4)+5));
       }
 
-      const body2 = bodyM?.[1]?.trim()||text;
+      // 본문에서 혹시 남은 '제목후보:' 줄 제거(본문 오염 방지)
+      const body2 = (bodyM?.[1]?.trim()||text).replace(/^제목후보[:\s].*$/gm,"").trim();
       setGenContent(body2.replace(/\[사진\d+\]/g,"").replace(/\n{3,}/g,"\n\n").trim());
       setGenTitle(title);
       setPubTitle(title);
@@ -3400,10 +3417,12 @@ POST3: (제목)|(이유)
       setQualityScore(calcQualityScore(body2, photoKeypoints.split(/[\s,]/)[0]||""));
       setPhotoGenDone(true);
       setAutoInserted(true);
+      setPhotoConfetti(true); setTimeout(()=>setPhotoConfetti(false), 2600);   // 🎉 꽃가루 축하
       showToast("✅ 사진 기반 글 생성 완료!", "success");
     } catch(e:any) {
       showToast("❌ 생성 실패: "+e.message+" (오류가 관리자에게 자동 전달됩니다)", "error");logError({user_id:user.id,user_name:(user as any).name||"",user_email:user.email||"",feature:"사진 글쓰기",error_message:e.message}).catch(()=>{});
     } finally {
+      clearInterval(stepTimer); setPhotoGenStep(0);
       setPhotoGenerating(false);
     }
   }
@@ -5093,17 +5112,25 @@ POST3: (제목)|(이유)
                     <div className="photo-drop-desc">JPG, PNG 지원 · 최대 20장 · {photoFiles.length}/20장 업로드됨</div>
                   </div>
 
-                  {/* 사진 미리보기 그리드 */}
+                  {/* 사진 미리보기 그리드 (드래그로 순서 변경 = 글에 들어가는 순서) */}
                   {photoFiles.length>0&&(
+                    <>
+                    <div style={{fontSize:11,color:"var(--text3)",marginBottom:8,display:"flex",alignItems:"center",gap:5}}>↕️ 사진을 <b style={{color:"#FF6B9D"}}>드래그</b>해서 순서를 바꿀 수 있어요 · 이 순서대로 글에 들어가요 (①번=대표)</div>
                     <div className="photo-grid">
                       {photoFiles.map((f,i)=>(
-                        <div key={f.id} className="photo-thumb">
+                        <div key={f.id} className="photo-thumb" draggable
+                          onDragStart={()=>{(window as any).__photoDrag=i;}}
+                          onDragOver={e=>e.preventDefault()}
+                          onDrop={()=>{const from=(window as any).__photoDrag; if(from===undefined||from===i)return; setPhotoFiles(p=>{const n=[...p];const[m]=n.splice(from,1);n.splice(i,0,m);return n;}); (window as any).__photoDrag=undefined;}}
+                          style={{cursor:"grab"}}>
                           <img src={f.src} alt={f.name}/>
+                          <div style={{position:"absolute",top:4,left:4,fontSize:10,fontWeight:900,background:i===0?"#FF6B9D":"rgba(0,0,0,.6)",color:"#fff",width:20,height:20,borderRadius:"50%",display:"flex",alignItems:"center",justifyContent:"center"}}>{i+1}</div>
                           {i===0&&<div style={{position:"absolute",bottom:4,left:4,fontSize:9,fontWeight:800,background:"#FF6B9D",color:"#fff",padding:"2px 6px",borderRadius:99}}>대표</div>}
                           <button className="photo-thumb-del" onClick={()=>setPhotoFiles(p=>p.filter(x=>x.id!==f.id))}>✕</button>
                         </div>
                       ))}
                     </div>
+                    </>
                   )}
                 </div>
 
@@ -5157,23 +5184,54 @@ POST3: (제목)|(이유)
 
                 {/* 생성 버튼 */}
                 <button className="photo-gen-btn" onClick={generateFromPhotos} disabled={photoGenerating||photoFiles.length===0}>
-                  {photoGenerating?<><span className="spinner" style={{width:18,height:18,marginRight:8,borderColor:"rgba(255,255,255,.3)",borderTopColor:"#fff"}}/>AI가 사진을 분석하고 있어요...</>:<><span className="flower-deco">🌸</span> 사진으로 글 생성하기</>}
+                  {photoGenerating
+                    ?(()=>{const steps=[["📸","사진을 하나하나 구경하는 중"],["✏️","글감을 찾아 이야기 짜는 중"],["🌸","문장을 예쁘게 다듬는 중"]];const st=steps[Math.max(0,Math.min(2,photoGenStep-1))];return <><span style={{fontSize:18,marginRight:8}} className="flower-deco">{st[0]}</span>{st[1]}...</>;})()
+                    :<><span className="flower-deco">🌸</span> 사진으로 글 생성하기</>}
                 </button>
+                {/* 생성 단계 진행바 */}
+                {photoGenerating&&(
+                  <div style={{display:"flex",gap:6,marginTop:10}}>
+                    {[1,2,3].map(n=>(
+                      <div key={n} style={{flex:1,height:5,borderRadius:99,background:photoGenStep>=n?"linear-gradient(90deg,#FF6B9D,#C77DFF)":"var(--card2)",transition:"background .4s"}}/>
+                    ))}
+                  </div>
+                )}
                 {photoGenerating&&(
                   <button onClick={()=>{setPhotoGenerating(false);}} style={{width:"100%",marginTop:8,padding:"10px",borderRadius:12,border:"1px solid var(--border)",background:"var(--bg2)",color:"var(--text2)",cursor:"pointer",fontSize:13,fontWeight:700,fontFamily:"inherit"}}>⏹️ 생성 취소</button>
                 )}
                 {/* 결제문의 플로팅에 생성 버튼이 가리지 않게 하단 여백 */}
                 {!photoGenDone&&<div style={{height:90}} aria-hidden="true" />}
 
+                {/* 🎉 꽃가루 축하 연출 */}
+                {photoConfetti&&(
+                  <div style={{position:"fixed",inset:0,pointerEvents:"none",zIndex:9998,overflow:"hidden"}}>
+                    {Array.from({length:36}).map((_,i)=>{const c=["#FF6B9D","#C77DFF","#80FFDB","#FFD85E","#FF9E6C"][i%5];const left=Math.random()*100;const delay=Math.random()*0.5;const dur=1.8+Math.random()*1.2;const size=7+Math.random()*8;return <span key={i} style={{position:"absolute",top:"-20px",left:`${left}%`,width:size,height:size,background:c,borderRadius:i%2?"50%":"2px",animation:`confettiFall ${dur}s ${delay}s ease-in forwards`,opacity:.9}}/>;})}
+                  </div>
+                )}
+
                 {/* 생성 완료 후 발행 패널 */}
                 {photoGenDone&&genContent&&(
                   <div style={{marginTop:20}}>
+                    {/* ⭐ 제목 후보 골라 쓰기 */}
+                    {photoTitleOptions.length>1&&(
+                      <div className="card" style={{marginBottom:12,padding:"14px 16px",border:"1.5px solid #C77DFF44"}}>
+                        <div style={{fontSize:12.5,fontWeight:800,color:"#C77DFF",marginBottom:8}}>✨ 제목 골라 쓰기 <span style={{fontSize:10.5,color:"var(--text3)",fontWeight:600}}>· 검색 잘 잡히는 순서로 추천</span></div>
+                        <div style={{display:"flex",flexDirection:"column",gap:7}}>
+                          {photoTitleOptions.map((t,i)=>{const on=genTitle===t;return(
+                            <button key={i} onClick={()=>{setGenTitle(t);setPubTitle(t);showToast("제목 적용!","success");}}
+                              style={{display:"flex",alignItems:"center",gap:9,padding:"10px 12px",borderRadius:10,border:`1.5px solid ${on?"#C77DFF":"var(--border)"}`,background:on?"#C77DFF14":"var(--bg)",color:on?"#C77DFF":"var(--text)",cursor:"pointer",fontFamily:"inherit",textAlign:"left",fontSize:13,fontWeight:on?800:600,transition:"all .12s"}}>
+                              <span style={{fontSize:14}}>{on?"🟣":"⚪"}</span><span style={{flex:1,minWidth:0}}>{t}</span>{on&&<span style={{fontSize:10,fontWeight:800}}>선택됨</span>}
+                            </button>
+                          );})}
+                        </div>
+                      </div>
+                    )}
                     <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:12,padding:"12px 16px",borderRadius:14,background:"linear-gradient(135deg,#FF6B9D11,#C77DFF11)",border:"1px solid #FF6B9D33"}}>
                       <div style={{display:"flex",alignItems:"center",gap:8}}>
                         <span style={{fontSize:20}}>🎉</span>
                         <div>
                           <div style={{fontSize:13,fontWeight:800,color:"#FF6B9D"}}>글 생성 완료!</div>
-                          <div style={{fontSize:11,color:"var(--text3)"}}>{genContent.length.toLocaleString()}자 · 사진 {photoFiles.length}장 기반</div>
+                          <div style={{fontSize:11,color:"var(--text3)"}}>{genContent.length.toLocaleString()}자 · 📖 약 {Math.max(1,Math.round(genContent.length/450))}분 읽기 · 사진 {photoFiles.length}장 · 🏷️ 태그 {hashtags.length}개</div>
                         </div>
                       </div>
                       <div style={{display:"flex",gap:8}}>
