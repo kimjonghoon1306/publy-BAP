@@ -4,6 +4,23 @@ import { getReplyDailyUsage, incrementReplyQuota, REPLY_DAILY_LIMIT, getBlogscor
 
 const BOT = "http://127.0.0.1:3334";
 
+// ★LogBox는 컴포넌트 밖에 고정 정의(테리 요청: 로그 스크롤이 위로 튀는 버그).
+//   NeighborPage 안에 정의하면 부모 리렌더마다 새 컴포넌트로 취급→통째 리마운트→스크롤 위치가 맨 위로 리셋됐다.
+//   밖으로 빼면 같은 컴포넌트로 유지돼 사용자가 스크롤한 위치가 그대로 남는다.
+const LogBox = ({ logs, logRef, onClear }: { logs: string[]; logRef: React.RefObject<HTMLDivElement>; onClear: () => void }) => (
+  <div className="card" style={{ padding: 0, overflow: "hidden" }}>
+    <div style={{ padding: "14px 18px", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+      <div className="card-title" style={{ margin: 0 }}>📟 작업 로그</div>
+      <button onClick={onClear} style={{ padding: "5px 12px", borderRadius: 8, border: "1px solid var(--border)", background: "transparent", color: "var(--text3)", cursor: "pointer", fontSize: 12, fontFamily: "inherit" }}>지우기</button>
+    </div>
+    <div ref={logRef} style={{ height: "min(62vh, 720px)", minHeight: 360, overflowY: "auto", padding: "14px 18px", fontFamily: "'JetBrains Mono', monospace", fontSize: 12.5, lineHeight: 1.85, background: "#050a0f" }}>
+      {logs.length === 0 ? <span style={{ color: "#3a5a7a" }}>대기 중...</span> : logs.map((l, i) => (
+        <div key={i} style={{ color: l.includes("✅")||l.includes("🎉")||l.includes("❤️")||l.includes("💬") ? "#00d68f" : l.includes("❌")||l.includes("🚫") ? "#ff5363" : l.includes("⏭️") ? "#7a9ab5" : "#00c8ff" }}>{l}</div>
+      ))}
+    </div>
+  </div>
+);
+
 /* ── 숫자 입력 헬퍼: 앞자리 0 고정/첫 숫자 안지워짐 버그 방지 (빈 값 허용, blur 시 기본값 복원) ── */
 function numProps(val: number, set: (n: number) => void, min: number, max: number, def: number) {
   return {
@@ -253,7 +270,12 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
   const addScLog = (m: string) => setScLogs(p => [...p, `${new Date().toLocaleTimeString("ko-KR",{hour12:false})}  ${m}`]);
   // ── 저품질/누락 글 제목·키워드 개선 솔루션(AI) ──
   const [scSolLoading, setScSolLoading] = useState(false);
-  const [scSolutions, setScSolutions] = useState<null | { original: string; newTitle: string; keywords: string[]; reason: string }[]>(null);
+  const [scSolutions, setScSolutions] = useState<null | { original: string; diagnosis: string; newTitle: string; newTitle2: string; keywords: string[]; bodyTip: string; expectedEffect: string; reason: string }[]>(null);
+  const [scSolPage, setScSolPage] = useState(0);   // AI 팁 페이지네이션(10개 단위)
+  const [scExpPage, setScExpPage] = useState(0);   // 검색노출 결과 페이지네이션(30개 단위)
+  const [scExpSearch, setScExpSearch] = useState(""); // 검색노출 결과 제목 검색
+  const [scPostPage, setScPostPage] = useState(0);    // 검사할 글 목록 페이지네이션(30개 단위)
+  const [scPostSearch, setScPostSearch] = useState(""); // 검사할 글 제목 검색
   const [scPostMode, setScPostMode] = useState<"period"|"all">("period");
   const [scPeriod, setScPeriod] = useState<7|14|30|"custom">(7);
   const [scCustomDays, setScCustomDays] = useState(7);
@@ -772,11 +794,17 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
   const handleGetSolutions = async () => {
     const key = (localStorage.getItem("publy_gemini_key") || "");
     if (!key) return alert("제목·키워드 개선 솔루션은 무료 Gemini 키가 필요해요.\n설정 → 글쓰기 AI에서 Gemini 키를 먼저 등록해주세요.");
-    // 검색에 누락된(exposed===false) 글 제목만 대상 — 최대 5개
-    const missing = (scResult?.exposureChecks || []).filter(c => c.exposed === false).map(c => c.title).slice(0, 5);
+    const checks = scResult?.exposureChecks || [];
+    // 검색에 누락된(exposed===false) 글 = 고칠 대상 (최대 10개)
+    const missing = checks.filter(c => c.exposed === false).map(c => c.title).slice(0, 10);
     if (!missing.length) return alert("검색에 누락된 글이 없어요. (개선이 급한 글이 없다는 좋은 신호예요!)");
-    setScSolLoading(true); setScSolutions(null);
-    const prompt = `너는 네이버 블로그 상위노출(SEO) 전문가야. 아래 블로그 글 제목들은 네이버 검색에 노출이 안 되고 있어(저품질/누락 의심). 각 제목을 검색에 잘 잡히도록 개선해줘.\n\n각 제목마다 아래 JSON 형식으로만 답해. 다른 말 절대 금지. 순수 JSON 배열만 출력:\n[{"original":"원래제목","newTitle":"개선된 제목(검색 잘되게, 30자내)","keywords":["추천키워드1","키워드2","키워드3"],"reason":"왜 이렇게 바꿨는지 한 문장"}]\n\n규칙: newTitle은 사람들이 실제 검색하는 핵심 키워드를 앞쪽에 배치, 구체적이고 클릭하고 싶게. keywords는 그 글에 넣으면 좋을 실제 검색 키워드 3개. reason은 쉽게 한 문장.\n\n[제목들]\n${missing.map((t, i) => `${i + 1}. ${t}`).join("\n")}`;
+    // ★내 블로그에서 실제로 검색 상위에 잡힌 성공 제목(순위 낮을수록 상위) = AI가 학습할 실전 성공 패턴
+    const winners = checks.filter(c => c.exposed === true && c.rank != null).sort((a, b) => (a.rank! - b.rank!)).slice(0, 12).map(c => `${c.title} (검색 약 ${c.rank}위)`);
+    setScSolLoading(true); setScSolutions(null); setScSolPage(0);
+    const winnerBlock = winners.length
+      ? `\n\n[⭐이 블로그에서 실제로 검색 상위에 잡힌 '성공 제목'들 — 반드시 이 패턴을 학습해서 반영]\n${winners.join("\n")}\n→ 위 성공 제목들의 공통 패턴(구체적 지명·제품명·상황·숫자·검색어 배치)을 분석해서, 아래 누락 제목을 '같은 블로그에서 통한 방식'으로 고쳐라. 일반론 말고 이 블로그에 실제로 통한 스타일로.`
+      : "";
+    const prompt = `너는 네이버 블로그 상위노출(SEO) 전문가야. 이 블로그의 아래 글들은 네이버 검색에 노출이 안 되고 있어(누락). 각 제목을 검색에 잘 잡히게 정교하게 고쳐줘.${winnerBlock}\n\n각 누락 제목마다 아래 JSON 형식으로만 답해. 다른 말 절대 금지. 순수 JSON 배열만:\n[{"original":"원래제목","diagnosis":"이 제목이 왜 검색 안 되는지 핵심 원인 1문장(과장/낚시/검색어없음/너무추상 등)","newTitle":"개선안1 (실제 검색어를 앞에 배치, 25~35자, 구체적)","newTitle2":"개선안2 (다른 각도의 대안)","keywords":["이 글 본문에 넣을 실제 검색 키워드5개"],"bodyTip":"본문/태그를 어떻게 손보면 좋은지 실전 팁 1문장","expectedEffect":"이렇게 바꾸면 기대되는 효과 1문장"}]\n\n[핵심 규칙]\n- newTitle: 사람들이 진짜 네이버에 치는 검색어(지명+대상+상황) 형태. 과장·감탄사(대박/진짜/1등/충격) 절대 금지.\n- 위 '성공 제목' 패턴이 있으면 그 스타일을 최대한 따라라.\n- keywords: 검색량 있을 법한 구체 키워드 5개(롱테일 포함).\n- 모든 답변은 실행 가능하고 구체적으로. 뻔한 일반론 금지.\n\n[누락 제목들]\n${missing.map((t, i) => `${i + 1}. ${t}`).join("\n")}`;
     const models = ["gemini-2.0-flash", "gemini-2.5-flash", "gemini-1.5-flash"];
     for (const model of models) {
       try {
@@ -790,7 +818,7 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
         txt = txt.replace(/^```json\s*/i, "").replace(/^```\s*/i, "").replace(/```\s*$/i, "").trim();
         const arr = JSON.parse(txt);
         if (Array.isArray(arr) && arr.length) {
-          setScSolutions(arr.map((x: any) => ({ original: String(x.original || ""), newTitle: String(x.newTitle || ""), keywords: Array.isArray(x.keywords) ? x.keywords.map(String) : [], reason: String(x.reason || "") })));
+          setScSolutions(arr.map((x: any) => ({ original: String(x.original || ""), diagnosis: String(x.diagnosis || ""), newTitle: String(x.newTitle || ""), newTitle2: String(x.newTitle2 || ""), keywords: Array.isArray(x.keywords) ? x.keywords.map(String) : [], bodyTip: String(x.bodyTip || ""), expectedEffect: String(x.expectedEffect || ""), reason: String(x.reason || "") })));
           setScSolLoading(false);
           return;
         }
@@ -874,19 +902,6 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
     );
   };
 
-  const LogBox = ({ logs, logRef, onClear }: { logs: string[]; logRef: React.RefObject<HTMLDivElement>; onClear: () => void }) => (
-    <div className="card" style={{ padding: 0, overflow: "hidden" }}>
-      <div style={{ padding: "14px 18px", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-        <div className="card-title" style={{ margin: 0 }}>📟 작업 로그</div>
-        <button onClick={onClear} style={{ padding: "5px 12px", borderRadius: 8, border: "1px solid var(--border)", background: "transparent", color: "var(--text3)", cursor: "pointer", fontSize: 12, fontFamily: "inherit" }}>지우기</button>
-      </div>
-      <div ref={logRef} style={{ height: "min(62vh, 720px)", minHeight: 360, overflowY: "auto", padding: "14px 18px", fontFamily: "'JetBrains Mono', monospace", fontSize: 12.5, lineHeight: 1.85, background: "#050a0f" }}>
-        {logs.length === 0 ? <span style={{ color: "#3a5a7a" }}>대기 중...</span> : logs.map((l, i) => (
-          <div key={i} style={{ color: l.includes("✅")||l.includes("🎉")||l.includes("❤️")||l.includes("💬") ? "#00d68f" : l.includes("❌")||l.includes("🚫") ? "#ff5363" : l.includes("⏭️") ? "#7a9ab5" : "#00c8ff" }}>{l}</div>
-        ))}
-      </div>
-    </div>
-  );
 
   return (
     <div style={{ animation: "fadeUp .25s ease both" }}>
@@ -1662,20 +1677,43 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
           {/* 오른쪽: 게이지 + 리포트 + 로그 */}
           <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
             <UsageGauge label="📈 오늘 진단" used={scUsed} limit={scLimit} unit="회" color="#00b8d4" />
-            {scPosts.length > 0 && <div className="card" style={{ padding: "18px 20px" }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, marginBottom: 10 }}>
-                <div style={{ fontSize: 14, fontWeight: 800 }}>📄 검사할 글 <b style={{ color: "var(--accent-text)" }}>{scSelectedLogNos.length}/{scPosts.length}</b></div>
-                <button onClick={() => setScSelectedLogNos(scSelectedLogNos.length === scPosts.length ? [] : scPosts.map(post => scLogNo(post.url)).filter(Boolean))} style={{ padding: "6px 10px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--bg)", color: "var(--text2)", cursor: "pointer", fontSize: 11.5, fontWeight: 700 }}>{scSelectedLogNos.length === scPosts.length ? "전체 해제" : "전체 선택"}</button>
+            {scPosts.length > 0 && (() => {
+              const q = scPostSearch.trim().toLowerCase();
+              const filtered = q ? scPosts.filter(p => (p.title || "").toLowerCase().includes(q)) : scPosts;
+              const PER = 30; const totalPages = Math.max(1, Math.ceil(filtered.length / PER));
+              const page = Math.min(scPostPage, totalPages - 1);
+              const shown = filtered.slice(page * PER, page * PER + PER);
+              const filteredLogNos = filtered.map(p => scLogNo(p.url)).filter(Boolean);
+              const allFilteredSelected = filteredLogNos.length > 0 && filteredLogNos.every(id => scSelectedLogNos.includes(id));
+              return (
+              <div className="card" style={{ padding: "18px 20px" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, marginBottom: 10 }}>
+                  <div style={{ fontSize: 14, fontWeight: 800 }}>📄 검사할 글 <b style={{ color: "var(--accent-text)" }}>{scSelectedLogNos.length}/{scPosts.length}</b></div>
+                  <button onClick={() => setScSelectedLogNos(prev => allFilteredSelected ? prev.filter(id => !filteredLogNos.includes(id)) : Array.from(new Set([...prev, ...filteredLogNos])))} style={{ padding: "6px 10px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--bg)", color: "var(--text2)", cursor: "pointer", fontSize: 11.5, fontWeight: 700 }}>{allFilteredSelected ? "전체 해제" : (q ? "검색결과 전체선택" : "전체 선택")}</button>
+                </div>
+                <div style={{ marginBottom: 10 }}>
+                  <input className="inp" value={scPostSearch} onChange={e => { setScPostSearch(e.target.value); setScPostPage(0); }} placeholder="🔍 제목으로 검색..." style={{ fontSize: 12.5, padding: "9px 12px" }} />
+                </div>
+                {filtered.length === 0 ? <div style={{ fontSize: 12, color: "var(--text3)", padding: "16px 0", textAlign: "center" }}>검색 결과가 없어요.</div> : (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                    {shown.map(post => { const logNo = scLogNo(post.url); const checked = scSelectedLogNos.includes(logNo); return <label key={post.url} style={{ display: "flex", alignItems: "center", gap: 9, padding: "9px 10px", borderRadius: 9, background: checked ? "var(--accent-bg)" : "var(--bg)", border: "1px solid var(--border)", cursor: "pointer" }}>
+                      <input type="checkbox" checked={checked} onChange={() => setScSelectedLogNos(prev => checked ? prev.filter(id => id !== logNo) : [...prev, logNo])} />
+                      <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 12.5 }}>{post.title || "(제목 없음)"}</span>
+                      <span style={{ flexShrink: 0, fontSize: 11, color: "var(--text3)" }}>{post.date}</span>
+                    </label>; })}
+                  </div>
+                )}
+                {totalPages > 1 && (
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, marginTop: 10 }}>
+                    <button onClick={() => setScPostPage(Math.max(0, page - 1))} disabled={page === 0} style={{ padding: "7px 14px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--bg)", color: page === 0 ? "var(--text3)" : "var(--text2)", cursor: page === 0 ? "default" : "pointer", fontSize: 12, fontWeight: 700, fontFamily: "inherit" }}>← 이전</button>
+                    <span style={{ fontSize: 12, color: "var(--text2)", fontWeight: 700 }}>{page + 1} / {totalPages} <span style={{ color: "var(--text3)", fontWeight: 500 }}>({filtered.length}개)</span></span>
+                    <button onClick={() => setScPostPage(Math.min(totalPages - 1, page + 1))} disabled={page >= totalPages - 1} style={{ padding: "7px 14px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--bg)", color: page >= totalPages - 1 ? "var(--text3)" : "var(--text2)", cursor: page >= totalPages - 1 ? "default" : "pointer", fontSize: 12, fontWeight: 700, fontFamily: "inherit" }}>다음 →</button>
+                  </div>
+                )}
+                <button className="btn btn-primary btn-full" onClick={handleCheckSelectedExposure} disabled={scExposureLoading || !scSelectedLogNos.length} style={{ marginTop: 12 }}>{scExposureLoading ? <><span className="spinner" />검사 중...</> : `🔎 선택한 ${scSelectedLogNos.length}개 검색노출 확인`}</button>
               </div>
-              <div style={{ maxHeight: 260, overflowY: "auto", display: "flex", flexDirection: "column", gap: 6 }}>
-                {scPosts.map(post => { const logNo = scLogNo(post.url); const checked = scSelectedLogNos.includes(logNo); return <label key={post.url} style={{ display: "flex", alignItems: "center", gap: 9, padding: "9px 10px", borderRadius: 9, background: checked ? "var(--accent-bg)" : "var(--bg)", border: "1px solid var(--border)", cursor: "pointer" }}>
-                  <input type="checkbox" checked={checked} onChange={() => setScSelectedLogNos(prev => checked ? prev.filter(id => id !== logNo) : [...prev, logNo])} />
-                  <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 12.5 }}>{post.title || "(제목 없음)"}</span>
-                  <span style={{ flexShrink: 0, fontSize: 11, color: "var(--text3)" }}>{post.date}</span>
-                </label>; })}
-              </div>
-              <button className="btn btn-primary btn-full" onClick={handleCheckSelectedExposure} disabled={scExposureLoading || !scSelectedLogNos.length} style={{ marginTop: 12 }}>{scExposureLoading ? <><span className="spinner" />검사 중...</> : `🔎 선택한 ${scSelectedLogNos.length}개 검색노출 확인`}</button>
-            </div>}
+              );
+            })()}
             {!scResult ? (
               <div className="card" style={{ padding: "48px 24px", textAlign: "center", color: "var(--text2)", fontSize: 13.5, lineHeight: 1.7 }}>
                 왼쪽에서 계정을 연결하고 <b style={{color:"#ff5fa2"}}>📈 블로그 진단 시작</b>을 누르면<br />내 블로그의 건강 리포트가 여기에 나타나요.
@@ -1753,13 +1791,37 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
                       오늘 {(scResult.checkedTodayCount || 0).toLocaleString()}개 검사 · 전체 {(scResult.totalPostsForExposure || 0).toLocaleString()}개 중 {(scResult.exposureCompletedCount || 0).toLocaleString()}개 완료
                       {scResult.exposureLimit == null ? " (무제한 등급)" : ` (등급 한도 ${scResult.exposureLimit.toLocaleString()}개/일)`}
                     </div>
-                    {exposureChecks.length ? <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
-                      {exposureChecks.map((item, i) => <div key={`${item.title}-${i}`} style={{ display: "grid", gridTemplateColumns: "22px minmax(0,1fr) auto", gap: 7, alignItems: "center", fontSize: 12 }}>
-                        <span>{item.exposed === true ? "✅" : item.exposed === false ? "❌" : "➖"}</span>
-                        <span title={item.title} style={{ overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis", color: "var(--text2)" }}>{item.title}</span>
-                        <b style={{ color: item.exposed === false ? "#ef4444" : "var(--text2)" }}>{item.exposed === true ? `약 ${item.rank}위` : item.exposed === false ? "100위 내 누락" : "확인 불가"}</b>
-                      </div>)}
-                    </div> : <div style={{ fontSize: 12, color: "var(--text3)" }}>위에서 글을 불러와 선택한 뒤 검색노출 확인을 실행하세요.</div>}
+                    {exposureChecks.length ? (() => {
+                      const q = scExpSearch.trim().toLowerCase();
+                      const filtered = q ? exposureChecks.filter(item => item.title.toLowerCase().includes(q)) : exposureChecks;
+                      const PER = 30; const totalPages = Math.max(1, Math.ceil(filtered.length / PER));
+                      const page = Math.min(scExpPage, totalPages - 1);
+                      const shown = filtered.slice(page * PER, page * PER + PER);
+                      return (
+                        <>
+                          {/* 제목 검색 */}
+                          <div style={{ marginBottom: 10 }}>
+                            <input className="inp" value={scExpSearch} onChange={e => { setScExpSearch(e.target.value); setScExpPage(0); }} placeholder="🔍 제목으로 검색..." style={{ fontSize: 12.5, padding: "9px 12px" }} />
+                          </div>
+                          {filtered.length === 0 ? <div style={{ fontSize: 12, color: "var(--text3)", padding: "16px 0", textAlign: "center" }}>검색 결과가 없어요.</div> : (
+                            <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
+                              {shown.map((item, i) => <div key={`${item.title}-${page}-${i}`} style={{ display: "grid", gridTemplateColumns: "22px minmax(0,1fr) auto", gap: 7, alignItems: "center", fontSize: 12 }}>
+                                <span>{item.exposed === true ? "✅" : item.exposed === false ? "❌" : "➖"}</span>
+                                <span title={item.title} style={{ overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis", color: "var(--text2)" }}>{item.title}</span>
+                                <b style={{ color: item.exposed === false ? "#ef4444" : "var(--text2)" }}>{item.exposed === true ? `약 ${item.rank}위` : item.exposed === false ? "100위 내 누락" : "확인 불가"}</b>
+                              </div>)}
+                            </div>
+                          )}
+                          {totalPages > 1 && (
+                            <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, marginTop: 12 }}>
+                              <button onClick={() => setScExpPage(Math.max(0, page - 1))} disabled={page === 0} style={{ padding: "7px 14px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--bg)", color: page === 0 ? "var(--text3)" : "var(--text2)", cursor: page === 0 ? "default" : "pointer", fontSize: 12, fontWeight: 700, fontFamily: "inherit" }}>← 이전</button>
+                              <span style={{ fontSize: 12, color: "var(--text2)", fontWeight: 700 }}>{page + 1} / {totalPages} <span style={{ color: "var(--text3)", fontWeight: 500 }}>({filtered.length}개)</span></span>
+                              <button onClick={() => setScExpPage(Math.min(totalPages - 1, page + 1))} disabled={page >= totalPages - 1} style={{ padding: "7px 14px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--bg)", color: page >= totalPages - 1 ? "var(--text3)" : "var(--text2)", cursor: page >= totalPages - 1 ? "default" : "pointer", fontSize: 12, fontWeight: 700, fontFamily: "inherit" }}>다음 →</button>
+                            </div>
+                          )}
+                        </>
+                      );
+                    })() : <div style={{ fontSize: 12, color: "var(--text3)" }}>위에서 글을 불러와 선택한 뒤 검색노출 확인을 실행하세요.</div>}
                     <div style={{ marginTop: 10, fontSize: 11, color: "var(--text3)", lineHeight: 1.5 }}>네이버 공식 지수가 아닌, 순환 선택한 글의 제목 검색 결과를 바탕으로 한 퍼블리 자체 진단이에요. 누락만으로 저품질을 확정할 수는 없어요.</div>
                   </div>
 
@@ -1775,25 +1837,41 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
                           {scSolLoading ? "AI 분석 중..." : "✨ 개선안 받기"}
                         </button>
                       </div>
-                      {scSolutions && (
+                      {scSolutions && (() => {
+                        const PER = 10; const totalPages = Math.ceil(scSolutions.length / PER);
+                        const page = Math.min(scSolPage, totalPages - 1);
+                        const shown = scSolutions.slice(page * PER, page * PER + PER);
+                        return (
                         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-                          {scSolutions.map((s, i) => (
-                            <div key={i} style={{ padding: "13px 15px", borderRadius: 12, background: "var(--card)", border: "1px solid var(--border)" }}>
-                              <div style={{ fontSize: 11, color: "var(--text3)", marginBottom: 5 }}>원래 제목</div>
-                              <div style={{ fontSize: 12.5, color: "var(--text3)", textDecoration: "line-through", marginBottom: 9 }}>{s.original}</div>
-                              <div style={{ fontSize: 11, color: "#00c896", fontWeight: 700, marginBottom: 4 }}>✅ 이렇게 바꿔보세요</div>
-                              <div style={{ fontSize: 14, fontWeight: 800, color: "var(--text)", marginBottom: 10, lineHeight: 1.4 }}>{s.newTitle}</div>
+                          <div style={{ fontSize: 11.5, color: "var(--text3)", fontWeight: 600 }}>총 {scSolutions.length}개 글의 개선안 · {page + 1}/{totalPages} 페이지</div>
+                          {shown.map((s, i) => (
+                            <div key={i} style={{ padding: "15px 16px", borderRadius: 13, background: "var(--card)", border: "1px solid var(--border)" }}>
+                              <div style={{ fontSize: 12.5, color: "var(--text3)", textDecoration: "line-through", marginBottom: 6 }}>{s.original}</div>
+                              {s.diagnosis && <div style={{ fontSize: 11.5, color: "#ff5fa2", fontWeight: 600, marginBottom: 11, lineHeight: 1.5 }}>🔍 {s.diagnosis}</div>}
+                              <div style={{ fontSize: 11, color: "#00c896", fontWeight: 800, marginBottom: 4 }}>✅ 개선 제목 1</div>
+                              <div style={{ fontSize: 14.5, fontWeight: 800, color: "var(--text)", marginBottom: s.newTitle2 ? 8 : 11, lineHeight: 1.4 }}>{s.newTitle}</div>
+                              {s.newTitle2 && <><div style={{ fontSize: 11, color: "#00c896", fontWeight: 800, marginBottom: 4 }}>✅ 개선 제목 2</div><div style={{ fontSize: 14, fontWeight: 700, color: "var(--text2)", marginBottom: 11, lineHeight: 1.4 }}>{s.newTitle2}</div></>}
                               {s.keywords.length > 0 && (
-                                <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 9 }}>
-                                  {s.keywords.map((k, j) => <span key={j} style={{ padding: "4px 10px", borderRadius: 20, background: "rgba(255,95,162,.12)", color: "#ff5fa2", fontSize: 11.5, fontWeight: 700 }}># {k}</span>)}
-                                </div>
+                                <><div style={{ fontSize: 11, color: "var(--text3)", fontWeight: 700, marginBottom: 5 }}>넣으면 좋은 키워드</div>
+                                <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 11 }}>
+                                  {s.keywords.map((k, j) => <span key={j} style={{ padding: "4px 10px", borderRadius: 20, background: "rgba(139,92,246,.12)", color: "#a855f7", fontSize: 11.5, fontWeight: 700 }}># {k}</span>)}
+                                </div></>
                               )}
-                              {s.reason && <div style={{ fontSize: 11.5, color: "var(--text2)", lineHeight: 1.5, fontWeight: 500 }}>💡 {s.reason}</div>}
+                              {s.bodyTip && <div style={{ fontSize: 12, color: "var(--text2)", lineHeight: 1.55, fontWeight: 500, marginBottom: 6 }}>✏️ <b>본문 팁</b> · {s.bodyTip}</div>}
+                              {s.expectedEffect && <div style={{ fontSize: 12, color: "var(--text2)", lineHeight: 1.55, fontWeight: 500, padding: "8px 11px", borderRadius: 9, background: "rgba(0,200,150,.08)" }}>📈 <b style={{color:"#00c896"}}>기대 효과</b> · {s.expectedEffect}</div>}
                             </div>
                           ))}
-                          <div style={{ fontSize: 10.5, color: "var(--text3)", lineHeight: 1.5 }}>AI 제안이에요. 참고해서 실제 글의 제목·본문 키워드를 다듬으면 검색 노출에 도움이 돼요.</div>
+                          {totalPages > 1 && (
+                            <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, marginTop: 4 }}>
+                              <button onClick={() => setScSolPage(Math.max(0, page - 1))} disabled={page === 0} style={{ padding: "7px 14px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--bg)", color: page === 0 ? "var(--text3)" : "var(--text2)", cursor: page === 0 ? "default" : "pointer", fontSize: 12, fontWeight: 700, fontFamily: "inherit" }}>← 이전</button>
+                              <span style={{ fontSize: 12, color: "var(--text2)", fontWeight: 700 }}>{page + 1} / {totalPages}</span>
+                              <button onClick={() => setScSolPage(Math.min(totalPages - 1, page + 1))} disabled={page >= totalPages - 1} style={{ padding: "7px 14px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--bg)", color: page >= totalPages - 1 ? "var(--text3)" : "var(--text2)", cursor: page >= totalPages - 1 ? "default" : "pointer", fontSize: 12, fontWeight: 700, fontFamily: "inherit" }}>다음 →</button>
+                            </div>
+                          )}
+                          <div style={{ fontSize: 10.5, color: "var(--text3)", lineHeight: 1.5 }}>AI 제안이에요. 내 블로그에서 실제로 검색 상위에 오른 제목 패턴을 학습해 만든 처방이라, 참고해서 제목·본문을 다듬으면 노출에 도움이 돼요.</div>
                         </div>
-                      )}
+                        );
+                      })()}
                     </div>
                   )}
 

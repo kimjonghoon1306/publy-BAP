@@ -2058,26 +2058,32 @@ export async function crawlBlogStats(params: {
           return { total, unique };
         } catch { return { total: 0, unique: 0 }; }
       }).catch(() => ({ total: 0, unique: 0 }));
+      // ★buddyInfo.total(응답의 진짜 총 이웃수)만 신뢰한다. unique(최근 글 쓴 이웃 수)는 총수와 전혀 달라 쓰지 않는다.
+      //   (예전엔 unique=7을 이웃수로 써서 실제 200+인데 7로 잘못 표시됐다 — 그래서 폴백도 안 탔음)
       if (buddyInfo.total > 0) neighbors = buddyInfo.total;
-      // 총계 필드가 없는 응답도 실제 이웃 글 작성자 수를 최소 실측값으로 사용한다.
-      else if (buddyInfo.unique > 0) neighbors = Math.max(neighbors, buddyInfo.unique);
 
+      // 총수를 못 얻으면 이웃 관리/프로필 페이지에서 총 이웃수를 직접 읽는다(세션 필요).
       if (neighbors <= 0) {
         const manageUrls = [
           `https://admin.blog.naver.com/${blogId}/buddy/BuddyListManage.naver`,
           `https://blog.naver.com/BuddyListManage.naver?blogId=${blogId}`,
+          `https://m.blog.naver.com/BuddyList.naver?blogId=${blogId}`,
           `https://blog.naver.com/BuddyMe.naver?blogId=${blogId}`,
+          `https://m.blog.naver.com/${blogId}`,
         ];
         for (const url of manageUrls) {
           try {
             await page.goto(url, { waitUntil: "domcontentloaded", timeout: 15000 });
+            await page.waitForTimeout(500);
             const text = `${await page.locator("body").innerText().catch(() => "")}\n${await page.content()}`;
-            const match = text.match(/(?:전체\s*이웃|이웃\s*수|이웃)[^\d]{0,20}([\d,]+)\s*명?/) || text.match(/(?:buddyCnt|buddyCount|totalBuddyCount)["'\s:=]+([\d,]+)/i);
-            if (match) neighbors = Number(match[1].replace(/,/g, "")) || 0;
-            if (neighbors > 0) break;
+            const match = text.match(/(?:전체\s*이웃|서로이웃|이웃\s*수|이웃)[^\d]{0,20}([\d,]{1,7})\s*명/)
+              || text.match(/"?(?:buddyCnt|buddyCount|totalBuddyCount|buddyAllCount|totalCount)"?\s*[:=]\s*"?([\d,]{1,7})/i);
+            if (match) { const n = Number(match[1].replace(/,/g, "")) || 0; if (n > 0) { neighbors = n; break; } }
           } catch {}
         }
       }
+      // 그래도 총수를 못 구하면 최소한 "확인된 최근활동 이웃 N명 이상"으로 참고값 제공(0보다 낫게)
+      if (neighbors <= 0 && buddyInfo.unique > 0) neighbors = buddyInfo.unique;
       log(`[이웃수] ${neighbors > 0 ? `${neighbors}명 수집` : "확인 실패(진단은 계속)"}`);
     } catch {}
 
