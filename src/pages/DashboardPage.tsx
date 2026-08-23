@@ -3356,27 +3356,42 @@ POST3: (제목)|(이유)
       //   글 흐름과 사진이 정확히 매칭되게 한다. (기존 균등배치는 글-사진 불일치)
       const usedPhoto = new Set<number>();
       const finalBlocks: ContentBlock[] = [];
-      // 문단 단위로 쪼개되 [사진N] 마커를 경계로 처리
+      // ★캡션을 사진의 '실제 내용 문단'에서 뽑아 글·이미지·캡션을 일치시킨다(키워드/파일명 반복 금지).
+      //   AI가 [사진N] 바로 뒤에 그 사진을 보고 쓴 문단을 두므로, 그 문단 첫 문장을 짧은 캡션으로.
+      const makeCaptionFrom = (txt:string):string => {
+        const first = (txt||"").replace(/\s+/g," ").trim().split(/(?<=[.!?~。])\s|(?<=요)\s|(?<=다)\s/)[0] || (txt||"").trim();
+        let c = first.replace(/^["'\s]+|["'\s]+$/g,"").replace(/[.!?~]+$/,"").trim();
+        if(c.length>28) c = c.slice(0,26).trim()+"…";
+        return c;
+      };
+      // 마커→그 다음 텍스트를 캡션 소스로 쓰기 위해 전체를 토큰 배열로 평탄화
       const paragraphs = body2.split(/\n\n+/).map(s=>s.trim()).filter(Boolean);
+      const tokens: {marker?:number; text?:string}[] = [];
       for(const para of paragraphs){
-        // 문단 안의 모든 [사진N] 마커를 찾아 사진 블록으로, 나머지 텍스트는 텍스트 블록으로
-        const parts = para.split(/(\[사진\d+\])/g).filter(s=>s.trim());
-        for(const part of parts){
+        for(const part of para.split(/(\[사진\d+\])/g).filter(s=>s.trim())){
           const m = part.match(/^\[사진(\d+)\]$/);
-          if(m){
-            const idx = parseInt(m[1],10)-1;
-            if(idx>=0 && idx<photoFiles.length && !usedPhoto.has(idx)){
-              usedPhoto.add(idx);
-              finalBlocks.push({type:"image",id:uid(),src:photoFiles[idx].src,alt:photoFiles[idx].name.replace(/\.[^.]+$/,"")||`사진 ${idx+1}`,position:"center",source:"manual"} as ContentBlock);
-            }
-          } else {
-            finalBlocks.push({type:"text",id:uid(),content:part.trim()} as ContentBlock);
-          }
+          if(m) tokens.push({marker:parseInt(m[1],10)-1});
+          else tokens.push({text:part.trim()});
         }
       }
-      // AI가 마커를 빠뜨린 사진은 글 뒤에 순서대로 보충 (누락 방지)
+      for(let ti=0; ti<tokens.length; ti++){
+        const tk = tokens[ti];
+        if(tk.marker!==undefined){
+          const idx = tk.marker;
+          if(idx>=0 && idx<photoFiles.length && !usedPhoto.has(idx)){
+            usedPhoto.add(idx);
+            // 이 사진 다음에 오는 첫 텍스트 토큰 = 이 사진을 설명하는 문단 → 캡션 소스
+            const nextText = tokens.slice(ti+1).find(t=>t.text)?.text || "";
+            const cap = makeCaptionFrom(nextText) || `사진 ${idx+1}`;
+            finalBlocks.push({type:"image",id:uid(),src:photoFiles[idx].src,alt:cap,position:"center",source:"manual"} as ContentBlock);
+          }
+        } else if(tk.text){
+          finalBlocks.push({type:"text",id:uid(),content:tk.text} as ContentBlock);
+        }
+      }
+      // AI가 마커를 빠뜨린 사진은 글 뒤에 순서대로 보충(캡션은 사진 내용을 모르니 번호만 — 잘못된 캡션보다 나음)
       photoFiles.forEach((f,i)=>{
-        if(!usedPhoto.has(i)) finalBlocks.push({type:"image",id:uid(),src:f.src,alt:f.name.replace(/\.[^.]+$/,"")||`사진 ${i+1}`,position:"center",source:"manual"} as ContentBlock);
+        if(!usedPhoto.has(i)) finalBlocks.push({type:"image",id:uid(),src:f.src,alt:`사진 ${i+1}`,position:"center",source:"manual"} as ContentBlock);
       });
 
       setBlocks(finalBlocks.length>0?finalBlocks:[{type:"text",id:uid(),content:body2}]);
