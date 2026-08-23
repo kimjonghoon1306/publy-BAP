@@ -6785,8 +6785,8 @@ POST3: (제목)|(이유)
         </a>
 
         <div className="mob-bar">
-          {MAIN_TABS.filter(t=>["control","keyword","write","image","publish","manage","blogscore","neighbor","engage","reply","pumasi","settings"].includes(t.k)).map(t=>{
-            const lbl:Record<string,string>={control:"홈",keyword:"키워드",write:"글쓰기",image:"이미지",publish:"발행",manage:"발행관리",blogscore:"지수",neighbor:"서이추",engage:"공감댓글",reply:"답방",pumasi:"품앗이",settings:"설정"};
+          {MAIN_TABS.filter(t=>["control","keyword","write","image","photo","publish","manage","blogscore","neighbor","engage","reply","pumasi","settings"].includes(t.k)).map(t=>{
+            const lbl:Record<string,string>={control:"홈",keyword:"키워드",write:"글쓰기",image:"이미지",photo:"사진글쓰기",publish:"발행",manage:"발행관리",blogscore:"지수",neighbor:"서이추",engage:"공감댓글",reply:"답방",pumasi:"품앗이",settings:"설정"};
             return (<button key={t.k} className={`mob-btn ${tab===t.k?"active":""}`} onClick={()=>setTab(t.k as MainTab)}><span className="mob-btn-ico">{t.i}</span><span className="mob-btn-lbl">{lbl[t.k]||t.l}</span></button>);
           })}
         </div>
