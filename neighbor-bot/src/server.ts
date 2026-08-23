@@ -1,7 +1,7 @@
 import express from "express";
 import cors from "cors";
-import { saveSession, sessionExists, removeSession, crawlBlogIds, crawlBuddyPosts, analyzeBuddyKeywords, addNeighbors, NeighborResult, donePath, engageBlogs, EngageResult, engageDonePath, crawlMyPosts, replyToComments, crawlBlogStats, checkSelectedBlogExposure, pumasiEngage, crawlPumasiReport, pumasiPreview } from "./naver";
-import { checkNeighborQuota, incrementNeighborQuota, getNeighborDailyUsage, incrementEngageQuota, getEngageDailyUsage, getUserPlan, NEIGHBOR_DAILY_LIMIT, addNeighborHistory, addReplyHistory, addBlogscoreHistory, incrementPumasiQuota } from "./supabase";
+import { saveSession, sessionExists, removeSession, crawlBlogIds, crawlBuddyPosts, analyzeBuddyKeywords, addNeighbors, NeighborResult, donePath, engageBlogs, EngageResult, engageDonePath, crawlMyPosts, replyToComments, crawlBlogStats, checkSelectedBlogExposure, pumasiEngage, crawlPumasiReport, pumasiPreview, updatePostTitle } from "./naver";
+import { checkNeighborQuota, incrementNeighborQuota, getNeighborDailyUsage, incrementEngageQuota, getEngageDailyUsage, getUserPlan, NEIGHBOR_DAILY_LIMIT, addNeighborHistory, addReplyHistory, addBlogscoreHistory, incrementPumasiQuota, TITLE_EDIT_DAILY_LIMIT, getTitleEditDailyUsage, incrementTitleEditQuota } from "./supabase";
 import fs from "fs";
 
 const app = express();
@@ -483,6 +483,34 @@ app.post("/api/pumasi-preview", async (req, res) => {
     const rows = await pumasiPreview(accounts.map((a: any) => ({ accountId: String(a.accountId), blogId: String(a.blogId) })), (m) => console.log(m));
     res.json({ rows });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+/* ── 제목 수정 한도 조회 ── */
+app.get("/api/title-edit-quota/:userId", async (req, res) => {
+  try {
+    const plan = await getUserPlan(req.params.userId);
+    const limit = TITLE_EDIT_DAILY_LIMIT[plan] ?? TITLE_EDIT_DAILY_LIMIT.free;
+    const used = await getTitleEditDailyUsage(req.params.userId);
+    res.json({ ok: true, used, limit, plan, remaining: Math.max(0, limit - used) });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+/* ── 글 제목 자동 수정(재발행) ── */
+app.post("/api/update-title", async (req, res) => {
+  const { userId, accountId, logNo, newTitle } = req.body as Record<string, any>;
+  if (!accountId || !logNo || !newTitle) return res.status(400).json({ error: "accountId, logNo, newTitle 필요" });
+  try {
+    // 등급 한도 체크
+    if (userId) {
+      const plan = await getUserPlan(userId);
+      const limit = TITLE_EDIT_DAILY_LIMIT[plan] ?? TITLE_EDIT_DAILY_LIMIT.free;
+      const used = await getTitleEditDailyUsage(userId);
+      if (used >= limit) return res.status(429).json({ error: `오늘 제목 수정 한도(${limit}회)를 모두 사용했어요. 자정에 초기화됩니다.`, quotaExceeded: true, used, limit });
+    }
+    const result = await updatePostTitle({ accountId: String(accountId), logNo: String(logNo), newTitle: String(newTitle), onLog: (m) => console.log(m) });
+    if (result.ok && userId) await incrementTitleEditQuota(userId);
+    res.json(result);
+  } catch (e: any) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
 /* ── 공감·댓글 완료 목록 조회/초기화 ── */

@@ -148,6 +148,26 @@ export async function incrementPumasiQuota(userId: string): Promise<void> {
   await supabase.from("publy_settings").upsert({ key, value: String(used + 1) }, { onConflict: "key" });
 }
 
+// ── 제목 수정 하루 한도(쓰기 작업이라 지수 검사와 별도) — 무료3·베10·프30·무제한∞ ──
+export const TITLE_EDIT_DAILY_LIMIT: Record<string, number> = {
+  free: 3, basic: 10, pro: 30, unlimited: 999999, admin: 999999,
+};
+function titleEditQuotaKey(userId: string): string {
+  const today = new Date().toISOString().slice(0, 10);
+  return `titleedit_daily_${userId}_${today}`;
+}
+export async function getTitleEditDailyUsage(userId: string): Promise<number> {
+  try {
+    const { data } = await supabase.from("publy_settings").select("value").eq("key", titleEditQuotaKey(userId)).maybeSingle();
+    return data?.value ? parseInt(data.value) || 0 : 0;
+  } catch { return 0; }
+}
+export async function incrementTitleEditQuota(userId: string): Promise<void> {
+  const key = titleEditQuotaKey(userId);
+  const used = await getTitleEditDailyUsage(userId);
+  await supabase.from("publy_settings").upsert({ key, value: String(used + 1) }, { onConflict: "key" });
+}
+
 /* ── 회원 플랜 조회 ── */
 export async function getUserPlan(userId: string): Promise<string> {
   try {

@@ -312,6 +312,9 @@ const CSS = `
 .inp{width:100%;padding:12px 14px;border-radius:9px;border:1.5px solid var(--border);background:var(--bg);color:var(--text);font-size:14px;font-family:'Noto Sans KR',sans-serif;outline:none;transition:all .15s;}
 .inp:focus{border-color:var(--border-focus);box-shadow:0 0 0 3px rgba(77,166,255,.12);}
 .inp::placeholder{color:var(--text3);}
+/* ★숫자 입력 화살표(스피너) 제거 — 오작동(값 흔들림) 방지, 직접 입력에 집중 */
+.inp[type=number]::-webkit-outer-spin-button,.inp[type=number]::-webkit-inner-spin-button{-webkit-appearance:none;margin:0;}
+.inp[type=number]{-moz-appearance:textfield;appearance:textfield;}
 .inp.lg{font-size:17px;padding:15px 16px;}
 .inp-label{font-size:12px;font-weight:700;color:var(--text2);display:block;margin-bottom:6px;}
 select.inp{cursor:pointer;appearance:auto;}

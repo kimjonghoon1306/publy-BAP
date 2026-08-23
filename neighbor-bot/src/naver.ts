@@ -1289,6 +1289,103 @@ async function crawlMobileFallback(context: BrowserContext, keyword: string, lim
   return out;
 }
 
+/* ── 글 제목 수정(기존 글 편집·재발행) ──
+   실측(2026-08-23): 수정 URL = PostWriteForm.naver?blogId=&logNo=&Redirect=Update (자기 글만).
+   스마트에디터라 발행과 동일: 제목칸 .se-section-documentTitle 교체 → publish_btn → confirm_btn 재발행. */
+export async function updatePostTitle(params: {
+  accountId: string; logNo: string; newTitle: string; onLog?: (m: string) => void;
+}): Promise<{ ok: boolean; message: string }> {
+  const { accountId, logNo, newTitle, onLog } = params;
+  const log = onLog || console.log;
+  if (!naverSessionExists(accountId)) throw new Error("세션 없음 — 먼저 로그인하세요");
+  const { blogId, cookies } = loadSession(accountId);
+  if (!blogId) throw new Error("내 블로그 ID를 찾을 수 없어요 — 계정을 다시 연결해주세요");
+  if (!/^\d+$/.test(String(logNo))) throw new Error("글 번호(logNo)가 올바르지 않아요");
+  if (!newTitle || !newTitle.trim()) throw new Error("새 제목이 비어 있어요");
+  const title = newTitle.trim().slice(0, 100);
+
+  const browser = await chromium.launch({ headless: false, args: [...LAUNCH_ARGS, "--start-maximized"] });
+  const context = await browser.newContext({ userAgent: UA, viewport: { width: 1280, height: 900 }, locale: "ko-KR" });
+  await applyAntiDetection(context);
+  await context.addCookies(cookies);
+  const page = await context.newPage();
+  await page.bringToFront().catch(() => {});
+  try {
+    const editUrl = `https://blog.naver.com/PostWriteForm.naver?blogId=${blogId}&logNo=${logNo}&Redirect=Update`;
+    log(`[제목수정] ${blogId}/${logNo} 수정 페이지 진입...`);
+    await page.goto(editUrl, { waitUntil: "domcontentloaded", timeout: 30000 });
+    await page.waitForTimeout(3000);
+    // 자기 글이 아니거나 세션 만료면 홈으로 튕김 → 감지
+    if (/section\.blog\.naver\.com|BlogHome/.test(page.url())) {
+      throw new Error("수정 페이지를 열 수 없어요(내 글이 아니거나 로그인이 풀렸어요). 계정을 다시 연결해주세요.");
+    }
+    let frame = page.frames().find(f => f.name() === "mainFrame") ?? page.frames().find(f => f.url().includes("blog.naver.com")) ?? null;
+    for (let i = 0; i < 12 && !frame; i++) { await page.waitForTimeout(700); frame = page.frames().find(f => f.name() === "mainFrame") ?? null; }
+    if (!frame) throw new Error("에디터 프레임을 찾지 못했어요");
+    // 에디터 로드 대기 + '작성 중 글 이어쓰기' 팝업 있으면 닫기(취소)
+    await frame.waitForSelector(".se-section-documentTitle, .se-editor, .se-container", { timeout: 40000 }).catch(() => {});
+    await page.waitForTimeout(2000);
+    for (const cancelSel of ["button:has-text('취소')", "button:has-text('아니오')", "button[class*='cancel']"]) {
+      try { const c = await frame.$(cancelSel); if (c) { await c.click({ timeout: 2000 }).catch(() => {}); await page.waitForTimeout(800); break; } } catch {}
+    }
+
+    // ── 제목 교체 (발행 코드와 동일 셀렉터) ──
+    const titleSels = [
+      ".se-section-documentTitle .se-text-paragraph span[contenteditable='true']",
+      ".se-section-documentTitle [contenteditable='true']",
+      ".se-section-documentTitle .se-text-paragraph",
+    ];
+    let replaced = false;
+    for (const sel of titleSels) {
+      try {
+        const el = await frame.$(sel);
+        if (el) {
+          await frame.click(sel, { timeout: 5000 });
+          await page.waitForTimeout(400);
+          await frame.evaluate(t => { document.execCommand("selectAll", false); document.execCommand("insertText", false, t as string); }, title);
+          await page.waitForTimeout(600);
+          const cur = await frame.evaluate(s => (document.querySelector(s as string)?.textContent || "").trim(), sel).catch(() => "");
+          if (cur.includes(title.slice(0, 8))) { replaced = true; break; }
+        }
+      } catch {}
+    }
+    if (!replaced) {
+      try { await frame.click(".se-section-documentTitle", { timeout: 5000 }); await page.keyboard.press(process.platform === "darwin" ? "Meta+A" : "Control+A"); await page.keyboard.press("Backspace"); await page.keyboard.type(title, { delay: 35 }); replaced = true; } catch {}
+    }
+    if (!replaced) throw new Error("제목 입력칸을 찾지 못했어요(에디터 구조 변경 가능)");
+    log(`[제목수정] 새 제목 입력: "${title}"`);
+
+    // ── 발행(재발행) ──
+    await page.waitForTimeout(500);
+    let panelOpened = false;
+    for (const sel of ["button.publish_btn__m9KHH", "button[class*='publish_btn']", "button:has-text('발행')"]) {
+      try { const el = await frame.$(sel); if (el) { await frame.click(sel, { timeout: 6000 }); panelOpened = true; break; } } catch {}
+    }
+    if (!panelOpened) throw new Error("발행 버튼을 찾지 못했어요");
+    await page.waitForTimeout(2000);
+    // 발행 패널의 최종 확인 버튼
+    let finalDone = false;
+    for (const sel of ["button.confirm_btn__xiHQQ", "button[class*='confirm_btn']", "button:has-text('발행')"]) {
+      try { const el = await frame.$(sel); if (el) { await frame.click(sel, { timeout: 8000 }); finalDone = true; break; } } catch {}
+    }
+    if (!finalDone) {
+      const btns = await frame.$$("button");
+      for (const btn of btns.reverse()) { const t = await btn.textContent(); if (t && t.includes("발행")) { await btn.click().catch(() => {}); finalDone = true; break; } }
+    }
+    await page.waitForTimeout(4000);
+    // 세션 쿠키 갱신
+    try { const nc = await context.cookies(); const s = loadSession(accountId); s.cookies = nc; writeSession(sessionName(accountId), s); } catch {}
+    if (!finalDone) throw new Error("발행 확인 버튼을 누르지 못했어요");
+    log(`[제목수정] ✅ ${blogId}/${logNo} 제목 변경 완료`);
+    return { ok: true, message: `제목을 "${title}"로 변경했어요` };
+  } catch (e: any) {
+    log(`[제목수정] ❌ 실패: ${e.message}`);
+    return { ok: false, message: e.message };
+  } finally {
+    await browser.close().catch(() => {});
+  }
+}
+
 /* ── 서이추 신청 ── */
 export async function addNeighbors(params: {
   accountId: string;
@@ -1701,7 +1798,10 @@ async function generateAiComment(key: string, tone: string, postText: string, lo
   if (!key) { log("[AI댓글] ⚠️ Gemini 키가 없어 건너뜁니다 (설정 → 글쓰기 AI에서 Gemini 키 입력)"); return ""; }
   if (!postText || postText.length < 10) { log("[AI댓글] 글 내용을 못 읽어 건너뜀"); return ""; }
   const toneGuide = tone === "담백" ? "깔끔하고 담백한" : tone === "짧게" ? "짧고 간결한" : "다정하고 따뜻한";
-  const prompt = `너는 네이버 블로그 이웃이야. 아래 블로그 글을 읽고 ${toneGuide} 말투의 자연스러운 한국어 공감 댓글을 딱 1개만 써줘.\n규칙: 1~2문장, 45자 이내, 글 내용에 구체적으로 반응, 이모지 1개 정도만, 광고·링크·해시태그 금지, 따옴표 없이 댓글 문장만 출력.\n\n[블로그 글]\n${postText}`;
+  // ★시작 표현 다양화: 매번 "와~"로 시작해 다 비슷해지는 문제 방지. 랜덤 힌트로 첫 단어를 흩뿌린다.
+  const starters = ["글 내용에 바로 반응하며", "질문을 던지듯", "공감하는 어투로", "가볍게 감탄하며", "정보에 고마움을 표하며", "담담하게 한마디로", "본문의 한 부분을 콕 집어", "내 경험을 살짝 곁들여"];
+  const starterHint = starters[Math.floor(Math.random() * starters.length)];
+  const prompt = `너는 네이버 블로그 이웃이야. 아래 블로그 글을 읽고 ${toneGuide} 말투의 자연스러운 한국어 공감 댓글을 딱 1개만 써줘.\n규칙: 1~2문장, 45자 이내, 글 내용에 구체적으로 반응, 이모지 1개 정도만, 광고·링크·해시태그 금지, 따옴표 없이 댓글 문장만 출력.\n★중요(시작 표현 다양화): 이번 댓글은 "${starterHint}" 시작해줘. "와", "우와", "와아" 같은 감탄사로 시작하지 마. 매번 다른 첫 단어로 시작해서 다른 댓글들과 겹치지 않게 해.\n\n[블로그 글]\n${postText}`;
   const models = ["gemini-2.0-flash", "gemini-2.5-flash", "gemini-1.5-flash"];
   for (const model of models) {
     try {
@@ -2647,7 +2747,9 @@ async function generateAiReply(key: string, tone: string, commentText: string, a
   const nameRule = authorName
     ? `상대 닉네임은 정확히 "${authorName}" 야. 답글에서 상대를 부를 때는 반드시 "${authorName}"를 한 글자도 바꾸지 말고 그대로 써. 이름을 임의로 줄이거나 바꾸거나 새로 지어내지 마. 닉네임이 부르기 어색하면 차라리 이름을 부르지 말고 내용에만 반응해.`
     : `상대 닉네임을 모르니, 답글에 사람 이름·호칭을 지어내서 쓰지 말고 내용에만 반응해.`;
-  const prompt = `너는 네이버 블로그 주인이야. 내 글에 아래 댓글이 달렸어. 이 댓글에 ${toneGuide} 말투로 고마움을 담은 자연스러운 한국어 답글을 딱 1개만 써줘.\n${nameRule}\n규칙: 1문장, 35자 이내, 댓글 내용에 구체적으로 반응, 이모지 1개 정도, 광고·링크 금지, 따옴표 없이 답글만 출력.\n\n[받은 댓글]\n${commentText}`;
+  const rStarters = ["고마움을 먼저 표하며", "상대 댓글에 되물으며", "공감하며", "가볍게 인사하며", "댓글 내용을 콕 집어", "반가움을 담아", "담담하게 한마디로"];
+  const rHint = rStarters[Math.floor(Math.random() * rStarters.length)];
+  const prompt = `너는 네이버 블로그 주인이야. 내 글에 아래 댓글이 달렸어. 이 댓글에 ${toneGuide} 말투로 고마움을 담은 자연스러운 한국어 답글을 딱 1개만 써줘.\n${nameRule}\n규칙: 1문장, 35자 이내, 댓글 내용에 구체적으로 반응, 이모지 1개 정도, 광고·링크 금지, 따옴표 없이 답글만 출력.\n★시작 표현 다양화: 이번 답글은 "${rHint}" 시작해줘. "와", "우와", "감사합니다"로만 매번 시작하지 말고 첫 단어를 다르게.\n\n[받은 댓글]\n${commentText}`;
   for (const model of ["gemini-2.0-flash", "gemini-2.5-flash", "gemini-1.5-flash"]) {
     try {
       // ★2.5계열 thinking 끄고 토큰 넉넉히 — 답글이 중간에 잘리는 것 방지

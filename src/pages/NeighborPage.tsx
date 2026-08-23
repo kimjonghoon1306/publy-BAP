@@ -43,15 +43,21 @@ const LogBox = ({ logs, logRef, onClear }: { logs: string[]; logRef: React.RefOb
 };
 
 /* ── 숫자 입력 헬퍼: 앞자리 0 고정/첫 숫자 안지워짐 버그 방지 (빈 값 허용, blur 시 기본값 복원) ── */
+// ★숫자 입력: 타이핑 중엔 clamp하지 않고(값이 튀는 것 방지), 입력을 끝낼 때(blur)에만 [min,max]로 정리.
+//   type="text" + inputMode="numeric"로 브라우저 기본 화살표(스피너)를 없애 오작동(흔들림)을 막고 직접 입력에 집중.
 function numProps(val: number, set: (n: number) => void, min: number, max: number, def: number) {
   return {
-    value: val === 0 ? "" : val,
+    type: "text" as const,
+    inputMode: "numeric" as const,
+    value: val === 0 ? "" : String(val),
     onChange: (e: React.ChangeEvent<HTMLInputElement>) => {
       const v = e.target.value.replace(/[^0-9]/g, "");
-      set(v === "" ? 0 : Math.min(max, Number(v)));
+      set(v === "" ? 0 : Number(v));   // 입력 중엔 그대로 저장(즉시 clamp 안 함)
     },
     onBlur: (e: React.FocusEvent<HTMLInputElement>) => {
-      if (!e.target.value || Number(e.target.value) < min) set(def);
+      const n = Number(e.target.value.replace(/[^0-9]/g, ""));
+      if (!e.target.value || !Number.isFinite(n) || n < min) set(def);
+      else if (n > max) set(max);
     },
   };
 }
@@ -375,7 +381,7 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
   const [scLoading, setScLoading] = useState(false);
   const [scResult, setScResult] = useState<null | {
     blogId: string; totalPosts: number; neighbors: number; recentDates: string[];
-    exposureChecks?: { title: string; exposed: boolean | null; rank: number | null; postUrl?: string }[];
+    exposureChecks?: { title: string; exposed: boolean | null; rank: number | null; postUrl?: string; logNo?: string }[];
     lowQualitySuspected?: boolean | null;
     visitorDays?: { date: string; visitors: number }[];
     inflowKeywords?: { keyword: string; count?: number }[];
@@ -392,6 +398,10 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
   // ── 저품질/누락 글 제목·키워드 개선 솔루션(AI) ──
   const [scSolLoading, setScSolLoading] = useState(false);
   const [scSolutions, setScSolutions] = useState<null | { original: string; diagnosis: string; newTitle: string; newTitle2: string; keywords: string[]; bodyTip: string; expectedEffect: string; reason: string }[]>(null);
+  // ★제목 자동수정 상태
+  const [titleEditUsed, setTitleEditUsed] = useState(0);
+  const [titleEditLimit, setTitleEditLimit] = useState(3);
+  const [titleEditingKey, setTitleEditingKey] = useState<string>("");   // 지금 수정 중인 "logNo|번호"
   const [scSolPage, setScSolPage] = useState(0);   // AI 팁 페이지네이션(5개 단위)
   const [scSolSearch, setScSolSearch] = useState(""); // AI 팁 원래 제목 검색
   const [scExpPage, setScExpPage] = useState(0);   // 검색노출 결과 페이지네이션(30개 단위)
@@ -1025,6 +1035,36 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
     es.onerror = () => { addScLog("❌ 연결 오류 (다시 시도해주세요)"); setScLoading(false); es.close(); };
   };
 
+  /* 제목 수정 한도 로드 (지수 탭 진입 시) */
+  useEffect(() => {
+    if (tab === "score" && userId) botFetch(`${BOT}/api/title-edit-quota/${userId}`).then(r => r.json())
+      .then(d => { if (d.ok) { setTitleEditUsed(d.used); setTitleEditLimit(d.limit); } }).catch(() => {});
+  }, [tab, userId]);
+
+  /* 개선 제목 → 실제 글 제목 자동 변경(재발행) */
+  const handleApplyTitle = async (originalTitle: string, newTitle: string, key: string) => {
+    const acc = activeAccount;
+    if (!acc) return alert("먼저 계정을 연결하세요");
+    // 원제목 → logNo 매핑 (검색노출 결과에서 찾음)
+    const match = (scResult?.exposureChecks || []).find(c => c.title === originalTitle);
+    const logNo = match?.logNo || "";
+    if (!logNo) return alert("이 글의 번호를 못 찾았어요. '검색노출 검사'를 다시 실행한 뒤 시도해주세요.");
+    if (!isUnlimitedPlan && titleEditUsed >= titleEditLimit) return alert(`오늘 제목 수정 한도(${titleEditLimit}회)를 모두 사용했어요. 자정에 초기화됩니다.`);
+    if (!window.confirm(`이 글의 제목을 아래로 바꿀까요?\n\n"${newTitle}"\n\n※ 네이버 블로그에서 실제로 수정·재발행돼요. 이미 노출 중인 글은 순위가 바뀔 수 있어요.`)) return;
+    setTitleEditingKey(key);
+    try {
+      const r = await botFetch(`${BOT}/api/update-title`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ accountId: acc.accountId, logNo, newTitle, ...(userId ? { userId } : {}) }) });
+      const d = await r.json();
+      if (d.ok) {
+        setTitleEditUsed(u => u + 1);
+        alert(`✅ 제목을 변경했어요!\n"${newTitle}"\n\n검색 반영에는 시간이 걸릴 수 있어요.`);
+      } else {
+        alert(`제목 변경 실패: ${d.error || d.message || "알 수 없는 오류"}`);
+      }
+    } catch (e: any) { alert(`오류: ${e.message}`); }
+    setTitleEditingKey("");
+  };
+
   const scLogNo = (url: string) => url.match(/(?:logNo=|\/)(\d{6,})(?:[/?&]|$)/)?.[1] || "";
 
   /* 블로그 지수 1단계: 기간에 맞는 내 글 불러오기 */
@@ -1280,14 +1320,14 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 10 }}>
                 <div>
                   <label className="inp-label" style={{ fontSize: 12, marginBottom: 6, display: "block" }}>키워드당 추출 수</label>
-                  <input className="inp" type="number" min={1} max={300} {...numProps(countPerKw, setCountPerKw, 1, 300, 34)} style={{ fontSize: 13, padding: "11px 14px" }} />
+                  <input className="inp" {...numProps(countPerKw, setCountPerKw, 1, 300, 34)} style={{ fontSize: 13, padding: "11px 14px" }} />
                   <div style={{ fontSize: 12, color: "var(--text2)", marginTop: 6, lineHeight: 1.55, fontWeight: 500 }}>
                     💡 키워드 하나당 서이추 신청할 블로거를 <b style={{color:"#00c896"}}>몇 명 불러올지</b> 정해요. (숫자가 클수록 더 많은 대상을 모읍니다)
                   </div>
                 </div>
                 <div>
                   <label className="inp-label" style={{ fontSize: 12, marginBottom: 6, display: "block" }}>하루 신청 한도</label>
-                  <input className="inp" type="number" min={1} max={100} {...numProps(dailyLimit, setDailyLimit, 1, 100, 100)} style={{ fontSize: 13, padding: "11px 14px" }} />
+                  <input className="inp" {...numProps(dailyLimit, setDailyLimit, 1, 100, 100)} style={{ fontSize: 13, padding: "11px 14px" }} />
                   <div style={{ fontSize: 12, color: "var(--text2)", marginTop: 6, lineHeight: 1.55, fontWeight: 500 }}>
                     💡 오늘 실제로 서로이웃 신청을 보낼 <b style={{color:"#ff5fa2"}}>최대 건수</b>예요. <b style={{color:"#00c896"}}>계정 안전</b>을 위해 이 수까지만 신청하고 멈춥니다.
                   </div>
@@ -1326,9 +1366,9 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
               <div style={{ marginBottom: 12 }}>
                 <label className="inp-label" style={{ fontSize: 12, marginBottom: 6, display: "block" }}>딜레이 (초) — 너무 짧으면 봇 탐지될 수 있어요</label>
                 <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                  <input className="inp" type="number" min={1} max={60} {...numProps(delayMin, setDelayMin, 1, 60, 5)} style={{ flex: 1, fontSize: 13, padding: "11px 14px" }} />
+                  <input className="inp" {...numProps(delayMin, setDelayMin, 1, 60, 5)} style={{ flex: 1, fontSize: 13, padding: "11px 14px" }} />
                   <span style={{ color: "var(--text3)", fontSize: 14, fontWeight: 700 }}>~</span>
-                  <input className="inp" type="number" min={1} max={120} {...numProps(delayMax, setDelayMax, 1, 120, 10)} style={{ flex: 1, fontSize: 13, padding: "11px 14px" }} />
+                  <input className="inp" {...numProps(delayMax, setDelayMax, 1, 120, 10)} style={{ flex: 1, fontSize: 13, padding: "11px 14px" }} />
                   <span style={{ color: "var(--text3)", fontSize: 13 }}>초</span>
                 </div>
               </div>
@@ -1340,7 +1380,7 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
               {skipDone && (
                 <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "6px 2px 2px", flexWrap: "wrap" }}>
                   <span style={{ fontSize: 13, color: "var(--text2)", fontWeight: 600 }}>거절·무응답은</span>
-                  <input className="inp" type="number" min={0} max={365} {...numProps(retryDays, setRetryDays, 0, 365, 30)} style={{ width: 74, fontSize: 13, padding: "9px 12px", textAlign: "center" }} />
+                  <input className="inp" {...numProps(retryDays, setRetryDays, 0, 365, 30)} style={{ width: 74, fontSize: 13, padding: "9px 12px", textAlign: "center" }} />
                   <span style={{ fontSize: 13, color: "var(--text2)", fontWeight: 600 }}>일 뒤 다시 신청</span>
                   <span style={{ fontSize: 11.5, color: "var(--text3)" }}>{retryDays === 0 ? "(0=영구 제외)" : "(성공한 곳은 계속 제외)"}</span>
                 </div>
@@ -1411,9 +1451,9 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
               {spreadMode && (
                 <>
                   <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", fontSize: 13, color: "var(--text2)", fontWeight: 600 }}>
-                    <input className="inp" type="number" min={2} max={10} {...numProps(spreadBatches, setSpreadBatches, 2, 10, 3)} style={{ width: 60, fontSize: 13, padding: "9px 10px", textAlign: "center" }} />
+                    <input className="inp" {...numProps(spreadBatches, setSpreadBatches, 2, 10, 3)} style={{ width: 60, fontSize: 13, padding: "9px 10px", textAlign: "center" }} />
                     <span>회로 나눠서</span>
-                    <input className="inp" type="number" min={1} max={720} {...numProps(spreadGapMin, setSpreadGapMin, 1, 720, 90)} style={{ width: 72, fontSize: 13, padding: "9px 10px", textAlign: "center" }} />
+                    <input className="inp" {...numProps(spreadGapMin, setSpreadGapMin, 1, 720, 90)} style={{ width: 72, fontSize: 13, padding: "9px 10px", textAlign: "center" }} />
                     <span>분 간격으로</span>
                   </div>
                   {spreadRunning && (
@@ -1583,7 +1623,7 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
                 <div>
                   <label className="inp-label" style={{ fontSize: 12, marginBottom: 6, display: "block" }}>{eSource === "buddy" ? "가져올 이웃 수 (최대)" : "키워드당 추출 수"}</label>
-                  <input className="inp" type="number" min={1} max={200} {...numProps(eCountPerKw, setECountPerKw, 1, 200, 20)} style={{ fontSize: 13, padding: "11px 14px" }} />
+                  <input className="inp" {...numProps(eCountPerKw, setECountPerKw, 1, 200, 20)} style={{ fontSize: 13, padding: "11px 14px" }} />
                   <div style={{ fontSize: 12, color: "var(--text2)", marginTop: 6, lineHeight: 1.55, fontWeight: 500 }}>
                     {eSource === "buddy"
                       ? "💡 내 서로이웃 중 최근 글을 쓴 사람을 최대 몇 명 불러올지 정해요. (숫자가 클수록 더 많은 이웃 글을 가져옵니다)"
@@ -1592,7 +1632,7 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
                 </div>
                 <div>
                   <label className="inp-label" style={{ fontSize: 12, marginBottom: 6, display: "block" }}>하루 작업 한도</label>
-                  <input className="inp" type="number" min={1} max={200} {...numProps(eDailyLimit, setEDailyLimit, 1, 200, 50)} style={{ fontSize: 13, padding: "11px 14px" }} />
+                  <input className="inp" {...numProps(eDailyLimit, setEDailyLimit, 1, 200, 50)} style={{ fontSize: 13, padding: "11px 14px" }} />
                   <div style={{ fontSize: 12, color: "var(--text2)", marginTop: 6, lineHeight: 1.55, fontWeight: 500 }}>
                     💡 오늘 실제로 공감·댓글을 남길 <b style={{color:"#ff5fa2"}}>최대 건수</b>예요. <b style={{color:"#00c896"}}>계정 안전</b>을 위해 이 수까지만 작업하고 멈춥니다.
                   </div>
@@ -1611,13 +1651,13 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
               </div>
               {ePeriod === "custom" && (
                 <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
-                  <input className="inp" type="number" min={1} max={365} {...numProps(eCustomDays, setECustomDays, 1, 365, 7)} style={{ flex: 1, fontSize: 13, padding: "11px 14px" }} />
+                  <input className="inp" {...numProps(eCustomDays, setECustomDays, 1, 365, 7)} style={{ flex: 1, fontSize: 13, padding: "11px 14px" }} />
                   <span style={{ fontSize: 13, color: "var(--text3)" }}>일 이내 글</span>
                 </div>
               )}
               <div>
                 <label className="inp-label" style={{ fontSize: 12, marginBottom: 6, display: "block" }}>블로그당 작업할 글 수 (최대 5개)</label>
-                <input className="inp" type="number" min={1} max={5} {...numProps(ePostsPerBlog, setEPostsPerBlog, 1, 5, 1)} style={{ fontSize: 13, padding: "11px 14px" }} />
+                <input className="inp" {...numProps(ePostsPerBlog, setEPostsPerBlog, 1, 5, 1)} style={{ fontSize: 13, padding: "11px 14px" }} />
               </div>
             </div>
 
@@ -1629,7 +1669,7 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
                 {eDoLike && (
                   <div style={{ display: "flex", alignItems: "center", gap: 8, margin: "2px 0 8px 6px" }}>
                     <span style={{ fontSize: 12.5, color: "var(--text2)", fontWeight: 600 }}>글마다 공감 확률</span>
-                    <input className="inp" type="number" min={10} max={100} step={10} {...numProps(eLikeRate, setELikeRate, 10, 100, 100)} style={{ width: 64, fontSize: 13, padding: "8px 10px", textAlign: "center" }} />
+                    <input className="inp" {...numProps(eLikeRate, setELikeRate, 10, 100, 100)} style={{ width: 64, fontSize: 13, padding: "8px 10px", textAlign: "center" }} />
                     <span style={{ fontSize: 12.5, color: "var(--text2)", fontWeight: 600 }}>%</span>
                   </div>
                 )}
@@ -1637,7 +1677,7 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
                 {eDoComment && (
                   <div style={{ display: "flex", alignItems: "center", gap: 8, margin: "2px 0 0 6px", flexWrap: "wrap" }}>
                     <span style={{ fontSize: 12.5, color: "var(--text2)", fontWeight: 600 }}>글마다 댓글 확률</span>
-                    <input className="inp" type="number" min={10} max={100} step={10} {...numProps(eCommentRate, setECommentRate, 10, 100, 40)} style={{ width: 64, fontSize: 13, padding: "8px 10px", textAlign: "center" }} />
+                    <input className="inp" {...numProps(eCommentRate, setECommentRate, 10, 100, 40)} style={{ width: 64, fontSize: 13, padding: "8px 10px", textAlign: "center" }} />
                     <span style={{ fontSize: 12.5, color: "var(--text2)", fontWeight: 600 }}>%</span>
                     <span style={{ fontSize: 11, color: "var(--text3)" }}>낮출수록 자연스러움(도배 방지)</span>
                   </div>
@@ -1646,9 +1686,9 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
               <div style={{ marginBottom: 12 }}>
                 <label className="inp-label" style={{ fontSize: 12, marginBottom: 6, display: "block" }}>딜레이 (초)</label>
                 <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                  <input className="inp" type="number" min={1} max={60} {...numProps(eDelayMin, setEDelayMin, 1, 60, 5)} style={{ flex: 1, fontSize: 13, padding: "11px 14px" }} />
+                  <input className="inp" {...numProps(eDelayMin, setEDelayMin, 1, 60, 5)} style={{ flex: 1, fontSize: 13, padding: "11px 14px" }} />
                   <span style={{ color: "var(--text3)", fontSize: 14, fontWeight: 700 }}>~</span>
-                  <input className="inp" type="number" min={1} max={120} {...numProps(eDelayMax, setEDelayMax, 1, 120, 10)} style={{ flex: 1, fontSize: 13, padding: "11px 14px" }} />
+                  <input className="inp" {...numProps(eDelayMax, setEDelayMax, 1, 120, 10)} style={{ flex: 1, fontSize: 13, padding: "11px 14px" }} />
                   <span style={{ color: "var(--text3)", fontSize: 13 }}>초</span>
                 </div>
               </div>
@@ -1824,7 +1864,7 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
                   ))}
                 </div>
                 {rSelectMode === "count" && (
-                  <input className="inp" type="number" min={1} max={100} {...numProps(rTargetPosts, setRTargetPosts, 1, 100, 10)} style={{ fontSize: 13, padding: "11px 14px" }} placeholder="최근 몇 개" />
+                  <input className="inp" {...numProps(rTargetPosts, setRTargetPosts, 1, 100, 10)} style={{ fontSize: 13, padding: "11px 14px" }} placeholder="최근 몇 개" />
                 )}
                 {rSelectMode === "period" && (
                   <>
@@ -1835,7 +1875,7 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
                     </div>
                     {rPeriod === "custom" && (
                       <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8 }}>
-                        <input className="inp" type="number" min={1} max={365} {...numProps(rCustomDays, setRCustomDays, 1, 365, 7)} style={{ flex: 1, fontSize: 13, padding: "11px 14px" }} />
+                        <input className="inp" {...numProps(rCustomDays, setRCustomDays, 1, 365, 7)} style={{ flex: 1, fontSize: 13, padding: "11px 14px" }} />
                         <span style={{ fontSize: 13, color: "var(--text3)" }}>일 이내 글</span>
                       </div>
                     )}
@@ -1884,9 +1924,9 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
               <div style={{ marginTop: 12 }}>
                 <label className="inp-label" style={{ fontSize: 12, marginBottom: 6, display: "block" }}>딜레이 (초)</label>
                 <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  <input className="inp" type="number" min={1} max={60} {...numProps(rDelayMin, setRDelayMin, 1, 60, 5)} style={{ flex: 1, fontSize: 13, padding: "11px 14px" }} />
+                  <input className="inp" {...numProps(rDelayMin, setRDelayMin, 1, 60, 5)} style={{ flex: 1, fontSize: 13, padding: "11px 14px" }} />
                   <span style={{ color: "var(--text3)" }}>~</span>
-                  <input className="inp" type="number" min={1} max={120} {...numProps(rDelayMax, setRDelayMax, 1, 120, 10)} style={{ flex: 1, fontSize: 13, padding: "11px 14px" }} />
+                  <input className="inp" {...numProps(rDelayMax, setRDelayMax, 1, 120, 10)} style={{ flex: 1, fontSize: 13, padding: "11px 14px" }} />
                 </div>
                 <div style={{ fontSize: 12, color: "var(--text2)", marginTop: 6, lineHeight: 1.55, fontWeight: 500 }}>💡 답글 사이 대기 시간이에요. <b style={{color:"#00c896"}}>넉넉히 둘수록</b> 사람이 쓰는 것처럼 자연스러워 <b style={{color:"#ff5fa2"}}>계정이 안전</b>해요.</div>
               </div>
@@ -1973,7 +2013,7 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
                   {([7,14,30,"custom"] as const).map(value => <button key={value} onClick={() => setScPeriod(value)} style={{ padding: 9, borderRadius: 9, border: `2px solid ${scPeriod===value?"var(--accent)":"var(--border)"}`, background: scPeriod===value?"var(--accent-bg)":"transparent", color: "var(--text2)", fontWeight: 700, cursor: "pointer" }}>{value === "custom" ? "직접 설정" : `최근 ${value}일`}</button>)}
                 </div>
-                {scPeriod === "custom" && <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8 }}><input className="inp" type="number" min={1} max={3650} {...numProps(scCustomDays, setScCustomDays, 1, 3650, 7)} /><span style={{ fontSize: 12, color: "var(--text3)" }}>일 이내</span></div>}
+                {scPeriod === "custom" && <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8 }}><input className="inp" {...numProps(scCustomDays, setScCustomDays, 1, 3650, 7)} /><span style={{ fontSize: 12, color: "var(--text3)" }}>일 이내</span></div>}
               </>}
               <button className="btn btn-full" onClick={handleLoadScorePosts} disabled={scPostsLoading || !botOnline} style={{ marginTop: 10 }}>{scPostsLoading ? <><span className="spinner" />불러오는 중...</> : "📥 검사할 글 불러오기"}</button>
             </div>
@@ -1982,6 +2022,7 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
           {/* 오른쪽: 게이지 + 리포트 + 로그 */}
           <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
             <UsageGauge label="📈 오늘 진단" used={scUsed} limit={scLimit} unit="회" color="#00b8d4" />
+            <UsageGauge label="⚡ 오늘 제목 수정" used={titleEditUsed} limit={titleEditLimit} unit="회" color="#00c896" />
             {scPosts.length > 0 && (() => {
               const q = scPostSearch.trim().toLowerCase();
               const filtered = q ? scPosts.filter(p => (p.title || "").toLowerCase().includes(q)) : scPosts;
@@ -2172,9 +2213,30 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
                             <div key={i} style={{ padding: "15px 16px", borderRadius: 13, background: "var(--card)", border: "1px solid var(--border)" }}>
                               <div style={{ fontSize: 12.5, color: "var(--text3)", textDecoration: "line-through", marginBottom: 6 }}>{s.original}</div>
                               {s.diagnosis && <div style={{ fontSize: 11.5, color: "#ff5fa2", fontWeight: 600, marginBottom: 11, lineHeight: 1.5 }}>🔍 {s.diagnosis}</div>}
-                              <div style={{ fontSize: 11, color: "#00c896", fontWeight: 800, marginBottom: 4 }}>✅ 개선 제목 1</div>
-                              <div style={{ fontSize: 14.5, fontWeight: 800, color: "var(--text)", marginBottom: s.newTitle2 ? 8 : 11, lineHeight: 1.4 }}>{s.newTitle}</div>
-                              {s.newTitle2 && <><div style={{ fontSize: 11, color: "#00c896", fontWeight: 800, marginBottom: 4 }}>✅ 개선 제목 2</div><div style={{ fontSize: 14, fontWeight: 700, color: "var(--text2)", marginBottom: 11, lineHeight: 1.4 }}>{s.newTitle2}</div></>}
+                              {(() => {
+                                const hasLogNo = !!(scResult?.exposureChecks || []).find(c => c.title === s.original)?.logNo;
+                                const overLimit = !isUnlimitedPlan && titleEditUsed >= titleEditLimit;
+                                const ApplyBtn = ({ nt, k }: { nt: string; k: string }) => (
+                                  <button onClick={() => handleApplyTitle(s.original, nt, k)} disabled={!hasLogNo || overLimit || !!titleEditingKey}
+                                    style={{ flexShrink: 0, padding: "7px 12px", borderRadius: 8, border: "none", background: (!hasLogNo || overLimit) ? "var(--border)" : "#00c896", color: (!hasLogNo || overLimit) ? "var(--text3)" : "#fff", fontSize: 11.5, fontWeight: 800, cursor: (!hasLogNo || overLimit || titleEditingKey) ? "not-allowed" : "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}>
+                                    {titleEditingKey === k ? "변경 중..." : "⚡ 바로 변경"}
+                                  </button>
+                                );
+                                return (<>
+                                  <div style={{ fontSize: 11, color: "#00c896", fontWeight: 800, marginBottom: 4 }}>✅ 개선 제목 1</div>
+                                  <div style={{ display: "flex", alignItems: "flex-start", gap: 8, marginBottom: s.newTitle2 ? 10 : 11 }}>
+                                    <div style={{ flex: 1, minWidth: 0, fontSize: 14.5, fontWeight: 800, color: "var(--text)", lineHeight: 1.4 }}>{s.newTitle}</div>
+                                    <ApplyBtn nt={s.newTitle} k={`${i}-1`} />
+                                  </div>
+                                  {s.newTitle2 && <>
+                                    <div style={{ fontSize: 11, color: "#00c896", fontWeight: 800, marginBottom: 4 }}>✅ 개선 제목 2</div>
+                                    <div style={{ display: "flex", alignItems: "flex-start", gap: 8, marginBottom: 11 }}>
+                                      <div style={{ flex: 1, minWidth: 0, fontSize: 14, fontWeight: 700, color: "var(--text2)", lineHeight: 1.4 }}>{s.newTitle2}</div>
+                                      <ApplyBtn nt={s.newTitle2} k={`${i}-2`} />
+                                    </div>
+                                  </>}
+                                </>);
+                              })()}
                               {s.keywords.length > 0 && (
                                 <><div style={{ fontSize: 11, color: "var(--text3)", fontWeight: 700, marginBottom: 5 }}>넣으면 좋은 키워드</div>
                                 <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 11 }}>
@@ -2409,9 +2471,9 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
               <div style={{ marginTop: 14 }}>
                 <label className="inp-label" style={{ fontSize: 12, marginBottom: 6, display: "block" }}>딜레이 (초)</label>
                 <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  <input className="inp" type="number" min={1} max={120} {...numProps(pumDelayMin, setPumDelayMin, 1, 120, 8)} style={{ flex: 1, fontSize: 13, padding: "11px 14px" }} />
+                  <input className="inp" {...numProps(pumDelayMin, setPumDelayMin, 1, 120, 8)} style={{ flex: 1, fontSize: 13, padding: "11px 14px" }} />
                   <span style={{ color: "var(--text3)" }}>~</span>
-                  <input className="inp" type="number" min={1} max={300} {...numProps(pumDelayMax, setPumDelayMax, 1, 300, 15)} style={{ flex: 1, fontSize: 13, padding: "11px 14px" }} />
+                  <input className="inp" {...numProps(pumDelayMax, setPumDelayMax, 1, 300, 15)} style={{ flex: 1, fontSize: 13, padding: "11px 14px" }} />
                 </div>
                 <div style={{ fontSize: 11.5, color: "var(--text2)", marginTop: 6, lineHeight: 1.5, fontWeight: 500 }}>💡 댓글 사이 대기 시간이에요. <b style={{color:"#00c896"}}>넉넉히 둘수록</b> 사람처럼 자연스러워 <b style={{color:"#ff5fa2"}}>계정이 안전</b>해요.</div>
               </div>

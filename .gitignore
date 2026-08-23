@@ -32,3 +32,5 @@ tmp/
 *.tmp
 _flowtest*
 _flowrun*
+naver_state.json
+neighbor-bot/naver_state.json
