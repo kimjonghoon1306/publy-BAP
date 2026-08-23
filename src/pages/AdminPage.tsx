@@ -851,7 +851,8 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
   const [calPlatform, setCalPlatform] = useState<"naver"|"tistory">("naver");
   const [calDays, setCalDays] = useState(30);
   // ★캘린더 스케줄·완료기록 localStorage 저장(관리자용 키) → 재접속해도 유지
-  const [calSchedule, setCalSchedule] = useState<{date:string;keyword:string;title:string;style:string;adType:string}[]>(()=>{try{return JSON.parse(localStorage.getItem("publy_adm_cal_schedule")||"[]");}catch{return[];}});
+  const [calSchedule, setCalSchedule] = useState<{date:string;keyword:string;title:string;style:string;adType:string;promo?:{name:string;url:string;blurb:string}}[]>(()=>{try{return JSON.parse(localStorage.getItem("publy_adm_cal_schedule")||"[]");}catch{return[];}});
+  const [pendingPromo, setPendingPromo] = useState<{name:string;url:string;blurb:string}|null>(null);
   const [calCompleted, setCalCompleted] = useState<Record<string,string>>(()=>{try{return JSON.parse(localStorage.getItem("publy_adm_cal_done")||"{}");}catch{return{};}});
   const [calLoading, setCalLoading] = useState(false);
   const [calDone, setCalDone] = useState(false);
@@ -922,6 +923,13 @@ Rules:
 - adType: use "adpost" for emotional/lifestyle posts, "adsense" for informational posts
 - style: one of 감성일기/정보글/맛집후기/여행기
 Today: ${today.toISOString().slice(0,10)}
+
+★제목 작성 규칙 (네이버 클릭률·검색노출 최적화 — 반드시 준수):
+- 실제 검색어(핵심 키워드)를 제목 맨 앞 8글자 안에 배치
+- 25~32자 권장
+- 구체성: 숫자·대상(초보·직장인)·상황(방법·후기·비교·주의점) 중 1~2개 포함
+- 검색 의도어: ~하는 법 / ~추천 / ~정리 / ~후기 / 총정리
+- ⛔ 과장·낚시 감탄사 금지(대박·충격·미쳤다·1등·완벽·진짜), 물음표·느낌표 남발 금지(최대 1개)
 Output format (JSON array only, no other text):
 [{"date":"YYYY-MM-DD","keyword":"키워드","title":"SEO제목","style":"글스타일","adType":"adpost or adsense"}]`;
       const r=await fetch("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key="+encodeURIComponent(geminiKey),
@@ -937,6 +945,21 @@ Output format (JSON array only, no other text):
       const clean=raw.replace(/```json|```/g,"").trim();
       const parsed=JSON.parse(clean);
       const sched=parsed.slice(0,calDays);
+      // ★우리 서비스 주제 1개를 스케줄에 자연스럽게 랜덤 삽입(회원 대시보드와 동일) → 글 본문에 링크 녹아듦
+      const SERVICE_TOPICS=[
+        {name:"온종일팜",url:"https://app.yuanfnb.com",keyword:"제철 농수산물 온라인 주문",title:"산지직송 제철 농수산물 온라인으로 편하게 사는 법",blurb:"산지에서 바로 보내주는 신선한 농수산물 쇼핑몰"},
+        {name:"온종일 체험단",url:"https://pick.온종일.com",keyword:"블로그 체험단 신청 방법",title:"블로그 체험단 처음 신청하는 법과 후기 잘 쓰는 팁",blurb:"블로그 체험단·협찬을 신청하고 리뷰하는 플랫폼"},
+        {name:"온파트너",url:"https://partner.yuanfnb.com",keyword:"제휴마케팅 부업",title:"초보도 시작하는 제휴마케팅 부업, 이렇게 하면 됩니다",blurb:"상품을 소개하고 수익을 얻는 제휴마케팅 서비스"},
+        {name:"온캐치",url:"https://game.온종일.com",keyword:"무료 웹게임 추천",title:"설치 없이 바로 즐기는 무료 웹게임 추천 모음",blurb:"회원가입만으로 즐기는 무료 게임 14종"},
+        {name:"온종일뉴스",url:"https://news.온종일.com",keyword:"정부지원금 정보",title:"놓치기 쉬운 정부지원금·창업 정보 한눈에 챙기는 법",blurb:"AI·창업·지원금·마케팅 실용 정보를 다루는 뉴스"},
+        {name:"온종일 스튜디오",url:"https://studio.온종일.com",keyword:"소상공인 홍보 영상 제작",title:"소상공인을 위한 홍보 영상·홈페이지 제작 시작하기",blurb:"홈페이지·홍보 영상을 만들어주는 제작 서비스"},
+      ];
+      if(sched.length>0){
+        const svc=SERVICE_TOPICS[Math.floor(Math.random()*SERVICE_TOPICS.length)];
+        const insertAt=Math.floor(Math.random()*sched.length);
+        const base=sched[insertAt];
+        sched[insertAt]={...base,keyword:svc.keyword,title:svc.title,style:base?.style||"정보글",adType:base?.adType||"adsense",promo:{name:svc.name,url:svc.url,blurb:svc.blurb}};
+      }
       setCalSchedule(sched);
       localStorage.setItem("publy_adm_cal_schedule",JSON.stringify(sched));
       setCalCompleted({}); localStorage.setItem("publy_adm_cal_done","{}");
@@ -944,6 +967,30 @@ Output format (JSON array only, no other text):
       showToast(`${sched.length}일치 스케줄 생성 완료!`);
     }catch(e:any){showToast("❌ "+e.message,"error");}
     finally{setCalLoading(false);}
+  }
+  // ★개별 항목 재추천(관리자, 회원과 동일): 그 줄 제목·키워드만 새로
+  const [calRegenIdx,setCalRegenIdx]=useState<number>(-1);
+  async function regenCalItem(idx:number){
+    const cur=calSchedule[idx]; if(!cur) return;
+    const key=localStorage.getItem("publy_adm_gemini_key")||"";
+    if(!key){showToast("설정탭에서 관리자 Gemini API 키를 먼저 입력해주세요","error");return;}
+    setCalRegenIdx(idx);
+    try{
+      const existTitles=calSchedule.filter((_,i)=>i!==idx).map(s=>s.title);
+      const prompt=`너는 네이버 블로그 SEO 제목 전문가야. 아래 조건으로 블로그 글감 1개를 새로 만들어 순수 JSON만 반환해(설명·마크다운 금지).
+주제 키워드: "${cur.keyword}" (주제는 유지, 아래 기존 제목과 겹치지 않는 새 각도)
+기존 제목(중복 금지): ${existTitles.slice(0,20).join(" / ")}
+★제목 규칙: 검색어 앞 8글자 배치, 25~32자, 숫자·대상·상황 1~2개, 과장·낚시 감탄사 금지, 물음표·느낌표 최대 1개.
+출력: {"keyword":"핵심키워드","title":"새 제목","style":"감성일기 또는 정보글 또는 맛집후기 또는 여행기","adType":"adpost 또는 adsense"}`;
+      const r=await fetch("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key="+encodeURIComponent(key),
+        {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({contents:[{parts:[{text:prompt}]}],generationConfig:{temperature:0.7,maxOutputTokens:512,responseMimeType:"application/json"}})});
+      const d=await r.json(); const raw=d.candidates?.[0]?.content?.parts?.[0]?.text||"";
+      const clean=raw.replace(/```json|```/g,"").trim(); const s=clean.indexOf("{"),e=clean.lastIndexOf("}");
+      const obj=JSON.parse(clean.slice(s,e+1));
+      setCalSchedule(prev=>{const next=[...prev];next[idx]={...next[idx],keyword:String(obj.keyword||cur.keyword),title:String(obj.title||cur.title),style:String(obj.style||cur.style),adType:String(obj.adType||cur.adType)};localStorage.setItem("publy_adm_cal_schedule",JSON.stringify(next));return next;});
+      showToast("🔄 새 제목으로 다시 추천했어요!");
+    }catch(e:any){showToast("❌ 재추천 실패: "+e.message,"error");}
+    finally{setCalRegenIdx(-1);}
   }
   function toggleCalDone(date:string){
     setCalCompleted(prev=>{
@@ -953,9 +1000,10 @@ Output format (JSON array only, no other text):
       return next;
     });
   }
-  function writeFromSchedule(s:{keyword:string;title:string}){
+  function writeFromSchedule(s:{keyword:string;title:string;promo?:{name:string;url:string;blurb:string}}){
     setKeyword(s.keyword);
     setSelectedTitle(s.title);
+    setPendingPromo(s.promo||null);
     setTab("write");
     showToast(`✍️ "${s.title}" 글쓰기로 이동했어요!`);
   }
@@ -4177,7 +4225,7 @@ POST3: (제목)|(이유)
                                     {isToday&&<span style={{fontSize:9,marginLeft:5,padding:"1px 6px",borderRadius:99,background:"var(--accent)",color:"#000",fontWeight:900}}>오늘</span>}
                                   </td>
                                   <td style={{padding:"10px 12px",color:"var(--accent-text)",fontWeight:700,whiteSpace:"nowrap"}}>{s.keyword}</td>
-                                  <td style={{padding:"10px 12px",color:"var(--text)",maxWidth:260,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",textDecoration:done?"line-through":"none"}}>{s.title}</td>
+                                  <td style={{padding:"10px 12px",color:"var(--text)",maxWidth:260,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",textDecoration:done?"line-through":"none"}}>{s.promo&&<span title={`${s.promo.name} 소개가 글 마지막에 자연스럽게 들어가요`} style={{fontSize:9,fontWeight:800,color:"#03c75a",background:"rgba(3,199,90,.12)",padding:"1px 6px",borderRadius:99,marginRight:5}}>🌿추천</span>}{s.title}</td>
                                   <td style={{padding:"10px 12px",whiteSpace:"nowrap"}}>
                                     <span style={{fontSize:11,padding:"2px 8px",borderRadius:99,background:"var(--card2)",color:"var(--text2)",border:"1px solid var(--border)"}}>{s.style}</span>
                                   </td>
@@ -4189,7 +4237,11 @@ POST3: (제목)|(이유)
                                       {s.adType==="adpost"?"애드포스트":"애드센스"}
                                     </span>
                                   </td>
-                                  <td style={{padding:"10px 12px"}}>
+                                  <td style={{padding:"10px 12px",whiteSpace:"nowrap"}}>
+                                    <button onClick={()=>regenCalItem(i)} disabled={calRegenIdx===i} title="이 제목이 맘에 안 들면 새로 추천받기"
+                                      style={{padding:"4px 9px",borderRadius:7,border:"1px solid var(--border)",background:"var(--card2)",color:"var(--text2)",cursor:calRegenIdx===i?"default":"pointer",fontSize:11,fontWeight:700,fontFamily:"inherit",marginRight:5}}>
+                                      {calRegenIdx===i?"🔄...":"🔄 재추천"}
+                                    </button>
                                     <button onClick={()=>writeFromSchedule(s)}
                                       style={{padding:"4px 10px",borderRadius:7,border:"1px solid var(--accent-border)",background:"var(--accent-bg)",color:"var(--accent-text)",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:"inherit",whiteSpace:"nowrap"}}>
                                       ✍️ 글쓰기 →

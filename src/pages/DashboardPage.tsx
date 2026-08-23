@@ -951,6 +951,15 @@ Rules:
 - adType: use "adpost" for emotional/lifestyle posts, "adsense" for informational posts
 - style: one of 감성일기/정보글/맛집후기/여행기
 Today: ${today.toISOString().slice(0,10)}
+
+★제목 작성 규칙 (네이버 클릭률·검색노출 최적화 — 반드시 준수):
+- 실제 검색어(핵심 키워드)를 제목 맨 앞 8글자 안에 배치
+- 25~32자 권장 (너무 짧거나 길지 않게)
+- 구체성: 숫자(예: 5가지·2026·3만원), 대상(초보·직장인), 상황(방법·후기·비교·주의점) 중 1~2개 포함
+- 검색 의도어 자연스럽게: ~하는 법 / ~추천 / ~정리 / ~후기 / 총정리
+- ⛔ 과장·낚시 감탄사 금지: 대박·충격·미쳤다·1등·놀라운·완벽·진짜 → 네이버 저품질/클릭후 이탈 유발
+- ⛔ 물음표·느낌표 남발 금지(제목당 최대 1개)
+- 담백하고 정보가 명확한 제목이 클릭 후 체류·지수에 유리하다
 Output format (JSON array only, no other text):
 [{"date":"YYYY-MM-DD","keyword":"키워드","title":"SEO제목","style":"글스타일","adType":"adpost or adsense"}]`;
 
@@ -981,6 +990,33 @@ Output format (JSON array only, no other text):
       showToast(`📅 ${sched.length}일치 스케줄 생성 완료!`);
     }catch(e:any){showToast("❌ "+e.message,"error");}
     finally{setCalLoading(false);}
+  }
+  // ★개별 항목 재추천: 그 줄의 제목·키워드만 새로 뽑기(나머지 스케줄·완료기록은 유지)
+  const [calRegenIdx,setCalRegenIdx]=useState<number>(-1);
+  async function regenCalItem(idx:number){
+    const cur=calSchedule[idx]; if(!cur) return;
+    setCalRegenIdx(idx);
+    try{
+      const existTitles=calSchedule.filter((_,i)=>i!==idx).map(s=>s.title);
+      const prompt=`너는 네이버 블로그 SEO 제목 전문가야. 아래 조건으로 블로그 글감 1개를 새로 만들어 순수 JSON만 반환해(설명·마크다운 금지).
+주제 키워드: "${cur.keyword}" (이 주제는 유지하되, 아래 기존 제목들과 겹치지 않는 새 각도로)
+기존 제목들(중복 금지): ${existTitles.slice(0,20).join(" / ")}
+★제목 규칙(클릭률·검색노출 최적화): 검색어를 앞 8글자 안에 배치, 25~32자, 숫자·대상·상황 중 1~2개 포함, 과장·낚시 감탄사(대박·충격·완벽·진짜) 금지, 물음표·느낌표 최대 1개.
+출력: {"keyword":"핵심키워드","title":"새 SEO 제목","style":"감성일기 또는 정보글 또는 맛집후기 또는 여행기","adType":"adpost 또는 adsense"}`;
+      const raw=await callAI(prompt);
+      const clean=(raw||"").replace(/```json|```/g,"").trim();
+      const s=clean.indexOf("{"),e=clean.lastIndexOf("}");
+      const obj=JSON.parse(clean.slice(s,e+1));
+      setCalSchedule(prev=>{
+        const next=[...prev];
+        // 홍보(promo) 항목은 서비스 링크 유지 위해 promo 보존, 일반 항목은 새로 교체
+        next[idx]={...next[idx],keyword:String(obj.keyword||cur.keyword),title:String(obj.title||cur.title),style:String(obj.style||cur.style),adType:String(obj.adType||cur.adType)};
+        localStorage.setItem("publy_cal_schedule",JSON.stringify(next));
+        return next;
+      });
+      showToast("🔄 새 제목으로 다시 추천했어요!");
+    }catch(e:any){showToast("❌ 재추천 실패: "+e.message,"error");}
+    finally{setCalRegenIdx(-1);}
   }
   // 스케줄 항목 완료 토글(날짜 기준) + localStorage 저장
   function toggleCalDone(date:string){
@@ -1158,13 +1194,32 @@ Output format (JSON array only, no other text):
   const [hotCat, setHotCat] = useState("실시간");
   const [hotItems, setHotItems] = useState<string[]>([]);
   const [hotLoading, setHotLoading] = useState(false);
+  // 봇 오프라인/웹 미리보기 대비 폴백(카테고리별 무난한 인기 주제) — 빈 화면 방지
+  const HOT_FALLBACK: Record<string,string[]> = {
+    실시간:["요즘 뜨는 부업","정부지원금 신청","가을 여행지 추천","제철 음식 요리","전기요금 절약법","1인 창업 아이템"],
+    경제:["금리 전망","연말정산 팁","소상공인 지원금","재테크 초보","청년 목돈 마련"],
+    증권:["배당주 추천","ETF 초보 투자","국장 vs 미장","공모주 청약"],
+    산업:["AI 활용법","전기차 보조금","반도체 전망","스마트스토어 창업"],
+    정치:["정부 지원 정책","청년 정책","주거 지원 제도"],
+    사회:["요즘 생활 물가","전세 사기 예방","실업급여 조건"],
+    전국:["지역 축제 일정","당일치기 여행","지방 맛집 투어"],
+    세계:["해외여행 준비물","환율 여행 팁","면세점 쇼핑"],
+    문화:["넷플릭스 추천작","전시회 나들이","베스트셀러 도서"],
+    연예:["아이돌 컴백 소식","드라마 정주행","예능 다시보기"],
+    스포츠:["프로야구 순위","홈트레이닝 루틴","등산 초보 코스"],
+    건강:["다이어트 식단","영양제 추천","환절기 건강관리","수면의 질 높이기"],
+  };
   const loadHotIssues = async (cat: string) => {
     setHotCat(cat); setHotLoading(true);
     try {
       const r = await botFetch(`${BOT}/api/hot-issues?category=${encodeURIComponent(cat)}`, { signal: AbortSignal.timeout(15000) } as any);
       const d = await r.json();
-      setHotItems(d.ok ? (d.items || []) : []);
-    } catch { setHotItems([]); }
+      const items = d.ok ? (d.items || []) : [];
+      setHotItems(items.length ? items : (HOT_FALLBACK[cat] || HOT_FALLBACK["실시간"]));
+    } catch {
+      // 봇 오프라인/웹 미리보기 → 폴백 주제라도 보여줌
+      setHotItems(HOT_FALLBACK[cat] || HOT_FALLBACK["실시간"]);
+    }
     setHotLoading(false);
   };
   // 캘린더 탭 첫 진입 시 실시간 핫이슈 자동 로드
@@ -6057,7 +6112,11 @@ POST3: (제목)|(이유)
                                       {s.adType==="adpost"?"애드포스트":"애드센스"}
                                     </span>
                                   </td>
-                                  <td style={{padding:"10px 12px"}}>
+                                  <td style={{padding:"10px 12px",whiteSpace:"nowrap"}}>
+                                    <button onClick={()=>regenCalItem(i)} disabled={calRegenIdx===i} title="이 제목이 맘에 안 들면 새로 추천받기"
+                                      style={{padding:"4px 9px",borderRadius:7,border:"1px solid var(--border)",background:"var(--card2)",color:"var(--text2)",cursor:calRegenIdx===i?"default":"pointer",fontSize:11,fontWeight:700,fontFamily:"inherit",marginRight:5}}>
+                                      {calRegenIdx===i?"🔄...":"🔄 재추천"}
+                                    </button>
                                     <button onClick={()=>writeFromSchedule(s)}
                                       style={{padding:"4px 10px",borderRadius:7,border:"1px solid var(--accent-border)",background:"var(--accent-bg)",color:"var(--accent-text)",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:"inherit",whiteSpace:"nowrap"}}>
                                       ✍️ 글쓰기 →

@@ -229,6 +229,29 @@ const AccountSelector = ({ accounts, selectedId, onSelect }: {
   );
 };
 
+/* ── 계정 영역 아코디언: 계정이 여러 개면 접어서 아래 기능이 안 밀리게(헤더 클릭 시 펼침/접힘) ── */
+const AccountAccordion = ({ accounts, open, setOpen, tabName, accountLimit, isUnlimited, children }: {
+  accounts: Account[]; open: boolean; setOpen: (v: boolean) => void; tabName: string; accountLimit: number; isUnlimited: boolean; children: React.ReactNode;
+}) => {
+  const connected = accounts.filter(a => a.sessionOk).length;
+  // 계정이 적으면(2개 이하) 그냥 펼쳐 보여줌. 3개 이상이면 접이식.
+  const collapsible = accounts.length >= 3;
+  const expanded = collapsible ? open : true;
+  return (
+    <div className="card" style={{ padding: collapsible ? "0" : "0", overflow: "hidden" }}>
+      {collapsible && (
+        <button onClick={() => setOpen(!open)} style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, padding: "14px 16px", background: "transparent", border: "none", cursor: "pointer", fontFamily: "inherit" }}>
+          <span style={{ fontSize: 13.5, fontWeight: 800, color: "var(--text)" }}>👤 {tabName} 계정 <span style={{ color: "#00c896" }}>{accounts.length}</span>개 <span style={{ fontSize: 11, color: "var(--text3)", fontWeight: 600 }}>· 연결됨 {connected}개</span></span>
+          <span style={{ fontSize: 13, color: "var(--accent-text)", fontWeight: 800, transform: expanded ? "rotate(180deg)" : "none", transition: "transform .2s" }}>▾</span>
+        </button>
+      )}
+      <div style={{ display: expanded ? "flex" : "none", flexDirection: "column", gap: 14, padding: collapsible ? "0 12px 14px" : "0" }}>
+        {children}
+      </div>
+    </div>
+  );
+};
+
 /* ── 방문자 수 필터: 서이추·공감댓글에서 대상 블로그를 방문자 규모로 거른다(공개 API 기반) ── */
 const VisitorFilter = ({ min, max, setMin, setMax }: { min: number; max: number; setMin: (n: number) => void; setMax: (n: number) => void }) => {
   const presets = [{ v: 0, t: "전체" }, { v: 1000, t: "1천↑" }, { v: 3000, t: "3천↑" }, { v: 5000, t: "5천↑" }, { v: 10000, t: "1만↑" }];
@@ -500,6 +523,8 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
   const [pumReadRelatedMode, setPumReadRelatedMode] = useState<"always" | "random">("random");  // 매번=각 대상 글마다 / 가끔=확률 60%
   const [pumSpread, setPumSpread] = useState(0);                // 시간 분산(분, 0=즉시 연속). 서버엔 시간으로 변환해 전달
   const [pumWorking, setPumWorking] = useState(false);
+  // ★계정 영역 아코디언: 계정 많으면 접어서 아래 기능이 안 밀리게(계정 목록+선택기 함께 접힘)
+  const [acctOpen, setAcctOpen] = useState(false);
   const [pumLogs, setPumLogs] = useState<string[]>([]);
   const [pumDone, setPumDone] = useState(0);
   const [pumSkip, setPumSkip] = useState(0);
@@ -1382,8 +1407,10 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
             <div style={{ fontSize: 12, color: "var(--text2)", background: "var(--card2)", borderRadius: 10, padding: "10px 13px", lineHeight: 1.5, fontWeight: 600 }}>
               🔒 <b>{tabName}</b> 전용 계정 <b style={{ color: "#00c896" }}>{accounts.length}</b>/{isUnlimitedPlan ? "∞" : accountLimit}개 · 다른 탭과 <b>완전히 분리</b>돼요(한 곳에서 문제가 생겨도 다른 탭엔 영향 없어요).
             </div>
-            <AccountCard accounts={accounts} onLogin={handleLogin} onAdd={handleAddAccount} onRemove={handleRemoveAccount} onChange={handleAccountChange} />
-            <AccountSelector accounts={accounts} selectedId={selectedAcctId} onSelect={setSelectedAcctId} />
+            <AccountAccordion accounts={accounts} open={acctOpen} setOpen={setAcctOpen} tabName={tabName} accountLimit={accountLimit} isUnlimited={isUnlimitedPlan}>
+              <AccountCard accounts={accounts} onLogin={handleLogin} onAdd={handleAddAccount} onRemove={handleRemoveAccount} onChange={handleAccountChange} />
+              <AccountSelector accounts={accounts} selectedId={selectedAcctId} onSelect={setSelectedAcctId} />
+            </AccountAccordion>
 
             <div className="card" style={{ padding: "18px 20px" }}>
               <div className="card-title" style={{ marginBottom: 14, fontSize: 15 }}>🔍 추출 설정</div>
@@ -1667,8 +1694,10 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
             <div style={{ fontSize: 12, color: "var(--text2)", background: "var(--card2)", borderRadius: 10, padding: "10px 13px", lineHeight: 1.5, fontWeight: 600 }}>
               🔒 <b>{tabName}</b> 전용 계정 <b style={{ color: "#00c896" }}>{accounts.length}</b>/{isUnlimitedPlan ? "∞" : accountLimit}개 · 다른 탭과 <b>완전히 분리</b>돼요(한 곳에서 문제가 생겨도 다른 탭엔 영향 없어요).
             </div>
-            <AccountCard accounts={accounts} onLogin={handleLogin} onAdd={handleAddAccount} onRemove={handleRemoveAccount} onChange={handleAccountChange} />
-            <AccountSelector accounts={accounts} selectedId={selectedAcctId} onSelect={setSelectedAcctId} />
+            <AccountAccordion accounts={accounts} open={acctOpen} setOpen={setAcctOpen} tabName={tabName} accountLimit={accountLimit} isUnlimited={isUnlimitedPlan}>
+              <AccountCard accounts={accounts} onLogin={handleLogin} onAdd={handleAddAccount} onRemove={handleRemoveAccount} onChange={handleAccountChange} />
+              <AccountSelector accounts={accounts} selectedId={selectedAcctId} onSelect={setSelectedAcctId} />
+            </AccountAccordion>
 
             <div className="card" style={{ padding: "18px 20px" }}>
               <div className="card-title" style={{ marginBottom: 14, fontSize: 15 }}>🔍 추출 설정</div>
@@ -1930,8 +1959,10 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
             <div style={{ fontSize: 12, color: "var(--text2)", background: "var(--card2)", borderRadius: 10, padding: "10px 13px", lineHeight: 1.5, fontWeight: 600 }}>
               🔒 <b>{tabName}</b> 전용 계정 <b style={{ color: "#00c896" }}>{accounts.length}</b>/{isUnlimitedPlan ? "∞" : accountLimit}개 · 다른 탭과 <b>완전히 분리</b>돼요(한 곳에서 문제가 생겨도 다른 탭엔 영향 없어요).
             </div>
-            <AccountCard accounts={accounts} onLogin={handleLogin} onAdd={handleAddAccount} onRemove={handleRemoveAccount} onChange={handleAccountChange} />
-            <AccountSelector accounts={accounts} selectedId={selectedAcctId} onSelect={setSelectedAcctId} />
+            <AccountAccordion accounts={accounts} open={acctOpen} setOpen={setAcctOpen} tabName={tabName} accountLimit={accountLimit} isUnlimited={isUnlimitedPlan}>
+              <AccountCard accounts={accounts} onLogin={handleLogin} onAdd={handleAddAccount} onRemove={handleRemoveAccount} onChange={handleAccountChange} />
+              <AccountSelector accounts={accounts} selectedId={selectedAcctId} onSelect={setSelectedAcctId} />
+            </AccountAccordion>
 
             <div className="card" style={{ padding: "18px 20px" }}>
               <div className="card-title" style={{ marginBottom: 14, fontSize: 15 }}>💬 답방 설정</div>
@@ -2072,8 +2103,10 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
             <div style={{ fontSize: 12, color: "var(--text2)", background: "var(--card2)", borderRadius: 10, padding: "10px 13px", lineHeight: 1.5, fontWeight: 600 }}>
               🔒 <b>{tabName}</b> 전용 계정 <b style={{ color: "#00c896" }}>{accounts.length}</b>/{isUnlimitedPlan ? "∞" : accountLimit}개 · 다른 탭과 <b>완전히 분리</b>돼요(한 곳에서 문제가 생겨도 다른 탭엔 영향 없어요).
             </div>
-            <AccountCard accounts={accounts} onLogin={handleLogin} onAdd={handleAddAccount} onRemove={handleRemoveAccount} onChange={handleAccountChange} />
-            <AccountSelector accounts={accounts} selectedId={selectedAcctId} onSelect={setSelectedAcctId} />
+            <AccountAccordion accounts={accounts} open={acctOpen} setOpen={setAcctOpen} tabName={tabName} accountLimit={accountLimit} isUnlimited={isUnlimitedPlan}>
+              <AccountCard accounts={accounts} onLogin={handleLogin} onAdd={handleAddAccount} onRemove={handleRemoveAccount} onChange={handleAccountChange} />
+              <AccountSelector accounts={accounts} selectedId={selectedAcctId} onSelect={setSelectedAcctId} />
+            </AccountAccordion>
             <div className="card" style={{ padding: "18px 20px" }}>
               <div className="card-title" style={{ marginBottom: 10, fontSize: 15 }}>📈 진단 방법</div>
               <div style={{ fontSize: 12.5, color: "var(--text2)", lineHeight: 1.7, fontWeight: 500 }}>
@@ -2445,12 +2478,14 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
               })()}
             </div>
 
-            <AccountCard accounts={accounts} onLogin={handleLogin} onAdd={handleAddAccount} onRemove={handleRemoveAccount} onChange={handleAccountChange} onConnectAll={handleConnectAll} connectingAll={connectingAll} />
-            {accounts.length > 1 && (
-              <button onClick={handleRemoveAllAccounts} style={{ width: "100%", padding: "10px", borderRadius: 10, border: "1.5px solid var(--danger)", background: "transparent", color: "var(--danger)", cursor: "pointer", fontSize: 12.5, fontWeight: 700, fontFamily: "inherit" }}>
-                🗑 계정 전체 삭제 (저장된 로그인도 함께)
-              </button>
-            )}
+            <AccountAccordion accounts={accounts} open={acctOpen} setOpen={setAcctOpen} tabName="품앗이" accountLimit={accountLimit} isUnlimited={isUnlimitedPlan}>
+              <AccountCard accounts={accounts} onLogin={handleLogin} onAdd={handleAddAccount} onRemove={handleRemoveAccount} onChange={handleAccountChange} onConnectAll={handleConnectAll} connectingAll={connectingAll} />
+              {accounts.length > 1 && (
+                <button onClick={handleRemoveAllAccounts} style={{ width: "100%", padding: "10px", borderRadius: 10, border: "1.5px solid var(--danger)", background: "transparent", color: "var(--danger)", cursor: "pointer", fontSize: 12.5, fontWeight: 700, fontFamily: "inherit" }}>
+                  🗑 계정 전체 삭제 (저장된 로그인도 함께)
+                </button>
+              )}
+            </AccountAccordion>
 
             {/* ★진행 현황 미리보기: 각 대상별 총 글 / 이미 댓글 단 글 / 남은 글(시작 전 확인) */}
             {connected.length >= 2 && (
