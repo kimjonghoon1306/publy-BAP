@@ -2219,19 +2219,19 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
                                 const ApplyBtn = ({ nt, k }: { nt: string; k: string }) => (
                                   <button onClick={() => handleApplyTitle(s.original, nt, k)} disabled={!hasLogNo || overLimit || !!titleEditingKey}
                                     style={{ flexShrink: 0, padding: "7px 12px", borderRadius: 8, border: "none", background: (!hasLogNo || overLimit) ? "var(--border)" : "#00c896", color: (!hasLogNo || overLimit) ? "var(--text3)" : "#fff", fontSize: 11.5, fontWeight: 800, cursor: (!hasLogNo || overLimit || titleEditingKey) ? "not-allowed" : "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}>
-                                    {titleEditingKey === k ? "변경 중..." : "⚡ 바로 변경"}
+                                    {titleEditingKey === k ? "변경 중..." : "제목 변경하러 가기"}
                                   </button>
                                 );
                                 return (<>
                                   <div style={{ fontSize: 11, color: "#00c896", fontWeight: 800, marginBottom: 4 }}>✅ 개선 제목 1</div>
-                                  <div style={{ display: "flex", alignItems: "flex-start", gap: 8, marginBottom: s.newTitle2 ? 10 : 11 }}>
-                                    <div style={{ flex: 1, minWidth: 0, fontSize: 14.5, fontWeight: 800, color: "var(--text)", lineHeight: 1.4 }}>{s.newTitle}</div>
+                                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: s.newTitle2 ? 10 : 11, flexWrap: "wrap" }}>
+                                    <div style={{ flex: "1 1 180px", minWidth: 0, fontSize: 14.5, fontWeight: 800, color: "var(--text)", lineHeight: 1.4 }}>{s.newTitle}</div>
                                     <ApplyBtn nt={s.newTitle} k={`${i}-1`} />
                                   </div>
                                   {s.newTitle2 && <>
                                     <div style={{ fontSize: 11, color: "#00c896", fontWeight: 800, marginBottom: 4 }}>✅ 개선 제목 2</div>
-                                    <div style={{ display: "flex", alignItems: "flex-start", gap: 8, marginBottom: 11 }}>
-                                      <div style={{ flex: 1, minWidth: 0, fontSize: 14, fontWeight: 700, color: "var(--text2)", lineHeight: 1.4 }}>{s.newTitle2}</div>
+                                    <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 11, flexWrap: "wrap" }}>
+                                      <div style={{ flex: "1 1 180px", minWidth: 0, fontSize: 14, fontWeight: 700, color: "var(--text2)", lineHeight: 1.4 }}>{s.newTitle2}</div>
                                       <ApplyBtn nt={s.newTitle2} k={`${i}-2`} />
                                     </div>
                                   </>}
