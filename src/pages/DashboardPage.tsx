@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import GoogleFlowCard from "../GoogleFlowCard";
-import { PublyUser, getQuota, getHistory, getAccounts, PublyQuota, PublyHistory, PublyAccount, upsertAccount, useQuota, addHistory, deleteHistory, deleteAllHistory, changeUserPassword, getNaverApiKeys, saveNaverApiKeys, NaverApiKeys, checkNaverQuota, incrementNaverQuota, getNaverDailyUsage, NAVER_DAILY_LIMIT, getUserNaverApiKeys, logError, PLAN_CONFIG, checkDailyPublishQuota, incrementDailyPublish, getDailyPublishUsage, getNeighborDailyUsage, NEIGHBOR_DAILY_LIMIT, getEngageDailyUsage, ENGAGE_DAILY_LIMIT, InstaDmTarget, InstaDmHistory, InstaDmQuota, getInstaDmTargets, addInstaDmTarget, deleteInstaDmTarget, getInstaDmHistory, addInstaDmHistory, getInstaDmQuota, upsertInstaDmQuota, incrementInstaDmUsage, INSTA_DM_DAILY_LIMIT, getReplyDailyUsage, REPLY_DAILY_LIMIT } from "../lib/supabase";
+import { PublyUser, getQuota, getHistory, getAccounts, PublyQuota, PublyHistory, PublyAccount, upsertAccount, useQuota, addHistory, deleteHistory, deleteAllHistory, deleteFailedHistory, changeUserPassword, getNaverApiKeys, saveNaverApiKeys, NaverApiKeys, checkNaverQuota, incrementNaverQuota, getNaverDailyUsage, NAVER_DAILY_LIMIT, getUserNaverApiKeys, logError, PLAN_CONFIG, checkDailyPublishQuota, incrementDailyPublish, getDailyPublishUsage, getNeighborDailyUsage, NEIGHBOR_DAILY_LIMIT, getEngageDailyUsage, ENGAGE_DAILY_LIMIT, InstaDmTarget, InstaDmHistory, InstaDmQuota, getInstaDmTargets, addInstaDmTarget, deleteInstaDmTarget, getInstaDmHistory, addInstaDmHistory, getInstaDmQuota, upsertInstaDmQuota, incrementInstaDmUsage, INSTA_DM_DAILY_LIMIT, getReplyDailyUsage, REPLY_DAILY_LIMIT } from "../lib/supabase";
 import { supabase, submitBugReportRow, getMyResolvedBugAlerts, markBugNotified, PublyBugReport } from "../lib/supabase";
 import NeighborPage from "./NeighborPage";
 import { botFetch, BotEventStream } from "../lib/botApi";
@@ -867,6 +867,8 @@ export default function DashboardPage({user, onLogout, onAdminLogin, onThemeTogg
   const [accounts, setAccounts] = useState<PublyAccount[]>([]);
   const [history, setHistory] = useState<PublyHistory[]>([]);
   const [historyError, setHistoryError] = useState("");
+  const [histPeriod, setHistPeriod] = useState<"all"|"today"|"week"|"month">("all");   // 발행기록 기간 필터
+  const [histStatus, setHistStatus] = useState<"all"|"success"|"fail">("all");          // 발행기록 상태 필터
   // 사진 글쓰기 안내 모달(모바일 최적화 — window.open 대신 앱 내 모달)
   const [photoGuideModal, setPhotoGuideModal] = useState<null|"guide"|"caution"|"example">(null);
   // 📈 성과 추적: 발행 글 현재 순위 + 이전 스냅샷 비교(로컬 저장)
@@ -5873,6 +5875,7 @@ POST3: (제목)|(이유)
                     <div style={{display:"flex",gap:8,alignItems:"center"}}>
                       <span style={{fontSize:13,color:"var(--text2)"}}>총 {history.length}건</span>
                       <button className="btn btn-secondary btn-sm" onClick={()=>void loadHistory(true)}>🔄 새로고침</button>
+                      {(()=>{ const failCnt=history.filter(h=>h.status==="fail").length; return failCnt>0 && <button className="btn btn-sm" style={{border:"1px solid var(--warn)",background:"rgba(255,159,10,.1)",color:"var(--warn)",fontWeight:800}} onClick={async()=>{if(!window.confirm(`실패한 발행 기록 ${failCnt}건을 삭제할까요?\n(성공한 글은 그대로 남아요)`))return;await deleteFailedHistory(user.id);setHistory(prev=>prev.filter(h=>h.status!=="fail"));showToast(`🗑 실패 기록 ${failCnt}건 삭제 완료`,"success");}}>⚠️ 실패 {failCnt}건 삭제</button>; })()}
                       {history.length>0&&<button className="btn btn-danger btn-sm" onClick={async()=>{if(!window.confirm(`발행 기록 ${history.length}건을 정말 모두 삭제할까요?\n(되돌릴 수 없습니다)`))return;if(!window.confirm("한 번 더 확인할게요. 전체 삭제를 진행할까요?"))return;await deleteAllHistory(user.id);setHistory([]);showToast("🗑 발행 기록 전체 삭제 완료","success");}}>🗑 전체삭제</button>}
                     </div>
                   </div>
@@ -5882,14 +5885,45 @@ POST3: (제목)|(이유)
                     💡 <b>발행 기록이란?</b> 발행에 성공한 글이 여기에 <b>차곡차곡 쌓여요.</b> 서버에 안전하게 <b>영구 저장</b>돼서 앱을 껐다 켜거나 업데이트해도 안 사라져요. 위쪽 <b>📈 순위 성과 확인</b>으로 각 글의 검색 순위도 여기서 관리해요.
                     <br/><span style={{color:"var(--text3)"}}><b>🔄 새로고침</b> — 기록이 안 보이거나 방금 발행한 글이 아직 없으면 눌러서 <b>서버에서 최신 목록을 다시 불러와요.</b></span>
                   </div>
-                  {history.length===0?(
+                  {/* 기간·상태 필터 (발행이 많아지면 골라 보기) */}
+                  {history.length>0&&(()=>{
+                    const now=new Date();
+                    const inPeriod=(h:PublyHistory)=>{ const d=new Date(h.published_at);
+                      if(histPeriod==="today") return d.toDateString()===now.toDateString();
+                      if(histPeriod==="week") return (now.getTime()-d.getTime())/(864e5)<=7;
+                      if(histPeriod==="month") return d.getMonth()===now.getMonth()&&d.getFullYear()===now.getFullYear();
+                      return true; };
+                    const cnt=(p:typeof histPeriod)=>history.filter(h=>{const d=new Date(h.published_at); if(p==="today")return d.toDateString()===now.toDateString(); if(p==="week")return (now.getTime()-d.getTime())/(864e5)<=7; if(p==="month")return d.getMonth()===now.getMonth()&&d.getFullYear()===now.getFullYear(); return true;}).length;
+                    const chip=(active:boolean,color:string)=>({padding:"5px 12px",borderRadius:99,border:`1.5px solid ${active?color:"var(--border)"}`,background:active?color+"22":"transparent",color:active?color:"var(--text3)",cursor:"pointer",fontSize:12,fontWeight:800,fontFamily:"inherit" as const});
+                    void inPeriod;
+                    return <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:14,alignItems:"center"}}>
+                      <span style={{fontSize:11,color:"var(--text3)",fontWeight:700,marginRight:2}}>기간</span>
+                      {([["all","전체"],["today","오늘"],["week","이번주"],["month","이번달"]] as const).map(([k,l])=>
+                        <button key={k} onClick={()=>setHistPeriod(k)} style={chip(histPeriod===k,"#3b82f6")}>{l} {cnt(k)}</button>)}
+                      <span style={{width:1,height:16,background:"var(--border)",margin:"0 4px"}}/>
+                      <span style={{fontSize:11,color:"var(--text3)",fontWeight:700,marginRight:2}}>상태</span>
+                      {([["all","전체"],["success","성공"],["fail","실패"]] as const).map(([k,l])=>
+                        <button key={k} onClick={()=>setHistStatus(k)} style={chip(histStatus===k,k==="fail"?"#ff6b6b":k==="success"?"#00c896":"#3b82f6")}>{l}</button>)}
+                    </div>;
+                  })()}
+                  {(()=>{
+                    const now=new Date();
+                    const filtered=history.filter(h=>{
+                      const d=new Date(h.published_at);
+                      const okP=histPeriod==="all"||(histPeriod==="today"&&d.toDateString()===now.toDateString())||(histPeriod==="week"&&(now.getTime()-d.getTime())/(864e5)<=7)||(histPeriod==="month"&&d.getMonth()===now.getMonth()&&d.getFullYear()===now.getFullYear());
+                      const okS=histStatus==="all"||h.status===histStatus;
+                      return okP&&okS;
+                    });
+                    return history.length===0?(
                     <div className="empty-state" style={{padding:"32px 24px"}}>
                       <span className="empty-ico">🚀</span>
                       <div className="empty-title">아직 발행 기록이 없어요</div>
                       <div className="empty-sub">글 생성 탭에서 첫 번째 글을 발행해보세요!</div>
                       <button className="btn btn-primary" onClick={()=>setTab("write")}>글 생성 시작하기 →</button>
                     </div>
-                  ):history.map((h,i)=>(
+                  ):filtered.length===0?(
+                    <div style={{textAlign:"center",padding:"28px",color:"var(--text3)",fontSize:13}}>이 조건에 맞는 발행 기록이 없어요.</div>
+                  ):filtered.map((h,i)=>(
                     <div key={h.id} className="hist-item" style={{animationDelay:`${i*.04}s`}}>
                       <span style={{fontSize:22,flexShrink:0}}>{h.platform==="naver"?"🟢":"🟠"}</span>
                       <div className="hist-info">
@@ -5933,7 +5967,7 @@ POST3: (제목)|(이유)
                             }} style={{padding:"4px 10px",borderRadius:7,border:"1px solid rgba(0,200,120,.3)",background:"transparent",color:"var(--success)",cursor:"pointer",fontSize:12,fontWeight:700,flexShrink:0}}>🔄 재발행</button>
                           )}
                     </div>
-                  ))}
+                  ));})()}
                 </div>
                 {/* 하단 여백: 마지막 기록의 삭제/재발행 버튼이 '결제 문의' 플로팅·모바일바에 가리지 않게 */}
                 <div style={{height:120}} aria-hidden="true" />

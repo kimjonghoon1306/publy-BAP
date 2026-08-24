@@ -208,6 +208,11 @@ export async function deleteAllHistory(userId: string): Promise<void> {
   await supabase.from("publy_history").delete().eq("user_id", userId);
 }
 
+// 실패(fail)한 발행 기록만 전체 삭제 — 성공/대기 건은 그대로 둔다.
+export async function deleteFailedHistory(userId: string): Promise<void> {
+  await supabase.from("publy_history").delete().eq("user_id", userId).eq("status", "fail");
+}
+
 // ── 계정 ─────────────────────────────────────────────────
 export async function getAccounts(userId: string): Promise<PublyAccount[]> {
   const { data } = await supabase
