@@ -69,24 +69,45 @@ async function launchBrowser(
    ok=false면 그 프록시로는 접속이 안 되는 것(죽었거나 인증 틀림). */
 export async function checkProxy(proxy: { server: string; username?: string; password?: string }): Promise<{ ok: boolean; ip?: string; ms?: number; error?: string }> {
   const t0 = Date.now();
-  const server = /^(https?|socks[45]?):\/\//i.test(proxy.server) ? proxy.server : `http://${proxy.server}`;
+  // ★값 정리: 복붙 시 앞뒤 공백·개행이 딸려오면 인증/연결이 조용히 실패(407 무한→타임아웃).
+  //   server/username/password 모두 trim. 내부 공백은 남기지 않도록 개행/탭도 제거.
+  const rawServer = (proxy.server || "").trim();
+  const username = (proxy.username || "").replace(/[\s]+/g, "") || undefined;
+  const password = (proxy.password || "").trim() || undefined;
+  if (!rawServer) return { ok: false, ms: Date.now() - t0, error: "프록시 주소가 비어 있습니다" };
+  const server = /^(https?|socks[45]?):\/\//i.test(rawServer) ? rawServer : `http://${rawServer}`;
+  // 포트 누락 감지(host:port 형태여야 함) — 포트 없으면 80으로 연결 시도돼 타임아웃 나는 대표 원인
+  const hostPort = server.replace(/^[a-z0-9]+:\/\//i, "");
+  if (!/:\d{2,5}$/.test(hostPort)) {
+    return { ok: false, ms: Date.now() - t0, error: `주소에 포트(:숫자)가 없습니다 → "${hostPort}". 예: gw.dataimpulse.com:823` };
+  }
   let browser: any = null;
   try {
-    browser = await chromium.launch({
-      headless: true,
-      args: LAUNCH_ARGS,
-      proxy: { server, username: proxy.username || undefined, password: proxy.password || undefined },
-    });
+    try {
+      browser = await chromium.launch({
+        headless: true,
+        args: LAUNCH_ARGS,
+        proxy: { server, username, password },
+      });
+    } catch (le: any) {
+      return { ok: false, ms: Date.now() - t0, error: `브라우저 실행 실패: ${(le?.message || le).toString().slice(0, 150)}` };
+    }
     const ctx = await browser.newContext({ locale: "ko-KR" });
     const page = await ctx.newPage();
-    await page.goto("https://api.ipify.org?format=json", { timeout: 20000, waitUntil: "domcontentloaded" });
+    // 타임아웃을 15초로 줄여 빠르게 실패 판정(정상이면 1~2초).
+    await page.goto("https://api.ipify.org?format=json", { timeout: 15000, waitUntil: "domcontentloaded" });
     const body = await page.evaluate(() => document.body.innerText).catch(() => "");
     let ip = "";
     try { ip = JSON.parse(body).ip || ""; } catch {}
     if (!ip) return { ok: false, ms: Date.now() - t0, error: "IP 확인 실패(응답 이상)" };
     return { ok: true, ip, ms: Date.now() - t0 };
   } catch (e: any) {
-    return { ok: false, ms: Date.now() - t0, error: (e?.message || "연결 실패").slice(0, 200) };
+    const msg = (e?.message || "연결 실패").toString();
+    // 타임아웃이면 = 프록시 응답 없음(주소·포트 틀림) 또는 인증 무한(아이디·비번 틀림)
+    const hint = /Timeout/i.test(msg)
+      ? `프록시 응답 없음 — 주소/포트 또는 아이디/비밀번호를 확인하세요 (server=${hostPort}${username ? `, id=${username}` : ", id 없음"})`
+      : msg.slice(0, 180);
+    return { ok: false, ms: Date.now() - t0, error: hint };
   } finally {
     await browser?.close().catch(() => {});
   }

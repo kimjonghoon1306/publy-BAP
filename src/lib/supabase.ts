@@ -1004,7 +1004,7 @@ export async function getProxies(): Promise<PublyProxy[]> {
 export async function addProxy(p: { label?: string; server: string; username?: string; password?: string; region?: string }): Promise<PublyProxy | null> {
   try {
     const { data, error } = await supabase.from("publy_proxies")
-      .insert({ label: p.label || null, server: p.server.trim(), username: p.username || null, password: p.password || null, region: p.region || "KR", active: true })
+      .insert({ label: (p.label || "").trim() || null, server: p.server.trim(), username: (p.username || "").replace(/[\s]+/g, "") || null, password: (p.password || "").trim() || null, region: p.region || "KR", active: true })
       .select("*").single();
     if (error) { alert("프록시 추가 실패: " + error.message); return null; }
     return data as PublyProxy;

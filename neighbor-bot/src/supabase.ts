@@ -294,10 +294,11 @@ async function _lookupProxy(userId: string, feature?: string): Promise<ProxyConf
         .eq("id", map.proxy_id)
         .maybeSingle();
       if (px?.server && px.active !== false) {
+        // ★복붙 공백·개행 제거(인증 조용히 실패 방지). id는 내부 공백까지, pw는 앞뒤만.
         proxy = {
           server: normalizeProxyServer(px.server),
-          username: px.username || undefined,
-          password: px.password || undefined,
+          username: (px.username || "").replace(/[\s]+/g, "") || undefined,
+          password: (px.password || "").trim() || undefined,
         };
       }
     }

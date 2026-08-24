@@ -625,21 +625,42 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
   const [proxies, setProxies] = useState<PublyProxy[]>([]);
   const [proxyAssign, setProxyAssign] = useState<Record<string, ProxyAssign[]>>({});
   const [proxyChecking, setProxyChecking] = useState<Record<string,boolean>>({});
-  const [proxyAccts, setProxyAccts] = useState<{accountId:string; label:string; search:string}[]>([]);
+  const [proxyAccts, setProxyAccts] = useState<{accountIds:string[]; label:string; search:string}[]>([]);
   const [proxyAcctSearch, setProxyAcctSearch] = useState("");
   const [proxyUserSearch, setProxyUserSearch] = useState("");
   const [newProxy, setNewProxy] = useState({ label:"", server:"", username:"", password:"" });
   // 4개 기능 탭(서이추·공감·답방·품앗이)의 연결된 계정을 모아 배정 후보로 (관리자 기기 localStorage)
+  // ★같은 계정(네이버 로그인 아이디 기준)을 한 줄로 묶는다. 탭별 격리로 accountId가 탭마다 달라(neighbor_acc_1·pumasi_acc_1…)
+  //   같은 계정이 여러 줄로 쪼개지고 이름도 blogId(system-b)/id(bb9653)로 제각각이던 문제 해결.
+  //   → 체크 한 번에 그 계정의 모든 탭 accountId에 배정. DB 배정은 accountId별 유지(봇 동작 불변).
   function loadProxyAccounts() {
     const tabs: [string,string][] = [["neighbor","서이추"],["engage","공감·댓글"],["reply","답방"],["pumasi","품앗이"]];
-    const list: {accountId:string; label:string; search:string}[] = [];
-    const seen = new Set<string>();
-    tabs.forEach(([k,l]) => {
+    const groups = new Map<string, { id:string; blogId:string; accountIds:Set<string> }>();
+    tabs.forEach(([k]) => {
       try {
         const raw = localStorage.getItem(`publy_accounts_${k}`);
         const arr = raw ? JSON.parse(raw) : [];
-        (Array.isArray(arr)?arr:[]).forEach((a:any)=>{ if(a?.accountId && !seen.has(a.accountId)){ seen.add(a.accountId); list.push({ accountId:a.accountId, label:`${a.blogId||a.id||a.accountId} · ${l}`, search:`${a.blogId||""} ${a.id||""} ${a.accountId} ${l}`.toLowerCase() }); } });
+        (Array.isArray(arr)?arr:[]).forEach((a:any)=>{
+          if(!a?.accountId) return;
+          const naverId = (a.id||"").trim();
+          // 네이버 아이디로 묶기(같은 계정=같은 로그인 아이디). 아이디 없으면 accountId 단독 그룹.
+          const gkey = naverId ? `id:${naverId.toLowerCase()}` : `acc:${a.accountId}`;
+          let g = groups.get(gkey);
+          if(!g){ g = { id:naverId, blogId:a.blogId||"", accountIds:new Set() }; groups.set(gkey,g); }
+          g.accountIds.add(a.accountId);
+          if(!g.id && naverId) g.id = naverId;
+          if(!g.blogId && a.blogId) g.blogId = a.blogId; // 로그인된 탭에서 blogId 보완
+        });
       } catch {}
+    });
+    const list = Array.from(groups.values()).map(g => {
+      const name = g.id || Array.from(g.accountIds)[0];
+      const blog = g.blogId && g.blogId!==g.id ? ` (블로그: ${g.blogId})` : "";
+      return {
+        accountIds: Array.from(g.accountIds),
+        label: `${name}${blog}`,
+        search: `${g.id} ${g.blogId} ${Array.from(g.accountIds).join(" ")}`.toLowerCase(),
+      };
     });
     setProxyAccts(list);
   }
@@ -661,15 +682,18 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
     loadProxies();
   }
   // 계정 체크 토글: 이 IP에 배정 / 해제 (다른 IP에 있었으면 이 IP로 이동)
-  async function toggleProxyAccount(accountId: string, proxyId: string, onThis: boolean) {
-    if (onThis) await unassignAccount(accountId);
-    else await assignAccountToProxy(accountId, proxyId);
+  // 한 계정(여러 탭 accountId)을 한 번에 배정/해제. onThis면 전부 해제, 아니면 전부 이 프록시로 배정.
+  async function toggleProxyAccount(accountIds: string[], proxyId: string, onThis: boolean) {
+    for (const aid of accountIds) {
+      if (onThis) await unassignAccount(aid);
+      else await assignAccountToProxy(aid, proxyId);
+    }
     loadProxies();
   }
-  // 기능 토글: 배정된 계정이 프록시를 쓸 기능(서이추/공감/품앗이/답방) on/off
-  async function toggleProxyFeature(accountId: string, feature: string, cur: string[]) {
+  // 기능 토글: 배정된 계정이 프록시를 쓸 기능(서이추/공감/품앗이/답방) on/off — 계정의 모든 탭에 동일 적용
+  async function toggleProxyFeature(accountIds: string[], feature: string, cur: string[]) {
     const next = cur.includes(feature) ? cur.filter(f=>f!==feature) : [...cur, feature];
-    await setAccountFeatures(accountId, next);
+    for (const aid of accountIds) await setAccountFeatures(aid, next);
     loadProxies();
   }
   async function handleDeleteProxy(p: PublyProxy) {
@@ -5559,7 +5583,7 @@ POST3: (제목)|(이유)
                               const onThis=(proxyAssign[p.id]||[]).some(x=>x.userId===u.id);
                               return (
                                 <div key={u.id} style={{display:"flex",alignItems:"center",gap:8,padding:"6px 8px",borderRadius:8,border:`1px solid ${onThis?"var(--success)":"var(--border)"}`,background:onThis?"rgba(0,214,143,.06)":"transparent"}}>
-                                  <button onClick={()=>toggleProxyAccount(u.id,p.id,onThis)} style={{display:"flex",alignItems:"center",gap:8,background:"transparent",border:"none",cursor:"pointer",color:"var(--text)",fontFamily:"inherit",fontSize:13,padding:0,flex:1,textAlign:"left"}}>
+                                  <button onClick={()=>toggleProxyAccount([u.id],p.id,onThis)} style={{display:"flex",alignItems:"center",gap:8,background:"transparent",border:"none",cursor:"pointer",color:"var(--text)",fontFamily:"inherit",fontSize:13,padding:0,flex:1,textAlign:"left"}}>
                                     <span style={{fontSize:15}}>{onThis?"☑️":"⬜"}</span>
                                     <span>{u.name||u.email}{u.phone?<span style={{color:"var(--text3)",fontSize:11}}> · {u.phone}</span>:null}</span>
                                   </button>
@@ -5576,22 +5600,24 @@ POST3: (제목)|(이유)
                         {proxyAccts.length>0 && <input value={proxyAcctSearch} onChange={e=>setProxyAcctSearch(e.target.value)} placeholder="🔍 계정 검색 (아이디·블로그ID)" style={{...inputStyle,width:"100%",marginBottom:8,boxSizing:"border-box"}}/>}
                         <div style={{display:"flex",flexDirection:"column",gap:6}}>
                           {proxyAccts.filter(a=>!proxyAcctSearch.trim()||a.search.includes(proxyAcctSearch.trim().toLowerCase())).map(a => {
-                            const mine = (proxyAssign[p.id]||[]).find(x=>x.userId===a.accountId);
-                            const onThis = !!mine;
-                            const otherPid = Object.entries(proxyAssign).find(([pid,arr])=>pid!==p.id && arr.some(x=>x.userId===a.accountId))?.[0];
+                            // 이 계정(여러 탭 accountId) 중 이 프록시에 배정된 것들
+                            const assignedHere = (proxyAssign[p.id]||[]).filter(x=>a.accountIds.includes(x.userId));
+                            const mine = assignedHere[0];
+                            const onThis = assignedHere.length>0;
+                            const otherPid = !onThis && Object.entries(proxyAssign).find(([pid,arr])=>pid!==p.id && arr.some(x=>a.accountIds.includes(x.userId)))?.[0];
                             return (
-                              <div key={a.accountId} style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",padding:"6px 8px",borderRadius:8,border:`1px solid ${onThis?"var(--success)":"var(--border)"}`,background:onThis?"rgba(0,214,143,.06)":"transparent"}}>
-                                <button onClick={()=>toggleProxyAccount(a.accountId,p.id,onThis)} style={{display:"flex",alignItems:"center",gap:8,background:"transparent",border:"none",cursor:"pointer",color:"var(--text)",fontFamily:"inherit",fontSize:13,padding:0,flex:1,minWidth:150,textAlign:"left"}}>
+                              <div key={a.accountIds.join(",")} style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",padding:"6px 8px",borderRadius:8,border:`1px solid ${onThis?"var(--success)":"var(--border)"}`,background:onThis?"rgba(0,214,143,.06)":"transparent"}}>
+                                <button onClick={()=>toggleProxyAccount(a.accountIds,p.id,onThis)} style={{display:"flex",alignItems:"center",gap:8,background:"transparent",border:"none",cursor:"pointer",color:"var(--text)",fontFamily:"inherit",fontSize:13,padding:0,flex:1,minWidth:150,textAlign:"left"}}>
                                   <span style={{fontSize:15}}>{onThis?"☑️":"⬜"}</span>
                                   <span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{a.label}</span>
                                   {otherPid && !onThis && <span style={{fontSize:10,color:"var(--text3)",marginLeft:4}}>다른 IP에 배정됨(누르면 이동)</span>}
                                 </button>
-                                {onThis && (
+                                {onThis && mine && (
                                   <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
                                     {PROXY_FEATURES.map(f => {
-                                      const fon = (mine!.features||[]).includes(f.k);
+                                      const fon = (mine.features||[]).includes(f.k);
                                       return (
-                                        <button key={f.k} onClick={()=>toggleProxyFeature(a.accountId,f.k,mine!.features||[])}
+                                        <button key={f.k} onClick={()=>toggleProxyFeature(a.accountIds,f.k,mine.features||[])}
                                           style={{fontSize:11,padding:"3px 9px",borderRadius:99,cursor:"pointer",fontFamily:"inherit",fontWeight:600,
                                             border:`1px solid ${fon?"var(--danger)":"var(--border)"}`,
                                             background:fon?"rgba(248,81,73,.1)":"transparent",
