@@ -3090,6 +3090,7 @@ async function generateAiReply(key: string, tone: string, commentText: string, a
       const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }], generationConfig }),
+        signal: AbortSignal.timeout(12000),   // ★12초 넘게 응답 없으면 끊고 다음 모델/고정댓글로(무한 hang 방지)
       });
       const d: any = await r.json();
       // ★글쓰기와 동일: 429 한도 포함 어떤 실패든 다음 모델로 폴백(섣불리 포기 금지)
@@ -3099,8 +3100,9 @@ async function generateAiReply(key: string, tone: string, commentText: string, a
       if (!raw || cand?.finishReason === "MAX_TOKENS") { log(`[답방] ${model} 답글 잘림/빈응답 → 다음 모델`); continue; }
       const cleaned = raw.replace(/^["'\s]+|["'\s]+$/g, "").replace(/\s*[\r\n]+\s*/g, " ").replace(/\s{2,}/g, " ").trim().slice(0, 100);
       if (cleaned.length >= 3) return cleaned;
-    } catch {}
+    } catch { log(`[답방] ${model} 응답 지연/오류 → 다음 모델`); }
   }
+  log(`[답방] AI 모두 실패 → 고정 인사로 답글`);
   return "";
 }
 

@@ -5573,66 +5573,46 @@ POST3: (제목)|(이유)
                         {p.last_checked_at && <> · {new Date(p.last_checked_at).toLocaleString("ko-KR")}</>}
                       </div>
                       <div style={{marginTop:12}}>
-                        <div style={{fontSize:12,fontWeight:600,marginBottom:6}}>이 IP를 쓸 회원 선택 <span style={{color:"var(--text3)",fontWeight:400}}>(이름·전화번호·이메일로 검색 → 체크하면 배정)</span></div>
-                        <input value={proxyUserSearch} onChange={e=>setProxyUserSearch(e.target.value)} placeholder="🔍 회원 검색 (이름·전화번호·이메일)" style={{...inputStyle,width:"100%",marginBottom:8,boxSizing:"border-box"}}/>
-                        {proxyUserSearch.trim() && (()=>{
+                        <div style={{fontSize:12,fontWeight:600,marginBottom:6}}>이 IP를 쓸 회원 선택 <span style={{color:"var(--text3)",fontWeight:400}}>(이름·아이디로 검색 → 체크하면 배정 · 오른쪽 칩으로 기능별 on/off)</span></div>
+                        <input value={proxyUserSearch} onChange={e=>setProxyUserSearch(e.target.value)} placeholder="🔍 회원 검색 (이름·아이디·이메일·전화)" style={{...inputStyle,width:"100%",marginBottom:8,boxSizing:"border-box"}}/>
+                        {(()=>{
                           const q=proxyUserSearch.trim().toLowerCase();
-                          const hits=(users as any[]).filter(u=>`${u.name||""} ${u.phone||""} ${u.email||""}`.toLowerCase().includes(q)).slice(0,20);
-                          if(!hits.length) return <div style={{fontSize:12,color:"var(--text3)",padding:"2px 0 10px"}}>검색 결과가 없어요.</div>;
-                          return <div style={{display:"flex",flexDirection:"column",gap:6,marginBottom:10}}>
+                          const hits=(users as any[]).filter(u=>!q||`${u.name||""} ${u.phone||""} ${u.email||""}`.toLowerCase().includes(q));
+                          if(!hits.length) return <div style={{fontSize:12,color:"var(--text3)",padding:"4px 0"}}>{q?"검색 결과가 없어요.":"회원이 없어요."}</div>;
+                          return <div style={{display:"flex",flexDirection:"column",gap:6}}>
                             {hits.map((u:any)=>{
-                              const onThis=(proxyAssign[p.id]||[]).some(x=>x.userId===u.id);
+                              const mine=(proxyAssign[p.id]||[]).find(x=>x.userId===u.id);
+                              const onThis=!!mine;
+                              const otherPid=!onThis && Object.entries(proxyAssign).find(([pid,arr])=>pid!==p.id && arr.some(x=>x.userId===u.id))?.[0];
+                              const idPart=(u.email||"").split("@")[0];
                               return (
-                                <div key={u.id} style={{display:"flex",alignItems:"center",gap:8,padding:"6px 8px",borderRadius:8,border:`1px solid ${onThis?"var(--success)":"var(--border)"}`,background:onThis?"rgba(0,214,143,.06)":"transparent"}}>
-                                  <button onClick={()=>toggleProxyAccount([u.id],p.id,onThis)} style={{display:"flex",alignItems:"center",gap:8,background:"transparent",border:"none",cursor:"pointer",color:"var(--text)",fontFamily:"inherit",fontSize:13,padding:0,flex:1,textAlign:"left"}}>
+                                <div key={u.id} style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",padding:"6px 8px",borderRadius:8,border:`1px solid ${onThis?"var(--success)":"var(--border)"}`,background:onThis?"rgba(0,214,143,.06)":"transparent"}}>
+                                  <button onClick={()=>toggleProxyAccount([u.id],p.id,onThis)} style={{display:"flex",alignItems:"center",gap:8,background:"transparent",border:"none",cursor:"pointer",color:"var(--text)",fontFamily:"inherit",fontSize:13,padding:0,flex:1,minWidth:150,textAlign:"left"}}>
                                     <span style={{fontSize:15}}>{onThis?"☑️":"⬜"}</span>
-                                    <span>{u.name||u.email}{u.phone?<span style={{color:"var(--text3)",fontSize:11}}> · {u.phone}</span>:null}</span>
+                                    <span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}><b>{u.name||"(이름없음)"}</b>{idPart?<span style={{color:"var(--text2)"}}> · {idPart}</span>:null}{u.email?<span style={{color:"var(--text3)",fontSize:11}}> ({u.email})</span>:null}</span>
+                                    {otherPid && !onThis && <span style={{fontSize:10,color:"var(--text3)",marginLeft:4}}>다른 IP에 배정됨(누르면 이동)</span>}
                                   </button>
+                                  {onThis && mine && (
+                                    <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
+                                      {PROXY_FEATURES.map(f => {
+                                        const fon = (mine.features||[]).includes(f.k);
+                                        return (
+                                          <button key={f.k} onClick={()=>toggleProxyFeature([u.id],f.k,mine.features||[])}
+                                            style={{fontSize:11,padding:"3px 9px",borderRadius:99,cursor:"pointer",fontFamily:"inherit",fontWeight:600,
+                                              border:`1px solid ${fon?"var(--danger)":"var(--border)"}`,
+                                              background:fon?"rgba(248,81,73,.1)":"transparent",
+                                              color:fon?"var(--danger)":"var(--text3)"}}>
+                                            {fon?"● ":"○ "}{f.l}
+                                          </button>
+                                        );
+                                      })}
+                                    </div>
+                                  )}
                                 </div>
                               );
                             })}
                           </div>;
                         })()}
-                      </div>
-
-                      <div style={{marginTop:12}}>
-                        <div style={{fontSize:12,fontWeight:600,marginBottom:6}}>이 IP를 쓸 계정 선택 <span style={{color:"var(--text3)",fontWeight:400}}>(체크하면 배정 · {cnt}개 · 오른쪽 칩으로 기능별 on/off)</span></div>
-                        {proxyAccts.length===0 && <div style={{fontSize:12,color:"var(--text3)",padding:"4px 0"}}>서이추·공감·품앗이·답방 탭에서 계정을 먼저 연결해주세요.</div>}
-                        {proxyAccts.length>0 && <input value={proxyAcctSearch} onChange={e=>setProxyAcctSearch(e.target.value)} placeholder="🔍 계정 검색 (아이디·블로그ID)" style={{...inputStyle,width:"100%",marginBottom:8,boxSizing:"border-box"}}/>}
-                        <div style={{display:"flex",flexDirection:"column",gap:6}}>
-                          {proxyAccts.filter(a=>!proxyAcctSearch.trim()||a.search.includes(proxyAcctSearch.trim().toLowerCase())).map(a => {
-                            // 이 계정(여러 탭 accountId) 중 이 프록시에 배정된 것들
-                            const assignedHere = (proxyAssign[p.id]||[]).filter(x=>a.accountIds.includes(x.userId));
-                            const mine = assignedHere[0];
-                            const onThis = assignedHere.length>0;
-                            const otherPid = !onThis && Object.entries(proxyAssign).find(([pid,arr])=>pid!==p.id && arr.some(x=>a.accountIds.includes(x.userId)))?.[0];
-                            return (
-                              <div key={a.accountIds.join(",")} style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",padding:"6px 8px",borderRadius:8,border:`1px solid ${onThis?"var(--success)":"var(--border)"}`,background:onThis?"rgba(0,214,143,.06)":"transparent"}}>
-                                <button onClick={()=>toggleProxyAccount(a.accountIds,p.id,onThis)} style={{display:"flex",alignItems:"center",gap:8,background:"transparent",border:"none",cursor:"pointer",color:"var(--text)",fontFamily:"inherit",fontSize:13,padding:0,flex:1,minWidth:150,textAlign:"left"}}>
-                                  <span style={{fontSize:15}}>{onThis?"☑️":"⬜"}</span>
-                                  <span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{a.label}</span>
-                                  {otherPid && !onThis && <span style={{fontSize:10,color:"var(--text3)",marginLeft:4}}>다른 IP에 배정됨(누르면 이동)</span>}
-                                </button>
-                                {onThis && mine && (
-                                  <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
-                                    {PROXY_FEATURES.map(f => {
-                                      const fon = (mine.features||[]).includes(f.k);
-                                      return (
-                                        <button key={f.k} onClick={()=>toggleProxyFeature(a.accountIds,f.k,mine.features||[])}
-                                          style={{fontSize:11,padding:"3px 9px",borderRadius:99,cursor:"pointer",fontFamily:"inherit",fontWeight:600,
-                                            border:`1px solid ${fon?"var(--danger)":"var(--border)"}`,
-                                            background:fon?"rgba(248,81,73,.1)":"transparent",
-                                            color:fon?"var(--danger)":"var(--text3)"}}>
-                                          {fon?"● ":"○ "}{f.l}
-                                        </button>
-                                      );
-                                    })}
-                                  </div>
-                                )}
-                              </div>
-                            );
-                          })}
-                        </div>
                       </div>
                     </div>
                   );
