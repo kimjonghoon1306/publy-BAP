@@ -439,15 +439,15 @@ export async function incrementBlogscoreQuota(userId: string): Promise<void> {
 // ── 품앗이(내 계정들끼리 상호 공감·댓글) 등급 한도 ──
 //   계정 수 한도(등록 가능한 내 계정 개수) + 계정당 대상 글 수 한도.
 export const PUMASI_ACCOUNT_LIMIT: Record<string, number> = {
-  free: 2, basic: 3, pro: 5, unlimited: 999, admin: 999,
+  free: 2, basic: 3, pro: 5, unlimited: 999999, admin: 999999,   // 무제한(관리자)은 계정 수 한도 없음
 };
 export const PUMASI_POSTS_LIMIT: Record<string, number> = {
-  free: 3, basic: 5, pro: 10, unlimited: 999, admin: 999,
+  free: 3, basic: 5, pro: 10, unlimited: 999999, admin: 999999,
 };
 // ── 단탭(서이추·공감댓글·답방·지수) 계정 연결 개수 한도 ──
 //   각 탭이 계정을 따로 관리(완전 격리). 무료 1개 · 베이직 2 · 프로 3 · 무제한 ∞.
 export const TAB_ACCOUNT_LIMIT: Record<string, number> = {
-  free: 1, basic: 2, pro: 3, unlimited: 999, admin: 999,
+  free: 1, basic: 2, pro: 3, unlimited: 999999, admin: 999999,   // 무제한(관리자)은 무한
 };
 // 하루 품앗이로 남긴 공감·댓글 총 건수(사용량 게이지용) — 자정 자동 리셋
 function pumasiQuotaKey(userId: string): string {
