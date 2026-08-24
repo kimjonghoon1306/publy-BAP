@@ -1560,7 +1560,7 @@ Output format (JSON array only, no other text):
 
   // 이미지 프롬프트 (KO_EN_MAP 축약 버전)
   // ─── 300+ 키워드 이미지 프롬프트 시스템 ────────────────────
-  const NP_TAG = "no people, no person, no face, no human, no text, no watermark";
+  const NP_TAG = "no people, no person, no face, no human, no text, no watermark, safe for work, wholesome family-friendly, no violence, no weapons, no explicit or adult content, no real brand logos, no celebrities";
   const PROMPT_DB: {keywords:string[];prompt:string}[] = [
     {keywords:["한식","한정식","백반","집밥","가정식"],prompt:"Korean home-style meal spread, banchan side dishes, stone pot bibimbap, wooden table, steam rising, cozy restaurant, warm natural lighting"},
     {keywords:["맛집","식당","레스토랑","음식점","맛"],prompt:"cozy Korean restaurant interior, beautifully plated dishes on wooden table, ambient warm lighting, inviting atmosphere, bokeh"},

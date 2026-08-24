@@ -41600,14 +41600,44 @@ async function generateFlowImages(params) {
       return false;
     }
     await input.click({ force: true });
-    await page.waitForTimeout(500);
-    await page.keyboard.press("Control+a");
-    await page.waitForTimeout(200);
-    await page.keyboard.press("Backspace");
-    await page.waitForTimeout(200);
-    await page.keyboard.type(prompt, { delay: 25 });
-    await page.waitForTimeout(500);
-    log(`  \u{1F4DD} \uD504\uB86C\uD504\uD2B8 \uC785\uB825: ${prompt.slice(0, 50)}...`);
+    await page.waitForTimeout(400);
+    let entered = false;
+    try {
+      await input.fill("");
+      await input.fill(prompt);
+      entered = true;
+    } catch {
+    }
+    if (!entered) {
+      entered = await input.evaluate((el, val) => {
+        try {
+          if (el.isContentEditable) {
+            el.focus();
+            el.textContent = val;
+            el.dispatchEvent(new InputEvent("input", { bubbles: true }));
+            return true;
+          }
+          const proto = el.tagName === "TEXTAREA" ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+          const setter = Object.getOwnPropertyDescriptor(proto, "value").set;
+          setter.call(el, val);
+          el.dispatchEvent(new Event("input", { bubbles: true }));
+          return true;
+        } catch {
+          return false;
+        }
+      }, prompt).catch(() => false);
+    }
+    let cur = await input.evaluate((el) => el.value ?? el.textContent ?? "").catch(() => "");
+    if (!cur || cur.trim().length < Math.min(5, prompt.length)) {
+      await page.keyboard.press("Control+a").catch(() => {
+      });
+      await page.keyboard.press("Backspace").catch(() => {
+      });
+      await page.keyboard.type(prompt, { delay: 15 });
+      cur = await input.evaluate((el) => el.value ?? el.textContent ?? "").catch(() => "");
+    }
+    await page.waitForTimeout(400);
+    log(`  \u{1F4DD} \uD504\uB86C\uD504\uD2B8 \uC785\uB825(${entered ? "\uD55C\uBC88\uC5D0" : "\uD0C0\uC774\uD551"}): ${prompt.slice(0, 50)}...`);
     return true;
   }
   async function clickGenerate() {
@@ -41639,14 +41669,36 @@ async function generateFlowImages(params) {
     return true;
   }
   async function saveGeneratedImage(idx, caption) {
-    log("  \u23F3 \uC774\uBBF8\uC9C0 \uC0DD\uC131 \uB300\uAE30 (\uCD5C\uB300 30\uCD08)...");
-    await page.waitForTimeout(25e3);
-    const imgSrcs = await page.evaluate(() => {
+    log("  \u23F3 \uC774\uBBF8\uC9C0 \uC0DD\uC131 \uB300\uAE30 (\uC644\uC131\uB418\uBA74 \uBC14\uB85C \uC800\uC7A5, \uCD5C\uB300 3\uBD84)...");
+    await page.waitForTimeout(8e3);
+    const findImgs = () => page.evaluate(() => {
       const imgs = Array.from(document.querySelectorAll("img"));
-      return imgs.map((img) => img.src).filter(
-        (src) => src && src.length > 100 && (src.includes("blob:") || src.includes("generativelanguage") || src.includes("aidemos") || src.includes("googleusercontent") || src.includes("data:image"))
-      );
+      return imgs.map((img) => img.src).filter((src) => src && src.length > 100 && (src.includes("blob:") || src.includes("generativelanguage") || src.includes("aidemos") || src.includes("googleusercontent") || src.includes("data:image")));
     });
+    let imgSrcs = [];
+    const MAX_WAIT = 18e4, STEP = 3e3, t0 = Date.now();
+    while (Date.now() - t0 < MAX_WAIT) {
+      imgSrcs = await findImgs().catch(() => []);
+      if (imgSrcs.length > 0)
+        break;
+      const blocked = await page.evaluate(() => {
+        const t = document.body.innerText || "";
+        return /정책|위반|생성할 수 없|사용하지 못|만들 수 없|violat|policy|not allowed|can(?:'|’)?t (?:be )?(?:create|generate)|unable to (?:create|generate)/i.test(t);
+      }).catch(() => false);
+      if (blocked) {
+        log(`  \u{1F6AB} [Flow] \uAD6C\uAE00 \uC815\uCC45\uC73C\uB85C \uC774 \uD504\uB86C\uD504\uD2B8\uB294 \uC0DD\uC131 \uBD88\uAC00 \u2192 \uC774 \uC7A5 \uAC74\uB108\uB700`);
+        return false;
+      }
+      const el = Math.round((Date.now() - t0) / 1e3);
+      if (el > 0 && el % 15 === 0)
+        log(`  \u23F3 [Flow] \uC0DD\uC131 \uC911... (${el}\uCD08 \uACBD\uACFC, \uACC4\uC18D \uAE30\uB2E4\uB824\uC694)`);
+      await page.waitForTimeout(STEP);
+    }
+    if (imgSrcs.length === 0) {
+      log(`  \u26A0\uFE0F [Flow] \uC0DD\uC131\uC774 \uB108\uBB34 \uC624\uB798 \uAC78\uB824 \uC774\uBBF8\uC9C0\uB97C \uBABB \uBC1B\uC558\uC5B4\uC694 (\uB2E4\uC74C \uC7A5\uC73C\uB85C \uC9C4\uD589)`);
+      return false;
+    }
+    log(`  \u{1F5BC}\uFE0F [Flow] \uC774\uBBF8\uC9C0 \uD655\uC778 \u2192 \uC800\uC7A5 \uC911...`);
     if (imgSrcs.length > 0) {
       const src = imgSrcs[0];
       if (src.startsWith("blob:")) {

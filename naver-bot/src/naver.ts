@@ -1579,14 +1579,31 @@ export async function generateFlowImages(params: {
     }
 
     await input.click({ force: true });
-    await page.waitForTimeout(500);
-    await page.keyboard.press("Control+a");
-    await page.waitForTimeout(200);
-    await page.keyboard.press("Backspace");
-    await page.waitForTimeout(200);
-    await page.keyboard.type(prompt, { delay: 25 });
-    await page.waitForTimeout(500);
-    log(`  📝 프롬프트 입력: ${prompt.slice(0, 50)}...`);
+    await page.waitForTimeout(400);
+    // ★커서 튐 방지: 한 글자씩 타이핑(keyboard.type)하면 Flow가 입력 중 자동완성·리렌더로 커서를
+    //   앞으로 되돌려 글자가 중간에 껴든다. → '한 번에' 값을 넣는다(fill → native setter → 최후에만 타이핑).
+    let entered = false;
+    try { await input.fill(""); await input.fill(prompt); entered = true; } catch {}
+    if (!entered) {
+      entered = await input.evaluate((el: any, val: string) => {
+        try {
+          if (el.isContentEditable) { el.focus(); el.textContent = val; el.dispatchEvent(new InputEvent("input", { bubbles: true })); return true; }
+          const proto = el.tagName === "TEXTAREA" ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+          const setter = Object.getOwnPropertyDescriptor(proto, "value")!.set!;
+          setter.call(el, val); el.dispatchEvent(new Event("input", { bubbles: true })); return true;
+        } catch { return false; }
+      }, prompt).catch(() => false);
+    }
+    // 값이 실제로 들어갔는지 확인 → 비었으면(제어 컴포넌트가 되돌린 경우) 최후 수단으로만 타이핑
+    let cur = await input.evaluate((el: any) => (el.value ?? el.textContent ?? "")).catch(() => "");
+    if (!cur || cur.trim().length < Math.min(5, prompt.length)) {
+      await page.keyboard.press("Control+a").catch(() => {});
+      await page.keyboard.press("Backspace").catch(() => {});
+      await page.keyboard.type(prompt, { delay: 15 });
+      cur = await input.evaluate((el: any) => (el.value ?? el.textContent ?? "")).catch(() => "");
+    }
+    await page.waitForTimeout(400);
+    log(`  📝 프롬프트 입력(${entered ? "한번에" : "타이핑"}): ${prompt.slice(0, 50)}...`);
     return true;
   }
 
@@ -1621,21 +1638,34 @@ export async function generateFlowImages(params: {
 
   // ── 헬퍼: 생성된 이미지 저장 ──
   async function saveGeneratedImage(idx: number, caption: string): Promise<boolean> {
-    log("  ⏳ 이미지 생성 대기 (최대 30초)...");
-    await page.waitForTimeout(25000);
-
-    // 생성된 이미지 찾기 - 다양한 방법
-    const imgSrcs: string[] = await page.evaluate(() => {
+    // ★고정 대기(25초)는 생성이 느리면 완성 전에 넘어가 '중단'된다. → 완성될 때까지 폴링(진행 로그 포함).
+    log("  ⏳ 이미지 생성 대기 (완성되면 바로 저장, 최대 3분)...");
+    await page.waitForTimeout(8000);   // 생성 시작 최소 대기(UI 이미지 오검출 방지)
+    const findImgs = () => page.evaluate(() => {
       const imgs = Array.from(document.querySelectorAll("img"));
-      return imgs
-        .map(img => img.src)
-        .filter(src =>
-          src && src.length > 100 &&
-          (src.includes("blob:") || src.includes("generativelanguage") ||
-           src.includes("aidemos") || src.includes("googleusercontent") ||
-           src.includes("data:image"))
-        );
+      return imgs.map(img => img.src).filter(src =>
+        src && src.length > 100 &&
+        (src.includes("blob:") || src.includes("generativelanguage") ||
+         src.includes("aidemos") || src.includes("googleusercontent") ||
+         src.includes("data:image")));
     });
+    let imgSrcs: string[] = [];
+    const MAX_WAIT = 180000, STEP = 3000, t0 = Date.now();
+    while (Date.now() - t0 < MAX_WAIT) {
+      imgSrcs = await findImgs().catch(() => [] as string[]);
+      if (imgSrcs.length > 0) break;
+      // ★구글 정책 거부 감지 → 3분 기다리지 말고 즉시 넘어간다(프롬프트가 정책에 걸린 경우).
+      const blocked = await page.evaluate(() => {
+        const t = (document.body.innerText || "");
+        return /정책|위반|생성할 수 없|사용하지 못|만들 수 없|violat|policy|not allowed|can(?:'|’)?t (?:be )?(?:create|generate)|unable to (?:create|generate)/i.test(t);
+      }).catch(() => false);
+      if (blocked) { log(`  🚫 [Flow] 구글 정책으로 이 프롬프트는 생성 불가 → 이 장 건너뜀`); return false; }
+      const el = Math.round((Date.now() - t0) / 1000);
+      if (el > 0 && el % 15 === 0) log(`  ⏳ [Flow] 생성 중... (${el}초 경과, 계속 기다려요)`);
+      await page.waitForTimeout(STEP);
+    }
+    if (imgSrcs.length === 0) { log(`  ⚠️ [Flow] 생성이 너무 오래 걸려 이미지를 못 받았어요 (다음 장으로 진행)`); return false; }
+    log(`  🖼️ [Flow] 이미지 확인 → 저장 중...`);
 
     if (imgSrcs.length > 0) {
       const src = imgSrcs[0];

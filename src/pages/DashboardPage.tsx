@@ -1864,7 +1864,7 @@ Output format (JSON array only, no other text):
   }
 
   // ─── 300+ 키워드 이미지 프롬프트 시스템 ────────────────────
-  const NP_TAG = "zero people, absolutely no humans, no person, no face, no hands, no body parts, no text, no watermark, object only";
+  const NP_TAG = "zero people, absolutely no humans, no person, no face, no hands, no body parts, no text, no watermark, object only, safe for work, wholesome family-friendly, no violence, no weapons, no explicit or adult content, no real brand logos, no celebrities";
   const PROMPT_DB: {keywords:string[];prompt:string}[] = [
     // 음식/맛집
     {keywords:["한식","한정식","백반","집밥","가정식"],prompt:"Korean home-style meal spread, banchan side dishes, stone pot bibimbap, wooden table, steam rising, cozy restaurant interior, warm natural lighting"},
