@@ -1712,9 +1712,9 @@ export async function addNeighbors(params: {
 
         // ── 서이추 전 블로그 먼저 방문 (읽는 척) ──
         log(`[서이추] 👀 ${blogId} 블로그 방문 중...`);
-        // ★검색 경유 진입(켜진 경우): 그 키워드로 검색해 이 블로그 글을 찾아 클릭(검색 유입). 못 찾으면 URL 직행.
+        // ★검색 경유 진입(켜진 경우): ①그 키워드(주제)로 검색 → ②안 되면 아이디로 검색 → ③다 못 찾으면 URL 직행.
         let nbEntered = false;
-        if (searchEntry) nbEntered = await enterViaSearch(page, keyword, blogId, null, log);
+        if (searchEntry) nbEntered = await enterViaSearch(page, [keyword, blogId], blogId, null, log);
         if (!nbEntered) {
           await page.goto(`https://blog.naver.com/${blogId}`, { waitUntil: "domcontentloaded", timeout: 20000 });
         }
@@ -2273,43 +2273,52 @@ function writeExposureHistory(blogId: string, history: ExposureHistory): void {
    URL 직행 대신 검색을 거쳐 방문하면 상대 블로그에 "검색 유입"으로 잡혀 자연스럽고 지수(홈판)에 유리.
    찾아서 클릭 진입하면 true, 검색 결과에 없으면 false(호출부에서 URL로 폴백). keyword로 검색.
    targetLogNo가 있으면 그 글을, 없으면 그 블로그의 아무 글이나 클릭. */
-async function enterViaSearch(page: any, keyword: string, blogId: string, targetLogNo: string | null, log: (m: string) => void): Promise<boolean> {
-  if (!keyword || !keyword.trim()) return false;
+// ★검색 유입: 여러 검색어를 순서대로 시도해 대상 글(blogId+logNo)을 검색 결과에서 찾아 클릭.
+//   테리 확정 순서: ①주제(제목 키워드) → ②안 되면 아이디 → (다 못 찾으면 false 반환 → 호출부가 최종 URL 직행).
+//   ①주제 검색이 자연스럽고 노출에 유리. 단 그 글이 검색에 노출돼야 찾힘 → 안 뜨면 아이디/URL 폴백.
+async function enterViaSearch(page: any, queries: (string | null | undefined)[], blogId: string, targetLogNo: string | null, log: (m: string) => void): Promise<boolean> {
   const wanted = blogId.toLowerCase();
-  try {
-    await page.goto(`https://m.search.naver.com/search.naver?ssc=tab.m_blog.all&query=${encodeURIComponent(keyword.trim())}`, { waitUntil: "domcontentloaded", timeout: 20000 });
-    await page.waitForTimeout(1000);
-    for (let i = 0; i < 4; i++) { await page.mouse.wheel(0, 3000); await page.waitForTimeout(500); }
-    // 대상 블로그(+글) 링크를 찾는다
-    const sel = await page.evaluate((args: { wanted: string; logNo: string | null }) => {
-      const as = Array.from(document.querySelectorAll('a[href*="blog.naver.com"]')) as HTMLAnchorElement[];
-      for (let i = 0; i < as.length; i++) {
-        const h = as[i].href || "";
-        const m = h.match(/blog\.naver\.com\/([a-zA-Z0-9_-]+)\/(\d{6,})/) || h.match(/blog\.naver\.com\/([a-zA-Z0-9_-]+)[?].*logNo=(\d{6,})/);
-        if (!m) continue;
-        if (m[1].toLowerCase() !== args.wanted) continue;
-        if (args.logNo && m[2] !== args.logNo) continue;
-        as[i].setAttribute("data-publy-hit", "1");   // 클릭 대상 표시
-        return true;
-      }
-      return false;
-    }, { wanted, logNo: targetLogNo });
-    if (!sel) return false;
-    const el = await page.$('a[data-publy-hit="1"]');
-    if (!el) return false;
-    await el.scrollIntoViewIfNeeded().catch(() => {});
-    await page.waitForTimeout(400 + Math.random() * 600);   // 사람처럼 잠깐
-    await Promise.all([
-      page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 20000 }).catch(() => {}),
-      el.click({ timeout: 5000 }).catch(() => {}),
-    ]);
-    await page.waitForTimeout(800);
-    log(`[검색유입] 🔎 "${keyword}" 검색 결과에서 ${blogId} 클릭 진입`);
-    return true;
-  } catch (e: any) {
-    log(`[검색유입] 검색 경유 실패(${(e.message || "").slice(0, 25)}) — 링크로 진입`);
-    return false;
+  const tried = new Set<string>();
+  for (const raw of queries) {
+    const kw = (raw || "").trim();
+    if (!kw || tried.has(kw.toLowerCase())) continue;
+    tried.add(kw.toLowerCase());
+    try {
+      await page.goto(`https://m.search.naver.com/search.naver?ssc=tab.m_blog.all&query=${encodeURIComponent(kw)}`, { waitUntil: "domcontentloaded", timeout: 20000 });
+      await page.waitForTimeout(1000);
+      for (let i = 0; i < 4; i++) { await page.mouse.wheel(0, 3000); await page.waitForTimeout(500); }
+      const sel = await page.evaluate((args: { wanted: string; logNo: string | null }) => {
+        const as = Array.from(document.querySelectorAll('a[href*="blog.naver.com"]')) as HTMLAnchorElement[];
+        for (let i = 0; i < as.length; i++) {
+          const h = as[i].href || "";
+          const m = h.match(/blog\.naver\.com\/([a-zA-Z0-9_-]+)\/(\d{6,})/) || h.match(/blog\.naver\.com\/([a-zA-Z0-9_-]+)[?].*logNo=(\d{6,})/);
+          if (!m) continue;
+          if (m[1].toLowerCase() !== args.wanted) continue;
+          if (args.logNo && m[2] !== args.logNo) continue;
+          as[i].setAttribute("data-publy-hit", "1");
+          return true;
+        }
+        return false;
+      }, { wanted, logNo: targetLogNo });
+      if (!sel) { log(`[검색유입] "${kw.slice(0, 20)}" 검색결과에 대상 글이 없어요 → 다음 방법`); continue; }
+      const el = await page.$('a[data-publy-hit="1"]');
+      if (!el) continue;
+      await el.scrollIntoViewIfNeeded().catch(() => {});
+      await page.waitForTimeout(400 + Math.random() * 600);   // 사람처럼 잠깐
+      await Promise.all([
+        page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 20000 }).catch(() => {}),
+        el.click({ timeout: 5000 }).catch(() => {}),
+      ]);
+      await page.waitForTimeout(800);
+      log(`[검색유입] 🔎 "${kw.slice(0, 20)}" 검색에서 ${blogId} 글 찾아 클릭 진입`);
+      return true;
+    } catch (e: any) {
+      log(`[검색유입] "${kw.slice(0, 15)}" 검색 실패(${(e.message || "").slice(0, 20)}) → 다음 방법`);
+      continue;
+    }
   }
+  log(`[검색유입] 검색으로 못 찾음 → 주소로 직접 진입`);
+  return false;
 }
 
 /* ── 제목에서 검색용 핵심 키워드 뽑기 ──
@@ -3383,9 +3392,12 @@ export async function engageBlogs(params: {
         let commentReason = "";  // 댓글 못단 이유 (결과 표시용)
 
         log(`[공감·댓글] ${blogId} → 글 진입: ${targetPost.url}`);
-        // ★검색 경유 진입(켜진 경우): 키워드로 검색해 이 글을 찾아 클릭(검색 유입). 못 찾으면 URL 직행.
+        // ★검색 경유 진입(켜진 경우): ①글 제목의 주제 키워드로 검색(가장 자연스러움) → ②안 되면 아이디로 검색 → ③다 못 찾으면 URL 직행.
         let entered = false;
-        if (searchEntry) entered = await enterViaSearch(page, keyword, blogId, targetPost.logNo, log);
+        if (searchEntry) {
+          const subject = extractSearchQuery(targetPost.title || "");   // 제목 → 검색용 핵심 주제
+          entered = await enterViaSearch(page, [subject, keyword, blogId], blogId, targetPost.logNo, log);
+        }
         // ★검색 유입은 '클릭'으로 이미 발생(referrer=검색). 그런데 검색 도착지는 모바일(m.blog)이라 PC 댓글 UI(.u_cbox_text)가 없다.
         //   → 유입 발생 후 반드시 PC 글 URL로 이동해서 공감·댓글해야 입력창을 찾는다. (검색유입 글에서만 '댓글 입력창 못 찾음' 나던 원인)
         if (entered) { await page.waitForTimeout(1200); await page.goto(targetPost.url, { waitUntil: "domcontentloaded", timeout: 20000 }).catch(() => {}); }
