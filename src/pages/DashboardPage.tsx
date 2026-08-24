@@ -5865,7 +5865,13 @@ POST3: (제목)|(이유)
                     <div className="card-title">📋 발행 기록</div>
                     <div style={{display:"flex",gap:8,alignItems:"center"}}>
                       <span style={{fontSize:13,color:"var(--text2)"}}>총 {history.length}건</span>
-                      <button className="btn btn-secondary btn-sm" onClick={async()=>{const h=await getHistory(user.id);setHistory(h);showToast(`🔄 발행기록 ${h.length}건 불러왔어요 · 계정 ${(user.id||"").slice(0,8)}`,"success");}}>🔄 새로고침</button>
+                      <button className="btn btn-secondary btn-sm" onClick={async()=>{
+                        // ★직접 조회+에러 노출: getHistory는 에러를 조용히 삼켜 0건처럼 보임 → 진짜 원인(RLS·네트워크) 확인용
+                        const { data, error } = await supabase.from("publy_history").select("*").eq("user_id",user.id).order("published_at",{ascending:false}).limit(2000);
+                        if(error){ showToast(`❌ 조회오류: ${error.message||error.code||"알수없음"}`,"error"); return; }
+                        setHistory((data||[]) as any);
+                        showToast(`🔄 ${(data||[]).length}건 · 계정 ${(user.id||"").slice(0,8)}`,"success");
+                      }}>🔄 새로고침</button>
                       {history.length>0&&<button className="btn btn-danger btn-sm" onClick={async()=>{if(!window.confirm(`발행 기록 ${history.length}건을 정말 모두 삭제할까요?\n(되돌릴 수 없습니다)`))return;if(!window.confirm("한 번 더 확인할게요. 전체 삭제를 진행할까요?"))return;await deleteAllHistory(user.id);setHistory([]);showToast("🗑 발행 기록 전체 삭제 완료","success");}}>🗑 전체삭제</button>}
                     </div>
                   </div>
