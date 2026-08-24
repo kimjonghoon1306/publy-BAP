@@ -627,6 +627,7 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
   const [proxyChecking, setProxyChecking] = useState<Record<string,boolean>>({});
   const [proxyAccts, setProxyAccts] = useState<{accountId:string; label:string; search:string}[]>([]);
   const [proxyAcctSearch, setProxyAcctSearch] = useState("");
+  const [proxyUserSearch, setProxyUserSearch] = useState("");
   const [newProxy, setNewProxy] = useState({ label:"", server:"", username:"", password:"" });
   // 4개 기능 탭(서이추·공감·답방·품앗이)의 연결된 계정을 모아 배정 후보로 (관리자 기기 localStorage)
   function loadProxyAccounts() {
@@ -5546,6 +5547,29 @@ POST3: (제목)|(이유)
                         {p.last_ms!=null && <> · {p.last_ms}ms</>}
                         {p.last_checked_at && <> · {new Date(p.last_checked_at).toLocaleString("ko-KR")}</>}
                       </div>
+                      <div style={{marginTop:12}}>
+                        <div style={{fontSize:12,fontWeight:600,marginBottom:6}}>이 IP를 쓸 회원 선택 <span style={{color:"var(--text3)",fontWeight:400}}>(이름·전화번호·이메일로 검색 → 체크하면 배정)</span></div>
+                        <input value={proxyUserSearch} onChange={e=>setProxyUserSearch(e.target.value)} placeholder="🔍 회원 검색 (이름·전화번호·이메일)" style={{...inputStyle,width:"100%",marginBottom:8,boxSizing:"border-box"}}/>
+                        {proxyUserSearch.trim() && (()=>{
+                          const q=proxyUserSearch.trim().toLowerCase();
+                          const hits=(users as any[]).filter(u=>`${u.name||""} ${u.phone||""} ${u.email||""}`.toLowerCase().includes(q)).slice(0,20);
+                          if(!hits.length) return <div style={{fontSize:12,color:"var(--text3)",padding:"2px 0 10px"}}>검색 결과가 없어요.</div>;
+                          return <div style={{display:"flex",flexDirection:"column",gap:6,marginBottom:10}}>
+                            {hits.map((u:any)=>{
+                              const onThis=(proxyAssign[p.id]||[]).some(x=>x.userId===u.id);
+                              return (
+                                <div key={u.id} style={{display:"flex",alignItems:"center",gap:8,padding:"6px 8px",borderRadius:8,border:`1px solid ${onThis?"var(--success)":"var(--border)"}`,background:onThis?"rgba(0,214,143,.06)":"transparent"}}>
+                                  <button onClick={()=>toggleProxyAccount(u.id,p.id,onThis)} style={{display:"flex",alignItems:"center",gap:8,background:"transparent",border:"none",cursor:"pointer",color:"var(--text)",fontFamily:"inherit",fontSize:13,padding:0,flex:1,textAlign:"left"}}>
+                                    <span style={{fontSize:15}}>{onThis?"☑️":"⬜"}</span>
+                                    <span>{u.name||u.email}{u.phone?<span style={{color:"var(--text3)",fontSize:11}}> · {u.phone}</span>:null}</span>
+                                  </button>
+                                </div>
+                              );
+                            })}
+                          </div>;
+                        })()}
+                      </div>
+
                       <div style={{marginTop:12}}>
                         <div style={{fontSize:12,fontWeight:600,marginBottom:6}}>이 IP를 쓸 계정 선택 <span style={{color:"var(--text3)",fontWeight:400}}>(체크하면 배정 · {cnt}개 · 오른쪽 칩으로 기능별 on/off)</span></div>
                         {proxyAccts.length===0 && <div style={{fontSize:12,color:"var(--text3)",padding:"4px 0"}}>서이추·공감·품앗이·답방 탭에서 계정을 먼저 연결해주세요.</div>}
