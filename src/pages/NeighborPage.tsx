@@ -505,6 +505,9 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
   const [titleEditingKey, setTitleEditingKey] = useState<string>("");   // 지금 수정 중인 "logNo|번호"
   // ★재발행 알림: 기간 설정(기본 30일) + 누적 대상(localStorage). 재설치돼도 발행이력(서버)은 안전, 이 캐시만 재검사로 복구.
   const [republishDays, setRepublishDays] = useState<number>(()=>{ const v=parseInt(localStorage.getItem("publy_republish_days")||"30",10); return Number.isFinite(v)?v:30; });
+  const [rpBusyLog, setRpBusyLog] = useState<string>("");   // 재발행 목록에서 지금 제목 바꾸는 중인 글의 logNo
+  const [rpTick, setRpTick] = useState(0);                   // 재발행 목록 새로고침 트리거
+  const [republishShow, setRepublishShow] = useState(12);   // 재발행 목록 몇 개까지 보이기(더 보기)
   const [scSolPage, setScSolPage] = useState(0);   // AI 팁 페이지네이션(5개 단위)
   const [scSolSearch, setScSolSearch] = useState(""); // AI 팁 원래 제목 검색
   const [scExpPage, setScExpPage] = useState(0);   // 검색노출 결과 페이지네이션(30개 단위)
@@ -1189,6 +1192,36 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
       .then(d => { if (d.ok) { setTitleEditUsed(d.used); setTitleEditLimit(d.limit); } }).catch(() => {});
   }, [tab, userId]);
 
+  /* 재발행 목록에서 '지금 바로' 제목 바꾸기 — 그 글 하나만 AI로 새 제목 1개 생성 → 확인 → 변경·재발행 */
+  const handleRepublishOne = async (item: { title: string; logNo?: string; blogId?: string }) => {
+    if (!activeAccount) return alert("먼저 계정을 연결하세요");
+    if (!item.logNo) return alert("이 글의 번호를 못 찾았어요. '검색노출 검사'를 다시 한 번 해주세요.");
+    const key = localStorage.getItem("publy_gemini_key") || "";
+    if (!key) return alert("AI 제목 추천은 무료 Gemini 키가 필요해요. 설정 → 글쓰기 AI에서 등록해주세요.");
+    if (!isUnlimitedPlan && titleEditUsed >= titleEditLimit) return alert(`오늘 제목 수정 한도(${titleEditLimit}회)를 모두 사용했어요. 자정에 초기화됩니다.`);
+    setRpBusyLog(item.logNo);
+    addScLog(`✏️ "${item.title.slice(0, 22)}" 새 제목 만드는 중...`);
+    // ★살아있는 Gemini 모델(폐기된 2.0/1.5 제외)로 새 제목 1개 생성
+    const models = ["gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-flash-latest", "gemini-flash-lite-latest"];
+    const prompt = `너는 네이버 블로그 상위노출(SEO) 전문가야. 아래 글은 검색에 안 뜨고 있어. 검색에 잘 잡히게 제목을 딱 1개만 새로 지어줘.\n규칙: 사람들이 실제로 검색하는 말(지명+대상+상황)을 앞에 배치, 25~35자, 과장·감탄사(대박/충격/완벽/진짜) 금지, 따옴표·설명 없이 제목만 한 줄로 출력.\n\n[원래 제목]\n${item.title}`;
+    let newTitle = "";
+    for (const model of models) {
+      try {
+        const gc: any = { maxOutputTokens: 120, temperature: 0.9 };
+        if (model.includes("2.5")) gc.thinkingConfig = { thinkingBudget: 0 };
+        const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }], generationConfig: gc }) });
+        const d: any = await r.json();
+        if (!r.ok) continue;
+        const t = (d?.candidates?.[0]?.content?.parts?.[0]?.text || "").trim().replace(/^["'\s]+|["'\s]+$/g, "").split("\n")[0].slice(0, 60);
+        if (t.length >= 6) { newTitle = t; break; }
+      } catch {}
+    }
+    setRpBusyLog("");
+    if (!newTitle) { addScLog("❌ 새 제목 생성 실패 (잠시 후 다시 시도)"); return alert("새 제목 생성에 실패했어요. 잠시 후 다시 시도해주세요."); }
+    // handleApplyTitle이 확인창(confirm) + 실제 변경까지 처리
+    await handleApplyTitle(item.title, newTitle, `rp-${item.logNo}`, item.logNo);
+  };
+
   /* 개선 제목 → 실제 글 제목 자동 변경(재발행) */
   const handleApplyTitle = async (originalTitle: string, newTitle: string, key: string, logNoArg?: string) => {
     const acc = activeAccount;
@@ -1281,18 +1314,20 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
   };
 
   /* 저품질/누락 글 제목·키워드 개선 솔루션 (AI) */
-  const handleGetSolutions = async () => {
+  const handleGetSolutions = async (append = false) => {
     const key = (localStorage.getItem("publy_gemini_key") || "");
     if (!key) return alert("제목·키워드 개선 솔루션은 무료 Gemini 키가 필요해요.\n설정 → 글쓰기 AI에서 Gemini 키를 먼저 등록해주세요.");
     const checks = scResult?.exposureChecks || [];
-    // 검색에 누락된(exposed===false) 글 = 고칠 대상 (최대 10개). ★logNo까지 들고 있어야 나중에 제목변경 버튼이 활성화됨
-    const missingChecks = checks.filter(c => c.exposed === false).slice(0, 10);
+    // 검색에 누락된(exposed===false) 글 = 고칠 대상. ★한 번에 10개씩(AI 응답 안정·한도). '더 받기'면 이미 받은 다음부터.
+    const allMissing = checks.filter(c => c.exposed === false);
+    const start = append ? (scSolutions?.length || 0) : 0;
+    const missingChecks = allMissing.slice(start, start + 10);
     const missing = missingChecks.map(c => c.title);
-    if (!missing.length) return alert("검색에 누락된 글이 없어요. (개선이 급한 글이 없다는 좋은 신호예요!)");
+    if (!missing.length) return alert(append ? "더 받을 글이 없어요 — 누락된 글의 개선안을 모두 받았어요! 👍" : "검색에 누락된 글이 없어요. (개선이 급한 글이 없다는 좋은 신호예요!)");
     // ★내 블로그에서 실제로 검색 상위에 잡힌 성공 제목(순위 낮을수록 상위) = AI가 학습할 실전 성공 패턴
     const winners = checks.filter(c => c.exposed === true && c.rank != null).sort((a, b) => (a.rank! - b.rank!)).slice(0, 12).map(c => `${c.title} (검색 약 ${c.rank}위)`);
-    setScSolLoading(true); setScSolutions(null); setScSolPage(0);
-    addScLog(`✏️ AI 개선안 생성 중 — 누락 글 ${missing.length}개${winners.length ? ` (성공 제목 ${winners.length}개 패턴 학습)` : ""}...`);
+    setScSolLoading(true); if (!append) { setScSolutions(null); setScSolPage(0); }
+    addScLog(`✏️ AI 개선안 생성 중 — ${append ? "다음 " : ""}누락 글 ${missing.length}개${winners.length ? ` (성공 제목 ${winners.length}개 패턴 학습)` : ""}...`);
     const winnerBlock = winners.length
       ? `\n\n[⭐이 블로그에서 실제로 검색 상위에 잡힌 '성공 제목'들 — 반드시 이 패턴을 학습해서 반영]\n${winners.join("\n")}\n→ 위 성공 제목들의 공통 패턴(구체적 지명·제품명·상황·숫자·검색어 배치)을 분석해서, 아래 누락 제목을 '같은 블로그에서 통한 방식'으로 고쳐라. 일반론 말고 이 블로그에 실제로 통한 스타일로.`
       : "";
@@ -1319,13 +1354,14 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
         if (Array.isArray(arr) && arr.length) {
           // ★AI가 돌려준 original이 실제 제목과 미세하게 달라도(공백·재작성) logNo를 확실히 붙인다: 정확→정규화→순서 폴백
           const norm = (t: string) => t.replace(/\s+/g, "").toLowerCase();
-          setScSolutions(arr.map((x: any, idx: number) => {
+          const mapped = arr.map((x: any, idx: number) => {
             const aiOrig = String(x.original || "");
             const mc = missingChecks.find(c => c.title === aiOrig)
               || missingChecks.find(c => norm(c.title) === norm(aiOrig))
               || missingChecks[idx];   // 같은 순서로 생성되므로 마지막 폴백
             return { original: mc?.title || aiOrig, logNo: mc?.logNo || "", diagnosis: String(x.diagnosis || ""), newTitle: String(x.newTitle || ""), newTitle2: String(x.newTitle2 || ""), keywords: Array.isArray(x.keywords) ? x.keywords.map(String) : [], bodyTip: String(x.bodyTip || ""), expectedEffect: String(x.expectedEffect || ""), reason: String(x.reason || "") };
-          }));
+          });
+          setScSolutions(prev => append && prev ? [...prev, ...mapped] : mapped);   // ★'더 받기'면 기존에 누적
           setScSolLoading(false);
           addScLog(`✅ AI 개선안 ${arr.length}개 생성 완료 (${model})`);
           return;
@@ -2403,17 +2439,22 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
                   {/* ♻️ 오래된 글 재발행 알림 — 누적 저장분(순환 검사로 며칠에 걸쳐 전체 커버) + 기간 설정 */}
                   {(() => {
                     const now = Date.now();
+                    void rpTick;   // 🔄 새로고침 트리거(계정 바꾸거나 새로고침 누르면 다시 계산)
                     let store: Record<string, any> = {};
                     try { store = JSON.parse(localStorage.getItem("publy_republish_targets") || "{}"); } catch {}
+                    // ★현재 선택한 계정 것만 표시(계정 바뀌면 자동으로 그 계정 목록으로 — 다른 계정 글 섞임 방지)
+                    const abid = (activeAccount?.blogId || "").toLowerCase();
                     const list = Object.values(store).filter((t: any) => t.date && (now - new Date(t.date).getTime()) >= republishDays*86400000)
+                      .filter((t: any) => !abid || !t.blogId || String(t.blogId).toLowerCase() === abid)
                       .sort((a: any, b: any) => new Date(a.date).getTime() - new Date(b.date).getTime());
                     return (
                       <div style={{ marginBottom: 20, padding: "16px", borderRadius: 14, background: "rgba(245,158,11,.08)", border: "1.5px solid rgba(245,158,11,.4)" }}>
                         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap", marginBottom: 6 }}>
                           <div style={{ fontSize: 14, fontWeight: 850, color: "#f59e0b" }}>♻️ 오래된 글 재발행 추천 <span style={{ fontSize: 11, fontWeight: 700, color: "var(--text3)" }}>{list.length}개</span></div>
-                          {/* 기간 설정 */}
+                          {/* 새로고침 + 기간 설정 */}
                           <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
-                            <span style={{ fontSize: 10.5, color: "var(--text3)", fontWeight: 700 }}>기준</span>
+                            <button onClick={() => setRpTick(t => t + 1)} title="목록 새로고침(계정 바꾼 뒤 눌러요)" style={{ padding: "3px 9px", borderRadius: 7, border: "1.5px solid var(--border)", background: "transparent", color: "var(--text3)", cursor: "pointer", fontSize: 10.5, fontWeight: 800, fontFamily: "inherit" }}>🔄 새로고침</button>
+                            <span style={{ fontSize: 10.5, color: "var(--text3)", fontWeight: 700, marginLeft: 4 }}>기준</span>
                             {[15,30,60,90].map(d => (
                               <button key={d} onClick={() => { setRepublishDays(d); localStorage.setItem("publy_republish_days", String(d)); }}
                                 style={{ padding: "3px 8px", borderRadius: 7, border: `1.5px solid ${republishDays===d?"#f59e0b":"var(--border)"}`, background: republishDays===d?"rgba(245,158,11,.15)":"transparent", color: republishDays===d?"#f59e0b":"var(--text3)", cursor: "pointer", fontSize: 10.5, fontWeight: 800, fontFamily: "inherit" }}>{d}일</button>
@@ -2424,16 +2465,27 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
                         {list.length === 0
                           ? <div style={{ fontSize: 12, color: "var(--text3)" }}>아직 재발행 대상이 없어요. 위에서 검색노출 검사를 하면 {republishDays}일+ 미노출 글이 여기 모여요.</div>
                           : <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
-                              {list.slice(0, 12).map((c: any, i) => {
+                              {list.slice(0, republishShow).map((c: any, i) => {
                                 const days = Math.floor((now - new Date(c.date).getTime())/86400000);
+                                const busy = rpBusyLog === c.logNo;
+                                const overLimit = !isUnlimitedPlan && titleEditUsed >= titleEditLimit;
                                 return (
                                   <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 12px", borderRadius: 10, background: "var(--bg)", border: "1px solid var(--border)" }}>
                                     <span style={{ fontSize: 13 }}>⏳</span>
                                     <span style={{ flex: 1, minWidth: 0, fontSize: 12.5, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.title}</span>
                                     <span style={{ fontSize: 10.5, color: "#f59e0b", fontWeight: 800, whiteSpace: "nowrap" }}>{days}일째 미노출</span>
+                                    <button onClick={() => handleRepublishOne(c)} disabled={busy || overLimit || !!titleEditingKey || !c.logNo}
+                                      style={{ flexShrink: 0, padding: "6px 11px", borderRadius: 8, border: "none", background: (busy || overLimit || !c.logNo) ? "#8a8a99" : "#f59e0b", color: "#fff", fontSize: 11, fontWeight: 800, cursor: (busy || overLimit || titleEditingKey || !c.logNo) ? "not-allowed" : "pointer", fontFamily: "inherit", whiteSpace: "nowrap", opacity: (busy || overLimit || !c.logNo) ? .6 : 1 }}>
+                                      {busy ? "새 제목 만드는 중..." : "✏️ 제목 바꾸기"}
+                                    </button>
                                   </div>
                                 );
                               })}
+                              {list.length > republishShow && (
+                                <button onClick={() => setRepublishShow(v => v + 12)} style={{ padding: "9px", borderRadius: 10, border: "1px dashed var(--border)", background: "transparent", color: "var(--text2)", cursor: "pointer", fontSize: 12, fontWeight: 700, fontFamily: "inherit" }}>
+                                  ⬇️ {Math.min(12, list.length - republishShow)}개 더 보기 (남은 {list.length - republishShow}개)
+                                </button>
+                              )}
                             </div>}
                       </div>
                     );
@@ -2447,7 +2499,7 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
                           <div style={{ fontSize: 14, fontWeight: 850, color: "#a855f7" }}>✏️ 제목·키워드 살리기 솔루션</div>
                           <div style={{ fontSize: 11.5, color: "var(--text2)", marginTop: 3, fontWeight: 500 }}>검색에 안 뜨는 글의 제목·키워드를 <b style={{color:"#ff5fa2"}}>AI가 상위노출용으로 고쳐</b>드려요.</div>
                         </div>
-                        <button onClick={handleGetSolutions} disabled={scSolLoading} style={{ padding: "10px 16px", borderRadius: 10, border: "none", background: scSolLoading ? "var(--card2)" : "linear-gradient(135deg,#8b5cf6,#a855f7)", color: scSolLoading ? "var(--text2)" : "#fff", cursor: scSolLoading ? "default" : "pointer", fontSize: 12.5, fontWeight: 800, fontFamily: "inherit", flexShrink: 0 }}>
+                        <button onClick={() => handleGetSolutions(false)} disabled={scSolLoading} style={{ padding: "10px 16px", borderRadius: 10, border: "none", background: scSolLoading ? "var(--card2)" : "linear-gradient(135deg,#8b5cf6,#a855f7)", color: scSolLoading ? "var(--text2)" : "#fff", cursor: scSolLoading ? "default" : "pointer", fontSize: 12.5, fontWeight: 800, fontFamily: "inherit", flexShrink: 0 }}>
                           {scSolLoading ? "AI 분석 중..." : "✨ 개선안 받기"}
                         </button>
                       </div>
@@ -2507,6 +2559,16 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
                               <button onClick={() => setScSolPage(Math.min(totalPages - 1, page + 1))} disabled={page >= totalPages - 1} style={{ padding: "7px 14px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--bg)", color: page >= totalPages - 1 ? "var(--text3)" : "var(--text2)", cursor: page >= totalPages - 1 ? "default" : "pointer", fontSize: 12, fontWeight: 700, fontFamily: "inherit" }}>다음 →</button>
                             </div>
                           )}
+                          {(() => {
+                            const totalMissing = (scResult?.exposureChecks || []).filter(c => c.exposed === false).length;
+                            const remain = totalMissing - scSolutions.length;
+                            return remain > 0 ? (
+                              <button onClick={() => handleGetSolutions(true)} disabled={scSolLoading}
+                                style={{ padding: "11px", borderRadius: 10, border: "1.5px dashed #a855f7", background: "rgba(139,92,246,.08)", color: "#a855f7", cursor: scSolLoading ? "default" : "pointer", fontSize: 12.5, fontWeight: 800, fontFamily: "inherit" }}>
+                                {scSolLoading ? "AI 개선안 만드는 중..." : `➕ 개선안 ${Math.min(10, remain)}개 더 받기 (아직 ${remain}개 남음)`}
+                              </button>
+                            ) : null;
+                          })()}
                           <div style={{ fontSize: 10.5, color: "var(--text3)", lineHeight: 1.5 }}>AI 제안이에요. 내 블로그에서 실제로 검색 상위에 오른 제목 패턴을 학습해 만든 처방이라, 참고해서 제목·본문을 다듬으면 노출에 도움이 돼요.</div>
                         </div>
                         );
