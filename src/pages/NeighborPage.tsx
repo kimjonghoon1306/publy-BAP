@@ -465,7 +465,38 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
   const [rMyPosts, setRMyPosts] = useState<{url:string;title:string;date:string;comments?:number}[]>([]); // 불러온 내 글 목록
   const [rLoadingPosts, setRLoadingPosts] = useState(false);
   const [rMode, setRMode] = useState<"ai"|"fixed">("ai");
-  const [rComment, setRComment] = useState("댓글 감사합니다 😊 자주 놀러오세요!");
+  const [rComment, setRComment] = useState(
+    "댓글 감사합니다 😊 자주 놀러오세요!\n" +
+    "방문해주셔서 감사해요, 좋은 하루 보내세요!\n" +
+    "따뜻한 댓글 남겨주셔서 고맙습니다 🙏\n" +
+    "들러주셔서 감사해요, 또 뵈어요~\n" +
+    "소중한 댓글 감사합니다, 힘이 나네요!\n" +
+    "읽어주시고 댓글까지 정말 감사해요 😊\n" +
+    "공감해주셔서 감사합니다, 반가웠어요!\n" +
+    "관심 가져주셔서 고마워요, 또 들러주세요!\n" +
+    "응원 감사합니다, 더 좋은 글로 보답할게요!\n" +
+    "댓글 보고 미소 지었어요, 고맙습니다 😊\n" +
+    "함께해주셔서 감사해요, 자주 소통해요!\n" +
+    "오늘도 좋은 하루 보내세요, 댓글 고마워요!\n" +
+    "덕분에 기운이 나네요, 감사합니다!\n" +
+    "정성스러운 댓글 감사해요, 행복한 하루 되세요!\n" +
+    "이렇게 와주시니 반갑네요, 종종 놀러오세요!\n" +
+    "댓글 하나하나 큰 힘이 돼요, 고맙습니다 🙏\n" +
+    "방문 감사드려요, 좋은 인연 이어가요~\n" +
+    "따뜻한 한마디에 하루가 밝아지네요, 감사해요!\n" +
+    "잘 보고 가신다니 저도 기뻐요, 고맙습니다 😊\n" +
+    "바쁘실 텐데 들러주셔서 감사해요!\n" +
+    "좋게 봐주셔서 감사합니다, 자주 뵐게요!\n" +
+    "댓글 남겨주셔서 감사해요, 편안한 하루 보내세요!\n" +
+    "반가운 댓글 고맙습니다, 또 소통해요~\n" +
+    "관심과 응원 감사해요, 늘 건강하세요!\n" +
+    "덕분에 블로그 하는 재미가 나요, 고맙습니다 😊\n" +
+    "방문해주신 것만으로 감사한데 댓글까지, 감동이에요!\n" +
+    "좋은 하루 보내시고 또 놀러오세요, 감사합니다!\n" +
+    "따뜻한 관심 감사드려요, 행복 가득한 하루 되세요!\n" +
+    "댓글 정말 감사해요, 다음 글도 기대해주세요!\n" +
+    "함께 소통할 수 있어 기뻐요, 고맙습니다 🙏"
+  );
   const [rTone, setRTone] = useState<"담백"|"다정"|"짧게">("다정");
   const [rOnlyNew, setROnlyNew] = useState(true);          // 아직 답글 없는 댓글만
   const [rDelayMin, setRDelayMin] = useState(5);
@@ -506,6 +537,8 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
   // ★재발행 알림: 기간 설정(기본 30일) + 누적 대상(localStorage). 재설치돼도 발행이력(서버)은 안전, 이 캐시만 재검사로 복구.
   const [republishDays, setRepublishDays] = useState<number>(()=>{ const v=parseInt(localStorage.getItem("publy_republish_days")||"30",10); return Number.isFinite(v)?v:30; });
   const [rpBusyLog, setRpBusyLog] = useState<string>("");   // 재발행 목록에서 지금 제목 바꾸는 중인 글의 logNo
+  // 재발행 목록에서 글별로 받은 개선안(제목1·2+진단·키워드·팁) — logNo → 솔루션
+  const [rpSolutions, setRpSolutions] = useState<Record<string, { original: string; logNo: string; diagnosis: string; newTitle: string; newTitle2: string; keywords: string[]; bodyTip: string; expectedEffect: string }>>({});
   const [rpTick, setRpTick] = useState(0);                   // 재발행 목록 새로고침 트리거
   const [republishShow, setRepublishShow] = useState(12);   // 재발행 목록 몇 개까지 보이기(더 보기)
   const [scSolPage, setScSolPage] = useState(0);   // AI 팁 페이지네이션(5개 단위)
@@ -1199,34 +1232,40 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
       .then(d => { if (d.ok) { setTitleEditUsed(d.used); setTitleEditLimit(d.limit); } }).catch(() => {});
   }, [tab, userId]);
 
-  /* 재발행 목록에서 '지금 바로' 제목 바꾸기 — 그 글 하나만 AI로 새 제목 1개 생성 → 확인 → 변경·재발행 */
+  /* 재발행 목록에서 '지금 바로' 개선안 받기 — 그 글 하나만 AI로 제목1·2 + 진단·키워드·본문팁 생성 →
+     글 아래에 펼쳐 보여주고, 둘 중 골라 '제목 변경하러 가기'로 변경. (재발행 흐름 + 개선안 풍부함을 합침) */
   const handleRepublishOne = async (item: { title: string; logNo?: string; blogId?: string }) => {
     if (!activeAccount) return alert("먼저 계정을 연결하세요");
     if (!item.logNo) return alert("이 글의 번호를 못 찾았어요. '검색노출 검사'를 다시 한 번 해주세요.");
     const key = localStorage.getItem("publy_gemini_key") || "";
     if (!key) return alert("AI 제목 추천은 무료 Gemini 키가 필요해요. 설정 → 글쓰기 AI에서 등록해주세요.");
-    if (!isUnlimitedPlan && titleEditUsed >= titleEditLimit) return alert(`오늘 제목 수정 한도(${titleEditLimit}회)를 모두 사용했어요. 자정에 초기화됩니다.`);
     setRpBusyLog(item.logNo);
-    addScLog(`✏️ "${item.title.slice(0, 22)}" 새 제목 만드는 중...`);
-    // ★살아있는 Gemini 모델(폐기된 2.0/1.5 제외)로 새 제목 1개 생성
+    addScLog(`✏️ "${item.title.slice(0, 22)}" 개선안 만드는 중...`);
+    // ★내 블로그에서 실제로 검색 상위에 잡힌 성공 제목 = AI가 학습할 실전 패턴(개선안 섹션과 동일 방식)
+    const winners = (scResult?.exposureChecks || []).filter(c => c.exposed === true && (c as any).rank != null)
+      .sort((a: any, b: any) => a.rank - b.rank).slice(0, 8).map((c: any) => `${c.title} (검색 약 ${c.rank}위)`);
+    const winnerBlock = winners.length ? `\n\n[⭐이 블로그에서 실제로 검색 상위에 잡힌 '성공 제목'들 — 이 패턴을 학습해 반영]\n${winners.join("\n")}` : "";
     const models = ["gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-flash-latest", "gemini-flash-lite-latest"];
-    const prompt = `너는 네이버 블로그 상위노출(SEO) 전문가야. 아래 글은 검색에 안 뜨고 있어. 검색에 잘 잡히게 제목을 딱 1개만 새로 지어줘.\n규칙: 사람들이 실제로 검색하는 말(지명+대상+상황)을 앞에 배치, 25~35자, 과장·감탄사(대박/충격/완벽/진짜) 금지, 따옴표·설명 없이 제목만 한 줄로 출력.\n\n[원래 제목]\n${item.title}`;
-    let newTitle = "";
+    const prompt = `너는 네이버 블로그 상위노출(SEO) 전문가야. 아래 글은 검색에 안 뜨고 있어(누락). 이 제목을 검색에 잘 잡히게 정교하게 고쳐줘.${winnerBlock}\n\n아래 JSON 형식으로만 답해. 다른 말 절대 금지. 순수 JSON만:\n{"diagnosis":"이 제목이 왜 검색 안 되는지 핵심 원인 1문장","newTitle":"개선안1 (실제 검색어를 앞에 배치, 25~35자, 구체적)","newTitle2":"개선안2 (newTitle과 검색어·각도·타겟을 확실히 다르게 한 대안, 반드시 채워라)","keywords":["본문에 넣을 실제 검색 키워드5개"],"bodyTip":"본문/태그를 어떻게 손보면 좋은지 실전 팁 1문장","expectedEffect":"이렇게 바꾸면 기대되는 효과 1문장"}\n[규칙] 과장·감탄사(대박/충격/완벽/진짜/1등) 금지. 사람들이 진짜 네이버에 치는 검색어(지명+대상+상황) 형태. newTitle2는 절대 비우지 마라(항상 제목 2개).\n\n[원래 제목]\n${item.title}`;
+    let sol: any = null;
     for (const model of models) {
       try {
-        const gc: any = { maxOutputTokens: 120, temperature: 0.9 };
+        const gc: any = { maxOutputTokens: 2000, temperature: 0.8, responseMimeType: "application/json" };
         if (model.includes("2.5")) gc.thinkingConfig = { thinkingBudget: 0 };
         const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }], generationConfig: gc }) });
         const d: any = await r.json();
         if (!r.ok) continue;
-        const t = (d?.candidates?.[0]?.content?.parts?.[0]?.text || "").trim().replace(/^["'\s]+|["'\s]+$/g, "").split("\n")[0].slice(0, 60);
-        if (t.length >= 6) { newTitle = t; break; }
+        let txt = (d?.candidates?.[0]?.content?.parts?.[0]?.text || "").trim().replace(/^```json\s*/i, "").replace(/^```\s*/i, "").replace(/```\s*$/i, "").trim();
+        const s = txt.indexOf("{"), e = txt.lastIndexOf("}");
+        if (s >= 0 && e > s) txt = txt.slice(s, e + 1);
+        const x = JSON.parse(txt);
+        if (x?.newTitle) { sol = { original: item.title, logNo: item.logNo, diagnosis: String(x.diagnosis || ""), newTitle: String(x.newTitle || ""), newTitle2: String(x.newTitle2 || ""), keywords: Array.isArray(x.keywords) ? x.keywords.map(String) : [], bodyTip: String(x.bodyTip || ""), expectedEffect: String(x.expectedEffect || "") }; break; }
       } catch {}
     }
     setRpBusyLog("");
-    if (!newTitle) { addScLog("❌ 새 제목 생성 실패 (잠시 후 다시 시도)"); return alert("새 제목 생성에 실패했어요. 잠시 후 다시 시도해주세요."); }
-    // handleApplyTitle이 확인창(confirm) + 실제 변경까지 처리
-    await handleApplyTitle(item.title, newTitle, `rp-${item.logNo}`, item.logNo);
+    if (!sol) { addScLog("❌ 개선안 생성 실패 (잠시 후 다시 시도)"); return alert("개선안 생성에 실패했어요. 잠시 후 다시 시도해주세요."); }
+    addScLog(`✅ "${item.title.slice(0, 16)}" 개선안 완성 — 제목 2개 제안`);
+    setRpSolutions(prev => ({ ...prev, [item.logNo!]: sol }));   // 이 글 아래에 펼쳐 보여줌
   };
 
   /* 개선 제목 → 실제 글 제목 자동 변경(재발행) */
@@ -1321,16 +1360,16 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
   };
 
   /* 저품질/누락 글 제목·키워드 개선 솔루션 (AI) */
-  const handleGetSolutions = async (append = false) => {
+  const handleGetSolutions = async (append = false, silent = false): Promise<number> => {
     const key = (localStorage.getItem("publy_gemini_key") || "");
-    if (!key) return alert("제목·키워드 개선 솔루션은 무료 Gemini 키가 필요해요.\n설정 → 글쓰기 AI에서 Gemini 키를 먼저 등록해주세요.");
+    if (!key) { if (!silent) alert("제목·키워드 개선 솔루션은 무료 Gemini 키가 필요해요.\n설정 → 글쓰기 AI에서 Gemini 키를 먼저 등록해주세요."); return 0; }
     const checks = scResult?.exposureChecks || [];
     // 검색에 누락된(exposed===false) 글 = 고칠 대상. ★한 번에 10개씩(AI 응답 안정·한도). '더 받기'면 이미 받은 다음부터.
     const allMissing = checks.filter(c => c.exposed === false);
     const start = append ? (scSolutions?.length || 0) : 0;
     const missingChecks = allMissing.slice(start, start + 10);
     const missing = missingChecks.map(c => c.title);
-    if (!missing.length) return alert(append ? "더 받을 글이 없어요 — 누락된 글의 개선안을 모두 받았어요! 👍" : "검색에 누락된 글이 없어요. (개선이 급한 글이 없다는 좋은 신호예요!)");
+    if (!missing.length) { if (!silent) alert(append ? "더 받을 글이 없어요 — 누락된 글의 개선안을 모두 받았어요! 👍" : "검색에 누락된 글이 없어요. (개선이 급한 글이 없다는 좋은 신호예요!)"); return 0; }
     // ★내 블로그에서 실제로 검색 상위에 잡힌 성공 제목(순위 낮을수록 상위) = AI가 학습할 실전 성공 패턴
     const winners = checks.filter(c => c.exposed === true && c.rank != null).sort((a, b) => (a.rank! - b.rank!)).slice(0, 12).map(c => `${c.title} (검색 약 ${c.rank}위)`);
     setScSolLoading(true); if (!append) { setScSolutions(null); setScSolPage(0); }
@@ -1338,7 +1377,7 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
     const winnerBlock = winners.length
       ? `\n\n[⭐이 블로그에서 실제로 검색 상위에 잡힌 '성공 제목'들 — 반드시 이 패턴을 학습해서 반영]\n${winners.join("\n")}\n→ 위 성공 제목들의 공통 패턴(구체적 지명·제품명·상황·숫자·검색어 배치)을 분석해서, 아래 누락 제목을 '같은 블로그에서 통한 방식'으로 고쳐라. 일반론 말고 이 블로그에 실제로 통한 스타일로.`
       : "";
-    const prompt = `너는 네이버 블로그 상위노출(SEO) 전문가야. 이 블로그의 아래 글들은 네이버 검색에 노출이 안 되고 있어(누락). 각 제목을 검색에 잘 잡히게 정교하게 고쳐줘.${winnerBlock}\n\n각 누락 제목마다 아래 JSON 형식으로만 답해. 다른 말 절대 금지. 순수 JSON 배열만:\n[{"original":"원래제목","diagnosis":"이 제목이 왜 검색 안 되는지 핵심 원인 1문장(과장/낚시/검색어없음/너무추상 등)","newTitle":"개선안1 (실제 검색어를 앞에 배치, 25~35자, 구체적)","newTitle2":"개선안2 (다른 각도의 대안)","keywords":["이 글 본문에 넣을 실제 검색 키워드5개"],"bodyTip":"본문/태그를 어떻게 손보면 좋은지 실전 팁 1문장","expectedEffect":"이렇게 바꾸면 기대되는 효과 1문장"}]\n\n[핵심 규칙]\n- newTitle: 사람들이 진짜 네이버에 치는 검색어(지명+대상+상황) 형태. 과장·감탄사(대박/진짜/1등/충격) 절대 금지.\n- 위 '성공 제목' 패턴이 있으면 그 스타일을 최대한 따라라.\n- keywords: 검색량 있을 법한 구체 키워드 5개(롱테일 포함).\n- 모든 답변은 실행 가능하고 구체적으로. 뻔한 일반론 금지.\n\n[누락 제목들]\n${missing.map((t, i) => `${i + 1}. ${t}`).join("\n")}`;
+    const prompt = `너는 네이버 블로그 상위노출(SEO) 전문가야. 이 블로그의 아래 글들은 네이버 검색에 노출이 안 되고 있어(누락). 각 제목을 검색에 잘 잡히게 정교하게 고쳐줘.${winnerBlock}\n\n각 누락 제목마다 아래 JSON 형식으로만 답해. 다른 말 절대 금지. 순수 JSON 배열만:\n[{"original":"원래제목","diagnosis":"이 제목이 왜 검색 안 되는지 핵심 원인 1문장(과장/낚시/검색어없음/너무추상 등)","newTitle":"개선안1 (실제 검색어를 앞에 배치, 25~35자, 구체적)","newTitle2":"개선안2 (다른 각도의 대안)","keywords":["이 글 본문에 넣을 실제 검색 키워드5개"],"bodyTip":"본문/태그를 어떻게 손보면 좋은지 실전 팁 1문장","expectedEffect":"이렇게 바꾸면 기대되는 효과 1문장"}]\n\n[핵심 규칙]\n- newTitle: 사람들이 진짜 네이버에 치는 검색어(지명+대상+상황) 형태. 과장·감탄사(대박/진짜/1등/충격) 절대 금지.\n- ★newTitle2는 반드시 채워라(절대 비우지 마라). newTitle과 검색어·각도·타겟을 확실히 다르게 한 두 번째 대안을 꼭 제시해서, 항상 제목 2개를 준다.\n- 위 '성공 제목' 패턴이 있으면 그 스타일을 최대한 따라라.\n- keywords: 검색량 있을 법한 구체 키워드 5개(롱테일 포함).\n- 모든 답변은 실행 가능하고 구체적으로. 뻔한 일반론 금지.\n\n[누락 제목들]\n${missing.map((t, i) => `${i + 1}. ${t}`).join("\n")}`;
     // 2.0-flash 우선(thinking 토큰 안 먹어 JSON 안정적). 토큰 넉넉히(8000)+JSON 강제로 응답 잘림·설명 섞임 방지.
     // ★실검증(2026-08-24): gemini-2.0-flash·2.0-flash-lite·1.5-flash는 구글이 폐기(404). 살아있는 모델만 사용.
     //   각 모델은 한도가 별도라, 2.5-flash가 한도 차도 다음 모델(2.5-flash-lite 등, 한도 남음)로 넘어가 성공한다.
@@ -1371,14 +1410,36 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
           setScSolutions(prev => append && prev ? [...prev, ...mapped] : mapped);   // ★'더 받기'면 기존에 누적
           setScSolLoading(false);
           addScLog(`✅ AI 개선안 ${arr.length}개 생성 완료 (${model})`);
-          return;
+          return arr.length;   // 성공: 생성 개수 반환(전체받기가 이어서 판단)
         }
       } catch (e: any) { lastErr = e.message; }
     }
     setScSolLoading(false);
     addScLog(`❌ AI 개선안 생성 실패: ${lastErr || "응답 형식 오류"}`);
-    alert("솔루션 생성에 실패했어요. 잠시 후 다시 시도해주세요.\n(" + (lastErr || "응답 형식 오류") + ")");
-    setScSolLoading(false);
+    if (!silent) alert("솔루션 생성에 실패했어요. 잠시 후 다시 시도해주세요.\n(" + (lastErr || "응답 형식 오류") + ")");
+    return 0;   // 실패
+  };
+
+  /* 전체 개선안 한 번에 받기 — 누락 글 전부를 10개씩 자동 반복 호출해 모두 채운다(C안). */
+  const [scSolAll, setScSolAll] = useState(false);   // 전체받기 진행중
+  const handleGetAllSolutions = async () => {
+    const key = (localStorage.getItem("publy_gemini_key") || "");
+    if (!key) return alert("제목·키워드 개선 솔루션은 무료 Gemini 키가 필요해요.\n설정 → 글쓰기 AI에서 Gemini 키를 먼저 등록해주세요.");
+    const total = (scResult?.exposureChecks || []).filter(c => c.exposed === false).length;
+    if (!total) return alert("검색에 누락된 글이 없어요. (개선이 급한 글이 없다는 좋은 신호예요!)");
+    setScSolAll(true);
+    addScLog(`🚀 전체 개선안 받기 시작 — 누락 글 ${total}개 (10개씩 자동 진행)`);
+    // 첫 배치는 새로, 이후는 append. 안전장치: 최대 total/10 + 2회
+    let done = false;
+    for (let i = 0; i < Math.ceil(total / 10) + 2 && !done; i++) {
+      const got = await handleGetSolutions(i > 0, true);   // silent=true(중간 팝업 없음)
+      // 현재까지 받은 개수를 함수형으로 확인
+      await new Promise<void>(res => setScSolutions(prev => { if ((prev?.length || 0) >= total || !got) done = true; res(); return prev; }));
+      if (!got) { addScLog("⚠️ 한도·오류로 잠시 멈췄어요. 잠시 후 '더 받기'로 이어서 받을 수 있어요."); break; }
+      await new Promise(r => setTimeout(r, 400));   // API 부담 완화
+    }
+    setScSolAll(false);
+    addScLog(`✅ 전체 개선안 받기 완료`);
   };
 
   /* CSV 저장 */
@@ -2152,8 +2213,8 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
                 </div>
               ) : (
                 <div style={{ marginBottom: 12 }}>
-                  <textarea className="inp" rows={3} value={rComment} onChange={e => setRComment(e.target.value)} style={{ resize: "vertical", fontSize: 13, lineHeight: 1.7, padding: "12px 14px" }} placeholder="댓글 감사합니다 😊 자주 놀러오세요!" />
-                  <div style={{ fontSize: 12, color: "var(--text2)", marginTop: 6, lineHeight: 1.55, fontWeight: 500 }}>💡 모든 댓글에 이 문구로 답합니다. (똑같은 답글 반복이 걱정되면 위 <b style={{color:"#ff5fa2"}}>'✨ AI 자동'</b>을 추천해요)</div>
+                  <textarea className="inp" rows={8} value={rComment} onChange={e => setRComment(e.target.value)} style={{ resize: "vertical", fontSize: 13, lineHeight: 1.7, padding: "12px 14px" }} placeholder="한 줄에 하나씩 인사말을 적어주세요 (여러 개면 랜덤으로 번갈아 답해요)" />
+                  <div style={{ fontSize: 12, color: "var(--text2)", marginTop: 6, lineHeight: 1.55, fontWeight: 500 }}>💡 <b>한 줄에 하나씩</b> 여러 개(기본 30개) 넣으면, 댓글마다 <b style={{color:"#00c896"}}>랜덤으로 골라</b> 답해서 똑같은 답글 반복을 피해요. 필요없는 줄은 지우고 원하는 문구로 바꿔도 돼요. (더 정교한 맞춤 답글은 위 <b style={{color:"#ff5fa2"}}>'✨ AI 자동'</b>)</div>
                 </div>
               )}
 
@@ -2322,10 +2383,11 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
               // ★KST 달력 날짜 기준 경과일(자정 넘으면 바로 +1일). 경과 '시간'이 아니라 '날짜 차이'로 계산.
               const kstDayNum = (ms: number) => Math.floor((ms + 9 * 3600000) / 86400000);
               const todayNum = kstDayNum(now);
-              const dayNumOf = (d: string) => kstDayNum(new Date(`${d}T00:00:00+09:00`).getTime());
-              const dates = [...(scResult.recentDates || [])].sort().reverse();
-              const recent30 = dates.filter(d => (todayNum - dayNumOf(d)) <= 30).length;
-              const lastDaysAgo = dates.length ? (todayNum - dayNumOf(dates[0])) : 999;
+              // ★파싱 안 되는 날짜(상대시간 등)가 섞이면 NaN → 봇(crawlBlogStats)과 동일하게 유효 날짜만 거른다.
+              const dayNumOf = (d: string) => { const t = new Date(`${d}T00:00:00+09:00`).getTime(); return Number.isFinite(t) ? kstDayNum(t) : NaN; };
+              const dayNums = (scResult.recentDates || []).map(dayNumOf).filter(n => Number.isFinite(n)).sort((a, b) => b - a);
+              const recent30 = dayNums.filter(n => (todayNum - n) <= 30).length;
+              const lastDaysAgo = dayNums.length ? (todayNum - dayNums[0]) : 999;
               // 점수(0~100): 글수·이웃·최근발행·활동성 가중
               const sPost = Math.min(30, (scResult.totalPosts / 100) * 30);
               const sNbr = Math.min(25, (scResult.neighbors / 1000) * 25);
@@ -2476,15 +2538,49 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
                                 const days = Math.floor((now - new Date(c.date).getTime())/86400000);
                                 const busy = rpBusyLog === c.logNo;
                                 const overLimit = !isUnlimitedPlan && titleEditUsed >= titleEditLimit;
+                                const rpSol = c.logNo ? rpSolutions[c.logNo] : null;
                                 return (
-                                  <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 12px", borderRadius: 10, background: "var(--bg)", border: "1px solid var(--border)" }}>
-                                    <span style={{ fontSize: 13 }}>⏳</span>
-                                    <span style={{ flex: 1, minWidth: 0, fontSize: 12.5, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.title}</span>
-                                    <span style={{ fontSize: 10.5, color: "#f59e0b", fontWeight: 800, whiteSpace: "nowrap" }}>{days}일째 미노출</span>
-                                    <button onClick={() => handleRepublishOne(c)} disabled={busy || overLimit || !!titleEditingKey || !c.logNo}
-                                      style={{ flexShrink: 0, padding: "6px 11px", borderRadius: 8, border: "none", background: (busy || overLimit || !c.logNo) ? "#8a8a99" : "#f59e0b", color: "#fff", fontSize: 11, fontWeight: 800, cursor: (busy || overLimit || titleEditingKey || !c.logNo) ? "not-allowed" : "pointer", fontFamily: "inherit", whiteSpace: "nowrap", opacity: (busy || overLimit || !c.logNo) ? .6 : 1 }}>
-                                      {busy ? "새 제목 만드는 중..." : "✏️ 제목 바꾸기"}
-                                    </button>
+                                  <div key={i} style={{ background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 10, overflow: "hidden" }}>
+                                    <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 12px" }}>
+                                      <span style={{ fontSize: 13 }}>⏳</span>
+                                      <span style={{ flex: 1, minWidth: 0, fontSize: 12.5, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.title}</span>
+                                      <span style={{ fontSize: 10.5, color: "#f59e0b", fontWeight: 800, whiteSpace: "nowrap" }}>{days}일째 미노출</span>
+                                      <button onClick={() => handleRepublishOne(c)} disabled={busy || !!titleEditingKey || !c.logNo}
+                                        style={{ flexShrink: 0, padding: "6px 11px", borderRadius: 8, border: "none", background: (busy || !c.logNo) ? "#8a8a99" : "#f59e0b", color: "#fff", fontSize: 11, fontWeight: 800, cursor: (busy || titleEditingKey || !c.logNo) ? "not-allowed" : "pointer", fontFamily: "inherit", whiteSpace: "nowrap", opacity: (busy || !c.logNo) ? .6 : 1 }}>
+                                        {busy ? "개선안 만드는 중..." : rpSol ? "🔄 다시 받기" : "✏️ 개선안 받기"}
+                                      </button>
+                                    </div>
+                                    {rpSol && (() => {
+                                      const ApplyBtn = ({ nt, k }: { nt: string; k: string }) => (
+                                        <button onClick={() => handleApplyTitle(rpSol.original, nt, k, rpSol.logNo)} disabled={overLimit || !!titleEditingKey}
+                                          style={{ flexShrink: 0, padding: "7px 12px", borderRadius: 8, border: "none", background: overLimit ? "#8a8a99" : "#00c896", color: "#fff", fontSize: 11.5, fontWeight: 800, cursor: (overLimit || titleEditingKey) ? "not-allowed" : "pointer", fontFamily: "inherit", whiteSpace: "nowrap", opacity: overLimit ? .6 : 1 }}>
+                                          {titleEditingKey === k ? "변경 중..." : "제목 변경하러 가기"}
+                                        </button>
+                                      );
+                                      return (
+                                        <div style={{ padding: "12px", borderTop: "1px solid var(--border)", background: "rgba(139,92,246,.05)" }}>
+                                          {rpSol.diagnosis && <div style={{ fontSize: 11.5, color: "#ff5fa2", fontWeight: 600, marginBottom: 10, lineHeight: 1.5 }}>🔍 {rpSol.diagnosis}</div>}
+                                          <div style={{ fontSize: 11, color: "#00c896", fontWeight: 800, marginBottom: 4 }}>✅ 개선 제목 1</div>
+                                          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: rpSol.newTitle2 ? 10 : 11, flexWrap: "wrap" }}>
+                                            <div style={{ flex: "1 1 180px", minWidth: 0, fontSize: 14, fontWeight: 800, color: "var(--text)", lineHeight: 1.4 }}>{rpSol.newTitle}</div>
+                                            <ApplyBtn nt={rpSol.newTitle} k={`rp-${rpSol.logNo}-1`} />
+                                          </div>
+                                          {rpSol.newTitle2 && <>
+                                            <div style={{ fontSize: 11, color: "#00c896", fontWeight: 800, marginBottom: 4 }}>✅ 개선 제목 2</div>
+                                            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 11, flexWrap: "wrap" }}>
+                                              <div style={{ flex: "1 1 180px", minWidth: 0, fontSize: 13.5, fontWeight: 700, color: "var(--text2)", lineHeight: 1.4 }}>{rpSol.newTitle2}</div>
+                                              <ApplyBtn nt={rpSol.newTitle2} k={`rp-${rpSol.logNo}-2`} />
+                                            </div>
+                                          </>}
+                                          {rpSol.keywords.length > 0 && <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 8 }}>
+                                            {rpSol.keywords.map((k, j) => <span key={j} style={{ padding: "3px 9px", borderRadius: 20, background: "rgba(139,92,246,.12)", color: "#a855f7", fontSize: 11, fontWeight: 700 }}># {k}</span>)}
+                                          </div>}
+                                          {rpSol.bodyTip && <div style={{ fontSize: 11.5, color: "var(--text2)", lineHeight: 1.5, fontWeight: 500, marginBottom: 4 }}>✏️ <b>본문 팁</b> · {rpSol.bodyTip}</div>}
+                                          {rpSol.expectedEffect && <div style={{ fontSize: 11.5, color: "var(--text2)", lineHeight: 1.5, fontWeight: 500, padding: "7px 10px", borderRadius: 8, background: "rgba(0,200,150,.08)" }}>📈 <b style={{color:"#00c896"}}>기대 효과</b> · {rpSol.expectedEffect}</div>}
+                                          {overLimit && <div style={{ fontSize: 11, color: "#f59e0b", fontWeight: 700, marginTop: 8 }}>⚠️ 오늘 제목 수정 한도를 다 썼어요. 자정에 초기화돼요.</div>}
+                                        </div>
+                                      );
+                                    })()}
                                   </div>
                                 );
                               })}
@@ -2506,9 +2602,14 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
                           <div style={{ fontSize: 14, fontWeight: 850, color: "#a855f7" }}>✏️ 제목·키워드 살리기 솔루션</div>
                           <div style={{ fontSize: 11.5, color: "var(--text2)", marginTop: 3, fontWeight: 500 }}>검색에 안 뜨는 글의 제목·키워드를 <b style={{color:"#ff5fa2"}}>AI가 상위노출용으로 고쳐</b>드려요.</div>
                         </div>
-                        <button onClick={() => handleGetSolutions(false)} disabled={scSolLoading} style={{ padding: "10px 16px", borderRadius: 10, border: "none", background: scSolLoading ? "var(--card2)" : "linear-gradient(135deg,#8b5cf6,#a855f7)", color: scSolLoading ? "var(--text2)" : "#fff", cursor: scSolLoading ? "default" : "pointer", fontSize: 12.5, fontWeight: 800, fontFamily: "inherit", flexShrink: 0 }}>
-                          {scSolLoading ? "AI 분석 중..." : "✨ 개선안 받기"}
-                        </button>
+                        <div style={{ display: "flex", gap: 8, flexShrink: 0, flexWrap: "wrap" }}>
+                          <button onClick={() => handleGetSolutions(false)} disabled={scSolLoading || scSolAll} style={{ padding: "10px 16px", borderRadius: 10, border: "none", background: (scSolLoading||scSolAll) ? "var(--card2)" : "linear-gradient(135deg,#8b5cf6,#a855f7)", color: (scSolLoading||scSolAll) ? "var(--text2)" : "#fff", cursor: (scSolLoading||scSolAll) ? "default" : "pointer", fontSize: 12.5, fontWeight: 800, fontFamily: "inherit" }}>
+                            {scSolLoading && !scSolAll ? "AI 분석 중..." : "✨ 10개 받기"}
+                          </button>
+                          <button onClick={handleGetAllSolutions} disabled={scSolLoading || scSolAll} style={{ padding: "10px 16px", borderRadius: 10, border: "none", background: (scSolLoading||scSolAll) ? "var(--card2)" : "linear-gradient(135deg,#f59e0b,#ff5fa2)", color: (scSolLoading||scSolAll) ? "var(--text2)" : "#fff", cursor: (scSolLoading||scSolAll) ? "default" : "pointer", fontSize: 12.5, fontWeight: 800, fontFamily: "inherit", boxShadow: (scSolLoading||scSolAll) ? "none" : "0 3px 10px rgba(245,158,11,.35)" }}>
+                            {scSolAll ? "🚀 전체 받는 중..." : "🚀 전체 받기"}
+                          </button>
+                        </div>
                       </div>
                       {scSolutions && (() => {
                         const sq = scSolSearch.trim().toLowerCase();
@@ -2521,9 +2622,16 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
                           <div style={{ fontSize: 11.5, color: "var(--text3)", fontWeight: 600 }}>총 {scSolutions.length}개 글의 개선안 · {page + 1}/{totalPages} 페이지</div>
                           <input className="inp" value={scSolSearch} onChange={e => { setScSolSearch(e.target.value); setScSolPage(0); }} placeholder="🔍 원래 제목으로 검색..." style={{ fontSize: 12.5, padding: "9px 12px" }} />
                           {solFiltered.length === 0 && <div style={{ fontSize: 12, color: "var(--text3)", padding: "16px 0", textAlign: "center" }}>검색 결과가 없어요.</div>}
-                          {shown.map((s, i) => (
-                            <div key={i} style={{ padding: "15px 16px", borderRadius: 13, background: "var(--card)", border: "1px solid var(--border)" }}>
-                              <div style={{ fontSize: 12.5, color: "var(--text3)", textDecoration: "line-through", marginBottom: 6 }}>{s.original}</div>
+                          {shown.map((s, i) => {
+                            // 카드마다 색을 순환시켜 눈에 잘 띄게(왼쪽 컬러 바 + 살짝 톤)
+                            const palette = ["#8b5cf6", "#f59e0b", "#00c896", "#00b8d4", "#ff5fa2"];
+                            const accent = palette[(page * PER + i) % palette.length];
+                            return (
+                            <div key={i} style={{ padding: "15px 16px", borderRadius: 13, background: "var(--card)", border: "1px solid var(--border)", borderLeft: `4px solid ${accent}` }}>
+                              <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
+                                <span style={{ fontSize: 10.5, fontWeight: 900, color: "#fff", background: accent, borderRadius: 6, padding: "2px 7px" }}>{page * PER + i + 1}</span>
+                                <div style={{ flex: 1, minWidth: 0, fontSize: 12.5, color: "var(--text3)", textDecoration: "line-through", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.original}</div>
+                              </div>
                               {s.diagnosis && <div style={{ fontSize: 11.5, color: "#ff5fa2", fontWeight: 600, marginBottom: 11, lineHeight: 1.5 }}>🔍 {s.diagnosis}</div>}
                               {(() => {
                                 const hasLogNo = !!s.logNo || !!(scResult?.exposureChecks || []).find(c => c.title === s.original)?.logNo;
@@ -2558,7 +2666,7 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
                               {s.bodyTip && <div style={{ fontSize: 12, color: "var(--text2)", lineHeight: 1.55, fontWeight: 500, marginBottom: 6 }}>✏️ <b>본문 팁</b> · {s.bodyTip}</div>}
                               {s.expectedEffect && <div style={{ fontSize: 12, color: "var(--text2)", lineHeight: 1.55, fontWeight: 500, padding: "8px 11px", borderRadius: 9, background: "rgba(0,200,150,.08)" }}>📈 <b style={{color:"#00c896"}}>기대 효과</b> · {s.expectedEffect}</div>}
                             </div>
-                          ))}
+                          );})}
                           {totalPages > 1 && (
                             <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, marginTop: 4 }}>
                               <button onClick={() => setScSolPage(Math.max(0, page - 1))} disabled={page === 0} style={{ padding: "7px 14px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--bg)", color: page === 0 ? "var(--text3)" : "var(--text2)", cursor: page === 0 ? "default" : "pointer", fontSize: 12, fontWeight: 700, fontFamily: "inherit" }}>← 이전</button>
@@ -2569,12 +2677,30 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
                           {(() => {
                             const totalMissing = (scResult?.exposureChecks || []).filter(c => c.exposed === false).length;
                             const remain = totalMissing - scSolutions.length;
+                            const pct = totalMissing ? Math.round((scSolutions.length / totalMissing) * 100) : 0;
                             return remain > 0 ? (
-                              <button onClick={() => handleGetSolutions(true)} disabled={scSolLoading}
-                                style={{ padding: "11px", borderRadius: 10, border: "1.5px dashed #a855f7", background: "rgba(139,92,246,.08)", color: "#a855f7", cursor: scSolLoading ? "default" : "pointer", fontSize: 12.5, fontWeight: 800, fontFamily: "inherit" }}>
-                                {scSolLoading ? "AI 개선안 만드는 중..." : `➕ 개선안 ${Math.min(10, remain)}개 더 받기 (아직 ${remain}개 남음)`}
-                              </button>
-                            ) : null;
+                              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                                {/* 진행률 바 — 전체 대비 얼마나 받았나 눈에 띄게 */}
+                                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                                  <div style={{ flex: 1, height: 8, borderRadius: 99, background: "rgba(139,92,246,.15)", overflow: "hidden" }}>
+                                    <div style={{ width: `${pct}%`, height: "100%", borderRadius: 99, background: "linear-gradient(90deg,#8b5cf6,#f59e0b,#ff5fa2)", transition: "width .4s" }} />
+                                  </div>
+                                  <span style={{ fontSize: 11, fontWeight: 800, color: "#a855f7", whiteSpace: "nowrap" }}>{scSolutions.length}/{totalMissing} ({pct}%)</span>
+                                </div>
+                                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                                  <button onClick={() => handleGetSolutions(true)} disabled={scSolLoading || scSolAll}
+                                    style={{ flex: "1 1 140px", padding: "11px", borderRadius: 10, border: "1.5px dashed #a855f7", background: "rgba(139,92,246,.08)", color: "#a855f7", cursor: (scSolLoading||scSolAll) ? "default" : "pointer", fontSize: 12.5, fontWeight: 800, fontFamily: "inherit" }}>
+                                    {scSolLoading && !scSolAll ? "만드는 중..." : `➕ ${Math.min(10, remain)}개 더 받기`}
+                                  </button>
+                                  <button onClick={handleGetAllSolutions} disabled={scSolLoading || scSolAll}
+                                    style={{ flex: "1 1 140px", padding: "11px", borderRadius: 10, border: "none", background: (scSolLoading||scSolAll) ? "var(--card2)" : "linear-gradient(135deg,#f59e0b,#ff5fa2)", color: (scSolLoading||scSolAll) ? "var(--text2)" : "#fff", cursor: (scSolLoading||scSolAll) ? "default" : "pointer", fontSize: 12.5, fontWeight: 800, fontFamily: "inherit", boxShadow: (scSolLoading||scSolAll) ? "none" : "0 3px 10px rgba(245,158,11,.35)" }}>
+                                    {scSolAll ? "🚀 전체 받는 중..." : `🚀 남은 ${remain}개 전체 받기`}
+                                  </button>
+                                </div>
+                              </div>
+                            ) : (
+                              <div style={{ fontSize: 12, fontWeight: 800, color: "#00c896", textAlign: "center", padding: "6px" }}>✅ 누락된 글 {totalMissing}개 개선안을 모두 받았어요!</div>
+                            );
                           })()}
                           <div style={{ fontSize: 10.5, color: "var(--text3)", lineHeight: 1.5 }}>AI 제안이에요. 내 블로그에서 실제로 검색 상위에 오른 제목 패턴을 학습해 만든 처방이라, 참고해서 제목·본문을 다듬으면 노출에 도움이 돼요.</div>
                         </div>

@@ -5,7 +5,16 @@ import { botFetch } from "./botApi";
 const SUPABASE_URL = "https://qhhoyxexxlimbjrbwrgq.supabase.co";
 const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFoaG95eGV4eGxpbWJqcmJ3cmdxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzczMTMzOTQsImV4cCI6MjA5Mjg4OTM5NH0.pw_qUR0oOxgt82S_DA6GTka3WP0JBu2vmWuKZ9VvTKM";
 
-export const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+// This app uses its own publy_users login, not Supabase Auth. Keep PostgREST
+// requests explicitly anonymous so a stale sb-*-auth-token in Electron's
+// localStorage cannot silently change the RLS role/uid used by supabase-js.
+export const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
+  auth: {
+    persistSession: false,
+    autoRefreshToken: false,
+    detectSessionInUrl: false,
+  },
+});
 
 // ── 타입 ─────────────────────────────────────────────────
 export interface PublyUser {
@@ -146,13 +155,46 @@ export async function addHistory(data: Omit<PublyHistory, "id" | "published_at">
 }
 
 export async function getHistory(userId: string): Promise<PublyHistory[]> {
-  const { data } = await supabase
+  const ordered = await supabase
     .from("publy_history")
     .select("*")
     .eq("user_id", userId)
     .order("published_at", { ascending: false })
     .limit(2000);   // 발행 흔적을 자동으로 지우지 않는다(테리). 삭제는 사용자가 개별/전체 버튼으로만.
-  return data || [];
+
+  if (!ordered.error) return (ordered.data || []) as PublyHistory[];
+
+  // A missing/renamed/non-orderable published_at column must not make valid
+  // history disappear. Retry without server-side ordering, then sort valid
+  // timestamps locally. If this also fails, expose both PostgREST diagnostics.
+  const unordered = await supabase
+    .from("publy_history")
+    .select("*")
+    .eq("user_id", userId)
+    .limit(2000);
+
+  if (unordered.error) {
+    const details = [
+      `ordered: ${ordered.error.code || "unknown"} ${ordered.error.message}`,
+      ordered.error.details && `details: ${ordered.error.details}`,
+      ordered.error.hint && `hint: ${ordered.error.hint}`,
+      `fallback: ${unordered.error.code || "unknown"} ${unordered.error.message}`,
+      unordered.error.details && `details: ${unordered.error.details}`,
+      unordered.error.hint && `hint: ${unordered.error.hint}`,
+    ].filter(Boolean).join(" | ");
+    console.error("[publy_history] query failed", { userId, ordered: ordered.error, fallback: unordered.error });
+    throw new Error(`발행 기록 조회 실패 (${details})`);
+  }
+
+  console.warn("[publy_history] published_at ordering failed; using local sort", {
+    userId,
+    error: ordered.error,
+  });
+  return ((unordered.data || []) as PublyHistory[]).sort((a, b) => {
+    const aTime = Date.parse(a.published_at);
+    const bTime = Date.parse(b.published_at);
+    return (Number.isNaN(bTime) ? 0 : bTime) - (Number.isNaN(aTime) ? 0 : aTime);
+  });
 }
 
 export async function deleteHistory(id: string): Promise<void> {

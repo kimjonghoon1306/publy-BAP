@@ -1503,6 +1503,7 @@ async function crawlMobileFallback(context: BrowserContext, keyword: string, lim
    저장값이 틀리면 실제 값으로 교정+세션 저장 → 이후 발행·카테고리·진단·검색노출·제목수정 등 모든 탭이 정확한 blogId 공유. */
 const RESOLVE_INVALID = ["PostList", "BlogHome", "FeedList", "neighborPostList", "TagList", "GoBlogWrite", "RedirectWriteView", "PostWriteForm", "MyBlog", "section", "m", "manage", "admin", "GoMyblog"];
 async function resolveBlogIdFast(storedBlogId: string, cookies: any[], accountId: string, log: (m: string) => void): Promise<string> {
+  storedBlogId = (storedBlogId || "").split("@")[0].trim();   // ★이메일(id@naver.com)이 blogId로 들어오면 아이디만 (PostTitleListAsync 404 방지)
   const pickFrom = (s: string): string => {
     let m = s.match(/[?&]blogId=([a-zA-Z0-9_-]+)/) || s.match(/blog\.naver\.com\/([a-zA-Z0-9_-]+)/);
     return (m && m[1] && !RESOLVE_INVALID.includes(m[1])) ? m[1] : "";
@@ -2862,8 +2863,10 @@ export async function crawlMyPosts(params: {
   const { accountId, selectMode, count, period, onLog } = params;
   const log = onLog || console.log;
   if (!naverSessionExists(accountId)) throw new Error("세션 없음 — 먼저 로그인하세요");
-  const { blogId, cookies } = loadSession(accountId);
-  if (!blogId) throw new Error("내 블로그 ID를 찾을 수 없어요 — 계정을 다시 연결해주세요");
+  const { blogId: storedBlogId, cookies } = loadSession(accountId);
+  if (!storedBlogId) throw new Error("내 블로그 ID를 찾을 수 없어요 — 계정을 다시 연결해주세요");
+  // ★답방 글목록도 다른 기능처럼 진짜 blogId로 확정(이메일/네이버ID≠blogId 대비) — 이게 빠져서 ojy8404@naver.com로 404났음
+  const blogId = await resolveBlogIdFast(storedBlogId, cookies, accountId, log);
 
   const limit = selectMode === "count" ? Math.max(1, count) : Number.MAX_SAFE_INTEGER;
   const cutoff = selectMode === "period" ? Date.now() - period * 86400000 : 0;
@@ -3015,6 +3018,10 @@ export async function replyToComments(params: {
             replyText = await generateAiReply(geminiKey, tone, c.text, c.author || "", log);
             // ★AI 실패(한도·오류)해도 스킵하지 말고 순환 답글로 답한다(테리: 답방도 순환 문구 사용).
             if (!replyText) { replyText = pickFallbackReply(); log(`[답방] AI 답글 실패 → 순환 답글 사용: "${replyText}"`); }
+          } else {
+            // ★고정 답글: 여러 줄 입력하면 줄마다 하나씩 랜덤으로 번갈아 답한다(똑같은 답글 반복 방지). 비었으면 기본 인사.
+            const lines = String(comment || "").split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+            replyText = lines.length ? lines[Math.floor(Math.random() * lines.length)] : pickFallbackReply();
           }
           // ① 해당 댓글의 '답글' 버튼 클릭(commentNo로 정확히 타겟) → 답글 입력 영역 펼침
           const opened = await ctx.evaluate((cno: string) => {

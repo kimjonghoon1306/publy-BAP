@@ -866,6 +866,7 @@ export default function DashboardPage({user, onLogout, onAdminLogin, onThemeTogg
   }
   const [accounts, setAccounts] = useState<PublyAccount[]>([]);
   const [history, setHistory] = useState<PublyHistory[]>([]);
+  const [historyError, setHistoryError] = useState("");
   // 사진 글쓰기 안내 모달(모바일 최적화 — window.open 대신 앱 내 모달)
   const [photoGuideModal, setPhotoGuideModal] = useState<null|"guide"|"caution"|"example">(null);
   // 📈 성과 추적: 발행 글 현재 순위 + 이전 스냅샷 비교(로컬 저장)
@@ -1382,6 +1383,20 @@ Output format (JSON array only, no other text):
     imgCountRef.current=count;
     setImgCount(count);
   }
+
+  async function loadHistory(showSuccess = false): Promise<void> {
+    try {
+      const rows = await getHistory(user.id);
+      setHistory(rows);
+      setHistoryError("");
+      if (showSuccess) showToast(`🔄 ${rows.length}건 · 계정 ${(user.id||"").slice(0,8)}`, "success");
+    } catch (error: any) {
+      const message = error?.message || String(error);
+      setHistoryError(message);
+      console.error("[publy_history] load failed", { userId: user.id, error });
+      showToast(`❌ ${message}`, "error");
+    }
+  }
   function applyImageCount(){
     const count=Math.max(1,Math.min(30,imgCount));
     setManualImageCount(count);
@@ -1821,7 +1836,7 @@ Output format (JSON array only, no other text):
   useEffect(()=>{
     checkBot();
     getAccounts(user.id).then(setAccounts);
-    getHistory(user.id).then(setHistory);
+    void loadHistory();
     getNeighborDailyUsage(user.id).then(setNeighborUsed);
     getEngageDailyUsage(user.id).then(setEngageUsed);
     getReplyDailyUsage(user.id).then(setReplyUsed);
@@ -1869,7 +1884,7 @@ Output format (JSON array only, no other text):
 
   // ★발행관리 탭 진입 시 발행기록 항상 다시 불러온다(초기 로드 누락/화면 0건 방지).
   //   발행기록은 서버(publy_history)에 user_id별 영구저장 → 탭 열 때마다 최신 반영.
-  useEffect(()=>{ if(tab==="manage"&&user?.id) getHistory(user.id).then(setHistory); },[tab,user?.id]);
+  useEffect(()=>{ if(tab==="manage"&&user?.id) void loadHistory(); },[tab,user?.id]);
 
   function recommendImgCount(content:string):number{
     // 글 길이에 맞춰 이미지 수 추천 — 약 700자당 1장, 최소 2장 최대 8장.
@@ -3130,7 +3145,7 @@ ${segList}`;
         showToast(scheduleOn?"⏰ 예약 완료!":"✅ 발행 완료! 🎉");
         if(d.warning) setTimeout(()=>showToast("⚠️ "+d.warning,"error"),1500);
       }
-      getHistory(user.id).then(setHistory);getQuota(user.id).then((q:PublyQuota|null)=>q&&setQuota(q));
+      void loadHistory();getQuota(user.id).then((q:PublyQuota|null)=>q&&setQuota(q));
     }catch(e:any){await addHistory({user_id:user.id,platform,title:effTitle,status:"fail",error_message:e.message});setPubMsg("❌ "+e.message+" (오류가 관리자에게 자동 전달됩니다)");showToast("❌ "+e.message,"error");logError({user_id:user.id,user_name:(user as any).name||"",user_email:user.email||"",feature:"블로그 발행 ("+platform+")",error_message:e.message}).catch(()=>{});}
     finally{setPublishing(false);}
   }
@@ -3954,7 +3969,6 @@ POST3: (제목)|(이유)
               : <div className="quota-chip"><div className="quota-bar-bg"><div className="quota-bar-fill" style={{width:`${Math.min(100,(dailyPublishUsed/(PLAN_CONFIG[user.plan]?.dailyPublish??2))*100)}%`}}/></div>{Math.max(0,(PLAN_CONFIG[user.plan]?.dailyPublish??2)-dailyPublishUsed)}건<span className={`plan-badge plan-${user.plan}`}>{PLAN_LABELS[user.plan]}</span></div>}
           </div>
           <div className="header-right">
-            {proxyActive && <div className="proxy-mini" title="프록시(전용 IP) 켜짐 — 안전 접속 중"><div className="dot"/></div>}
             <button className="video-open-btn" onClick={()=>setShowVideo(true)} title="소개 영상 보기">🎬 <span className="guide-btn-text">영상</span></button>
             <button className="guide-open-btn" onClick={()=>{setShowGuide(true);setGuideTab(0);}}>📖 <span className="guide-btn-text">사용설명서</span></button>
             <button className="icon-btn" onClick={onThemeToggle}>{theme==="dark"?"☀️":"🌙"}</button>
@@ -5865,16 +5879,11 @@ POST3: (제목)|(이유)
                     <div className="card-title">📋 발행 기록</div>
                     <div style={{display:"flex",gap:8,alignItems:"center"}}>
                       <span style={{fontSize:13,color:"var(--text2)"}}>총 {history.length}건</span>
-                      <button className="btn btn-secondary btn-sm" onClick={async()=>{
-                        // ★직접 조회+에러 노출: getHistory는 에러를 조용히 삼켜 0건처럼 보임 → 진짜 원인(RLS·네트워크) 확인용
-                        const { data, error } = await supabase.from("publy_history").select("*").eq("user_id",user.id).order("published_at",{ascending:false}).limit(2000);
-                        if(error){ showToast(`❌ 조회오류: ${error.message||error.code||"알수없음"}`,"error"); return; }
-                        setHistory((data||[]) as any);
-                        showToast(`🔄 ${(data||[]).length}건 · 계정 ${(user.id||"").slice(0,8)}`,"success");
-                      }}>🔄 새로고침</button>
+                      <button className="btn btn-secondary btn-sm" onClick={()=>void loadHistory(true)}>🔄 새로고침</button>
                       {history.length>0&&<button className="btn btn-danger btn-sm" onClick={async()=>{if(!window.confirm(`발행 기록 ${history.length}건을 정말 모두 삭제할까요?\n(되돌릴 수 없습니다)`))return;if(!window.confirm("한 번 더 확인할게요. 전체 삭제를 진행할까요?"))return;await deleteAllHistory(user.id);setHistory([]);showToast("🗑 발행 기록 전체 삭제 완료","success");}}>🗑 전체삭제</button>}
                     </div>
                   </div>
+                  {historyError&&<div style={{margin:"0 0 12px",padding:"10px 12px",borderRadius:10,background:"rgba(255,71,87,.08)",border:"1px solid rgba(255,71,87,.35)",fontSize:12,color:"var(--danger)",lineHeight:1.6,wordBreak:"break-word"}}>❌ {historyError}</div>}
                   {/* 발행 기록 기능설명 */}
                   <div style={{margin:"0 0 12px",padding:"10px 12px",borderRadius:10,background:"var(--card2)",border:"1px solid var(--border)",fontSize:12,color:"var(--text2)",lineHeight:1.6}}>
                     💡 <b>발행 기록이란?</b> 발행에 성공한 글이 여기에 <b>차곡차곡 쌓여요.</b> 서버에 안전하게 <b>영구 저장</b>돼서 앱을 껐다 켜거나 업데이트해도 안 사라져요. 위쪽 <b>📈 순위 성과 확인</b>으로 각 글의 검색 순위도 여기서 관리해요.

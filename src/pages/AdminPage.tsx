@@ -1527,7 +1527,7 @@ Output format (JSON array only, no other text):
 
   useEffect(() => {
     checkBot(); getAccounts(ADM_UID).then(setAdmAccs); loadUsers();
-    getHistory(ADM_UID).then(setHistory);
+    getHistory(ADM_UID).then(setHistory).catch(e=>console.error("[관리자 발행기록] 로드 실패", e));
     loadUnreadCount();
     // 임시저장 확인
     try{const d=localStorage.getItem("publy_adm_draft");if(d){const p=JSON.parse(d);if(p.content&&p.title){setDraftAvailable(true);setDraftData(p);}}}catch{}
