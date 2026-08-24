@@ -1,6 +1,6 @@
 import express from "express";
 import cors from "cors";
-import { saveSession, sessionExists, removeSession, crawlBlogIds, crawlBuddyPosts, analyzeBuddyKeywords, addNeighbors, NeighborResult, donePath, engageBlogs, EngageResult, engageDonePath, crawlMyPosts, replyToComments, crawlBlogStats, checkSelectedBlogExposure, pumasiEngage, crawlPumasiReport, pumasiPreview, updatePostTitle } from "./naver";
+import { saveSession, sessionExists, removeSession, crawlBlogIds, crawlBuddyPosts, analyzeBuddyKeywords, addNeighbors, NeighborResult, donePath, engageBlogs, EngageResult, engageDonePath, crawlMyPosts, replyToComments, crawlBlogStats, checkSelectedBlogExposure, pumasiEngage, crawlPumasiReport, pumasiPreview, updatePostTitle, checkProxy } from "./naver";
 import { checkNeighborQuota, incrementNeighborQuota, getNeighborDailyUsage, incrementEngageQuota, getEngageDailyUsage, getUserPlan, NEIGHBOR_DAILY_LIMIT, addNeighborHistory, addReplyHistory, addBlogscoreHistory, incrementPumasiQuota, TITLE_EDIT_DAILY_LIMIT, getTitleEditDailyUsage, incrementTitleEditQuota } from "./supabase";
 import fs from "fs";
 
@@ -537,6 +537,18 @@ app.delete("/api/engage-done/:accountId", (req, res) => {
   const dp = engageDonePath(req.params.accountId);
   try { if (fs.existsSync(dp)) fs.unlinkSync(dp); } catch {}
   res.json({ ok: true });
+});
+
+// ── 프록시 헬스체크: 주어진 프록시로 실제 나가는 IP·응답속도 확인(관리자 상태판용) ──
+app.post("/api/proxy-check", async (req, res) => {
+  try {
+    const { server, username, password } = req.body || {};
+    if (!server) return res.status(400).json({ ok: false, error: "server(주소:포트)가 필요해요" });
+    const r = await checkProxy({ server, username, password });
+    res.json(r);
+  } catch (e: any) {
+    res.status(500).json({ ok: false, error: e?.message || "검사 실패" });
+  }
 });
 
 app.listen(PORT, "127.0.0.1", () => {

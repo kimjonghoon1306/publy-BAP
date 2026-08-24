@@ -5,7 +5,7 @@ import http from "http";
 import os from "os";
 import path from "path";
 import { deleteSession, hasSession, readSession, writeSession, SESSION_DIR } from "./session-store";
-import { getAdminBlogSearchKeys } from "./supabase";
+import { getAdminBlogSearchKeys, getProxyForAccount } from "./supabase";
 
 const LEGACY_SESSION_DIRS = [path.join(__dirname, "../sessions"), path.join(__dirname, "../../naver-bot/sessions")];
 const sessionName = (userId: string) => `naver_${userId}`;
@@ -45,6 +45,52 @@ const LAUNCH_ARGS = [
 ];
 
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
+
+/* ── 계정별 프록시로 브라우저 실행 (모든 chromium.launch를 이걸로 통일) ──
+   userId가 있으면 그 계정에 배정된 프록시로, 없거나 미배정이면 프록시 없이(기존 동작 그대로) 실행.
+   업체 미선정 상태여도 안전: 배정된 프록시가 없으면 그냥 로컬 IP로 뜬다. */
+async function launchBrowser(
+  userId: string | null | undefined,
+  opts: { headless?: boolean; maximized?: boolean; slowMo?: number; log?: (s: string) => void } = {}
+) {
+  const args = opts.maximized ? [...LAUNCH_ARGS, "--start-maximized"] : LAUNCH_ARGS;
+  const proxy = await getProxyForAccount(userId);
+  if (proxy) opts.log?.(`🔒 프록시 사용: ${proxy.server}`);
+  return chromium.launch({
+    headless: opts.headless ?? true,
+    args,
+    ...(opts.slowMo ? { slowMo: opts.slowMo } : {}),
+    ...(proxy ? { proxy } : {}),
+  });
+}
+
+/* ── 프록시 헬스체크 (관리자 "프록시 상태판"용) ──
+   주어진 프록시로 실제 브라우저를 띄워 바깥으로 나가는 IP·응답속도를 확인한다.
+   ok=false면 그 프록시로는 접속이 안 되는 것(죽었거나 인증 틀림). */
+export async function checkProxy(proxy: { server: string; username?: string; password?: string }): Promise<{ ok: boolean; ip?: string; ms?: number; error?: string }> {
+  const t0 = Date.now();
+  const server = /^(https?|socks[45]?):\/\//i.test(proxy.server) ? proxy.server : `http://${proxy.server}`;
+  let browser: any = null;
+  try {
+    browser = await chromium.launch({
+      headless: true,
+      args: LAUNCH_ARGS,
+      proxy: { server, username: proxy.username || undefined, password: proxy.password || undefined },
+    });
+    const ctx = await browser.newContext({ locale: "ko-KR" });
+    const page = await ctx.newPage();
+    await page.goto("https://api.ipify.org?format=json", { timeout: 20000, waitUntil: "domcontentloaded" });
+    const body = await page.evaluate(() => document.body.innerText).catch(() => "");
+    let ip = "";
+    try { ip = JSON.parse(body).ip || ""; } catch {}
+    if (!ip) return { ok: false, ms: Date.now() - t0, error: "IP 확인 실패(응답 이상)" };
+    return { ok: true, ip, ms: Date.now() - t0 };
+  } catch (e: any) {
+    return { ok: false, ms: Date.now() - t0, error: (e?.message || "연결 실패").slice(0, 200) };
+  } finally {
+    await browser?.close().catch(() => {});
+  }
+}
 
 /* ★Gemini 표준 모델 리스트 — 글쓰기(callAI)와 동일. 한 모델이 429(한도)여도 다음 모델은 별도 한도라
    끝까지 폴백해야 '한도 부족'으로 헛되이 포기하지 않는다. flash-lite 포함(무료 한도 넉넉). */
@@ -290,7 +336,7 @@ async function downloadImageToTemp(url: string): Promise<string | null> {
 export async function saveNaverSession(
   userId: string, id: string, pw: string
 ): Promise<{ blogId: string }> {
-  const browser = await chromium.launch({ headless: false, args: LAUNCH_ARGS, slowMo: 50 });
+  const browser = await launchBrowser(userId, { headless: false, slowMo: 50 });
   const context = await browser.newContext({
     userAgent: UA, viewport: { width: 1280, height: 800 },
     locale: "ko-KR", timezoneId: "Asia/Seoul",
@@ -387,7 +433,7 @@ export async function reloginNaverSilent(userId: string, visible = false): Promi
   if (session.pw) { try { pw = Buffer.from(session.pw, "base64").toString("utf-8"); } catch {} }
   if (!pw) { console.log("[naver] 자동재로그인 실패: 비밀번호 없음"); return false; }
 
-  const browser = await chromium.launch({ headless: !visible, args: visible ? [...LAUNCH_ARGS, "--start-maximized"] : LAUNCH_ARGS });
+  const browser = await launchBrowser(userId, { headless: !visible, maximized: visible });
   const context = await browser.newContext({
     userAgent: UA, viewport: { width: 1280, height: 800 },
     locale: "ko-KR", timezoneId: "Asia/Seoul",
@@ -488,7 +534,7 @@ export async function getNaverCategories(
   if (!naverSessionExists(userId)) throw new Error("네이버 세션 없음");
   const _s = loadSession(userId); const cookies = _s.cookies;
   const blogId = await resolveBlogIdFast(_s.blogId, cookies, userId, console.log);  // ★네이버ID≠blogId 대비
-  const browser = await chromium.launch({ headless: true, args: LAUNCH_ARGS });
+  const browser = await launchBrowser(userId, { headless: true });
   const context = await browser.newContext({
     userAgent: UA, viewport: { width: 1280, height: 800 },
     locale: "ko-KR", timezoneId: "Asia/Seoul",
@@ -582,7 +628,7 @@ export async function publishNaver(params: {
   const _ps = loadSession(userId); const cookies = _ps.cookies;
   const blogId = await resolveBlogIdFast(_ps.blogId, cookies, userId, console.log);  // ★네이버ID≠blogId 대비(모든 탭 공용)
 
-  const browser = await chromium.launch({ headless: false, args: LAUNCH_ARGS });
+  const browser = await launchBrowser(userId, { headless: false });
   const context = await browser.newContext({
     userAgent: UA, viewport: { width: 1280, height: 800 },
     locale: "ko-KR", timezoneId: "Asia/Seoul",
@@ -1204,7 +1250,7 @@ export async function crawlBlogIds(params: {
 
   const results: BlogTarget[] = [];
   const seen = new Set<string>();   // ★ 키워드 전체에 걸쳐 중복 블로그 제거(루프 밖에서 유지)
-  const browser = await chromium.launch({ headless: true, args: LAUNCH_ARGS });
+  const browser = await launchBrowser(params.accountId, { headless: true, log });
   const context = await browser.newContext({ userAgent: UA, locale: "ko-KR" });
   await applyAntiDetection(context);
   const page = await context.newPage();
@@ -1291,7 +1337,7 @@ export async function crawlBuddyPosts(params: {
 
   const results: BlogTarget[] = [];
   const seen = new Set<string>();
-  const browser = await chromium.launch({ headless: true, args: LAUNCH_ARGS });
+  const browser = await launchBrowser(accountId, { headless: true, log });
   const context = await browser.newContext({ userAgent: UA, locale: "ko-KR" });
   await applyAntiDetection(context);
   await context.addCookies(cookies);
@@ -1351,7 +1397,7 @@ export async function analyzeBuddyKeywords(params: {
   const log = onLog || console.log;
   if (!sessionExists(accountId)) throw new Error("세션 없음 — 먼저 계정을 연결하세요");
   const { cookies } = loadSession(accountId);
-  const browser = await chromium.launch({ headless: true, args: LAUNCH_ARGS });
+  const browser = await launchBrowser(accountId, { headless: true, log });
   const context = await browser.newContext({ userAgent: UA, locale: "ko-KR" });
   await applyAntiDetection(context);
   await context.addCookies(cookies);
@@ -1481,7 +1527,7 @@ export async function updatePostTitle(params: {
   if (!newTitle || !newTitle.trim()) throw new Error("새 제목이 비어 있어요");
   const title = newTitle.trim().slice(0, 100);
 
-  const browser = await chromium.launch({ headless: false, args: [...LAUNCH_ARGS, "--start-maximized"] });
+  const browser = await launchBrowser(accountId, { headless: false, maximized: true, log });
   const context = await browser.newContext({ userAgent: UA, viewport: { width: 1280, height: 900 }, locale: "ko-KR" });
   await applyAntiDetection(context);
   await context.addCookies(cookies);
@@ -1659,7 +1705,7 @@ export async function addNeighbors(params: {
 
   // 서이추 신청 페이지가 모바일(m.blog.naver.com)만 작동 → 모바일 UA/뷰포트로 실행
   const MOBILE_UA = "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1";
-  const browser = await chromium.launch({ headless: false, args: [...LAUNCH_ARGS, "--start-maximized"] });
+  const browser = await launchBrowser(accountId, { headless: false, maximized: true, log });
   const context = await browser.newContext({
     userAgent: MOBILE_UA, viewport: { width: 390, height: 844 }, locale: "ko-KR", isMobile: true, hasTouch: true,
   });
@@ -2477,7 +2523,7 @@ export async function checkSelectedBlogExposure(params: {
   if (!selected.length) throw new Error("선택한 글 정보를 다시 찾지 못했어요. 글 목록을 새로 불러와주세요");
   log(`[검색노출] 선택 ${selected.length}개 · ${plan} 등급 한도 적용 · 실제 통합검색 순위 확인`);
   // ★실제 통합검색 순위 확인용 browser context(세션 쿠키). 개발자 API보다 실제 노출 순위에 맞다.
-  const exBrowser = await chromium.launch({ headless: true, args: LAUNCH_ARGS });
+  const exBrowser = await launchBrowser(accountId, { headless: true, log });
   const exContext = await exBrowser.newContext({ locale: "ko-KR" });
   await exContext.addCookies(cookies).catch(() => {});
   let progress;
@@ -2502,7 +2548,7 @@ export async function crawlBlogStats(params: {
   const cookies = await ensureLiveSession(accountId, log);   // ★세션 만료면 저장된 비번으로 자동 재연결
   if (!blogId) throw new Error("내 블로그 ID를 찾을 수 없어요 — 계정을 다시 연결해주세요");
 
-  const browser = await chromium.launch({ headless: true, args: LAUNCH_ARGS });
+  const browser = await launchBrowser(accountId, { headless: true, log });
   const context = await browser.newContext({ userAgent: UA, viewport: { width: 1280, height: 900 }, locale: "ko-KR" });
   await applyAntiDetection(context);
   await context.addCookies(cookies);
@@ -2800,7 +2846,7 @@ export async function crawlMyPosts(params: {
   const limit = selectMode === "count" ? Math.max(1, count) : Number.MAX_SAFE_INTEGER;
   const cutoff = selectMode === "period" ? Date.now() - period * 86400000 : 0;
 
-  const browser = await chromium.launch({ headless: true, args: LAUNCH_ARGS });
+  const browser = await launchBrowser(accountId, { headless: true, log });
   const context = await browser.newContext({ userAgent: UA, viewport: { width: 1280, height: 900 }, locale: "ko-KR" });
   await applyAntiDetection(context);
   await context.addCookies(cookies);
@@ -2889,7 +2935,7 @@ export async function replyToComments(params: {
   const log = onLog || console.log;
   const cookies = await ensureLiveSession(accountId, log);   // ★세션 만료면 저장된 비번으로 자동 재연결(테리: "연결됨"인데 로그인풀림 방지)
 
-  const browser = await chromium.launch({ headless: false, args: [...LAUNCH_ARGS, "--start-maximized"] });
+  const browser = await launchBrowser(accountId, { headless: false, maximized: true, log });
   const context = await browser.newContext({ userAgent: UA, viewport: { width: 1280, height: 900 }, locale: "ko-KR" });
   await applyAntiDetection(context);
   await context.addCookies(cookies);
@@ -3206,10 +3252,18 @@ export async function pumasiEngage(params: {
   log(`[품앗이] 순환 매칭 완료 — 이번엔 총 ${totalCombos}회 방문 예정(받을 수·쿨다운 반영)`);
   let comboIdx = 0;
 
-  // ★크롬 창을 한 번만 띄워 계속 유지(방문 사이 대기에도 창이 안 닫혀 "멈춘 것처럼" 보이지 않음).
-  //   대기 안내 페이지를 하나 열어두어 시간 분산으로 쉬는 동안에도 창이 보이게 한다.
-  const sharedBrowser = await chromium.launch({ headless: false, args: [...LAUNCH_ARGS, "--start-maximized"] });
-  const holdPage = await sharedBrowser.newPage().catch(() => null);
+  // ★프록시 격리: 참여 계정 중 하나라도 프록시가 배정돼 있으면 방문마다 그 계정 IP로 따로 브라우저를 띄운다.
+  //   (공유 브라우저 하나로 돌면 모든 계정이 같은 IP로 나가 네이버가 한 사람으로 묶어 차단 — 프록시가 무의미).
+  //   배정된 프록시가 전혀 없으면 기존처럼 공유 브라우저 하나로 돌린다(업체 연결 전 동작 그대로).
+  const proxied = (await Promise.all(valid.map(a => getProxyForAccount(a.accountId)))).some(Boolean);
+  if (proxied) log("[품앗이] 🔒 프록시 격리 모드 — 방문마다 해당 계정의 IP로 접속합니다.");
+
+  // ★안내 창: 대기 중에도 "진행 중"을 보여주는 창(방문 사이 대기에도 안 닫혀 "멈춘 것처럼" 안 보임).
+  //   격리 모드에선 이 창은 안내 전용이고, 실제 방문은 계정별 브라우저가 따로 담당한다.
+  const holdBrowser = await chromium.launch({ headless: false, args: [...LAUNCH_ARGS, "--start-maximized"] });
+  const holdPage = await holdBrowser.newPage().catch(() => null);
+  // 방문에 재사용할 공유 브라우저: 격리 모드가 아니면 안내 창과 같은 브라우저를 그대로 씀(기존 동작).
+  const sharedBrowser: any = proxied ? null : holdBrowser;
   const showHold = async (msg: string) => {
     if (!holdPage) return;
     try {
@@ -3263,7 +3317,9 @@ export async function pumasiEngage(params: {
     }
   }
   } finally {
-    await sharedBrowser.close().catch(() => {});   // 작업 완료/중단 시 공유 크롬 닫기
+    // 격리 모드에선 방문 브라우저는 각 방문 종료 시 스스로 닫히므로 안내 창(holdBrowser)만 닫는다.
+    // 비격리 모드에선 sharedBrowser === holdBrowser 이라 이 한 줄로 함께 닫힌다.
+    await holdBrowser.close().catch(() => {});
   }
   log(`[품앗이] 완료 — 성공 ${done} / 스킵 ${skip} / 실패 ${fail}`);
 }
@@ -3325,7 +3381,7 @@ export async function engageBlogs(params: {
 
   // ★품앗이는 sharedBrowser(공유 크롬)를 재사용 → 방문 사이 대기에도 창이 안 닫힌다. 없으면(공감·댓글 단독) 자체 생성.
   const ownBrowser = !sharedBrowser;
-  const browser = sharedBrowser || await chromium.launch({ headless: false, args: [...LAUNCH_ARGS, "--start-maximized"] });
+  const browser = sharedBrowser || await launchBrowser(accountId, { headless: false, maximized: true, log });
   const context = await browser.newContext({
     userAgent: UA, viewport: { width: 1280, height: 800 }, locale: "ko-KR",
   });

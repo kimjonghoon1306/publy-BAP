@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import GoogleFlowCard from "../GoogleFlowCard";
-import { supabase, getAccounts, upsertAccount, PublyAccount, getHistory, PublyHistory, addHistory, deleteHistory, deleteAllHistory, setAdminPassword, saveAdminNaverApiKeys, getNaverApiKeys, NaverApiKeys, getNaverDailyUsage, NAVER_DAILY_LIMIT, checkNaverQuota, incrementNaverQuota, getUserNaverApiKeys, getReferrals, getErrorLogs, getUnreadErrorCount, markErrorsAsRead, logError, PLAN_CONFIG, getAllNeighborHistory, NeighborHistory, getAllEngageHistory, EngageHistory, InstaDmTarget, InstaDmHistory, InstaDmQuota, getInstaDmTargets, addInstaDmTarget, updateInstaDmTargetStatus, deleteInstaDmTarget, getInstaDmHistory, addInstaDmHistory, getAllInstaDmHistory, getInstaDmQuota, upsertInstaDmQuota, getAllInstaDmQuotas, INSTA_DM_DAILY_LIMIT, PublyBugReport, getBugReports, updateBugReportStatus, deleteBugReport, resetDailyPublish, getAllDailyUsageToday, DailyUsageRow, getAllReplyHistory, ReplyHistory, getAllBlogscoreHistory, BlogscoreHistory, NEIGHBOR_DAILY_LIMIT, ENGAGE_DAILY_LIMIT, REPLY_DAILY_LIMIT, BLOGSCORE_DAILY_LIMIT, PUMASI_ACCOUNT_LIMIT, PUMASI_POSTS_LIMIT } from "../lib/supabase";
+import { supabase, getAccounts, upsertAccount, PublyAccount, getHistory, PublyHistory, addHistory, deleteHistory, deleteAllHistory, setAdminPassword, saveAdminNaverApiKeys, getNaverApiKeys, NaverApiKeys, getNaverDailyUsage, NAVER_DAILY_LIMIT, checkNaverQuota, incrementNaverQuota, getUserNaverApiKeys, getReferrals, getErrorLogs, getUnreadErrorCount, markErrorsAsRead, logError, PLAN_CONFIG, getAllNeighborHistory, NeighborHistory, getAllEngageHistory, EngageHistory, InstaDmTarget, InstaDmHistory, InstaDmQuota, getInstaDmTargets, addInstaDmTarget, updateInstaDmTargetStatus, deleteInstaDmTarget, getInstaDmHistory, addInstaDmHistory, getAllInstaDmHistory, getInstaDmQuota, upsertInstaDmQuota, getAllInstaDmQuotas, INSTA_DM_DAILY_LIMIT, PublyBugReport, getBugReports, updateBugReportStatus, deleteBugReport, resetDailyPublish, getAllDailyUsageToday, DailyUsageRow, getAllReplyHistory, ReplyHistory, getAllBlogscoreHistory, BlogscoreHistory, NEIGHBOR_DAILY_LIMIT, ENGAGE_DAILY_LIMIT, REPLY_DAILY_LIMIT, BLOGSCORE_DAILY_LIMIT, PUMASI_ACCOUNT_LIMIT, PUMASI_POSTS_LIMIT, PublyProxy, getProxies, addProxy, updateProxy, deleteProxy, getProxyAssignments, setProxyAccounts, checkProxyHealth } from "../lib/supabase";
 import NeighborPage from "./NeighborPage";
 import { botFetch, BotEventStream } from "../lib/botApi";
 
@@ -614,10 +614,49 @@ const TABS = [
   {k:"reply_manage",    i:"↩️", l:"답방 관리"},
   {k:"blogscore_manage",i:"🩺", l:"지수 관리"},
   {k:"settings",        i:"🔐", l:"설정"},
+  {k:"proxy",           i:"🌐", l:"프록시 IP"},
 ] as const;
 
 export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: Props) {
-  const [tab, setTab] = useState<"keyword"|"write"|"image"|"photo"|"publish"|"manage"|"accounts"|"rank"|"blogscore"|"calendar"|"neighbor"|"engage"|"reply"|"pumasi"|"neighbor_manage"|"engage_manage"|"reply_manage"|"blogscore_manage"|"insta_dm"|"insta_dm_manage"|"users"|"bug"|"stats"|"live"|"settings">("keyword");
+  const [tab, setTab] = useState<"keyword"|"write"|"image"|"photo"|"publish"|"manage"|"accounts"|"rank"|"blogscore"|"calendar"|"neighbor"|"engage"|"reply"|"pumasi"|"neighbor_manage"|"engage_manage"|"reply_manage"|"blogscore_manage"|"insta_dm"|"insta_dm_manage"|"users"|"bug"|"stats"|"live"|"settings"|"proxy">("keyword");
+
+  // ── 프록시(계정별 IP) 관리 ──
+  const NEIGHBOR_BOT = "http://127.0.0.1:3334";   // 서이추·공감·품앗이 봇(프록시 헬스체크도 여기서 실행)
+  const [proxies, setProxies] = useState<PublyProxy[]>([]);
+  const [proxyAssign, setProxyAssign] = useState<Record<string,string[]>>({});
+  const [proxyChecking, setProxyChecking] = useState<Record<string,boolean>>({});
+  const [proxyAcctInput, setProxyAcctInput] = useState<Record<string,string>>({});
+  const [newProxy, setNewProxy] = useState({ label:"", server:"", username:"", password:"" });
+  async function loadProxies() {
+    const [ps, asg] = await Promise.all([getProxies(), getProxyAssignments()]);
+    setProxies(ps); setProxyAssign(asg);
+    const inputs: Record<string,string> = {};
+    ps.forEach(p => { inputs[p.id] = (asg[p.id]||[]).join("\n"); });
+    setProxyAcctInput(inputs);
+  }
+  useEffect(() => { if (tab==="proxy") loadProxies(); /* eslint-disable-next-line */ }, [tab]);
+  async function handleAddProxy() {
+    if (!newProxy.server.trim()) { showToast("프록시 주소(IP:포트)를 입력해주세요","error"); return; }
+    const r = await addProxy(newProxy);
+    if (r) { setNewProxy({label:"",server:"",username:"",password:""}); showToast("✅ 프록시가 추가됐어요"); loadProxies(); }
+  }
+  async function handleCheckProxy(p: PublyProxy) {
+    setProxyChecking(s=>({...s,[p.id]:true}));
+    const r = await checkProxyHealth(NEIGHBOR_BOT, p);
+    setProxyChecking(s=>({...s,[p.id]:false}));
+    showToast(r.ok ? `🟢 정상 · 나가는 IP ${r.ip} · ${r.ms}ms` : `🔴 실패: ${r.error||"연결 안 됨"}`, r.ok?"success":"error");
+    loadProxies();
+  }
+  async function handleSaveProxyAccounts(p: PublyProxy) {
+    const ids = (proxyAcctInput[p.id]||"").split(/[\n,]+/).map(s=>s.trim()).filter(Boolean);
+    await setProxyAccounts(p.id, ids);
+    showToast(`✅ 이 IP에 계정 ${ids.length}개 배정했어요`);
+    loadProxies();
+  }
+  async function handleDeleteProxy(p: PublyProxy) {
+    if (!window.confirm(`프록시 "${p.label||p.server}" 을(를) 삭제할까요?\n이 IP에 배정된 계정 배정도 함께 해제됩니다.`)) return;
+    await deleteProxy(p.id); showToast("프록시를 삭제했어요"); loadProxies();
+  }
   const [statsSubTab, setStatsSubTab] = useState<"mine"|"all">("mine");
   // ★자동화 탭 keep-alive(대시보드와 동일): 방문한 탭은 언마운트 안 하고 숨김 → 작업·데이터 유지
   const [visitedAutoTabs, setVisitedAutoTabs] = useState<Set<string>>(new Set());
@@ -2637,7 +2676,7 @@ POST3: (제목)|(이유)
               </button>
             ))}
             <div className="nav-section" style={{fontSize:10,fontWeight:800,color:"var(--text3)",padding:"10px 12px 4px",letterSpacing:".08em",borderTop:"1px solid var(--border)",marginTop:6}}>🔐 관리자 전용</div>
-            {TABS.filter(t=>["users","stats"].includes(t.k)).map(t => (
+            {TABS.filter(t=>["users","stats","proxy"].includes(t.k)).map(t => (
               <button key={t.k} className={`nav-item ${tab===t.k?"active":""}`} onClick={()=>setTab(t.k as any)}>
                 <span className="nav-ico">{t.i}</span>{t.l}
                 {t.k==="users" && users.length>0 && <span className="nav-badge">{users.length}</span>}
@@ -5436,6 +5475,71 @@ POST3: (제목)|(이유)
             )}
 
             {/* ───── 🔐 설정 ───── */}
+            {tab === "proxy" && (() => {
+              const inputStyle: React.CSSProperties = {padding:"10px 12px",borderRadius:8,border:"1px solid var(--border)",background:"var(--bg)",color:"var(--text)",fontSize:14,fontFamily:"inherit",outline:"none"};
+              const statBox: React.CSSProperties = {background:"var(--card)",border:"1px solid var(--border)",borderRadius:10,padding:"10px 16px",fontSize:13,color:"var(--text2)"};
+              const totalAssigned = Object.values(proxyAssign).reduce((a,b)=>a+b.length,0);
+              return (
+              <div style={{maxWidth:920}}>
+                <h2 style={{fontSize:20,fontWeight:800,margin:"0 0 4px"}}>🌐 프록시 IP 관리</h2>
+                <p style={{color:"var(--text2)",fontSize:13,margin:"0 0 16px",lineHeight:1.6}}>계정이 많으면 같은 IP로 나가 네이버가 한 사람으로 묶어 차단해요. IP(프록시)를 등록하고 계정을 배정하면, 그 계정은 <b>항상 이 IP로만</b> 접속합니다. 배정 안 된 계정은 지금처럼 내 IP로 접속해요(안전).</p>
+
+                <div style={{background:"var(--card)",border:"1px solid var(--border)",borderRadius:12,padding:14,marginBottom:16,fontSize:13,lineHeight:1.8,color:"var(--text2)"}}>
+                  💡 업체에서 받은 IP 정보 <b style={{color:"var(--text)"}}>(주소:포트 · 아이디 · 비밀번호)</b>를 아래에 등록하세요. 한 IP에 여러 계정을 묶을 수 있어요(예: IP 1개에 계정 3개). <b style={{color:"var(--text)"}}>🔍 검사</b>로 실제로 잘 나가는지(나가는 IP·속도) 확인해요.
+                </div>
+
+                <div style={{display:"flex",gap:12,marginBottom:16,flexWrap:"wrap"}}>
+                  <div style={statBox}>등록된 IP <b style={{color:"var(--text)"}}>{proxies.length}</b>개</div>
+                  <div style={statBox}>배정된 계정 <b style={{color:"var(--text)"}}>{totalAssigned}</b>개</div>
+                  <div style={statBox}>정상 <b style={{color:"var(--success)"}}>{proxies.filter(p=>p.last_ok===true).length}</b> · 실패 <b style={{color:"var(--danger)"}}>{proxies.filter(p=>p.last_ok===false).length}</b></div>
+                </div>
+
+                <div style={{background:"var(--card)",border:"1px solid var(--border)",borderRadius:12,padding:16,marginBottom:20}}>
+                  <div style={{fontWeight:700,marginBottom:10}}>＋ 새 IP 등록</div>
+                  <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))",gap:10}}>
+                    <input placeholder="별칭 (선택, 예: IP-1)" value={newProxy.label} onChange={e=>setNewProxy({...newProxy,label:e.target.value})} style={inputStyle}/>
+                    <input placeholder="주소:포트 (예: 1.2.3.4:8000)" value={newProxy.server} onChange={e=>setNewProxy({...newProxy,server:e.target.value})} style={inputStyle}/>
+                    <input placeholder="아이디 (선택)" value={newProxy.username} onChange={e=>setNewProxy({...newProxy,username:e.target.value})} style={inputStyle}/>
+                    <input placeholder="비밀번호 (선택)" value={newProxy.password} onChange={e=>setNewProxy({...newProxy,password:e.target.value})} style={inputStyle}/>
+                  </div>
+                  <button className="btn btn-primary btn-sm" style={{marginTop:12}} onClick={handleAddProxy}>＋ 등록하기</button>
+                </div>
+
+                {proxies.length===0 && <div style={{textAlign:"center",color:"var(--text3)",padding:40,fontSize:14}}>아직 등록된 IP가 없어요. 위에서 업체 IP를 등록해주세요.</div>}
+
+                {proxies.map(p => {
+                  const cnt = (proxyAssign[p.id]||[]).length;
+                  const checking = proxyChecking[p.id];
+                  const badge = p.last_ok===true ? {t:"🟢 정상",c:"var(--success)"} : p.last_ok===false ? {t:"🔴 실패",c:"var(--danger)"} : {t:"⚪ 미검사",c:"var(--text3)"};
+                  return (
+                    <div key={p.id} style={{background:"var(--card)",border:"1px solid var(--border)",borderRadius:12,padding:16,marginBottom:14}}>
+                      <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
+                        <div style={{fontWeight:700,fontSize:15}}>{p.label||p.server}</div>
+                        <span style={{fontSize:12,fontWeight:700,color:badge.c}}>{badge.t}</span>
+                        <span style={{fontSize:12,color:"var(--text3)"}}>· 계정 {cnt}개</span>
+                        <div style={{marginLeft:"auto",display:"flex",gap:8}}>
+                          <button className="btn btn-secondary btn-sm" disabled={checking} onClick={()=>handleCheckProxy(p)}>{checking?"검사 중…":"🔍 검사"}</button>
+                          <button className="btn btn-sm" style={{color:"var(--danger)",border:"1px solid var(--border)",background:"transparent"}} onClick={()=>handleDeleteProxy(p)}>삭제</button>
+                        </div>
+                      </div>
+                      <div style={{fontSize:12,color:"var(--text2)",marginTop:6}}>
+                        {p.server}{p.username?` · ${p.username}`:""}
+                        {p.last_ip && <> · 나가는 IP <b style={{color:"var(--text)"}}>{p.last_ip}</b></>}
+                        {p.last_ms!=null && <> · {p.last_ms}ms</>}
+                        {p.last_checked_at && <> · {new Date(p.last_checked_at).toLocaleString("ko-KR")}</>}
+                      </div>
+                      <div style={{marginTop:12}}>
+                        <div style={{fontSize:12,fontWeight:600,marginBottom:4}}>이 IP를 쓸 계정 ID <span style={{color:"var(--text3)",fontWeight:400}}>(한 줄에 하나씩)</span></div>
+                        <textarea value={proxyAcctInput[p.id]||""} onChange={e=>setProxyAcctInput(s=>({...s,[p.id]:e.target.value}))} placeholder={"계정 ID를 한 줄에 하나씩\n예)\nbb9653\ns9653"} rows={3} style={{...inputStyle,width:"100%",fontFamily:"monospace",resize:"vertical",boxSizing:"border-box"}}/>
+                        <button className="btn btn-secondary btn-sm" style={{marginTop:8}} onClick={()=>handleSaveProxyAccounts(p)}>계정 배정 저장</button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+              );
+            })()}
+
             {tab === "settings" && (
               <div style={{animation:"fadeUp .25s ease both"}}>
 

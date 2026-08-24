@@ -974,3 +974,88 @@ export async function getMyResolvedBugAlerts(userId: string): Promise<PublyBugRe
 export async function markBugNotified(id: string) {
   try { await supabase.from("publy_bug_reports").update({ user_notified: true }).eq("id", id); } catch {}
 }
+
+/* ── 프록시(계정별 IP) 관리 (관리자 전용) ──
+   계정이 많으면 같은 IP로 나가 네이버가 한 사람으로 묶어 차단한다.
+   IP(프록시)를 등록하고, 각 IP에 계정들을 배정한다(1 IP에 여러 계정 가능). */
+export interface PublyProxy {
+  id: string;
+  label?: string | null;
+  server: string;            // 주소:포트 (예: 1.2.3.4:8000)
+  username?: string | null;
+  password?: string | null;
+  region?: string | null;
+  active?: boolean;
+  last_ok?: boolean | null;
+  last_ip?: string | null;
+  last_ms?: number | null;
+  last_checked_at?: string | null;
+  created_at?: string;
+}
+
+export async function getProxies(): Promise<PublyProxy[]> {
+  try {
+    const { data } = await supabase.from("publy_proxies").select("*").order("created_at", { ascending: true });
+    return (data || []) as PublyProxy[];
+  } catch { return []; }
+}
+
+export async function addProxy(p: { label?: string; server: string; username?: string; password?: string; region?: string }): Promise<PublyProxy | null> {
+  try {
+    const { data, error } = await supabase.from("publy_proxies")
+      .insert({ label: p.label || null, server: p.server.trim(), username: p.username || null, password: p.password || null, region: p.region || "KR", active: true })
+      .select("*").single();
+    if (error) { alert("프록시 추가 실패: " + error.message); return null; }
+    return data as PublyProxy;
+  } catch (e: any) { alert("프록시 추가 오류: " + (e?.message || e)); return null; }
+}
+
+export async function updateProxy(id: string, p: Partial<PublyProxy>): Promise<void> {
+  const { error } = await supabase.from("publy_proxies").update(p).eq("id", id);
+  if (error) alert("프록시 수정 실패: " + error.message);
+}
+
+export async function deleteProxy(id: string): Promise<void> {
+  const { error } = await supabase.from("publy_proxies").delete().eq("id", id);
+  if (error) alert("프록시 삭제 실패: " + error.message);
+}
+
+// 프록시별 배정 계정 목록 조회: { proxyId: [userId, ...] }
+export async function getProxyAssignments(): Promise<Record<string, string[]>> {
+  try {
+    const { data } = await supabase.from("publy_account_proxy").select("user_id, proxy_id");
+    const map: Record<string, string[]> = {};
+    (data || []).forEach((r: any) => { if (r.proxy_id) { (map[r.proxy_id] ||= []).push(r.user_id); } });
+    return map;
+  } catch { return {}; }
+}
+
+// 한 프록시에 계정 목록을 통째로 설정(기존 배정 교체). 다른 프록시에 있던 계정은 이 프록시로 이동.
+export async function setProxyAccounts(proxyId: string, userIds: string[]): Promise<void> {
+  try {
+    // 이 프록시에 기존 배정된 계정 클리어
+    await supabase.from("publy_account_proxy").delete().eq("proxy_id", proxyId);
+    const rows = userIds.map(u => u.trim()).filter(Boolean).map(user_id => ({ user_id, proxy_id: proxyId, updated_at: new Date().toISOString() }));
+    if (rows.length) {
+      const { error } = await supabase.from("publy_account_proxy").upsert(rows, { onConflict: "user_id" });
+      if (error) alert("계정 배정 실패: " + error.message);
+    }
+  } catch (e: any) { alert("계정 배정 오류: " + (e?.message || e)); }
+}
+
+// 봇 헬스체크 API 호출 + 결과를 DB에 저장. bot = neighbor-bot 주소(기본 3334).
+export async function checkProxyHealth(bot: string, p: PublyProxy): Promise<{ ok: boolean; ip?: string; ms?: number; error?: string }> {
+  try {
+    const r = await fetch(`${bot}/api/proxy-check`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ server: p.server, username: p.username, password: p.password }),
+    });
+    const j = await r.json();
+    await updateProxy(p.id, { last_ok: !!j.ok, last_ip: j.ip || null, last_ms: j.ms ?? null, last_checked_at: new Date().toISOString() });
+    return j;
+  } catch (e: any) {
+    const err = e?.message || "봇 연결 실패(봇이 꺼져 있으면 확인 불가)";
+    await updateProxy(p.id, { last_ok: false, last_checked_at: new Date().toISOString() });
+    return { ok: false, error: err };
+  }
+}

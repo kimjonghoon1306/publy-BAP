@@ -257,6 +257,58 @@ export async function addHistory(params: {
   });
 }
 
+/* ── 프록시(계정별 IP) ──
+   IP가 계속 같은 곳에서 나가면 네이버가 여러 계정을 한 사람으로 묶어 차단한다.
+   계정마다 배정된 프록시로 브라우저를 띄우기 위한 조회 헬퍼.
+   업체와 무관: server(host:port)·username·password 4개만 있으면 Playwright가 그대로 사용. */
+export interface ProxyConfig { server: string; username?: string; password?: string }
+const _proxyCache = new Map<string, { proxy: ProxyConfig | null; ts: number }>();
+const PROXY_CACHE_MS = 60000;
+
+// server 문자열에 스킴이 없으면 http:// 를 붙여 Playwright가 인식하게 정규화
+function normalizeProxyServer(server: string): string {
+  const s = (server || "").trim();
+  if (!s) return s;
+  return /^(https?|socks[45]?):\/\//i.test(s) ? s : `http://${s}`;
+}
+
+export async function getProxyForAccount(userId?: string | null): Promise<ProxyConfig | null> {
+  if (!userId) return null;
+  const cached = _proxyCache.get(userId);
+  if (cached && Date.now() - cached.ts < PROXY_CACHE_MS) return cached.proxy;
+  try {
+    const { data: map } = await supabase
+      .from("publy_account_proxy")
+      .select("proxy_id")
+      .eq("user_id", userId)
+      .maybeSingle();
+    let proxy: ProxyConfig | null = null;
+    if (map?.proxy_id) {
+      const { data: px } = await supabase
+        .from("publy_proxies")
+        .select("server, username, password, active")
+        .eq("id", map.proxy_id)
+        .maybeSingle();
+      if (px?.server && px.active !== false) {
+        proxy = {
+          server: normalizeProxyServer(px.server),
+          username: px.username || undefined,
+          password: px.password || undefined,
+        };
+      }
+    }
+    _proxyCache.set(userId, { proxy, ts: Date.now() });
+    return proxy;
+  } catch {
+    return null;
+  }
+}
+
+export function clearProxyCache(userId?: string): void {
+  if (userId) _proxyCache.delete(userId);
+  else _proxyCache.clear();
+}
+
 export async function useQuota(userId: string): Promise<boolean> {
   const { data } = await supabase
     .from("publy_quotas")
