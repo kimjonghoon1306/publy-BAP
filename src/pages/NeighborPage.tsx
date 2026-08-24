@@ -564,8 +564,10 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
   })();
   const pumasiPostsLimit = PUMASI_POSTS_LIMIT[plan] ?? PUMASI_POSTS_LIMIT.free;        // 계정당 대상 글 수 상한
   const [pumUsed, setPumUsed] = useState(0);                                            // 오늘 품앗이 공감·댓글 건수
-  const [pumPostsByAcc, setPumPostsByAcc] = useState<Record<string, number>>({});       // 계정별 대상 글 수
-  const [pumReceiveByAcc, setPumReceiveByAcc] = useState<Record<string, number>>({});   // 계정별 방문 받을 actor 수
+  const [pumPostsByAcc, setPumPostsByAcc] = useState<Record<string, number>>({});       // 계정별 남 방문 시 상대 글에 댓글 달 수(주는 양)
+  const [pumReceiveByAcc, setPumReceiveByAcc] = useState<Record<string, number>>({});   // 계정별 방문 받을 수
+  const [pumNoGive, setPumNoGive] = useState<Record<string, boolean>>({});               // 안 가기(남 방문 안 함, 받기만)
+  const [pumNoReceive, setPumNoReceive] = useState<Record<string, boolean>>({});         // 안 받기(방문 안 받음, 가기만)
   const [pumDoLike, setPumDoLike] = useState(true);
   const [pumDoComment, setPumDoComment] = useState(true);
   const [pumCommentMode, setPumCommentMode] = useState<"single"|"multi"|"ai">("ai");
@@ -1117,8 +1119,13 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
     const geminiKey = pumCommentMode === "ai" ? (localStorage.getItem("publy_gemini_key") || "") : "";
     // ★받을 수 상한 = 등급 기준(무료2·베3·프5·무제한999). 연결 계정 수가 적으면 봇·서버가 자연스럽게 실제 방문 수로 제한(초과 설정해도 손해 없음).
     const maxReceivers = isUnlimitedPlan ? 999 : pumasiAccountLimit;
-    const accs = connected.map(a => ({ accountId: a.accountId, blogId: a.blogId, posts: Math.min(isUnlimitedPlan ? 999 : pumasiPostsLimit, pumPostsByAcc[a.accountId] || 3), receiveLimit: Math.min(maxReceivers, Math.max(1, pumReceiveByAcc[a.accountId] || 3)) }));
-    addPumLog(`🤝 품앗이 시작 — 계정 ${accs.length}개가 서로 방문 (${accs.map(a => `${a.blogId}:글${a.posts}개씩`).join(", ")})`);
+    const accs = connected.map(a => ({
+      accountId: a.accountId, blogId: a.blogId,
+      posts: Math.min(isUnlimitedPlan ? 999 : pumasiPostsLimit, Math.max(1, pumPostsByAcc[a.accountId] || 3)),
+      receiveLimit: pumNoReceive[a.accountId] ? 0 : Math.min(maxReceivers, Math.max(0, pumReceiveByAcc[a.accountId] ?? 3)),   // 안 받기면 0
+      noGive: !!pumNoGive[a.accountId],   // 안 가기면 남 방문 안 함
+    }));
+    addPumLog(`🤝 품앗이 시작 — 계정 ${accs.length}개 (${accs.map(a => `${a.blogId}:${a.noGive ? "안감" : `줄글${a.posts}`}·${a.receiveLimit === 0 ? "안받음" : `받기${a.receiveLimit}`}`).join(", ")})`);
     const body = JSON.stringify({ accounts: accs, comment, doLike: pumDoLike, doComment: pumDoComment, aiComment: pumCommentMode === "ai", commentTone: pumTone, geminiKey, delayMin: pumDelayMin, delayMax: pumDelayMax, readRelated: pumReadRelated, readRelatedMode: pumReadRelatedMode, readSpeed: pumReadSpeed, periodDays: pumPeriodDays, searchEntry, searchKeyword: pumSearchKeyword, spreadHours: pumSpread / 60, jobId: pumJobIdRef.current, ...(userId ? { userId } : {}) });
     const es = new BotEventStream(`${BOT}/api/pumasi`, { method: "POST", headers: { "Content-Type": "application/json" }, body }); pumEsRef.current = es;
     let pumAiFbShown = false;
@@ -2730,22 +2737,45 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
                   // 실제 방문 가능한 계정 수(나 제외) — 이보다 크게 설정해도 봇이 자연스럽게 이 수로 제한(손해 없음)
                   const physMax = Math.max(1, connected.length - 1);
                   const anyOverPhys = connected.some(a => Math.min(maxReceive, pumReceiveByAcc[a.accountId] ?? Math.min(3, maxReceive)) > physMax);
-                  const colStyle = { display: "grid", gridTemplateColumns: "1fr 76px 76px", alignItems: "center", gap: 10 } as const;
+                  const postsMaxN = isUnlimitedPlan ? 999 : pumasiPostsLimit;
                   return (<>
-                    {/* 헤더: 입력칸과 같은 grid로 맞춰 칸 위에 정확히 정렬 */}
-                    <div style={{ ...colStyle, padding: "0 11px 6px", fontSize: 10.5, color: "var(--text3)", fontWeight: 700 }}>
-                      <span />
-                      <span style={{ textAlign: "center" }}>대상 글</span>
-                      <span style={{ textAlign: "center" }}>받을 수</span>
-                    </div>
                     <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                      {connected.map(a => (
-                        <div key={a.accountId} style={{ ...colStyle, padding: "8px 11px", borderRadius: 9, background: "var(--bg)", border: "1px solid var(--border)" }}>
-                          <span style={{ minWidth: 0, fontSize: 13, fontWeight: 700, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>🔗 {a.blogId || a.accountId}</span>
-                          <input className="inp" type="number" min={1} max={isUnlimitedPlan ? 999 : pumasiPostsLimit} value={pumPostsByAcc[a.accountId] ?? 3} onChange={e => { const v = Math.max(1, Math.min(isUnlimitedPlan ? 999 : pumasiPostsLimit, parseInt(e.target.value) || 1)); setPumPostsByAcc(prev => ({ ...prev, [a.accountId]: v })); }} style={{ width: "100%", fontSize: 13, padding: "8px 6px", textAlign: "center" }} />
-                          <input className="inp" type="number" min={1} max={maxReceive} value={Math.min(maxReceive, pumReceiveByAcc[a.accountId] ?? Math.min(3, maxReceive))} onChange={e => { const v = Math.max(1, Math.min(maxReceive, parseInt(e.target.value) || 1)); setPumReceiveByAcc(prev => ({ ...prev, [a.accountId]: v })); }} style={{ width: "100%", fontSize: 13, padding: "8px 6px", textAlign: "center" }} />
+                      {connected.map(a => {
+                        const noGive = !!pumNoGive[a.accountId];
+                        const noReceive = !!pumNoReceive[a.accountId];
+                        const toggleBtn = (on: boolean, onLabel: string, offLabel: string, onClick: () => void) => (
+                          <button onClick={onClick} style={{ padding: "5px 11px", borderRadius: 99, border: `1.5px solid ${on ? "#ef4444" : "var(--border)"}`, background: on ? "rgba(239,68,68,.12)" : "transparent", color: on ? "#ef4444" : "var(--text3)", fontSize: 11, fontWeight: 800, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}>{on ? onLabel : offLabel}</button>
+                        );
+                        return (
+                        <div key={a.accountId} style={{ padding: "10px 12px", borderRadius: 10, background: "var(--bg)", border: "1px solid var(--border)", display: "flex", flexDirection: "column", gap: 9 }}>
+                          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
+                            <span style={{ minWidth: 0, fontSize: 13, fontWeight: 800, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>🔗 {a.blogId || a.accountId}</span>
+                            <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+                              {toggleBtn(noGive, "🚫 안 가기", "가기", () => setPumNoGive(p => ({ ...p, [a.accountId]: !noGive })))}
+                              {toggleBtn(noReceive, "🚫 안 받기", "받기", () => setPumNoReceive(p => ({ ...p, [a.accountId]: !noReceive })))}
+                            </div>
+                          </div>
+                          <div style={{ display: "flex", gap: 10 }}>
+                            <label style={{ flex: 1, display: "flex", alignItems: "center", gap: 6, fontSize: 11.5, color: "var(--text3)", fontWeight: 700, opacity: noGive ? 0.4 : 1 }}>
+                              줄 글수
+                              <input className="inp" type="text" inputMode="numeric" disabled={noGive}
+                                value={noGive ? "—" : String(pumPostsByAcc[a.accountId] ?? 3)}
+                                onChange={e => { const raw = e.target.value.replace(/[^0-9]/g, ""); setPumPostsByAcc(prev => ({ ...prev, [a.accountId]: raw === "" ? 0 : parseInt(raw) })); }}
+                                onBlur={e => { const v = Math.max(1, Math.min(postsMaxN, parseInt(e.target.value) || 1)); setPumPostsByAcc(prev => ({ ...prev, [a.accountId]: v })); }}
+                                style={{ flex: 1, fontSize: 13, padding: "8px 6px", textAlign: "center", minWidth: 0 }} />
+                            </label>
+                            <label style={{ flex: 1, display: "flex", alignItems: "center", gap: 6, fontSize: 11.5, color: "var(--text3)", fontWeight: 700, opacity: noReceive ? 0.4 : 1 }}>
+                              받을수
+                              <input className="inp" type="text" inputMode="numeric" disabled={noReceive}
+                                value={noReceive ? "0" : String(pumReceiveByAcc[a.accountId] ?? 3)}
+                                onChange={e => { const raw = e.target.value.replace(/[^0-9]/g, ""); setPumReceiveByAcc(prev => ({ ...prev, [a.accountId]: raw === "" ? 0 : parseInt(raw) })); }}
+                                onBlur={e => { const v = Math.max(0, Math.min(maxReceive, parseInt(e.target.value) || 0)); setPumReceiveByAcc(prev => ({ ...prev, [a.accountId]: v })); }}
+                                style={{ flex: 1, fontSize: 13, padding: "8px 6px", textAlign: "center", minWidth: 0 }} />
+                            </label>
+                          </div>
                         </div>
-                      ))}
+                        );
+                      })}
                     </div>
                     <div style={{ fontSize: 11, color: "var(--text3)", marginTop: 9, lineHeight: 1.5, background: "var(--card2)", borderRadius: 8, padding: "8px 11px" }}>
                       ℹ️ <b>받을 수</b>는 내 등급 한도(<b style={{ color: "#ec4899" }}>{isUnlimitedPlan ? "무제한" : `${maxReceive}명`}</b>)까지 설정할 수 있어요.
@@ -2882,14 +2912,16 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
                 {(() => {
                   // ★실제 설정과 연동: 받을 수는 연결 계정 수(나 제외)로 제한되고, 각 방문마다 그 계정의 '대상 글 수'만큼 댓글을 단다.
                   //   → 총 방문(블로그 진입 수)과 실제 댓글 수를 둘 다 계산해 보여준다(받을 수·대상 글 수 바꾸면 즉시 반영).
-                  // ★품앗이 = 계정 전원이 서로 다 방문(N×(N-1)회). 각 계정은 자기 '글 N개' 설정만큼 상대 글에 댓글.
+                  // ★품앗이 = 각 계정이 '받기 M'만큼 방문받고(0이면 안 받음), 방문자는 자기 '글 N개'만큼 상대 글에 댓글(주는 양).
                   const N = connected.length;
                   const postsMax = isUnlimitedPlan ? 999 : pumasiPostsLimit;
                   const per = connected.map(a => ({
-                    posts: Math.min(postsMax, Math.max(1, pumPostsByAcc[a.accountId] ?? 3)),           // 이 계정이 상대에게 남길 댓글 글 수
+                    recv: Math.max(0, pumReceiveByAcc[a.accountId] ?? 3),                               // 받기(0=안 받음), 실제 최대 N-1
+                    posts: Math.min(postsMax, Math.max(1, pumPostsByAcc[a.accountId] ?? 3)),           // 남 방문 시 상대 글에 댓글 달 수(주는 양)
                   }));
-                  const totalVisits = Math.max(1, N * (N - 1));                                        // 전원이 서로 방문 = N×(N-1)
-                  const totalComments = per.reduce((s, x) => s + x.posts * Math.max(0, N - 1), 0) || 1; // 각 계정이 (N-1)곳에 posts개씩
+                  const totalVisits = per.reduce((s, x) => s + Math.min(x.recv, Math.max(0, N - 1)), 0) || 0;   // 총 방문 = Σ 받기(최대 N-1)
+                  const avgPosts = per.length ? per.reduce((s, x) => s + x.posts, 0) / per.length : 1;
+                  const totalComments = Math.round(totalVisits * avgPosts) || 0;                        // 방문마다 방문자 글수(평균)만큼 댓글
                   const gapMin = pumSpread > 0 ? pumSpread / totalVisits : 0;   // 방문 사이 평균 간격(분)
                   const fmtGap = gapMin >= 1 ? `약 ${Math.round(gapMin)}분` : `약 ${Math.round(gapMin * 60)}초`;
                   const fmtTotal = pumSpread >= 60 ? `${Math.floor(pumSpread/60)}시간 ${pumSpread%60 ? `${pumSpread%60}분` : ""}`.trim() : `${pumSpread}분`;
@@ -2912,7 +2944,7 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
                     {pumSpread === 0
                       ? <>지금은 <b>즉시 연속</b>이에요 — 딜레이만 두고 쉬지 않고 이어서 방문해요. (이번 설정: 총 방문 <b style={{color:"#8b5cf6"}}>{totalVisits}회</b> · 댓글 약 <b style={{color:"#ec4899"}}>{totalComments}개</b>)</>
                       : <>이번 설정: 총 방문 <b style={{color:"#8b5cf6"}}>{totalVisits}회</b>(댓글 약 <b style={{color:"#ec4899"}}>{totalComments}개</b>)를 <b style={{color:"#8b5cf6"}}>{fmtTotal}</b>에 걸쳐 → 방문 사이 <b style={{color:"#ec4899"}}>{fmtGap}</b> 간격. <span style={{color:"var(--text3)"}}>그동안 앱이 켜져 있어야 해요.</span></>}
-                    <div style={{ marginTop: 6, color: "var(--text3)", fontSize: 10.5 }}>계정 {N}개가 서로 다 방문해요(1↔2↔3↔4). 각 계정이 자기 '글 개수'만큼 상대 글에 댓글을 남겨요.</div>
+                    <div style={{ marginTop: 6, color: "var(--text3)", fontSize: 10.5 }}>각 계정은 <b>받기</b> 수만큼 방문받고(0이면 안 받음, 최대 {Math.max(0, N - 1)}회), 방문한 계정은 자기 <b>글 개수</b>만큼 상대 글에 공감·댓글을 남겨요. 상대 글이 부족하면 그만큼만 하고 넘어가요.</div>
                   </div>
                 </div>
                   );

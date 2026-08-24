@@ -3138,7 +3138,7 @@ export async function crawlPumasiReport(blogId: string, log: (m: string) => void
 //   각 계정(작성자)의 세션으로 로그인 상태에서, 나머지 계정(대상)의 blogId 글에 engageBlogs 호출.
 //   계정별 postsPerBlog(대상 글 수)를 다르게 지정 가능. 세션은 이미 저장돼 있어 재로그인 불필요.
 export async function pumasiEngage(params: {
-  accounts: { accountId: string; blogId: string; posts: number; receiveLimit: number }[];  // posts=대상 글 수, receiveLimit=방문 받을 actor 수
+  accounts: { accountId: string; blogId: string; posts: number; receiveLimit: number; noGive?: boolean }[];  // posts=줄 글 수(actor), receiveLimit=받을 수(0=안받기), noGive=안가기(남 방문 안 함)
   comment: string;                 // 고정/순환(|||) 멘트
   doLike: boolean;
   doComment: boolean;
@@ -3182,15 +3182,22 @@ export async function pumasiEngage(params: {
   const commentedAll = loadPumasiCommented();   // (actor→target)별 이미 댓글 단 글 이력(도배 방지·최신→과거)
   const now = Date.now();
   const pairKey = (a: string, t: string) => `${a}>${t}`;
-  // ★★품앗이 로직(테리 확정): 계정 전원이 서로 다 방문한다. 4개면 1→2,3,4 / 2→1,3,4 / 3→1,2,4 / 4→1,2,3 (총 N×(N-1)회).
-  //   '받기 수'나 쿨다운으로 조합을 줄이지 않는다. 같은 글 중복 댓글만 아래 excludeLogNos(commentedSet)로 막는다.
+  // ★★품앗이 로직(테리 확정):
+  //   · 받기 M (receiveLimit) = 이 계정이 '몇 번 받을지'. 0이면 안 받음(방문 대상에서 제외).
+  //   · 글 N (posts, actor 기준) = 방문한 계정이 상대 글 몇 개에 공감·댓글 남길지(주는 양).
+  //   각 대상은 받기 수만큼 방문받고(최근 안 온 계정 우선), 방문자는 자기 글수(posts)만큼 준다.
   const visitPlan: { actor: typeof valid[number]; target: typeof valid[number] }[] = [];
-  for (const actor of valid) {
-    for (const target of valid) {
-      if (actor.accountId === target.accountId) continue;
-      visitPlan.push({ actor, target });
-    }
+  for (const target of valid) {
+    const receiveLimit = target.receiveLimit ?? 3;   // 0이면 안 받음
+    if (receiveLimit <= 0) { log(`[품앗이] ${target.blogId} — 받기 0으로 설정돼 방문받지 않음(건너뜀)`); continue; }
+    // 후보 방문자(자기 제외, '안 가기' 계정 제외)를 '최근 안 온 순'으로 정렬 → 받기 수만큼 선정(고정 조합 반복↓)
+    const cands = valid.filter(a => a.accountId !== target.accountId && !a.noGive)
+      .map(a => ({ a, last: pairs[pairKey(a.accountId, target.accountId)] || 0 }))
+      .sort((x, y) => x.last - y.last);
+    for (const c of cands.slice(0, receiveLimit)) visitPlan.push({ actor: c.a, target });
   }
+  // 같은 대상·같은 방문자가 연달아 오지 않도록 방문자별로 흩뿌림
+  visitPlan.sort((p, q) => valid.indexOf(p.actor) - valid.indexOf(q.actor));
 
   // ★시간 분산 큐: 전체 방문을 spreadHours 시간에 걸쳐 고르게 분산(투데이·댓글 폭증 방지)
   const totalCombos = visitPlan.length;
