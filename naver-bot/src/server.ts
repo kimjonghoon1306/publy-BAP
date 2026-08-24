@@ -381,7 +381,7 @@ app.post("/api/naver-datalab", async (req, res) => {
 app.post("/api/gemini-vision", async (req, res) => {
   const { apiKey, parts, prompt } = req.body;
   if (!apiKey || !parts || !prompt) return res.status(400).json({ error: "파라미터 누락" });
-  const models = ["gemini-2.0-flash", "gemini-2.5-flash", "gemini-1.5-flash"];
+  const models = ["gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-flash-latest", "gemini-flash-lite-latest"];
   for (const model of models) {
     try {
       // ★사진글은 길어서 4000토큰이면 잘림 → 8000 + 2.5계열 thinking 끄기(사고에 토큰 뺏겨 본문 잘리는 것 방지)

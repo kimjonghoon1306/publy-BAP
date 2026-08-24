@@ -24,7 +24,8 @@ const INSTA_BOT = "http://127.0.0.1:3335";
 const BATCH = 30;
 const MAX_TITLES = 90;
 const MAX_KW = 90;
-const GEMINI_MODELS = ["gemini-2.0-flash","gemini-2.0-flash-lite","gemini-2.5-flash","gemini-2.5-flash-lite"];
+// ★실검증(2026-08-24): 2.0-flash·2.0-flash-lite·1.5-flash는 구글이 폐기(404). 살아있는 모델만 사용(각 한도 별도라 분산).
+const GEMINI_MODELS = ["gemini-2.5-flash","gemini-2.5-flash-lite","gemini-flash-latest","gemini-flash-lite-latest"];
 const PLAN_LABELS: Record<string,string> = {free:"FREE",basic:"BASIC",pro:"PRO",unlimited:"무제한",admin:"ADMIN"};
 // 만료일까지 남은 일수 — 자정 기준으로 계산해 시각과 무관하게 항상 동일한 값(상단/하단 D-day 일치)
 function daysUntil(dateStr?: string): number | null {
@@ -3316,7 +3317,7 @@ ${segList}`;
         if(pr.ok){const pd=await pr.json();if(pd.text)text=pd.text;}
       }catch{}
       if(!text){
-        for(const model of ["gemini-2.0-flash","gemini-2.5-flash","gemini-1.5-flash"]){
+        for(const model of ["gemini-2.5-flash","gemini-2.5-flash-lite","gemini-flash-latest","gemini-flash-lite-latest"]){
           try{
             const cfg:any={maxOutputTokens:2000,temperature:0.7};
             if(model.startsWith("gemini-2.5"))cfg.thinkingConfig={thinkingBudget:0};
@@ -3434,7 +3435,7 @@ POST3: (제목)|(이유)
 
       // 봇 없거나 실패 시 직접 호출 (토큰 8000·2.5 thinking 끄기·잘림 재시도)
       if(!text){
-        const MODELS = ["gemini-2.0-flash","gemini-2.5-flash","gemini-1.5-flash"];
+        const MODELS = ["gemini-2.5-flash","gemini-2.5-flash-lite","gemini-flash-latest","gemini-flash-lite-latest"];
         for(const model of MODELS){
           try{
             const genCfg:any = {maxOutputTokens:8000,temperature:0.9};
@@ -6471,7 +6472,7 @@ POST3: (제목)|(이유)
                         <button onClick={async()=>{
                           const key=localStorage.getItem("publy_gemini_key")||localStorage.getItem("publy_adm_gemini_key")||"";
                           if(!key){alert("설정 탭에서 Gemini API 키를 먼저 입력해주세요");return;}
-                          const r=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${key}`,
+                          const r=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${key}`,
                             {method:"POST",headers:{"Content-Type":"application/json"},
                              body:JSON.stringify({contents:[{parts:[{text:`인스타그램 체험단 모집 DM을 자연스럽게 작성해줘. 키워드: "${dmKeyword||"뷰티/식품 체험단"}". 조건: 1000자 이내, 링크 미포함, 친근한 말투, 브랜드명은 [브랜드명]으로 표시, 담당자명은 [담당자명]. DM 내용만 출력.`}]}],generationConfig:{maxOutputTokens:500}})});
                           const d=await r.json();

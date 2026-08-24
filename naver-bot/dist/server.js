@@ -41820,41 +41820,36 @@ async function generateFlowImages(params) {
     return true;
   }
   async function saveGeneratedImage(idx, caption) {
-    log("  \u23F3 \uC774\uBBF8\uC9C0 \uC0DD\uC131 \uB300\uAE30 (\uC644\uC131\uB418\uBA74 '\uBC14\uB85C' \uC800\uC7A5, \uCD5C\uB300 3\uBD84)...");
-    await page.waitForTimeout(4e3);
+    log("  \u23F3 \uC774\uBBF8\uC9C0 \uC0DD\uC131 \uB300\uAE30 (\uC644\uC131\uB418\uBA74 \uBC14\uB85C \uC800\uC7A5, \uCD5C\uB300 3\uBD84)...");
+    await page.waitForTimeout(8e3);
     const findImgs = () => page.evaluate(() => {
       const imgs = Array.from(document.querySelectorAll("img"));
       return imgs.map((img) => img.src).filter((src) => src && src.length > 100 && (src.includes("blob:") || src.includes("generativelanguage") || src.includes("aidemos") || src.includes("googleusercontent") || src.includes("data:image")));
     });
     let imgSrcs = [];
-    const MAX_WAIT = 18e4, STEP = 700, t0 = Date.now();
-    let lastPolicyCheck = 0;
+    const MAX_WAIT = 18e4, STEP = 3e3, t0 = Date.now();
     while (Date.now() - t0 < MAX_WAIT) {
       imgSrcs = await findImgs().catch(() => []);
       if (imgSrcs.length > 0)
         break;
-      const nowEl = Date.now() - t0;
-      if (nowEl - lastPolicyCheck >= 3e3) {
-        lastPolicyCheck = nowEl;
-        const blocked = await page.evaluate(() => {
-          const t = document.body.innerText || "";
-          return /정책|위반|생성할 수 없|사용하지 못|만들 수 없|violat|policy|not allowed|can(?:'|’)?t (?:be )?(?:create|generate)|unable to (?:create|generate)/i.test(t);
-        }).catch(() => false);
-        if (blocked) {
-          log(`  \u{1F6AB} [Flow] \uAD6C\uAE00 \uC815\uCC45\uC73C\uB85C \uC774 \uD504\uB86C\uD504\uD2B8\uB294 \uC0DD\uC131 \uBD88\uAC00 \u2192 \uC774 \uC7A5 \uAC74\uB108\uB700`);
-          return false;
-        }
-        const el = Math.round(nowEl / 1e3);
-        if (el > 0 && el % 15 === 0)
-          log(`  \u23F3 [Flow] \uC0DD\uC131 \uC911... (${el}\uCD08 \uACBD\uACFC)`);
+      const blocked = await page.evaluate(() => {
+        const t = document.body.innerText || "";
+        return /정책|위반|생성할 수 없|사용하지 못|만들 수 없|violat|policy|not allowed|can(?:'|’)?t (?:be )?(?:create|generate)|unable to (?:create|generate)/i.test(t);
+      }).catch(() => false);
+      if (blocked) {
+        log(`  \u{1F6AB} [Flow] \uAD6C\uAE00 \uC815\uCC45\uC73C\uB85C \uC774 \uD504\uB86C\uD504\uD2B8\uB294 \uC0DD\uC131 \uBD88\uAC00 \u2192 \uC774 \uC7A5 \uAC74\uB108\uB700`);
+        return false;
       }
+      const el = Math.round((Date.now() - t0) / 1e3);
+      if (el > 0 && el % 15 === 0)
+        log(`  \u23F3 [Flow] \uC0DD\uC131 \uC911... (${el}\uCD08 \uACBD\uACFC, \uACC4\uC18D \uAE30\uB2E4\uB824\uC694)`);
       await page.waitForTimeout(STEP);
     }
     if (imgSrcs.length === 0) {
       log(`  \u26A0\uFE0F [Flow] \uC0DD\uC131\uC774 \uB108\uBB34 \uC624\uB798 \uAC78\uB824 \uC774\uBBF8\uC9C0\uB97C \uBABB \uBC1B\uC558\uC5B4\uC694 (\uB2E4\uC74C \uC7A5\uC73C\uB85C \uC9C4\uD589)`);
       return false;
     }
-    log(`  \u{1F5BC}\uFE0F [Flow] \uC774\uBBF8\uC9C0 \uD655\uC778 \u2192 \uBC14\uB85C \uC800\uC7A5`);
+    log(`  \u{1F5BC}\uFE0F [Flow] \uC774\uBBF8\uC9C0 \uD655\uC778 \u2192 \uC800\uC7A5 \uC911...`);
     if (imgSrcs.length > 0) {
       const src = imgSrcs[0];
       if (src.startsWith("blob:")) {
@@ -52111,7 +52106,7 @@ app.post("/api/gemini-vision", async (req, res) => {
   const { apiKey, parts, prompt } = req.body;
   if (!apiKey || !parts || !prompt)
     return res.status(400).json({ error: "\uD30C\uB77C\uBBF8\uD130 \uB204\uB77D" });
-  const models = ["gemini-2.0-flash", "gemini-2.5-flash", "gemini-1.5-flash"];
+  const models = ["gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-flash-latest", "gemini-flash-lite-latest"];
   for (const model of models) {
     try {
       const generationConfig = { maxOutputTokens: 8e3, temperature: 0.9 };

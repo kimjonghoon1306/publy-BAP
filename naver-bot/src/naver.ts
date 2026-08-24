@@ -1701,8 +1701,8 @@ export async function generateFlowImages(params: {
   // ── 헬퍼: 생성된 이미지 저장 ──
   async function saveGeneratedImage(idx: number, caption: string): Promise<boolean> {
     // ★고정 대기(25초)는 생성이 느리면 완성 전에 넘어가 '중단'된다. → 완성될 때까지 폴링(진행 로그 포함).
-    log("  ⏳ 이미지 생성 대기 (완성되면 '바로' 저장, 최대 3분)...");
-    await page.waitForTimeout(4000);   // 생성 시작 최소 대기(UI 이미지 오검출 방지) — 8→4초로 단축
+    log("  ⏳ 이미지 생성 대기 (완성되면 바로 저장, 최대 3분)...");
+    await page.waitForTimeout(8000);   // 생성 시작 최소 대기(UI 이미지 오검출 방지)
     const findImgs = () => page.evaluate(() => {
       const imgs = Array.from(document.querySelectorAll("img"));
       return imgs.map(img => img.src).filter(src =>
@@ -1712,28 +1712,22 @@ export async function generateFlowImages(params: {
          src.includes("data:image")));
     });
     let imgSrcs: string[] = [];
-    // ★완료 감지를 빠르게: 폴링 간격 3초→0.7초. 완성되는 즉시(최대 0.7초 내) 잡아 당겨온다.
-    const MAX_WAIT = 180000, STEP = 700, t0 = Date.now();
-    let lastPolicyCheck = 0;
+    const MAX_WAIT = 180000, STEP = 3000, t0 = Date.now();
     while (Date.now() - t0 < MAX_WAIT) {
       imgSrcs = await findImgs().catch(() => [] as string[]);
       if (imgSrcs.length > 0) break;
-      const nowEl = Date.now() - t0;
-      // 정책 거부 감지는 3초마다만(매 폴링은 부하) → 걸리면 즉시 다음 장
-      if (nowEl - lastPolicyCheck >= 3000) {
-        lastPolicyCheck = nowEl;
-        const blocked = await page.evaluate(() => {
-          const t = (document.body.innerText || "");
-          return /정책|위반|생성할 수 없|사용하지 못|만들 수 없|violat|policy|not allowed|can(?:'|’)?t (?:be )?(?:create|generate)|unable to (?:create|generate)/i.test(t);
-        }).catch(() => false);
-        if (blocked) { log(`  🚫 [Flow] 구글 정책으로 이 프롬프트는 생성 불가 → 이 장 건너뜀`); return false; }
-        const el = Math.round(nowEl / 1000);
-        if (el > 0 && el % 15 === 0) log(`  ⏳ [Flow] 생성 중... (${el}초 경과)`);
-      }
+      // ★구글 정책 거부 감지 → 3분 기다리지 말고 즉시 넘어간다(프롬프트가 정책에 걸린 경우).
+      const blocked = await page.evaluate(() => {
+        const t = (document.body.innerText || "");
+        return /정책|위반|생성할 수 없|사용하지 못|만들 수 없|violat|policy|not allowed|can(?:'|’)?t (?:be )?(?:create|generate)|unable to (?:create|generate)/i.test(t);
+      }).catch(() => false);
+      if (blocked) { log(`  🚫 [Flow] 구글 정책으로 이 프롬프트는 생성 불가 → 이 장 건너뜀`); return false; }
+      const el = Math.round((Date.now() - t0) / 1000);
+      if (el > 0 && el % 15 === 0) log(`  ⏳ [Flow] 생성 중... (${el}초 경과, 계속 기다려요)`);
       await page.waitForTimeout(STEP);
     }
     if (imgSrcs.length === 0) { log(`  ⚠️ [Flow] 생성이 너무 오래 걸려 이미지를 못 받았어요 (다음 장으로 진행)`); return false; }
-    log(`  🖼️ [Flow] 이미지 확인 → 바로 저장`);
+    log(`  🖼️ [Flow] 이미지 확인 → 저장 중...`);
 
     if (imgSrcs.length > 0) {
       const src = imgSrcs[0];

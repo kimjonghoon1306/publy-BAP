@@ -20,7 +20,8 @@ interface UserFull {
 const BOT = "http://127.0.0.1:3333";
 const INSTA_BOT = "http://127.0.0.1:3335";
 const ADM_UID = "admin-publy";
-const GEMINI_MODELS_ADM = ["gemini-2.0-flash","gemini-2.0-flash-lite","gemini-2.5-flash","gemini-2.5-flash-lite"];
+// ★실검증(2026-08-24): 2.0·1.5 계열은 폐기(404). 살아있는 모델만.
+const GEMINI_MODELS_ADM = ["gemini-2.5-flash","gemini-2.5-flash-lite","gemini-flash-latest","gemini-flash-lite-latest"];
 const BATCH = 30;
 const MAX_TITLES = 90;
 const MAX_KW = 90;
@@ -952,7 +953,7 @@ Today: ${today.toISOString().slice(0,10)}
 - ⛔ 과장·낚시 감탄사 금지(대박·충격·미쳤다·1등·완벽·진짜), 물음표·느낌표 남발 금지(최대 1개)
 Output format (JSON array only, no other text):
 [{"date":"YYYY-MM-DD","keyword":"키워드","title":"SEO제목","style":"글스타일","adType":"adpost or adsense"}]`;
-      const r=await fetch("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key="+encodeURIComponent(geminiKey),
+      const r=await fetch("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key="+encodeURIComponent(geminiKey),
         {method:"POST",headers:{"Content-Type":"application/json"},
           body:JSON.stringify({
             contents:[{parts:[{text:prompt}]}],
@@ -1002,7 +1003,7 @@ Output format (JSON array only, no other text):
 기존 제목(중복 금지): ${existTitles.slice(0,20).join(" / ")}
 ★제목 규칙: 검색어 앞 8글자 배치, 25~32자, 숫자·대상·상황 1~2개, 과장·낚시 감탄사 금지, 물음표·느낌표 최대 1개.
 출력: {"keyword":"핵심키워드","title":"새 제목","style":"감성일기 또는 정보글 또는 맛집후기 또는 여행기","adType":"adpost 또는 adsense"}`;
-      const r=await fetch("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key="+encodeURIComponent(key),
+      const r=await fetch("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key="+encodeURIComponent(key),
         {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({contents:[{parts:[{text:prompt}]}],generationConfig:{temperature:0.7,maxOutputTokens:512,responseMimeType:"application/json"}})});
       const d=await r.json(); const raw=d.candidates?.[0]?.content?.parts?.[0]?.text||"";
       const clean=raw.replace(/```json|```/g,"").trim(); const s=clean.indexOf("{"),e=clean.lastIndexOf("}");
@@ -1338,7 +1339,7 @@ Output format (JSON array only, no other text):
       } catch {}
 
       if(!text){
-        const MODELS = ["gemini-2.0-flash","gemini-2.5-flash","gemini-1.5-flash"];
+        const MODELS = ["gemini-2.5-flash","gemini-2.5-flash-lite","gemini-flash-latest","gemini-flash-lite-latest"];
         for(const model of MODELS){
           try{
             const genCfg:any={maxOutputTokens:8000,temperature:0.9};   // 사진글 길어서 8000·2.5 thinking 끄기
@@ -5233,7 +5234,7 @@ POST3: (제목)|(이유)
                       <button onClick={async()=>{
                         const key=localStorage.getItem("publy_adm_gemini_key")||"";
                         if(!key){alert("설정탭에서 Gemini API 키를 먼저 입력해주세요");return;}
-                        const r=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${key}`,
+                        const r=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${key}`,
                           {method:"POST",headers:{"Content-Type":"application/json"},
                            body:JSON.stringify({contents:[{parts:[{text:`인스타그램 체험단 모집 DM을 작성해줘. 제품 키워드: "${dmKeyword||"뷰티/식품"}". 조건: 1000자 이내, 링크 미포함, 친근한 말투, 자연스럽게, 브랜드명은 [브랜드명]으로 표시. DM 내용만 출력.`}]}],generationConfig:{maxOutputTokens:500}})});
                         const d=await r.json();

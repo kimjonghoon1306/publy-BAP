@@ -1260,7 +1260,9 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
       : "";
     const prompt = `너는 네이버 블로그 상위노출(SEO) 전문가야. 이 블로그의 아래 글들은 네이버 검색에 노출이 안 되고 있어(누락). 각 제목을 검색에 잘 잡히게 정교하게 고쳐줘.${winnerBlock}\n\n각 누락 제목마다 아래 JSON 형식으로만 답해. 다른 말 절대 금지. 순수 JSON 배열만:\n[{"original":"원래제목","diagnosis":"이 제목이 왜 검색 안 되는지 핵심 원인 1문장(과장/낚시/검색어없음/너무추상 등)","newTitle":"개선안1 (실제 검색어를 앞에 배치, 25~35자, 구체적)","newTitle2":"개선안2 (다른 각도의 대안)","keywords":["이 글 본문에 넣을 실제 검색 키워드5개"],"bodyTip":"본문/태그를 어떻게 손보면 좋은지 실전 팁 1문장","expectedEffect":"이렇게 바꾸면 기대되는 효과 1문장"}]\n\n[핵심 규칙]\n- newTitle: 사람들이 진짜 네이버에 치는 검색어(지명+대상+상황) 형태. 과장·감탄사(대박/진짜/1등/충격) 절대 금지.\n- 위 '성공 제목' 패턴이 있으면 그 스타일을 최대한 따라라.\n- keywords: 검색량 있을 법한 구체 키워드 5개(롱테일 포함).\n- 모든 답변은 실행 가능하고 구체적으로. 뻔한 일반론 금지.\n\n[누락 제목들]\n${missing.map((t, i) => `${i + 1}. ${t}`).join("\n")}`;
     // 2.0-flash 우선(thinking 토큰 안 먹어 JSON 안정적). 토큰 넉넉히(8000)+JSON 강제로 응답 잘림·설명 섞임 방지.
-    const models = ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-2.5-flash"];
+    // ★실검증(2026-08-24): gemini-2.0-flash·2.0-flash-lite·1.5-flash는 구글이 폐기(404). 살아있는 모델만 사용.
+    //   각 모델은 한도가 별도라, 2.5-flash가 한도 차도 다음 모델(2.5-flash-lite 등, 한도 남음)로 넘어가 성공한다.
+    const models = ["gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-flash-latest", "gemini-flash-lite-latest"];
     let lastErr = "";
     for (const model of models) {
       try {

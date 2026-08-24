@@ -48,7 +48,7 @@ const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML,
 
 /* ★Gemini 표준 모델 리스트 — 글쓰기(callAI)와 동일. 한 모델이 429(한도)여도 다음 모델은 별도 한도라
    끝까지 폴백해야 '한도 부족'으로 헛되이 포기하지 않는다. flash-lite 포함(무료 한도 넉넉). */
-const GEMINI_MODELS = ["gemini-2.0-flash", "gemini-2.0-flash-lite", "gemini-2.5-flash", "gemini-2.5-flash-lite"];
+const GEMINI_MODELS = ["gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-flash-latest", "gemini-flash-lite-latest"];
 
 /* ── 멘트 자연 변형 헬퍼 ── */
 // ★ 네이버 서이추/댓글 메시지 필드는 4바이트 이모지(😊)를 "?"로 저장함 → 텍스트 이모티콘으로 치환
