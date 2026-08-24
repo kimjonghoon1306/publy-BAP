@@ -95,7 +95,19 @@ const CAMPAIGN_PRESETS = [
 ];
 // 기본 멘트(복원용) — 사용자가 수정해도 이 값으로 되돌릴 수 있게 상수로 보관
 const DEFAULT_SINGLE_MSG = "안녕하세요! 좋은 글 잘 읽고 갑니다. 서이추 신청드려요 😊";
-const DEFAULT_MULTI_MSGS = "안녕하세요! 좋은 글 잘 읽고 갑니다. 서이추 신청드려요 😊\n공감가는 글이 많네요. 서이추 해요!\n좋은 정보 잘 보고 갑니다. 이웃 신청드려요^^";
+// ★다중 멘트 = 순서대로 돌아가며 사용(도배·스팸 탐지 회피). 자연스러운 서이추 인사 다양하게.
+const DEFAULT_MULTI_MSGS = [
+  "안녕하세요! 좋은 글 잘 읽고 갑니다. 서이추 신청드려요 😊",
+  "공감 가는 글이 많네요. 서로이웃해요!",
+  "좋은 정보 잘 보고 갑니다. 이웃 신청드려요^^",
+  "블로그 분위기가 참 좋네요 🌿 서이추 신청할게요!",
+  "포스팅에 정성이 느껴져요 👍 서로이웃 해요~",
+  "글 잘 보고 갑니다 😄 자주 소통해요, 이웃 신청드려요!",
+  "반가워요~ 좋은 이웃이 되고 싶어 신청드려요 🤝",
+  "유익한 글 감사합니다 🙌 서로이웃 신청드려요!",
+  "앞으로 자주 들를게요 ☺️ 서이추 신청합니다~",
+  "따뜻한 글 잘 읽었어요 💕 이웃해요!",
+].join("\n");
 interface EngageResult { keyword: string; blogId: string; postUrl: string; liked: boolean; commented: boolean; status: "success"|"fail"|"skip"|"pending"|"running"; message: string; }
 // 상단·사이드바 배지와 동일한 플랜별 하루 한도 (lib/supabase.ts의 NEIGHBOR/ENGAGE_DAILY_LIMIT와 일치)
 const DAILY_LIMIT_BY_PLAN: Record<string, number> = { free: 10, basic: 50, pro: 100, unlimited: 999999, admin: 9999 };

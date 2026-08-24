@@ -46,6 +46,10 @@ const LAUNCH_ARGS = [
 
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
 
+/* ★Gemini 표준 모델 리스트 — 글쓰기(callAI)와 동일. 한 모델이 429(한도)여도 다음 모델은 별도 한도라
+   끝까지 폴백해야 '한도 부족'으로 헛되이 포기하지 않는다. flash-lite 포함(무료 한도 넉넉). */
+const GEMINI_MODELS = ["gemini-2.0-flash", "gemini-2.0-flash-lite", "gemini-2.5-flash", "gemini-2.5-flash-lite"];
+
 /* ── 멘트 자연 변형 헬퍼 ── */
 // ★ 네이버 서이추/댓글 메시지 필드는 4바이트 이모지(😊)를 "?"로 저장함 → 텍스트 이모티콘으로 치환
 function emojiToSafeText(s: string): string {
@@ -63,21 +67,71 @@ function emojiToSafeText(s: string): string {
 // ★AI 한도 소진 시 자동 전환용 순환 댓글 풀(다양한 시작·자연스러운 표현, "와~" 편중 없음).
 //   Gemini 무료 한도(하루 제한)를 넘겨도 댓글이 끊기지 않도록 이 중에서 랜덤으로 단다.
 const FALLBACK_COMMENTS = [
+  // ── 정보·유익 ──
   "좋은 정보 얻어가요, 잘 보고 갑니다!",
-  "정성스러운 글이네요, 잘 읽었어요.",
-  "오늘도 유익한 글 감사합니다.",
-  "덕분에 많이 배우고 가요, 감사해요.",
-  "글이 깔끔해서 읽기 편했어요!",
   "필요했던 내용인데 도움 많이 됐어요.",
   "꼼꼼하게 정리해주셔서 감사합니다.",
-  "잘 보고 갑니다, 다음 글도 기대할게요!",
-  "공감하며 읽었어요, 좋은 하루 보내세요.",
-  "사진이랑 설명이 딱 좋네요, 잘 봤어요.",
   "유용한 팁 감사해요, 참고할게요!",
+  "이런 정보 찾고 있었는데 딱이네요.",
+  "설명이 자세해서 이해가 쏙쏙 돼요.",
+  "핵심만 딱딱 짚어주셔서 좋았어요.",
+  "덕분에 궁금했던 게 풀렸어요, 감사해요.",
+  "정리가 잘 되어 있어서 저장해둡니다!",
+  "실질적으로 도움되는 글이라 반갑네요.",
+  // ── 정성·글솜씨 ──
+  "정성스러운 글이네요, 잘 읽었어요.",
+  "글이 깔끔해서 읽기 편했어요!",
+  "사진이랑 설명이 딱 좋네요, 잘 봤어요.",
+  "문장이 술술 읽혀서 끝까지 봤어요.",
+  "정성이 느껴지는 포스팅이에요, 최고!",
+  "사진도 예쁘고 내용도 알차네요.",
+  "구성이 깔끔해서 보기 좋았습니다.",
+  // ── 공감·일상 ──
+  "공감하며 읽었어요, 좋은 하루 보내세요.",
+  "저도 비슷한 경험이 있어서 반가웠어요.",
+  "읽는 내내 고개 끄덕이며 봤네요.",
+  "마음이 따뜻해지는 글이에요, 잘 봤어요.",
+  "괜히 기분 좋아지는 포스팅이네요!",
+  "오늘 하루도 힘내시길 바라요, 잘 봤어요.",
+  "글에서 진심이 느껴져서 좋았어요.",
+  // ── 감탄·리액션 ──
+  "우아 이거 완전 꿀팁이네요!",
+  "생각지도 못한 방법인데 신기해요.",
+  "이렇게 정리된 글은 처음 봐요, 대단해요.",
+  "보자마자 감탄했어요, 잘 봤습니다!",
+  "역시 전문가는 다르네요, 배우고 가요.",
+  // ── 응원·소통 ──
+  "잘 보고 갑니다, 다음 글도 기대할게요!",
   "정보 감사합니다, 자주 들를게요.",
+  "오늘도 유익한 글 감사합니다.",
+  "덕분에 많이 배우고 가요, 감사해요.",
+  "다음 포스팅도 기다리고 있을게요!",
+  "좋은 글 자주 올려주세요, 응원합니다.",
+  "앞으로도 좋은 글 부탁드려요!",
+  "잘 보고 가요, 소통해요 우리~",
+  "글 보고 힘 얻고 갑니다, 감사해요.",
+  "덕분에 좋은 하루 시작하네요, 고마워요.",
 ];
 function pickFallbackComment(): string {
   return FALLBACK_COMMENTS[Math.floor(Math.random() * FALLBACK_COMMENTS.length)];
+}
+/* ★답방(내 글에 온 댓글에 대한 답글) 전용 순환 문구 — 공감댓글과 성격이 달라 별도 풀. */
+const FALLBACK_REPLIES = [
+  "댓글 남겨주셔서 감사해요, 힘이 나네요!",
+  "찾아와 주셔서 고맙습니다, 좋은 하루 보내세요.",
+  "따뜻한 댓글 감사해요, 자주 소통해요!",
+  "읽어주시고 댓글까지, 정말 감사합니다.",
+  "관심 가져주셔서 감사해요, 또 들러주세요!",
+  "덕분에 기운이 나네요, 고맙습니다.",
+  "공감해주셔서 감사해요, 반가웠어요!",
+  "댓글 보고 미소 지었어요, 고마워요.",
+  "소중한 댓글 감사합니다, 좋은 하루 되세요.",
+  "함께해주셔서 감사해요, 자주 뵈어요!",
+  "응원 감사합니다, 더 좋은 글로 보답할게요.",
+  "방문해주셔서 감사해요, 행복한 하루 보내세요!",
+];
+function pickFallbackReply(): string {
+  return FALLBACK_REPLIES[Math.floor(Math.random() * FALLBACK_REPLIES.length)];
 }
 
 function naturalizeMsg(msg: string): string {
@@ -1958,8 +2012,8 @@ async function generateAiComment(key: string, tone: string, postText: string, lo
   const starters = ["글 내용에 바로 반응하며", "질문을 던지듯", "공감하는 어투로", "가볍게 감탄하며", "정보에 고마움을 표하며", "담담하게 한마디로", "본문의 한 부분을 콕 집어", "내 경험을 살짝 곁들여"];
   const starterHint = starters[Math.floor(Math.random() * starters.length)];
   const prompt = `너는 네이버 블로그 이웃이야. 아래 블로그 글을 읽고 ${toneGuide} 말투의 자연스러운 한국어 공감 댓글을 딱 1개만 써줘.\n규칙: 1~2문장, 45자 이내, 글 내용에 구체적으로 반응, 이모지 1개 정도만, 광고·링크·해시태그 금지, 따옴표 없이 댓글 문장만 출력.\n★중요(시작 표현 다양화): 이번 댓글은 "${starterHint}" 시작해줘. "와", "우와", "와아" 같은 감탄사로 시작하지 마. 매번 다른 첫 단어로 시작해서 다른 댓글들과 겹치지 않게 해.\n\n[블로그 글]\n${postText}`;
-  const models = ["gemini-2.0-flash", "gemini-2.5-flash", "gemini-1.5-flash"];
-  for (const model of models) {
+  let sawQuota = false;   // 429/quota를 본 모델이 있었는지(모든 모델 소진 후에만 한도소진 처리)
+  for (const model of GEMINI_MODELS) {
     try {
       // ★2.5계열은 thinking 토큰을 먼저 소비 → maxOutputTokens가 작으면 실제 댓글이 잘려나옴.
       //   그래서 thinking 끄고(thinkingBudget 0), 토큰도 넉넉히(800) 준다.
@@ -1970,9 +2024,8 @@ async function generateAiComment(key: string, tone: string, postText: string, lo
         body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }], generationConfig }),
       });
       const d: any = await r.json();
-      // ★한도 초과(429 또는 quota 메시지) 감지 — 모델 로직은 건드리지 않고 플래그만 세운다.
-      if (r.status === 429 || /quota|exceeded|rate.?limit/i.test(d?.error?.message || "")) __aiQuotaExhausted = true;
-      if (!r.ok) { if (r.status === 404 || r.status === 400) continue; log(`[AI댓글] 생성 실패(${model}): ${d?.error?.message || r.status}`); return ""; }
+      // ★글쓰기(callAI)와 동일: 어떤 실패든(429 한도 포함) 다음 모델로 폴백. 한 모델 429여도 다른 모델은 한도가 남아있음.
+      if (!r.ok) { if (r.status === 429 || /quota|exceeded|rate.?limit/i.test(d?.error?.message || "")) sawQuota = true; log(`[AI댓글] ${model} 실패(${r.status}) → 다음 모델`); continue; }
       const cand = d?.candidates?.[0];
       const raw = cand?.content?.parts?.[0]?.text?.trim();
       const finish = cand?.finishReason;
@@ -1985,7 +2038,9 @@ async function generateAiComment(key: string, tone: string, postText: string, lo
       return cleaned;
     } catch (e: any) { log(`[AI댓글] 오류(${model}): ${e.message}`); }
   }
-  log("[AI댓글] 모든 모델 생성 실패");
+  // ★모든 모델이 429/한도였을 때만 소진으로 판정 → 순환 폴백 댓글로 전환. (한 모델 429로 섣불리 포기하지 않음)
+  if (sawQuota) { __aiQuotaExhausted = true; log("[AI댓글] 모든 모델 한도 소진 → 순환 댓글로 전환"); }
+  else log("[AI댓글] 모든 모델 생성 실패");
   return "";
 }
 
@@ -2855,7 +2910,8 @@ export async function replyToComments(params: {
           let replyText = comment;
           if (mode === "ai") {
             replyText = await generateAiReply(geminiKey, tone, c.text, c.author || "", log);
-            if (!replyText) { log(`[답방] AI 답글 생성 실패 — 이 댓글 스킵`); continue; }
+            // ★AI 실패(한도·오류)해도 스킵하지 말고 순환 답글로 답한다(테리: 답방도 순환 문구 사용).
+            if (!replyText) { replyText = pickFallbackReply(); log(`[답방] AI 답글 실패 → 순환 답글 사용: "${replyText}"`); }
           }
           // ① 해당 댓글의 '답글' 버튼 클릭(commentNo로 정확히 타겟) → 답글 입력 영역 펼침
           const opened = await ctx.evaluate((cno: string) => {
@@ -2923,7 +2979,7 @@ async function generateAiReply(key: string, tone: string, commentText: string, a
   const rStarters = ["고마움을 먼저 표하며", "상대 댓글에 되물으며", "공감하며", "가볍게 인사하며", "댓글 내용을 콕 집어", "반가움을 담아", "담담하게 한마디로"];
   const rHint = rStarters[Math.floor(Math.random() * rStarters.length)];
   const prompt = `너는 네이버 블로그 주인이야. 내 글에 아래 댓글이 달렸어. 이 댓글에 ${toneGuide} 말투로 고마움을 담은 자연스러운 한국어 답글을 딱 1개만 써줘.\n${nameRule}\n규칙: 1문장, 35자 이내, 댓글 내용에 구체적으로 반응, 이모지 1개 정도, 광고·링크 금지, 따옴표 없이 답글만 출력.\n★시작 표현 다양화: 이번 답글은 "${rHint}" 시작해줘. "와", "우와", "감사합니다"로만 매번 시작하지 말고 첫 단어를 다르게.\n\n[받은 댓글]\n${commentText}`;
-  for (const model of ["gemini-2.0-flash", "gemini-2.5-flash", "gemini-1.5-flash"]) {
+  for (const model of GEMINI_MODELS) {
     try {
       // ★2.5계열 thinking 끄고 토큰 넉넉히 — 답글이 중간에 잘리는 것 방지
       const generationConfig: any = { maxOutputTokens: 800, temperature: 1.0 };
@@ -2933,7 +2989,8 @@ async function generateAiReply(key: string, tone: string, commentText: string, a
         body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }], generationConfig }),
       });
       const d: any = await r.json();
-      if (!r.ok) { if (r.status === 404 || r.status === 400) continue; return ""; }
+      // ★글쓰기와 동일: 429 한도 포함 어떤 실패든 다음 모델로 폴백(섣불리 포기 금지)
+      if (!r.ok) { log(`[답방] ${model} 실패(${r.status}) → 다음 모델`); continue; }
       const cand = d?.candidates?.[0];
       const raw = cand?.content?.parts?.[0]?.text?.trim();
       if (!raw || cand?.finishReason === "MAX_TOKENS") { log(`[답방] ${model} 답글 잘림/빈응답 → 다음 모델`); continue; }
