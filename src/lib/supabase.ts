@@ -154,10 +154,13 @@ export async function addHistory(data: Omit<PublyHistory, "id" | "published_at">
   if (error) throw new Error(error.message);
 }
 
+// ★목록엔 본문(content) 컬럼 제외 — content엔 발행 본문 전체(이미지 등)가 담겨 115건이어도
+//   수십 MB라 select("*")가 문 타임아웃(57014)을 낸다. 목록에 필요한 가벼운 컬럼만 가져온다.
+const HISTORY_COLS = "id,user_id,platform,title,post_url,status,error_message,image_used,published_at";
 export async function getHistory(userId: string): Promise<PublyHistory[]> {
   const ordered = await supabase
     .from("publy_history")
-    .select("*")
+    .select(HISTORY_COLS)
     .eq("user_id", userId)
     .order("published_at", { ascending: false })
     .limit(2000);   // 발행 흔적을 자동으로 지우지 않는다(테리). 삭제는 사용자가 개별/전체 버튼으로만.
@@ -169,7 +172,7 @@ export async function getHistory(userId: string): Promise<PublyHistory[]> {
   // timestamps locally. If this also fails, expose both PostgREST diagnostics.
   const unordered = await supabase
     .from("publy_history")
-    .select("*")
+    .select(HISTORY_COLS)
     .eq("user_id", userId)
     .limit(2000);
 

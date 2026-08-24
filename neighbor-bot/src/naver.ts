@@ -2171,6 +2171,28 @@ function decodeNaverText(value: unknown): string {
     .replace(/\s+/g, " ").trim();
 }
 
+function parseRelativePostDate(value: string, nowMs = Date.now()): { date: string; dateMs: number } | null {
+  const raw = value.trim();
+  let elapsedMs: number | null = null;
+
+  if (raw === "방금 전") elapsedMs = 0;
+  else if (raw === "어제") elapsedMs = 24 * 60 * 60 * 1000;
+  else if (raw === "그제" || raw === "그저께") elapsedMs = 2 * 24 * 60 * 60 * 1000;
+  else {
+    const match = raw.match(/^(\d+)\s*(초|분|시간|일)\s*전$/);
+    if (!match) return null;
+    const amount = Number(match[1]);
+    const unitMs = match[2] === "초" ? 1000
+      : match[2] === "분" ? 60 * 1000
+      : match[2] === "시간" ? 60 * 60 * 1000
+      : 24 * 60 * 60 * 1000;
+    elapsedMs = amount * unitMs;
+  }
+
+  const d = new Date(nowMs - elapsedMs);
+  return { date: koreanDate(d), dateMs: d.getTime() };
+}
+
 /* ── 블로그 방문자 수 조회 (공개 위젯 API, 세션 불필요) ──
    NVisitorgp4Ajax는 최근 5일 정도의 일별 방문자를 XML로 준다. 오늘은 진행 중이라 최근 며칠의 최댓값을 대표값으로 쓴다.
    못 읽으면 -1 반환(필터에서 '통과'로 처리 → 조회 실패로 억울하게 스킵되지 않게). */
@@ -2189,6 +2211,8 @@ async function fetchRecentVisitors(blogId: string): Promise<number> {
 
 function normalizePostDate(value: unknown): { date: string; dateMs: number } {
   const raw = String(value ?? "").trim();
+  const relative = parseRelativePostDate(raw);
+  if (relative) return relative;
   if (/^\d{10,13}$/.test(raw)) {
     const numeric = Number(raw) * (raw.length === 10 ? 1000 : 1);
     const d = new Date(numeric);

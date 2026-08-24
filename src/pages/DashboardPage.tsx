@@ -4026,13 +4026,6 @@ POST3: (제목)|(이유)
                         </span>
                       </button>
                     </div>
-                    {/* 어드민 */}
-                    <div style={{padding:"10px 16px"}}>
-                      <button onClick={()=>{setShowUserDrop(false);onAdminLogin();}}
-                        style={{width:"100%",textAlign:"left",background:"none",border:"none",cursor:"pointer",fontSize:12,color:"var(--text3)",fontFamily:"inherit",padding:0}}>
-                        ⚙️ 관리자 로그인
-                      </button>
-                    </div>
                   </div>
                 </>
               )}

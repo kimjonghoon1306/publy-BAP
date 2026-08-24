@@ -540,6 +540,7 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
   // 재발행 목록에서 글별로 받은 개선안(제목1·2+진단·키워드·팁) — logNo → 솔루션
   const [rpSolutions, setRpSolutions] = useState<Record<string, { original: string; logNo: string; diagnosis: string; newTitle: string; newTitle2: string; keywords: string[]; bodyTip: string; expectedEffect: string }>>({});
   const [rpTick, setRpTick] = useState(0);                   // 재발행 목록 새로고침 트리거
+  const [rpSpin, setRpSpin] = useState(false);               // 재발행 새로고침 버튼 회전 애니(눌린 느낌)
   const [republishShow, setRepublishShow] = useState(12);   // 재발행 목록 몇 개까지 보이기(더 보기)
   const [scSolPage, setScSolPage] = useState(0);   // AI 팁 페이지네이션(5개 단위)
   const [scSolSearch, setScSolSearch] = useState(""); // AI 팁 원래 제목 검색
@@ -2522,7 +2523,18 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
                           <div style={{ fontSize: 14, fontWeight: 850, color: "#f59e0b" }}>♻️ 오래된 글 재발행 추천 <span style={{ fontSize: 11, fontWeight: 700, color: "var(--text3)" }}>{list.length}개</span></div>
                           {/* 새로고침 + 기간 설정 */}
                           <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
-                            <button onClick={() => setRpTick(t => t + 1)} title="목록 새로고침(계정 바꾼 뒤 눌러요)" style={{ padding: "3px 9px", borderRadius: 7, border: "1.5px solid var(--border)", background: "transparent", color: "var(--text3)", cursor: "pointer", fontSize: 10.5, fontWeight: 800, fontFamily: "inherit" }}>🔄 새로고침</button>
+                            <button onClick={() => {
+                                setRpTick(t => t + 1);
+                                setRpSpin(true); setTimeout(() => setRpSpin(false), 600);   // 눌린 느낌(회전)
+                                addScLog(`🔄 재발행 목록 새로고침 — ${list.length}개`);        // 눌린 확인(로그)
+                              }}
+                              title="목록 새로고침(계정 바꾼 뒤 눌러요)"
+                              style={{ padding: "3px 9px", borderRadius: 7, border: "1.5px solid var(--border)", background: rpSpin ? "rgba(245,158,11,.15)" : "transparent", color: rpSpin ? "#f59e0b" : "var(--text3)", cursor: "pointer", fontSize: 10.5, fontWeight: 800, fontFamily: "inherit", transition: "all .15s" }}
+                              onMouseDown={e => (e.currentTarget.style.transform = "scale(.92)")}
+                              onMouseUp={e => (e.currentTarget.style.transform = "scale(1)")}
+                              onMouseLeave={e => (e.currentTarget.style.transform = "scale(1)")}>
+                              <span style={{ display: "inline-block", transition: "transform .6s", transform: rpSpin ? "rotate(360deg)" : "none" }}>🔄</span> 새로고침
+                            </button>
                             <span style={{ fontSize: 10.5, color: "var(--text3)", fontWeight: 700, marginLeft: 4 }}>기준</span>
                             {[15,30,60,90].map(d => (
                               <button key={d} onClick={() => { setRepublishDays(d); localStorage.setItem("publy_republish_days", String(d)); }}
