@@ -1,5 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
 import bcrypt from "bcryptjs";
+import { botFetch } from "./botApi";
 
 const SUPABASE_URL = "https://qhhoyxexxlimbjrbwrgq.supabase.co";
 const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFoaG95eGV4eGxpbWJqcmJ3cmdxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzczMTMzOTQsImV4cCI6MjA5Mjg4OTM5NH0.pw_qUR0oOxgt82S_DA6GTka3WP0JBu2vmWuKZ9VvTKM";
@@ -1074,9 +1075,10 @@ export async function unassignAccount(userId: string): Promise<void> {
 }
 
 // 봇 헬스체크 API 호출 + 결과를 DB에 저장. bot = neighbor-bot 주소(기본 3334).
+// ★botFetch를 써야 한다: 봇은 모든 요청에 Authorization: Bearer 토큰을 요구(없으면 401 Unauthorized).
 export async function checkProxyHealth(bot: string, p: PublyProxy): Promise<{ ok: boolean; ip?: string; ms?: number; error?: string }> {
   try {
-    const r = await fetch(`${bot}/api/proxy-check`, {
+    const r = await botFetch(`${bot}/api/proxy-check`, {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ server: p.server, username: p.username, password: p.password }),
     });
