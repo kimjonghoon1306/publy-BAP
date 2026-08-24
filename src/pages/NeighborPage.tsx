@@ -606,7 +606,38 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
   const [pumDoComment, setPumDoComment] = useState(true);
   const [pumCommentMode, setPumCommentMode] = useState<"single"|"multi"|"ai">("ai");
   const [pumComment, setPumComment] = useState("좋은 글 잘 보고 가요 😊");
-  const [pumMultiComments, setPumMultiComments] = useState("좋은 글 잘 보고 가요 😊\n오늘도 좋은 하루 보내세요!\n잘 보고 갑니다 ✨");
+  const [pumMultiComments, setPumMultiComments] = useState(
+    "좋은 글 잘 보고 가요 😊\n" +
+    "오늘도 좋은 하루 보내세요!\n" +
+    "잘 보고 갑니다 ✨\n" +
+    "포스팅 잘 봤어요, 자주 들를게요!\n" +
+    "정성이 느껴지는 글이네요 😊\n" +
+    "유익한 내용 감사합니다 👍\n" +
+    "사진이 참 예쁘네요, 잘 보고 가요!\n" +
+    "덕분에 좋은 정보 얻어갑니다~\n" +
+    "글이 깔끔해서 읽기 편했어요 😊\n" +
+    "공감하며 읽었어요, 응원합니다!\n" +
+    "잘 정리된 글이라 도움됐어요 ✨\n" +
+    "오늘도 좋은 포스팅 감사해요!\n" +
+    "내용이 알차네요, 잘 봤습니다 👍\n" +
+    "따뜻한 글 잘 읽고 가요 😊\n" +
+    "자주 소통해요, 좋은 하루 되세요!\n" +
+    "정보가 유용하네요, 참고할게요~\n" +
+    "글 솜씨가 좋으시네요 ✨\n" +
+    "잘 보고 갑니다, 다음 글도 기대해요!\n" +
+    "읽으면서 많이 배웠어요 😊\n" +
+    "구성이 좋아서 보기 편했어요 👍\n" +
+    "좋은 정보 나눠주셔서 감사해요!\n" +
+    "정성스러운 글 잘 봤습니다 ✨\n" +
+    "덕분에 기분 좋아지네요, 고마워요 😊\n" +
+    "알찬 포스팅 감사합니다, 응원해요!\n" +
+    "핵심이 잘 담겨 있어 좋았어요 👍\n" +
+    "편안하게 읽고 갑니다 😊\n" +
+    "사진이랑 글이 잘 어울리네요!\n" +
+    "다음에 또 놀러올게요 ✨\n" +
+    "좋은 하루 보내시고 또 뵈어요 😊\n" +
+    "잘 읽었어요, 늘 건강하세요!"
+  );
   const [pumTone, setPumTone] = useState<"담백"|"다정"|"짧게">("다정");
   const [pumDelayMin, setPumDelayMin] = useState(8);
   const [pumDelayMax, setPumDelayMax] = useState(15);
@@ -727,7 +758,38 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
   const [eComment, setEComment] = useState("좋은 글 잘 읽고 갑니다 😊 자주 놀러올게요!");
   const [eCommentMode, setECommentMode] = useState<"single"|"multi"|"ai">("single");
   const [eCommentTone, setECommentTone] = useState<"담백"|"다정"|"짧게">("다정"); // AI 댓글 말투
-  const [eMultiComments, setEMultiComments] = useState("좋은 글 잘 읽고 갑니다 😊 자주 놀러올게요!\n유익한 정보 감사해요! 구독하고 갑니다 🙌\n정말 도움이 됐어요! 앞으로도 좋은 글 부탁드려요 ✨");
+  const [eMultiComments, setEMultiComments] = useState(
+    "좋은 글 잘 읽고 갑니다 😊 자주 놀러올게요!\n" +
+    "유익한 정보 감사해요! 구독하고 갑니다 🙌\n" +
+    "정말 도움이 됐어요! 앞으로도 좋은 글 부탁드려요 ✨\n" +
+    "포스팅 정성이 느껴지네요, 잘 보고 가요!\n" +
+    "필요했던 내용인데 딱이에요, 감사합니다 😊\n" +
+    "사진도 예쁘고 글도 알차네요, 잘 봤어요!\n" +
+    "덕분에 좋은 정보 얻어갑니다, 고마워요~\n" +
+    "설명이 자세해서 이해가 쏙쏙 되네요 👍\n" +
+    "공감하며 읽었어요, 좋은 하루 보내세요!\n" +
+    "꼼꼼하게 정리해주셔서 감사해요 😊\n" +
+    "이런 글 찾고 있었는데 반갑네요!\n" +
+    "잘 읽었습니다, 다음 글도 기대할게요 ✨\n" +
+    "정보가 알차서 저장해두고 갑니다!\n" +
+    "글 솜씨가 좋으시네요, 잘 보고 가요~\n" +
+    "따뜻한 글 감사해요, 자주 소통해요 😊\n" +
+    "도움 많이 됐어요, 좋은 정보 고맙습니다!\n" +
+    "읽는 내내 고개 끄덕이며 봤네요 👍\n" +
+    "핵심만 딱딱 짚어주셔서 좋았어요!\n" +
+    "구성이 깔끔해서 보기 편했어요 😊\n" +
+    "유용한 팁이네요, 참고할게요~\n" +
+    "좋은 하루 되세요, 잘 보고 갑니다!\n" +
+    "실질적으로 도움되는 글이라 반가워요 ✨\n" +
+    "정성스러운 포스팅 잘 봤습니다 😊\n" +
+    "덕분에 궁금했던 게 풀렸어요, 감사해요!\n" +
+    "내용이 알차서 끝까지 읽었네요 👍\n" +
+    "잘 정리된 글이라 도움이 많이 됐어요!\n" +
+    "사진이랑 설명이 딱 좋네요, 잘 봤어요 😊\n" +
+    "마음이 편안해지는 글이에요, 감사합니다~\n" +
+    "좋은 정보 나눠주셔서 고마워요 ✨\n" +
+    "다음에 또 들를게요, 좋은 글 감사해요 😊"
+  );
   const [eCommentIndex, setECommentIndex] = useState(0);
   const [eDelayMin, setEDelayMin] = useState(5);
   const [eDelayMax, setEDelayMax] = useState(12);
