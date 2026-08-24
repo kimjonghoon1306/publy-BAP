@@ -1118,7 +1118,7 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
     // ★받을 수 상한 = 등급 기준(무료2·베3·프5·무제한999). 연결 계정 수가 적으면 봇·서버가 자연스럽게 실제 방문 수로 제한(초과 설정해도 손해 없음).
     const maxReceivers = isUnlimitedPlan ? 999 : pumasiAccountLimit;
     const accs = connected.map(a => ({ accountId: a.accountId, blogId: a.blogId, posts: Math.min(isUnlimitedPlan ? 999 : pumasiPostsLimit, pumPostsByAcc[a.accountId] || 3), receiveLimit: Math.min(maxReceivers, Math.max(1, pumReceiveByAcc[a.accountId] || 3)) }));
-    addPumLog(`🤝 품앗이 시작 — 계정 ${accs.length}개 (${accs.map(a => `${a.blogId}:글${a.posts}·받기${a.receiveLimit}명`).join(", ")})`);
+    addPumLog(`🤝 품앗이 시작 — 계정 ${accs.length}개가 서로 방문 (${accs.map(a => `${a.blogId}:글${a.posts}개씩`).join(", ")})`);
     const body = JSON.stringify({ accounts: accs, comment, doLike: pumDoLike, doComment: pumDoComment, aiComment: pumCommentMode === "ai", commentTone: pumTone, geminiKey, delayMin: pumDelayMin, delayMax: pumDelayMax, readRelated: pumReadRelated, readRelatedMode: pumReadRelatedMode, readSpeed: pumReadSpeed, periodDays: pumPeriodDays, searchEntry, searchKeyword: pumSearchKeyword, spreadHours: pumSpread / 60, jobId: pumJobIdRef.current, ...(userId ? { userId } : {}) });
     const es = new BotEventStream(`${BOT}/api/pumasi`, { method: "POST", headers: { "Content-Type": "application/json" }, body }); pumEsRef.current = es;
     let pumAiFbShown = false;
@@ -2882,18 +2882,14 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
                 {(() => {
                   // ★실제 설정과 연동: 받을 수는 연결 계정 수(나 제외)로 제한되고, 각 방문마다 그 계정의 '대상 글 수'만큼 댓글을 단다.
                   //   → 총 방문(블로그 진입 수)과 실제 댓글 수를 둘 다 계산해 보여준다(받을 수·대상 글 수 바꾸면 즉시 반영).
-                  // ★실제 실행(handleStartPumasi)과 '동일한 공식'으로 계산해야 표시가 설정과 실시간으로 맞는다.
-                  //   실행: receiveLimit = min(등급한도, max(1, 받을수설정)). physMax(계정수-1)로는 캡하지 않는다(봇이 실제 방문 시 자연 제한).
-                  const physMax = Math.max(1, connected.length - 1);                                   // 물리적 최대(안내용)
-                  const maxRecv = isUnlimitedPlan ? 999 : pumasiAccountLimit;
+                  // ★품앗이 = 계정 전원이 서로 다 방문(N×(N-1)회). 각 계정은 자기 '글 N개' 설정만큼 상대 글에 댓글.
+                  const N = connected.length;
                   const postsMax = isUnlimitedPlan ? 999 : pumasiPostsLimit;
                   const per = connected.map(a => ({
-                    recv: Math.min(maxRecv, Math.max(1, pumReceiveByAcc[a.accountId] ?? Math.min(3, maxRecv))),   // 받을 수(등급 한도까지) — 실행과 동일
-                    posts: Math.min(postsMax, Math.max(1, pumPostsByAcc[a.accountId] ?? 3)),                       // 방문 1회당 댓글 달 글 수
+                    posts: Math.min(postsMax, Math.max(1, pumPostsByAcc[a.accountId] ?? 3)),           // 이 계정이 상대에게 남길 댓글 글 수
                   }));
-                  const totalVisits = per.reduce((s, x) => s + x.recv, 0) || 1;                        // 총 방문(블로그 진입) 횟수 = Σ 받을 수
-                  const totalComments = per.reduce((s, x) => s + x.recv * x.posts, 0) || 1;            // 실제 총 댓글 수
-                  const overPhys = per.some(x => x.recv > physMax);                                    // 받을 수 > 계정수-1 이면 실제론 그만큼 방문 못 함
+                  const totalVisits = Math.max(1, N * (N - 1));                                        // 전원이 서로 방문 = N×(N-1)
+                  const totalComments = per.reduce((s, x) => s + x.posts * Math.max(0, N - 1), 0) || 1; // 각 계정이 (N-1)곳에 posts개씩
                   const gapMin = pumSpread > 0 ? pumSpread / totalVisits : 0;   // 방문 사이 평균 간격(분)
                   const fmtGap = gapMin >= 1 ? `약 ${Math.round(gapMin)}분` : `약 ${Math.round(gapMin * 60)}초`;
                   const fmtTotal = pumSpread >= 60 ? `${Math.floor(pumSpread/60)}시간 ${pumSpread%60 ? `${pumSpread%60}분` : ""}`.trim() : `${pumSpread}분`;
@@ -2916,7 +2912,7 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
                     {pumSpread === 0
                       ? <>지금은 <b>즉시 연속</b>이에요 — 딜레이만 두고 쉬지 않고 이어서 방문해요. (이번 설정: 총 방문 <b style={{color:"#8b5cf6"}}>{totalVisits}회</b> · 댓글 약 <b style={{color:"#ec4899"}}>{totalComments}개</b>)</>
                       : <>이번 설정: 총 방문 <b style={{color:"#8b5cf6"}}>{totalVisits}회</b>(댓글 약 <b style={{color:"#ec4899"}}>{totalComments}개</b>)를 <b style={{color:"#8b5cf6"}}>{fmtTotal}</b>에 걸쳐 → 방문 사이 <b style={{color:"#ec4899"}}>{fmtGap}</b> 간격. <span style={{color:"var(--text3)"}}>그동안 앱이 켜져 있어야 해요.</span></>}
-                    {overPhys && <div style={{ marginTop: 6, color: "#c88010", fontWeight: 700 }}>⚠️ 받을 수가 연결 계정 수(현재 {connected.length}개, 나 제외 최대 {physMax}회)보다 커요. 계정을 더 연결하면 총 방문이 그만큼 늘어나요.</div>}
+                    <div style={{ marginTop: 6, color: "var(--text3)", fontSize: 10.5 }}>계정 {N}개가 서로 다 방문해요(1↔2↔3↔4). 각 계정이 자기 '글 개수'만큼 상대 글에 댓글을 남겨요.</div>
                   </div>
                 </div>
                   );

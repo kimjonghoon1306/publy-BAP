@@ -3170,6 +3170,11 @@ export async function pumasiEngage(params: {
     const bad = sessionState.filter(s => !s.ok).map(s => s.blogId).join(", ");
     throw new Error(`품앗이는 세션 연결된 계정이 2개 이상 필요해요. 연결이 풀린 계정을 다시 연결해주세요${bad ? ` (${bad})` : ""}.`);
   }
+  // ★대상 글 주소가 네이버ID로 만들어져 '본문 못 읽음'이 나던 문제(네이버ID≠blogId, 예 bb9653≠system-b) 방지:
+  //   각 계정의 진짜 blogId를 세션으로 확정해 둔다(품앗이는 내 계정끼리라 세션이 있어 확정 가능).
+  for (const a of valid) {
+    try { const ck = loadSession(a.accountId).cookies; const real = await resolveBlogIdFast(a.blogId, ck, a.accountId, log); if (real) a.blogId = real; } catch {}
+  }
   log(`[품앗이] 시작 — 계정 ${valid.length}개가 서로 글에 공감·댓글`);
   // ★계정 순환 매칭: 이력을 보고 '아직 안 갔거나 가장 오래된' 조합을 우선 배정
   //   (고정된 계정끼리만 반복 소통하는 패턴↓). 같은 actor→target 조합은 2일 쿨다운.
@@ -3177,20 +3182,15 @@ export async function pumasiEngage(params: {
   const commentedAll = loadPumasiCommented();   // (actor→target)별 이미 댓글 단 글 이력(도배 방지·최신→과거)
   const now = Date.now();
   const pairKey = (a: string, t: string) => `${a}>${t}`;
+  // ★★품앗이 로직(테리 확정): 계정 전원이 서로 다 방문한다. 4개면 1→2,3,4 / 2→1,3,4 / 3→1,2,4 / 4→1,2,3 (총 N×(N-1)회).
+  //   '받기 수'나 쿨다운으로 조합을 줄이지 않는다. 같은 글 중복 댓글만 아래 excludeLogNos(commentedSet)로 막는다.
   const visitPlan: { actor: typeof valid[number]; target: typeof valid[number] }[] = [];
-  for (const target of valid) {
-    const receiveLimit = Math.max(1, target.receiveLimit || 3);
-    // 후보 actor(자기 자신 제외)를 최근 방문시각 오름차순(안 간 계정=0 최우선)으로 정렬
-    const cands = valid.filter(a => a.accountId !== target.accountId)
-      .map(a => ({ a, last: pairs[pairKey(a.accountId, target.accountId)] || 0 }))
-      .sort((x, y) => x.last - y.last);
-    // 쿨다운(2일) 안 지난 조합은 뒤로 미루되, 받을 수를 못 채우면 오래된 순으로 채움
-    const fresh = cands.filter(c => now - c.last >= PUMASI_PAIR_COOLDOWN_MS);
-    const chosen = (fresh.length >= receiveLimit ? fresh : cands).slice(0, receiveLimit);
-    for (const c of chosen) visitPlan.push({ actor: c.a, target });
+  for (const actor of valid) {
+    for (const target of valid) {
+      if (actor.accountId === target.accountId) continue;
+      visitPlan.push({ actor, target });
+    }
   }
-  // 같은 대상·같은 actor가 연달아 오지 않도록 라운드로빈 인터리브(actor별로 흩뿌림)
-  visitPlan.sort((p, q) => valid.indexOf(p.actor) - valid.indexOf(q.actor));
 
   // ★시간 분산 큐: 전체 방문을 spreadHours 시간에 걸쳐 고르게 분산(투데이·댓글 폭증 방지)
   const totalCombos = visitPlan.length;
@@ -3215,7 +3215,7 @@ export async function pumasiEngage(params: {
   try {
   for (const { actor, target } of visitPlan) {
     if (stopSignal?.()) { log("[품앗이] 중단 신호 수신"); break; }
-    log(`[품앗이] ${actor.blogId} → ${target.blogId} 글 ${target.posts}개에 ${doLike ? "공감" : ""}${doLike && doComment ? "+" : ""}${doComment ? "댓글" : ""}`);
+    log(`[품앗이] ${actor.blogId} → ${target.blogId} 글 ${actor.posts}개에 ${doLike ? "공감" : ""}${doLike && doComment ? "+" : ""}${doComment ? "댓글" : ""}`);
     pairs[pairKey(actor.accountId, target.accountId)] = Date.now(); // 조합 방문시각 기록(쿨다운·순환용)
     savePumasiPairs(pairs);
     appendPumasiRun(target.blogId, actor.blogId);                   // 효과 리포트용 실행 로그
@@ -3229,7 +3229,7 @@ export async function pumasiEngage(params: {
         targets: [{ keyword: searchEntry ? (searchKeyword.trim() || target.blogId) : "품앗이", blogId: target.blogId }],
         comment, doLike, doComment,
         periodDays: periodDays > 0 ? periodDays : 3650,   // 0=전체(무제한), 값 있으면 최근 N일 글만
-        postsPerBlog: Math.max(1, target.posts),
+        postsPerBlog: Math.max(1, actor.posts),   // ★주는 쪽(actor) 기준 — actor가 상대 글 이 개수만큼 댓글
         delayMin, delayMax,
         dailyLimit: 999999,
         skipDone: false,                // 서로 계속 달 수 있게(당일 중복방지는 아래 excludeLogNos가 담당)
