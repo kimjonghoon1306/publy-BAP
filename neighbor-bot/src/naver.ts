@@ -313,26 +313,26 @@ export async function saveNaverSession(
     if (page.url().includes("nidlogin")) throw new Error("로그인 실패");
     console.log("[naver] ✅ 로그인 성공");
 
+    // ★★근본해결(네이버ID≠블로그주소): GoBlogWrite 리다이렉트 최종 URL은 `blog.naver.com/{blogId}?Redirect=Write`(경로형)
+    //   → 경로형+쿼리형 둘 다 파싱해야 진짜 blogId(예: system-b)를 뽑는다. 기존엔 못 뽑아 네이버ID로 저장→제목변경 등 실패.
     let blogId: string | null = null;
-    const INVALID_IDS = ["PostList","BlogHome","FeedList","neighborPostList","TagList","GoBlogWrite"];
-
+    const pickBlogId = (u: string): string => {
+      const mm = u.match(/[?&]blogId=([a-zA-Z0-9_-]+)/) || u.match(/(?:m\.)?blog\.naver\.com\/([a-zA-Z0-9_-]+)/);
+      return (mm && mm[1] && !RESOLVE_INVALID.includes(mm[1])) ? mm[1] : "";
+    };
     try {
       await page.goto("https://blog.naver.com/GoBlogWrite.naver", { waitUntil: "domcontentloaded", timeout: 30000 });
       await page.waitForTimeout(3000);
-      const m = page.url().match(/[?&]blogId=([a-zA-Z0-9_-]+)/);
-      if (m && m[1] && !INVALID_IDS.includes(m[1])) blogId = m[1];
+      blogId = pickBlogId(page.url());
     } catch {}
-
     if (!blogId) {
       try {
         await page.goto("https://m.blog.naver.com", { waitUntil: "domcontentloaded", timeout: 20000 });
         await page.waitForTimeout(2000);
-        const m = page.url().match(/blog\.naver\.com\/([a-zA-Z0-9_-]+)/);
-        if (m && m[1] && !INVALID_IDS.includes(m[1])) blogId = m[1];
+        blogId = pickBlogId(page.url());
       } catch {}
     }
-
-    if (!blogId) blogId = id;
+    if (!blogId) { blogId = id; console.log(`[naver] ⚠️ blogId 자동추출 실패 → 네이버ID(${id})로 임시저장(실행 시 resolveBlogIdFast가 자동 교정)`); }
     console.log(`[naver] ✅ blogId: ${blogId}`);
 
     const cookies = await context.cookies();
@@ -436,7 +436,7 @@ async function isSessionAlive(cookies: any[]): Promise<boolean> {
     const r = await fetch("https://blog.naver.com/GoBlogWrite.naver", { headers: { cookie: cookieHeader, "user-agent": UA } as any, redirect: "manual" as any });
     const loc = r.headers.get("location") || "";
     if (/nidlogin|nid\.naver\.com|\/login/i.test(loc)) return false;       // 만료 = 로그인 페이지로 튕김
-    if (/PostWriteForm|RedirectWriteView|blogId=/i.test(loc)) return true;  // 유효 = 글쓰기 폼으로
+    if (/PostWriteForm|RedirectWriteView|blogId=|Redirect=Write|blog\.naver\.com\/[a-zA-Z0-9_-]+/i.test(loc)) return true;  // 유효 = 글쓰기 폼/내 블로그로
     return r.status >= 200 && r.status < 400;                                // 애매하면 유효로 가정(실작업서 재확인)
   } catch { return true; }   // 네트워크 오류는 만료로 오판하지 않는다
 }

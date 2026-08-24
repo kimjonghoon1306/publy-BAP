@@ -138,26 +138,29 @@ export async function saveNaverSession(
     if (page.url().includes("nidlogin")) throw new Error("로그인 실패");
     console.log("[naver] ✅ 로그인 성공");
 
+    // ★★근본해결(네이버ID≠블로그주소, 예: 네이버ID=bb9653 blogId=system-b):
+    //   GoBlogWrite 리다이렉트 최종 URL은 `blog.naver.com/{blogId}?Redirect=Write`(경로형)이라
+    //   기존 `?blogId=`만 찾는 정규식으론 못 뽑아 네이버ID로 잘못 저장됐다.
+    //   → 경로형 `blog.naver.com/{blogId}` + 쿼리형 `?blogId=` 둘 다 파싱한다. 이후 모든 회원 자동 정상.
     let blogId: string | null = null;
-    const INVALID_IDS = ["PostList","BlogHome","FeedList","neighborPostList","TagList","GoBlogWrite"];
-
+    const BAD_BLOG_IDS = ["PostList","BlogHome","FeedList","neighborPostList","TagList","GoBlogWrite","RedirectWriteView","PostWriteForm","MyBlog","section","m","manage","admin","GoMyblog","Write","fx"];
+    const pickBlogId = (u: string): string => {
+      const mm = u.match(/[?&]blogId=([a-zA-Z0-9_-]+)/) || u.match(/(?:m\.)?blog\.naver\.com\/([a-zA-Z0-9_-]+)/);
+      return (mm && mm[1] && !BAD_BLOG_IDS.includes(mm[1])) ? mm[1] : "";
+    };
     try {
       await page.goto("https://blog.naver.com/GoBlogWrite.naver", { waitUntil: "domcontentloaded", timeout: 30000 });
       await page.waitForTimeout(3000);
-      const m = page.url().match(/[?&]blogId=([a-zA-Z0-9_-]+)/);
-      if (m && m[1] && !INVALID_IDS.includes(m[1])) blogId = m[1];
+      blogId = pickBlogId(page.url());
     } catch {}
-
     if (!blogId) {
       try {
         await page.goto("https://m.blog.naver.com", { waitUntil: "domcontentloaded", timeout: 20000 });
         await page.waitForTimeout(2000);
-        const m = page.url().match(/blog\.naver\.com\/([a-zA-Z0-9_-]+)/);
-        if (m && m[1] && !INVALID_IDS.includes(m[1])) blogId = m[1];
+        blogId = pickBlogId(page.url());
       } catch {}
     }
-
-    if (!blogId) blogId = id;
+    if (!blogId) { blogId = id; console.log(`[naver] ⚠️ blogId 자동추출 실패 → 네이버ID(${id})로 임시저장(실행 시 resolveBlogIdFast가 자동 교정)`); }
     console.log(`[naver] ✅ blogId: ${blogId}`);
 
     const cookies = await context.cookies();
@@ -223,7 +226,7 @@ async function isSessionAliveNaver(cookies: any[]): Promise<boolean> {
     const r = await fetch("https://blog.naver.com/GoBlogWrite.naver", { headers: { cookie: h, "user-agent": UA } as any, redirect: "manual" as any });
     const loc = r.headers.get("location") || "";
     if (/nidlogin|nid\.naver\.com|\/login/i.test(loc)) return false;
-    if (/PostWriteForm|RedirectWriteView|blogId=/i.test(loc)) return true;
+    if (/PostWriteForm|RedirectWriteView|blogId=|Redirect=Write|blog\.naver\.com\/[a-zA-Z0-9_-]+/i.test(loc)) return true;
     return r.status >= 200 && r.status < 400;
   } catch { return true; }
 }

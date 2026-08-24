@@ -40159,27 +40159,29 @@ async function saveNaverSession(userId, id, pw) {
       throw new Error("\uB85C\uADF8\uC778 \uC2E4\uD328");
     console.log("[naver] \u2705 \uB85C\uADF8\uC778 \uC131\uACF5");
     let blogId = null;
-    const INVALID_IDS = ["PostList", "BlogHome", "FeedList", "neighborPostList", "TagList", "GoBlogWrite"];
+    const BAD_BLOG_IDS = ["PostList", "BlogHome", "FeedList", "neighborPostList", "TagList", "GoBlogWrite", "RedirectWriteView", "PostWriteForm", "MyBlog", "section", "m", "manage", "admin", "GoMyblog", "Write", "fx"];
+    const pickBlogId = (u) => {
+      const mm = u.match(/[?&]blogId=([a-zA-Z0-9_-]+)/) || u.match(/(?:m\.)?blog\.naver\.com\/([a-zA-Z0-9_-]+)/);
+      return mm && mm[1] && !BAD_BLOG_IDS.includes(mm[1]) ? mm[1] : "";
+    };
     try {
       await page.goto("https://blog.naver.com/GoBlogWrite.naver", { waitUntil: "domcontentloaded", timeout: 3e4 });
       await page.waitForTimeout(3e3);
-      const m = page.url().match(/[?&]blogId=([a-zA-Z0-9_-]+)/);
-      if (m && m[1] && !INVALID_IDS.includes(m[1]))
-        blogId = m[1];
+      blogId = pickBlogId(page.url());
     } catch {
     }
     if (!blogId) {
       try {
         await page.goto("https://m.blog.naver.com", { waitUntil: "domcontentloaded", timeout: 2e4 });
         await page.waitForTimeout(2e3);
-        const m = page.url().match(/blog\.naver\.com\/([a-zA-Z0-9_-]+)/);
-        if (m && m[1] && !INVALID_IDS.includes(m[1]))
-          blogId = m[1];
+        blogId = pickBlogId(page.url());
       } catch {
       }
     }
-    if (!blogId)
+    if (!blogId) {
       blogId = id;
+      console.log(`[naver] \u26A0\uFE0F blogId \uC790\uB3D9\uCD94\uCD9C \uC2E4\uD328 \u2192 \uB124\uC774\uBC84ID(${id})\uB85C \uC784\uC2DC\uC800\uC7A5(\uC2E4\uD589 \uC2DC resolveBlogIdFast\uAC00 \uC790\uB3D9 \uAD50\uC815)`);
+    }
     console.log(`[naver] \u2705 blogId: ${blogId}`);
     const cookies = await context.cookies();
     writeSession(naverSessionName(userId), {
@@ -40320,7 +40322,7 @@ async function isSessionAliveNaver(cookies) {
     const loc = r.headers.get("location") || "";
     if (/nidlogin|nid\.naver\.com|\/login/i.test(loc))
       return false;
-    if (/PostWriteForm|RedirectWriteView|blogId=/i.test(loc))
+    if (/PostWriteForm|RedirectWriteView|blogId=|Redirect=Write|blog\.naver\.com\/[a-zA-Z0-9_-]+/i.test(loc))
       return true;
     return r.status >= 200 && r.status < 400;
   } catch {
