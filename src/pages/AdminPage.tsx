@@ -625,18 +625,19 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
   const [proxies, setProxies] = useState<PublyProxy[]>([]);
   const [proxyAssign, setProxyAssign] = useState<Record<string, ProxyAssign[]>>({});
   const [proxyChecking, setProxyChecking] = useState<Record<string,boolean>>({});
-  const [proxyAccts, setProxyAccts] = useState<{accountId:string; label:string}[]>([]);
+  const [proxyAccts, setProxyAccts] = useState<{accountId:string; label:string; search:string}[]>([]);
+  const [proxyAcctSearch, setProxyAcctSearch] = useState("");
   const [newProxy, setNewProxy] = useState({ label:"", server:"", username:"", password:"" });
   // 4개 기능 탭(서이추·공감·답방·품앗이)의 연결된 계정을 모아 배정 후보로 (관리자 기기 localStorage)
   function loadProxyAccounts() {
     const tabs: [string,string][] = [["neighbor","서이추"],["engage","공감·댓글"],["reply","답방"],["pumasi","품앗이"]];
-    const list: {accountId:string; label:string}[] = [];
+    const list: {accountId:string; label:string; search:string}[] = [];
     const seen = new Set<string>();
     tabs.forEach(([k,l]) => {
       try {
         const raw = localStorage.getItem(`publy_accounts_${k}`);
         const arr = raw ? JSON.parse(raw) : [];
-        (Array.isArray(arr)?arr:[]).forEach((a:any)=>{ if(a?.accountId && !seen.has(a.accountId)){ seen.add(a.accountId); list.push({ accountId:a.accountId, label:`${a.blogId||a.id||a.accountId} · ${l}` }); } });
+        (Array.isArray(arr)?arr:[]).forEach((a:any)=>{ if(a?.accountId && !seen.has(a.accountId)){ seen.add(a.accountId); list.push({ accountId:a.accountId, label:`${a.blogId||a.id||a.accountId} · ${l}`, search:`${a.blogId||""} ${a.id||""} ${a.accountId} ${l}`.toLowerCase() }); } });
       } catch {}
     });
     setProxyAccts(list);
@@ -5548,8 +5549,9 @@ POST3: (제목)|(이유)
                       <div style={{marginTop:12}}>
                         <div style={{fontSize:12,fontWeight:600,marginBottom:6}}>이 IP를 쓸 계정 선택 <span style={{color:"var(--text3)",fontWeight:400}}>(체크하면 배정 · {cnt}개 · 오른쪽 칩으로 기능별 on/off)</span></div>
                         {proxyAccts.length===0 && <div style={{fontSize:12,color:"var(--text3)",padding:"4px 0"}}>서이추·공감·품앗이·답방 탭에서 계정을 먼저 연결해주세요.</div>}
+                        {proxyAccts.length>0 && <input value={proxyAcctSearch} onChange={e=>setProxyAcctSearch(e.target.value)} placeholder="🔍 계정 검색 (아이디·블로그ID)" style={{...inputStyle,width:"100%",marginBottom:8,boxSizing:"border-box"}}/>}
                         <div style={{display:"flex",flexDirection:"column",gap:6}}>
-                          {proxyAccts.map(a => {
+                          {proxyAccts.filter(a=>!proxyAcctSearch.trim()||a.search.includes(proxyAcctSearch.trim().toLowerCase())).map(a => {
                             const mine = (proxyAssign[p.id]||[]).find(x=>x.userId===a.accountId);
                             const onThis = !!mine;
                             const otherPid = Object.entries(proxyAssign).find(([pid,arr])=>pid!==p.id && arr.some(x=>x.userId===a.accountId))?.[0];
