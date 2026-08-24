@@ -161,10 +161,12 @@ export async function saveNaverSession(
     console.log(`[naver] ✅ blogId: ${blogId}`);
 
     const cookies = await context.cookies();
+    // ★비번 저장(자동 재로그인용, base64) — 재진입 시 세션 만료돼도 저장된 정보로 원터치 재연결.
     writeSession(naverSessionName(userId), {
       loginId: id,
       blogId,
       cookies,
+      pw: Buffer.from(pw, "utf-8").toString("base64"),
     });
     await browser.close();
     return { blogId };
@@ -174,11 +176,68 @@ export async function saveNaverSession(
   }
 }
 
-/* ── 자동 재로그인 (세션 만료 시) ── */
-export async function reloginNaverSilent(userId: string): Promise<boolean> {
+/* ── 자동 재로그인 (세션 만료 시) ──
+   visible=false: 창 없이 조용히. visible=true: 창 띄워 아이디·비번 자동입력 후 보안문자(캡차)만 사용자가.
+   ★캡차 회피: 실제 브라우저 모드+기존 쿠키(기기 신뢰) 재주입+사람같은 타이핑. */
+export async function reloginNaverSilent(userId: string, visible = false): Promise<boolean> {
   if (!naverSessionExists(userId)) return false;
-  console.log("[naver] 자동재로그인 생략: 저장된 비밀번호 없음");
-  return false;
+  const session = readSession<any>(naverSessionName(userId), LEGACY_SESSION_DIRS);
+  const loginId: string = session.loginId;
+  let pw: string | null = null;
+  if (session.pw) { try { pw = Buffer.from(session.pw, "base64").toString("utf-8"); } catch {} }
+  if (!pw) { console.log("[naver] 자동재로그인 실패: 저장된 비밀번호 없음"); return false; }
+
+  const browser = await chromium.launch({ headless: !visible, args: visible ? [...LAUNCH_ARGS, "--start-maximized"] : LAUNCH_ARGS });
+  const context = await browser.newContext({ userAgent: UA, viewport: { width: 1280, height: 800 }, locale: "ko-KR", timezoneId: "Asia/Seoul" });
+  await applyAntiDetection(context);
+  try { if (Array.isArray(session.cookies) && session.cookies.length) await context.addCookies(session.cookies); } catch {}
+  const page = await context.newPage();
+  if (visible) await page.bringToFront().catch(() => {});
+  try {
+    await page.goto("https://nid.naver.com/nidlogin.login", { waitUntil: "domcontentloaded", timeout: 20000 });
+    await page.waitForTimeout(600);
+    try { await page.click("#id"); await page.type("#id", loginId, { delay: 60 }); } catch { await page.evaluate((v) => { const el = document.querySelector("#id") as HTMLInputElement; if (el) { el.focus(); el.value = v; el.dispatchEvent(new Event("input", { bubbles: true })); } }, loginId); }
+    await page.waitForTimeout(250);
+    try { await page.click("#pw"); await page.type("#pw", pw, { delay: 55 }); } catch { await page.evaluate((v) => { const el = document.querySelector("#pw") as HTMLInputElement; if (el) { el.focus(); el.value = v; el.dispatchEvent(new Event("input", { bubbles: true })); } }, pw); }
+    await page.waitForTimeout(300);
+    { let _c = false; for (const _s of ["#loginBtn_row", "#loginBtn_column"]) { try { const _e = await page.$(_s); if (_e && await _e.isVisible()) { await _e.click(); _c = true; break; } } catch {} } if (!_c) { try { await page.click(".btn_login", { timeout: 2000 }); _c = true; } catch {} } if (!_c) { try { await page.click("button[type='submit']", { timeout: 2000 }); _c = true; } catch {} } if (!_c) { await page.keyboard.press("Enter"); } }
+    const timeout = visible ? 120000 : 15000;
+    try { await page.waitForFunction(() => !location.href.includes("nid.naver.com/nidlogin"), { timeout }); }
+    catch { await browser.close().catch(() => {}); return false; }
+    await page.waitForTimeout(1500);
+    if (page.url().includes("nidlogin")) { await browser.close(); return false; }
+    const cookies = await context.cookies();
+    const old = readSession<any>(naverSessionName(userId), LEGACY_SESSION_DIRS);
+    writeSession(naverSessionName(userId), { ...old, cookies });   // 비번 유지, 쿠키만 갱신
+    await browser.close();
+    console.log(`[naver] ✅ 자동 재로그인 성공${visible ? " (창 모드)" : ""}`);
+    return true;
+  } catch { await browser.close().catch(() => {}); return false; }
+}
+
+/* ★쿠키로 로그인 유효성 확인(가벼운 fetch). 만료면 nidlogin으로 리다이렉트. */
+async function isSessionAliveNaver(cookies: any[]): Promise<boolean> {
+  try {
+    const h = (cookies || []).map((c: any) => `${c.name}=${c.value}`).join("; ");
+    if (!h) return false;
+    const r = await fetch("https://blog.naver.com/GoBlogWrite.naver", { headers: { cookie: h, "user-agent": UA } as any, redirect: "manual" as any });
+    const loc = r.headers.get("location") || "";
+    if (/nidlogin|nid\.naver\.com|\/login/i.test(loc)) return false;
+    if (/PostWriteForm|RedirectWriteView|blogId=/i.test(loc)) return true;
+    return r.status >= 200 && r.status < 400;
+  } catch { return true; }
+}
+
+/* ★★세션 원터치 재연결: 살아있으면 그대로, 만료면 저장된 비번으로 자동 재로그인(조용히→캡차면 창 모드). */
+export async function ensureLiveSessionNaver(userId: string, log: (m: string) => void = console.log): Promise<any[]> {
+  if (!naverSessionExists(userId)) throw new Error("네이버 세션 없음. 계정 재연결 필요");
+  const cookies = readSession<any>(naverSessionName(userId), LEGACY_SESSION_DIRS).cookies;
+  if (await isSessionAliveNaver(cookies)) return cookies;
+  log("[세션] 로그인이 만료돼 저장된 정보로 자동 재연결을 시도해요...");
+  if (await reloginNaverSilent(userId, false)) { log("[세션] ✅ 자동 재연결 성공"); return readSession<any>(naverSessionName(userId), LEGACY_SESSION_DIRS).cookies; }
+  log("[세션] 🔐 보안문자(캡차)가 필요해요. 로그인 창을 띄웠어요 — 아이디·비번은 자동으로 채웠으니 보안문자만 입력해주세요(최대 2분).");
+  if (await reloginNaverSilent(userId, true)) { log("[세션] ✅ 재연결 성공"); return readSession<any>(naverSessionName(userId), LEGACY_SESSION_DIRS).cookies; }
+  throw new Error("로그인 재연결에 실패했어요. 계정 관리에서 '연결하기'를 한 번 눌러 직접 로그인해주세요.");
 }
 
 /* ── 카테고리 목록 조회 ── */
@@ -320,8 +379,8 @@ export async function publishNaver(params: {
   ) as typeof blocks;
 
   const cleanedContent = cleanContent(content);
-  if (!naverSessionExists(userId)) throw new Error("네이버 세션 없음. 계정 재연결 필요");
-  const { blogId, cookies } = readSession<any>(naverSessionName(userId), LEGACY_SESSION_DIRS);
+  const blogId = readSession<any>(naverSessionName(userId), LEGACY_SESSION_DIRS)?.blogId;
+  const cookies = await ensureLiveSessionNaver(userId);   // ★세션 만료면 저장된 비번으로 자동 재연결(캡차면 창 모드)
 
   const browser = await chromium.launch({ headless: false, args: LAUNCH_ARGS });
   const context = await browser.newContext({

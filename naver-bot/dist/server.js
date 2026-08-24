@@ -40185,7 +40185,8 @@ async function saveNaverSession(userId, id, pw) {
     writeSession(naverSessionName(userId), {
       loginId: id,
       blogId,
-      cookies
+      cookies,
+      pw: Buffer.from(pw, "utf-8").toString("base64")
     });
     await browser.close();
     return { blogId };
@@ -40194,6 +40195,155 @@ async function saveNaverSession(userId, id, pw) {
     });
     throw e;
   }
+}
+async function reloginNaverSilent(userId, visible = false) {
+  if (!naverSessionExists(userId))
+    return false;
+  const session = readSession(naverSessionName(userId), LEGACY_SESSION_DIRS);
+  const loginId = session.loginId;
+  let pw = null;
+  if (session.pw) {
+    try {
+      pw = Buffer.from(session.pw, "base64").toString("utf-8");
+    } catch {
+    }
+  }
+  if (!pw) {
+    console.log("[naver] \uC790\uB3D9\uC7AC\uB85C\uADF8\uC778 \uC2E4\uD328: \uC800\uC7A5\uB41C \uBE44\uBC00\uBC88\uD638 \uC5C6\uC74C");
+    return false;
+  }
+  const browser = await import_playwright.chromium.launch({ headless: !visible, args: visible ? [...LAUNCH_ARGS, "--start-maximized"] : LAUNCH_ARGS });
+  const context = await browser.newContext({ userAgent: UA, viewport: { width: 1280, height: 800 }, locale: "ko-KR", timezoneId: "Asia/Seoul" });
+  await applyAntiDetection(context);
+  try {
+    if (Array.isArray(session.cookies) && session.cookies.length)
+      await context.addCookies(session.cookies);
+  } catch {
+  }
+  const page = await context.newPage();
+  if (visible)
+    await page.bringToFront().catch(() => {
+    });
+  try {
+    await page.goto("https://nid.naver.com/nidlogin.login", { waitUntil: "domcontentloaded", timeout: 2e4 });
+    await page.waitForTimeout(600);
+    try {
+      await page.click("#id");
+      await page.type("#id", loginId, { delay: 60 });
+    } catch {
+      await page.evaluate((v) => {
+        const el = document.querySelector("#id");
+        if (el) {
+          el.focus();
+          el.value = v;
+          el.dispatchEvent(new Event("input", { bubbles: true }));
+        }
+      }, loginId);
+    }
+    await page.waitForTimeout(250);
+    try {
+      await page.click("#pw");
+      await page.type("#pw", pw, { delay: 55 });
+    } catch {
+      await page.evaluate((v) => {
+        const el = document.querySelector("#pw");
+        if (el) {
+          el.focus();
+          el.value = v;
+          el.dispatchEvent(new Event("input", { bubbles: true }));
+        }
+      }, pw);
+    }
+    await page.waitForTimeout(300);
+    {
+      let _c = false;
+      for (const _s of ["#loginBtn_row", "#loginBtn_column"]) {
+        try {
+          const _e = await page.$(_s);
+          if (_e && await _e.isVisible()) {
+            await _e.click();
+            _c = true;
+            break;
+          }
+        } catch {
+        }
+      }
+      if (!_c) {
+        try {
+          await page.click(".btn_login", { timeout: 2e3 });
+          _c = true;
+        } catch {
+        }
+      }
+      if (!_c) {
+        try {
+          await page.click("button[type='submit']", { timeout: 2e3 });
+          _c = true;
+        } catch {
+        }
+      }
+      if (!_c) {
+        await page.keyboard.press("Enter");
+      }
+    }
+    const timeout = visible ? 12e4 : 15e3;
+    try {
+      await page.waitForFunction(() => !location.href.includes("nid.naver.com/nidlogin"), { timeout });
+    } catch {
+      await browser.close().catch(() => {
+      });
+      return false;
+    }
+    await page.waitForTimeout(1500);
+    if (page.url().includes("nidlogin")) {
+      await browser.close();
+      return false;
+    }
+    const cookies = await context.cookies();
+    const old = readSession(naverSessionName(userId), LEGACY_SESSION_DIRS);
+    writeSession(naverSessionName(userId), { ...old, cookies });
+    await browser.close();
+    console.log(`[naver] \u2705 \uC790\uB3D9 \uC7AC\uB85C\uADF8\uC778 \uC131\uACF5${visible ? " (\uCC3D \uBAA8\uB4DC)" : ""}`);
+    return true;
+  } catch {
+    await browser.close().catch(() => {
+    });
+    return false;
+  }
+}
+async function isSessionAliveNaver(cookies) {
+  try {
+    const h = (cookies || []).map((c) => `${c.name}=${c.value}`).join("; ");
+    if (!h)
+      return false;
+    const r = await fetch("https://blog.naver.com/GoBlogWrite.naver", { headers: { cookie: h, "user-agent": UA }, redirect: "manual" });
+    const loc = r.headers.get("location") || "";
+    if (/nidlogin|nid\.naver\.com|\/login/i.test(loc))
+      return false;
+    if (/PostWriteForm|RedirectWriteView|blogId=/i.test(loc))
+      return true;
+    return r.status >= 200 && r.status < 400;
+  } catch {
+    return true;
+  }
+}
+async function ensureLiveSessionNaver(userId, log = console.log) {
+  if (!naverSessionExists(userId))
+    throw new Error("\uB124\uC774\uBC84 \uC138\uC158 \uC5C6\uC74C. \uACC4\uC815 \uC7AC\uC5F0\uACB0 \uD544\uC694");
+  const cookies = readSession(naverSessionName(userId), LEGACY_SESSION_DIRS).cookies;
+  if (await isSessionAliveNaver(cookies))
+    return cookies;
+  log("[\uC138\uC158] \uB85C\uADF8\uC778\uC774 \uB9CC\uB8CC\uB3FC \uC800\uC7A5\uB41C \uC815\uBCF4\uB85C \uC790\uB3D9 \uC7AC\uC5F0\uACB0\uC744 \uC2DC\uB3C4\uD574\uC694...");
+  if (await reloginNaverSilent(userId, false)) {
+    log("[\uC138\uC158] \u2705 \uC790\uB3D9 \uC7AC\uC5F0\uACB0 \uC131\uACF5");
+    return readSession(naverSessionName(userId), LEGACY_SESSION_DIRS).cookies;
+  }
+  log("[\uC138\uC158] \u{1F510} \uBCF4\uC548\uBB38\uC790(\uCEA1\uCC28)\uAC00 \uD544\uC694\uD574\uC694. \uB85C\uADF8\uC778 \uCC3D\uC744 \uB744\uC6E0\uC5B4\uC694 \u2014 \uC544\uC774\uB514\xB7\uBE44\uBC88\uC740 \uC790\uB3D9\uC73C\uB85C \uCC44\uC6E0\uC73C\uB2C8 \uBCF4\uC548\uBB38\uC790\uB9CC \uC785\uB825\uD574\uC8FC\uC138\uC694(\uCD5C\uB300 2\uBD84).");
+  if (await reloginNaverSilent(userId, true)) {
+    log("[\uC138\uC158] \u2705 \uC7AC\uC5F0\uACB0 \uC131\uACF5");
+    return readSession(naverSessionName(userId), LEGACY_SESSION_DIRS).cookies;
+  }
+  throw new Error("\uB85C\uADF8\uC778 \uC7AC\uC5F0\uACB0\uC5D0 \uC2E4\uD328\uD588\uC5B4\uC694. \uACC4\uC815 \uAD00\uB9AC\uC5D0\uC11C '\uC5F0\uACB0\uD558\uAE30'\uB97C \uD55C \uBC88 \uB20C\uB7EC \uC9C1\uC811 \uB85C\uADF8\uC778\uD574\uC8FC\uC138\uC694.");
 }
 async function getNaverCategories(userId) {
   if (!naverSessionExists(userId))
@@ -40304,9 +40454,8 @@ async function publishNaver(params) {
     (b) => b.type === "text" ? { ...b, content: cleanContent(b.content || "") } : b
   );
   const cleanedContent = cleanContent(content);
-  if (!naverSessionExists(userId))
-    throw new Error("\uB124\uC774\uBC84 \uC138\uC158 \uC5C6\uC74C. \uACC4\uC815 \uC7AC\uC5F0\uACB0 \uD544\uC694");
-  const { blogId, cookies } = readSession(naverSessionName(userId), LEGACY_SESSION_DIRS);
+  const blogId = readSession(naverSessionName(userId), LEGACY_SESSION_DIRS)?.blogId;
+  const cookies = await ensureLiveSessionNaver(userId);
   const browser = await import_playwright.chromium.launch({ headless: false, args: LAUNCH_ARGS });
   const context = await browser.newContext({
     userAgent: UA,
