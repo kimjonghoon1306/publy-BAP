@@ -643,8 +643,9 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
         (Array.isArray(arr)?arr:[]).forEach((a:any)=>{
           if(!a?.accountId) return;
           const naverId = (a.id||"").trim();
-          // 네이버 아이디로 묶기(같은 계정=같은 로그인 아이디). 아이디 없으면 accountId 단독 그룹.
-          const gkey = naverId ? `id:${naverId.toLowerCase()}` : `acc:${a.accountId}`;
+          if(!naverId) return; // 로그인 안 한 빈 슬롯(아이디 없음)은 프록시 대상 아님 → 목록에서 제외
+          // 네이버 아이디로 묶기(같은 계정=같은 로그인 아이디).
+          const gkey = `id:${naverId.toLowerCase()}`;
           let g = groups.get(gkey);
           if(!g){ g = { id:naverId, blogId:a.blogId||"", accountIds:new Set() }; groups.set(gkey,g); }
           g.accountIds.add(a.accountId);
