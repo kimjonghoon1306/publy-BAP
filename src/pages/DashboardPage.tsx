@@ -1861,6 +1861,10 @@ Output format (JSON array only, no other text):
     return()=>{clearInterval(iv);warm.forEach(clearTimeout);};
   },[checkBot,user.id]);
 
+  // ★발행관리 탭 진입 시 발행기록 항상 다시 불러온다(초기 로드 누락/화면 0건 방지).
+  //   발행기록은 서버(publy_history)에 user_id별 영구저장 → 탭 열 때마다 최신 반영.
+  useEffect(()=>{ if(tab==="manage"&&user?.id) getHistory(user.id).then(setHistory); },[tab,user?.id]);
+
   function recommendImgCount(content:string):number{
     // 글 길이에 맞춰 이미지 수 추천 — 약 700자당 1장, 최소 2장 최대 8장.
     // (1500자→2장, 2800자→4장, 4200자→6장, 5600자+→8장) 배치는 균등분산이라 많아도 안 붙음.
@@ -5855,6 +5859,7 @@ POST3: (제목)|(이유)
                     <div className="card-title">📋 발행 기록</div>
                     <div style={{display:"flex",gap:8,alignItems:"center"}}>
                       <span style={{fontSize:13,color:"var(--text2)"}}>총 {history.length}건</span>
+                      <button className="btn btn-secondary btn-sm" onClick={async()=>{const h=await getHistory(user.id);setHistory(h);showToast(`🔄 발행기록 ${h.length}건 불러왔어요 · 계정 ${(user.id||"").slice(0,8)}`,"success");}}>🔄 새로고침</button>
                       {history.length>0&&<button className="btn btn-danger btn-sm" onClick={async()=>{if(!window.confirm(`발행 기록 ${history.length}건을 정말 모두 삭제할까요?\n(되돌릴 수 없습니다)`))return;if(!window.confirm("한 번 더 확인할게요. 전체 삭제를 진행할까요?"))return;await deleteAllHistory(user.id);setHistory([]);showToast("🗑 발행 기록 전체 삭제 완료","success");}}>🗑 전체삭제</button>}
                     </div>
                   </div>
