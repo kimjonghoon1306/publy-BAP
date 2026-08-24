@@ -332,8 +332,20 @@ ipcMain.handle("open-preview", async (_event, html: string) => {
       webSecurity: false,
     },
   });
-  preview.loadURL("data:text/html;charset=utf-8," + encodeURIComponent(html));
   preview.setMenuBarVisibility(false);
+  // ★data: URL은 길이 제한이 있어 base64 이미지가 든 글이면 로드 실패(백지)가 난다.
+  //   임시 HTML 파일로 써서 loadFile로 연다(이미지 크기 무관). 창 닫히면 파일 삭제.
+  try {
+    const fs = await import("fs");
+    const os = await import("os");
+    const tmp = path.join(os.tmpdir(), `publy-preview-${Date.now()}.html`);
+    fs.writeFileSync(tmp, html, "utf-8");
+    await preview.loadFile(tmp);
+    preview.on("closed", () => { try { fs.unlinkSync(tmp); } catch {} });
+  } catch (e) {
+    // 폴백: 파일 실패 시 기존 data URL 방식
+    preview.loadURL("data:text/html;charset=utf-8," + encodeURIComponent(html));
+  }
 });
 
 ipcMain.handle("unregister-user", async (_event, userId: string) => {
