@@ -2768,15 +2768,18 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
                 {(() => {
                   // ★실제 설정과 연동: 받을 수는 연결 계정 수(나 제외)로 제한되고, 각 방문마다 그 계정의 '대상 글 수'만큼 댓글을 단다.
                   //   → 총 방문(블로그 진입 수)과 실제 댓글 수를 둘 다 계산해 보여준다(받을 수·대상 글 수 바꾸면 즉시 반영).
-                  const physMax = Math.max(1, connected.length - 1);
-                  const gradeMax = isUnlimitedPlan ? 999 : pumasiAccountLimit;
+                  // ★실제 실행(handleStartPumasi)과 '동일한 공식'으로 계산해야 표시가 설정과 실시간으로 맞는다.
+                  //   실행: receiveLimit = min(등급한도, max(1, 받을수설정)). physMax(계정수-1)로는 캡하지 않는다(봇이 실제 방문 시 자연 제한).
+                  const physMax = Math.max(1, connected.length - 1);                                   // 물리적 최대(안내용)
+                  const maxRecv = isUnlimitedPlan ? 999 : pumasiAccountLimit;
                   const postsMax = isUnlimitedPlan ? 999 : pumasiPostsLimit;
                   const per = connected.map(a => ({
-                    recv: Math.min(physMax, pumReceiveByAcc[a.accountId] ?? Math.min(3, gradeMax)),   // 이 계정을 방문할 실제 계정 수
-                    posts: Math.min(postsMax, pumPostsByAcc[a.accountId] ?? 3),                        // 방문 1회당 댓글 달 글 수
+                    recv: Math.min(maxRecv, Math.max(1, pumReceiveByAcc[a.accountId] ?? Math.min(3, maxRecv))),   // 받을 수(등급 한도까지) — 실행과 동일
+                    posts: Math.min(postsMax, Math.max(1, pumPostsByAcc[a.accountId] ?? 3)),                       // 방문 1회당 댓글 달 글 수
                   }));
-                  const totalVisits = per.reduce((s, x) => s + x.recv, 0) || 1;                        // 총 방문(블로그 진입) 횟수
+                  const totalVisits = per.reduce((s, x) => s + x.recv, 0) || 1;                        // 총 방문(블로그 진입) 횟수 = Σ 받을 수
                   const totalComments = per.reduce((s, x) => s + x.recv * x.posts, 0) || 1;            // 실제 총 댓글 수
+                  const overPhys = per.some(x => x.recv > physMax);                                    // 받을 수 > 계정수-1 이면 실제론 그만큼 방문 못 함
                   const gapMin = pumSpread > 0 ? pumSpread / totalVisits : 0;   // 방문 사이 평균 간격(분)
                   const fmtGap = gapMin >= 1 ? `약 ${Math.round(gapMin)}분` : `약 ${Math.round(gapMin * 60)}초`;
                   const fmtTotal = pumSpread >= 60 ? `${Math.floor(pumSpread/60)}시간 ${pumSpread%60 ? `${pumSpread%60}분` : ""}`.trim() : `${pumSpread}분`;
@@ -2799,6 +2802,7 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
                     {pumSpread === 0
                       ? <>지금은 <b>즉시 연속</b>이에요 — 딜레이만 두고 쉬지 않고 이어서 방문해요. (이번 설정: 총 방문 <b style={{color:"#8b5cf6"}}>{totalVisits}회</b> · 댓글 약 <b style={{color:"#ec4899"}}>{totalComments}개</b>)</>
                       : <>이번 설정: 총 방문 <b style={{color:"#8b5cf6"}}>{totalVisits}회</b>(댓글 약 <b style={{color:"#ec4899"}}>{totalComments}개</b>)를 <b style={{color:"#8b5cf6"}}>{fmtTotal}</b>에 걸쳐 → 방문 사이 <b style={{color:"#ec4899"}}>{fmtGap}</b> 간격. <span style={{color:"var(--text3)"}}>그동안 앱이 켜져 있어야 해요.</span></>}
+                    {overPhys && <div style={{ marginTop: 6, color: "#c88010", fontWeight: 700 }}>⚠️ 받을 수가 연결 계정 수(현재 {connected.length}개, 나 제외 최대 {physMax}회)보다 커요. 계정을 더 연결하면 총 방문이 그만큼 늘어나요.</div>}
                   </div>
                 </div>
                   );
