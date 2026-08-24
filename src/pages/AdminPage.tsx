@@ -1549,6 +1549,21 @@ Output format (JSON array only, no other text):
     return ()=>clearInterval(t);
   },[tab, liveAuto, loadLiveUsage]);
 
+  // ★관리 탭(서이추·공감·답방·지수)이 열려있는 동안 30초마다 최신 이력 자동 재로드(실시간 연동).
+  //   회원이 서이추/공감/답방을 돌리면 관리자 화면이 새로고침 없이도 갱신된다.
+  useEffect(()=>{
+    const loaders: Record<string, ()=>void> = {
+      neighbor_manage: ()=>{ getAllNeighborHistory().then(setNeighborHistory); },
+      engage_manage:   ()=>{ getAllEngageHistory().then(setEngageHistory); },
+      reply_manage:    ()=>{ getAllReplyHistory().then(setReplyHistory); },
+      blogscore_manage:()=>{ getAllBlogscoreHistory().then(setBlogscoreHistory); },
+    };
+    const fn = loaders[tab];
+    if(!fn) return;
+    const iv = setInterval(fn, 30000);
+    return ()=>clearInterval(iv);
+  },[tab]);
+
   // 설정탭 열 때 관리자 네이버 키 로드
   useEffect(()=>{
     // 탭 열 때마다 최신 이력 로드(예전엔 length===0 조건 때문에 처음 한 번만 불러와 '최신 반영 안 됨' 버그)
