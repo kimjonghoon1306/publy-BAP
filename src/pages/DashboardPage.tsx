@@ -1048,9 +1048,11 @@ Output format (JSON array only, no other text):
 기존 제목들(중복 금지): ${existTitles.slice(0,20).join(" / ")}
 ★제목 규칙(클릭률·검색노출 최적화): 검색어를 앞 8글자 안에 배치, 25~32자, 숫자·대상·상황 중 1~2개 포함, 과장·낚시 감탄사(대박·충격·완벽·진짜) 금지, 물음표·느낌표 최대 1개.
 출력: {"keyword":"핵심키워드","title":"새 SEO 제목","style":"감성일기 또는 정보글 또는 맛집후기 또는 여행기","adType":"adpost 또는 adsense"}`;
-      const raw=await callAI(prompt);
+      // ★제목 1개라 30초면 충분 — 무한 로딩(🔄...) 방지 타임아웃
+      const raw=await callAI(prompt,AbortSignal.timeout(30000));
       const clean=(raw||"").replace(/```json|```/g,"").trim();
       const s=clean.indexOf("{"),e=clean.lastIndexOf("}");
+      if(s<0||e<=s)throw new Error("AI 응답 형식 오류(잠시 후 다시)");
       const obj=JSON.parse(clean.slice(s,e+1));
       setCalSchedule(prev=>{
         const next=[...prev];
@@ -2303,14 +2305,21 @@ Output format (JSON array only, no other text):
     if(ai==="gemini"){
       const key=localStorage.getItem("publy_gemini_key")||"";
       if(!key)throw new Error("Gemini API 키 없음 — 설정 탭에서 입력해주세요");
+      let lastErr="";
       for(const model of GEMINI_MODELS){
         try{
-          const r=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({contents:[{parts:[{text:prompt}]}],generationConfig:{maxOutputTokens:8000}}),signal:signal||AbortSignal.timeout(90000)});
-          if(!r.ok)continue;
+          // ★2.5계열은 thinking에 토큰 다 써서 빈 답 → thinkingBudget:0. 실패 원인(429한도 등)을 lastErr에 담아 표면화.
+          const gc:any={maxOutputTokens:8000};
+          if(model.startsWith("gemini-2.5"))gc.thinkingConfig={thinkingBudget:0};
+          const r=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({contents:[{parts:[{text:prompt}]}],generationConfig:gc}),signal:signal||AbortSignal.timeout(90000)});
+          if(!r.ok){ const j=await r.json().catch(()=>null); lastErr=`${r.status} ${j?.error?.message||""}`.slice(0,120); continue; }
           const d=await r.json();const t=d.candidates?.[0]?.content?.parts?.[0]?.text||"";if(t)return t;
-        }catch(e:any){if(e.name==="AbortError")throw e;continue;}
+          lastErr="빈 응답";
+        }catch(e:any){if(e.name==="AbortError")throw e;lastErr=e.message||"네트워크 오류";continue;}
       }
-      throw new Error("Gemini 모든 모델 실패");
+      throw new Error(lastErr.includes("429")||lastErr.toLowerCase().includes("quota")||lastErr.toLowerCase().includes("exhaust")
+        ? "Gemini 하루 무료 한도를 다 썼어요. 잠시 후(또는 자정 리셋 후) 다시 시도해주세요."
+        : `AI 호출 실패 (${lastErr||"알 수 없음"})`);
     }
     if(ai==="groq"){
       const key=localStorage.getItem("publy_groq_key")||"";if(!key)throw new Error("Groq API 키 없음");
