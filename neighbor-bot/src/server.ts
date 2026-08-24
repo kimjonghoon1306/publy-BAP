@@ -546,7 +546,13 @@ app.delete("/api/engage-done/:accountId", (req, res) => {
 // ── 회원 프록시 상태: 이 회원(user_id)에게 배정된 프록시가 있는지 (대시보드 노란불용) ──
 app.get("/api/my-proxy/:userId", async (req, res) => {
   try {
-    const px = await getProxyForAccount(req.params.userId);
+    // ①회원 본인 id에 배정됐는지 ②없으면 회원의 연결 계정(accts=accountId 목록) 중 하나라도
+    //   배정됐는지 확인 → 봇이 실제로 프록시를 쓰는 조건과 노란불을 일치시킨다.
+    let px = await getProxyForAccount(req.params.userId);
+    if (!px && req.query.accts) {
+      const accts = String(req.query.accts).split(",").map(s => s.trim()).filter(Boolean);
+      for (const aid of accts) { px = await getProxyForAccount(aid); if (px) break; }
+    }
     res.json({ active: !!px });
   } catch { res.json({ active: false }); }
 });

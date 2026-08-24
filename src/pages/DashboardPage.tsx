@@ -1771,7 +1771,13 @@ Output format (JSON array only, no other text):
   const NEIGHBOR_BOT = "http://127.0.0.1:3334";   // 서이추·공감·품앗이 봇(프록시 배정 조회)
   const [proxyActive, setProxyActive] = useState(false);
   const checkMyProxy = useCallback(async()=>{
-    try{ const r=await botFetch(`${NEIGHBOR_BOT}/api/my-proxy/${user.id}`,{signal:AbortSignal.timeout(3000)}); const j=await r.json(); setProxyActive(!!j.active); }
+    try{
+      // 이 회원의 연결 계정(서이추·공감·답방·품앗이) accountId도 함께 넘겨, 계정에 배정된 경우도 노란불이 뜨게.
+      const accts=new Set<string>();
+      ["neighbor","engage","reply","pumasi"].forEach(k=>{try{(JSON.parse(localStorage.getItem(`publy_accounts_${k}`)||"[]")||[]).forEach((a:any)=>{if(a?.accountId)accts.add(a.accountId);});}catch{}});
+      const q=accts.size?`?accts=${encodeURIComponent([...accts].join(","))}`:"";
+      const r=await botFetch(`${NEIGHBOR_BOT}/api/my-proxy/${user.id}${q}`,{signal:AbortSignal.timeout(3000)}); const j=await r.json(); setProxyActive(!!j.active);
+    }
     catch{ setProxyActive(false); }
   },[user.id]);
   useEffect(()=>{ checkMyProxy(); const t=setInterval(checkMyProxy,60000); return ()=>clearInterval(t); },[checkMyProxy]);
@@ -5862,6 +5868,11 @@ POST3: (제목)|(이유)
                       <button className="btn btn-secondary btn-sm" onClick={async()=>{const h=await getHistory(user.id);setHistory(h);showToast(`🔄 발행기록 ${h.length}건 불러왔어요 · 계정 ${(user.id||"").slice(0,8)}`,"success");}}>🔄 새로고침</button>
                       {history.length>0&&<button className="btn btn-danger btn-sm" onClick={async()=>{if(!window.confirm(`발행 기록 ${history.length}건을 정말 모두 삭제할까요?\n(되돌릴 수 없습니다)`))return;if(!window.confirm("한 번 더 확인할게요. 전체 삭제를 진행할까요?"))return;await deleteAllHistory(user.id);setHistory([]);showToast("🗑 발행 기록 전체 삭제 완료","success");}}>🗑 전체삭제</button>}
                     </div>
+                  </div>
+                  {/* 발행 기록 기능설명 */}
+                  <div style={{margin:"0 0 12px",padding:"10px 12px",borderRadius:10,background:"var(--card2)",border:"1px solid var(--border)",fontSize:12,color:"var(--text2)",lineHeight:1.6}}>
+                    💡 <b>발행 기록이란?</b> 발행에 성공한 글이 여기에 <b>차곡차곡 쌓여요.</b> 서버에 안전하게 <b>영구 저장</b>돼서 앱을 껐다 켜거나 업데이트해도 안 사라져요. 위쪽 <b>📈 순위 성과 확인</b>으로 각 글의 검색 순위도 여기서 관리해요.
+                    <br/><span style={{color:"var(--text3)"}}><b>🔄 새로고침</b> — 기록이 안 보이거나 방금 발행한 글이 아직 없으면 눌러서 <b>서버에서 최신 목록을 다시 불러와요.</b></span>
                   </div>
                   {history.length===0?(
                     <div className="empty-state" style={{padding:"32px 24px"}}>
