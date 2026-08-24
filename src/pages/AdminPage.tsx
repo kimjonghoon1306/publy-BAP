@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import GoogleFlowCard from "../GoogleFlowCard";
-import { supabase, getAccounts, upsertAccount, PublyAccount, getHistory, PublyHistory, addHistory, deleteHistory, deleteAllHistory, setAdminPassword, saveAdminNaverApiKeys, getNaverApiKeys, NaverApiKeys, getNaverDailyUsage, NAVER_DAILY_LIMIT, checkNaverQuota, incrementNaverQuota, getUserNaverApiKeys, getReferrals, getErrorLogs, getUnreadErrorCount, markErrorsAsRead, logError, PLAN_CONFIG, getAllNeighborHistory, NeighborHistory, getAllEngageHistory, EngageHistory, InstaDmTarget, InstaDmHistory, InstaDmQuota, getInstaDmTargets, addInstaDmTarget, updateInstaDmTargetStatus, deleteInstaDmTarget, getInstaDmHistory, addInstaDmHistory, getAllInstaDmHistory, getInstaDmQuota, upsertInstaDmQuota, getAllInstaDmQuotas, INSTA_DM_DAILY_LIMIT, PublyBugReport, getBugReports, updateBugReportStatus, deleteBugReport, resetDailyPublish, getAllDailyUsageToday, DailyUsageRow, getAllReplyHistory, ReplyHistory, getAllBlogscoreHistory, BlogscoreHistory, NEIGHBOR_DAILY_LIMIT, ENGAGE_DAILY_LIMIT, REPLY_DAILY_LIMIT, BLOGSCORE_DAILY_LIMIT, PUMASI_ACCOUNT_LIMIT, PUMASI_POSTS_LIMIT, PublyProxy, getProxies, addProxy, updateProxy, deleteProxy, getProxyAssignments, setProxyAccounts, checkProxyHealth } from "../lib/supabase";
+import { supabase, getAccounts, upsertAccount, PublyAccount, getHistory, PublyHistory, addHistory, deleteHistory, deleteAllHistory, setAdminPassword, saveAdminNaverApiKeys, getNaverApiKeys, NaverApiKeys, getNaverDailyUsage, NAVER_DAILY_LIMIT, checkNaverQuota, incrementNaverQuota, getUserNaverApiKeys, getReferrals, getErrorLogs, getUnreadErrorCount, markErrorsAsRead, logError, PLAN_CONFIG, getAllNeighborHistory, NeighborHistory, getAllEngageHistory, EngageHistory, InstaDmTarget, InstaDmHistory, InstaDmQuota, getInstaDmTargets, addInstaDmTarget, updateInstaDmTargetStatus, deleteInstaDmTarget, getInstaDmHistory, addInstaDmHistory, getAllInstaDmHistory, getInstaDmQuota, upsertInstaDmQuota, getAllInstaDmQuotas, INSTA_DM_DAILY_LIMIT, PublyBugReport, getBugReports, updateBugReportStatus, deleteBugReport, resetDailyPublish, getAllDailyUsageToday, DailyUsageRow, getAllReplyHistory, ReplyHistory, getAllBlogscoreHistory, BlogscoreHistory, NEIGHBOR_DAILY_LIMIT, ENGAGE_DAILY_LIMIT, REPLY_DAILY_LIMIT, BLOGSCORE_DAILY_LIMIT, PUMASI_ACCOUNT_LIMIT, PUMASI_POSTS_LIMIT, PublyProxy, getProxies, addProxy, updateProxy, deleteProxy, getProxyAssignments, assignAccountToProxy, unassignAccount, setAccountFeatures, ProxyAssign, PROXY_FEATURES, checkProxyHealth } from "../lib/supabase";
 import NeighborPage from "./NeighborPage";
 import { botFetch, BotEventStream } from "../lib/botApi";
 
@@ -623,16 +623,27 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
   // ── 프록시(계정별 IP) 관리 ──
   const NEIGHBOR_BOT = "http://127.0.0.1:3334";   // 서이추·공감·품앗이 봇(프록시 헬스체크도 여기서 실행)
   const [proxies, setProxies] = useState<PublyProxy[]>([]);
-  const [proxyAssign, setProxyAssign] = useState<Record<string,string[]>>({});
+  const [proxyAssign, setProxyAssign] = useState<Record<string, ProxyAssign[]>>({});
   const [proxyChecking, setProxyChecking] = useState<Record<string,boolean>>({});
-  const [proxyAcctInput, setProxyAcctInput] = useState<Record<string,string>>({});
+  const [proxyAccts, setProxyAccts] = useState<{accountId:string; label:string}[]>([]);
   const [newProxy, setNewProxy] = useState({ label:"", server:"", username:"", password:"" });
+  // 4개 기능 탭(서이추·공감·답방·품앗이)의 연결된 계정을 모아 배정 후보로 (관리자 기기 localStorage)
+  function loadProxyAccounts() {
+    const tabs: [string,string][] = [["neighbor","서이추"],["engage","공감·댓글"],["reply","답방"],["pumasi","품앗이"]];
+    const list: {accountId:string; label:string}[] = [];
+    const seen = new Set<string>();
+    tabs.forEach(([k,l]) => {
+      try {
+        const raw = localStorage.getItem(`publy_accounts_${k}`);
+        const arr = raw ? JSON.parse(raw) : [];
+        (Array.isArray(arr)?arr:[]).forEach((a:any)=>{ if(a?.accountId && !seen.has(a.accountId)){ seen.add(a.accountId); list.push({ accountId:a.accountId, label:`${a.blogId||a.id||a.accountId} · ${l}` }); } });
+      } catch {}
+    });
+    setProxyAccts(list);
+  }
   async function loadProxies() {
     const [ps, asg] = await Promise.all([getProxies(), getProxyAssignments()]);
-    setProxies(ps); setProxyAssign(asg);
-    const inputs: Record<string,string> = {};
-    ps.forEach(p => { inputs[p.id] = (asg[p.id]||[]).join("\n"); });
-    setProxyAcctInput(inputs);
+    setProxies(ps); setProxyAssign(asg); loadProxyAccounts();
   }
   useEffect(() => { if (tab==="proxy") loadProxies(); /* eslint-disable-next-line */ }, [tab]);
   async function handleAddProxy() {
@@ -647,10 +658,16 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
     showToast(r.ok ? `🟢 정상 · 나가는 IP ${r.ip} · ${r.ms}ms` : `🔴 실패: ${r.error||"연결 안 됨"}`, r.ok?"success":"error");
     loadProxies();
   }
-  async function handleSaveProxyAccounts(p: PublyProxy) {
-    const ids = (proxyAcctInput[p.id]||"").split(/[\n,]+/).map(s=>s.trim()).filter(Boolean);
-    await setProxyAccounts(p.id, ids);
-    showToast(`✅ 이 IP에 계정 ${ids.length}개 배정했어요`);
+  // 계정 체크 토글: 이 IP에 배정 / 해제 (다른 IP에 있었으면 이 IP로 이동)
+  async function toggleProxyAccount(accountId: string, proxyId: string, onThis: boolean) {
+    if (onThis) await unassignAccount(accountId);
+    else await assignAccountToProxy(accountId, proxyId);
+    loadProxies();
+  }
+  // 기능 토글: 배정된 계정이 프록시를 쓸 기능(서이추/공감/품앗이/답방) on/off
+  async function toggleProxyFeature(accountId: string, feature: string, cur: string[]) {
+    const next = cur.includes(feature) ? cur.filter(f=>f!==feature) : [...cur, feature];
+    await setAccountFeatures(accountId, next);
     loadProxies();
   }
   async function handleDeleteProxy(p: PublyProxy) {
@@ -5529,9 +5546,40 @@ POST3: (제목)|(이유)
                         {p.last_checked_at && <> · {new Date(p.last_checked_at).toLocaleString("ko-KR")}</>}
                       </div>
                       <div style={{marginTop:12}}>
-                        <div style={{fontSize:12,fontWeight:600,marginBottom:4}}>이 IP를 쓸 계정 ID <span style={{color:"var(--text3)",fontWeight:400}}>(한 줄에 하나씩)</span></div>
-                        <textarea value={proxyAcctInput[p.id]||""} onChange={e=>setProxyAcctInput(s=>({...s,[p.id]:e.target.value}))} placeholder={"계정 ID를 한 줄에 하나씩\n예)\nbb9653\ns9653"} rows={3} style={{...inputStyle,width:"100%",fontFamily:"monospace",resize:"vertical",boxSizing:"border-box"}}/>
-                        <button className="btn btn-secondary btn-sm" style={{marginTop:8}} onClick={()=>handleSaveProxyAccounts(p)}>계정 배정 저장</button>
+                        <div style={{fontSize:12,fontWeight:600,marginBottom:6}}>이 IP를 쓸 계정 선택 <span style={{color:"var(--text3)",fontWeight:400}}>(체크하면 배정 · {cnt}개 · 오른쪽 칩으로 기능별 on/off)</span></div>
+                        {proxyAccts.length===0 && <div style={{fontSize:12,color:"var(--text3)",padding:"4px 0"}}>서이추·공감·품앗이·답방 탭에서 계정을 먼저 연결해주세요.</div>}
+                        <div style={{display:"flex",flexDirection:"column",gap:6}}>
+                          {proxyAccts.map(a => {
+                            const mine = (proxyAssign[p.id]||[]).find(x=>x.userId===a.accountId);
+                            const onThis = !!mine;
+                            const otherPid = Object.entries(proxyAssign).find(([pid,arr])=>pid!==p.id && arr.some(x=>x.userId===a.accountId))?.[0];
+                            return (
+                              <div key={a.accountId} style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",padding:"6px 8px",borderRadius:8,border:`1px solid ${onThis?"var(--success)":"var(--border)"}`,background:onThis?"rgba(0,214,143,.06)":"transparent"}}>
+                                <button onClick={()=>toggleProxyAccount(a.accountId,p.id,onThis)} style={{display:"flex",alignItems:"center",gap:8,background:"transparent",border:"none",cursor:"pointer",color:"var(--text)",fontFamily:"inherit",fontSize:13,padding:0,flex:1,minWidth:150,textAlign:"left"}}>
+                                  <span style={{fontSize:15}}>{onThis?"☑️":"⬜"}</span>
+                                  <span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{a.label}</span>
+                                  {otherPid && !onThis && <span style={{fontSize:10,color:"var(--text3)",marginLeft:4}}>다른 IP에 배정됨(누르면 이동)</span>}
+                                </button>
+                                {onThis && (
+                                  <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
+                                    {PROXY_FEATURES.map(f => {
+                                      const fon = (mine!.features||[]).includes(f.k);
+                                      return (
+                                        <button key={f.k} onClick={()=>toggleProxyFeature(a.accountId,f.k,mine!.features||[])}
+                                          style={{fontSize:11,padding:"3px 9px",borderRadius:99,cursor:"pointer",fontFamily:"inherit",fontWeight:600,
+                                            border:`1px solid ${fon?"var(--danger)":"var(--border)"}`,
+                                            background:fon?"rgba(248,81,73,.1)":"transparent",
+                                            color:fon?"var(--danger)":"var(--text3)"}}>
+                                          {fon?"● ":"○ "}{f.l}
+                                        </button>
+                                      );
+                                    })}
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
                       </div>
                     </div>
                   );

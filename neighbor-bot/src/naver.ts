@@ -51,10 +51,10 @@ const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML,
    업체 미선정 상태여도 안전: 배정된 프록시가 없으면 그냥 로컬 IP로 뜬다. */
 async function launchBrowser(
   userId: string | null | undefined,
-  opts: { headless?: boolean; maximized?: boolean; slowMo?: number; log?: (s: string) => void } = {}
+  opts: { headless?: boolean; maximized?: boolean; slowMo?: number; log?: (s: string) => void; feature?: string } = {}
 ) {
   const args = opts.maximized ? [...LAUNCH_ARGS, "--start-maximized"] : LAUNCH_ARGS;
-  const proxy = await getProxyForAccount(userId);
+  const proxy = await getProxyForAccount(userId, opts.feature);
   if (proxy) opts.log?.(`🔒 프록시 사용: ${proxy.server}`);
   return chromium.launch({
     headless: opts.headless ?? true,
@@ -1705,7 +1705,7 @@ export async function addNeighbors(params: {
 
   // 서이추 신청 페이지가 모바일(m.blog.naver.com)만 작동 → 모바일 UA/뷰포트로 실행
   const MOBILE_UA = "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1";
-  const browser = await launchBrowser(accountId, { headless: false, maximized: true, log });
+  const browser = await launchBrowser(accountId, { headless: false, maximized: true, log, feature: "neighbor" });
   const context = await browser.newContext({
     userAgent: MOBILE_UA, viewport: { width: 390, height: 844 }, locale: "ko-KR", isMobile: true, hasTouch: true,
   });
@@ -2935,7 +2935,7 @@ export async function replyToComments(params: {
   const log = onLog || console.log;
   const cookies = await ensureLiveSession(accountId, log);   // ★세션 만료면 저장된 비번으로 자동 재연결(테리: "연결됨"인데 로그인풀림 방지)
 
-  const browser = await launchBrowser(accountId, { headless: false, maximized: true, log });
+  const browser = await launchBrowser(accountId, { headless: false, maximized: true, log, feature: "reply" });
   const context = await browser.newContext({ userAgent: UA, viewport: { width: 1280, height: 900 }, locale: "ko-KR" });
   await applyAntiDetection(context);
   await context.addCookies(cookies);
@@ -3255,7 +3255,7 @@ export async function pumasiEngage(params: {
   // ★프록시 격리: 참여 계정 중 하나라도 프록시가 배정돼 있으면 방문마다 그 계정 IP로 따로 브라우저를 띄운다.
   //   (공유 브라우저 하나로 돌면 모든 계정이 같은 IP로 나가 네이버가 한 사람으로 묶어 차단 — 프록시가 무의미).
   //   배정된 프록시가 전혀 없으면 기존처럼 공유 브라우저 하나로 돌린다(업체 연결 전 동작 그대로).
-  const proxied = (await Promise.all(valid.map(a => getProxyForAccount(a.accountId)))).some(Boolean);
+  const proxied = (await Promise.all(valid.map(a => getProxyForAccount(a.accountId, "pumasi")))).some(Boolean);
   if (proxied) log("[품앗이] 🔒 프록시 격리 모드 — 방문마다 해당 계정의 IP로 접속합니다.");
 
   // ★안내 창: 대기 중에도 "진행 중"을 보여주는 창(방문 사이 대기에도 안 닫혀 "멈춘 것처럼" 안 보임).
@@ -3297,6 +3297,7 @@ export async function pumasiEngage(params: {
         commentRate: 100, likeRate: 100,
         aiComment, commentTone, geminiKey, readRelated, readRelatedMode, readSpeed, searchEntry,
         sharedBrowser,   // ★공유 크롬 재사용(방문 사이에도 창 유지)
+        proxyFeature: "pumasi",   // 품앗이 기능 토글 확인용(격리 모드일 때 actor 계정 프록시 적용)
         excludeLogNos: commentedSet,
         onCommented: (logNo) => { commentedSet.add(logNo); commentedAll[ckey] = [...commentedSet]; savePumasiCommented(commentedAll); },
         onLog: (m) => log(m),
@@ -3347,6 +3348,7 @@ export async function engageBlogs(params: {
   onCommented?: (logNo: string) => void;   // ★댓글 성공 시 그 글 logNo 통보(이력 저장용)
   readSpeed?: ReadSpeed;         // ★체류 속도(fast/normal/natural)
   sharedBrowser?: any;           // ★품앗이: 여러 방문이 크롬 창 하나를 공유(대기 중에도 창 유지). 있으면 이 browser 재사용·안 닫음
+  proxyFeature?: string;         // 프록시 기능 토글용(engage=공감·댓글, pumasi=품앗이). 그 계정의 해당 기능이 켜져 있을 때만 프록시 적용
   minVisitors?: number;          // ★대상 블로그 최근 방문자 하한(0=제한없음) — 범위 밖이면 스킵
   maxVisitors?: number;          // ★대상 블로그 최근 방문자 상한(0=제한없음)
   searchEntry?: boolean;         // ★검색 경유 진입: 글에 URL직행 대신 네이버 검색→클릭(검색 유입 발생). 못 찾으면 URL 폴백
@@ -3361,7 +3363,7 @@ export async function engageBlogs(params: {
     dailyLimit, skipDone, commentRate = 100, likeRate = 100,
     // ★readRelated 기본 false: 일반 공감·댓글(여러 블로그 순회)은 관련글 더 읽기를 켜지 않음(시간 급증 방지).
     //   품앗이(pumasiEngage)만 명시적으로 true를 넘겨 켠다.
-    aiComment = false, commentTone = "다정", geminiKey = "", readRelated = false, readRelatedMode = "random", excludeLogNos, onCommented, readSpeed = "natural", sharedBrowser, minVisitors = 0, maxVisitors = 0, searchEntry = false, onLog, onResult, onProgress, stopSignal,
+    aiComment = false, commentTone = "다정", geminiKey = "", readRelated = false, readRelatedMode = "random", excludeLogNos, onCommented, readSpeed = "natural", sharedBrowser, proxyFeature, minVisitors = 0, maxVisitors = 0, searchEntry = false, onLog, onResult, onProgress, stopSignal,
   } = params;
   const log = onLog || console.log;
 
@@ -3381,7 +3383,7 @@ export async function engageBlogs(params: {
 
   // ★품앗이는 sharedBrowser(공유 크롬)를 재사용 → 방문 사이 대기에도 창이 안 닫힌다. 없으면(공감·댓글 단독) 자체 생성.
   const ownBrowser = !sharedBrowser;
-  const browser = sharedBrowser || await launchBrowser(accountId, { headless: false, maximized: true, log });
+  const browser = sharedBrowser || await launchBrowser(accountId, { headless: false, maximized: true, log, feature: proxyFeature || "engage" });
   const context = await browser.newContext({
     userAgent: UA, viewport: { width: 1280, height: 800 }, locale: "ko-KR",
   });

@@ -1020,12 +1020,22 @@ export async function deleteProxy(id: string): Promise<void> {
   if (error) alert("프록시 삭제 실패: " + error.message);
 }
 
-// 프록시별 배정 계정 목록 조회: { proxyId: [userId, ...] }
-export async function getProxyAssignments(): Promise<Record<string, string[]>> {
+// 프록시가 적용될 기능 4종(관리자가 계정별로 on/off)
+export const PROXY_FEATURES = [
+  { k: "neighbor", l: "서이추" },
+  { k: "engage",   l: "공감·댓글" },
+  { k: "pumasi",   l: "품앗이" },
+  { k: "reply",    l: "답방" },
+] as const;
+export const ALL_PROXY_FEATURES = PROXY_FEATURES.map(f => f.k) as string[];
+
+export interface ProxyAssign { userId: string; features: string[] }
+// 프록시별 배정 계정 목록 조회: { proxyId: [{userId, features}, ...] }
+export async function getProxyAssignments(): Promise<Record<string, ProxyAssign[]>> {
   try {
-    const { data } = await supabase.from("publy_account_proxy").select("user_id, proxy_id");
-    const map: Record<string, string[]> = {};
-    (data || []).forEach((r: any) => { if (r.proxy_id) { (map[r.proxy_id] ||= []).push(r.user_id); } });
+    const { data } = await supabase.from("publy_account_proxy").select("user_id, proxy_id, features");
+    const map: Record<string, ProxyAssign[]> = {};
+    (data || []).forEach((r: any) => { if (r.proxy_id) { (map[r.proxy_id] ||= []).push({ userId: r.user_id, features: Array.isArray(r.features) ? r.features : ALL_PROXY_FEATURES }); } });
     return map;
   } catch { return {}; }
 }
@@ -1041,6 +1051,26 @@ export async function setProxyAccounts(proxyId: string, userIds: string[]): Prom
       if (error) alert("계정 배정 실패: " + error.message);
     }
   } catch (e: any) { alert("계정 배정 오류: " + (e?.message || e)); }
+}
+
+// 계정 하나를 특정 프록시에 배정(체크). user_id가 PK라 다른 IP에 있었으면 이 IP로 자동 이동(중복 방지).
+// features 미지정이면 4개 기능 전체 ON으로 시작(관리자가 이후 개별 토글).
+export async function assignAccountToProxy(userId: string, proxyId: string, features: string[] = ALL_PROXY_FEATURES): Promise<void> {
+  const { error } = await supabase.from("publy_account_proxy")
+    .upsert({ user_id: userId, proxy_id: proxyId, features, updated_at: new Date().toISOString() }, { onConflict: "user_id" });
+  if (error) alert("계정 배정 실패: " + error.message);
+}
+
+// 배정된 계정이 프록시를 쓸 기능만 변경(서이추/공감/품앗이/답방 개별 토글).
+export async function setAccountFeatures(userId: string, features: string[]): Promise<void> {
+  const { error } = await supabase.from("publy_account_proxy").update({ features, updated_at: new Date().toISOString() }).eq("user_id", userId);
+  if (error) alert("기능 설정 실패: " + error.message);
+}
+
+// 계정의 프록시 배정 해제(체크 해제) → 그 계정은 다시 내 IP로 접속.
+export async function unassignAccount(userId: string): Promise<void> {
+  const { error } = await supabase.from("publy_account_proxy").delete().eq("user_id", userId);
+  if (error) alert("배정 해제 실패: " + error.message);
 }
 
 // 봇 헬스체크 API 호출 + 결과를 DB에 저장. bot = neighbor-bot 주소(기본 3334).

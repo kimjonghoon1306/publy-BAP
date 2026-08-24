@@ -272,18 +272,22 @@ function normalizeProxyServer(server: string): string {
   return /^(https?|socks[45]?):\/\//i.test(s) ? s : `http://${s}`;
 }
 
-export async function getProxyForAccount(userId?: string | null): Promise<ProxyConfig | null> {
+export async function getProxyForAccount(userId?: string | null, feature?: string): Promise<ProxyConfig | null> {
   if (!userId) return null;
-  const cached = _proxyCache.get(userId);
+  const key = `${userId}::${feature || ""}`;
+  const cached = _proxyCache.get(key);
   if (cached && Date.now() - cached.ts < PROXY_CACHE_MS) return cached.proxy;
   try {
     const { data: map } = await supabase
       .from("publy_account_proxy")
-      .select("proxy_id")
+      .select("proxy_id, features")
       .eq("user_id", userId)
       .maybeSingle();
     let proxy: ProxyConfig | null = null;
-    if (map?.proxy_id) {
+    // 기능 토글: feature가 주어졌는데 그 계정의 프록시 사용 기능 목록에 없으면 프록시 미적용(내 IP로).
+    const features: string[] = Array.isArray((map as any)?.features) ? (map as any).features : [];
+    const featureOk = !feature || features.includes(feature);
+    if (map?.proxy_id && featureOk) {
       const { data: px } = await supabase
         .from("publy_proxies")
         .select("server, username, password, active")
@@ -297,7 +301,7 @@ export async function getProxyForAccount(userId?: string | null): Promise<ProxyC
         };
       }
     }
-    _proxyCache.set(userId, { proxy, ts: Date.now() });
+    _proxyCache.set(key, { proxy, ts: Date.now() });
     return proxy;
   } catch {
     return null;
@@ -305,7 +309,7 @@ export async function getProxyForAccount(userId?: string | null): Promise<ProxyC
 }
 
 export function clearProxyCache(userId?: string): void {
-  if (userId) _proxyCache.delete(userId);
+  if (userId) { for (const k of Array.from(_proxyCache.keys())) if (k.startsWith(`${userId}::`)) _proxyCache.delete(k); }
   else _proxyCache.clear();
 }
 
