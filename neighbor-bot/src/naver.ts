@@ -51,10 +51,10 @@ const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML,
    업체 미선정 상태여도 안전: 배정된 프록시가 없으면 그냥 로컬 IP로 뜬다. */
 async function launchBrowser(
   userId: string | null | undefined,
-  opts: { headless?: boolean; maximized?: boolean; slowMo?: number; log?: (s: string) => void; feature?: string } = {}
+  opts: { headless?: boolean; maximized?: boolean; slowMo?: number; log?: (s: string) => void; feature?: string; ownerUserId?: string | null } = {}
 ) {
   const args = opts.maximized ? [...LAUNCH_ARGS, "--start-maximized"] : LAUNCH_ARGS;
-  const proxy = await getProxyForAccount(userId, opts.feature);
+  const proxy = await getProxyForAccount(userId, opts.feature, opts.ownerUserId);
   if (proxy) opts.log?.(`🔒 프록시 사용: ${proxy.server}`);
   return chromium.launch({
     headless: opts.headless ?? true,
@@ -1668,6 +1668,7 @@ export async function updatePostTitle(params: {
 /* ── 서이추 신청 ── */
 export async function addNeighbors(params: {
   accountId: string;
+  ownerUserId?: string;   // 이 계정을 쓰는 회원 user_id (프록시 회원 배정 fallback용)
   targets: { keyword: string; blogId: string }[];
   message: string;
   delayMin: number;
@@ -1684,7 +1685,7 @@ export async function addNeighbors(params: {
   onProgress?: (done: number, fail: number) => void;
   stopSignal?: () => boolean;
 }): Promise<void> {
-  const { accountId, targets, message, delayMin, delayMax, dailyLimit, skipDone, qualityFilter = true, retryDays = 30, minVisitors = 0, maxVisitors = 0, searchEntry = false, onLog, onResult, onProgress, stopSignal } = params;
+  const { accountId, ownerUserId, targets, message, delayMin, delayMax, dailyLimit, skipDone, qualityFilter = true, retryDays = 30, minVisitors = 0, maxVisitors = 0, searchEntry = false, onLog, onResult, onProgress, stopSignal } = params;
   const log = onLog || console.log;
 
   // 다중 멘트 파싱 (|||로 구분된 경우 순환 사용)
@@ -1705,7 +1706,7 @@ export async function addNeighbors(params: {
 
   // 서이추 신청 페이지가 모바일(m.blog.naver.com)만 작동 → 모바일 UA/뷰포트로 실행
   const MOBILE_UA = "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1";
-  const browser = await launchBrowser(accountId, { headless: false, maximized: true, log, feature: "neighbor" });
+  const browser = await launchBrowser(accountId, { headless: false, maximized: true, log, feature: "neighbor", ownerUserId });
   const context = await browser.newContext({
     userAgent: MOBILE_UA, viewport: { width: 390, height: 844 }, locale: "ko-KR", isMobile: true, hasTouch: true,
   });
@@ -2918,6 +2919,7 @@ export async function crawlMyPosts(params: {
    mode=ai면 댓글 내용을 읽고 Gemini로 답글 생성, fixed면 고정 문구. */
 export async function replyToComments(params: {
   accountId: string;
+  ownerUserId?: string;   // 프록시 회원 배정 fallback용
   posts: string[];
   mode: "ai" | "fixed";
   comment: string;
@@ -2931,11 +2933,11 @@ export async function replyToComments(params: {
   onProgress?: (done: number, fail: number) => void;
   stopSignal?: () => boolean;
 }): Promise<void> {
-  const { accountId, posts, mode, comment, tone, onlyNew, delayMin, delayMax, geminiKey = "", onLog, onResult, onProgress, stopSignal } = params;
+  const { accountId, ownerUserId, posts, mode, comment, tone, onlyNew, delayMin, delayMax, geminiKey = "", onLog, onResult, onProgress, stopSignal } = params;
   const log = onLog || console.log;
   const cookies = await ensureLiveSession(accountId, log);   // ★세션 만료면 저장된 비번으로 자동 재연결(테리: "연결됨"인데 로그인풀림 방지)
 
-  const browser = await launchBrowser(accountId, { headless: false, maximized: true, log, feature: "reply" });
+  const browser = await launchBrowser(accountId, { headless: false, maximized: true, log, feature: "reply", ownerUserId });
   const context = await browser.newContext({ userAgent: UA, viewport: { width: 1280, height: 900 }, locale: "ko-KR" });
   await applyAntiDetection(context);
   await context.addCookies(cookies);
@@ -3185,6 +3187,7 @@ export async function crawlPumasiReport(blogId: string, log: (m: string) => void
 //   계정별 postsPerBlog(대상 글 수)를 다르게 지정 가능. 세션은 이미 저장돼 있어 재로그인 불필요.
 export async function pumasiEngage(params: {
   accounts: { accountId: string; blogId: string; posts: number; receiveLimit: number; noGive?: boolean }[];  // posts=줄 글 수(actor), receiveLimit=받을 수(0=안받기), noGive=안가기(남 방문 안 함)
+  ownerUserId?: string;   // 품앗이 실행 회원 user_id (프록시 회원 배정 fallback용)
   comment: string;                 // 고정/순환(|||) 멘트
   doLike: boolean;
   doComment: boolean;
@@ -3205,7 +3208,7 @@ export async function pumasiEngage(params: {
   onProgress?: (done: number, fail: number, skip?: number) => void;
   stopSignal?: () => boolean;
 }): Promise<void> {
-  const { accounts, comment, doLike, doComment, aiComment, commentTone, geminiKey, delayMin, delayMax, readRelated = true, readRelatedMode = "random", readSpeed = "natural", periodDays = 0, searchEntry = false, searchKeyword = "", spreadHours = 0, onLog, onResult, onProgress, stopSignal } = params;
+  const { accounts, ownerUserId, comment, doLike, doComment, aiComment, commentTone, geminiKey, delayMin, delayMax, readRelated = true, readRelatedMode = "random", readSpeed = "natural", periodDays = 0, searchEntry = false, searchKeyword = "", spreadHours = 0, onLog, onResult, onProgress, stopSignal } = params;
   const log = onLog || console.log;
   let done = 0, fail = 0, skip = 0;
   // ★세션 상태를 계정별로 로그에 남긴다(크롬이 안 뜰 때 어느 계정이 문제인지 즉시 파악).
@@ -3255,7 +3258,7 @@ export async function pumasiEngage(params: {
   // ★프록시 격리: 참여 계정 중 하나라도 프록시가 배정돼 있으면 방문마다 그 계정 IP로 따로 브라우저를 띄운다.
   //   (공유 브라우저 하나로 돌면 모든 계정이 같은 IP로 나가 네이버가 한 사람으로 묶어 차단 — 프록시가 무의미).
   //   배정된 프록시가 전혀 없으면 기존처럼 공유 브라우저 하나로 돌린다(업체 연결 전 동작 그대로).
-  const proxied = (await Promise.all(valid.map(a => getProxyForAccount(a.accountId, "pumasi")))).some(Boolean);
+  const proxied = (await Promise.all(valid.map(a => getProxyForAccount(a.accountId, "pumasi", ownerUserId)))).some(Boolean);
   if (proxied) log("[품앗이] 🔒 프록시 격리 모드 — 방문마다 해당 계정의 IP로 접속합니다.");
 
   // ★안내 창: 대기 중에도 "진행 중"을 보여주는 창(방문 사이 대기에도 안 닫혀 "멈춘 것처럼" 안 보임).
@@ -3298,6 +3301,7 @@ export async function pumasiEngage(params: {
         aiComment, commentTone, geminiKey, readRelated, readRelatedMode, readSpeed, searchEntry,
         sharedBrowser,   // ★공유 크롬 재사용(방문 사이에도 창 유지)
         proxyFeature: "pumasi",   // 품앗이 기능 토글 확인용(격리 모드일 때 actor 계정 프록시 적용)
+        ownerUserId,   // 회원 프록시 배정 fallback 전달
         excludeLogNos: commentedSet,
         onCommented: (logNo) => { commentedSet.add(logNo); commentedAll[ckey] = [...commentedSet]; savePumasiCommented(commentedAll); },
         onLog: (m) => log(m),
@@ -3327,6 +3331,7 @@ export async function pumasiEngage(params: {
 
 export async function engageBlogs(params: {
   accountId: string;
+  ownerUserId?: string;   // 프록시 회원 배정 fallback용
   targets: { keyword: string; blogId: string }[];
   comment: string;
   doLike: boolean;
@@ -3363,7 +3368,7 @@ export async function engageBlogs(params: {
     dailyLimit, skipDone, commentRate = 100, likeRate = 100,
     // ★readRelated 기본 false: 일반 공감·댓글(여러 블로그 순회)은 관련글 더 읽기를 켜지 않음(시간 급증 방지).
     //   품앗이(pumasiEngage)만 명시적으로 true를 넘겨 켠다.
-    aiComment = false, commentTone = "다정", geminiKey = "", readRelated = false, readRelatedMode = "random", excludeLogNos, onCommented, readSpeed = "natural", sharedBrowser, proxyFeature, minVisitors = 0, maxVisitors = 0, searchEntry = false, onLog, onResult, onProgress, stopSignal,
+    aiComment = false, commentTone = "다정", geminiKey = "", readRelated = false, readRelatedMode = "random", excludeLogNos, onCommented, readSpeed = "natural", sharedBrowser, proxyFeature, ownerUserId, minVisitors = 0, maxVisitors = 0, searchEntry = false, onLog, onResult, onProgress, stopSignal,
   } = params;
   const log = onLog || console.log;
 
@@ -3383,7 +3388,7 @@ export async function engageBlogs(params: {
 
   // ★품앗이는 sharedBrowser(공유 크롬)를 재사용 → 방문 사이 대기에도 창이 안 닫힌다. 없으면(공감·댓글 단독) 자체 생성.
   const ownBrowser = !sharedBrowser;
-  const browser = sharedBrowser || await launchBrowser(accountId, { headless: false, maximized: true, log, feature: proxyFeature || "engage" });
+  const browser = sharedBrowser || await launchBrowser(accountId, { headless: false, maximized: true, log, feature: proxyFeature || "engage", ownerUserId });
   const context = await browser.newContext({
     userAgent: UA, viewport: { width: 1280, height: 800 }, locale: "ko-KR",
   });

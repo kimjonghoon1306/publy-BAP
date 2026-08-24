@@ -272,8 +272,8 @@ function normalizeProxyServer(server: string): string {
   return /^(https?|socks[45]?):\/\//i.test(s) ? s : `http://${s}`;
 }
 
-export async function getProxyForAccount(userId?: string | null, feature?: string): Promise<ProxyConfig | null> {
-  if (!userId) return null;
+// 특정 user_id(계정 또는 회원)에 배정된 프록시를 조회. feature 토글 반영.
+async function _lookupProxy(userId: string, feature?: string): Promise<ProxyConfig | null> {
   const key = `${userId}::${feature || ""}`;
   const cached = _proxyCache.get(key);
   if (cached && Date.now() - cached.ts < PROXY_CACHE_MS) return cached.proxy;
@@ -306,6 +306,15 @@ export async function getProxyForAccount(userId?: string | null, feature?: strin
   } catch {
     return null;
   }
+}
+
+// 계정(accountId)에 직접 배정된 프록시 우선, 없으면 그 계정을 쓰는 회원(ownerUserId)에 배정된 프록시를 쓴다.
+//   → 관리자가 "회원"에게 프록시를 배정하면, 그 회원이 어느 계정으로 돌리든 프록시가 적용된다.
+export async function getProxyForAccount(userId?: string | null, feature?: string, ownerUserId?: string | null): Promise<ProxyConfig | null> {
+  if (!userId) return null;
+  let proxy = await _lookupProxy(userId, feature);
+  if (!proxy && ownerUserId && ownerUserId !== userId) proxy = await _lookupProxy(ownerUserId, feature);
+  return proxy;
 }
 
 export function clearProxyCache(userId?: string): void {

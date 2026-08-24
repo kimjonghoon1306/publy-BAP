@@ -1,7 +1,7 @@
 import express from "express";
 import cors from "cors";
 import { saveSession, sessionExists, removeSession, crawlBlogIds, crawlBuddyPosts, analyzeBuddyKeywords, addNeighbors, NeighborResult, donePath, engageBlogs, EngageResult, engageDonePath, crawlMyPosts, replyToComments, crawlBlogStats, checkSelectedBlogExposure, pumasiEngage, crawlPumasiReport, pumasiPreview, updatePostTitle, checkProxy } from "./naver";
-import { checkNeighborQuota, incrementNeighborQuota, getNeighborDailyUsage, incrementEngageQuota, getEngageDailyUsage, getUserPlan, NEIGHBOR_DAILY_LIMIT, addNeighborHistory, addReplyHistory, addBlogscoreHistory, incrementPumasiQuota, TITLE_EDIT_DAILY_LIMIT, getTitleEditDailyUsage, incrementTitleEditQuota } from "./supabase";
+import { checkNeighborQuota, incrementNeighborQuota, getNeighborDailyUsage, incrementEngageQuota, getEngageDailyUsage, getUserPlan, NEIGHBOR_DAILY_LIMIT, addNeighborHistory, addReplyHistory, addBlogscoreHistory, incrementPumasiQuota, TITLE_EDIT_DAILY_LIMIT, getTitleEditDailyUsage, incrementTitleEditQuota, getProxyForAccount } from "./supabase";
 import fs from "fs";
 
 const app = express();
@@ -189,6 +189,7 @@ app.post("/api/add-neighbor", async (req, res) => {
 
     await addNeighbors({
       accountId,
+      ownerUserId: userId,
       targets,
       message: message || "안녕하세요! 좋은 글 잘 읽고 갑니다. 서이추 신청드려요 😊",
       delayMin: parseFloat(String(delayMin ?? "5")),
@@ -349,6 +350,7 @@ app.post("/api/engage", async (req, res) => {
 
     await engageBlogs({
       accountId,
+      ownerUserId: userId,
       targets,
       comment: comment || "",
       doLike: doLike !== false && doLike !== "false",
@@ -401,6 +403,7 @@ app.post("/api/reply", async (req, res) => {
     sseSend(res, { type: "start", total: posts.length });
     await replyToComments({
       accountId,
+      ownerUserId: userId,
       posts,
       mode: mode === "fixed" ? "fixed" : "ai",
       comment: comment || "댓글 감사합니다 😊",
@@ -436,6 +439,7 @@ app.post("/api/pumasi", async (req, res) => {
   try {
     sseSend(res, { type: "start", total: accounts.length });
     await pumasiEngage({
+      ownerUserId: userId,
       accounts: accounts.map((a: any) => ({ accountId: String(a.accountId), blogId: String(a.blogId), posts: parseInt(String(a.posts ?? "3"), 10) || 3, receiveLimit: Math.max(0, parseInt(String(a.receiveLimit ?? "3"), 10) || 0), noGive: !!a.noGive })),   // 받기 0=안받기, noGive=안가기
       comment: comment || "",
       doLike: doLike !== false && doLike !== "false",
@@ -537,6 +541,14 @@ app.delete("/api/engage-done/:accountId", (req, res) => {
   const dp = engageDonePath(req.params.accountId);
   try { if (fs.existsSync(dp)) fs.unlinkSync(dp); } catch {}
   res.json({ ok: true });
+});
+
+// ── 회원 프록시 상태: 이 회원(user_id)에게 배정된 프록시가 있는지 (대시보드 노란불용) ──
+app.get("/api/my-proxy/:userId", async (req, res) => {
+  try {
+    const px = await getProxyForAccount(req.params.userId);
+    res.json({ active: !!px });
+  } catch { res.json({ active: false }); }
 });
 
 // ── 프록시 헬스체크: 주어진 프록시로 실제 나가는 IP·응답속도 확인(관리자 상태판용) ──

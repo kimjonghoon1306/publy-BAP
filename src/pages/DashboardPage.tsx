@@ -245,6 +245,11 @@ const CSS = `
 .server-chip{display:flex;align-items:center;gap:5px;padding:5px 12px;border-radius:99px;font-size:11px;font-weight:700;border:1px solid;white-space:nowrap;}
 .server-on{background:rgba(0,214,143,.1);color:var(--success);border-color:rgba(0,214,143,.3);}
 .server-off{background:rgba(120,120,120,.06);color:var(--text2);border-color:var(--border);}
+.proxy-chip{background:rgba(245,180,30,.14);color:#d99400;border-color:rgba(245,180,30,.45);}
+.proxy-chip .dot{background:#f5b41e;box-shadow:0 0 6px #f5b41e;animation:proxyBlink 1s ease-in-out infinite;}
+@keyframes proxyBlink{0%,100%{opacity:1;transform:scale(1);}50%{opacity:.25;transform:scale(.7);}}
+.proxy-mini{display:flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:99px;background:rgba(245,180,30,.14);border:1px solid rgba(245,180,30,.45);flex-shrink:0;}
+.proxy-mini .dot{width:8px;height:8px;background:#f5b41e;box-shadow:0 0 6px #f5b41e;animation:proxyBlink 1s ease-in-out infinite;}
 .dot{width:6px;height:6px;border-radius:50%;flex-shrink:0;}
 .dot-on{background:var(--success);box-shadow:0 0 6px var(--success);animation:pulse 1.5s ease-in-out infinite;}
 .dot-off{background:var(--text3);}
@@ -1761,6 +1766,15 @@ Output format (JSON array only, no other text):
     try{const r=await botFetch(`${BOT}/health`,{signal:AbortSignal.timeout(3000)});setBotOnline(r.ok);}
     catch{setBotOnline(false);}
   },[]);
+
+  // ── 프록시 노란불: 관리자가 이 회원에게 프록시를 배정하면 대시보드에 "프록시 ON" 깜빡이 ──
+  const NEIGHBOR_BOT = "http://127.0.0.1:3334";   // 서이추·공감·품앗이 봇(프록시 배정 조회)
+  const [proxyActive, setProxyActive] = useState(false);
+  const checkMyProxy = useCallback(async()=>{
+    try{ const r=await botFetch(`${NEIGHBOR_BOT}/api/my-proxy/${user.id}`,{signal:AbortSignal.timeout(3000)}); const j=await r.json(); setProxyActive(!!j.active); }
+    catch{ setProxyActive(false); }
+  },[user.id]);
+  useEffect(()=>{ checkMyProxy(); const t=setInterval(checkMyProxy,60000); return ()=>clearInterval(t); },[checkMyProxy]);
 
   function loadReferrals() {
     if (referralLoaded) return;
@@ -3924,11 +3938,13 @@ POST3: (제목)|(이유)
             <button className={`plat-btn ${platform==="tistory"?"plat-btn-tistory":"plat-btn-tistory-off"}`} onClick={()=>setPlatform("tistory")}>🟠 티스토리</button>
             <div style={{width:1,height:16,background:"var(--border)",flexShrink:0}}/>
             <div className={`server-chip ${botOnline?"server-on":"server-off"}`}><div className={`dot ${botOnline?"dot-on":"dot-off"}`}/>{botOnline?"서버 온라인":"서버 오프라인"}</div>
+            {proxyActive && <div className="server-chip proxy-chip" title="관리자가 프록시(전용 IP)를 켜줬어요. 안전하게 자동 접속 중이에요."><div className="dot"/>프록시 ON</div>}
             {(["unlimited","admin"] as string[]).includes(user.plan)
               ? <div className="quota-chip"><div className="quota-bar-bg"><div className="quota-bar-fill" style={{width:"100%"}}/></div>무제한<span className={`plan-badge plan-${user.plan}`}>{PLAN_LABELS[user.plan]}</span></div>
               : <div className="quota-chip"><div className="quota-bar-bg"><div className="quota-bar-fill" style={{width:`${Math.min(100,(dailyPublishUsed/(PLAN_CONFIG[user.plan]?.dailyPublish??2))*100)}%`}}/></div>{Math.max(0,(PLAN_CONFIG[user.plan]?.dailyPublish??2)-dailyPublishUsed)}건<span className={`plan-badge plan-${user.plan}`}>{PLAN_LABELS[user.plan]}</span></div>}
           </div>
           <div className="header-right">
+            {proxyActive && <div className="proxy-mini" title="프록시(전용 IP) 켜짐 — 안전 접속 중"><div className="dot"/></div>}
             <button className="video-open-btn" onClick={()=>setShowVideo(true)} title="소개 영상 보기">🎬 <span className="guide-btn-text">영상</span></button>
             <button className="guide-open-btn" onClick={()=>{setShowGuide(true);setGuideTab(0);}}>📖 <span className="guide-btn-text">사용설명서</span></button>
             <button className="icon-btn" onClick={onThemeToggle}>{theme==="dark"?"☀️":"🌙"}</button>
