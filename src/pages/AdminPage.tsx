@@ -656,9 +656,11 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
   const [dmSessionOk, setDmSessionOk] = useState(false);
   const [dmConnecting, setDmConnecting] = useState(false);
   const [dmLogs, setDmLogs] = useState<string[]>([]);
+  const dmLogRef = useRef<HTMLDivElement>(null); const dmStick = useRef(true);
   const [dmRunning, setDmRunning] = useState(false);
   const esDmRef = useRef<BotEventStream|null>(null);
   const dmLog = (m:string)=>setDmLogs(p=>[...p.slice(-200), m]);
+  useEffect(()=>{ const el=dmLogRef.current; if(el&&dmStick.current) el.scrollTop=el.scrollHeight; },[dmLogs]);
 
   const checkDmSession = async(acct:string)=>{
     if(!acct){setDmSessionOk(false);return;}
@@ -5049,7 +5051,7 @@ POST3: (제목)|(이유)
                       )}
                     </div>
                     {dmLogs.length>0&&(
-                      <div style={{background:"var(--bg)",border:"1px solid var(--border)",borderRadius:10,padding:"10px 12px",maxHeight:220,overflowY:"auto",fontSize:11.5,fontFamily:"monospace",lineHeight:1.7,color:"var(--text2)"}}>
+                      <div ref={dmLogRef} onScroll={()=>{const el=dmLogRef.current; if(el) dmStick.current=el.scrollHeight-el.scrollTop-el.clientHeight<48;}} style={{background:"var(--bg)",border:"1px solid var(--border)",borderRadius:10,padding:"10px 12px",maxHeight:220,overflowY:"auto",fontSize:11.5,fontFamily:"monospace",lineHeight:1.7,color:"var(--text2)"}}>
                         {dmLogs.map((l,i)=>(<div key={i}>{l}</div>))}
                       </div>
                     )}

@@ -9,6 +9,18 @@ const BOT = "http://127.0.0.1:3334";
 //   밖으로 빼면 같은 컴포넌트로 유지돼 사용자가 스크롤한 위치가 그대로 남는다.
 const LogBox = ({ logs, logRef, onClear }: { logs: string[]; logRef: React.RefObject<HTMLDivElement>; onClear: () => void }) => {
   const [copied, setCopied] = useState(false);
+  // ★로그 자동 따라가기: 맨 아래에 붙어 있으면 새 로그가 와도 항상 최신(하단)을 보여준다.
+  //   사용자가 위로 스크롤하면(과거 보기) 고정, 다시 맨 아래로 내리면 자동 추적 재개.
+  const stick = useRef(true);
+  useEffect(() => {
+    const el = logRef.current;
+    if (el && stick.current) el.scrollTop = el.scrollHeight;
+  }, [logs, logRef]);
+  const onScroll = () => {
+    const el = logRef.current;
+    if (!el) return;
+    stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 48;   // 하단 48px 이내면 '따라가기' 켜짐
+  };
   const copyAll = async () => {
     const text = logs.join("\n");
     if (!text) return;
@@ -33,7 +45,7 @@ const LogBox = ({ logs, logRef, onClear }: { logs: string[]; logRef: React.RefOb
       </div>
     </div>
     {/* userSelect:text + WebkitUserSelect:text → Electron에서도 드래그로 로그 직접 복사 가능 */}
-    <div ref={logRef} style={{ height: "min(82vh, 1100px)", minHeight: 520, overflowY: "auto", padding: "14px 18px", fontFamily: "'JetBrains Mono', monospace", fontSize: 12.5, lineHeight: 1.85, background: "#050a0f", userSelect: "text", WebkitUserSelect: "text", cursor: "text" }}>
+    <div ref={logRef} onScroll={onScroll} style={{ height: "min(82vh, 1100px)", minHeight: 520, overflowY: "auto", padding: "14px 18px", fontFamily: "'JetBrains Mono', monospace", fontSize: 12.5, lineHeight: 1.85, background: "#050a0f", userSelect: "text", WebkitUserSelect: "text", cursor: "text" }}>
       {logs.length === 0 ? <span style={{ color: "#3a5a7a" }}>대기 중...</span> : logs.map((l, i) => (
         <div key={i} style={{ color: l.includes("✅")||l.includes("🎉")||l.includes("❤️")||l.includes("💬") ? "#00d68f" : l.includes("❌")||l.includes("🚫") ? "#ff5363" : l.includes("⏭️") ? "#7a9ab5" : "#00c8ff", userSelect: "text", WebkitUserSelect: "text" }}>{l}</div>
       ))}
@@ -97,16 +109,42 @@ const CAMPAIGN_PRESETS = [
 const DEFAULT_SINGLE_MSG = "안녕하세요! 좋은 글 잘 읽고 갑니다. 서이추 신청드려요 😊";
 // ★다중 멘트 = 순서대로 돌아가며 사용(도배·스팸 탐지 회피). 자연스러운 서이추 인사 다양하게.
 const DEFAULT_MULTI_MSGS = [
-  "안녕하세요! 좋은 글 잘 읽고 갑니다. 서이추 신청드려요 😊",
-  "공감 가는 글이 많네요. 서로이웃해요!",
-  "좋은 정보 잘 보고 갑니다. 이웃 신청드려요^^",
+  // 짧고 담백
+  "안녕하세요, 서로이웃해요!",
+  "좋은 글 잘 봤어요, 이웃해요~",
+  "반가워요, 서이추 신청드려요 😊",
+  "글 잘 보고 갑니다, 이웃해요!",
+  "소통해요~ 서로이웃 신청합니다.",
+  // 정성·분위기 칭찬
   "블로그 분위기가 참 좋네요 🌿 서이추 신청할게요!",
   "포스팅에 정성이 느껴져요 👍 서로이웃 해요~",
-  "글 잘 보고 갑니다 😄 자주 소통해요, 이웃 신청드려요!",
-  "반가워요~ 좋은 이웃이 되고 싶어 신청드려요 🤝",
+  "글이 참 깔끔하네요, 이웃 신청드려요!",
+  "사진이랑 글이 잘 어울려요, 서로이웃해요 :)",
+  "정성스러운 포스팅 잘 봤어요, 이웃할게요!",
+  // 정보·유익
   "유익한 글 감사합니다 🙌 서로이웃 신청드려요!",
+  "좋은 정보 잘 보고 갑니다. 이웃 신청드려요^^",
+  "도움되는 글이 많네요, 자주 올게요! 서이추해요~",
+  "필요한 정보 얻어가요, 이웃 신청합니다!",
+  // 공감·소통
+  "공감 가는 글이 많네요. 서로이웃해요!",
+  "글 잘 보고 갑니다 😄 자주 소통해요, 이웃 신청드려요!",
+  "비슷한 관심사라 반가워요, 서로이웃해요~",
+  "자주 소통하고 싶어요, 이웃 신청드립니다 :)",
+  "글 보고 공감 많이 했어요, 이웃해요!",
+  // 인사·친근
+  "안녕하세요! 좋은 글 잘 읽고 갑니다. 서이추 신청드려요 😊",
+  "반가워요~ 좋은 이웃이 되고 싶어 신청드려요 🤝",
   "앞으로 자주 들를게요 ☺️ 서이추 신청합니다~",
   "따뜻한 글 잘 읽었어요 💕 이웃해요!",
+  "우연히 들렀는데 글이 좋네요, 서로이웃해요!",
+  "지나가다 글 보고 반해서 이웃 신청해요 😊",
+  // 응원·기대
+  "좋은 글 잘 봤어요, 다음 글도 기대할게요! 이웃해요~",
+  "꾸준한 포스팅 멋져요 👏 서로이웃 신청드려요!",
+  "응원하며 이웃 신청드려요, 자주 뵈어요!",
+  "글 잘 읽었어요, 앞으로도 좋은 글 부탁드려요! 서이추요~",
+  "블로그 잘 키워가시는 것 같아요, 이웃해요 🌸",
 ].join("\n");
 interface EngageResult { keyword: string; blogId: string; postUrl: string; liked: boolean; commented: boolean; status: "success"|"fail"|"skip"|"pending"|"running"; message: string; }
 // 상단·사이드바 배지와 동일한 플랜별 하루 한도 (lib/supabase.ts의 NEIGHBOR/ENGAGE_DAILY_LIMIT와 일치)
