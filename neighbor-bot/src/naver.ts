@@ -3386,7 +3386,10 @@ export async function engageBlogs(params: {
         // ★검색 경유 진입(켜진 경우): 키워드로 검색해 이 글을 찾아 클릭(검색 유입). 못 찾으면 URL 직행.
         let entered = false;
         if (searchEntry) entered = await enterViaSearch(page, keyword, blogId, targetPost.logNo, log);
-        if (!entered) { await page.goto(targetPost.url, { waitUntil: "domcontentloaded", timeout: 20000 }); }
+        // ★검색 유입은 '클릭'으로 이미 발생(referrer=검색). 그런데 검색 도착지는 모바일(m.blog)이라 PC 댓글 UI(.u_cbox_text)가 없다.
+        //   → 유입 발생 후 반드시 PC 글 URL로 이동해서 공감·댓글해야 입력창을 찾는다. (검색유입 글에서만 '댓글 입력창 못 찾음' 나던 원인)
+        if (entered) { await page.waitForTimeout(1200); await page.goto(targetPost.url, { waitUntil: "domcontentloaded", timeout: 20000 }).catch(() => {}); }
+        else { await page.goto(targetPost.url, { waitUntil: "domcontentloaded", timeout: 20000 }); }
         await page.waitForTimeout(2000);
 
         // iframe 처리 (네이버 블로그는 mainFrame 안에 있음)
