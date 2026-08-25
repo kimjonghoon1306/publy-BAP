@@ -1019,6 +1019,7 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
   const [hotCat, setHotCat] = useState("실시간");
   const [hotItems, setHotItems] = useState<string[]>([]);
   const [hotLoading, setHotLoading] = useState(false);
+  const [quickKw, setQuickKw] = useState(""); // 핫이슈 '바로 글쓰기'용(캘린더와 별개)
   const HOT_FALLBACK: Record<string,string[]> = {
     실시간:["요즘 뜨는 부업","정부지원금 신청","가을 여행지 추천","제철 음식 요리","전기요금 절약법","1인 창업 아이템"],
     경제:["금리 전망","연말정산 팁","소상공인 지원금","재테크 초보","청년 목돈 마련"],
@@ -4335,7 +4336,7 @@ POST3: (제목)|(이유)
                     <div className="card-title" style={{margin:0}}>🔥 오늘의 핫이슈 <span style={{fontSize:11,fontWeight:800,color:"#ff8c00",background:"rgba(255,180,0,.15)",padding:"2px 8px",borderRadius:99,marginLeft:4}}>무료</span></div>
                     <button onClick={()=>loadHotIssues(hotCat,{refreshed:true})} disabled={hotLoading} style={{fontSize:11,padding:"5px 10px",borderRadius:8,border:"1px solid var(--border)",background:"var(--card2)",color:"var(--text2)",cursor:"pointer",fontWeight:700,fontFamily:"inherit",transition:"all .15s"}} onMouseEnter={e=>{e.currentTarget.style.borderColor="#ff8c00";e.currentTarget.style.color="#ff8c00";}} onMouseLeave={e=>{e.currentTarget.style.borderColor="var(--border)";e.currentTarget.style.color="var(--text2)";}}>{hotLoading?"⏳ 불러오는 중...":"🔄 새로고침"}</button>
                   </div>
-                  <div style={{fontSize:11.5,color:"var(--text2)",lineHeight:1.5,marginBottom:11}}>지금 <b>실시간·분야별로 뜨는 주제</b>예요. 글감을 <b style={{color:"#ff8c00"}}>탭하면 그 주제로 바로 글쓰기</b>로 가요. <b style={{color:"#ff8c00"}}>＋</b>를 누르면 캘린더 스케줄에 담겨요. (실시간=구글 트렌드, 분야별=연합뉴스 · 30분마다 갱신)</div>
+                  <div style={{fontSize:11.5,color:"var(--text2)",lineHeight:1.5,marginBottom:11}}>지금 <b>실시간·분야별로 뜨는 주제</b>예요. 관심 있는 걸 <b style={{color:"#ff8c00"}}>탭하면 아래 키워드에 바로 추가</b>돼요. (실시간=구글 트렌드, 분야별=연합뉴스 · 30분마다 갱신)</div>
                   <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:12}}>
                     {HOT_CATS.map(c=>(
                       <button key={c} onClick={()=>loadHotIssues(c)}
@@ -4348,20 +4349,29 @@ POST3: (제목)|(이유)
                     : hotItems.length===0 ? <div style={{fontSize:12.5,color:"var(--text3)",padding:"10px 0"}}>카테고리를 눌러 지금 뜨는 주제를 확인하세요.</div>
                     : <div style={{display:"flex",flexWrap:"wrap",gap:7}}>
                         {hotItems.map((it,i)=>(
-                          <div key={i} style={{display:"inline-flex",alignItems:"stretch",borderRadius:10,border:"1px solid var(--border)",background:"var(--card)",overflow:"hidden",maxWidth:"100%",transition:"all .12s"}}
+                          <button key={i} onClick={()=>{setCalKeywords(prev=>{const list=prev.split(/[,\n]+/).map(s=>s.trim()).filter(Boolean); if(!list.includes(it)) list.push(it); return list.join(", ");}); showToast(`➕ "${it.slice(0,18)}" 키워드에 추가!`);}}
+                            title="클릭하면 아래 키워드에 추가돼요"
+                            style={{padding:"7px 12px",borderRadius:10,border:"1px solid var(--border)",background:"var(--card)",color:"var(--text)",cursor:"pointer",fontSize:12.5,fontWeight:600,fontFamily:"inherit",lineHeight:1.3,textAlign:"left",maxWidth:"100%",transition:"all .12s"}}
                             onMouseEnter={e=>{e.currentTarget.style.borderColor="#ff8c00";e.currentTarget.style.background="rgba(255,140,0,.08)";}}
                             onMouseLeave={e=>{e.currentTarget.style.borderColor="var(--border)";e.currentTarget.style.background="var(--card)";}}>
-                            <button onClick={()=>{setKeyword(it);setSelectedTitle("");setPendingPromo(null);setTab("write");showToast(`✍️ "${it.slice(0,16)}…" 이 주제로 글쓰기!`);}}
-                              title="이 주제로 바로 글쓰기"
-                              style={{padding:"7px 6px 7px 12px",border:"none",background:"transparent",color:"var(--text)",cursor:"pointer",fontSize:12.5,fontWeight:600,fontFamily:"inherit",lineHeight:1.3,textAlign:"left",minWidth:0}}>
-                              <span style={{color:"#ff8c00",fontWeight:800,marginRight:4}}>{i+1}</span>{it.length>30?it.slice(0,30)+"…":it}
-                            </button>
-                            <button onClick={()=>{setCalKeywords(prev=>{const list=prev.split(/[,\n]+/).map(s=>s.trim()).filter(Boolean); if(!list.includes(it)) list.push(it); return list.join(", ");}); showToast(`➕ 캘린더 키워드에 담았어요!`);}}
-                              title="캘린더 스케줄에 담기"
-                              style={{flexShrink:0,padding:"0 11px",border:"none",borderLeft:"1px solid var(--border)",background:"transparent",color:"#ff8c00",cursor:"pointer",fontSize:15,fontWeight:800,fontFamily:"inherit"}}>＋</button>
-                          </div>
+                            <span style={{color:"#ff8c00",fontWeight:800,marginRight:4}}>{i+1}</span>{it.length>34?it.slice(0,34)+"…":it}
+                          </button>
                         ))}
                       </div>}
+                  {/* ✍️ 별도 파이프라인 — 핫이슈로 '바로 글쓰기'(캘린더 스케줄 안 거침) */}
+                  {hotItems.length>0 && (
+                    <div style={{marginTop:12,padding:"12px 14px",borderRadius:12,background:"var(--card2)",border:"1px solid var(--border)"}}>
+                      <div style={{fontSize:12.5,fontWeight:800,color:"var(--text)",marginBottom:8,display:"flex",alignItems:"center",gap:6}}>✍️ 핫이슈로 바로 글쓰기 <span style={{fontSize:11,fontWeight:600,color:"var(--text3)"}}>· 스케줄 안 거치고 지금 바로 써요</span></div>
+                      <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                        <select value={quickKw} onChange={e=>setQuickKw(e.target.value)} style={{flex:1,minWidth:180,padding:"10px 12px",borderRadius:10,border:"1px solid var(--border)",background:"var(--card)",color:"var(--text)",fontSize:12.5,fontWeight:600,fontFamily:"inherit",outline:"none"}}>
+                          <option value="">위 핫이슈에서 골라주세요…</option>
+                          {hotItems.map((it,i)=><option key={i} value={it}>{i+1}. {it.length>42?it.slice(0,42)+"…":it}</option>)}
+                        </select>
+                        <button onClick={()=>{const kw=quickKw.trim(); if(!kw){showToast("먼저 핫이슈를 골라주세요");return;} setKeyword(kw);setSelectedTitle("");setPendingPromo(null);setTab("write");showToast(`✍️ "${kw.slice(0,16)}…" 바로 글쓰기로 이동!`);}}
+                          style={{flexShrink:0,padding:"10px 18px",borderRadius:10,border:"none",background:"linear-gradient(135deg,#ff922e,#ff6a3d)",color:"#fff",fontSize:13,fontWeight:800,fontFamily:"inherit",cursor:"pointer",whiteSpace:"nowrap",boxShadow:"0 6px 16px -6px rgba(255,122,61,.5)"}}>바로 글쓰기 →</button>
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 <div className="card">

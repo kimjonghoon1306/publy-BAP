@@ -3,10 +3,11 @@ import GoogleFlowCard from "../GoogleFlowCard";
 import { PublyUser, getQuota, getHistory, getAccounts, PublyQuota, PublyHistory, PublyAccount, upsertAccount, useQuota, addHistory, getHistoryContent, deleteHistory, deleteAllHistory, deleteFailedHistory, changeUserPassword, getNaverApiKeys, saveNaverApiKeys, NaverApiKeys, checkNaverQuota, incrementNaverQuota, getNaverDailyUsage, NAVER_DAILY_LIMIT, getUserNaverApiKeys, logError, PLAN_CONFIG, checkDailyPublishQuota, incrementDailyPublish, getDailyPublishUsage, getNeighborDailyUsage, NEIGHBOR_DAILY_LIMIT, getEngageDailyUsage, ENGAGE_DAILY_LIMIT, InstaDmTarget, InstaDmHistory, InstaDmQuota, getInstaDmTargets, addInstaDmTarget, deleteInstaDmTarget, getInstaDmHistory, addInstaDmHistory, getInstaDmQuota, upsertInstaDmQuota, incrementInstaDmUsage, INSTA_DM_DAILY_LIMIT, getReplyDailyUsage, REPLY_DAILY_LIMIT } from "../lib/supabase";
 import { supabase, submitBugReportRow, getMyResolvedBugAlerts, markBugNotified, PublyBugReport } from "../lib/supabase";
 import NeighborPage from "./NeighborPage";
+import CrawlCenter from "../components/CrawlCenter";
 import { botFetch, BotEventStream } from "../lib/botApi";
 import WebInstallNotice from "../WebInstallNotice";
 
-type MainTab = "control" | "keyword" | "write" | "image" | "photo" | "publish" | "manage" | "accounts" | "rank" | "blogscore" | "calendar" | "settings" | "neighbor" | "engage" | "reply" | "pumasi" | "insta_dm";
+type MainTab = "control" | "keyword" | "write" | "image" | "photo" | "publish" | "manage" | "accounts" | "rank" | "blogscore" | "calendar" | "settings" | "neighbor" | "engage" | "reply" | "pumasi" | "insta_dm" | "crawl";
 type OnPartnerProduct = {id:string|null;name:string;image:string;price:number|null;available:boolean;partnerUrl:string;shopUrl:string};
 type OnPartnerPlacement = "auto"|"adpost"|"after_first"|"middle"|"before_last"|"bottom";
 type PublishConcept = "full" | "body_faq" | "body_only";
@@ -150,7 +151,7 @@ const NAV_GROUPS = [
     {k:"keyword",i:"🔍",l:"키워드/제목"},{k:"write",i:"✍️",l:"글 생성"},{k:"image",i:"🖼️",l:"이미지 생성"},{k:"photo",i:"📷",l:"사진 글쓰기"},{k:"publish",i:"🚀",l:"발행하기"},
   ]},
   {label:"블로그 운영",tabs:[
-    {k:"calendar",i:"📅",l:"콘텐츠 캘린더",shine:true},{k:"manage",i:"📋",l:"발행 관리"},{k:"blogscore",i:"📈",l:"블로그 지수"},
+    {k:"calendar",i:"📅",l:"콘텐츠 캘린더",shine:true},{k:"manage",i:"📋",l:"발행 관리"},{k:"blogscore",i:"📈",l:"블로그 지수"},{k:"crawl",i:"🔍",l:"크롤링"},
   ]},
   {label:"관계·소통 자동화",tabs:[
     {k:"neighbor",i:"🤝",l:"서이추"},{k:"engage",i:"❤️",l:"공감·댓글"},{k:"reply",i:"💬",l:"답방"},{k:"pumasi",i:"💞",l:"품앗이"},{k:"insta_dm",i:"📱",l:"인스타 DM"},
@@ -553,6 +554,16 @@ textarea.inp{resize:vertical;line-height:1.75;min-height:80px;}
 @keyframes navShineFlow{0%{background-position:0% 0}100%{background-position:220% 0}}
 @keyframes navShineSweep{0%{left:-60%}45%,100%{left:130%}}
 .nav-hot{margin-left:auto;font-size:9px;font-weight:900;letter-spacing:.5px;color:#3a2500;background:linear-gradient(135deg,#ffd85e,#ffab2e);padding:2px 7px;border-radius:99px;box-shadow:0 0 8px rgba(255,180,0,.6);animation:navHotGlow 1.6s ease-in-out infinite;}
+/* 🔍 크롤링 탭 — 핑크 글자 + 통통 튀는 🔒 + hover 핑크 팝업(관리자 승인) */
+.nav-crawl .nav-crawl-label{color:#ff6fa5;font-weight:900;}
+.nav-crawl-lock{margin-left:auto;font-size:13px;animation:crawlBob 1.3s ease-in-out infinite;filter:drop-shadow(0 1px 3px rgba(255,111,165,.6));}
+@keyframes crawlBob{0%,100%{transform:translateY(0)}50%{transform:translateY(-3px)}}
+.nav-crawl-locked{border:1px dashed rgba(255,111,165,.45)!important;border-radius:9px;}
+.nav-crawl-locked:hover{background:rgba(255,111,165,.09);}
+.crawl-tip{position:absolute;left:calc(100% + 6px);top:50%;transform:translateY(-50%) scale(.9);white-space:nowrap;background:linear-gradient(135deg,#ff6fa5,#ff9ec4);color:#fff;font-size:11.5px;font-weight:700;padding:8px 13px;border-radius:11px;box-shadow:0 8px 22px rgba(255,111,165,.45);opacity:0;pointer-events:none;transition:all .2s cubic-bezier(.34,1.56,.64,1);z-index:200;}
+.crawl-tip::before{content:'';position:absolute;right:100%;top:50%;transform:translateY(-50%);border:6px solid transparent;border-right-color:#ff6fa5;}
+.nav-crawl-locked:hover .crawl-tip{opacity:1;transform:translateY(-50%) scale(1);}
+@keyframes crawlPop{0%{opacity:0;transform:scale(.82) translateY(10px)}100%{opacity:1;transform:scale(1) translateY(0)}}
 @keyframes navHotGlow{0%,100%{box-shadow:0 0 6px rgba(255,180,0,.5);transform:scale(1)}50%{box-shadow:0 0 14px rgba(255,180,0,.9);transform:scale(1.06)}}
 /* 🎉 사진 글쓰기 완성 꽃가루 */
 @keyframes confettiFall{0%{transform:translateY(-20px) rotate(0);opacity:1}100%{transform:translateY(105vh) rotate(720deg);opacity:.2}}
@@ -853,6 +864,9 @@ export default function DashboardPage({user, onLogout, onAdminLogin, onThemeTogg
   const stopDm = ()=>{ try{esDmRef.current?.close();}catch{} setDmRunning(false); dmLog("⏹️ 중단됨"); };
   const [quota, setQuota] = useState<PublyQuota|null>(null);
   const [dailyPublishUsed, setDailyPublishUsed] = useState(0);
+  // 🔍 크롤링 = 관리자 승인 필요 기능. user.crawl_enabled(publy_users)로 잠금/해제.
+  const crawlEnabled = !!(user as any)?.crawl_enabled;
+  const [showCrawlLock, setShowCrawlLock] = useState(false);
   const [neighborUsed, setNeighborUsed] = useState(0);
   const [replyUsed, setReplyUsed] = useState(0);
   const [engageUsed, setEngageUsed] = useState(0);
@@ -1241,6 +1255,7 @@ Output format (JSON array only, no other text):
   const [hotCat, setHotCat] = useState("실시간");
   const [hotItems, setHotItems] = useState<string[]>([]);
   const [hotLoading, setHotLoading] = useState(false);
+  const [quickKw, setQuickKw] = useState(""); // 핫이슈로 '바로 글쓰기'용(캘린더 스케줄과 별개 파이프라인)
   // 봇 오프라인/웹 미리보기 대비 폴백(카테고리별 무난한 인기 주제) — 빈 화면 방지
   const HOT_FALLBACK: Record<string,string[]> = {
     실시간:["요즘 뜨는 부업","정부지원금 신청","가을 여행지 추천","제철 음식 요리","전기요금 절약법","1인 창업 아이템"],
@@ -4112,7 +4127,13 @@ POST3: (제목)|(이유)
             {NAV_GROUPS.map(group=>(
               <div key={group.label}>
                 {group.label&&<div className="nav-lbl">{group.label}</div>}
-                {group.tabs.map(t=>(
+                {group.tabs.map(t=> t.k==="crawl" ? (
+                  <button key={t.k} className={`nav-item nav-crawl ${tab==="crawl"&&crawlEnabled?"active":""} ${crawlEnabled?"":"nav-crawl-locked"}`} onClick={()=>{ if(!crawlEnabled){ setShowCrawlLock(true); return; } setTab("crawl"); }}>
+                    <span className="nav-ico">🔍</span><span className="nav-crawl-label">크롤링</span>
+                    {!crawlEnabled && <span className="nav-crawl-lock">🔒</span>}
+                    {!crawlEnabled && <span className="crawl-tip">🔒 <b>관리자 승인</b>이 필요한 기능이에요</span>}
+                  </button>
+                ) : (
                   <button key={t.k} className={`nav-item ${tab===t.k?"active":""} ${t.k==="control"?"nav-control":""} ${t.k==="insta_dm"?"nav-soon":""} ${(t as any).shine?"nav-shine":""}`} onClick={()=>{if(t.k==="insta_dm"){showToast("📱 인스타 DM은 곧 출시됩니다!","info");return;}setTab(t.k);}}>
                     <span className="nav-ico">{t.i}</span>{t.l}
                     {(t as any).shine&&<span className="nav-hot">HOT</span>}
@@ -6110,7 +6131,7 @@ POST3: (제목)|(이유)
                     <div className="card-title" style={{margin:0}}>🔥 오늘의 핫이슈 <span style={{fontSize:11,fontWeight:800,color:"#ff8c00",background:"rgba(255,180,0,.15)",padding:"2px 8px",borderRadius:99,marginLeft:4}}>무료</span></div>
                     <button onClick={()=>loadHotIssues(hotCat,{refreshed:true})} disabled={hotLoading} style={{fontSize:11,padding:"5px 10px",borderRadius:8,border:"1px solid var(--border)",background:"var(--card2)",color:"var(--text2)",cursor:"pointer",fontWeight:700,fontFamily:"inherit",transition:"all .15s"}} onMouseEnter={e=>{e.currentTarget.style.borderColor="#ff8c00";e.currentTarget.style.color="#ff8c00";}} onMouseLeave={e=>{e.currentTarget.style.borderColor="var(--border)";e.currentTarget.style.color="var(--text2)";}}>{hotLoading?"⏳ 불러오는 중...":"🔄 새로고침"}</button>
                   </div>
-                  <div style={{fontSize:11.5,color:"var(--text2)",lineHeight:1.5,marginBottom:11}}>지금 <b>실시간·분야별로 뜨는 주제</b>예요. 글감을 <b style={{color:"#ff8c00"}}>탭하면 그 주제로 바로 글쓰기</b>로 가요. <b style={{color:"#ff8c00"}}>＋</b>를 누르면 캘린더 스케줄에 담겨요. (실시간=구글 트렌드, 분야별=연합뉴스 · 30분마다 갱신)</div>
+                  <div style={{fontSize:11.5,color:"var(--text2)",lineHeight:1.5,marginBottom:11}}>지금 <b>실시간·분야별로 뜨는 주제</b>예요. 관심 있는 걸 <b style={{color:"#ff8c00"}}>탭하면 아래 키워드에 바로 추가</b>돼요. (실시간=구글 트렌드, 분야별=연합뉴스 · 30분마다 갱신)</div>
                   {/* 카테고리 탭 */}
                   <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:12}}>
                     {HOT_CATS.map(c=>(
@@ -6125,23 +6146,29 @@ POST3: (제목)|(이유)
                     : hotItems.length===0 ? <div style={{fontSize:12.5,color:"var(--text3)",padding:"10px 0"}}>카테고리를 눌러 지금 뜨는 주제를 확인하세요.</div>
                     : <div style={{display:"flex",flexWrap:"wrap",gap:7}}>
                         {hotItems.map((it,i)=>(
-                          <div key={i} className="hot-chip"
-                            style={{display:"inline-flex",alignItems:"stretch",borderRadius:10,border:"1px solid var(--border)",background:"var(--card)",overflow:"hidden",maxWidth:"100%",transition:"all .12s"}}
+                          <button key={i} onClick={()=>{setCalKeywords(prev=>{const list=prev.split(/[,\n]+/).map(s=>s.trim()).filter(Boolean); if(!list.includes(it)) list.push(it); return list.join(", ");}); showToast(`➕ "${it.slice(0,18)}" 키워드에 추가!`);}}
+                            title="클릭하면 아래 키워드에 추가돼요"
+                            style={{padding:"7px 12px",borderRadius:10,border:"1px solid var(--border)",background:"var(--card)",color:"var(--text)",cursor:"pointer",fontSize:12.5,fontWeight:600,fontFamily:"inherit",lineHeight:1.3,textAlign:"left",maxWidth:"100%",transition:"all .12s"}}
                             onMouseEnter={e=>{e.currentTarget.style.borderColor="#ff8c00";e.currentTarget.style.background="rgba(255,140,0,.08)";}}
                             onMouseLeave={e=>{e.currentTarget.style.borderColor="var(--border)";e.currentTarget.style.background="var(--card)";}}>
-                            {/* 제목 클릭 = 이 주제로 바로 글쓰기(스케줄 안 건드림) */}
-                            <button onClick={()=>{setKeyword(it);setSelectedTitle("");setPendingPromo(null);setTab("write");showToast(`✍️ "${it.slice(0,16)}…" 이 주제로 글쓰기!`);}}
-                              title="이 주제로 바로 글쓰기"
-                              style={{padding:"7px 6px 7px 12px",border:"none",background:"transparent",color:"var(--text)",cursor:"pointer",fontSize:12.5,fontWeight:600,fontFamily:"inherit",lineHeight:1.3,textAlign:"left",minWidth:0}}>
-                              <span style={{color:"#ff8c00",fontWeight:800,marginRight:4}}>{i+1}</span>{it.length>30?it.slice(0,30)+"…":it}
-                            </button>
-                            {/* ＋ = 캘린더 스케줄 키워드에 담기 */}
-                            <button onClick={()=>{setCalKeywords(prev=>{const list=prev.split(/[,\n]+/).map(s=>s.trim()).filter(Boolean); if(!list.includes(it)) list.push(it); return list.join(", ");}); showToast(`➕ 캘린더 키워드에 담았어요!`);}}
-                              title="캘린더 스케줄에 담기"
-                              style={{flexShrink:0,padding:"0 11px",border:"none",borderLeft:"1px solid var(--border)",background:"transparent",color:"#ff8c00",cursor:"pointer",fontSize:15,fontWeight:800,fontFamily:"inherit"}}>＋</button>
-                          </div>
+                            <span style={{color:"#ff8c00",fontWeight:800,marginRight:4}}>{i+1}</span>{it.length>34?it.slice(0,34)+"…":it}
+                          </button>
                         ))}
                       </div>}
+                  {/* ✍️ 별도 파이프라인 — 핫이슈로 '바로 글쓰기'(캘린더 스케줄 안 거침) */}
+                  {hotItems.length>0 && (
+                    <div style={{marginTop:12,padding:"12px 14px",borderRadius:12,background:"var(--card2)",border:"1px solid var(--border)"}}>
+                      <div style={{fontSize:12.5,fontWeight:800,color:"var(--text)",marginBottom:8,display:"flex",alignItems:"center",gap:6}}>✍️ 핫이슈로 바로 글쓰기 <span style={{fontSize:11,fontWeight:600,color:"var(--text3)"}}>· 스케줄 안 거치고 지금 바로 써요</span></div>
+                      <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                        <select value={quickKw} onChange={e=>setQuickKw(e.target.value)} style={{flex:1,minWidth:180,padding:"10px 12px",borderRadius:10,border:"1px solid var(--border)",background:"var(--card)",color:"var(--text)",fontSize:12.5,fontWeight:600,fontFamily:"inherit",outline:"none"}}>
+                          <option value="">위 핫이슈에서 골라주세요…</option>
+                          {hotItems.map((it,i)=><option key={i} value={it}>{i+1}. {it.length>42?it.slice(0,42)+"…":it}</option>)}
+                        </select>
+                        <button onClick={()=>{const kw=quickKw.trim(); if(!kw){showToast("먼저 핫이슈를 골라주세요","info");return;} setKeyword(kw);setSelectedTitle("");setPendingPromo(null);setTab("write");showToast(`✍️ "${kw.slice(0,16)}…" 바로 글쓰기로 이동!`,"success");}}
+                          style={{flexShrink:0,padding:"10px 18px",borderRadius:10,border:"none",background:"linear-gradient(135deg,#ff922e,#ff6a3d)",color:"#fff",fontSize:13,fontWeight:800,fontFamily:"inherit",cursor:"pointer",whiteSpace:"nowrap",boxShadow:"0 6px 16px -6px rgba(255,122,61,.5)"}}>바로 글쓰기 →</button>
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 {/* 💡 추천 글감 — 우리 서비스를 '주제'로 자연스럽게 녹임(링크 X, 클릭 시 키워드에 추가) */}
@@ -6337,6 +6364,16 @@ POST3: (제목)|(이유)
             )}
 
             {/* ⚠️ 인스타 DM 안전 수칙 팝업 */}
+            {showCrawlLock&&(
+              <div onClick={()=>setShowCrawlLock(false)} style={{position:"fixed",inset:0,background:"rgba(12,8,20,.62)",backdropFilter:"blur(4px)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:99999,padding:20}}>
+                <div onClick={e=>e.stopPropagation()} style={{background:"#fff",borderRadius:26,padding:"30px 26px 26px",maxWidth:360,width:"100%",textAlign:"center",boxShadow:"0 26px 70px rgba(255,111,165,.4)",border:"2px solid #ffe0ec",animation:"crawlPop .32s cubic-bezier(.34,1.56,.64,1)"}}>
+                  <img src="/characters/dodo-checker.png" alt="도도" style={{width:118,height:118,objectFit:"contain",filter:"drop-shadow(0 10px 16px rgba(255,111,165,.32))",animation:"crawlBob 1.6s ease-in-out infinite"}}/>
+                  <div style={{fontSize:20,fontWeight:900,color:"#20242b",margin:"6px 0 8px"}}>🔒 관리자 승인이 필요해요</div>
+                  <div style={{fontSize:13.5,color:"#6b7280",lineHeight:1.65,marginBottom:22}}>크롤링은 <b style={{color:"#ff6fa5"}}>관리자 승인</b>을 받은 회원만 쓸 수 있어요.<br/>승인을 요청하면 도도가 열어드릴게요! ✨</div>
+                  <button onClick={()=>setShowCrawlLock(false)} style={{width:"100%",padding:"14px",borderRadius:15,border:"none",background:"linear-gradient(135deg,#ff6fa5,#ff9ec4)",color:"#fff",fontSize:15,fontWeight:800,cursor:"pointer",boxShadow:"0 10px 24px rgba(255,111,165,.42)"}}>알겠어요</button>
+                </div>
+              </div>
+            )}
             {showInstaWarn&&(
               <div style={{position:"fixed",inset:0,zIndex:9999,background:"rgba(0,0,0,.78)",backdropFilter:"blur(8px)",display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onClick={()=>setShowInstaWarn(false)}>
                 <div onClick={e=>e.stopPropagation()} style={{width:"100%",maxWidth:440,background:"var(--card)",border:"1px solid var(--border)",borderRadius:18,overflow:"hidden",boxShadow:"0 20px 60px rgba(0,0,0,.4)"}}>
@@ -6713,6 +6750,9 @@ POST3: (제목)|(이유)
               <div style={{ display: tab==="reply" ? "block" : "none" }}>
                 <NeighborPage theme={theme as "dark"|"light"} userId={user.id} plan={user.plan} initialTab="reply" singleTab onBusyChange={setNeighborBusy} />
               </div>
+            )}
+            {tab==="crawl" && crawlEnabled && (
+              <div style={{animation:"fadeUp .25s ease both"}}><CrawlCenter showToast={showToast} /></div>
             )}
             {visitedAutoTabs.has("pumasi") && (
               <div style={{ display: tab==="pumasi" ? "block" : "none" }}>
