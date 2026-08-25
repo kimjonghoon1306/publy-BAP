@@ -213,11 +213,11 @@ app.post("/api/publish-full", async (req, res) => {
       return res.status(400).json({ error: "platform은 naver 또는 tistory" });
     }
 
-    await addHistory({ user_id: userId, platform, title, post_url: postUrl, status: "success" });
+    // 발행기록 저장은 앱(회원 DashboardPage / 관리자 AdminPage)이 content까지 통째로 전담한다.
+    // 여기서 또 저장하면 content 없는 중복 기록이 생겨(이중저장) 그 기록을 재발행하면 "제목만" 복원된다.
     res.json({ success: true, postUrl });
   } catch (e: any) {
-    await addHistory({ user_id: userId, platform, title, status: "fail", error_message: e.message });
-
+    // 실패 기록도 앱이 저장(이중저장 방지)
     if (e.message?.includes("세션 만료") || e.message?.includes("재연결")) {
       return res.status(401).json({ error: e.message, code: "SESSION_EXPIRED" });
     }

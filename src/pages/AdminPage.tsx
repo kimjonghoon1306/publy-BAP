@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import GoogleFlowCard from "../GoogleFlowCard";
-import { supabase, getAccounts, upsertAccount, PublyAccount, getHistory, PublyHistory, addHistory, deleteHistory, deleteAllHistory, setAdminPassword, saveAdminNaverApiKeys, getNaverApiKeys, NaverApiKeys, getNaverDailyUsage, NAVER_DAILY_LIMIT, checkNaverQuota, incrementNaverQuota, getUserNaverApiKeys, getReferrals, getErrorLogs, getUnreadErrorCount, markErrorsAsRead, logError, PLAN_CONFIG, getAllNeighborHistory, NeighborHistory, getAllEngageHistory, EngageHistory, InstaDmTarget, InstaDmHistory, InstaDmQuota, getInstaDmTargets, addInstaDmTarget, updateInstaDmTargetStatus, deleteInstaDmTarget, getInstaDmHistory, addInstaDmHistory, getAllInstaDmHistory, getInstaDmQuota, upsertInstaDmQuota, getAllInstaDmQuotas, INSTA_DM_DAILY_LIMIT, PublyBugReport, getBugReports, updateBugReportStatus, deleteBugReport, resetDailyPublish, getAllDailyUsageToday, DailyUsageRow, getAllReplyHistory, ReplyHistory, getAllBlogscoreHistory, BlogscoreHistory, NEIGHBOR_DAILY_LIMIT, ENGAGE_DAILY_LIMIT, REPLY_DAILY_LIMIT, BLOGSCORE_DAILY_LIMIT, PUMASI_ACCOUNT_LIMIT, PUMASI_POSTS_LIMIT, PublyProxy, getProxies, addProxy, updateProxy, deleteProxy, getProxyAssignments, assignAccountToProxy, unassignAccount, setAccountFeatures, ProxyAssign, PROXY_FEATURES, checkProxyHealth } from "../lib/supabase";
+import { supabase, getAccounts, upsertAccount, PublyAccount, getHistory, getHistoryContent, PublyHistory, addHistory, deleteHistory, deleteAllHistory, setAdminPassword, saveAdminNaverApiKeys, getNaverApiKeys, NaverApiKeys, getNaverDailyUsage, NAVER_DAILY_LIMIT, checkNaverQuota, incrementNaverQuota, getUserNaverApiKeys, getReferrals, getErrorLogs, getUnreadErrorCount, markErrorsAsRead, logError, PLAN_CONFIG, getAllNeighborHistory, NeighborHistory, getAllEngageHistory, EngageHistory, InstaDmTarget, InstaDmHistory, InstaDmQuota, getInstaDmTargets, addInstaDmTarget, updateInstaDmTargetStatus, deleteInstaDmTarget, getInstaDmHistory, addInstaDmHistory, getAllInstaDmHistory, getInstaDmQuota, upsertInstaDmQuota, getAllInstaDmQuotas, INSTA_DM_DAILY_LIMIT, PublyBugReport, getBugReports, updateBugReportStatus, deleteBugReport, resetDailyPublish, getAllDailyUsageToday, DailyUsageRow, getAllReplyHistory, ReplyHistory, getAllBlogscoreHistory, BlogscoreHistory, NEIGHBOR_DAILY_LIMIT, ENGAGE_DAILY_LIMIT, REPLY_DAILY_LIMIT, BLOGSCORE_DAILY_LIMIT, PUMASI_ACCOUNT_LIMIT, PUMASI_POSTS_LIMIT, PublyProxy, getProxies, addProxy, updateProxy, deleteProxy, getProxyAssignments, assignAccountToProxy, unassignAccount, setAccountFeatures, ProxyAssign, PROXY_FEATURES, checkProxyHealth } from "../lib/supabase";
 import NeighborPage from "./NeighborPage";
 import { botFetch, BotEventStream } from "../lib/botApi";
 
@@ -2255,9 +2255,14 @@ POST3: (제목)|(이유)
       const d = await r.json();
       if (r.status===401) { setPubMsg("❌ 세션 만료 — 계정 관리 탭에서 재연결해주세요"); setPublishing(false); return; }
       if (!r.ok) throw new Error(d.error);
+      // 회원과 동일하게 발행기록을 content 통째로 저장 → 관리자도 발행관리에 쌓이고 재발행 통째복원 가능
+      await addHistory({user_id:ADM_UID, platform, title:pubTitle, post_url:d.postUrl, status:"success",
+        content:{title:pubTitle, content, pubScope, tags, imageUrl:thumbnail||getActiveImages()[0]||undefined, categoryId:category||undefined, visibility, blocks:publishBody.blocks, platform}} as any)
+        .catch(async()=>{ await addHistory({user_id:ADM_UID, platform, title:pubTitle, post_url:d.postUrl, status:"success"}).catch(()=>{}); });
+      getHistory(ADM_UID).then(setHistory).catch(()=>{});
       setPubMsg(scheduleOn?"✅ 예약 완료! 설정한 시간에 자동 발행돼요.":"✅ 발행 완료!");
       setPubTitle(""); setPubContent(""); setPubTags(""); setPubImg("");
-    } catch(e:any) { setPubMsg("❌ "+e.message+" (오류가 자동 전달됩니다)");logError({user_id:ADM_UID,user_name:"관리자",user_email:"",feature:"관리자 발행",error_message:e.message}).catch(()=>{}); }
+    } catch(e:any) { await addHistory({user_id:ADM_UID, platform, title:pubTitle, status:"fail", error_message:e.message}).catch(()=>{}); setPubMsg("❌ "+e.message+" (오류가 자동 전달됩니다)");logError({user_id:ADM_UID,user_name:"관리자",user_email:"",feature:"관리자 발행",error_message:e.message}).catch(()=>{}); }
     finally { setPublishing(false); }
   }
 
@@ -3455,7 +3460,26 @@ POST3: (제목)|(이유)
                       {h.post_url&&<a href={h.post_url} target="_blank" rel="noopener noreferrer" style={{fontSize:12,color:"var(--accent-text)",fontWeight:700,flexShrink:0}}>보기</a>}
                       <button style={{padding:"4px 10px",borderRadius:7,border:"1px solid rgba(255,71,87,.3)",background:"transparent",color:"var(--danger)",cursor:"pointer",fontSize:12,fontWeight:700,flexShrink:0}} onClick={async()=>{await deleteHistory(h.id);setHistory(prev=>prev.filter(x=>x.id!==h.id));}}>삭제</button>
                           {h.status!=="fail"&&(
-                            <button onClick={()=>{setPubTitle(h.title||"");setTab("publish");showToast("✅ 발행하기 탭으로 이동했어요");}} style={{padding:"4px 10px",borderRadius:7,border:"1px solid rgba(0,200,120,.3)",background:"transparent",color:"var(--success)",cursor:"pointer",fontSize:12,fontWeight:700,flexShrink:0}}>🔄 재발행</button>
+                            <button onClick={async()=>{
+                              let c:any=(h as any).content;
+                              if(typeof c==="string"){ try{c=JSON.parse(c);}catch{c=null;} }
+                              // 목록엔 content를 안 싣는다(성능) → 이 한 건만 DB에서 단건 조회로 보충
+                              if(!c){ try{ showToast("📄 발행했던 글·이미지를 불러오는 중…"); c=await getHistoryContent(h.id); }catch{ c=null; } }
+                              if(c){
+                                setPubTitle(c.title||h.title||"");
+                                if(c.content)setGenContent(c.content);
+                                if(Array.isArray(c.blocks))setBlocks(c.blocks.map((b:any)=>b.type==="text"?{type:"text",id:uid(),content:b.content}:b.type==="image"?{type:"image",id:uid(),src:b.src,alt:b.alt||"",position:"center",source:"auto"}:b.type==="image-pair"?{type:"image-pair",id:uid(),images:b.images}:null).filter(Boolean) as any);
+                                if(c.imageUrl)setThumbnail(c.imageUrl);
+                                if(Array.isArray(c.tags))setHashtags(c.tags.map((t:string)=>t.startsWith("#")?t:"#"+t));
+                                if(c.visibility)setVisibility(c.visibility);
+                                if(c.pubScope)setPubScope(c.pubScope);
+                                setTab("publish");
+                                showToast("✅ 글·이미지 통째로 복원 완료! 발행 버튼만 누르면 돼요");
+                              }else{
+                                setPubTitle(h.title||"");setTab("publish");
+                                showToast("제목만 복원됐어요 (이전 발행은 내용 미저장)");
+                              }
+                            }} style={{padding:"4px 10px",borderRadius:7,border:"1px solid rgba(0,200,120,.3)",background:"transparent",color:"var(--success)",cursor:"pointer",fontSize:12,fontWeight:700,flexShrink:0}}>🔄 재발행</button>
                           )}
                     </div>
                   ))}
