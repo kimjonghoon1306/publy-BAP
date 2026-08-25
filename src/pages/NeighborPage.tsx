@@ -45,7 +45,7 @@ const LogBox = ({ logs, logRef, onClear }: { logs: string[]; logRef: React.RefOb
       </div>
     </div>
     {/* userSelect:text + WebkitUserSelect:text → Electron에서도 드래그로 로그 직접 복사 가능 */}
-    <div ref={logRef} onScroll={onScroll} style={{ height: "min(82vh, 1100px)", minHeight: 520, overflowY: "auto", padding: "14px 18px", fontFamily: "'JetBrains Mono', monospace", fontSize: 12.5, lineHeight: 1.85, background: "#050a0f", userSelect: "text", WebkitUserSelect: "text", cursor: "text" }}>
+    <div ref={logRef} onScroll={onScroll} style={{ height: "min(90vh, 1400px)", minHeight: 680, overflowY: "auto", padding: "14px 18px", fontFamily: "'JetBrains Mono', monospace", fontSize: 12.5, lineHeight: 1.85, background: "#050a0f", userSelect: "text", WebkitUserSelect: "text", cursor: "text" }}>
       {logs.length === 0 ? <span style={{ color: "#3a5a7a" }}>대기 중...</span> : logs.map((l, i) => (
         <div key={i} style={{ color: l.includes("✅")||l.includes("🎉")||l.includes("❤️")||l.includes("💬") ? "#00d68f" : l.includes("❌")||l.includes("🚫") ? "#ff5363" : l.includes("⏭️") ? "#7a9ab5" : "#00c8ff", userSelect: "text", WebkitUserSelect: "text" }}>{l}</div>
       ))}
