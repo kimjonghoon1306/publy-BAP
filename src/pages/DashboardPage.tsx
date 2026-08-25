@@ -1256,7 +1256,7 @@ Output format (JSON array only, no other text):
     스포츠:["프로야구 순위","홈트레이닝 루틴","등산 초보 코스"],
     건강:["다이어트 식단","영양제 추천","환절기 건강관리","수면의 질 높이기"],
   };
-  const loadHotIssues = async (cat: string) => {
+  const loadHotIssues = async (cat: string, opts?: { refreshed?: boolean }) => {
     setHotCat(cat); setHotLoading(true);
     try {
       const r = await botFetch(`${BOT}/api/hot-issues?category=${encodeURIComponent(cat)}`, { signal: AbortSignal.timeout(15000) } as any);
@@ -1268,6 +1268,8 @@ Output format (JSON array only, no other text):
       setHotItems(HOT_FALLBACK[cat] || HOT_FALLBACK["실시간"]);
     }
     setHotLoading(false);
+    // 🔄 새로고침 버튼으로 부른 경우: 내용이 바뀌든 아니든 "갱신됐다" 피드백
+    if (opts?.refreshed) showToast(`✨ ${cat} 핫이슈를 최신으로 갱신했어요!`, "success");
   };
   // 캘린더 탭 첫 진입 시 실시간 핫이슈 자동 로드
   useEffect(() => { if (tab === "calendar" && hotItems.length === 0 && !hotLoading) loadHotIssues("실시간"); /* eslint-disable-next-line */ }, [tab]);
@@ -1832,6 +1834,10 @@ Output format (JSON array only, no other text):
     const sync=()=>{
       getQuota(user.id).then((q:PublyQuota|null)=>{ if(alive&&q) setQuota(q); });
       getDailyPublishUsage(user.id).then(u=>{ if(alive) setDailyPublishUsed(u); });
+      // 서이추·공감·답방 게이지도 함께 갱신 → 관리자가 '건수 초기화'하면 회원 화면도 20초 내 0으로 반영
+      getNeighborDailyUsage(user.id).then(u=>{ if(alive) setNeighborUsed(u); });
+      getEngageDailyUsage(user.id).then(u=>{ if(alive) setEngageUsed(u); });
+      getReplyDailyUsage(user.id).then(u=>{ if(alive) setReplyUsed(u); });
     };
     const iv=window.setInterval(sync,20000);
     return ()=>{ alive=false; window.clearInterval(iv); };
@@ -6102,9 +6108,9 @@ POST3: (제목)|(이유)
                 <div className="card" style={{marginBottom:14,border:"1.5px solid rgba(255,180,0,.35)",background:"linear-gradient(135deg,rgba(255,196,0,.06),rgba(255,146,10,.03))"}}>
                   <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,flexWrap:"wrap",marginBottom:8}}>
                     <div className="card-title" style={{margin:0}}>🔥 오늘의 핫이슈 <span style={{fontSize:11,fontWeight:800,color:"#ff8c00",background:"rgba(255,180,0,.15)",padding:"2px 8px",borderRadius:99,marginLeft:4}}>무료</span></div>
-                    <button onClick={()=>loadHotIssues(hotCat)} disabled={hotLoading} style={{fontSize:11,padding:"5px 10px",borderRadius:8,border:"1px solid var(--border)",background:"var(--card2)",color:"var(--text2)",cursor:"pointer",fontWeight:700,fontFamily:"inherit"}}>{hotLoading?"불러오는 중...":"🔄 새로고침"}</button>
+                    <button onClick={()=>loadHotIssues(hotCat,{refreshed:true})} disabled={hotLoading} style={{fontSize:11,padding:"5px 10px",borderRadius:8,border:"1px solid var(--border)",background:"var(--card2)",color:"var(--text2)",cursor:"pointer",fontWeight:700,fontFamily:"inherit",transition:"all .15s"}} onMouseEnter={e=>{e.currentTarget.style.borderColor="#ff8c00";e.currentTarget.style.color="#ff8c00";}} onMouseLeave={e=>{e.currentTarget.style.borderColor="var(--border)";e.currentTarget.style.color="var(--text2)";}}>{hotLoading?"⏳ 불러오는 중...":"🔄 새로고침"}</button>
                   </div>
-                  <div style={{fontSize:11.5,color:"var(--text2)",lineHeight:1.5,marginBottom:11}}>지금 <b>실시간·분야별로 뜨는 주제</b>예요. 관심 있는 걸 <b style={{color:"#ff8c00"}}>탭하면 아래 키워드에 바로 추가</b>돼요. (실시간=구글 트렌드, 분야별=연합뉴스)</div>
+                  <div style={{fontSize:11.5,color:"var(--text2)",lineHeight:1.5,marginBottom:11}}>지금 <b>실시간·분야별로 뜨는 주제</b>예요. 글감을 <b style={{color:"#ff8c00"}}>탭하면 그 주제로 바로 글쓰기</b>로 가요. <b style={{color:"#ff8c00"}}>＋</b>를 누르면 캘린더 스케줄에 담겨요. (실시간=구글 트렌드, 분야별=연합뉴스 · 30분마다 갱신)</div>
                   {/* 카테고리 탭 */}
                   <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:12}}>
                     {HOT_CATS.map(c=>(
@@ -6119,13 +6125,21 @@ POST3: (제목)|(이유)
                     : hotItems.length===0 ? <div style={{fontSize:12.5,color:"var(--text3)",padding:"10px 0"}}>카테고리를 눌러 지금 뜨는 주제를 확인하세요.</div>
                     : <div style={{display:"flex",flexWrap:"wrap",gap:7}}>
                         {hotItems.map((it,i)=>(
-                          <button key={i} onClick={()=>{setCalKeywords(prev=>{const list=prev.split(/[,\n]+/).map(s=>s.trim()).filter(Boolean); if(!list.includes(it)) list.push(it); return list.join(", ");}); showToast(`➕ "${it.slice(0,18)}" 키워드에 추가!`);}}
-                            title="클릭하면 아래 키워드에 추가돼요"
-                            style={{padding:"7px 12px",borderRadius:10,border:"1px solid var(--border)",background:"var(--card)",color:"var(--text)",cursor:"pointer",fontSize:12.5,fontWeight:600,fontFamily:"inherit",lineHeight:1.3,textAlign:"left",maxWidth:"100%",transition:"all .12s"}}
+                          <div key={i} className="hot-chip"
+                            style={{display:"inline-flex",alignItems:"stretch",borderRadius:10,border:"1px solid var(--border)",background:"var(--card)",overflow:"hidden",maxWidth:"100%",transition:"all .12s"}}
                             onMouseEnter={e=>{e.currentTarget.style.borderColor="#ff8c00";e.currentTarget.style.background="rgba(255,140,0,.08)";}}
                             onMouseLeave={e=>{e.currentTarget.style.borderColor="var(--border)";e.currentTarget.style.background="var(--card)";}}>
-                            <span style={{color:"#ff8c00",fontWeight:800,marginRight:4}}>{i+1}</span>{it.length>34?it.slice(0,34)+"…":it}
-                          </button>
+                            {/* 제목 클릭 = 이 주제로 바로 글쓰기(스케줄 안 건드림) */}
+                            <button onClick={()=>{setKeyword(it);setSelectedTitle("");setPendingPromo(null);setTab("write");showToast(`✍️ "${it.slice(0,16)}…" 이 주제로 글쓰기!`);}}
+                              title="이 주제로 바로 글쓰기"
+                              style={{padding:"7px 6px 7px 12px",border:"none",background:"transparent",color:"var(--text)",cursor:"pointer",fontSize:12.5,fontWeight:600,fontFamily:"inherit",lineHeight:1.3,textAlign:"left",minWidth:0}}>
+                              <span style={{color:"#ff8c00",fontWeight:800,marginRight:4}}>{i+1}</span>{it.length>30?it.slice(0,30)+"…":it}
+                            </button>
+                            {/* ＋ = 캘린더 스케줄 키워드에 담기 */}
+                            <button onClick={()=>{setCalKeywords(prev=>{const list=prev.split(/[,\n]+/).map(s=>s.trim()).filter(Boolean); if(!list.includes(it)) list.push(it); return list.join(", ");}); showToast(`➕ 캘린더 키워드에 담았어요!`);}}
+                              title="캘린더 스케줄에 담기"
+                              style={{flexShrink:0,padding:"0 11px",border:"none",borderLeft:"1px solid var(--border)",background:"transparent",color:"#ff8c00",cursor:"pointer",fontSize:15,fontWeight:800,fontFamily:"inherit"}}>＋</button>
+                          </div>
                         ))}
                       </div>}
                 </div>

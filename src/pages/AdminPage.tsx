@@ -1014,6 +1014,38 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
     return{score,items};
   }
 
+  // 🔥 핫이슈 추천 — 회원 대시보드와 동일(카테고리별 실시간 인기 주제)
+  const HOT_CATS = ["실시간","경제","증권","산업","정치","사회","전국","세계","문화","연예","스포츠","건강"];
+  const [hotCat, setHotCat] = useState("실시간");
+  const [hotItems, setHotItems] = useState<string[]>([]);
+  const [hotLoading, setHotLoading] = useState(false);
+  const HOT_FALLBACK: Record<string,string[]> = {
+    실시간:["요즘 뜨는 부업","정부지원금 신청","가을 여행지 추천","제철 음식 요리","전기요금 절약법","1인 창업 아이템"],
+    경제:["금리 전망","연말정산 팁","소상공인 지원금","재테크 초보","청년 목돈 마련"],
+    증권:["배당주 추천","ETF 초보 투자","국장 vs 미장","공모주 청약"],
+    산업:["AI 활용법","전기차 보조금","반도체 전망","스마트스토어 창업"],
+    정치:["정부 지원 정책","청년 정책","주거 지원 제도"],
+    사회:["요즘 생활 물가","전세 사기 예방","실업급여 조건"],
+    전국:["지역 축제 일정","당일치기 여행","지방 맛집 투어"],
+    세계:["해외여행 준비물","환율 여행 팁","면세점 쇼핑"],
+    문화:["넷플릭스 추천작","전시회 나들이","베스트셀러 도서"],
+    연예:["아이돌 컴백 소식","드라마 정주행","예능 다시보기"],
+    스포츠:["프로야구 순위","홈트레이닝 루틴","등산 초보 코스"],
+    건강:["다이어트 식단","영양제 추천","환절기 건강관리","수면의 질 높이기"],
+  };
+  const loadHotIssues = async (cat: string, opts?: { refreshed?: boolean }) => {
+    setHotCat(cat); setHotLoading(true);
+    try {
+      const r = await botFetch(`${BOT}/api/hot-issues?category=${encodeURIComponent(cat)}`, { signal: AbortSignal.timeout(15000) } as any);
+      const d = await r.json();
+      const items = d.ok ? (d.items || []) : [];
+      setHotItems(items.length ? items : (HOT_FALLBACK[cat] || HOT_FALLBACK["실시간"]));
+    } catch { setHotItems(HOT_FALLBACK[cat] || HOT_FALLBACK["실시간"]); }
+    setHotLoading(false);
+    if (opts?.refreshed) showToast(`✨ ${cat} 핫이슈를 최신으로 갱신했어요!`);
+  };
+  useEffect(() => { if (tab === "calendar" && hotItems.length === 0 && !hotLoading) loadHotIssues("실시간"); /* eslint-disable-next-line */ }, [tab]);
+
   async function generateCalendar(){
     const kws = calKeywords.split(/[,\n]+/).map((s:string)=>s.trim()).filter(Boolean);
     if(kws.length===0){showToast("키워드를 입력해주세요","error");return;}
@@ -2468,7 +2500,20 @@ POST3: (제목)|(이유)
     finally { setSaving(null); }
   }
 
-  async function resetQuota(uid: string) { if (!confirm("건수 초기화?")) return; try { const {data,error}=await supabase.from("publy_quotas").update({used_quota:0}).eq("user_id",uid).select("user_id,used_quota"); if(error)throw new Error(error.message); if(!data?.[0]||data[0].used_quota!==0)throw new Error("권한/RLS로 publy_quotas에 반영된 행이 없습니다"); await resetDailyPublish(uid); await loadUsers(); alert("✅ 발행 건수를 초기화했어요. 회원 화면에 20초 안에 반영됩니다."); } catch(e:any){alert("건수 초기화 실패 — "+e.message);} }
+  async function resetQuota(uid: string) {
+    if (!confirm("이 회원의 오늘 사용 건수를 모두 0으로 초기화할까요?\n(발행·서이추·공감·댓글·답방·지수·품앗이 전부)")) return;
+    try {
+      const today = new Date().toISOString().slice(0, 10);
+      // 1) 발행 quota(누적 사용량) 0으로
+      await supabase.from("publy_quotas").update({ used_quota: 0 }).eq("user_id", uid);
+      // 2) 모든 기능 일일 카운터 통째 삭제 — publy_settings의 `{기능}_daily_{uid}_{오늘}` 키
+      //    (발행/서이추/공감/답방/지수/품앗이 전부가 이 형식으로 저장됨 → 지우면 전부 0/한도)
+      const { error } = await supabase.from("publy_settings").delete().like("key", `%_daily_${uid}_${today}`);
+      if (error) throw new Error(error.message);
+      await loadUsers();
+      alert("✅ 오늘 사용 건수를 모두 초기화했어요 (발행·서이추·공감·답방·지수 전부). 회원 화면엔 20초 안에 반영됩니다.");
+    } catch (e: any) { alert("건수 초기화 실패 — " + e.message); }
+  }
   async function toggleActive(u: UserFull) { if (!confirm(`${u.name||u.email} ${u.is_active?"비활성화":"활성화"}?`)) return; try { const next=!u.is_active; const {data,error}=await supabase.from("publy_users").update({is_active:next}).eq("id",u.id).select("id,is_active"); if(error)throw new Error(error.message); if(!data?.[0]||data[0].is_active!==next)throw new Error("권한/RLS로 반영된 행이 없습니다"); await loadUsers(); } catch(e:any){alert("활성 상태 저장 실패 — "+e.message);} }
   async function addNote(uid: string) { if (!newNote.trim()) return; try { const content=newNote.trim(); const {data,error}=await supabase.from("publy_notes").insert({user_id:uid,content}).select("id,user_id,content"); if(error)throw new Error(error.message); if(!data?.[0]||data[0].user_id!==uid||data[0].content!==content)throw new Error("권한/RLS로 반영된 행이 없습니다"); setNewNote(""); await loadUsers(); } catch(e:any){alert("메모 추가 실패 — "+e.message);} }
   async function addPayment(uid: string, plan: string) {
@@ -4284,6 +4329,41 @@ POST3: (제목)|(이유)
             {/* ───── 📅 콘텐츠 캘린더 ───── */}
             {tab === "calendar" && (
               <div style={{animation:"fadeUp .25s ease both"}}>
+                {/* 🔥 오늘의 핫이슈 — 회원 대시보드와 동일 */}
+                <div className="card" style={{marginBottom:14,border:"1.5px solid rgba(255,180,0,.35)",background:"linear-gradient(135deg,rgba(255,196,0,.06),rgba(255,146,10,.03))"}}>
+                  <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,flexWrap:"wrap",marginBottom:8}}>
+                    <div className="card-title" style={{margin:0}}>🔥 오늘의 핫이슈 <span style={{fontSize:11,fontWeight:800,color:"#ff8c00",background:"rgba(255,180,0,.15)",padding:"2px 8px",borderRadius:99,marginLeft:4}}>무료</span></div>
+                    <button onClick={()=>loadHotIssues(hotCat,{refreshed:true})} disabled={hotLoading} style={{fontSize:11,padding:"5px 10px",borderRadius:8,border:"1px solid var(--border)",background:"var(--card2)",color:"var(--text2)",cursor:"pointer",fontWeight:700,fontFamily:"inherit",transition:"all .15s"}} onMouseEnter={e=>{e.currentTarget.style.borderColor="#ff8c00";e.currentTarget.style.color="#ff8c00";}} onMouseLeave={e=>{e.currentTarget.style.borderColor="var(--border)";e.currentTarget.style.color="var(--text2)";}}>{hotLoading?"⏳ 불러오는 중...":"🔄 새로고침"}</button>
+                  </div>
+                  <div style={{fontSize:11.5,color:"var(--text2)",lineHeight:1.5,marginBottom:11}}>지금 <b>실시간·분야별로 뜨는 주제</b>예요. 글감을 <b style={{color:"#ff8c00"}}>탭하면 그 주제로 바로 글쓰기</b>로 가요. <b style={{color:"#ff8c00"}}>＋</b>를 누르면 캘린더 스케줄에 담겨요. (실시간=구글 트렌드, 분야별=연합뉴스 · 30분마다 갱신)</div>
+                  <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:12}}>
+                    {HOT_CATS.map(c=>(
+                      <button key={c} onClick={()=>loadHotIssues(c)}
+                        style={{padding:"6px 12px",borderRadius:99,border:`1.5px solid ${hotCat===c?"#ff8c00":"var(--border)"}`,background:hotCat===c?"rgba(255,140,0,.12)":"var(--bg)",color:hotCat===c?"#ff8c00":"var(--text2)",cursor:"pointer",fontSize:12,fontWeight:800,fontFamily:"inherit",transition:"all .15s"}}>
+                        {c==="실시간"?"🔥 실시간":c}
+                      </button>
+                    ))}
+                  </div>
+                  {hotLoading ? <div style={{fontSize:12.5,color:"var(--text3)",padding:"10px 0"}}><span className="spinner"/> 인기 주제 불러오는 중...</div>
+                    : hotItems.length===0 ? <div style={{fontSize:12.5,color:"var(--text3)",padding:"10px 0"}}>카테고리를 눌러 지금 뜨는 주제를 확인하세요.</div>
+                    : <div style={{display:"flex",flexWrap:"wrap",gap:7}}>
+                        {hotItems.map((it,i)=>(
+                          <div key={i} style={{display:"inline-flex",alignItems:"stretch",borderRadius:10,border:"1px solid var(--border)",background:"var(--card)",overflow:"hidden",maxWidth:"100%",transition:"all .12s"}}
+                            onMouseEnter={e=>{e.currentTarget.style.borderColor="#ff8c00";e.currentTarget.style.background="rgba(255,140,0,.08)";}}
+                            onMouseLeave={e=>{e.currentTarget.style.borderColor="var(--border)";e.currentTarget.style.background="var(--card)";}}>
+                            <button onClick={()=>{setKeyword(it);setSelectedTitle("");setPendingPromo(null);setTab("write");showToast(`✍️ "${it.slice(0,16)}…" 이 주제로 글쓰기!`);}}
+                              title="이 주제로 바로 글쓰기"
+                              style={{padding:"7px 6px 7px 12px",border:"none",background:"transparent",color:"var(--text)",cursor:"pointer",fontSize:12.5,fontWeight:600,fontFamily:"inherit",lineHeight:1.3,textAlign:"left",minWidth:0}}>
+                              <span style={{color:"#ff8c00",fontWeight:800,marginRight:4}}>{i+1}</span>{it.length>30?it.slice(0,30)+"…":it}
+                            </button>
+                            <button onClick={()=>{setCalKeywords(prev=>{const list=prev.split(/[,\n]+/).map(s=>s.trim()).filter(Boolean); if(!list.includes(it)) list.push(it); return list.join(", ");}); showToast(`➕ 캘린더 키워드에 담았어요!`);}}
+                              title="캘린더 스케줄에 담기"
+                              style={{flexShrink:0,padding:"0 11px",border:"none",borderLeft:"1px solid var(--border)",background:"transparent",color:"#ff8c00",cursor:"pointer",fontSize:15,fontWeight:800,fontFamily:"inherit"}}>＋</button>
+                          </div>
+                        ))}
+                      </div>}
+                </div>
+
                 <div className="card">
                   <div className="card-title" style={{marginBottom:8}}>📅 콘텐츠 캘린더 생성</div>
                   <div style={{fontSize:12.5,color:"var(--text2)",lineHeight:1.6,marginBottom:16,padding:"11px 14px",borderRadius:11,background:"var(--card2)",border:"1px solid var(--border)"}}>
