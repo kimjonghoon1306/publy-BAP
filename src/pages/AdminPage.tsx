@@ -20,6 +20,10 @@ interface UserFull {
 const BOT = "http://127.0.0.1:3333";
 const INSTA_BOT = "http://127.0.0.1:3335";
 const ADM_UID = "admin-publy";
+// 발행기록(publy_history)은 publy_users.id(uuid)에 FK로 묶여 있어 실제 회원계정 uuid여야 한다.
+// 관리자 페이지 발행은 "관리자 본인 회원계정(s9653)"에 기록 → 회원 대시보드와 동일 기록 공유(테리 확정).
+// ※ 봇 발행요청·계정·세션은 계속 ADM_UID("admin-publy")를 쓴다(관리자 봇세션 식별용). 여기 uuid는 DB 기록 전용.
+const ADM_HISTORY_UID = "41377589-d3d0-473b-8677-8c22a988045a"; // s9653@naver.com
 // ★실검증(2026-08-24): 2.0·1.5 계열은 폐기(404). 살아있는 모델만.
 const GEMINI_MODELS_ADM = ["gemini-2.5-flash","gemini-2.5-flash-lite","gemini-flash-latest","gemini-flash-lite-latest"];
 const BATCH = 30;
@@ -1527,7 +1531,7 @@ Output format (JSON array only, no other text):
 
   useEffect(() => {
     checkBot(); getAccounts(ADM_UID).then(setAdmAccs); loadUsers();
-    getHistory(ADM_UID).then(setHistory).catch(e=>console.error("[관리자 발행기록] 로드 실패", e));
+    getHistory(ADM_HISTORY_UID).then(setHistory).catch(e=>console.error("[관리자 발행기록] 로드 실패", e));
     loadUnreadCount();
     // 임시저장 확인
     try{const d=localStorage.getItem("publy_adm_draft");if(d){const p=JSON.parse(d);if(p.content&&p.title){setDraftAvailable(true);setDraftData(p);}}}catch{}
@@ -2256,13 +2260,14 @@ POST3: (제목)|(이유)
       if (r.status===401) { setPubMsg("❌ 세션 만료 — 계정 관리 탭에서 재연결해주세요"); setPublishing(false); return; }
       if (!r.ok) throw new Error(d.error);
       // 회원과 동일하게 발행기록을 content 통째로 저장 → 관리자도 발행관리에 쌓이고 재발행 통째복원 가능
-      await addHistory({user_id:ADM_UID, platform, title:pubTitle, post_url:d.postUrl, status:"success",
+      // user_id는 관리자 본인 회원계정(ADM_HISTORY_UID) — publy_history FK(→publy_users.id) 충족
+      await addHistory({user_id:ADM_HISTORY_UID, platform, title:pubTitle, post_url:d.postUrl, status:"success",
         content:{title:pubTitle, content, pubScope, tags, imageUrl:thumbnail||getActiveImages()[0]||undefined, categoryId:category||undefined, visibility, blocks:publishBody.blocks, platform}} as any)
-        .catch(async()=>{ await addHistory({user_id:ADM_UID, platform, title:pubTitle, post_url:d.postUrl, status:"success"}).catch(()=>{}); });
-      getHistory(ADM_UID).then(setHistory).catch(()=>{});
+        .catch(async()=>{ await addHistory({user_id:ADM_HISTORY_UID, platform, title:pubTitle, post_url:d.postUrl, status:"success"}).catch(()=>{}); });
+      getHistory(ADM_HISTORY_UID).then(setHistory).catch(()=>{});
       setPubMsg(scheduleOn?"✅ 예약 완료! 설정한 시간에 자동 발행돼요.":"✅ 발행 완료!");
       setPubTitle(""); setPubContent(""); setPubTags(""); setPubImg("");
-    } catch(e:any) { await addHistory({user_id:ADM_UID, platform, title:pubTitle, status:"fail", error_message:e.message}).catch(()=>{}); setPubMsg("❌ "+e.message+" (오류가 자동 전달됩니다)");logError({user_id:ADM_UID,user_name:"관리자",user_email:"",feature:"관리자 발행",error_message:e.message}).catch(()=>{}); }
+    } catch(e:any) { await addHistory({user_id:ADM_HISTORY_UID, platform, title:pubTitle, status:"fail", error_message:e.message}).catch(()=>{}); setPubMsg("❌ "+e.message+" (오류가 자동 전달됩니다)");logError({user_id:ADM_UID,user_name:"관리자",user_email:"",feature:"관리자 발행",error_message:e.message}).catch(()=>{}); }
     finally { setPublishing(false); }
   }
 
@@ -3436,7 +3441,7 @@ POST3: (제목)|(이유)
                     <div style={{display:"flex",gap:8,alignItems:"center"}}>
                       <button onClick={checkPostRanks} disabled={rankChecking} style={{padding:"6px 12px",borderRadius:8,border:"none",background:rankChecking?"var(--card2)":"linear-gradient(135deg,#00c896,#00a5ff)",color:rankChecking?"var(--text3)":"#fff",cursor:rankChecking?"default":"pointer",fontSize:12,fontWeight:800,fontFamily:"inherit",whiteSpace:"nowrap"}}>{rankChecking?"📈 확인 중...":"📈 순위 성과"}</button>
                       <span style={{fontSize:13,color:"var(--text2)"}}>총 {history.length}건</span>
-                      {history.length>0&&<button className="btn btn-danger btn-sm" onClick={async()=>{if(!confirm("전체 삭제할까요?"))return;await deleteAllHistory(ADM_UID);setHistory([]);}}>🗑 전체삭제</button>}
+                      {history.length>0&&<button className="btn btn-danger btn-sm" onClick={async()=>{if(!confirm("전체 삭제할까요?"))return;await deleteAllHistory(ADM_HISTORY_UID);setHistory([]);}}>🗑 전체삭제</button>}
                     </div>
                   </div>
                   {history.length===0?(
