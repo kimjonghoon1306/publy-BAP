@@ -157,6 +157,23 @@ export async function addHistory(data: Omit<PublyHistory, "id" | "published_at">
 // ★목록엔 본문(content) 컬럼 제외 — content엔 발행 본문 전체(이미지 등)가 담겨 115건이어도
 //   수십 MB라 select("*")가 문 타임아웃(57014)을 낸다. 목록에 필요한 가벼운 컬럼만 가져온다.
 const HISTORY_COLS = "id,user_id,platform,title,post_url,status,error_message,image_used,published_at";
+
+// 재발행(글·이미지 통째 복원)용 — 목록엔 무거운 content를 안 싣지만, 재발행 버튼을
+// 누른 그 한 건만 PK로 단건 조회한다(인덱스 1행이라 빠름, 타임아웃 없음).
+// content는 DB에 JSON 문자열로 저장돼 있어 문자열이면 파싱해 객체로 돌려준다.
+export async function getHistoryContent(id: string): Promise<any | null> {
+  const { data, error } = await supabase
+    .from("publy_history")
+    .select("content")
+    .eq("id", id)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  let c: any = (data as any)?.content;
+  if (c == null) return null;
+  if (typeof c === "string") { try { c = JSON.parse(c); } catch { return null; } }
+  return c;
+}
+
 export async function getHistory(userId: string): Promise<PublyHistory[]> {
   const ordered = await supabase
     .from("publy_history")
