@@ -538,6 +538,12 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
   // ★재발행 알림: 기간 설정(기본 30일) + 누적 대상(localStorage). 재설치돼도 발행이력(서버)은 안전, 이 캐시만 재검사로 복구.
   const [republishDays, setRepublishDays] = useState<number>(()=>{ const v=parseInt(localStorage.getItem("publy_republish_days")||"30",10); return Number.isFinite(v)?v:30; });
   const [republishAncient, setRepublishAncient] = useState(false);   // "90일 이후"(90일 넘은 오래된 글) 모드
+  // 🚀 전체 제목 자동 변경(관찰중 제외 · 제목1·2 랜덤 · 한도 걸리면 업그레이드 팝업)
+  const [bulkRunning, setBulkRunning] = useState(false);
+  const [bulkProgress, setBulkProgress] = useState({ done: 0, total: 0 });
+  const [bulkUpgrade, setBulkUpgrade] = useState<{ done: number; left: number } | null>(null);   // 한도 도달 업그레이드 팝업
+  const bulkStopRef = useRef(false);
+  const [rpChecked, setRpChecked] = useState<Set<string>>(new Set());   // 재발행 목록 체크박스로 고른 logNo
   const [rpBusyLog, setRpBusyLog] = useState<string>("");   // 재발행 목록에서 지금 제목 바꾸는 중인 글의 logNo
   // 재발행 목록에서 글별로 받은 개선안(제목1·2+진단·키워드·팁) — logNo → 솔루션
   const [rpSolutions, setRpSolutions] = useState<Record<string, { original: string; logNo: string; diagnosis: string; newTitle: string; newTitle2: string; keywords: string[]; bodyTip: string; expectedEffect: string }>>({});
@@ -1434,6 +1440,91 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
       }
     };
     es.onerror = () => { addScLog("❌ 제목 변경 연결 오류 (다시 시도해주세요)"); setTitleEditingKey(""); es.close(); };
+  };
+
+  // ── 🚀 전체 제목 자동 변경(조합) — 개선안 받기 + 제목변경(alert/confirm 없는 조용한 버전) ──
+  // AI 개선안 1개 받기(제목1·2 반환). 실패 시 null.
+  const getSolutionQuiet = async (title: string, logNo: string): Promise<{ newTitle: string; newTitle2: string } | null> => {
+    const key = localStorage.getItem("publy_gemini_key") || "";
+    if (!key) return null;
+    let bodyBlock = "";
+    try {
+      const bid = activeAccount?.blogId || "";
+      if (bid) { const br = await botFetch(`${BOT}/api/post-body?blogId=${encodeURIComponent(bid)}&logNo=${encodeURIComponent(logNo)}`); const bd = await br.json(); if (bd.ok && bd.body) bodyBlock = `\n\n[⚠️이 글의 실제 본문 — 반드시 이 내용에 맞는 제목. 내용과 동떨어진 제목 금지]\n${String(bd.body).slice(0, 1000)}`; }
+    } catch {}
+    const prompt = `너는 네이버 블로그 상위노출(SEO) 전문가야. 아래 글은 검색에 안 뜨고 있어(누락). 이 글의 본문 내용에 맞으면서 검색에 잘 잡히는 제목으로 고쳐줘.${bodyBlock}\n\n순수 JSON만: {"newTitle":"개선안1(본문내용 일치+실제 검색어 앞배치, 25~35자)","newTitle2":"개선안2(다른 각도, 반드시 채워라)"}\n[규칙] 내용에 없는 소재로 낚시 금지. 과장·감탄사 금지. newTitle2 절대 비우지 마라.\n\n[원래 제목]\n${title}`;
+    for (const model of ["gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-flash-latest", "gemini-flash-lite-latest"]) {
+      try {
+        const gc: any = { maxOutputTokens: 1200, temperature: 0.8, responseMimeType: "application/json" };
+        if (model.includes("2.5")) gc.thinkingConfig = { thinkingBudget: 0 };
+        const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }], generationConfig: gc }) });
+        if (!r.ok) continue;
+        const d: any = await r.json();
+        let txt = (d?.candidates?.[0]?.content?.parts?.[0]?.text || "").trim().replace(/^```json\s*/i, "").replace(/^```\s*/i, "").replace(/```\s*$/i, "").trim();
+        const s = txt.indexOf("{"), e = txt.lastIndexOf("}");
+        if (s >= 0 && e > s) txt = txt.slice(s, e + 1);
+        const x = JSON.parse(txt);
+        if (x?.newTitle) return { newTitle: String(x.newTitle), newTitle2: String(x.newTitle2 || x.newTitle) };
+      } catch {}
+    }
+    return null;
+  };
+  // 제목 1개 변경(조용히 실행, Promise<성공여부>). 자동변경 실행 로직(update-title)은 불가침 — 그대로 호출.
+  const applyTitleQuiet = (logNo: string, newTitle: string): Promise<boolean> => new Promise(resolve => {
+    const acc = activeAccount;
+    if (!acc) return resolve(false);
+    const body = JSON.stringify({ accountId: acc.accountId, logNo, newTitle, ...(userId ? { userId } : {}) });
+    const es = new BotEventStream(`${BOT}/api/update-title`, { method: "POST", headers: { "Content-Type": "application/json" }, body });
+    es.onmessage = e => {
+      const d = JSON.parse(e.data);
+      if (d.type === "log") addScLog(d.msg);
+      if (d.type === "done") {
+        if (d.ok && userId) markTitleChanged(userId, acc.accountId, logNo, newTitle);
+        es.close(); resolve(!!d.ok);
+      }
+    };
+    es.onerror = () => { es.close(); resolve(false); };
+  });
+
+  // 🚀 지금 목록(list)의 미노출 글 전체를 자동으로: 관찰중 제외 → 개선안 → 제목1·2 랜덤 → 변경. 한도 걸리면 멈추고 업그레이드 팝업.
+  const runBulkRetitle = async (targets: { title: string; logNo?: string; blogId?: string }[]) => {
+    // 관찰중(이미 제목 바꿔 지켜보는) 글 제외 — 무한루프 차단
+    const todo = targets.filter(t => t.logNo).filter(t => {
+      const care = careMap[t.logNo!];
+      return !(care && computeCareStatus(care).status === "observing");
+    });
+    if (!todo.length) { alert("변경할 글을 먼저 체크해주세요."); return; }
+    if (!localStorage.getItem("publy_gemini_key")) { alert("AI 제목 추천은 무료 Gemini 키가 필요해요. 설정 → 글쓰기 AI에서 등록해주세요."); return; }
+    if (!window.confirm(`선택한 글 ${todo.length}개의 제목을 AI가 추천안(2개 중 랜덤)으로 자동 변경할까요?\n\n· AI가 글 내용을 읽고 제목을 추천해요\n· 오늘 제목 수정 한도까지만 진행되고, 한도에 걸리면 멈춰요\n· 실제 네이버 블로그에 반영돼요`)) return;
+    setBulkRunning(true); bulkStopRef.current = false; setBulkProgress({ done: 0, total: todo.length });
+    addScLog(`🚀 전체 제목 변경 시작 — ${todo.length}개 (관찰중 제외)`);
+    let done = 0;
+    for (let i = 0; i < todo.length; i++) {
+      if (bulkStopRef.current) { addScLog("⏹ 사용자가 중단했어요"); break; }
+      // 한도 체크(무제한 제외) — 걸리면 멈추고 업그레이드 팝업
+      if (!isUnlimitedPlan && (titleEditUsed + done) >= titleEditLimit) {
+        addScLog(`🛑 오늘 제목 수정 한도(${titleEditLimit}회) 도달 — ${done}개 변경, 나머지 ${todo.length - i}개 남음`);
+        setBulkUpgrade({ done, left: todo.length - i });
+        break;
+      }
+      const t = todo[i];
+      setBulkProgress({ done: i, total: todo.length });
+      addScLog(`✏️ (${i + 1}/${todo.length}) "${t.title.slice(0, 20)}" 개선안 받는 중...`);
+      const sol = await getSolutionQuiet(t.title, t.logNo!);
+      if (!sol) { addScLog(`   → ❌ 개선안 실패, 건너뜀`); continue; }
+      const pick = Math.random() < 0.5 ? sol.newTitle : sol.newTitle2;   // 제목1·2 랜덤
+      addScLog(`   → 새 제목(랜덤): "${pick.slice(0, 24)}" 변경 중...`);
+      const ok = await applyTitleQuiet(t.logNo!, pick);
+      if (ok) { done++; setTitleEditUsed(u => u + 1); addScLog(`   → ✅ 변경 완료 (오늘 ${titleEditUsed + done}/${isUnlimitedPlan ? "∞" : titleEditLimit})`); }
+      else addScLog(`   → ❌ 변경 실패, 건너뜀`);
+      await new Promise(r => setTimeout(r, 1500));   // 계정 안전 간격
+    }
+    setBulkProgress({ done, total: todo.length });
+    addScLog(`🎉 전체 제목 변경 마무리 — ${done}개 변경 완료`);
+    setBulkRunning(false);
+    setRpChecked(new Set());   // 체크 해제
+    await loadCare();   // 방금 바꾼 글 = 관찰중으로 → 재발행 목록에서 빠짐
+    setRpTick(t => t + 1);
   };
 
   const scLogNo = (url: string) => url.match(/(?:logNo=|\/)(\d{6,})(?:[/?&]|$)/)?.[1] || "";
@@ -2802,6 +2893,8 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
                         return republishAncient ? ageDays > 90 : ageDays < republishDays;
                       })
                       .filter((t: any) => !abid || !t.blogId || String(t.blogId).toLowerCase() === abid)
+                      // ★관찰중(이미 제목 바꿔 지켜보는) 글은 재발행 목록에 안 뜸 → '수정 추적'에서만 다시 변경(테리 확정)
+                      .filter((t: any) => { const care = t.logNo ? careMap[t.logNo] : null; return !(care && computeCareStatus(care).status === "observing"); })
                       .sort((a: any, b: any) => new Date(a.date || 0).getTime() - new Date(b.date || 0).getTime());
                     return (
                       <div style={{ marginBottom: 20, padding: "16px", borderRadius: 14, background: "rgba(245,158,11,.08)", border: "1.5px solid rgba(245,158,11,.4)" }}>
@@ -2847,6 +2940,27 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
                         <div style={{ fontSize: 11, color: "var(--text3)", lineHeight: 1.65, marginBottom: 12, padding: "9px 12px", borderRadius: 8, background: "rgba(245,158,11,.06)", border: "1px solid rgba(245,158,11,.2)" }}>
                           <b style={{ color: "#f59e0b" }}>🔎 '미노출'이 뭔가요?</b> 이 글의 제목으로 네이버 통합검색(블로그탭)을 돌렸을 때 <b>상위 100위 안에 내 글이 안 나오는</b> 상태예요. 100위 밖이면 사실상 <b>검색 유입이 거의 0</b> — 저품질·누락이 의심돼요. 그래서 여기 모인 글은 <b>제목·키워드를 바꿔 다시 검색 기회를 주는</b> 대상이에요. <span style={{ color: "var(--text2)" }}>(이미 100위 안에 뜨는 글은 여기 안 나와요 — 그건 아래 '제목·키워드 살리기 솔루션'에서 더 위로 올려요.)</span>
                         </div>
+                        {/* 🚀 체크해서 선택한 글만 한 번에 제목 변경 — 전체선택 or 개별 체크 */}
+                        {(list as any[]).length > 0 && (() => {
+                          const pageLogNos = (list as any[]).slice(0, republishShow).map(t => t.logNo).filter(Boolean);
+                          const allChecked = pageLogNos.length > 0 && pageLogNos.every(ln => rpChecked.has(ln));
+                          const pickedItems = (list as any[]).filter(t => t.logNo && rpChecked.has(t.logNo));
+                          return (
+                            <div style={{ marginBottom: 12, padding: "12px 14px", borderRadius: 10, background: "rgba(139,92,246,.08)", border: "1px solid rgba(139,92,246,.3)", display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                              <label style={{ display: "flex", alignItems: "center", gap: 7, cursor: "pointer", flexShrink: 0 }}>
+                                <input type="checkbox" checked={allChecked} onChange={e => { setRpChecked(prev => { const n = new Set(prev); if (e.target.checked) pageLogNos.forEach(ln => n.add(ln)); else pageLogNos.forEach(ln => n.delete(ln)); return n; }); }} style={{ width: 17, height: 17, cursor: "pointer", accentColor: "#8b5cf6" }} />
+                                <span style={{ fontSize: 12.5, fontWeight: 800, color: "#8b5cf6" }}>전체 선택</span>
+                              </label>
+                              <div style={{ flex: 1, minWidth: 140, fontSize: 11, color: "var(--text3)", lineHeight: 1.5 }}>
+                                체크한 글의 제목을 <b>한 번에</b> — AI가 <b>글 내용을 읽고</b> 추천한 제목(2개 중 랜덤)으로 변경해요. 오늘 한도까지만 진행돼요.
+                                {bulkRunning && <div style={{ color: "#8b5cf6", fontWeight: 700, marginTop: 3 }}>진행 {bulkProgress.done}/{bulkProgress.total}…</div>}
+                              </div>
+                              {bulkRunning
+                                ? <button onClick={() => { bulkStopRef.current = true; }} style={{ flexShrink: 0, padding: "9px 16px", borderRadius: 10, border: "none", background: "#d64545", color: "#fff", cursor: "pointer", fontSize: 12, fontWeight: 800, fontFamily: "inherit" }}>⏹ 중단</button>
+                                : <button onClick={() => runBulkRetitle(pickedItems as any)} disabled={!!titleEditingKey || pickedItems.length === 0} style={{ flexShrink: 0, padding: "9px 18px", borderRadius: 10, border: "none", background: pickedItems.length === 0 ? "var(--card2)" : "linear-gradient(135deg,#8b5cf6,#a855f7)", color: pickedItems.length === 0 ? "var(--text3)" : "#fff", cursor: pickedItems.length === 0 ? "default" : "pointer", fontSize: 12.5, fontWeight: 800, fontFamily: "inherit", boxShadow: pickedItems.length === 0 ? "none" : "0 4px 12px -4px rgba(139,92,246,.5)" }}>🚀 선택한 {pickedItems.length}개 제목 변경</button>}
+                            </div>
+                          );
+                        })()}
                         {list.length === 0
                           ? <div style={{ fontSize: 12, color: "var(--text3)" }}>{republishAncient ? "90일이 넘은 오래된 미노출 글이 없어요." : `최근 ${republishDays}일 이내에 쓴 미노출 글이 없어요.`} 위에서 <b>검색노출 검사</b>를 하면 미노출 글이 여기 모여요. (다른 기간 버튼도 눌러보세요)</div>
                           : <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
@@ -2860,8 +2974,9 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
                                 const careSt = care ? computeCareStatus(care) : null;
                                 const observing = careSt?.status === "observing";
                                 return (
-                                  <div key={i} style={{ background: "var(--bg)", border: `1px solid ${observing ? "rgba(139,92,246,.35)" : "var(--border)"}`, borderRadius: 10, overflow: "hidden" }}>
+                                  <div key={i} style={{ background: "var(--bg)", border: `1px solid ${c.logNo && rpChecked.has(c.logNo) ? "rgba(139,92,246,.5)" : "var(--border)"}`, borderRadius: 10, overflow: "hidden" }}>
                                     <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 12px" }}>
+                                      {c.logNo && <input type="checkbox" checked={rpChecked.has(c.logNo)} onChange={e => setRpChecked(prev => { const n = new Set(prev); e.target.checked ? n.add(c.logNo) : n.delete(c.logNo); return n; })} title="이 글을 전체 변경 대상에 넣기" style={{ width: 16, height: 16, flexShrink: 0, cursor: "pointer", accentColor: "#8b5cf6" }} />}
                                       <span style={{ fontSize: 13 }}>{observing ? "🌱" : "⏳"}</span>
                                       <span style={{ flex: 1, minWidth: 0, fontSize: 12.5, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.title}</span>
                                       {observing
@@ -3524,6 +3639,22 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
         );
       })()}
     {/* 🎉 블로그지수 웰컴 팝업 — 진입 시 팡! 캐릭터+사용순서+멘토 멘트. [닫기][일주일 보지않기] */}
+    {/* 🛑 전체 제목 변경 중 한도 도달 → 업그레이드 안내 팝업 */}
+    {bulkUpgrade && createPortal(
+      <div className={theme === "dark" ? "app dark" : "app light"} style={{ display: "contents" }}>
+      <div onClick={() => setBulkUpgrade(null)} style={{ position: "fixed", inset: 0, zIndex: 100001, background: "rgba(12,10,20,.62)", backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+        <div onClick={e => e.stopPropagation()} style={{ background: "var(--card)", borderRadius: 22, padding: "32px 28px 24px", maxWidth: 400, width: "100%", textAlign: "center", boxShadow: "0 30px 90px -20px rgba(0,0,0,.55)", border: "1px solid var(--border)" }}>
+          <div style={{ fontSize: 46, marginBottom: 8 }}>🚀</div>
+          <div style={{ fontSize: 20, fontWeight: 900, color: "var(--text)", marginBottom: 10 }}>오늘 한도까지 다 바꿨어요!</div>
+          <div style={{ fontSize: 13, color: "var(--text2)", lineHeight: 1.65, marginBottom: 20 }}>오늘 <b style={{ color: "#8b5cf6" }}>{bulkUpgrade.done}개</b>의 제목을 바꿨어요.<br />아직 <b style={{ color: "#f59e0b" }}>{bulkUpgrade.left}개</b>가 남았는데, 오늘 제목 수정 한도({titleEditLimit}회)를 다 썼어요.<br /><span style={{ fontSize: 12, color: "var(--text3)" }}>자정이 지나면 다시 할 수 있어요. 더 많이 하려면 등급을 올려보세요!</span></div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button onClick={() => setBulkUpgrade(null)} style={{ flex: 1, padding: "12px", borderRadius: 12, border: "1px solid var(--border)", background: "transparent", color: "var(--text3)", cursor: "pointer", fontSize: 12.5, fontWeight: 700, fontFamily: "inherit" }}>나중에</button>
+            <button onClick={() => setBulkUpgrade(null)} style={{ flex: 1.4, padding: "12px", borderRadius: 12, border: "none", background: "linear-gradient(135deg,#8b5cf6,#a855f7)", color: "#fff", cursor: "pointer", fontSize: 13.5, fontWeight: 800, fontFamily: "inherit", boxShadow: "0 8px 20px -8px rgba(139,92,246,.6)" }}>등급 올리기 →</button>
+          </div>
+        </div>
+      </div>
+      </div>, document.body)}
+
     {welcome && createPortal(
       /* ★ body로 포탈되면 .app.dark/.light의 CSS변수(--card 등)가 안 먹혀 팝업이 투명해짐 → 테마 클래스로 변수 범위 복원(display:contents=레이아웃 영향 0) */
       <div className={theme === "dark" ? "app dark" : "app light"} style={{ display: "contents" }}>
