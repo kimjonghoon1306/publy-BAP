@@ -544,6 +544,8 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
   const [bulkUpgrade, setBulkUpgrade] = useState<{ done: number; left: number } | null>(null);   // 한도 도달 업그레이드 팝업
   const bulkStopRef = useRef(false);
   const [rpChecked, setRpChecked] = useState<Set<string>>(new Set());   // 재발행 목록 체크박스로 고른 logNo
+  // 🩺 수정추적에서 '제목 변경' → 개선안 받아 별도 모달로 제목1·2 보여주고 거기서 변경(관찰중 글은 재발행 목록에 없어 펼칠 곳이 없음)
+  const [trackSol, setTrackSol] = useState<{ item: { title: string; logNo?: string; blogId?: string }; loading: boolean; sol: { diagnosis: string; newTitle: string; newTitle2: string; keywords: string[]; bodyTip: string; expectedEffect: string } | null } | null>(null);
   const [rpBusyLog, setRpBusyLog] = useState<string>("");   // 재발행 목록에서 지금 제목 바꾸는 중인 글의 logNo
   // 재발행 목록에서 글별로 받은 개선안(제목1·2+진단·키워드·팁) — logNo → 솔루션
   const [rpSolutions, setRpSolutions] = useState<Record<string, { original: string; logNo: string; diagnosis: string; newTitle: string; newTitle2: string; keywords: string[]; bodyTip: string; expectedEffect: string }>>({});
@@ -753,8 +755,16 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
       msg = `이 글의 제목을 다시 바꾸시겠어요?\n\n제목을 바꾼 지 ${changedDays}일 됐어요.`;
     }
     if (!window.confirm(msg)) { addScLog(`🌱 "${item.title.slice(0, 18)}" — 멘토 지휘에 따라 기다리기로 했어요`); return; }
-    addScLog(`✏️ "${item.title.slice(0, 18)}" 개선안 받기 진행`);
-    handleRepublishOne(item);   // 기존 개선안 받기 흐름 재사용(제목 자동변경 실행 로직은 불가침)
+    if (!item.logNo) { alert("이 글의 번호를 못 찾았어요. '순위 검사'를 다시 해주세요."); return; }
+    if (!localStorage.getItem("publy_gemini_key")) { alert("AI 제목 추천은 무료 Gemini 키가 필요해요. 설정 → 글쓰기 AI에서 등록해주세요."); return; }
+    // 개선안을 별도 모달로 — 관찰중 글은 재발행 목록에 없어 펼칠 곳이 없으므로
+    addScLog(`✏️ "${item.title.slice(0, 18)}" 개선안 받는 중...`);
+    setTrackSol({ item, loading: true, sol: null });
+    getSolutionQuiet(item.title, item.logNo).then(s => {
+      if (!s) { setTrackSol(null); addScLog("❌ 개선안 생성 실패"); alert("개선안 생성에 실패했어요. 잠시 후 다시 시도해주세요."); return; }
+      setTrackSol({ item, loading: false, sol: { diagnosis: (s as any).diagnosis || "", newTitle: s.newTitle, newTitle2: s.newTitle2, keywords: (s as any).keywords || [], bodyTip: (s as any).bodyTip || "", expectedEffect: (s as any).expectedEffect || "" } });
+      addScLog(`✅ "${item.title.slice(0, 16)}" 개선안 완성 — 제목 2개`);
+    });
   };
   // 📖 기능 설명 — 각 기능 헤더 밑에 "이게 뭐예요" 한 줄. 어르신도 알게(문의 방지). 항상 보이는 인라인 텍스트.
   const HelpLine = ({ children }: { children: React.ReactNode }) => (
@@ -1434,7 +1444,7 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
       const d = JSON.parse(e.data);
       if (d.type === "log") addScLog(d.msg);
       if (d.type === "done") {
-        if (d.ok) { setTitleEditUsed(u => u + 1); addScLog(`✅ 제목 변경 완료!`); if (userId) markTitleChanged(userId, acc.accountId, logNo, newTitle); /* 🩺 수정한 날 기록 → 30일 관찰 시작(무한루프 차단) */ alert(`✅ 제목을 변경했어요!\n"${newTitle}"\n\n검색 반영에는 시간이 걸릴 수 있어요.`); }
+        if (d.ok) { setTitleEditUsed(u => u + 1); addScLog(`✅ 제목 변경 완료!`); if (userId) markTitleChanged(userId, acc.accountId, logNo, newTitle); /* 🩺 수정한 날 기록 → 30일 관찰 시작(무한루프 차단) */ setTrackSol(null); loadCare(); alert(`✅ 제목을 변경했어요!\n"${newTitle}"\n\n검색 반영에는 시간이 걸릴 수 있어요.`); }
         else { addScLog(`❌ 제목 변경 실패: ${d.message || "알 수 없는 오류"}`); alert(`제목 변경 실패: ${d.message || "알 수 없는 오류"}`); }
         setTitleEditingKey(""); es.close();
       }
@@ -1443,8 +1453,8 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
   };
 
   // ── 🚀 전체 제목 자동 변경(조합) — 개선안 받기 + 제목변경(alert/confirm 없는 조용한 버전) ──
-  // AI 개선안 1개 받기(제목1·2 반환). 실패 시 null.
-  const getSolutionQuiet = async (title: string, logNo: string): Promise<{ newTitle: string; newTitle2: string } | null> => {
+  // AI 개선안 1개 받기(제목1·2 + 진단·키워드·팁 반환). 실패 시 null.
+  const getSolutionQuiet = async (title: string, logNo: string): Promise<{ newTitle: string; newTitle2: string; diagnosis?: string; keywords?: string[]; bodyTip?: string; expectedEffect?: string } | null> => {
     const key = localStorage.getItem("publy_gemini_key") || "";
     if (!key) return null;
     let bodyBlock = "";
@@ -1452,7 +1462,7 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
       const bid = activeAccount?.blogId || "";
       if (bid) { const br = await botFetch(`${BOT}/api/post-body?blogId=${encodeURIComponent(bid)}&logNo=${encodeURIComponent(logNo)}`); const bd = await br.json(); if (bd.ok && bd.body) bodyBlock = `\n\n[⚠️이 글의 실제 본문 — 반드시 이 내용에 맞는 제목. 내용과 동떨어진 제목 금지]\n${String(bd.body).slice(0, 1000)}`; }
     } catch {}
-    const prompt = `너는 네이버 블로그 상위노출(SEO) 전문가야. 아래 글은 검색에 안 뜨고 있어(누락). 이 글의 본문 내용에 맞으면서 검색에 잘 잡히는 제목으로 고쳐줘.${bodyBlock}\n\n순수 JSON만: {"newTitle":"개선안1(본문내용 일치+실제 검색어 앞배치, 25~35자)","newTitle2":"개선안2(다른 각도, 반드시 채워라)"}\n[규칙] 내용에 없는 소재로 낚시 금지. 과장·감탄사 금지. newTitle2 절대 비우지 마라.\n\n[원래 제목]\n${title}`;
+    const prompt = `너는 네이버 블로그 상위노출(SEO) 전문가야. 아래 글은 검색에 안 뜨고 있어(누락). 이 글의 본문 내용에 맞으면서 검색에 잘 잡히는 제목으로 고쳐줘.${bodyBlock}\n\n순수 JSON만: {"diagnosis":"이 제목이 왜 검색 안 되는지 1문장","newTitle":"개선안1(본문내용 일치+실제 검색어 앞배치, 25~35자)","newTitle2":"개선안2(다른 각도, 반드시 채워라)","keywords":["본문 검색 키워드5개"],"bodyTip":"본문/태그 실전팁 1문장","expectedEffect":"기대효과 1문장"}\n[규칙] 내용에 없는 소재로 낚시 금지. 과장·감탄사 금지. newTitle2 절대 비우지 마라.\n\n[원래 제목]\n${title}`;
     for (const model of ["gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-flash-latest", "gemini-flash-lite-latest"]) {
       try {
         const gc: any = { maxOutputTokens: 1200, temperature: 0.8, responseMimeType: "application/json" };
@@ -1464,7 +1474,7 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
         const s = txt.indexOf("{"), e = txt.lastIndexOf("}");
         if (s >= 0 && e > s) txt = txt.slice(s, e + 1);
         const x = JSON.parse(txt);
-        if (x?.newTitle) return { newTitle: String(x.newTitle), newTitle2: String(x.newTitle2 || x.newTitle) };
+        if (x?.newTitle) return { newTitle: String(x.newTitle), newTitle2: String(x.newTitle2 || x.newTitle), diagnosis: String(x.diagnosis || ""), keywords: Array.isArray(x.keywords) ? x.keywords.map(String) : [], bodyTip: String(x.bodyTip || ""), expectedEffect: String(x.expectedEffect || "") };
       } catch {}
     }
     return null;
@@ -2884,15 +2894,31 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
                     void rpTick;   // 🔄 새로고침 트리거(계정 바꾸거나 새로고침 누르면 다시 계산)
                     let store: Record<string, any> = {};
                     try { store = JSON.parse(localStorage.getItem("publy_republish_targets") || "{}"); } catch {}
-                    // ★현재 선택한 계정 것만 표시(계정 바뀌면 자동으로 그 계정 목록으로 — 다른 계정 글 섞임 방지)
+                    // ★★소스 = 방금 검사한 결과(exposureChecks)의 미노출 글 + store(예전 누적 캐시) 합침.
+                    //   방금 검사한 미노출 글은 blogId 매칭 안 따지고 무조건 포함(같은 계정으로 검사한 거니까) → "일자 지정하면 다 나온다".
                     const abid = (activeAccount?.blogId || "").toLowerCase();
-                    // 기간 필터: 기본=선택 날짜 '이내(미만)'에 쓴 미노출 글 / '90일 이후' 모드=90일 넘은 오래된 글
-                    const list = Object.values(store).filter((t: any) => {
-                        if (!t.date) return republishAncient ? false : true;   // 날짜 없으면 이내 목록엔 포함, 이후 목록엔 제외
+                    const merged: Record<string, any> = {};
+                    // 1) store(누적) — 현재 계정 것만(다른 계정 글 섞임 방지)
+                    for (const t of Object.values(store) as any[]) {
+                      if (!t.logNo) continue;
+                      if (abid && t.blogId && String(t.blogId).toLowerCase() !== abid) continue;
+                      merged[t.logNo] = t;
+                    }
+                    // 2) 방금 검사 결과의 미노출 글 — 발행날짜(scPosts)까지 붙여 무조건 포함
+                    const dateByLogNow: Record<string,string> = {};
+                    scPosts.forEach(p => { const ln = scLogNo(p.url); if (ln) dateByLogNow[ln] = p.date; });
+                    for (const c of (scResult?.exposureChecks || [])) {
+                      if (!c.logNo) continue;
+                      if (c.exposed === false) merged[c.logNo] = { logNo: c.logNo, title: c.title, date: (c as any).date || dateByLogNow[String(c.logNo)] || "", blogId: activeAccount?.blogId || "", at: now };
+                      else if (c.exposed === true) delete merged[c.logNo];
+                    }
+                    // 기간 필터: 기본=선택 날짜 '이내(미만)' + 날짜 모르면 포함 / '90일 이후' 모드=90일 넘은 것만
+                    const list = Object.values(merged).filter((t: any) => {
+                        if (!t.date) return !republishAncient;   // 날짜 모르면 '이내' 목록엔 포함, '이후' 목록엔 제외
                         const ageDays = (now - new Date(t.date).getTime()) / 86400000;
+                        if (!Number.isFinite(ageDays)) return !republishAncient;   // 날짜 파싱 실패도 '이내'에 포함(누락 방지)
                         return republishAncient ? ageDays > 90 : ageDays < republishDays;
                       })
-                      .filter((t: any) => !abid || !t.blogId || String(t.blogId).toLowerCase() === abid)
                       // ★관찰중(이미 제목 바꿔 지켜보는) 글은 재발행 목록에 안 뜸 → '수정 추적'에서만 다시 변경(테리 확정)
                       .filter((t: any) => { const care = t.logNo ? careMap[t.logNo] : null; return !(care && computeCareStatus(care).status === "observing"); })
                       .sort((a: any, b: any) => new Date(a.date || 0).getTime() - new Date(b.date || 0).getTime());
@@ -3640,6 +3666,42 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
       })()}
     {/* 🎉 블로그지수 웰컴 팝업 — 진입 시 팡! 캐릭터+사용순서+멘토 멘트. [닫기][일주일 보지않기] */}
     {/* 🛑 전체 제목 변경 중 한도 도달 → 업그레이드 안내 팝업 */}
+    {/* 🩺 수정추적 '제목 변경' → 개선안 제목1·2 모달(관찰중 글은 재발행 목록에 없어 여기서 보여줌) */}
+    {trackSol && createPortal(
+      <div className={theme === "dark" ? "app dark" : "app light"} style={{ display: "contents" }}>
+      <div onClick={() => !titleEditingKey && setTrackSol(null)} style={{ position: "fixed", inset: 0, zIndex: 100001, background: "rgba(12,10,20,.6)", backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+        <div onClick={e => e.stopPropagation()} style={{ background: "var(--card)", borderRadius: 20, padding: "24px 24px 20px", maxWidth: 460, width: "100%", maxHeight: "88vh", overflowY: "auto", boxShadow: "0 30px 90px -20px rgba(0,0,0,.55)", border: "1px solid var(--border)" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 15, fontWeight: 900, color: "var(--text)" }}>✏️ 제목 개선안</div>
+              <div style={{ fontSize: 11.5, color: "var(--text3)", marginTop: 2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>원래: {trackSol.item.title}</div>
+            </div>
+            <button onClick={() => !titleEditingKey && setTrackSol(null)} style={{ border: "1px solid var(--border)", background: "transparent", color: "var(--text3)", borderRadius: 8, padding: "5px 10px", cursor: "pointer", fontSize: 13 }}>✕</button>
+          </div>
+          {trackSol.loading || !trackSol.sol
+            ? <div style={{ padding: "30px 0", textAlign: "center", color: "var(--text3)", fontSize: 13 }}><span className="spinner" /> AI가 글 내용을 읽고 제목을 만드는 중...</div>
+            : (() => { const sol = trackSol.sol!; const ln = trackSol.item.logNo!; return (
+              <>
+                {sol.diagnosis && <div style={{ fontSize: 11.5, color: "#ff5fa2", fontWeight: 600, marginBottom: 12, lineHeight: 1.5 }}>🔍 {sol.diagnosis}</div>}
+                {[[sol.newTitle, "1"], [sol.newTitle2, "2"]].filter(([t]) => t).map(([nt, n]) => (
+                  <div key={n} style={{ marginBottom: 12 }}>
+                    <div style={{ fontSize: 11, color: "#00c896", fontWeight: 800, marginBottom: 4 }}>✅ 개선 제목 {n}</div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                      <div style={{ flex: "1 1 180px", minWidth: 0, fontSize: 14, fontWeight: 800, color: "var(--text)", lineHeight: 1.4 }}>{nt}</div>
+                      <button onClick={() => handleApplyTitle(trackSol.item.title, nt as string, `track-${ln}-${n}`, ln)} disabled={!!titleEditingKey}
+                        style={{ flexShrink: 0, padding: "8px 14px", borderRadius: 9, border: "none", background: titleEditingKey ? "var(--card2)" : "#00c896", color: titleEditingKey ? "var(--text3)" : "#fff", fontSize: 12, fontWeight: 800, fontFamily: "inherit", cursor: titleEditingKey ? "default" : "pointer" }}>{titleEditingKey === `track-${ln}-${n}` ? "변경 중..." : "이 제목으로 변경"}</button>
+                    </div>
+                  </div>
+                ))}
+                {sol.keywords.length > 0 && <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 10 }}>{sol.keywords.map((k, j) => <span key={j} style={{ padding: "3px 9px", borderRadius: 20, background: "rgba(139,92,246,.12)", color: "#a855f7", fontSize: 11, fontWeight: 700 }}># {k}</span>)}</div>}
+                {sol.bodyTip && <div style={{ fontSize: 11.5, color: "var(--text2)", lineHeight: 1.5, marginBottom: 4 }}>✏️ <b>본문 팁</b> · {sol.bodyTip}</div>}
+                {sol.expectedEffect && <div style={{ fontSize: 11.5, color: "var(--text2)", lineHeight: 1.5, padding: "7px 10px", borderRadius: 8, background: "rgba(0,200,150,.08)" }}>📈 <b style={{ color: "#00c896" }}>기대 효과</b> · {sol.expectedEffect}</div>}
+              </>
+            ); })()}
+        </div>
+      </div>
+      </div>, document.body)}
+
     {bulkUpgrade && createPortal(
       <div className={theme === "dark" ? "app dark" : "app light"} style={{ display: "contents" }}>
       <div onClick={() => setBulkUpgrade(null)} style={{ position: "fixed", inset: 0, zIndex: 100001, background: "rgba(12,10,20,.62)", backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
