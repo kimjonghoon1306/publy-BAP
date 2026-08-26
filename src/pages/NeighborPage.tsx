@@ -1460,14 +1460,15 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
     let bodyBlock = "";
     try {
       const bid = activeAccount?.blogId || "";
-      if (bid) { const br = await botFetch(`${BOT}/api/post-body?blogId=${encodeURIComponent(bid)}&logNo=${encodeURIComponent(logNo)}`); const bd = await br.json(); if (bd.ok && bd.body) bodyBlock = `\n\n[⚠️이 글의 실제 본문 — 반드시 이 내용에 맞는 제목. 내용과 동떨어진 제목 금지]\n${String(bd.body).slice(0, 1000)}`; }
+      if (bid) { const br = await botFetch(`${BOT}/api/post-body?blogId=${encodeURIComponent(bid)}&logNo=${encodeURIComponent(logNo)}`, { signal: AbortSignal.timeout(12000) } as any); const bd = await br.json(); if (bd.ok && bd.body) bodyBlock = `\n\n[⚠️이 글의 실제 본문 — 반드시 이 내용에 맞는 제목. 내용과 동떨어진 제목 금지]\n${String(bd.body).slice(0, 1000)}`; }
     } catch {}
     const prompt = `너는 네이버 블로그 상위노출(SEO) 전문가야. 아래 글은 검색에 안 뜨고 있어(누락). 이 글의 본문 내용에 맞으면서 검색에 잘 잡히는 제목으로 고쳐줘.${bodyBlock}\n\n순수 JSON만: {"diagnosis":"이 제목이 왜 검색 안 되는지 1문장","newTitle":"개선안1(본문내용 일치+실제 검색어 앞배치, 25~35자)","newTitle2":"개선안2(다른 각도, 반드시 채워라)","keywords":["본문 검색 키워드5개"],"bodyTip":"본문/태그 실전팁 1문장","expectedEffect":"기대효과 1문장"}\n[규칙] 내용에 없는 소재로 낚시 금지. 과장·감탄사 금지. newTitle2 절대 비우지 마라.\n\n[원래 제목]\n${title}`;
     for (const model of ["gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-flash-latest", "gemini-flash-lite-latest"]) {
       try {
         const gc: any = { maxOutputTokens: 1200, temperature: 0.8, responseMimeType: "application/json" };
         if (model.includes("2.5")) gc.thinkingConfig = { thinkingBudget: 0 };
-        const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }], generationConfig: gc }) });
+        // ★타임아웃 20초 — Gemini가 응답 안 하면(429 한도·503 과부하) 멈추지 않고 다음 모델/글로 넘어가게
+        const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }], generationConfig: gc }), signal: AbortSignal.timeout(20000) } as any);
         if (!r.ok) continue;
         const d: any = await r.json();
         let txt = (d?.candidates?.[0]?.content?.parts?.[0]?.text || "").trim().replace(/^```json\s*/i, "").replace(/^```\s*/i, "").replace(/```\s*$/i, "").trim();
@@ -1483,17 +1484,21 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
   const applyTitleQuiet = (logNo: string, newTitle: string): Promise<boolean> => new Promise(resolve => {
     const acc = activeAccount;
     if (!acc) return resolve(false);
+    let done = false;
+    const finish = (ok: boolean) => { if (done) return; done = true; try { es.close(); } catch {} resolve(ok); };
     const body = JSON.stringify({ accountId: acc.accountId, logNo, newTitle, ...(userId ? { userId } : {}) });
     const es = new BotEventStream(`${BOT}/api/update-title`, { method: "POST", headers: { "Content-Type": "application/json" }, body });
+    // ★90초 안전 타임아웃 — 봇이 응답 안 해도 멈추지 않고 다음 글로 넘어가게
+    const to = setTimeout(() => { addScLog(`   → ⏱ 응답 지연으로 건너뜀`); finish(false); }, 90000);
     es.onmessage = e => {
       const d = JSON.parse(e.data);
       if (d.type === "log") addScLog(d.msg);
       if (d.type === "done") {
         if (d.ok && userId) markTitleChanged(userId, acc.accountId, logNo, newTitle);
-        es.close(); resolve(!!d.ok);
+        clearTimeout(to); finish(!!d.ok);
       }
     };
-    es.onerror = () => { es.close(); resolve(false); };
+    es.onerror = () => { clearTimeout(to); finish(false); };
   });
 
   // 🚀 지금 목록(list)의 미노출 글 전체를 자동으로: 관찰중 제외 → 개선안 → 제목1·2 랜덤 → 변경. 한도 걸리면 멈추고 업그레이드 팝업.
@@ -1521,12 +1526,14 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
       setBulkProgress({ done: i, total: todo.length });
       addScLog(`✏️ (${i + 1}/${todo.length}) "${t.title.slice(0, 20)}" 개선안 받는 중...`);
       const sol = await getSolutionQuiet(t.title, t.logNo!);
+      if (bulkStopRef.current) { addScLog("⏹ 사용자가 중단했어요"); break; }   // 개선안 받은 뒤 중단 체크
       if (!sol) { addScLog(`   → ❌ 개선안 실패, 건너뜀`); continue; }
       const pick = Math.random() < 0.5 ? sol.newTitle : sol.newTitle2;   // 제목1·2 랜덤
       addScLog(`   → 새 제목(랜덤): "${pick.slice(0, 24)}" 변경 중...`);
       const ok = await applyTitleQuiet(t.logNo!, pick);
       if (ok) { done++; setTitleEditUsed(u => u + 1); addScLog(`   → ✅ 변경 완료 (오늘 ${titleEditUsed + done}/${isUnlimitedPlan ? "∞" : titleEditLimit})`); }
       else addScLog(`   → ❌ 변경 실패, 건너뜀`);
+      if (bulkStopRef.current) { addScLog("⏹ 사용자가 중단했어요"); break; }   // 제목변경 뒤 중단 체크
       await new Promise(r => setTimeout(r, 1500));   // 계정 안전 간격
     }
     setBulkProgress({ done, total: todo.length });
@@ -2982,7 +2989,7 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
                                 {bulkRunning && <div style={{ color: "#8b5cf6", fontWeight: 700, marginTop: 3 }}>진행 {bulkProgress.done}/{bulkProgress.total}…</div>}
                               </div>
                               {bulkRunning
-                                ? <button onClick={() => { bulkStopRef.current = true; }} style={{ flexShrink: 0, padding: "9px 16px", borderRadius: 10, border: "none", background: "#d64545", color: "#fff", cursor: "pointer", fontSize: 12, fontWeight: 800, fontFamily: "inherit" }}>⏹ 중단</button>
+                                ? <button onClick={() => { bulkStopRef.current = true; addScLog("⏹ 중단 요청 — 지금 글까지만 끝내고 멈춰요..."); }} style={{ flexShrink: 0, padding: "9px 16px", borderRadius: 10, border: "none", background: bulkStopRef.current ? "#8a8a99" : "#d64545", color: "#fff", cursor: "pointer", fontSize: 12, fontWeight: 800, fontFamily: "inherit" }}>{bulkStopRef.current ? "멈추는 중..." : "⏹ 중단"}</button>
                                 : <button onClick={() => runBulkRetitle(pickedItems as any)} disabled={!!titleEditingKey || pickedItems.length === 0} style={{ flexShrink: 0, padding: "9px 18px", borderRadius: 10, border: "none", background: pickedItems.length === 0 ? "var(--card2)" : "linear-gradient(135deg,#8b5cf6,#a855f7)", color: pickedItems.length === 0 ? "var(--text3)" : "#fff", cursor: pickedItems.length === 0 ? "default" : "pointer", fontSize: 12.5, fontWeight: 800, fontFamily: "inherit", boxShadow: pickedItems.length === 0 ? "none" : "0 4px 12px -4px rgba(139,92,246,.5)" }}>🚀 선택한 {pickedItems.length}개 제목 변경</button>}
                             </div>
                           );
