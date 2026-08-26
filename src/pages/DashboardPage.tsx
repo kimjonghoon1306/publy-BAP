@@ -2233,8 +2233,10 @@ Output format (JSON array only, no other text):
 
   function stripMarkdown(text:string):string{
     const brands: string[] = [];
+    // ⚠️ 플레이스홀더 구분자는 언더스코어(_) 금지 — 아래 마크다운 정리의 _{2,} 제거가 __BR0__를 먹어
+    //    "BR0"만 남기고 복원(맨아래)이 실패한다(BR11 등이 본문에 노출된 버그). 마크다운이 안 건드리는 §로 감쌈.
     const preserved = text.replace(BRAND_KEEP_RE, (m) => {
-      brands.push(m); return `__BR${brands.length - 1}__`;
+      brands.push(m); return `§BR${brands.length - 1}§`;
     });
     const cleaned = preserved
       // AI 메타 주석 제거 (Self-correction, Character count 등)
@@ -2259,9 +2261,9 @@ Output format (JSON array only, no other text):
       .replace(/[\u4E00-\u9FFF\u3400-\u4DBF]/g,"")
       .replace(/[\u3040-\u30FF]/g,"")
       // 플레이스홀더가 아닌 순수 영어 단어 제거 (4자 이상)
-      .replace(/(^|[\s,.])(?!__BR\d+__)[A-Za-z]{4,}(?=[\s,.]|$)/g,"$1")
+      .replace(/(^|[\s,.])(?!§BR\d+§)[A-Za-z]{4,}(?=[\s,.]|$)/g,"$1")
       // 줄 전체가 영어인 경우 제거 (플레이스홀더 없는 줄만)
-      .replace(/^(?!.*__BR\d+__)[A-Za-z\s\d.,!?\'""-]{10,}$/gm,"")
+      .replace(/^(?!.*§BR\d+§)[A-Za-z\s\d.,!?\'""-]{10,}$/gm,"")
       // ── AI 티 나는 상투어 → 자연스러운 구어체로 자동 치환 (SEO 'AI 패턴 차단' 점수 확보) ──
       .replace(/소개해\s*드리겠습니다/g,"소개할게요").replace(/소개하겠습니다/g,"소개할게요")
       .replace(/알아보겠습니다/g,"알아볼게요").replace(/살펴보겠습니다/g,"살펴볼게요")
@@ -2276,7 +2278,7 @@ Output format (JSON array only, no other text):
       .replace(/ {2,}/g," ")
       .replace(/\n{3,}/g,"\n\n")
       .trim();
-    return cleaned.replace(/__BR(\d+)__/g, (_:string,i:string) => brands[parseInt(i)] ?? "");
+    return cleaned.replace(/§BR(\d+)§/g, (_:string,i:string) => brands[parseInt(i)] ?? "");
   }
 
   function ensureQuestionHeadings(text:string, topic:string):string {
