@@ -110,6 +110,9 @@ export default function CrawlCenter({ showToast, theme: extTheme, userId }: { sh
     try { const r = await fetch(`${BOT}/api/outreach/history/${userId}`); const d = await r.json(); if (d.ok) setOutHistory(d.history || []); } catch {}
   };
   const esOutRef = useRef<BotEventStream | null>(null);
+  // 🎉 크롤링 웰컴 팝업(진입 시 팡!) — 7일 보지않기
+  const [welcome, setWelcome] = useState(() => Date.now() > Number(localStorage.getItem("publy_crawl_welcome_until") || "0"));
+  const closeWelcome = (week?: boolean) => { if (week) localStorage.setItem("publy_crawl_welcome_until", String(Date.now() + 7 * 86400000)); setWelcome(false); };
   const [shipOpen, setShipOpen] = useState(false);
   const [ships, setShips] = useState<Record<string, ShipState>>({}); // 블로거별 배송 상태
   const setShip = (id: string, patch: Partial<ShipState>) => setShips((s) => ({ ...s, [id]: { ...{ status: "proposed" as ShipStatus }, ...s[id], ...patch } }));
@@ -262,6 +265,10 @@ export default function CrawlCenter({ showToast, theme: extTheme, userId }: { sh
   const inp = { background: theme === "dark" ? C.surf2 : "#fff", border: `1px solid ${C.line2}`, borderRadius: 3, padding: "10px 12px", fontSize: 13, fontWeight: 600, color: C.ink, width: "100%", outline: "none", fontFamily: "'Noto Sans KR',sans-serif", boxSizing: "border-box" as const };
   const btnSolid = { border: `1px solid ${C.ink}`, borderRadius: 3, padding: "11px 18px", fontSize: 12.5, fontWeight: 800, cursor: "pointer", color: C.surf, fontFamily: "inherit" as const, background: C.ink, letterSpacing: ".06em" };
   const btnGhost = { border: `1px solid ${C.line2}`, borderRadius: 3, padding: "11px 16px", fontSize: 12.5, fontWeight: 800, cursor: "pointer", color: C.ink, fontFamily: "inherit" as const, background: "transparent", letterSpacing: ".04em" };
+  // 📖 기능 설명 — 각 섹션에 "이게 뭐예요" 한 줄(어르신도 알게, 문의 방지)
+  const Help = ({ children }: { children: React.ReactNode }) => (
+    <div style={{ fontSize: 11.5, color: C.sub, lineHeight: 1.6, marginBottom: 14, display: "flex", gap: 6, alignItems: "flex-start" }}><span style={{ flexShrink: 0 }}>💬</span><span>{children}</span></div>
+  );
 
   return (
     <div style={{ position: "relative", borderRadius: 6, padding: "26px 26px", overflow: "hidden", fontFamily: "'Noto Sans KR',sans-serif", color: C.ink, background: C.bg, minHeight: 420, transition: "background .3s,color .3s" }}>
@@ -272,49 +279,88 @@ export default function CrawlCenter({ showToast, theme: extTheme, userId }: { sh
         .ob-sec{animation:obUp .5s cubic-bezier(.22,1,.36,1) both}
         .ob-bob{animation:obBob 4s ease-in-out infinite}
         .ob-card:hover{box-shadow:0 14px 30px -20px rgba(0,0,0,.4)!important;transition:all .25s}
+        .ob-stat:hover{transform:translateY(-3px);box-shadow:0 12px 24px -14px rgba(0,0,0,.35)}
         .ob-scroll::-webkit-scrollbar{height:6px;width:6px}.ob-scroll::-webkit-scrollbar-thumb{background:${C.line2};border-radius:0}
       `}</style>
 
+      {/* 🎉 크롤링 웰컴 팝업 — 몽글(탐험)이 팡! 사용법+재미있는 멘트. [닫기][일주일 보지않기] */}
+      {welcome && createPortal(
+        <div onClick={() => closeWelcome(false)} style={{ position: "fixed", inset: 0, zIndex: 100000, background: "rgba(20,16,12,.6)", backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+          <style>{`@keyframes cwPop{0%{transform:scale(.6) translateY(30px);opacity:0}55%{transform:scale(1.04)}100%{transform:scale(1) translateY(0);opacity:1}}@keyframes cwBob{0%,100%{transform:translateY(0) rotate(-2deg)}50%{transform:translateY(-9px) rotate(2deg)}}@keyframes cwRow{0%{opacity:0;transform:translateX(-10px)}100%{opacity:1;transform:translateX(0)}}`}</style>
+          <div onClick={e => e.stopPropagation()} style={{ position: "relative", background: C.surf, borderRadius: 22, padding: "34px 30px 26px", maxWidth: 440, width: "100%", boxShadow: "0 30px 90px -20px rgba(0,0,0,.55)", border: `1px solid ${C.line2}`, animation: "cwPop .5s cubic-bezier(.22,1.4,.4,1) both", maxHeight: "90vh", overflowY: "auto", color: C.ink }}>
+            <div style={{ textAlign: "center", marginBottom: 18 }}>
+              <img src="characters/monggeul-explorer.png" alt="탐험가 몽글" onError={e => { const s = document.createElement("div"); s.textContent = "🧭"; s.style.cssText = "font-size:56px"; e.currentTarget.replaceWith(s); }} style={{ width: 82, height: 82, objectFit: "contain", animation: "cwBob 2.4s ease-in-out infinite", filter: `drop-shadow(0 8px 16px ${C.accent}44)` }} />
+              <div style={{ fontFamily: serif, fontSize: 23, fontWeight: 600, color: C.ink, marginTop: 8 }}>탐험 준비 완료! 🧭</div>
+              <div style={{ fontSize: 12.5, color: C.sub, marginTop: 7, lineHeight: 1.6 }}>안녕하세요, 발굴 탐험가 <b style={{ color: C.accent }}>몽글</b>이에요!<br />체험단에 딱 맞는 <b style={{ color: C.ink }}>진짜 블로거</b>를 공개 정보로 찾아드릴게요.</div>
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 9, marginBottom: 20 }}>
+              {[
+                { n: "1", ic: "🎯", t: "주제·지역·키워드 고르기", d: "어떤 블로거를 찾을지 정해요.", },
+                { n: "2", ic: "📡", t: "START SCAN", d: "네이버에서 진짜 블로거를 실시간으로 발굴해요.", },
+                { n: "3", ic: "🩺", t: "진정성 자동 분석", d: "가짜·품앗이 블로거를 걸러내요. 이게 제 특기!", },
+                { n: "4", ic: "✉️", t: "정중히 제안", d: "공개 이메일로 체험단을 제안해요. (발신계정 등록 후)", },
+              ].map((s, i) => (
+                <div key={s.n} style={{ display: "flex", alignItems: "center", gap: 12, padding: "11px 13px", borderRadius: 12, background: C.bg, border: `1px solid ${C.line}`, animation: "cwRow .4s ease both", animationDelay: `${.15 + i * .1}s` }}>
+                  <div style={{ width: 30, height: 30, borderRadius: "50%", background: C.accent, color: C.surf, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, fontWeight: 900, flexShrink: 0 }}>{s.n}</div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 13, fontWeight: 800, color: C.ink }}>{s.ic} {s.t}</div>
+                    <div style={{ fontSize: 11, color: C.sub, marginTop: 2, lineHeight: 1.4 }}>{s.d}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div style={{ fontSize: 11.5, color: C.sub, textAlign: "center", marginBottom: 16, lineHeight: 1.55, padding: "10px 12px", borderRadius: 10, background: C.accentSoft }}>⚖️ <b style={{ color: C.ink }}>공개된 정보만</b> 봐요. "협찬 문의 환영"처럼 열어둔 곳에 정중히 제안하는 거예요. 무차별 스팸 아니에요!</div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button onClick={() => closeWelcome(true)} style={{ flex: 1, padding: "12px", borderRadius: 12, border: `1px solid ${C.line2}`, background: "transparent", color: C.sub, cursor: "pointer", fontSize: 12.5, fontWeight: 700, fontFamily: "inherit" }}>일주일간 보지 않기</button>
+              <button onClick={() => closeWelcome(false)} style={{ flex: 1.4, padding: "12px", borderRadius: 12, border: "none", background: C.accent, color: C.surf, cursor: "pointer", fontSize: 13.5, fontWeight: 800, fontFamily: "inherit", boxShadow: `0 8px 20px -8px ${C.accent}` }}>탐험 시작 →</button>
+            </div>
+          </div>
+        </div>, document.body)}
+
       {/* ── 헤더 ── */}
-      <div className="ob-sec" style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", gap: 16, paddingBottom: 18, borderBottom: `1px solid ${C.line2}`, marginBottom: 22 }}>
-        <div>
-          <div style={eyebrow}>Blogger Discovery · Outreach</div>
-          <div style={{ fontFamily: serif, fontSize: 38, fontWeight: 600, letterSpacing: "-.01em", lineHeight: 1, marginTop: 8, color: C.ink }}>PUBLY<span style={{ color: C.accent }}> Discovery</span></div>
-          <div style={{ fontSize: 12.5, color: C.sub, fontWeight: 600, marginTop: 8, maxWidth: 480, lineHeight: 1.6 }}>체험단에 어울리는 블로거를 <b style={{ color: C.ink }}>공개 정보로</b> 발굴하고, 관심사·주력 품목까지 분석해 정중히 제안합니다.</div>
+      <div className="ob-sec" style={{ position: "relative", overflow: "hidden", display: "flex", alignItems: "flex-end", justifyContent: "space-between", gap: 16, padding: "26px 28px", marginBottom: 22, borderRadius: 14, background: theme === "dark" ? `linear-gradient(135deg, ${C.surf2} 0%, ${C.surf} 60%, ${C.accentSoft} 130%)` : `linear-gradient(135deg, #fff 0%, ${C.surf} 55%, ${C.accentSoft} 130%)`, border: `1px solid ${C.line2}`, boxShadow: theme === "dark" ? "0 12px 40px -18px rgba(0,0,0,.6)" : "0 12px 40px -20px rgba(168,89,58,.28)" }}>
+        {/* 은은한 장식 원 */}
+        <div style={{ position: "absolute", right: -40, top: -50, width: 200, height: 200, borderRadius: "50%", background: `radial-gradient(circle, ${C.accent}22, transparent 70%)`, pointerEvents: "none" }} />
+        <div style={{ position: "relative", zIndex: 1 }}>
+          <div style={{ ...eyebrow, color: C.accent }}>✦ Blogger Discovery · Outreach</div>
+          <div style={{ fontFamily: serif, fontSize: 40, fontWeight: 600, letterSpacing: "-.015em", lineHeight: 1, marginTop: 8, color: C.ink }}>PUBLY<span style={{ background: `linear-gradient(90deg, ${C.accent}, ${theme === "dark" ? "#f0b088" : "#c9724a"})`, WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent", backgroundClip: "text" }}> Discovery</span></div>
+          <div style={{ fontSize: 12.5, color: C.sub, fontWeight: 600, marginTop: 10, maxWidth: 480, lineHeight: 1.6 }}>체험단에 어울리는 블로거를 <b style={{ color: C.ink }}>공개 정보로</b> 발굴하고, <b style={{ color: C.accent }}>🩺 진정성</b>까지 분석해 정중히 제안합니다.</div>
         </div>
-        <div style={{ display: "flex", alignItems: "flex-end", gap: 10 }}>
-          {/* 테마 토글 제거 — 메인 헤더 토글이 공용(테리 지시). 크롤링은 메인 테마를 따라감 */}
-          <span style={{ fontSize: 10, fontWeight: 800, letterSpacing: ".12em", color: C.sub, border: `1px solid ${C.line2}`, padding: "6px 11px", borderRadius: 2, whiteSpace: "nowrap" }}>⚖ 공개 정보만</span>
-          <img src={CH.monggeul} onError={chErr("🧭")} className="ob-bob" style={{ width: 62, height: 62, objectFit: "contain", filter: "saturate(.9) drop-shadow(0 8px 14px rgba(0,0,0,.2))" }} />
+        <div style={{ position: "relative", zIndex: 1, display: "flex", alignItems: "flex-end", gap: 10 }}>
+          <span style={{ fontSize: 10, fontWeight: 800, letterSpacing: ".12em", color: C.accent, border: `1px solid ${C.accent}`, background: theme === "dark" ? "transparent" : "#fff", padding: "6px 11px", borderRadius: 20, whiteSpace: "nowrap" }}>⚖ 공개 정보만</span>
+          <img src={CH.monggeul} onError={chErr("🧭")} className="ob-bob" style={{ width: 68, height: 68, objectFit: "contain", filter: "saturate(1) drop-shadow(0 10px 18px rgba(0,0,0,.28))" }} />
         </div>
       </div>
 
       {/* ── 지표 ── */}
-      <div className="ob-sec" style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", marginBottom: 22, border: `1px solid ${C.line}`, background: C.surf, borderRadius: 4 }}>
+      <div className="ob-sec" style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 12, marginBottom: 22 }}>
         {[
-          { lab: "Found", val: results.length, unit: "명" },
-          { lab: "Proposed", val: Object.keys(ships).length, unit: "명" },
-          { lab: "With Contact", val: results.filter((b) => b.email || b.kakao).length, unit: "명" },
-          { lab: "Scanned", val: scanned, unit: "명" },
+          { lab: "발굴", en: "Found", val: results.length, unit: "명", ic: "🔍", col: C.accent },
+          { lab: "제안함", en: "Proposed", val: Object.keys(ships).length, unit: "명", ic: "✉️", col: "#8b5cf6" },
+          { lab: "연락처 확보", en: "With Contact", val: results.filter((b) => b.email || b.kakao).length, unit: "명", ic: "📇", col: "#2f9e5e" },
+          { lab: "스캔", en: "Scanned", val: scanned, unit: "명", ic: "📡", col: "#d98a1f" },
         ].map((k, i) => (
-          <div key={i} style={{ padding: "15px 18px", borderLeft: i ? `1px solid ${C.line}` : "none" }}>
-            <div style={label}>{k.lab}</div>
-            <div style={{ fontFamily: serif, fontSize: 29, fontWeight: 600, color: C.ink, lineHeight: 1 }}>{k.val}<span style={{ fontSize: 12, marginLeft: 3, color: C.sub, fontFamily: "'Noto Sans KR'" }}>{k.unit}</span></div>
+          <div key={i} className="ob-stat" style={{ padding: "16px 18px", background: C.surf, border: `1px solid ${C.line2}`, borderRadius: 12, borderTop: `3px solid ${k.col}`, position: "relative", overflow: "hidden", transition: "transform .15s, box-shadow .15s" }}>
+            <div style={{ position: "absolute", right: 12, top: 12, fontSize: 18, opacity: .85 }}>{k.ic}</div>
+            <div style={{ fontSize: 10, fontWeight: 800, letterSpacing: ".08em", color: k.col, textTransform: "uppercase" }}>{k.en}</div>
+            <div style={{ fontSize: 11.5, fontWeight: 700, color: C.sub, marginTop: 1 }}>{k.lab}</div>
+            <div style={{ fontFamily: serif, fontSize: 32, fontWeight: 600, color: C.ink, lineHeight: 1, marginTop: 6 }}>{k.val}<span style={{ fontSize: 12, marginLeft: 3, color: C.sub, fontFamily: "'Noto Sans KR'" }}>{k.unit}</span></div>
           </div>
         ))}
       </div>
 
       {/* ── 검색 설정 ── */}
       <div className="ob-sec ob-card" style={{ ...card, padding: 22, marginBottom: 16 }}>
-        <div style={{ fontFamily: serif, fontSize: 19, fontWeight: 600, marginBottom: 18 }}>Search — 무엇을 찾을까요</div>
+        <div style={{ fontFamily: serif, fontSize: 19, fontWeight: 600, marginBottom: 6 }}>Search — 무엇을 찾을까요</div>
+        <Help>어떤 블로거를 찾을지 정하는 곳이에요. <b style={{ color: C.ink }}>주제·지역·키워드</b>를 고르고 <b style={{ color: C.ink }}>몇 명</b> 찾을지 정한 뒤, 맨 아래 <b style={{ color: C.accent }}>START SCAN</b>을 누르면 네이버에서 진짜 블로거를 찾아와요.</Help>
         <div style={{ marginBottom: 18 }}>
-          <div style={label}>Topic</div>
+          <div style={label}>Topic · 주제</div>
           <div className="ob-scroll" style={{ display: "flex", gap: 7, flexWrap: "wrap" }}>{TOPICS.map((t) => <span key={t} onClick={() => setTopic(t)} style={chip(topic === t)}>{t} <span style={{ opacity: .6, fontSize: 11 }}>{TOPIC_KR[t]}</span></span>)}</div>
         </div>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1.4fr 110px", gap: 14, alignItems: "end" }}>
-          <div><div style={label}>Region</div><select value={region} onChange={(e) => setRegion(e.target.value)} style={inp}>{REGIONS.map((r) => <option key={r}>{r}</option>)}</select></div>
-          <div><div style={label}>Keyword</div><input value={keyword} onChange={e => setKeyword(e.target.value)} placeholder="예: 감성카페, 아이랑 갈만한곳" style={inp} /></div>
-          <div><div style={label}>Count</div><select value={count} onChange={(e) => setCount(Number(e.target.value))} style={inp}>{[10, 20, 30, 50, 100].map((n) => <option key={n} value={n}>{n}명</option>)}</select></div>
+          <div><div style={label}>Region · 지역</div><select value={region} onChange={(e) => setRegion(e.target.value)} style={inp}>{REGIONS.map((r) => <option key={r}>{r}</option>)}</select></div>
+          <div><div style={label}>Keyword · 세부 검색어(선택)</div><input value={keyword} onChange={e => setKeyword(e.target.value)} placeholder="예: 감성카페, 아이랑 갈만한곳" style={inp} /></div>
+          <div><div style={label}>Count · 인원</div><select value={count} onChange={(e) => setCount(Number(e.target.value))} style={inp}>{[10, 20, 30, 50, 100].map((n) => <option key={n} value={n}>{n}명</option>)}</select></div>
         </div>
         <hr style={{ border: 0, borderTop: `1px solid ${C.line2}`, margin: "20px 0 18px" }} />
         <div style={{ display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap" }}>
@@ -328,7 +374,8 @@ export default function CrawlCenter({ showToast, theme: extTheme, userId }: { sh
       {/* ── 필터 · 수집항목 ── */}
       <div className="ob-sec" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 16 }}>
         <div className="ob-card" style={{ ...card, padding: 22 }}>
-          <div style={{ fontFamily: serif, fontSize: 16, fontWeight: 600, marginBottom: 18 }}>Activity Filter</div>
+          <div style={{ fontFamily: serif, fontSize: 16, fontWeight: 600, marginBottom: 6 }}>Activity Filter · 활동성 거르기</div>
+          <Help>죽은 블로그(이웃 적고 글 안 씀)를 <b style={{ color: C.ink }}>걸러내는</b> 조건이에요. 활발한 블로거만 남겨야 체험단 효과가 좋아요.</Help>
           {/* 이웃수 = 직접 입력 */}
           <div style={{ marginBottom: 16 }}>
             <div style={label}>최소 이웃 수 (직접 입력)</div>
@@ -346,10 +393,11 @@ export default function CrawlCenter({ showToast, theme: extTheme, userId }: { sh
               <span style={{ fontSize: 12, color: C.sub, fontWeight: 700 }}>글 이상 / 주</span>
             </div>
           </div>
-          <div style={{ display: "flex", gap: 8 }}><span onClick={() => setActiveOnly((v) => !v)} style={sChip(activeOnly)}>최근 활동중만</span><span onClick={() => setTopicMatch((v) => !v)} style={sChip(topicMatch)}>주제 일치</span></div>
+          <div style={{ display: "flex", gap: 8 }}><span onClick={() => setActiveOnly((v) => !v)} title="최근 30일 안에 글을 쓴 블로거만 찾아요(휴면 블로그 제외)" style={sChip(activeOnly)}>최근 활동중만</span><span onClick={() => setTopicMatch((v) => !v)} title="정확도순으로 검색해 주제에 더 딱 맞는 블로거를 우선 찾아요" style={sChip(topicMatch)}>주제 일치</span></div>
         </div>
         <div className="ob-card" style={{ ...card, padding: 22 }}>
-          <div style={{ display: "flex", alignItems: "center", marginBottom: 18 }}><div style={{ fontFamily: serif, fontSize: 16, fontWeight: 600 }}>Collect — 무엇을 모을까요</div><img src={CH.dodo} onError={chErr("✅")} style={{ width: 30, height: 30, marginLeft: "auto", filter: "saturate(.9)" }} /></div>
+          <div style={{ display: "flex", alignItems: "center", marginBottom: 6 }}><div style={{ fontFamily: serif, fontSize: 16, fontWeight: 600 }}>Collect — 무엇을 모을까요</div><img src={CH.dodo} onError={chErr("✅")} style={{ width: 30, height: 30, marginLeft: "auto", filter: "saturate(.9)" }} /></div>
+          <Help>발굴한 블로거의 <b style={{ color: C.ink }}>어떤 정보를 결과에 담을지</b> 골라요. 켠 항목만 카드·CSV에 나와요.</Help>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 7, marginBottom: 16 }}>{[["email", "이메일"], ["kakao", "카톡 ID"], ["openchat", "오픈채팅"], ["url", "블로그 주소"], ["nick", "닉네임"], ["keywords", "관심 키워드"], ["categories", "주력 품목"]].map(([k, l]) => <span key={k} onClick={() => toggleField(k)} style={sChip(!!fields[k])}>{l}</span>)}</div>
           <div style={{ fontSize: 12, color: C.sub, fontWeight: 600, background: C.surf2, border: `1px solid ${C.line}`, borderRadius: 3, padding: "12px 14px", lineHeight: 1.6 }}>블로그에 <b style={{ color: C.accent }}>공개해 둔 정보</b>만 모읍니다. "협찬·체험단 문의 환영"처럼 열어둔 곳에 정중히 제안하는 건 정당합니다.</div>
         </div>
@@ -378,13 +426,14 @@ export default function CrawlCenter({ showToast, theme: extTheme, userId }: { sh
           <div style={{ display: "flex", alignItems: "flex-end", gap: 12, flexWrap: "wrap", marginBottom: 0, paddingBottom: 16, borderBottom: `1px solid ${C.line}` }}>
             <div><div style={eyebrow}>Curated</div><div style={{ fontFamily: serif, fontSize: 20, fontWeight: 600, marginTop: 5 }}>발굴된 블로거 {shown.length}명</div></div>
             <div style={{ marginLeft: "auto", display: "flex", gap: 7, alignItems: "center", flexWrap: "wrap" }}>
-              <span onClick={() => { loadOutHistory(); setHistoryOpen(true); }} style={sChip(false)}>📮 보낸 글 이력</span>
-              <span onClick={() => setOnlyContact((v) => !v)} style={sChip(onlyContact)}>연락처 있는 것만</span>
-              <select value={sortBy} onChange={(e) => setSortBy(e.target.value as any)} style={{ ...inp, width: "auto", padding: "7px 10px", fontSize: 12 }}><option value="score">점수순</option><option value="neighbors">이웃순</option><option value="posts">글 많은순</option></select>
+              <span onClick={() => { loadOutHistory(); setHistoryOpen(true); }} title="지금까지 누구에게 이메일을 보냈는지 기록을 봐요" style={sChip(false)}>📮 보낸 글 이력</span>
+              <span onClick={() => setOnlyContact((v) => !v)} title="공개 이메일·카톡이 있는 블로거만 보여줘요(바로 제안 가능한 사람)" style={sChip(onlyContact)}>연락처 있는 것만</span>
+              <select value={sortBy} onChange={(e) => setSortBy(e.target.value as any)} title="블로거 정렬 기준" style={{ ...inp, width: "auto", padding: "7px 10px", fontSize: 12 }}><option value="score">진정성순</option><option value="neighbors">이웃순</option><option value="posts">글 많은순</option></select>
               <span onClick={() => setSelected(new Set(shown.map((b) => b.id)))} style={sChip(false)}>전체선택</span>
               {selected.size > 0 && <span onClick={() => setSelected(new Set())} style={{ ...sChip(false), color: C.accent, borderColor: C.accent }}>해제 {selected.size}</span>}
             </div>
           </div>
+          <Help>발굴된 블로거예요. <b style={{ color: C.ink }}>🩺 진정성</b>은 가짜·품앗이인지 감별한 점수(<b style={{ color: "#2f9e5e" }}>초록=진짜</b>/<b style={{ color: "#d98a1f" }}>주황=주의</b>/<b style={{ color: "#d64545" }}>빨강=의심</b>). 카드를 <b style={{ color: C.ink }}>골라서</b> 아래 <b style={{ color: C.accent }}>이메일 보내기</b>로 체험단을 제안해요. <b style={{ color: C.ink }}>상세 →</b>를 누르면 그 블로그를 직접 열어볼 수 있어요.</Help>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(250px,1fr))", borderLeft: `1px solid ${C.line}`, borderTop: `1px solid ${C.line}` }}>
             {shown.map((b) => {
               const on = selected.has(b.id);
@@ -449,13 +498,14 @@ export default function CrawlCenter({ showToast, theme: extTheme, userId }: { sh
           <span style={{ fontFamily: serif, fontSize: 16, fontWeight: 600, display: "flex", alignItems: "center", gap: 8 }}>Advanced <img src={CH.pumi} onError={chErr("💬")} style={{ width: 26, height: 26, filter: "saturate(.9)" }} /></span>
           <span style={{ fontSize: 11.5, fontWeight: 800, letterSpacing: ".1em", color: C.sub, textTransform: "uppercase" }}>{advOpen ? "− 닫기" : "+ 열기"}</span>
         </div>
-        {advOpen && (
+        {advOpen && (<>
+          <Help><b style={{ color: C.ink }}>수집 속도</b>=천천히 모을수록 계정이 안전해요(빠르면 네이버가 의심할 수 있어요). <b style={{ color: C.ink }}>하루 최대</b>=하루에 몇 명까지 모을지 한도. <b style={{ color: C.ink }}>제외 키워드</b>=이 말이 프로필에 있으면 건너뛰어요(예: "협찬거부").</Help>
           <div style={{ display: "grid", gridTemplateColumns: "1.2fr 1fr 1.5fr", gap: 16 }}>
             <div><div style={label}>수집 속도 (계정 안전)</div><div style={{ display: "flex", gap: 7 }}>{["느림", "보통", "빠름"].map((s) => <span key={s} onClick={() => setSpeed(s)} style={{ ...sChip(speed === s), flex: 1, textAlign: "center" }}>{s}</span>)}</div></div>
             <div><div style={label}>하루 최대</div><select value={dailyLimit} onChange={(e) => setDailyLimit(Number(e.target.value))} style={inp}>{[100, 200, 500, 1000].map((n) => <option key={n} value={n}>{n}명</option>)}</select></div>
             <div><div style={label}>제외 키워드</div><input value={excludeKw} onChange={(e) => setExcludeKw(e.target.value)} placeholder="예: 협찬거부, 홍보사절" style={inp} /></div>
           </div>
-        )}
+        </>)}
       </div>
 
       {/* ═══ 블로거 상세 분석 모달 ═══ */}

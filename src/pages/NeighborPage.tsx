@@ -402,7 +402,7 @@ const GUIDE = {
     { step: "1", title: "계정 연결", desc: "진단할 내 네이버 블로그 계정을 이 탭에 연결하세요. 탭마다 계정은 따로 관리돼요." },
     { step: "2", title: "진단 시작", desc: "'📈 블로그 진단 시작'을 누르면 봇이 내 블로그의 실제 지표를 읽어와 건강 리포트를 만들어요.\n(등급에 따라 하루 진단 횟수가 정해져 있고, 자정에 초기화돼요.)" },
     { step: "3", title: "🔴 검색 노출 진단 (핵심)", desc: "내 최근 글 제목을 실제로 네이버에 검색해 '내 글이 뜨는지'를 확인해요.\n안 뜨는 글(누락)이 많으면 '저품질 의심'으로 알려드려요. 저품질 조기경보예요." },
-    { step: "4", title: "✏️ 제목·키워드 살리기", desc: "검색에 안 뜨는 글이 있으면 'AI 개선안 받기'를 눌러보세요.\n제목을 상위노출용으로 고치고 추천 키워드까지 알려줘요. (무료 Gemini 키 필요)" },
+    { step: "4", title: "✏️ 제목·키워드 살리기", desc: "두 갈래로 나뉘어요. ①미노출(100위 밖) 글은 '오래된 글 재발행'에서 살리고, ②이미 100위 안에 뜬 글은 '제목·키워드 솔루션'에서 더 위로 올려요. 서로 안 겹쳐요. (무료 Gemini 키 필요)" },
     { step: "5", title: "👥 방문자·유입 확인", desc: "최근 방문자 추이(급감 여부)와 사람들이 어떤 키워드로 들어오는지 볼 수 있어요.\n내가 뭘로 노출되는지 알면 그 주제를 더 키울 수 있어요." },
     { step: "팁", title: "등급별 검사 개수", desc: "검색 노출 검사는 하루 검사 글 수가 등급별로 달라요(무료 5·베이직 10·프로 20개, 무제한은 전체).\n이미 검사한 글은 건너뛰고 새 글부터 검사하니, 매일 진단하면 전체 글을 골고루 살펴봐요." },
     { step: "팁", title: "네이버 공식 지수가 아니에요", desc: "네이버는 공식 '지수'를 공개하지 않아요. 이 진단은 실제 검색 결과·방문 데이터를 바탕으로 한 퍼블리 자체 건강검진으로, 블로그 관리 방향을 잡는 용도예요." },
@@ -546,6 +546,23 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
   // 🩺 주치의 진료차트: logNo → PostCare (검사·개선안·수정 이력). 관찰중 글을 "기다리세요"로 표시해 무한루프 차단.
   const [careMap, setCareMap] = useState<Record<string, PostCare>>({});
   const [celebrate, setCelebrate] = useState<PostCare[] | null>(null);   // 🎉 완치(노출) 축포 세리머니 대상
+  // 🆕 수정 추적 대시보드
+  const [trackOpen, setTrackOpen] = useState(false);        // 리스트 펼침
+  const [trackPage, setTrackPage] = useState(0);
+  const [rankChecking, setRankChecking] = useState<string>("");   // 지금 순위 검사 중인 postKey
+  const [liveRanks, setLiveRanks] = useState<Record<string, { rank: number | null; at: number }>>({});   // postKey → 방금 검사한 실시간 순위
+  const TRACK_PAGE_SIZE = 8;
+  // 🎉 블로그지수 웰컴 팝업(진입 시 팡!) — 7일 보지않기(localStorage until)
+  const [welcome, setWelcome] = useState(false);
+  useEffect(() => {
+    if (tab !== "score") return;
+    const until = Number(localStorage.getItem("publy_blogscore_welcome_until") || "0");
+    if (Date.now() > until) setWelcome(true);
+  }, [tab]);
+  const closeWelcome = (week?: boolean) => {
+    if (week) localStorage.setItem("publy_blogscore_welcome_until", String(Date.now() + 7 * 86400000));
+    setWelcome(false);
+  };
   const [scSolPage, setScSolPage] = useState(0);   // AI 팁 페이지네이션(5개 단위)
   const [scSolSearch, setScSolSearch] = useState(""); // AI 팁 원래 제목 검색
   const [scExpPage, setScExpPage] = useState(0);   // 검색노출 결과 페이지네이션(30개 단위)
@@ -700,6 +717,44 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
     try { const rows = await getPostCare(userId, activeAccount.accountId); const m: Record<string, PostCare> = {}; rows.forEach(r => { m[r.post_key] = r; }); setCareMap(m); } catch {}
   };
   useEffect(() => { loadCare(); /* eslint-disable-next-line */ }, [activeAccount?.accountId, userId, rpTick]);
+
+  // 🆕 수정 추적: 그 글 하나만 실시간으로 현재 검색 순위 검사(exposure-check 단건). 결과를 카르테에도 누적.
+  const checkOneRank = async (postKey: string) => {
+    const acc = activeAccount;
+    if (!acc) { alert("먼저 계정을 연결하세요"); return; }
+    setRankChecking(postKey);
+    try {
+      const r = await botFetch(`${BOT}/api/exposure-check`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ accountId: acc.accountId, plan, logNos: [postKey] }) });
+      const d = await r.json();
+      const chk = (d.checks || [])[0];
+      const rank = chk?.rank ?? null;
+      setLiveRanks(p => ({ ...p, [postKey]: { rank, at: Date.now() } }));
+      // 카르테에 이 순위도 저장(회복 그래프·완치 감지에 반영)
+      if (userId && chk) { try { const { newlyCured } = await savePostCareChecks(userId, acc.accountId, [{ logNo: postKey, title: chk.title || careMap[postKey]?.title || "", rank, exposed: chk.exposed ?? null }]); if (newlyCured.length) setCelebrate(newlyCured); await loadCare(); } catch {} }
+    } catch { setLiveRanks(p => ({ ...p, [postKey]: { rank: null, at: Date.now() } })); }
+    setRankChecking("");
+  };
+
+  // 🩺 수정 추적에서 '제목 변경' 클릭 → 멘토가 관찰기간을 보고 판단하는 팝업. 무시하고 강행 OR 지휘 따라 기다리기.
+  const handleTrackedRepublish = (item: { title: string; logNo?: string; blogId?: string }, changedDays: number, st: { status: string; daysLeft?: number }) => {
+    let msg: string;
+    if (st.status === "observing") {
+      msg = `🌱 멘토의 조언\n\n이 글은 제목을 바꾼 지 ${changedDays}일밖에 안 됐어요.\n네이버가 이 글을 다시 읽고 순위를 매기는 데 보통 30일쯤 걸려요. (앞으로 ${st.daysLeft}일 더)\n\n지금 또 바꾸면 그동안의 관찰이 초기화돼서 오히려 손해예요.\n\n👉 조금만 더 기다리는 걸 권해요.\n\n그래도 지금 바로 제목을 다시 바꾸시겠어요?`;
+    } else if (st.status === "relapse") {
+      msg = `🔴 멘토의 조언\n\n이 글은 제목을 바꾼 지 ${changedDays}일이 지났는데 아직 검색에 안 떴어요.\n충분히 기다렸으니, 이제 제목·키워드를 다시 손볼 때예요.\n\n👉 개선안을 받아 다시 바꿔보는 걸 권해요.\n\n지금 개선안을 받으시겠어요?`;
+    } else {
+      msg = `이 글의 제목을 다시 바꾸시겠어요?\n\n제목을 바꾼 지 ${changedDays}일 됐어요.`;
+    }
+    if (!window.confirm(msg)) { addScLog(`🌱 "${item.title.slice(0, 18)}" — 멘토 지휘에 따라 기다리기로 했어요`); return; }
+    addScLog(`✏️ "${item.title.slice(0, 18)}" 개선안 받기 진행`);
+    handleRepublishOne(item);   // 기존 개선안 받기 흐름 재사용(제목 자동변경 실행 로직은 불가침)
+  };
+  // 📖 기능 설명 — 각 기능 헤더 밑에 "이게 뭐예요" 한 줄. 어르신도 알게(문의 방지). 항상 보이는 인라인 텍스트.
+  const HelpLine = ({ children }: { children: React.ReactNode }) => (
+    <div style={{ fontSize: 11.5, color: "var(--text3)", lineHeight: 1.6, marginTop: 4, marginBottom: 12, display: "flex", gap: 6, alignItems: "flex-start" }}>
+      <span style={{ flexShrink: 0, marginTop: 1 }}>💬</span><span>{children}</span>
+    </div>
+  );
   // 선택된 계정이 사라지거나 아직 없으면 첫 연결 계정으로 자동 보정
   useEffect(() => {
     const stillOk = accounts.some(a => a.accountId === selectedAcctId && a.sessionOk);
@@ -1446,20 +1501,22 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
     const key = (localStorage.getItem("publy_gemini_key") || "");
     if (!key) { if (!silent) alert("제목·키워드 개선 솔루션은 무료 Gemini 키가 필요해요.\n설정 → 글쓰기 AI에서 Gemini 키를 먼저 등록해주세요."); return 0; }
     const checks = scResult?.exposureChecks || [];
-    // 검색에 누락된(exposed===false) 글 = 고칠 대상. ★한 번에 10개씩(AI 응답 안정·한도). '더 받기'면 이미 받은 다음부터.
-    const allMissing = checks.filter(c => c.exposed === false);
+    // ★★재발행과 기준 분리(테리 확정): 제목·키워드 솔루션 = 이미 검색 100위 "안"에 뜨는 글(exposed===true & rank≤100)을 '더 위로' 끌어올리는 대상.
+    //    (100위 밖 미노출 글은 위쪽 '재발행'이 담당 → 겹치지 않음 → 방금 수정한 글을 또 수정하는 사고 방지.)
+    const allInRank = checks.filter(c => c.exposed === true && c.rank != null && c.rank <= 100)
+      .sort((a, b) => (b.rank! - a.rank!));   // 순위 낮은(뒤쪽) 글부터 = 개선 여지 큰 순
     const start = append ? (scSolutions?.length || 0) : 0;
-    const missingChecks = allMissing.slice(start, start + 10);
+    const missingChecks = allInRank.slice(start, start + 10);
     const missing = missingChecks.map(c => c.title);
-    if (!missing.length) { if (!silent) alert(append ? "더 받을 글이 없어요 — 누락된 글의 개선안을 모두 받았어요! 👍" : "검색에 누락된 글이 없어요. (개선이 급한 글이 없다는 좋은 신호예요!)"); return 0; }
-    // ★내 블로그에서 실제로 검색 상위에 잡힌 성공 제목(순위 낮을수록 상위) = AI가 학습할 실전 성공 패턴
+    if (!missing.length) { if (!silent) alert(append ? "더 받을 글이 없어요 — 100위 안에 뜬 글의 개선안을 모두 받았어요! 👍" : "검색 100위 안에 뜬 글이 없어요.\n(먼저 검색노출 검사를 하거나, 미노출 글은 위쪽 '오래된 글 재발행'에서 살려주세요.)"); return 0; }
+    // ★상위(1~10위권) 성공 제목 = AI가 학습할 실전 성공 패턴
     const winners = checks.filter(c => c.exposed === true && c.rank != null).sort((a, b) => (a.rank! - b.rank!)).slice(0, 12).map(c => `${c.title} (검색 약 ${c.rank}위)`);
     setScSolLoading(true); if (!append) { setScSolutions(null); setScSolPage(0); }
     addScLog(`✏️ AI 개선안 생성 중 — ${append ? "다음 " : ""}누락 글 ${missing.length}개${winners.length ? ` (성공 제목 ${winners.length}개 패턴 학습)` : ""}...`);
     const winnerBlock = winners.length
       ? `\n\n[⭐이 블로그에서 실제로 검색 상위에 잡힌 '성공 제목'들 — 반드시 이 패턴을 학습해서 반영]\n${winners.join("\n")}\n→ 위 성공 제목들의 공통 패턴(구체적 지명·제품명·상황·숫자·검색어 배치)을 분석해서, 아래 누락 제목을 '같은 블로그에서 통한 방식'으로 고쳐라. 일반론 말고 이 블로그에 실제로 통한 스타일로.`
       : "";
-    const prompt = `너는 네이버 블로그 상위노출(SEO) 전문가야. 이 블로그의 아래 글들은 네이버 검색에 노출이 안 되고 있어(누락). 각 제목을 검색에 잘 잡히게 정교하게 고쳐줘.${winnerBlock}\n\n각 누락 제목마다 아래 JSON 형식으로만 답해. 다른 말 절대 금지. 순수 JSON 배열만:\n[{"original":"원래제목","diagnosis":"이 제목이 왜 검색 안 되는지 핵심 원인 1문장(과장/낚시/검색어없음/너무추상 등)","newTitle":"개선안1 (실제 검색어를 앞에 배치, 25~35자, 구체적)","newTitle2":"개선안2 (다른 각도의 대안)","keywords":["이 글 본문에 넣을 실제 검색 키워드5개"],"bodyTip":"본문/태그를 어떻게 손보면 좋은지 실전 팁 1문장","expectedEffect":"이렇게 바꾸면 기대되는 효과 1문장"}]\n\n[핵심 규칙]\n- newTitle: 사람들이 진짜 네이버에 치는 검색어(지명+대상+상황) 형태. 과장·감탄사(대박/진짜/1등/충격) 절대 금지.\n- ★newTitle2는 반드시 채워라(절대 비우지 마라). newTitle과 검색어·각도·타겟을 확실히 다르게 한 두 번째 대안을 꼭 제시해서, 항상 제목 2개를 준다.\n- 위 '성공 제목' 패턴이 있으면 그 스타일을 최대한 따라라.\n- keywords: 검색량 있을 법한 구체 키워드 5개(롱테일 포함).\n- 모든 답변은 실행 가능하고 구체적으로. 뻔한 일반론 금지.\n\n[누락 제목들]\n${missing.map((t, i) => `${i + 1}. ${t}`).join("\n")}`;
+    const prompt = `너는 네이버 블로그 상위노출(SEO) 전문가야. 이 블로그의 아래 글들은 이미 네이버 검색 100위 안에 노출은 되고 있지만 순위가 아쉬워(더 위로 올릴 여지가 큼). 각 제목·키워드를 다듬어 검색 순위를 더 끌어올려줘.${winnerBlock}\n\n각 누락 제목마다 아래 JSON 형식으로만 답해. 다른 말 절대 금지. 순수 JSON 배열만:\n[{"original":"원래제목","diagnosis":"이 제목이 왜 검색 안 되는지 핵심 원인 1문장(과장/낚시/검색어없음/너무추상 등)","newTitle":"개선안1 (실제 검색어를 앞에 배치, 25~35자, 구체적)","newTitle2":"개선안2 (다른 각도의 대안)","keywords":["이 글 본문에 넣을 실제 검색 키워드5개"],"bodyTip":"본문/태그를 어떻게 손보면 좋은지 실전 팁 1문장","expectedEffect":"이렇게 바꾸면 기대되는 효과 1문장"}]\n\n[핵심 규칙]\n- newTitle: 사람들이 진짜 네이버에 치는 검색어(지명+대상+상황) 형태. 과장·감탄사(대박/진짜/1등/충격) 절대 금지.\n- ★newTitle2는 반드시 채워라(절대 비우지 마라). newTitle과 검색어·각도·타겟을 확실히 다르게 한 두 번째 대안을 꼭 제시해서, 항상 제목 2개를 준다.\n- 위 '성공 제목' 패턴이 있으면 그 스타일을 최대한 따라라.\n- keywords: 검색량 있을 법한 구체 키워드 5개(롱테일 포함).\n- 모든 답변은 실행 가능하고 구체적으로. 뻔한 일반론 금지.\n\n[누락 제목들]\n${missing.map((t, i) => `${i + 1}. ${t}`).join("\n")}`;
     // 2.0-flash 우선(thinking 토큰 안 먹어 JSON 안정적). 토큰 넉넉히(8000)+JSON 강제로 응답 잘림·설명 섞임 방지.
     // ★실검증(2026-08-24): gemini-2.0-flash·2.0-flash-lite·1.5-flash는 구글이 폐기(404). 살아있는 모델만 사용.
     //   각 모델은 한도가 별도라, 2.5-flash가 한도 차도 다음 모델(2.5-flash-lite 등, 한도 남음)로 넘어가 성공한다.
@@ -1507,10 +1564,10 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
   const handleGetAllSolutions = async () => {
     const key = (localStorage.getItem("publy_gemini_key") || "");
     if (!key) return alert("제목·키워드 개선 솔루션은 무료 Gemini 키가 필요해요.\n설정 → 글쓰기 AI에서 Gemini 키를 먼저 등록해주세요.");
-    const total = (scResult?.exposureChecks || []).filter(c => c.exposed === false).length;
-    if (!total) return alert("검색에 누락된 글이 없어요. (개선이 급한 글이 없다는 좋은 신호예요!)");
+    const total = (scResult?.exposureChecks || []).filter(c => c.exposed === true && c.rank != null && c.rank <= 100).length;
+    if (!total) return alert("검색 100위 안에 뜬 글이 없어요.\n(미노출 글은 위쪽 '오래된 글 재발행'에서 살려주세요.)");
     setScSolAll(true);
-    addScLog(`🚀 전체 개선안 받기 시작 — 누락 글 ${total}개 (10개씩 자동 진행)`);
+    addScLog(`🚀 전체 개선안 받기 시작 — 100위 안 글 ${total}개 (10개씩 자동 진행)`);
     // 첫 배치는 새로, 이후는 append. 안전장치: 최대 total/10 + 2회
     let done = false;
     for (let i = 0; i < Math.ceil(total / 10) + 2 && !done; i++) {
@@ -2515,6 +2572,7 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
                       <div style={{ fontSize: 13, color: "var(--text3)", fontWeight: 700, marginBottom: 4 }}>내 블로그 <b style={{color:"var(--text2)"}}>{scResult.blogId}</b></div>
                       <div style={{ fontSize: 24, fontWeight: 900, color: grade.color }}>{grade.emoji} {grade.label}</div>
                       <div style={{ fontSize: 12, color: "var(--text2)", marginTop: 4, fontWeight: 500 }}>실제 지표로 계산한 퍼블리 건강 점수예요</div>
+                      <div style={{ fontSize: 11, color: "var(--text3)", marginTop: 5, lineHeight: 1.55 }}>💬 <b>글 수·이웃 수·발행 활동·검색 노출</b>을 종합한 0~100점이에요. 네이버 공식 지수는 아니고, 블로그 관리 방향을 잡는 <b>퍼블리 자체 건강검진</b>이에요.</div>
                     </div>
                   </div>
                   {/* ★발행 활성도 (상위노출 핵심) */}
@@ -2541,14 +2599,85 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
                       </div>
                     ))}
                   </div>
+                  {/* 🆕 수정 추적 대시보드 — 제목 바꾼 글을 완치까지 데려가는 관제탑 (title_changed_at 있는 글) */}
+                  {(() => {
+                    const tracked = Object.values(careMap).filter(c => c.title_changed_at)
+                      .sort((a, b) => new Date(a.title_changed_at!).getTime() - new Date(b.title_changed_at!).getTime());   // 수정 오래된 순
+                    if (!tracked.length) return null;
+                    const totalPages = Math.max(1, Math.ceil(tracked.length / TRACK_PAGE_SIZE));
+                    const page = Math.min(trackPage, totalPages - 1);
+                    const pageItems = tracked.slice(page * TRACK_PAGE_SIZE, page * TRACK_PAGE_SIZE + TRACK_PAGE_SIZE);
+                    const observingN = tracked.filter(c => computeCareStatus(c).status === "observing").length;
+                    const relapseN = tracked.filter(c => computeCareStatus(c).status === "relapse").length;
+                    const curedN = tracked.filter(c => computeCareStatus(c).status === "cured").length;
+                    return (
+                      <div style={{ marginBottom: 20, borderRadius: 16, background: "linear-gradient(135deg, rgba(0,200,150,.07), rgba(139,92,246,.05))", border: "1.5px solid rgba(0,200,150,.28)", overflow: "hidden" }}>
+                        <div style={{ padding: "16px 18px", display: "flex", alignItems: "center", gap: 12 }}>
+                          <img src="characters/dodo-checker.png" alt="주치의 도도" onError={e => { const s = document.createElement("div"); s.textContent = "🩺"; s.style.cssText = "font-size:34px;line-height:1"; e.currentTarget.replaceWith(s); }} style={{ width: 44, height: 44, objectFit: "contain", flexShrink: 0, filter: "drop-shadow(0 4px 8px rgba(0,200,150,.3))" }} />
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ fontSize: 14.5, fontWeight: 850, color: "var(--text)" }}>🩺 수정 추적 <span style={{ fontSize: 11.5, fontWeight: 800, color: "#00c896", background: "rgba(0,200,150,.14)", padding: "2px 9px", borderRadius: 20, marginLeft: 4 }}>{tracked.length}개 관리 중</span></div>
+                            <div style={{ fontSize: 11.5, color: "var(--text2)", marginTop: 3, lineHeight: 1.5 }}>제목을 바꾼 글이에요. 주치의가 <b style={{ color: "#8b5cf6" }}>완치(검색 노출)될 때까지</b> 함께 지켜봐요.</div>
+                          </div>
+                          <button onClick={() => { setTrackOpen(o => !o); setTrackPage(0); }} style={{ flexShrink: 0, padding: "8px 14px", borderRadius: 10, border: "none", background: trackOpen ? "var(--card2)" : "linear-gradient(135deg,#00c896,#00a878)", color: trackOpen ? "var(--text2)" : "#fff", cursor: "pointer", fontSize: 12, fontWeight: 800, fontFamily: "inherit" }}>{trackOpen ? "접기 ▲" : "리스트 보기 ▼"}</button>
+                        </div>
+                        {/* 상태 요약 칩 */}
+                        <div style={{ display: "flex", gap: 7, flexWrap: "wrap", padding: "0 18px 14px" }}>
+                          {observingN > 0 && <span style={{ fontSize: 11, fontWeight: 800, color: "#8b5cf6", background: "rgba(139,92,246,.12)", padding: "4px 11px", borderRadius: 20 }}>🌱 관찰 중 {observingN}</span>}
+                          {relapseN > 0 && <span style={{ fontSize: 11, fontWeight: 800, color: "#f59e0b", background: "rgba(245,158,11,.12)", padding: "4px 11px", borderRadius: 20 }}>🔴 재점검 필요 {relapseN}</span>}
+                          {curedN > 0 && <span style={{ fontSize: 11, fontWeight: 800, color: "#00c896", background: "rgba(0,200,150,.12)", padding: "4px 11px", borderRadius: 20 }}>✅ 완치 {curedN}</span>}
+                        </div>
+                        {/* 펼침 리스트 */}
+                        {trackOpen && (
+                          <div style={{ background: "var(--bg)", borderTop: "1px solid var(--border)", padding: "12px 14px" }}>
+                            {pageItems.map((c, i) => {
+                              const st = computeCareStatus(c);
+                              const changedDays = c.title_changed_at ? Math.floor((Date.now() - new Date(c.title_changed_at).getTime()) / 86400000) : 0;
+                              const live = liveRanks[c.post_key];
+                              const lastHist = c.rank_history?.[c.rank_history.length - 1];
+                              const shownRank = live ? live.rank : (lastHist?.rank ?? null);
+                              const stColor = st.status === "cured" ? "#00c896" : st.status === "observing" ? "#8b5cf6" : st.status === "relapse" ? "#f59e0b" : "var(--text3)";
+                              const stLabel = st.status === "cured" ? "✅ 완치" : st.status === "observing" ? `🌱 관찰 중 (${st.daysLeft}일 남음)` : st.status === "relapse" ? "🔴 재점검 필요" : "진행 중";
+                              return (
+                                <div key={c.post_key} style={{ padding: "12px 4px", borderBottom: i < pageItems.length - 1 ? "1px solid var(--border)" : "none" }}>
+                                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                                    <div style={{ flex: 1, minWidth: 0 }}>
+                                      <div style={{ fontSize: 13, fontWeight: 700, color: "var(--text)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{c.title || c.post_key}</div>
+                                      <div style={{ fontSize: 10.5, color: "var(--text3)", marginTop: 3, display: "flex", gap: 8, flexWrap: "wrap" }}>
+                                        <span>✍️ 수정 {changedDays === 0 ? "오늘" : `${changedDays}일 전`}</span>
+                                        <span style={{ color: stColor, fontWeight: 800 }}>{stLabel}</span>
+                                        <span>📊 순위 {shownRank == null ? "미노출" : `${shownRank}위`}{live && <span style={{ color: "#00c896" }}> ·방금</span>}</span>
+                                      </div>
+                                    </div>
+                                    <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+                                      <button onClick={() => checkOneRank(c.post_key)} disabled={rankChecking === c.post_key} title="지금 검색해서 현재 순위를 실시간으로 확인해요" style={{ padding: "6px 10px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--card)", color: "var(--text2)", cursor: "pointer", fontSize: 10.5, fontWeight: 800, fontFamily: "inherit", whiteSpace: "nowrap" }}>{rankChecking === c.post_key ? "검사 중..." : "🔍 순위 검사"}</button>
+                                      <a href={`https://blog.naver.com/${activeAccount?.blogId || ""}/${c.post_key}`} target="_blank" rel="noopener noreferrer" style={{ padding: "6px 10px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--card)", color: "var(--text2)", textDecoration: "none", fontSize: 10.5, fontWeight: 800, whiteSpace: "nowrap" }}>👁 보기</a>
+                                      <button onClick={() => { const item = { title: c.title || c.post_key, logNo: c.post_key, blogId: activeAccount?.blogId }; handleTrackedRepublish(item, changedDays, st); }} style={{ padding: "6px 10px", borderRadius: 8, border: "none", background: "linear-gradient(135deg,#8b5cf6,#a855f7)", color: "#fff", cursor: "pointer", fontSize: 10.5, fontWeight: 800, fontFamily: "inherit", whiteSpace: "nowrap" }}>✏️ 제목 변경</button>
+                                    </div>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                            {totalPages > 1 && (
+                              <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 5, marginTop: 12 }}>
+                                <button onClick={() => setTrackPage(Math.max(0, page - 1))} disabled={page === 0} style={{ padding: "5px 10px", borderRadius: 7, border: "1px solid var(--border)", background: "var(--card)", color: "var(--text2)", cursor: page === 0 ? "default" : "pointer", fontSize: 11, fontWeight: 700, opacity: page === 0 ? .4 : 1, fontFamily: "inherit" }}>‹ 이전</button>
+                                <span style={{ fontSize: 11, color: "var(--text2)", fontWeight: 700 }}>{page + 1} / {totalPages}</span>
+                                <button onClick={() => setTrackPage(Math.min(totalPages - 1, page + 1))} disabled={page === totalPages - 1} style={{ padding: "5px 10px", borderRadius: 7, border: "1px solid var(--border)", background: "var(--card)", color: "var(--text2)", cursor: page === totalPages - 1 ? "default" : "pointer", fontSize: 11, fontWeight: 700, opacity: page === totalPages - 1 ? .4 : 1, fontFamily: "inherit" }}>다음 ›</button>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
                   {/* 검색 노출/저품질 진단 */}
                   <div style={{ marginBottom: 20, padding: "16px", borderRadius: 14, background: scResult.lowQualitySuspected ? "rgba(239,68,68,.08)" : "var(--bg)", border: `1px solid ${scResult.lowQualitySuspected ? "rgba(239,68,68,.35)" : "var(--border)"}` }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", marginBottom: 11 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", marginBottom: 4 }}>
                       <div style={{ fontSize: 14, fontWeight: 850 }}>🔎 검색 노출 진단</div>
                       <div style={{ fontSize: 13, fontWeight: 850, color: scResult.lowQualitySuspected ? "#ef4444" : checkedExposure.length ? "#00c896" : "var(--text3)" }}>
                         {scResult.lowQualitySuspected === true ? "🔴 저품질 의심" : checkedExposure.length ? `${exposedCount}/${checkedExposure.length}개 노출` : "확인 불가"}
                       </div>
                     </div>
+                    <HelpLine>내 글 제목으로 네이버 통합검색(블로그탭)을 실제로 돌려서 <b>내 글이 100위 안에 뜨는지</b> 확인해요. <b style={{ color: "#00c896" }}>노출</b>=100위 안에 뜸 / <b style={{ color: "#ef4444" }}>미노출</b>=100위 밖(검색 유입 거의 0). 미노출이 많으면 저품질 조기경보예요.</HelpLine>
                     <div style={{ marginBottom: 10, padding: "8px 10px", borderRadius: 9, background: "rgba(0,184,212,.08)", color: "var(--text2)", fontSize: 11.5, fontWeight: 650, lineHeight: 1.5 }}>
                       오늘 {(scResult.checkedTodayCount || 0).toLocaleString()}개 검사 · 전체 {(scResult.totalPostsForExposure || 0).toLocaleString()}개 중 {(scResult.exposureCompletedCount || 0).toLocaleString()}개 완료
                       {scResult.exposureLimit == null ? " (무제한 등급)" : ` (등급 한도 ${scResult.exposureLimit.toLocaleString()}개/일)`}
@@ -2587,12 +2716,14 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
                     <div style={{ marginTop: 10, fontSize: 11, color: "var(--text3)", lineHeight: 1.5 }}>네이버 공식 지수가 아닌, 순환 선택한 글의 제목 검색 결과를 바탕으로 한 퍼블리 자체 진단이에요. 누락만으로 저품질을 확정할 수는 없어요.</div>
                   </div>
 
-                  {/* 🩺 오늘의 회진 — 주치의(도도)가 진료차트 전체를 보고 오늘 뭘 할지 지휘 (careMap 있을 때만) */}
-                  {Object.keys(careMap).length > 0 && (() => {
+                  {/* 🩺 오늘의 회진 — 제목을 아직 안 바꾼 글만(바꾼 글은 위 '수정 추적'이 담당). 도도가 오늘 뭘 할지 지휘 */}
+                  {(() => {
+                    const notChanged = Object.values(careMap).filter(c => !c.title_changed_at);
+                    if (notChanged.length === 0) return null;
                     const cnt: Record<string, number> = { new: 0, needs: 0, prescribed: 0, observing: 0, relapse: 0, cured: 0 };
-                    Object.values(careMap).forEach(c => { cnt[computeCareStatus(c).status]++; });
+                    notChanged.forEach(c => { cnt[computeCareStatus(c).status]++; });
                     const todo = cnt.needs + cnt.relapse;   // 지금 손볼 것
-                    const total = Object.keys(careMap).length;
+                    const total = notChanged.length;
                     const rate = total ? Math.round(cnt.cured / total * 100) : 0;   // 돌봄지수(회복률)
                     const chip = (bg: string, col: string, txt: string) => <span style={{ padding: "4px 10px", borderRadius: 20, background: bg, color: col, fontSize: 11, fontWeight: 800, whiteSpace: "nowrap" }}>{txt}</span>;
                     return (
@@ -2665,11 +2796,23 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
                             <span style={{ fontSize: 10.5, color: "var(--text3)", fontWeight: 700, marginLeft: 4 }}>기준</span>
                             {[15,30,60,90].map(d => (
                               <button key={d} onClick={() => { setRepublishDays(d); localStorage.setItem("publy_republish_days", String(d)); }}
-                                style={{ padding: "3px 8px", borderRadius: 7, border: `1.5px solid ${republishDays===d?"#f59e0b":"var(--border)"}`, background: republishDays===d?"rgba(245,158,11,.15)":"transparent", color: republishDays===d?"#f59e0b":"var(--text3)", cursor: "pointer", fontSize: 10.5, fontWeight: 800, fontFamily: "inherit" }}>{d}일</button>
+                                title={`발행한 지 ${d}일이 지났는데도 검색에 안 뜨는(미노출) 글`}
+                                style={{ padding: "3px 8px", borderRadius: 7, border: `1.5px solid ${republishDays===d?"#f59e0b":"var(--border)"}`, background: republishDays===d?"rgba(245,158,11,.15)":"transparent", color: republishDays===d?"#f59e0b":"var(--text3)", cursor: "pointer", fontSize: 10.5, fontWeight: 800, fontFamily: "inherit" }}>{d}일+</button>
                             ))}
+                            {/* 직접 기간 설정 — 임의 일수 */}
+                            <span style={{ display: "inline-flex", alignItems: "center", gap: 3, marginLeft: 2 }}>
+                              <input type="number" min={1} value={republishDays} onChange={e => { const v = Math.max(1, parseInt(e.target.value || "1", 10)); setRepublishDays(v); localStorage.setItem("publy_republish_days", String(v)); }}
+                                title="원하는 일수를 직접 입력하세요(예: 45일 이후)"
+                                style={{ width: 46, padding: "3px 6px", borderRadius: 7, border: `1.5px solid ${![15,30,60,90].includes(republishDays)?"#f59e0b":"var(--border)"}`, background: "transparent", color: ![15,30,60,90].includes(republishDays)?"#f59e0b":"var(--text2)", fontSize: 10.5, fontWeight: 800, fontFamily: "inherit", textAlign: "center", outline: "none" }} />
+                              <span style={{ fontSize: 10.5, color: "var(--text3)", fontWeight: 700 }}>일+ 직접</span>
+                            </span>
                           </div>
                         </div>
-                        <div style={{ fontSize: 12, color: "var(--text2)", lineHeight: 1.7, marginBottom: 12, fontWeight: 500 }}>쓴 지 <b>{republishDays}일이 넘었는데도 네이버 검색에 안 나오는</b> 글이에요. 이런 글은 <b style={{ color: "#f59e0b" }}>제목만 바꿔서 다시 올리면</b> 검색에 뜰 기회가 다시 생겨요.<br/>아래에서 <b>AI가 추천한 새 제목</b>을 받아서 <b>제목 변경하러 가기</b>만 누르면, 알아서 제목을 바꿔 다시 발행해줘요. <span style={{ color: "var(--text3)" }}>(검색 순위 확인을 며칠 하면 오래된 글이 여기 차곡차곡 모여요)</span></div>
+                        <div style={{ fontSize: 12, color: "var(--text2)", lineHeight: 1.7, marginBottom: 10, fontWeight: 500 }}>쓴 지 <b>{republishDays}일이 넘었는데도 네이버 검색에 안 나오는</b> 글이에요. 이런 글은 <b style={{ color: "#f59e0b" }}>제목만 바꿔서 다시 올리면</b> 검색에 뜰 기회가 다시 생겨요.<br/>아래에서 <b>AI가 추천한 새 제목</b>을 받아서 <b>제목 변경하러 가기</b>만 누르면, 알아서 제목을 바꿔 다시 발행해줘요.</div>
+                        {/* ★ 미노출 기준 — 디테일 설명(테리 요청) */}
+                        <div style={{ fontSize: 11, color: "var(--text3)", lineHeight: 1.65, marginBottom: 12, padding: "9px 12px", borderRadius: 8, background: "rgba(245,158,11,.06)", border: "1px solid rgba(245,158,11,.2)" }}>
+                          <b style={{ color: "#f59e0b" }}>🔎 '미노출'이 뭔가요?</b> 이 글의 제목으로 네이버 통합검색(블로그탭)을 돌렸을 때 <b>상위 100위 안에 내 글이 안 나오는</b> 상태예요. 발행 후 {republishDays}일이 지나도 100위 밖이면 사실상 <b>검색 유입이 거의 0</b> — 저품질·누락이 의심돼요. 그래서 여기 모인 글은 <b>제목·키워드를 바꿔 다시 검색 기회를 주는</b> 대상이에요. <span style={{ color: "var(--text2)" }}>(이미 100위 안에 뜨는 글은 여기 안 나와요 — 그건 아래 '제목·키워드 살리기 솔루션'에서 더 위로 올려요.)</span>
+                        </div>
                         {list.length === 0
                           ? <div style={{ fontSize: 12, color: "var(--text3)" }}>아직 재발행 대상이 없어요. 위에서 검색노출 검사를 하면 {republishDays}일+ 미노출 글이 여기 모여요.</div>
                           : <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
@@ -2757,13 +2900,13 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
                     );
                   })()}
 
-                  {/* ✏️ 제목·키워드 살리기 솔루션 (AI 처방) — 누락 글 있을 때만 */}
-                  {exposureChecks.some(c => c.exposed === false) && (
+                  {/* ✏️ 제목·키워드 살리기 솔루션 (AI 처방) — 이미 100위 안에 뜬 글을 '더 위로'(재발행과 기준 분리) */}
+                  {exposureChecks.some(c => c.exposed === true && c.rank != null && c.rank <= 100) && (
                     <div style={{ marginBottom: 20, padding: "16px", borderRadius: 14, background: "linear-gradient(135deg,rgba(139,92,246,.1),rgba(255,95,162,.06))", border: "1.5px solid rgba(139,92,246,.3)" }}>
                       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: scSolutions ? 14 : 0 }}>
                         <div>
-                          <div style={{ fontSize: 14, fontWeight: 850, color: "#a855f7" }}>✏️ 제목·키워드 살리기 솔루션</div>
-                          <div style={{ fontSize: 11.5, color: "var(--text2)", marginTop: 3, fontWeight: 500 }}>검색에 안 뜨는 글의 제목·키워드를 <b style={{color:"#ff5fa2"}}>AI가 상위노출용으로 고쳐</b>드려요.</div>
+                          <div style={{ fontSize: 14, fontWeight: 850, color: "#a855f7" }}>✏️ 제목·키워드 살리기 솔루션 <span style={{ fontSize: 10.5, fontWeight: 800, color: "#a855f7", background: "rgba(168,85,247,.14)", padding: "2px 8px", borderRadius: 20, marginLeft: 4 }}>100위 안</span></div>
+                          <div style={{ fontSize: 11.5, color: "var(--text2)", marginTop: 3, fontWeight: 500, lineHeight: 1.55 }}><b style={{ color: "#a855f7" }}>이미 검색 100위 안에 뜨는 글</b>을 <b style={{color:"#ff5fa2"}}>AI가 더 위로 끌어올려</b>드려요. <span style={{ color: "var(--text3)" }}>(100위 밖 미노출 글은 위쪽 <b>'오래된 글 재발행'</b>에서 살려요 — 서로 안 겹쳐요.)</span></div>
                         </div>
                         <div style={{ display: "flex", gap: 8, flexShrink: 0, flexWrap: "wrap" }}>
                           <button onClick={() => handleGetSolutions(false)} disabled={scSolLoading || scSolAll} style={{ padding: "10px 16px", borderRadius: 10, border: "none", background: (scSolLoading||scSolAll) ? "var(--card2)" : "linear-gradient(135deg,#8b5cf6,#a855f7)", color: (scSolLoading||scSolAll) ? "var(--text2)" : "#fff", cursor: (scSolLoading||scSolAll) ? "default" : "pointer", fontSize: 12.5, fontWeight: 800, fontFamily: "inherit" }}>
@@ -2878,6 +3021,7 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
                       <div style={{ fontSize: 14, fontWeight: 850 }}>👥 최근 방문자</div>
                       {scResult.visitorDrop && <b style={{ fontSize: 12, color: scResult.visitorDrop.detected ? "#ef4444" : "var(--text2)" }}>{scResult.visitorDrop.detected ? "⚠️ " : ""}{scResult.visitorDrop.message}</b>}
                     </div>
+                    <HelpLine>네이버 공개 방문자 통계로 <b>최근 며칠간 일별 방문자 수</b>를 보여줘요. 갑자기 <b style={{ color: "#ef4444" }}>확 줄면(급감)</b> 저품질·검색 순위 하락 신호일 수 있어요.</HelpLine>
                     {visitorDays.length ? <div style={{ display: "flex", height: 92, alignItems: "flex-end", gap: 7, marginBottom: 14 }}>
                       {visitorDays.map(day => <div key={day.date} style={{ flex: 1, minWidth: 0, textAlign: "center" }}>
                         <div style={{ fontSize: 10, fontWeight: 800, marginBottom: 4 }}>{day.visitors.toLocaleString()}</div>
@@ -2885,7 +3029,8 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
                         <div style={{ fontSize: 9.5, color: "var(--text3)", marginTop: 4 }}>{day.date.slice(5).replace("-", "/")}</div>
                       </div>)}
                     </div> : <div style={{ fontSize: 12, color: "var(--text3)", marginBottom: 12 }}>관리자 통계에서 일별 방문자를 읽지 못했어요.</div>}
-                    <div style={{ fontSize: 12, fontWeight: 800, marginBottom: 7 }}>유입 검색어 TOP</div>
+                    <div style={{ fontSize: 12, fontWeight: 800, marginBottom: 2 }}>유입 검색어 TOP</div>
+                    <HelpLine>사람들이 <b>어떤 검색어로 내 블로그에 들어왔는지</b> 순위예요. 내가 실제로 뭘로 노출되는지 알면, <b>그 주제를 더 키워서</b> 방문자를 늘릴 수 있어요.</HelpLine>
                     {(scResult.inflowKeywords || []).length ? <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>{(scResult.inflowKeywords || []).map((item, i) => <span key={`${item.keyword}-${i}`} style={{ padding: "5px 9px", borderRadius: 20, background: "rgba(0,184,212,.1)", color: "var(--text2)", fontSize: 11.5, fontWeight: 650 }}>{i + 1}. {item.keyword}{item.count !== undefined ? ` · ${item.count}` : ""}</span>)}</div> : <div style={{ fontSize: 12, color: "var(--text3)" }}>유입 검색어를 읽지 못했거나 데이터가 없어요.</div>}
                   </div>
                   {/* 맞춤 조언 */}
@@ -3344,6 +3489,40 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
         </div>
         );
       })()}
+    {/* 🎉 블로그지수 웰컴 팝업 — 진입 시 팡! 캐릭터+사용순서+멘토 멘트. [닫기][일주일 보지않기] */}
+    {welcome && createPortal(
+      <div onClick={() => closeWelcome(false)} style={{ position: "fixed", inset: 0, zIndex: 100000, background: "rgba(12,10,20,.6)", backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+        <style>{`@keyframes wcPop{0%{transform:scale(.6) translateY(30px);opacity:0}55%{transform:scale(1.04)}100%{transform:scale(1) translateY(0);opacity:1}}@keyframes wcBob{0%,100%{transform:translateY(0)}50%{transform:translateY(-9px)}}@keyframes wcRow{0%{opacity:0;transform:translateX(-10px)}100%{opacity:1;transform:translateX(0)}}`}</style>
+        <div onClick={e => e.stopPropagation()} style={{ position: "relative", background: "var(--card)", borderRadius: 24, padding: "34px 30px 26px", maxWidth: 440, width: "100%", boxShadow: "0 30px 90px -20px rgba(0,0,0,.55)", border: "1px solid var(--border)", animation: "wcPop .5s cubic-bezier(.22,1.4,.4,1) both", maxHeight: "90vh", overflowY: "auto" }}>
+          <div style={{ textAlign: "center", marginBottom: 18 }}>
+            <img src="characters/pumi-guide.png" alt="가이드 푸미" onError={e => { const s = document.createElement("div"); s.textContent = "🧑‍⚕️"; s.style.cssText = "font-size:56px"; e.currentTarget.replaceWith(s); }} style={{ width: 78, height: 78, objectFit: "contain", animation: "wcBob 2.2s ease-in-out infinite", filter: "drop-shadow(0 8px 16px rgba(0,200,150,.3))" }} />
+            <div style={{ fontSize: 21, fontWeight: 900, color: "var(--text)", marginTop: 8, letterSpacing: "-.02em" }}>블로그 주치의에 오신 걸 환영해요! 🩺</div>
+            <div style={{ fontSize: 12.5, color: "var(--text2)", marginTop: 7, lineHeight: 1.6 }}>글 하나하나를 <b style={{ color: "#00c896" }}>검색에 뜰 때까지</b> 제가 끝까지 데려갈게요.<br />이 순서대로만 하면 돼요 👇</div>
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 9, marginBottom: 22 }}>
+            {[
+              { n: "1", ic: "📈", t: "블로그 진단 시작", d: "총 글·이웃·활동을 읽어 건강 점수를 내요.", c: "#00c896" },
+              { n: "2", ic: "🔎", t: "검색 노출 검사", d: "내 글이 검색 몇 위인지 확인해요.", c: "#00b8d4" },
+              { n: "3", ic: "♻️", t: "안 뜨는 글 살리기", d: "100위 밖 글은 제목을 바꿔 다시 올려요.", c: "#f59e0b" },
+              { n: "4", ic: "🩺", t: "수정 추적 · 회진", d: "바꾼 글은 제가 완치까지 지켜봐요. 재촉 안 해요!", c: "#8b5cf6" },
+            ].map((s, i) => (
+              <div key={s.n} style={{ display: "flex", alignItems: "center", gap: 12, padding: "11px 13px", borderRadius: 12, background: "var(--bg)", border: "1px solid var(--border)", animation: `wcRow .4s ease both`, animationDelay: `${.15 + i * .1}s` }}>
+                <div style={{ width: 30, height: 30, borderRadius: "50%", background: s.c, color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, fontWeight: 900, flexShrink: 0 }}>{s.n}</div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 13, fontWeight: 800, color: "var(--text)" }}>{s.ic} {s.t}</div>
+                  <div style={{ fontSize: 11, color: "var(--text3)", marginTop: 2, lineHeight: 1.4 }}>{s.d}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+          <div style={{ fontSize: 11.5, color: "var(--text2)", textAlign: "center", marginBottom: 16, lineHeight: 1.55, padding: "10px 12px", borderRadius: 10, background: "rgba(139,92,246,.08)" }}>💜 <b>제 조언을 따르든, 무시하고 바로 바꾸든 자유예요.</b><br />다만 방금 바꾼 글은 30일은 기다려야 효과가 나와요 🌱</div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button onClick={() => closeWelcome(true)} style={{ flex: 1, padding: "12px", borderRadius: 12, border: "1px solid var(--border)", background: "transparent", color: "var(--text3)", cursor: "pointer", fontSize: 12.5, fontWeight: 700, fontFamily: "inherit" }}>일주일간 보지 않기</button>
+            <button onClick={() => closeWelcome(false)} style={{ flex: 1.4, padding: "12px", borderRadius: 12, border: "none", background: "linear-gradient(135deg,#00c896,#00a878)", color: "#fff", cursor: "pointer", fontSize: 13.5, fontWeight: 800, fontFamily: "inherit", boxShadow: "0 8px 20px -8px rgba(0,200,150,.6)" }}>시작할게요 →</button>
+          </div>
+        </div>
+      </div>, document.body)}
+
     {/* 🎉 완치(노출) 축포 세리머니 — createPortal로 body에(transform 조상 무관), 하늘에서 색종이 낙하 */}
     {celebrate && createPortal(
       <div onClick={() => setCelebrate(null)} style={{ position: "fixed", inset: 0, zIndex: 100000, background: "rgba(12,10,20,.62)", backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20, overflow: "hidden" }}>
