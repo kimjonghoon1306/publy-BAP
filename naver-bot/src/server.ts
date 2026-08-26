@@ -39,6 +39,18 @@ function fileLog(args: unknown[], isErr = false) {
 // ★봇 프로세스 시작 구분선 — 로그에서 "봇이 언제 떴는지/재시작됐는지" 한눈에(오프라인 디버깅 핵심).
 console.log(`\n━━━━━━━━━━━━━━ 봇 시작 (PID ${process.pid}) ━━━━━━━━━━━━━━`);
 
+// ★★프로세스 크래시 가드(테리 2026-08-26 'Flow 하다 서버 오프라인' 근본해결) ──
+//   Playwright/CDP는 크롬이 닫히거나 탭이 사라질 때 "Target closed"·"browser has been closed" 같은
+//   비동기 에러(unhandledRejection)를 던지는데, 핸들러가 없으면 Node가 봇 프로세스를 통째로 종료한다.
+//   → 헤더 "서버 오프라인" + 이후 모든 요청 "Failed to fetch"의 진짜 원인. 여기서 잡아 로그만 남기고
+//   프로세스는 계속 살려 HTTP 응답을 유지한다(개별 요청은 각 핸들러 try/catch가 이미 처리).
+process.on("unhandledRejection", (reason: any) => {
+  console.error(`[bot] ⚠️ 처리 안 된 Promise 거부(프로세스 유지): ${String(reason?.stack || reason?.message || reason).split("\n").slice(0, 3).join(" | ")}`);
+});
+process.on("uncaughtException", (err: any) => {
+  console.error(`[bot] ⚠️ 예기치 못한 예외(프로세스 유지): ${String(err?.stack || err?.message || err).split("\n").slice(0, 3).join(" | ")}`);
+});
+
 const app = express();
 const PORT = 3333;
 const AUTH_TOKEN = process.env.BOT_AUTH_TOKEN || "";
