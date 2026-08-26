@@ -1,5 +1,8 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { createPortal } from "react-dom";
+import { BotEventStream } from "../lib/botApi";
+
+const BOT = "http://127.0.0.1:3334";   // neighbor-bot (발굴·발송)
 
 /* ═══════════════════════════════════════════════════════════════
    블로거 발굴 · 아웃리치 컨트롤 센터 — PUBLY DISCOVERY
@@ -31,12 +34,14 @@ const THEMES = {
 
 type Blogger = {
   id: string; nick: string; url: string; topic: string;
+  thumbnail?: string;      // 프로필/썸네일 이미지(네이버 검색 API 제공)
   neighbors: number; postsPerWeek: number; visitors: number; score: number;
   email?: string; kakao?: string; openchat?: string; proposed?: boolean;
   keywords: string[];      // 자주 쓰는 키워드
   categories: string[];    // 주력 품목/카테고리
   lastActive: string;      // 마지막 활동
   engageRate: number;      // 참여율(%)
+  authenticity?: number;   // 🩺 AI 진정성 점수(0~100) — 봇 로직 역이용, 가짜/품앗이 감별
   ship?: ShipState;        // 배송 단계(체험단 제품 발송)
 };
 // 체험단 배송 단계: 제안함(내가 연락) → 수락(블로거가 OK 회신 → 운영자가 확인 눌러 확정) → 발송대기 → 배송중 → 배송완료
@@ -49,65 +54,19 @@ const SHIP_DESC: Record<ShipStatus, string> = { none: "아직 제안 안 함", p
 const TOPICS = ["DELIVERY", "FOOD", "TRAVEL", "BEAUTY", "PARENTING", "FASHION", "CAFE", "LIVING", "PET", "FITNESS", "TECH", "HEALTH", "DIGITAL", "INTERIOR", "CULTURE", "EDU", "AUTO", "WEDDING", "FLOWER", "HOBBY"];
 const TOPIC_KR: Record<string, string> = { DELIVERY: "배송·택배", FOOD: "맛집", TRAVEL: "여행", BEAUTY: "뷰티", PARENTING: "육아", FASHION: "패션", CAFE: "카페", LIVING: "리빙", PET: "펫", FITNESS: "운동", TECH: "IT", HEALTH: "건강", DIGITAL: "디지털", INTERIOR: "인테리어", CULTURE: "문화·공연", EDU: "교육", AUTO: "자동차", WEDDING: "웨딩", FLOWER: "플라워", HOBBY: "취미" };
 const REGIONS = ["전국", "서울", "경기", "부산", "제주", "강원", "인천", "대구", "광주", "대전"];
-const KW_POOL: Record<string, string[]> = {
-  DELIVERY: ["새벽배송", "당일배송", "내돈내산", "정기구독", "언박싱", "배송후기", "가성비"],
-  FOOD: ["맛집추천", "내돈내산", "존맛탱", "웨이팅", "혼밥", "가성비", "회식장소"],
-  TRAVEL: ["국내여행", "당일치기", "숙소추천", "뷰맛집", "여행코스", "드라이브"],
-  BEAUTY: ["신상템", "발색", "지속력", "데일리메이크업", "성분", "추천템"],
-  CAFE: ["감성카페", "디저트", "분위기", "인생샷", "브런치", "노키즈존"],
-  PARENTING: ["육아템", "아기용품", "이유식", "장난감추천", "육아꿀팁", "출산준비"],
-  FASHION: ["데일리룩", "코디", "가성비룩", "신상", "OOTD", "하객룩"],
-  HEALTH: ["다이어트", "영양제", "홈트", "건강식", "체지방", "건강관리"],
-  PET: ["강아지간식", "고양이용품", "펫호텔", "반려동물", "사료추천", "펫케어"],
-  LIVING: ["살림템", "주방템", "정리수납", "인테리어소품", "생활꿀팁", "청소템"],
-};
-const CAT_POOL: Record<string, string[]> = {
-  DELIVERY: ["식품·신선", "생필품", "정기구독박스", "밀키트", "산지직송"],
-  FOOD: ["한식", "일식", "카페·디저트", "고기·구이", "배달·밀키트"],
-  TRAVEL: ["숙박·펜션", "관광·액티비티", "캠핑", "항공·교통"],
-  BEAUTY: ["스킨케어", "메이크업", "헤어", "향수·바디"],
-  CAFE: ["원두·홈카페", "베이커리", "디저트", "티·음료"],
-  PARENTING: ["아기용품", "이유식·간식", "장난감", "출산·유아"],
-  FASHION: ["여성의류", "남성의류", "잡화·가방", "슈즈"],
-  HEALTH: ["건강기능식품", "운동용품", "다이어트식", "홈트기구"],
-  PET: ["사료·간식", "펫용품", "펫패션", "위생·미용"],
-  LIVING: ["주방·조리", "수납·정리", "청소·세탁", "인테리어소품"],
-};
 
-function mockFind(topic: string, n: number): Blogger[] {
-  const nicks = ["초록다이어리", "제주살이룸", "먹킷리스트", "육아하는곰", "감성필름", "여행가는펭귄", "코랄뷰티", "산책하는나무", "홈카페일기", "부부의세계", "달려라토끼", "빵순이로그"];
-  const kws = KW_POOL[topic] || KW_POOL.FOOD, cats = CAT_POOL[topic] || CAT_POOL.FOOD;
-  const pick = (arr: string[], k: number) => [...arr].sort(() => Math.random() - .5).slice(0, k);
-  const out: Blogger[] = [];
-  for (let i = 0; i < n; i++) {
-    const neighbors = 300 + Math.floor(Math.random() * 5000);
-    const postsPerWeek = 1 + Math.floor(Math.random() * 6);
-    const visitors = 50 + Math.floor(Math.random() * 2000);
-    const engageRate = Math.round((2 + Math.random() * 12) * 10) / 10;
-    const score = Math.min(99, Math.round((neighbors / 60 + postsPerWeek * 6 + visitors / 40 + engageRate * 2) / 3.5));
-    out.push({
-      id: "b" + i + Date.now(), nick: nicks[i % nicks.length] + (i > 11 ? i : ""),
-      url: "blog.naver.com/" + TOPIC_KR[topic] + "_blogger" + i, topic, neighbors, postsPerWeek, visitors, score,
-      email: Math.random() > 0.35 ? `${TOPIC_KR[topic]}blog${i}@naver.com` : undefined,
-      kakao: Math.random() > 0.55 ? `${TOPIC_KR[topic]}_${i}` : undefined,
-      openchat: Math.random() > 0.7 ? "open.kakao.com/o/xxxx" : undefined,
-      proposed: Math.random() > 0.85,
-      keywords: pick(kws, 3 + Math.floor(Math.random() * 2)),
-      categories: pick(cats, 2),
-      lastActive: ["오늘", "어제", "2일 전", "3일 전"][Math.floor(Math.random() * 4)],
-      engageRate,
-    });
-  }
-  return out.sort((a, b) => b.score - a.score);
-}
+// (목업 mockFind 제거 — 실제 네이버 발굴 API(/api/crawl)로 교체됨)
 
-export default function CrawlCenter({ showToast, theme: extTheme }: { showToast?: (m: string, t?: any) => void; theme?: "dark" | "light" }) {
+export default function CrawlCenter({ showToast, theme: extTheme, userId }: { showToast?: (m: string, t?: any) => void; theme?: "dark" | "light"; userId?: string }) {
   const toast = (m: string, t?: string) => showToast?.(m, t);
-  const [theme, setTheme] = useState<"dark" | "light">(extTheme === "dark" ? "dark" : "light");
+  // 테마는 메인 헤더 토글(부모 prop)을 그대로 따른다 — 크롤링 자체 토글 제거(테리: 토글 공용화).
+  // 다크 색상(THEMES.dark 웜 차콜)은 그대로. 다크면 로그 배경·글씨(logBg/logInk)도 함께 바뀜.
+  const theme: "dark" | "light" = extTheme === "dark" ? "dark" : "light";
   const C = THEMES[theme];
 
   const [topic, setTopic] = useState("FOOD");
   const [region, setRegion] = useState("전국");
+  const [keyword, setKeyword] = useState("");   // 사용자 추가 검색어(선택)
   const [count, setCount] = useState(30);
   const [minNeighbors, setMinNeighbors] = useState(500);
   const [minPosts, setMinPosts] = useState(2);
@@ -130,35 +89,151 @@ export default function CrawlCenter({ showToast, theme: extTheme }: { showToast?
   const [onlyContact, setOnlyContact] = useState(false);
   const [detail, setDetail] = useState<Blogger | null>(null);
   const [outreach, setOutreach] = useState<null | "email" | "comment">(null);
+  const [emailSubject, setEmailSubject] = useState("[온종일 체험단] 함께하실 블로거님을 찾았어요");
+  const [emailBody, setEmailBody] = useState("{닉네임}님 안녕하세요! 블로그 잘 보고 있어요 😊\n{관심품목} 관련 글을 즐겨 쓰시는 것 같아, 온종일 체험단에 함께하시면 좋을 것 같아 연락드려요.\n관심 있으시면 회신 주세요. 감사합니다!");
+  const [commentBody, setCommentBody] = useState("{닉네임}님 글 잘 봤어요! {관심키워드} 관련해 온종일 체험단 함께하실래요? 문의는 프로필 링크로 :)");
+  const [sending, setSending] = useState(false);
+  // 발신 이메일 계정(등록 여부)
+  const [sender, setSender] = useState<any>(null);
+  const [senderOpen, setSenderOpen] = useState(false);
+  const [sForm, setSForm] = useState({ from_name: "", from_email: "", smtp_host: "smtp.naver.com", smtp_port: "465", smtp_user: "", smtp_pass: "", daily_limit: "50" });
+  const [sSaving, setSSaving] = useState(false);
+  const loadSender = async () => {
+    if (!userId) return;
+    try { const r = await fetch(`${BOT}/api/outreach/sender/${userId}`); const d = await r.json(); if (d.ok) setSender(d.sender); } catch {}
+  };
+  // 보낸글 이력
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [outHistory, setOutHistory] = useState<any[]>([]);
+  const loadOutHistory = async () => {
+    if (!userId) return;
+    try { const r = await fetch(`${BOT}/api/outreach/history/${userId}`); const d = await r.json(); if (d.ok) setOutHistory(d.history || []); } catch {}
+  };
+  const esOutRef = useRef<BotEventStream | null>(null);
   const [shipOpen, setShipOpen] = useState(false);
   const [ships, setShips] = useState<Record<string, ShipState>>({}); // 블로거별 배송 상태
   const setShip = (id: string, patch: Partial<ShipState>) => setShips((s) => ({ ...s, [id]: { ...{ status: "proposed" as ShipStatus }, ...s[id], ...patch } }));
   const timerRef = useRef<any>(null);
+  const esRef = useRef<BotEventStream | null>(null);
+  const [scanned, setScanned] = useState(0);   // 지금까지 스캔(수집)한 블로거 수 — 실시간 표시
 
   const pushLog = (m: string) => setLogs((l) => [...l, `${new Date().toLocaleTimeString("ko-KR")}  ${m}`]);
 
+  // 🩺 AI 진정성 점수(0~100): 봇 로직 역이용 — 참여율 대비 이웃수로 "진짜 영향력 vs 품앗이·봇 부풀림" 감별.
+  // 이웃만 많고 참여율 낮으면(도배·품앗이 의심) 낮게, 참여율이 이웃 규모 대비 건강하면 높게.
+  const calcAuthenticity = (neighbors: number, engageRate: number, postsPerWeek: number): number => {
+    if (!neighbors) return 50;
+    const expected = Math.max(2, Math.min(14, 900 / Math.sqrt(neighbors)));  // 이웃 많을수록 기대 참여율 자연 감소
+    const ratio = engageRate / expected;              // 1 이상이면 건강
+    let s = 50 + Math.round(Math.min(45, (ratio - 1) * 45));
+    if (postsPerWeek >= 3) s += 6;                    // 꾸준한 활동 가점
+    if (postsPerWeek === 0) s -= 15;                  // 휴면 감점
+    return Math.max(5, Math.min(99, s));
+  };
+
   const startFind = () => {
     if (running) return;
-    setRunning(true); setProgress(0); setLogs([]); setResults([]); setSelected(new Set());
-    pushLog(`SCAN START — "${topic}" · ${region} (target ${count})`);
-    pushLog(`FILTER — neighbors ${minNeighbors.toLocaleString()}+ · ${minPosts} posts/wk+ ${activeOnly ? "· active only" : ""} ${topicMatch ? "· topic match" : ""}`);
-    let p = 0;
-    const steps = ["네이버 검색으로 글 수집 중", "글쓴이(블로거) 추리는 중", "공개 프로필·연락처 확인 중", "관심 키워드·품목 분석 중", "활동성 점수 계산 · 비공개 제외"];
-    timerRef.current = setInterval(() => {
-      p += Math.random() * 20;
-      if (p >= 100) {
-        p = 100; setProgress(100); clearInterval(timerRef.current);
-        const found = mockFind(topic, Math.min(count, 12)).filter((b) => b.neighbors >= minNeighbors && b.postsPerWeek >= minPosts);
-        setResults(found);
-        pushLog(`DONE — ${found.length} bloggers (${found.filter((b) => b.email || b.kakao).length} with contact)`);
-        setRunning(false); toast(`${found.length}명 발굴 완료`, "success");
-        return;
+    if (esRef.current) { esRef.current.close(); esRef.current = null; }
+    setRunning(true); setProgress(0); setLogs([]); setResults([]); setSelected(new Set()); setScanned(0);
+    const kwList = [TOPIC_KR[topic] || topic, ...(keyword.trim() ? keyword.split(/[,\s]+/).filter(Boolean) : [])];
+    if (region && region !== "전국") kwList[0] = `${region} ${kwList[0]}`;
+    pushLog(`🔎 발굴 시작 — "${kwList.join(", ")}" · 목표 ${count}명`);
+    pushLog(`필터 — 이웃 ${minNeighbors.toLocaleString()}+ · 주 ${minPosts}글+ ${activeOnly ? "· 최근 활동중만" : ""}`);
+    // 실제 네이버 검색 발굴 API(neighbor-bot /api/crawl, SSE) — 목업 아님. thumbnail=프로필 이미지 제공.
+    const url = `${BOT}/api/crawl?keywords=${encodeURIComponent(kwList.join(","))}&countPerKeyword=${count}&orderBy=${topicMatch ? "sim" : "recentdate"}&activeDays=${activeOnly ? 30 : 0}&excludeMarket=true${userId ? `&userId=${userId}` : ""}`;
+    const es = new BotEventStream(url);
+    esRef.current = es;
+    es.onmessage = (e: MessageEvent) => {
+      let d: any; try { d = JSON.parse(e.data); } catch { return; }
+      if (d.type === "log") { pushLog(d.msg); const m = String(d.msg).match(/(\d+)\s*명/); if (m) { setScanned(Number(m[1])); setProgress(Math.min(95, Number(m[1]))); } }
+      else if (d.type === "quota_exceeded") { pushLog("🛑 오늘 발굴 한도를 다 썼어요"); toast("오늘 발굴 한도 초과", "error"); setRunning(false); es.close(); }
+      else if (d.type === "crawl_done") {
+        const raw: any[] = d.results || [];
+        // 실제 발굴 결과 → 카드 매핑. 이웃수/참여율은 네이버 검색 API가 안 주므로 추정치(추후 blog-stats로 정밀화 가능)
+        const seen = new Set<string>();
+        const mapped: Blogger[] = raw.filter(r => r.blogId && !seen.has(r.blogId) && seen.add(r.blogId)).map((r, i) => {
+          const daysAgo = r.addDate ? Math.floor((Date.now() - r.addDate) / 86400000) : null;
+          const lastActive = daysAgo == null ? "-" : daysAgo <= 0 ? "오늘" : daysAgo === 1 ? "어제" : `${daysAgo}일 전`;
+          const postsPerWeek = daysAgo == null ? 2 : daysAgo <= 2 ? 5 : daysAgo <= 7 ? 3 : daysAgo <= 30 ? 1 : 0;
+          const neighbors = 0;   // 정확값은 상세(blog-stats)에서 — 목록에선 미상(0=미확인)
+          const engageRate = 0;
+          return {
+            id: r.blogId, nick: r.nickName || r.blogName || r.blogId, url: `blog.naver.com/${r.blogId}`,
+            topic, thumbnail: r.thumbnail || undefined,
+            neighbors, postsPerWeek, visitors: 0, score: 0,
+            keywords: r.keyword ? [String(r.keyword)] : [], categories: [],
+            lastActive, engageRate, authenticity: undefined,
+          } as Blogger;
+        });
+        setResults(mapped);
+        setProgress(100); setScanned(mapped.length);
+        pushLog(`✅ 발굴 완료 — 실제 블로거 ${mapped.length}명 (프로필 이미지 포함)`);
+        toast(`${mapped.length}명 발굴 완료`, "success");
+        setRunning(false); es.close(); esRef.current = null;
+        if (mapped.length) analyzeAuthenticity(mapped);   // 🩺 발굴 직후 진정성 자동 분석(실제 이웃·방문자)
       }
-      setProgress(Math.round(p));
-      if (Math.random() > 0.5) pushLog("· " + steps[Math.min(steps.length - 1, Math.floor(p / 20))]);
-    }, 420);
+      else if (d.type === "error") { pushLog(`❌ 발굴 실패: ${d.msg}`); toast(`발굴 실패: ${d.msg}`, "error"); setRunning(false); es.close(); esRef.current = null; }
+    };
+    es.onerror = () => { pushLog("❌ 봇 연결 오류 — 서버가 켜져 있는지 확인해주세요"); toast("봇 연결 오류", "error"); setRunning(false); es.close(); esRef.current = null; };
   };
-  const stopFind = () => { if (timerRef.current) clearInterval(timerRef.current); setRunning(false); pushLog("STOPPED by user."); };
+  const stopFind = () => { if (esRef.current) { esRef.current.close(); esRef.current = null; } if (timerRef.current) clearInterval(timerRef.current); setRunning(false); pushLog("⏹ 사용자가 중단했어요"); };
+
+  useEffect(() => { loadSender(); /* eslint-disable-next-line */ }, [userId]);
+
+  // 🩺 진정성 정밀 분석 — 발굴된 블로거들의 실제 이웃수·방문자를 공개 API로 읽어 진정성 점수 채움(세션 불필요)
+  const [analyzing, setAnalyzing] = useState(false);
+  const esAuthRef = useRef<BotEventStream | null>(null);
+  const analyzeAuthenticity = (list?: Blogger[]) => {
+    const src = list || results;
+    const ids = src.map(b => b.id).filter(Boolean);
+    if (!ids.length) return;
+    setAnalyzing(true); pushLog(`🩺 진정성 분석 시작 — ${ids.length}명 (공개 이웃·방문자)`);
+    const es = new BotEventStream(`${BOT}/api/outreach/authenticity?blogIds=${encodeURIComponent(JSON.stringify(ids))}`);
+    esAuthRef.current = es;
+    es.onmessage = (e: MessageEvent) => {
+      let d: any; try { d = JSON.parse(e.data); } catch { return; }
+      if (d.type === "auth") {
+        setResults(prev => prev.map(b => b.id === d.blogId ? { ...b, neighbors: d.neighbors || b.neighbors, visitors: d.visitors || b.visitors, authenticity: d.authenticity ?? b.authenticity, score: d.authenticity ?? b.score } : b));
+      } else if (d.type === "done") { pushLog(`✅ 진정성 분석 완료`); setAnalyzing(false); es.close(); esAuthRef.current = null; }
+      else if (d.type === "error") { pushLog(`❌ 진정성 분석 실패: ${d.msg}`); setAnalyzing(false); es.close(); esAuthRef.current = null; }
+    };
+    es.onerror = () => { setAnalyzing(false); es.close(); esAuthRef.current = null; };
+  };
+
+  // 📧 이메일 실발송(SSE) — 발신계정 필요. 블로그 창 안 열고 SMTP로 바로. 개인화 토큰은 봇에서 치환.
+  const sendEmails = () => {
+    if (!userId) { toast("로그인 정보가 없어요", "error"); return; }
+    if (!sender) { toast("먼저 발신 이메일 계정을 등록하세요", "info"); setSenderOpen(true); return; }
+    const picks = shown.filter(b => selected.has(b.id) && b.email);
+    if (!picks.length) { toast("선택한 블로거 중 공개 이메일이 있는 사람이 없어요", "info"); return; }
+    setSending(true); pushLog(`📧 이메일 발송 시작 — ${picks.length}명`);
+    const targets = picks.map(b => ({ id: b.id, nick: b.nick, email: b.email, keywords: b.keywords, categories: b.categories }));
+    const url = `${BOT}/api/outreach/send-email?userId=${encodeURIComponent(userId)}&subject=${encodeURIComponent(emailSubject)}&message=${encodeURIComponent(emailBody)}&targets=${encodeURIComponent(JSON.stringify(targets))}`;
+    const es = new BotEventStream(url); esOutRef.current = es;
+    es.onmessage = (e: MessageEvent) => {
+      let d: any; try { d = JSON.parse(e.data); } catch { return; }
+      if (d.type === "log") pushLog(d.msg);
+      else if (d.type === "sent") { setShips(s => ({ ...s, [d.id]: s[d.id] || { status: "proposed" as ShipStatus } })); }   // 보낸 사람=제안함
+      else if (d.type === "done") { pushLog(`✅ 발송 완료 — 성공 ${d.ok} · 실패 ${d.fail}`); toast(`이메일 ${d.ok}명 발송 완료`, "success"); setSending(false); setOutreach(null); es.close(); esOutRef.current = null; loadOutHistory(); }
+      else if (d.type === "error") { pushLog(`❌ ${d.msg}`); toast(d.msg, "error"); setSending(false); es.close(); esOutRef.current = null; }
+    };
+    es.onerror = () => { pushLog("❌ 봇 연결 오류"); toast("봇 연결 오류", "error"); setSending(false); es.close(); esOutRef.current = null; };
+  };
+
+  // 발신 계정 저장(SMTP 검증 후)
+  const saveSender = async () => {
+    if (!userId) return;
+    if (!sForm.from_email || !sForm.smtp_user || !sForm.smtp_pass) { toast("발신 이메일·아이디·비밀번호를 채워주세요", "info"); return; }
+    setSSaving(true);
+    try {
+      const r = await fetch(`${BOT}/api/outreach/sender`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ userId, ...sForm }) });
+      const d = await r.json();
+      if (!d.ok) throw new Error(d.error || "저장 실패");
+      toast("✅ 발신 계정을 등록했어요 (연결 확인됨)", "success");
+      setSenderOpen(false); await loadSender();
+    } catch (e: any) { toast(e.message, "error"); }
+    setSSaving(false);
+  };
 
   const shown = results
     .filter((b) => !onlyContact || b.email || b.kakao || b.openchat)
@@ -208,8 +283,7 @@ export default function CrawlCenter({ showToast, theme: extTheme }: { showToast?
           <div style={{ fontSize: 12.5, color: C.sub, fontWeight: 600, marginTop: 8, maxWidth: 480, lineHeight: 1.6 }}>체험단에 어울리는 블로거를 <b style={{ color: C.ink }}>공개 정보로</b> 발굴하고, 관심사·주력 품목까지 분석해 정중히 제안합니다.</div>
         </div>
         <div style={{ display: "flex", alignItems: "flex-end", gap: 10 }}>
-          {/* 테마 토글 */}
-          <button onClick={() => setTheme((t) => t === "dark" ? "light" : "dark")} style={{ border: `1px solid ${C.line2}`, background: "transparent", color: C.sub, borderRadius: 2, padding: "6px 10px", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}>{theme === "dark" ? "☀ LIGHT" : "☾ DARK"}</button>
+          {/* 테마 토글 제거 — 메인 헤더 토글이 공용(테리 지시). 크롤링은 메인 테마를 따라감 */}
           <span style={{ fontSize: 10, fontWeight: 800, letterSpacing: ".12em", color: C.sub, border: `1px solid ${C.line2}`, padding: "6px 11px", borderRadius: 2, whiteSpace: "nowrap" }}>⚖ 공개 정보만</span>
           <img src={CH.monggeul} onError={chErr("🧭")} className="ob-bob" style={{ width: 62, height: 62, objectFit: "contain", filter: "saturate(.9) drop-shadow(0 8px 14px rgba(0,0,0,.2))" }} />
         </div>
@@ -219,9 +293,9 @@ export default function CrawlCenter({ showToast, theme: extTheme }: { showToast?
       <div className="ob-sec" style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", marginBottom: 22, border: `1px solid ${C.line}`, background: C.surf, borderRadius: 4 }}>
         {[
           { lab: "Found", val: results.length, unit: "명" },
-          { lab: "Proposed", val: 0, unit: "명" },
+          { lab: "Proposed", val: Object.keys(ships).length, unit: "명" },
           { lab: "With Contact", val: results.filter((b) => b.email || b.kakao).length, unit: "명" },
-          { lab: "Avg Score", val: results.length ? Math.round(results.reduce((s, b) => s + b.score, 0) / results.length) : 0, unit: "" },
+          { lab: "Scanned", val: scanned, unit: "명" },
         ].map((k, i) => (
           <div key={i} style={{ padding: "15px 18px", borderLeft: i ? `1px solid ${C.line}` : "none" }}>
             <div style={label}>{k.lab}</div>
@@ -239,7 +313,7 @@ export default function CrawlCenter({ showToast, theme: extTheme }: { showToast?
         </div>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1.4fr 110px", gap: 14, alignItems: "end" }}>
           <div><div style={label}>Region</div><select value={region} onChange={(e) => setRegion(e.target.value)} style={inp}>{REGIONS.map((r) => <option key={r}>{r}</option>)}</select></div>
-          <div><div style={label}>Keyword</div><input placeholder="예: 감성카페, 아이랑 갈만한곳" style={inp} /></div>
+          <div><div style={label}>Keyword</div><input value={keyword} onChange={e => setKeyword(e.target.value)} placeholder="예: 감성카페, 아이랑 갈만한곳" style={inp} /></div>
           <div><div style={label}>Count</div><select value={count} onChange={(e) => setCount(Number(e.target.value))} style={inp}>{[10, 20, 30, 50, 100].map((n) => <option key={n} value={n}>{n}명</option>)}</select></div>
         </div>
         <hr style={{ border: 0, borderTop: `1px solid ${C.line2}`, margin: "20px 0 18px" }} />
@@ -304,6 +378,7 @@ export default function CrawlCenter({ showToast, theme: extTheme }: { showToast?
           <div style={{ display: "flex", alignItems: "flex-end", gap: 12, flexWrap: "wrap", marginBottom: 0, paddingBottom: 16, borderBottom: `1px solid ${C.line}` }}>
             <div><div style={eyebrow}>Curated</div><div style={{ fontFamily: serif, fontSize: 20, fontWeight: 600, marginTop: 5 }}>발굴된 블로거 {shown.length}명</div></div>
             <div style={{ marginLeft: "auto", display: "flex", gap: 7, alignItems: "center", flexWrap: "wrap" }}>
+              <span onClick={() => { loadOutHistory(); setHistoryOpen(true); }} style={sChip(false)}>📮 보낸 글 이력</span>
               <span onClick={() => setOnlyContact((v) => !v)} style={sChip(onlyContact)}>연락처 있는 것만</span>
               <select value={sortBy} onChange={(e) => setSortBy(e.target.value as any)} style={{ ...inp, width: "auto", padding: "7px 10px", fontSize: 12 }}><option value="score">점수순</option><option value="neighbors">이웃순</option><option value="posts">글 많은순</option></select>
               <span onClick={() => setSelected(new Set(shown.map((b) => b.id)))} style={sChip(false)}>전체선택</span>
@@ -317,15 +392,23 @@ export default function CrawlCenter({ showToast, theme: extTheme }: { showToast?
               return (
                 <div key={b.id} style={{ padding: 16, borderRight: `1px solid ${C.line}`, borderBottom: `1px solid ${C.line}`, background: on ? C.accentSoft : "transparent", position: "relative", transition: "background .15s" }}>
                   <div onClick={() => toggleSel(b.id)} style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 9, cursor: "pointer" }}>
-                    <div style={{ fontFamily: serif, fontSize: 22, fontWeight: 600, color: on ? C.accent : C.ink, width: 24 }}>{gr}</div>
+                    {/* 프로필 이미지(네이버 검색 API 제공) — 실패 시 등급 문자로 폴백 */}
+                    {b.thumbnail
+                      ? <img src={b.thumbnail} alt={b.nick} referrerPolicy="no-referrer" onError={e => { const d = document.createElement("div"); d.textContent = gr; d.style.cssText = `font-family:${serif};font-size:20px;font-weight:600;width:38px;height:38px;display:flex;align-items:center;justify-content:center;border-radius:50%;background:${C.surf2};color:${C.sub};flex-shrink:0`; e.currentTarget.replaceWith(d); }} style={{ width: 38, height: 38, borderRadius: "50%", objectFit: "cover", flexShrink: 0, border: `1px solid ${C.line2}` }} />
+                      : <div style={{ width: 38, height: 38, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", background: C.surf2, fontFamily: serif, fontSize: 20, fontWeight: 600, color: on ? C.accent : C.sub, flexShrink: 0 }}>{gr}</div>}
                     <div style={{ minWidth: 0, flex: 1 }}>
                       <div style={{ fontSize: 14, fontWeight: 800, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{b.nick}</div>
                       <div style={{ fontSize: 10.5, color: C.sub, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{b.url}</div>
                     </div>
                     <div style={{ width: 18, height: 18, borderRadius: 2, border: `1px solid ${on ? C.accent : C.line2}`, background: on ? C.accent : "transparent", color: C.surf, fontSize: 12, fontWeight: 900, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>{on ? "✓" : ""}</div>
                   </div>
-                  <div style={{ display: "flex", gap: 10, marginBottom: 8, fontSize: 11, color: C.sub, fontWeight: 700, flexWrap: "wrap" }}>
-                    <span>이웃 {b.neighbors.toLocaleString()}</span><span>주 {b.postsPerWeek}글</span><span>참여 {b.engageRate}%</span><span style={{ color: C.ink }}>{b.score}점</span>
+                  <div style={{ display: "flex", gap: 8, marginBottom: 8, fontSize: 11, color: C.sub, fontWeight: 700, flexWrap: "wrap", alignItems: "center" }}>
+                    <span>🕒 {b.lastActive}</span>
+                    {b.neighbors > 0 && <span>이웃 {b.neighbors.toLocaleString()}</span>}
+                    {/* 🩺 진정성 점수: 상세에서 이웃·참여율 정밀 분석 후 채워짐. 색상=신뢰도(초록=진짜/주황=주의/빨강=의심) */}
+                    {b.authenticity != null
+                      ? <span title="AI 진정성 점수 — 참여율 대비 이웃수로 가짜·품앗이 감별(높을수록 진짜 영향력)" style={{ fontWeight: 800, color: b.authenticity >= 70 ? "#2f9e5e" : b.authenticity >= 45 ? "#d98a1f" : "#d64545", background: b.authenticity >= 70 ? "rgba(47,158,94,.12)" : b.authenticity >= 45 ? "rgba(217,138,31,.12)" : "rgba(214,69,69,.12)", padding: "2px 8px", borderRadius: 20 }}>🩺 진정성 {b.authenticity}</span>
+                      : <span style={{ color: C.sub, fontWeight: 600, fontStyle: "italic" }}>상세로 진정성 분석</span>}
                   </div>
                   {/* 관심 키워드 미리보기 */}
                   <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginBottom: 8 }}>
@@ -380,7 +463,9 @@ export default function CrawlCenter({ showToast, theme: extTheme }: { showToast?
         <div onClick={() => setDetail(null)} style={{ position: "fixed", inset: 0, background: "rgba(20,16,12,.55)", backdropFilter: "blur(3px)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 99999, padding: 20 }}>
           <div onClick={(e) => e.stopPropagation()} style={{ background: C.surf, border: `1px solid ${C.line2}`, borderRadius: 6, maxWidth: 480, width: "100%", maxHeight: "86vh", overflowY: "auto", boxShadow: "0 30px 80px rgba(0,0,0,.5)" }}>
             <div style={{ padding: "22px 24px", borderBottom: `1px solid ${C.line}`, display: "flex", alignItems: "flex-start", gap: 12 }}>
-              <div style={{ fontFamily: serif, fontSize: 30, fontWeight: 600, color: C.accent }}>{detail.score >= 75 ? "S" : detail.score >= 55 ? "A" : "B"}</div>
+              {detail.thumbnail
+                ? <img src={detail.thumbnail} alt={detail.nick} referrerPolicy="no-referrer" onError={e => { const d = document.createElement("div"); d.textContent = "B"; d.style.cssText = `font-family:${serif};font-size:24px;font-weight:600;width:48px;height:48px;display:flex;align-items:center;justify-content:center;border-radius:50%;background:${C.surf2};color:${C.sub}`; e.currentTarget.replaceWith(d); }} style={{ width: 48, height: 48, borderRadius: "50%", objectFit: "cover", border: `1px solid ${C.line2}` }} />
+                : <div style={{ width: 48, height: 48, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", background: C.surf2, fontFamily: serif, fontSize: 24, fontWeight: 600, color: C.accent }}>B</div>}
               <div style={{ flex: 1 }}>
                 <div style={{ fontSize: 18, fontWeight: 900 }}>{detail.nick}</div>
                 <div style={{ fontSize: 11.5, color: C.sub }}>{detail.url}</div>
@@ -388,15 +473,17 @@ export default function CrawlCenter({ showToast, theme: extTheme }: { showToast?
               <button onClick={() => setDetail(null)} style={{ ...btnGhost, padding: "5px 10px" }}>✕</button>
             </div>
             <div style={{ padding: "20px 24px" }}>
-              {/* 지표 그리드 */}
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 0, border: `1px solid ${C.line}`, marginBottom: 20 }}>
-                {[["이웃 수", detail.neighbors.toLocaleString()], ["주간 글 수", detail.postsPerWeek + "글"], ["일 방문자", detail.visitors.toLocaleString()], ["참여율", detail.engageRate + "%"], ["활동성 점수", detail.score + "점"], ["최근 활동", detail.lastActive]].map(([l, v], i) => (
-                  <div key={i} style={{ padding: "12px 14px", borderLeft: i % 3 ? `1px solid ${C.line}` : "none", borderTop: i >= 3 ? `1px solid ${C.line}` : "none" }}>
+              {/* 지표 그리드 — 이웃/방문자/참여율은 남의 블로그라 로그인 세션 없이 못 읽음 → 미확인 정직 표시 */}
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 0, border: `1px solid ${C.line}`, marginBottom: 14 }}>
+                {[["이웃 수", detail.neighbors > 0 ? detail.neighbors.toLocaleString() : "—"], ["최근 활동", detail.lastActive], ["관심 키워드", (detail.keywords[0] || "—")]].map(([l, v], i) => (
+                  <div key={i} style={{ padding: "12px 14px", borderLeft: i % 3 ? `1px solid ${C.line}` : "none" }}>
                     <div style={{ ...label, marginBottom: 5 }}>{l}</div>
-                    <div style={{ fontFamily: serif, fontSize: 18, fontWeight: 600 }}>{v}</div>
+                    <div style={{ fontFamily: serif, fontSize: 16, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{v}</div>
                   </div>
                 ))}
               </div>
+              {/* 실제 블로그 방문(공개 정보 직접 확인) */}
+              <a href={`https://${detail.url}`} target="_blank" rel="noopener noreferrer" style={{ display: "block", textAlign: "center", padding: "10px", marginBottom: 20, borderRadius: 4, border: `1px solid ${C.accent}`, color: C.accent, fontSize: 13, fontWeight: 800, textDecoration: "none" }}>🔗 블로그 열어서 직접 확인하기 →</a>
               {/* 관심 키워드 */}
               <div style={{ marginBottom: 18 }}>
                 <div style={label}>자주 쓰는 키워드</div>
@@ -439,20 +526,96 @@ export default function CrawlCenter({ showToast, theme: extTheme }: { showToast?
               <button onClick={() => setOutreach(null)} style={{ ...btnGhost, padding: "5px 10px" }}>✕</button>
             </div>
             <div style={{ padding: "20px 24px" }}>
-              {outreach === "email" && <div style={{ marginBottom: 14 }}><div style={label}>제목</div><input defaultValue="[온종일 체험단] 함께하실 블로거님을 찾았어요" style={inp} /></div>}
+              {/* 이메일: 발신계정 상태 배너 */}
+              {outreach === "email" && (
+                <div style={{ marginBottom: 14, padding: "10px 13px", borderRadius: 4, background: sender ? "rgba(47,158,94,.08)" : "rgba(217,138,31,.1)", border: `1px solid ${sender ? "rgba(47,158,94,.3)" : "rgba(217,138,31,.35)"}`, display: "flex", alignItems: "center", gap: 8, fontSize: 11.5, fontWeight: 600 }}>
+                  {sender ? <><span style={{ color: "#2f9e5e" }}>✅ 발신 계정: <b>{sender.from_email}</b></span><button onClick={() => { setSForm(f => ({ ...f, from_email: sender.from_email, from_name: sender.from_name || "", smtp_user: sender.smtp_user, smtp_host: sender.smtp_host, smtp_port: String(sender.smtp_port), daily_limit: String(sender.daily_limit) })); setSenderOpen(true); }} style={{ ...btnGhost, marginLeft: "auto", padding: "3px 8px", fontSize: 10.5 }}>변경</button></>
+                    : <><span style={{ color: "#d98a1f" }}>⚠️ 발신 이메일 계정이 없어요 — 등록해야 발송돼요</span><button onClick={() => setSenderOpen(true)} style={{ ...btnSolid, marginLeft: "auto", padding: "4px 10px", fontSize: 10.5 }}>+ 발신계정 등록</button></>}
+                </div>
+              )}
+              {outreach === "email" && <div style={{ marginBottom: 14 }}><div style={label}>제목</div><input value={emailSubject} onChange={e => setEmailSubject(e.target.value)} style={inp} /></div>}
               <div style={{ marginBottom: 14 }}>
                 <div style={label}>메시지 (개인화 변수 사용 가능)</div>
-                <textarea rows={outreach === "email" ? 7 : 4} defaultValue={outreach === "email"
-                  ? "{닉네임}님 안녕하세요! 블로그 잘 보고 있어요 😊\n{관심품목} 관련 글을 즐겨 쓰시는 것 같아, 온종일 체험단에 함께하시면 좋을 것 같아 연락드려요.\n관심 있으시면 회신 주세요. 감사합니다!"
-                  : "{닉네임}님 글 잘 봤어요! {관심키워드} 관련해 온종일 체험단 함께하실래요? 문의는 프로필 링크로 :)"} style={{ ...inp, resize: "vertical", lineHeight: 1.7 }} />
+                <textarea rows={outreach === "email" ? 7 : 4}
+                  value={outreach === "email" ? emailBody : commentBody}
+                  onChange={e => outreach === "email" ? setEmailBody(e.target.value) : setCommentBody(e.target.value)}
+                  style={{ ...inp, resize: "vertical", lineHeight: 1.7 }} />
               </div>
               <div style={{ fontSize: 11.5, color: C.sub, fontWeight: 600, background: C.surf2, border: `1px solid ${C.line}`, borderRadius: 3, padding: "10px 13px", lineHeight: 1.6, marginBottom: 18 }}>
-                💡 <b>{"{닉네임}"}·{"{관심키워드}"}·{"{관심품목}"}</b>는 블로거마다 자동으로 채워져요. {outreach === "comment" ? "댓글은 계정 연결이 필요해요(서이추·공감댓글처럼)." : "발송은 공개된 이메일 주소로만 나가요."}
+                💡 <b>{"{닉네임}"}·{"{관심키워드}"}·{"{관심품목}"}</b>는 블로거마다 자동으로 채워져요. {outreach === "comment" ? "댓글은 계정 연결이 필요해요(서이추·공감댓글처럼)." : `발송은 공개된 이메일 주소로만 나가요. 계정 안전을 위해 하루 ${sender?.daily_limit || 50}통까지, 3~6초 간격으로 보내요.`}
               </div>
               <div style={{ display: "flex", gap: 8 }}>
-                <button onClick={() => setOutreach(null)} style={{ ...btnGhost, flex: 1 }}>취소</button>
-                <button onClick={() => { const now: Record<string, ShipState> = {}; selected.forEach((id) => { now[id] = ships[id] || { status: "proposed" as ShipStatus }; }); setShips((s) => ({ ...s, ...now })); toast(`${outreach === "email" ? "이메일" : "댓글"}로 제안했어요 — 블로거가 OK 회신하면 카드에서 '수락'을 눌러주세요`, "info"); setOutreach(null); }} style={{ ...btnSolid, flex: 2 }}>{selected.size}명에게 {outreach === "email" ? "발송" : "댓글 남기기"} →</button>
+                <button onClick={() => setOutreach(null)} disabled={sending} style={{ ...btnGhost, flex: 1 }}>취소</button>
+                {outreach === "email"
+                  ? <button onClick={sendEmails} disabled={sending} style={{ ...btnSolid, flex: 2, opacity: sending ? .6 : 1 }}>{sending ? "발송 중..." : `${shown.filter(b => selected.has(b.id) && b.email).length}명에게 실제 발송 →`}</button>
+                  : <button onClick={() => { const now: Record<string, ShipState> = {}; selected.forEach((id) => { now[id] = ships[id] || { status: "proposed" as ShipStatus }; }); setShips((s) => ({ ...s, ...now })); toast("댓글 제안 대상으로 담았어요 — 댓글 실발송은 계정 연결 후 지원돼요", "info"); setOutreach(null); }} style={{ ...btnSolid, flex: 2 }}>{selected.size}명 담기 →</button>}
               </div>
+            </div>
+          </div>
+        </div>
+      ), document.body)}
+
+      {/* ═══ 발신 이메일 계정 등록 모달 ═══ */}
+      {senderOpen && createPortal((
+        <div onClick={() => setSenderOpen(false)} style={{ position: "fixed", inset: 0, background: "rgba(20,16,12,.55)", backdropFilter: "blur(3px)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 100000, padding: 20 }}>
+          <div onClick={e => e.stopPropagation()} style={{ background: C.surf, border: `1px solid ${C.line2}`, borderRadius: 6, maxWidth: 480, width: "100%", maxHeight: "88vh", overflowY: "auto", boxShadow: "0 30px 80px rgba(0,0,0,.5)" }}>
+            <div style={{ padding: "20px 24px", borderBottom: `1px solid ${C.line}` }}>
+              <div style={{ fontFamily: serif, fontSize: 18, fontWeight: 600 }}>발신 이메일 계정 등록</div>
+              <div style={{ fontSize: 11.5, color: C.sub, marginTop: 3, lineHeight: 1.55 }}>이 계정으로 블로거에게 제안 메일이 나가요. <b>네이버 메일은 '앱 비밀번호'</b>가 필요해요(네이버 메일 설정 → POP3/SMTP → 앱 비밀번호 생성).</div>
+            </div>
+            <div style={{ padding: "20px 24px", display: "flex", flexDirection: "column", gap: 12 }}>
+              {[
+                { k: "from_name", l: "보내는 사람 이름 (선택)", ph: "온종일 체험단" },
+                { k: "from_email", l: "발신 이메일 주소 *", ph: "myid@naver.com" },
+                { k: "smtp_user", l: "SMTP 아이디 * (보통 이메일 앞부분 or 전체)", ph: "myid" },
+                { k: "smtp_pass", l: "앱 비밀번호 *", ph: "네이버 메일 앱 비밀번호", pw: true },
+              ].map(f => (
+                <div key={f.k}>
+                  <div style={label}>{f.l}</div>
+                  <input type={(f as any).pw ? "password" : "text"} value={(sForm as any)[f.k]} onChange={e => setSForm(s => ({ ...s, [f.k]: e.target.value }))} placeholder={f.ph} style={inp} />
+                </div>
+              ))}
+              <div style={{ display: "flex", gap: 10 }}>
+                <div style={{ flex: 2 }}><div style={label}>SMTP 서버</div><input value={sForm.smtp_host} onChange={e => setSForm(s => ({ ...s, smtp_host: e.target.value }))} style={inp} /></div>
+                <div style={{ flex: 1 }}><div style={label}>포트</div><input value={sForm.smtp_port} onChange={e => setSForm(s => ({ ...s, smtp_port: e.target.value }))} style={inp} /></div>
+                <div style={{ flex: 1 }}><div style={label}>하루 한도</div><input value={sForm.daily_limit} onChange={e => setSForm(s => ({ ...s, daily_limit: e.target.value }))} style={inp} /></div>
+              </div>
+              <div style={{ fontSize: 11, color: C.sub, lineHeight: 1.55, background: C.surf2, borderRadius: 3, padding: "9px 12px" }}>네이버=smtp.naver.com:465 · 구글=smtp.gmail.com:465. 저장 시 실제 로그인 연결을 확인해요(틀리면 저장 안 됨).</div>
+              <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
+                <button onClick={() => setSenderOpen(false)} disabled={sSaving} style={{ ...btnGhost, flex: 1 }}>취소</button>
+                <button onClick={saveSender} disabled={sSaving} style={{ ...btnSolid, flex: 2, opacity: sSaving ? .6 : 1 }}>{sSaving ? "연결 확인 중..." : "연결 확인 후 저장"}</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      ), document.body)}
+
+      {/* ═══ 보낸 글 이력 모달 (CRM) ═══ */}
+      {historyOpen && createPortal((
+        <div onClick={() => setHistoryOpen(false)} style={{ position: "fixed", inset: 0, background: "rgba(20,16,12,.55)", backdropFilter: "blur(3px)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 100000, padding: 20 }}>
+          <div onClick={e => e.stopPropagation()} style={{ background: C.surf, border: `1px solid ${C.line2}`, borderRadius: 6, maxWidth: 620, width: "100%", maxHeight: "86vh", display: "flex", flexDirection: "column", boxShadow: "0 30px 80px rgba(0,0,0,.5)" }}>
+            <div style={{ padding: "20px 24px", borderBottom: `1px solid ${C.line}`, display: "flex", alignItems: "center", gap: 10 }}>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontFamily: serif, fontSize: 18, fontWeight: 600 }}>보낸 글 이력</div>
+                <div style={{ fontSize: 11.5, color: C.sub }}>누구에게 언제 무엇을 보냈는지 · 총 {outHistory.length}건</div>
+              </div>
+              <button onClick={() => setHistoryOpen(false)} style={{ ...btnGhost, padding: "5px 10px" }}>✕</button>
+            </div>
+            <div className="ob-scroll" style={{ padding: "12px 20px", overflowY: "auto", flex: 1 }}>
+              {outHistory.length === 0 ? <div style={{ textAlign: "center", padding: "40px 20px", color: C.sub, fontSize: 13 }}>아직 보낸 글이 없어요.<br />블로거를 선택해 이메일을 보내면 여기에 기록돼요.</div>
+                : outHistory.map((h, i) => (
+                  <div key={i} style={{ padding: "11px 0", borderBottom: `1px solid ${C.line}`, display: "flex", alignItems: "center", gap: 10 }}>
+                    <span style={{ fontSize: 14 }}>{h.channel === "email" ? "✉️" : "💬"}</span>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 12.5, fontWeight: 700, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{h.nickname || h.blog_id} {h.to_email && <span style={{ color: C.sub, fontWeight: 400 }}>· {h.to_email}</span>}</div>
+                      <div style={{ fontSize: 10.5, color: C.sub, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{h.subject || h.message?.slice(0, 40)}</div>
+                    </div>
+                    <div style={{ textAlign: "right", flexShrink: 0 }}>
+                      <div style={{ fontSize: 10, fontWeight: 800, color: h.status === "failed" ? "#d64545" : h.status === "sent" ? "#2f9e5e" : C.accent }}>{h.status === "sent" ? "발송됨" : h.status === "failed" ? "실패" : h.status}</div>
+                      <div style={{ fontSize: 9.5, color: C.sub }}>{new Date(h.sent_at).toLocaleString("ko-KR", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })}</div>
+                    </div>
+                  </div>
+                ))}
             </div>
           </div>
         </div>

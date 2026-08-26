@@ -1,7 +1,8 @@
 import express from "express";
 import cors from "cors";
-import { saveSession, sessionExists, removeSession, crawlBlogIds, crawlBuddyPosts, analyzeBuddyKeywords, addNeighbors, NeighborResult, donePath, engageBlogs, EngageResult, engageDonePath, crawlMyPosts, replyToComments, crawlBlogStats, checkSelectedBlogExposure, pumasiEngage, crawlPumasiReport, pumasiPreview, updatePostTitle, checkProxy } from "./naver";
-import { checkNeighborQuota, incrementNeighborQuota, getNeighborDailyUsage, incrementEngageQuota, getEngageDailyUsage, getUserPlan, NEIGHBOR_DAILY_LIMIT, addNeighborHistory, addReplyHistory, addBlogscoreHistory, incrementPumasiQuota, TITLE_EDIT_DAILY_LIMIT, getTitleEditDailyUsage, incrementTitleEditQuota, getProxyForAccount } from "./supabase";
+import { saveSession, sessionExists, removeSession, crawlBlogIds, crawlBuddyPosts, analyzeBuddyKeywords, addNeighbors, NeighborResult, donePath, engageBlogs, EngageResult, engageDonePath, crawlMyPosts, replyToComments, crawlBlogStats, checkSelectedBlogExposure, pumasiEngage, crawlPumasiReport, pumasiPreview, updatePostTitle, checkProxy, analyzeBlogAuthenticity } from "./naver";
+import { checkNeighborQuota, incrementNeighborQuota, getNeighborDailyUsage, incrementEngageQuota, getEngageDailyUsage, getUserPlan, NEIGHBOR_DAILY_LIMIT, addNeighborHistory, addReplyHistory, addBlogscoreHistory, incrementPumasiQuota, TITLE_EDIT_DAILY_LIMIT, getTitleEditDailyUsage, incrementTitleEditQuota, getProxyForAccount, supabase, getOutreachSender, getOutreachSentToday, addOutreachLog } from "./supabase";
+import nodemailer from "nodemailer";
 import fs from "fs";
 
 const app = express();
@@ -567,6 +568,115 @@ app.post("/api/proxy-check", async (req, res) => {
   } catch (e: any) {
     res.status(500).json({ ok: false, error: e?.message || "검사 실패" });
   }
+});
+
+/* ═══ 📧 아웃리치(체험단 제안) — 발신계정 + 이메일 실발송 + 이력 ═══ */
+
+// 발신 계정 조회(비번은 등록여부만, 값은 숨김)
+app.get("/api/outreach/sender/:userId", async (req, res) => {
+  try {
+    const s = await getOutreachSender(req.params.userId);
+    if (!s) return res.json({ ok: true, sender: null });
+    res.json({ ok: true, sender: { from_name: s.from_name, from_email: s.from_email, smtp_host: s.smtp_host, smtp_port: s.smtp_port, smtp_user: s.smtp_user, daily_limit: s.daily_limit, has_pass: !!s.smtp_pass } });
+  } catch (e: any) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// 발신 계정 저장(회원별). SMTP 연결 검증 후 저장.
+app.post("/api/outreach/sender", async (req, res) => {
+  const { userId, from_name, from_email, smtp_host, smtp_port, smtp_user, smtp_pass, daily_limit } = req.body || {};
+  if (!userId || !from_email || !smtp_user || !smtp_pass) return res.status(400).json({ ok: false, error: "필수 항목(발신 이메일·아이디·비밀번호)을 채워주세요" });
+  const host = smtp_host || "smtp.naver.com";
+  const port = Number(smtp_port) || 465;
+  try {
+    // 실제 연결 검증(잘못된 비번이면 여기서 실패 → 저장 안 함)
+    const tx = nodemailer.createTransport({ host, port, secure: port === 465, auth: { user: smtp_user, pass: smtp_pass } });
+    await tx.verify();
+    const { error } = await supabase.from("publy_outreach_sender").upsert({
+      user_id: userId, from_name: from_name || null, from_email, smtp_host: host, smtp_port: port,
+      smtp_user, smtp_pass, daily_limit: Number(daily_limit) || 50, updated_at: new Date().toISOString(),
+    }, { onConflict: "user_id" });
+    if (error) throw new Error(error.message);
+    res.json({ ok: true });
+  } catch (e: any) {
+    const msg = /auth|credential|password|535/i.test(e.message || "") ? "로그인 실패 — 아이디/앱 비밀번호를 확인하세요(네이버는 '메일 앱 비밀번호' 필요)" : e.message;
+    res.status(400).json({ ok: false, error: msg });
+  }
+});
+
+// 이메일 실발송(SSE) — 선택한 블로거들에게 개인화 발송. 블로그 창 안 열고 SMTP로 바로.
+app.get("/api/outreach/send-email", async (req, res) => {
+  const { userId, subject, message, targets } = req.query as Record<string, string>;
+  sseSetup(res);
+  try {
+    if (!userId) throw new Error("userId 필요");
+    const sender = await getOutreachSender(userId);
+    if (!sender) { sseSend(res, { type: "error", msg: "먼저 발신 이메일 계정을 등록하세요" }); return res.end(); }
+    let list: any[] = [];
+    try { list = JSON.parse(targets || "[]"); } catch {}
+    const withEmail = list.filter(t => t.email);
+    if (!withEmail.length) { sseSend(res, { type: "error", msg: "공개 이메일이 있는 대상이 없어요" }); return res.end(); }
+
+    const sentToday = await getOutreachSentToday(userId);
+    const remain = Math.max(0, sender.daily_limit - sentToday);
+    if (remain <= 0) { sseSend(res, { type: "error", msg: `오늘 발송 한도(${sender.daily_limit}통)를 다 썼어요. 내일 다시 해주세요.` }); return res.end(); }
+    const todo = withEmail.slice(0, remain);
+    if (withEmail.length > remain) sseSend(res, { type: "log", msg: `⚠️ 하루 한도 때문에 ${remain}명만 보냅니다(계정 안전). 나머지는 내일.` });
+
+    const tx = nodemailer.createTransport({ host: sender.smtp_host, port: sender.smtp_port, secure: sender.smtp_port === 465, auth: { user: sender.smtp_user, pass: sender.smtp_pass } });
+    let ok = 0, fail = 0;
+    for (let i = 0; i < todo.length; i++) {
+      const t = todo[i];
+      // 개인화 토큰 치환
+      const subj = String(subject || "체험단 제안").replace(/\{닉네임\}/g, t.nick || "").replace(/\{관심키워드\}/g, (t.keywords?.[0] || "")).replace(/\{관심품목\}/g, (t.categories?.[0] || ""));
+      const body = String(message || "").replace(/\{닉네임\}/g, t.nick || "").replace(/\{관심키워드\}/g, (t.keywords?.[0] || "")).replace(/\{관심품목\}/g, (t.categories?.[0] || ""));
+      try {
+        await tx.sendMail({ from: sender.from_name ? `"${sender.from_name}" <${sender.from_email}>` : sender.from_email, to: t.email, subject: subj, text: body });
+        ok++;
+        await addOutreachLog({ user_id: userId, blog_id: t.id || t.blogId || "", nickname: t.nick, channel: "email", to_email: t.email, subject: subj, message: body, status: "sent" });
+        sseSend(res, { type: "log", msg: `✅ ${t.nick || t.email} 발송 완료 (${ok}/${todo.length})` });
+        sseSend(res, { type: "sent", id: t.id });
+      } catch (e: any) {
+        fail++;
+        await addOutreachLog({ user_id: userId, blog_id: t.id || t.blogId || "", nickname: t.nick, channel: "email", to_email: t.email, subject: subj, message: body, status: "failed", error: e.message });
+        sseSend(res, { type: "log", msg: `❌ ${t.nick || t.email} 실패: ${e.message}` });
+      }
+      // 계정 안전: 발송 간격(3~6초 랜덤)
+      if (i < todo.length - 1) await new Promise(r => setTimeout(r, 3000 + Math.random() * 3000));
+    }
+    sseSend(res, { type: "done", ok, fail });
+  } catch (e: any) {
+    sseSend(res, { type: "error", msg: e.message });
+  }
+  res.end();
+});
+
+// 보낸글 이력 조회
+app.get("/api/outreach/history/:userId", async (req, res) => {
+  try {
+    const { data, error } = await supabase.from("publy_outreach").select("*").eq("user_id", req.params.userId).order("sent_at", { ascending: false }).limit(200);
+    if (error) throw new Error(error.message);
+    res.json({ ok: true, history: data || [] });
+  } catch (e: any) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// 🩺 진정성 정밀 분석(공개 정보, 세션 불필요) — blogIds 배치. SSE로 하나씩 결과 스트림.
+app.get("/api/outreach/authenticity", async (req, res) => {
+  const { blogIds } = req.query as Record<string, string>;
+  sseSetup(res);
+  try {
+    let ids: string[] = [];
+    try { ids = JSON.parse(blogIds || "[]"); } catch {}
+    ids = ids.filter(Boolean).slice(0, 60);   // 과부하 방지
+    for (const id of ids) {
+      const r = await analyzeBlogAuthenticity(id);
+      sseSend(res, { type: "auth", ...r });
+      await new Promise(rs => setTimeout(rs, 250));   // 네이버 예의상 간격
+    }
+    sseSend(res, { type: "done", count: ids.length });
+  } catch (e: any) {
+    sseSend(res, { type: "error", msg: e.message });
+  }
+  res.end();
 });
 
 app.listen(PORT, "127.0.0.1", () => {

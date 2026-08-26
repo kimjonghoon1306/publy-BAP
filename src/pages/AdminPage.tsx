@@ -2832,7 +2832,7 @@ POST3: (제목)|(이유)
 
             {/* ───── 🔍 크롤링 (회원과 동일 · 관리자는 잠금 없이 항상 사용) ───── */}
             {tab === "crawl" && (
-              <div style={{animation:"fadeUp .25s ease both"}}><CrawlCenter showToast={showToast} theme={theme} /></div>
+              <div style={{animation:"fadeUp .25s ease both"}}><CrawlCenter showToast={showToast} theme={theme==="dark"?"dark":"light"} userId={ADM_HISTORY_UID} /></div>
             )}
 
             {/* ───── 🔎 크롤링 관리 (관리자 전용 · 회원 크롤링 잠금해제 승인) ───── */}

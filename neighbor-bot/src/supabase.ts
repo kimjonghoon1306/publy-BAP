@@ -340,3 +340,31 @@ export async function useQuota(userId: string): Promise<boolean> {
 
   return !!(updated && updated.length > 0);
 }
+
+// ═══════════════════════════════════════════════════════════════════
+// 📧 아웃리치(체험단 제안) — 발신 계정 + 보낸글 이력
+// ═══════════════════════════════════════════════════════════════════
+export interface OutreachSender {
+  user_id: string; from_name?: string; from_email: string;
+  smtp_host: string; smtp_port: number; smtp_user: string; smtp_pass: string; daily_limit: number;
+}
+export async function getOutreachSender(userId: string): Promise<OutreachSender | null> {
+  const { data } = await supabase.from("publy_outreach_sender").select("*").eq("user_id", userId).maybeSingle();
+  return (data as OutreachSender) || null;
+}
+// 오늘 이 회원이 보낸 이메일 수(하루 제한 체크용)
+export async function getOutreachSentToday(userId: string): Promise<number> {
+  const start = new Date(); start.setHours(0, 0, 0, 0);
+  const { count } = await supabase.from("publy_outreach")
+    .select("id", { count: "exact", head: true })
+    .eq("user_id", userId).eq("channel", "email").eq("status", "sent")
+    .gte("sent_at", start.toISOString());
+  return count || 0;
+}
+export async function addOutreachLog(row: {
+  user_id: string; blog_id: string; nickname?: string; channel: string;
+  to_email?: string; subject?: string; message?: string; status: string; error?: string;
+}): Promise<void> {
+  const { error } = await supabase.from("publy_outreach").insert(row);
+  if (error) console.warn("[outreach] 이력 저장 실패:", error.message);
+}

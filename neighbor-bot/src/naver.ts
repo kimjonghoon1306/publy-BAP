@@ -3920,3 +3920,32 @@ export async function engageBlogs(params: {
 export function engageDonePath(accountId: string): string {
   return path.join(SESSION_DIR, `engage_done_${accountId}.json`);
 }
+
+/* ── 🩺 공개 정보로 남의 블로그 진정성 분석 (세션 불필요) ──
+   m.blog.naver.com 공개 API의 이웃수(subscriberCount) + NVisitorgp4Ajax 공개 방문자 XML.
+   참여율(방문자/이웃) 대비로 "진짜 영향력 vs 품앗이·봇 부풀림"을 추정한다. */
+export async function analyzeBlogAuthenticity(blogId: string): Promise<{ blogId: string; neighbors: number; visitors: number; authenticity: number | null }> {
+  const MUA = "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1";
+  let neighbors = 0, visitors = 0;
+  try {
+    const r = await fetch(`https://m.blog.naver.com/api/blogs/${encodeURIComponent(blogId)}`, { headers: { "User-Agent": MUA, Referer: `https://m.blog.naver.com/${blogId}` } });
+    const j: any = JSON.parse((await r.text()).replace(/^\)\]\}',?\s*/, ""));
+    neighbors = Number(j?.result?.subscriberCount ?? j?.subscriberCount ?? 0) || 0;
+  } catch {}
+  try {
+    const vres = await fetch(`https://blog.naver.com/NVisitorgp4Ajax.naver?blogId=${encodeURIComponent(blogId)}`, { headers: { "User-Agent": MUA, Referer: `https://blog.naver.com/${blogId}` } });
+    const xml = await vres.text();
+    const nums = Array.from(xml.matchAll(/cnt="(\d+)"/g)).map((m) => Number(m[1])).filter((n) => Number.isFinite(n));
+    if (nums.length) visitors = Math.max(...nums);   // 최근 며칠 중 대표값
+  } catch {}
+  let authenticity: number | null = null;
+  if (neighbors > 0) {
+    // 이웃 대비 일방문자 비율(방문/이웃). 건강한 블로그는 이웃 규모 대비 방문이 어느 정도 나온다.
+    const ratio = visitors / neighbors;               // 0.1~0.5면 건강, 극히 낮으면 품앗이·죽은 이웃 의심
+    const expected = 0.18;                            // 경험적 기대 비율
+    let s = 50 + Math.round(Math.max(-45, Math.min(45, (ratio / expected - 1) * 40)));
+    if (visitors === 0) s = Math.min(s, 30);          // 방문자 0 = 죽은 블로그 의심
+    authenticity = Math.max(5, Math.min(99, s));
+  }
+  return { blogId, neighbors, visitors, authenticity };
+}
