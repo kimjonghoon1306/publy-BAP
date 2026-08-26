@@ -332,14 +332,36 @@ export default function CrawlCenter({ showToast, theme: extTheme, userId, plan =
       {/* 🎉 크롤링 웰컴 팝업 — 몽글(탐험)이 팡! 사용법+재미있는 멘트. [닫기][일주일 보지않기] */}
       {welcome && createPortal(
         <div onClick={() => closeWelcome(false)} style={{ position: "fixed", inset: 0, zIndex: 100000, background: "rgba(20,16,12,.6)", backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
-          <style>{`@keyframes cwPop{0%{transform:scale(.6) translateY(30px);opacity:0}55%{transform:scale(1.04)}100%{transform:scale(1) translateY(0);opacity:1}}@keyframes cwBob{0%,100%{transform:translateY(0) rotate(-3deg)}50%{transform:translateY(-11px) rotate(3deg)}}@keyframes cwRow{0%{opacity:0;transform:translateX(-10px)}100%{opacity:1;transform:translateX(0)}}@keyframes cwGlow{0%,100%{transform:scale(1);opacity:.85}50%{transform:scale(1.12);opacity:1}}@keyframes cwShadow{0%,100%{transform:translateX(-50%) scale(1);opacity:.85}50%{transform:translateX(-50%) scale(.8);opacity:.5}}`}</style>
+          <style>{`
+            @keyframes cwPop{0%{transform:scale(.6) translateY(30px);opacity:0}55%{transform:scale(1.04)}100%{transform:scale(1) translateY(0);opacity:1}}
+            @keyframes cwBob{0%,100%{transform:translateY(0) rotate(-3deg)}50%{transform:translateY(-11px) rotate(3deg)}}
+            @keyframes cwRow{0%{opacity:0;transform:translateX(-10px)}100%{opacity:1;transform:translateX(0)}}
+            @keyframes cwGlow{0%,100%{transform:scale(1);opacity:.85}50%{transform:scale(1.12);opacity:1}}
+            @keyframes cwShadow{0%,100%{transform:translateX(-50%) scale(1);opacity:.85}50%{transform:translateX(-50%) scale(.8);opacity:.5}}
+            @keyframes cwHeroPop{0%{transform:scale(.2) translateY(60px) rotate(-18deg);opacity:0}45%{transform:scale(1.28) translateY(-10px) rotate(8deg);opacity:1}65%{transform:scale(.94) rotate(-4deg)}82%{transform:scale(1.06) rotate(2deg)}100%{transform:scale(1) translateY(0) rotate(0);opacity:1}}
+            @keyframes cwRays{0%{transform:rotate(0);opacity:0}30%{opacity:.9}100%{transform:rotate(360deg);opacity:.9}}
+            @keyframes cwRing{0%{transform:scale(.3);opacity:.9}100%{transform:scale(2.4);opacity:0}}
+            @keyframes cwSpark{0%,100%{transform:scale(0) rotate(0);opacity:0}50%{transform:scale(1) rotate(90deg);opacity:1}}
+            @keyframes cwConfetti{0%{transform:translateY(-40px) rotate(0);opacity:0}12%{opacity:1}100%{transform:translateY(150px) rotate(540deg);opacity:0}}
+          `}</style>
           <div onClick={e => e.stopPropagation()} style={{ position: "relative", background: C.surf, borderRadius: 22, padding: "34px 30px 26px", maxWidth: 440, width: "100%", boxShadow: "0 30px 90px -20px rgba(0,0,0,.55)", border: `1px solid ${C.line2}`, animation: "cwPop .5s cubic-bezier(.22,1.4,.4,1) both", maxHeight: "90vh", overflowY: "auto", color: C.ink }}>
             <div style={{ textAlign: "center", marginBottom: 18 }}>
-              {/* 🧭 주인공 캐릭터 — 크고 임팩트 있게. 후광 + 바닥 그림자 + 회전 bob */}
-              <div style={{ position: "relative", width: 152, height: 152, margin: "0 auto 2px" }}>
-                <div style={{ position: "absolute", inset: 0, borderRadius: "50%", background: `radial-gradient(circle at 50% 42%, ${C.accent}44, ${C.accent}18 55%, transparent 72%)`, animation: "cwGlow 2.6s ease-in-out infinite" }} />
-                <div style={{ position: "absolute", left: "50%", bottom: 8, transform: "translateX(-50%)", width: 76, height: 13, borderRadius: "50%", background: "rgba(0,0,0,.2)", filter: "blur(5px)", animation: "cwShadow 2.4s ease-in-out infinite" }} />
-                <img src="characters/monggeul-explorer.png" alt="탐험가 몽글" onError={e => { const s = document.createElement("div"); s.textContent = "🧭"; s.style.cssText = "font-size:108px;line-height:152px"; e.currentTarget.replaceWith(s); }} style={{ position: "relative", width: 138, height: 138, marginTop: 6, objectFit: "contain", animation: "cwBob 2.4s ease-in-out infinite", filter: `drop-shadow(0 12px 22px ${C.accent}55)` }} />
+              {/* 🧭 주인공 캐릭터 — 화려하게 팡! 광선+링파동+색종이+반짝이+오버슈트 등장 */}
+              <div style={{ position: "relative", width: 190, height: 178, margin: "0 auto 2px", overflow: "visible" }}>
+                <div style={{ position: "absolute", left: "50%", top: "46%", width: 200, height: 200, transform: "translate(-50%,-50%)", background: `conic-gradient(from 0deg, transparent 0 12deg, ${C.accent}28 12deg 24deg, transparent 24deg 36deg, ${C.accent}20 36deg 48deg)`, borderRadius: "50%", animation: "cwRays 9s linear infinite", pointerEvents: "none" }} />
+                <div style={{ position: "absolute", left: "50%", top: "46%", width: 120, height: 120, transform: "translate(-50%,-50%)", borderRadius: "50%", border: `2.5px solid ${C.accent}88`, animation: "cwRing 2.2s ease-out infinite", pointerEvents: "none" }} />
+                <div style={{ position: "absolute", left: "50%", top: "46%", width: 120, height: 120, transform: "translate(-50%,-50%)", borderRadius: "50%", border: `2.5px solid ${C.accent}55`, animation: "cwRing 2.2s ease-out 1.1s infinite", pointerEvents: "none" }} />
+                <div style={{ position: "absolute", left: "50%", top: "46%", width: 150, height: 150, transform: "translate(-50%,-50%)", borderRadius: "50%", background: `radial-gradient(circle, ${C.accent}44, ${C.accent}18 55%, transparent 72%)`, animation: "cwGlow 2.6s ease-in-out infinite" }} />
+                {[["12%","14%",".2s","#ffd23f",16],["82%","10%",".7s",C.accent,13],["6%","62%","1.1s","#8b5cf6",12],["88%","58%",".45s","#ff5fa2",15],["50%","2%","1.4s","#00c8ff",14]].map(([l,t,d,col,sz],k)=>(
+                  <div key={k} style={{ position: "absolute", left: l as string, top: t as string, fontSize: sz as number, color: col as string, animation: `cwSpark 1.8s ease-in-out ${d as string} infinite`, pointerEvents: "none", textShadow: `0 0 8px ${col}` }}>✦</div>
+                ))}
+                {[["20%","#ff5fa2",".1s"],["38%","#ffd23f",".5s"],["56%",C.accent,".3s"],["72%","#8b5cf6",".7s"],["30%","#00c8ff",".9s"],["64%","#ff922e",".2s"]].map(([l,col,d],k)=>(
+                  <div key={"c"+k} style={{ position: "absolute", left: l as string, top: -8, width: 7, height: 11, background: col as string, borderRadius: 2, animation: `cwConfetti 2.6s linear ${d as string} infinite`, pointerEvents: "none" }} />
+                ))}
+                <div style={{ position: "absolute", left: "50%", bottom: 6, transform: "translateX(-50%)", width: 90, height: 15, borderRadius: "50%", background: "rgba(0,0,0,.22)", filter: "blur(6px)", animation: "cwShadow 2.4s ease-in-out infinite" }} />
+                <div style={{ position: "absolute", left: "50%", top: "44%", transform: "translate(-50%,-50%)", animation: "cwHeroPop .9s cubic-bezier(.18,1.5,.5,1) both" }}>
+                  <img src="characters/monggeul-explorer.png" alt="탐험가 몽글" onError={e => { const s = document.createElement("div"); s.textContent = "🧭"; s.style.cssText = "font-size:124px;line-height:1"; e.currentTarget.replaceWith(s); }} style={{ display: "block", width: 156, height: 156, objectFit: "contain", animation: "cwBob 2.4s ease-in-out .9s infinite", filter: `drop-shadow(0 14px 26px ${C.accent}66)` }} />
+                </div>
               </div>
               <div style={{ fontFamily: serif, fontSize: 24, fontWeight: 600, color: C.ink, marginTop: 4 }}>탐험 준비 완료! 🧭</div>
               <div style={{ fontSize: 12.5, color: C.sub, marginTop: 7, lineHeight: 1.6 }}>안녕하세요, 발굴 탐험가 <b style={{ color: C.accent }}>몽글</b>이에요!<br />체험단에 딱 맞는 <b style={{ color: C.ink }}>진짜 블로거</b>를 공개 정보로 찾아드릴게요.</div>

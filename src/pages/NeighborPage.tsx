@@ -3659,14 +3659,48 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
       /* ★ body로 포탈되면 .app.dark/.light의 CSS변수(--card 등)가 안 먹혀 팝업이 투명해짐 → 테마 클래스로 변수 범위 복원(display:contents=레이아웃 영향 0) */
       <div className={theme === "dark" ? "app dark" : "app light"} style={{ display: "contents" }}>
       <div onClick={() => closeWelcome(false)} style={{ position: "fixed", inset: 0, zIndex: 100000, background: "rgba(12,10,20,.6)", backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
-        <style>{`@keyframes wcPop{0%{transform:scale(.6) translateY(30px);opacity:0}55%{transform:scale(1.04)}100%{transform:scale(1) translateY(0);opacity:1}}@keyframes wcBob{0%,100%{transform:translateY(0)}50%{transform:translateY(-11px)}}@keyframes wcRow{0%{opacity:0;transform:translateX(-10px)}100%{opacity:1;transform:translateX(0)}}@keyframes wcGlow{0%,100%{transform:scale(1);opacity:.85}50%{transform:scale(1.12);opacity:1}}@keyframes wcShadow{0%,100%{transform:translateX(-50%) scale(1);opacity:.85}50%{transform:translateX(-50%) scale(.8);opacity:.5}}`}</style>
+        <style>{`
+          @keyframes wcPop{0%{transform:scale(.6) translateY(30px);opacity:0}55%{transform:scale(1.04)}100%{transform:scale(1) translateY(0);opacity:1}}
+          @keyframes wcBob{0%,100%{transform:translateY(0)}50%{transform:translateY(-11px)}}
+          @keyframes wcRow{0%{opacity:0;transform:translateX(-10px)}100%{opacity:1;transform:translateX(0)}}
+          @keyframes wcGlow{0%,100%{transform:scale(1);opacity:.85}50%{transform:scale(1.12);opacity:1}}
+          @keyframes wcShadow{0%,100%{transform:translateX(-50%) scale(1);opacity:.85}50%{transform:translateX(-50%) scale(.8);opacity:.5}}
+          /* ★ 캐릭터 팡! — 작게 아래서 튀어올라 크게 오버슈트 후 안착 */
+          @keyframes wcHeroPop{0%{transform:scale(.2) translateY(60px) rotate(-18deg);opacity:0}45%{transform:scale(1.28) translateY(-10px) rotate(6deg);opacity:1}65%{transform:scale(.94) rotate(-3deg)}82%{transform:scale(1.06) rotate(1deg)}100%{transform:scale(1) translateY(0) rotate(0);opacity:1}}
+          /* 뒤에서 회전하는 광선(sunburst) */
+          @keyframes wcRays{0%{transform:rotate(0);opacity:0}30%{opacity:.9}100%{transform:rotate(360deg);opacity:.9}}
+          /* 퍼져나가는 링 파동 */
+          @keyframes wcRing{0%{transform:scale(.3);opacity:.9}100%{transform:scale(2.4);opacity:0}}
+          /* 반짝이 별 */
+          @keyframes wcSpark{0%,100%{transform:scale(0) rotate(0);opacity:0}50%{transform:scale(1) rotate(90deg);opacity:1}}
+          /* 색종이 낙하 */
+          @keyframes wcConfetti{0%{transform:translateY(-40px) rotate(0);opacity:0}12%{opacity:1}100%{transform:translateY(150px) rotate(540deg);opacity:0}}
+        `}</style>
         <div onClick={e => e.stopPropagation()} style={{ position: "relative", background: "var(--card)", borderRadius: 24, padding: "34px 30px 26px", maxWidth: 440, width: "100%", boxShadow: "0 30px 90px -20px rgba(0,0,0,.55)", border: "1px solid var(--border)", animation: "wcPop .5s cubic-bezier(.22,1.4,.4,1) both", maxHeight: "90vh", overflowY: "auto" }}>
           <div style={{ textAlign: "center", marginBottom: 18 }}>
-            {/* 🌱 주인공 캐릭터 — 크고 임팩트 있게. 뒤 후광 + 바닥 그림자 + 등장 스프링 + bob */}
-            <div style={{ position: "relative", width: 148, height: 148, margin: "0 auto 2px" }}>
-              <div style={{ position: "absolute", inset: 0, borderRadius: "50%", background: "radial-gradient(circle at 50% 42%, rgba(0,200,150,.28), rgba(139,92,246,.1) 55%, transparent 72%)", animation: "wcGlow 2.6s ease-in-out infinite" }} />
-              <div style={{ position: "absolute", left: "50%", bottom: 8, transform: "translateX(-50%)", width: 74, height: 13, borderRadius: "50%", background: "rgba(0,0,0,.18)", filter: "blur(5px)", animation: "wcShadow 2.2s ease-in-out infinite" }} />
-              <img src="characters/pumi-guide.png" alt="가이드 푸미" onError={e => { const s = document.createElement("div"); s.textContent = "🧑‍⚕️"; s.style.cssText = "font-size:104px;line-height:148px"; e.currentTarget.replaceWith(s); }} style={{ position: "relative", width: 132, height: 132, marginTop: 6, objectFit: "contain", animation: "wcBob 2.2s ease-in-out infinite", filter: "drop-shadow(0 12px 22px rgba(0,200,150,.34))" }} />
+            {/* 🌱 주인공 캐릭터 — 화려하게 팡! 광선+링파동+색종이+반짝이+오버슈트 등장 */}
+            <div style={{ position: "relative", width: 190, height: 178, margin: "0 auto 2px", overflow: "visible" }}>
+              {/* 회전 광선(sunburst) */}
+              <div style={{ position: "absolute", left: "50%", top: "46%", width: 200, height: 200, transform: "translate(-50%,-50%)", background: "conic-gradient(from 0deg, transparent 0 12deg, rgba(0,200,150,.16) 12deg 24deg, transparent 24deg 36deg, rgba(139,92,246,.14) 36deg 48deg)", borderRadius: "50%", animation: "wcRays 9s linear infinite", pointerEvents: "none" }} />
+              {/* 퍼지는 링 파동 2개 */}
+              <div style={{ position: "absolute", left: "50%", top: "46%", width: 120, height: 120, transform: "translate(-50%,-50%)", borderRadius: "50%", border: "2.5px solid rgba(0,200,150,.5)", animation: "wcRing 2.2s ease-out infinite", pointerEvents: "none" }} />
+              <div style={{ position: "absolute", left: "50%", top: "46%", width: 120, height: 120, transform: "translate(-50%,-50%)", borderRadius: "50%", border: "2.5px solid rgba(139,92,246,.45)", animation: "wcRing 2.2s ease-out 1.1s infinite", pointerEvents: "none" }} />
+              {/* 후광 */}
+              <div style={{ position: "absolute", left: "50%", top: "46%", width: 150, height: 150, transform: "translate(-50%,-50%)", borderRadius: "50%", background: "radial-gradient(circle, rgba(0,200,150,.32), rgba(139,92,246,.12) 55%, transparent 72%)", animation: "wcGlow 2.6s ease-in-out infinite" }} />
+              {/* 반짝이 별들 */}
+              {[["12%","14%",".2s","#ffd23f",16],["82%","10%",".7s","#00c896",13],["6%","62%","1.1s","#8b5cf6",12],["88%","58%",".45s","#ff5fa2",15],["50%","2%","1.4s","#00c8ff",14]].map(([l,t,d,col,sz],k)=>(
+                <div key={k} style={{ position: "absolute", left: l as string, top: t as string, fontSize: sz as number, color: col as string, animation: `wcSpark 1.8s ease-in-out ${d as string} infinite`, pointerEvents: "none", textShadow: `0 0 8px ${col}` }}>✦</div>
+              ))}
+              {/* 색종이 */}
+              {[["20%","#ff5fa2",".1s"],["38%","#ffd23f",".5s"],["56%","#00c896",".3s"],["72%","#8b5cf6",".7s"],["30%","#00c8ff",".9s"],["64%","#ff922e",".2s"]].map(([l,col,d],k)=>(
+                <div key={"c"+k} style={{ position: "absolute", left: l as string, top: -8, width: 7, height: 11, background: col as string, borderRadius: 2, animation: `wcConfetti 2.6s linear ${d as string} infinite`, pointerEvents: "none" }} />
+              ))}
+              {/* 바닥 그림자 */}
+              <div style={{ position: "absolute", left: "50%", bottom: 6, transform: "translateX(-50%)", width: 88, height: 15, borderRadius: "50%", background: "rgba(0,0,0,.2)", filter: "blur(6px)", animation: "wcShadow 2.2s ease-in-out infinite" }} />
+              {/* 캐릭터 본체 — 크게 + 팡 등장 + bob */}
+              <div style={{ position: "absolute", left: "50%", top: "44%", transform: "translate(-50%,-50%)", animation: "wcHeroPop .9s cubic-bezier(.18,1.5,.5,1) both" }}>
+                <img src="characters/pumi-guide.png" alt="가이드 푸미" onError={e => { const s = document.createElement("div"); s.textContent = "🧑‍⚕️"; s.style.cssText = "font-size:120px;line-height:1"; e.currentTarget.replaceWith(s); }} style={{ display: "block", width: 150, height: 150, objectFit: "contain", animation: "wcBob 2.2s ease-in-out .9s infinite", filter: "drop-shadow(0 14px 26px rgba(0,200,150,.4))" }} />
+              </div>
             </div>
             <div style={{ fontSize: 22, fontWeight: 900, color: "var(--text)", marginTop: 4, letterSpacing: "-.02em" }}>블로그 주치의에 오신 걸 환영해요! 🩺</div>
             <div style={{ fontSize: 12.5, color: "var(--text2)", marginTop: 7, lineHeight: 1.6 }}>글 하나하나를 <b style={{ color: "#00c896" }}>검색에 뜰 때까지</b> 제가 끝까지 데려갈게요.<br />이 순서대로만 하면 돼요 👇</div>
