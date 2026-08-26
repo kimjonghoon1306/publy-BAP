@@ -1369,12 +1369,23 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
     if (!key) return alert("AI 제목 추천은 무료 Gemini 키가 필요해요. 설정 → 글쓰기 AI에서 등록해주세요.");
     setRpBusyLog(item.logNo);
     addScLog(`✏️ "${item.title.slice(0, 22)}" 개선안 만드는 중...`);
+    // ★★글 본문을 실제로 읽어 AI에 준다 — 제목만 보고 내용과 다른 엉뚱한 제목을 제안하는 문제 방지(테리 지적)
+    let bodyBlock = "";
+    try {
+      const bid = item.blogId || activeAccount?.blogId || "";
+      if (bid) {
+        addScLog(`📄 글 내용 읽는 중...`);
+        const br = await botFetch(`${BOT}/api/post-body?blogId=${encodeURIComponent(bid)}&logNo=${encodeURIComponent(item.logNo)}`);
+        const bd = await br.json();
+        if (bd.ok && bd.body) bodyBlock = `\n\n[⚠️이 글의 실제 본문 내용 — 반드시 이 내용에 맞는 제목을 제안하라. 내용과 동떨어진 제목 금지]\n${String(bd.body).slice(0, 1200)}`;
+      }
+    } catch {}
     // ★내 블로그에서 실제로 검색 상위에 잡힌 성공 제목 = AI가 학습할 실전 패턴(개선안 섹션과 동일 방식)
     const winners = (scResult?.exposureChecks || []).filter(c => c.exposed === true && (c as any).rank != null)
       .sort((a: any, b: any) => a.rank - b.rank).slice(0, 8).map((c: any) => `${c.title} (검색 약 ${c.rank}위)`);
     const winnerBlock = winners.length ? `\n\n[⭐이 블로그에서 실제로 검색 상위에 잡힌 '성공 제목'들 — 이 패턴을 학습해 반영]\n${winners.join("\n")}` : "";
     const models = ["gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-flash-latest", "gemini-flash-lite-latest"];
-    const prompt = `너는 네이버 블로그 상위노출(SEO) 전문가야. 아래 글은 검색에 안 뜨고 있어(누락). 이 제목을 검색에 잘 잡히게 정교하게 고쳐줘.${winnerBlock}\n\n아래 JSON 형식으로만 답해. 다른 말 절대 금지. 순수 JSON만:\n{"diagnosis":"이 제목이 왜 검색 안 되는지 핵심 원인 1문장","newTitle":"개선안1 (실제 검색어를 앞에 배치, 25~35자, 구체적)","newTitle2":"개선안2 (newTitle과 검색어·각도·타겟을 확실히 다르게 한 대안, 반드시 채워라)","keywords":["본문에 넣을 실제 검색 키워드5개"],"bodyTip":"본문/태그를 어떻게 손보면 좋은지 실전 팁 1문장","expectedEffect":"이렇게 바꾸면 기대되는 효과 1문장"}\n[규칙] 과장·감탄사(대박/충격/완벽/진짜/1등) 금지. 사람들이 진짜 네이버에 치는 검색어(지명+대상+상황) 형태. newTitle2는 절대 비우지 마라(항상 제목 2개).\n\n[원래 제목]\n${item.title}`;
+    const prompt = `너는 네이버 블로그 상위노출(SEO) 전문가야. 아래 글은 검색에 안 뜨고 있어(누락). 이 글의 실제 본문 내용을 읽고, 그 내용에 딱 맞으면서 검색에 잘 잡히는 제목으로 고쳐줘.${bodyBlock}${winnerBlock}\n\n아래 JSON 형식으로만 답해. 다른 말 절대 금지. 순수 JSON만:\n{"diagnosis":"이 제목이 왜 검색 안 되는지 핵심 원인 1문장","newTitle":"개선안1 (본문 내용과 일치 + 실제 검색어를 앞에 배치, 25~35자, 구체적)","newTitle2":"개선안2 (newTitle과 검색어·각도·타겟을 확실히 다르게 한 대안, 반드시 채워라)","keywords":["본문에 실제로 나오는 검색 키워드5개"],"bodyTip":"본문/태그를 어떻게 손보면 좋은지 실전 팁 1문장","expectedEffect":"이렇게 바꾸면 기대되는 효과 1문장"}\n[규칙] ★제목은 반드시 위 본문 내용과 일치해야 한다(내용에 없는 소재로 낚시 금지). 과장·감탄사(대박/충격/완벽/진짜/1등) 금지. 사람들이 진짜 네이버에 치는 검색어(지명+대상+상황) 형태. newTitle2는 절대 비우지 마라(항상 제목 2개).\n\n[원래 제목]\n${item.title}`;
     let sol: any = null;
     for (const model of models) {
       try {
@@ -1512,11 +1523,22 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
     // ★상위(1~10위권) 성공 제목 = AI가 학습할 실전 성공 패턴
     const winners = checks.filter(c => c.exposed === true && c.rank != null).sort((a, b) => (a.rank! - b.rank!)).slice(0, 12).map(c => `${c.title} (검색 약 ${c.rank}위)`);
     setScSolLoading(true); if (!append) { setScSolutions(null); setScSolPage(0); }
-    addScLog(`✏️ AI 개선안 생성 중 — ${append ? "다음 " : ""}누락 글 ${missing.length}개${winners.length ? ` (성공 제목 ${winners.length}개 패턴 학습)` : ""}...`);
+    // ★★각 글 본문을 병렬로 읽어 AI에 준다(제목만 보고 내용과 다른 제목 제안 방지). blogId=현재 계정.
+    const bid = activeAccount?.blogId || "";
+    let bodyMap: Record<string, string> = {};
+    if (bid) {
+      addScLog(`📄 ${missing.length}개 글 내용 읽는 중...`);
+      const bodies = await Promise.all(missingChecks.map(async c => {
+        try { const r = await botFetch(`${BOT}/api/post-body?blogId=${encodeURIComponent(bid)}&logNo=${encodeURIComponent(String(c.logNo || ""))}`); const d = await r.json(); return { title: c.title, body: d.ok ? String(d.body || "").slice(0, 700) : "" }; } catch { return { title: c.title, body: "" }; }
+      }));
+      bodies.forEach(b => { if (b.body) bodyMap[b.title] = b.body; });
+    }
+    addScLog(`✏️ AI 개선안 생성 중 — ${append ? "다음 " : ""}글 ${missing.length}개${winners.length ? ` (성공 제목 ${winners.length}개 패턴 학습)` : ""}...`);
     const winnerBlock = winners.length
       ? `\n\n[⭐이 블로그에서 실제로 검색 상위에 잡힌 '성공 제목'들 — 반드시 이 패턴을 학습해서 반영]\n${winners.join("\n")}\n→ 위 성공 제목들의 공통 패턴(구체적 지명·제품명·상황·숫자·검색어 배치)을 분석해서, 아래 누락 제목을 '같은 블로그에서 통한 방식'으로 고쳐라. 일반론 말고 이 블로그에 실제로 통한 스타일로.`
       : "";
-    const prompt = `너는 네이버 블로그 상위노출(SEO) 전문가야. 이 블로그의 아래 글들은 이미 네이버 검색 100위 안에 노출은 되고 있지만 순위가 아쉬워(더 위로 올릴 여지가 큼). 각 제목·키워드를 다듬어 검색 순위를 더 끌어올려줘.${winnerBlock}\n\n각 누락 제목마다 아래 JSON 형식으로만 답해. 다른 말 절대 금지. 순수 JSON 배열만:\n[{"original":"원래제목","diagnosis":"이 제목이 왜 검색 안 되는지 핵심 원인 1문장(과장/낚시/검색어없음/너무추상 등)","newTitle":"개선안1 (실제 검색어를 앞에 배치, 25~35자, 구체적)","newTitle2":"개선안2 (다른 각도의 대안)","keywords":["이 글 본문에 넣을 실제 검색 키워드5개"],"bodyTip":"본문/태그를 어떻게 손보면 좋은지 실전 팁 1문장","expectedEffect":"이렇게 바꾸면 기대되는 효과 1문장"}]\n\n[핵심 규칙]\n- newTitle: 사람들이 진짜 네이버에 치는 검색어(지명+대상+상황) 형태. 과장·감탄사(대박/진짜/1등/충격) 절대 금지.\n- ★newTitle2는 반드시 채워라(절대 비우지 마라). newTitle과 검색어·각도·타겟을 확실히 다르게 한 두 번째 대안을 꼭 제시해서, 항상 제목 2개를 준다.\n- 위 '성공 제목' 패턴이 있으면 그 스타일을 최대한 따라라.\n- keywords: 검색량 있을 법한 구체 키워드 5개(롱테일 포함).\n- 모든 답변은 실행 가능하고 구체적으로. 뻔한 일반론 금지.\n\n[누락 제목들]\n${missing.map((t, i) => `${i + 1}. ${t}`).join("\n")}`;
+    const hasBody = Object.keys(bodyMap).length > 0;
+    const prompt = `너는 네이버 블로그 상위노출(SEO) 전문가야. 이 블로그의 아래 글들은 이미 네이버 검색 100위 안에 노출은 되고 있지만 순위가 아쉬워(더 위로 올릴 여지가 큼). ${hasBody ? "각 글의 실제 본문 내용을 읽고, 그 내용에 딱 맞으면서 " : ""}각 제목·키워드를 다듬어 검색 순위를 더 끌어올려줘.${winnerBlock}\n\n각 제목마다 아래 JSON 형식으로만 답해. 다른 말 절대 금지. 순수 JSON 배열만:\n[{"original":"원래제목","diagnosis":"이 제목이 왜 순위가 아쉬운지 핵심 원인 1문장(과장/낚시/검색어없음/너무추상 등)","newTitle":"개선안1 (본문 내용과 일치 + 실제 검색어를 앞에 배치, 25~35자, 구체적)","newTitle2":"개선안2 (다른 각도의 대안)","keywords":["이 글 본문에 실제로 나오는 검색 키워드5개"],"bodyTip":"본문/태그를 어떻게 손보면 좋은지 실전 팁 1문장","expectedEffect":"이렇게 바꾸면 기대되는 효과 1문장"}]\n\n[핵심 규칙]\n- ★제목은 반드시 각 글의 본문 내용과 일치해야 한다(내용에 없는 소재로 낚시 절대 금지).\n- newTitle: 사람들이 진짜 네이버에 치는 검색어(지명+대상+상황) 형태. 과장·감탄사(대박/진짜/1등/충격) 절대 금지.\n- ★newTitle2는 반드시 채워라(절대 비우지 마라). newTitle과 검색어·각도·타겟을 확실히 다르게 한 두 번째 대안을 꼭 제시해서, 항상 제목 2개를 준다.\n- 위 '성공 제목' 패턴이 있으면 그 스타일을 최대한 따라라.\n- keywords: 검색량 있을 법한 구체 키워드 5개(롱테일 포함).\n- 모든 답변은 실행 가능하고 구체적으로. 뻔한 일반론 금지.\n\n[대상 글${hasBody ? " (제목 + 실제 본문 발췌)" : ""}]\n${missing.map((t, i) => `${i + 1}. 제목: ${t}${bodyMap[t] ? `\n   본문: ${bodyMap[t]}` : ""}`).join("\n\n")}`;
     // 2.0-flash 우선(thinking 토큰 안 먹어 JSON 안정적). 토큰 넉넉히(8000)+JSON 강제로 응답 잘림·설명 섞임 방지.
     // ★실검증(2026-08-24): gemini-2.0-flash·2.0-flash-lite·1.5-flash는 구글이 폐기(404). 살아있는 모델만 사용.
     //   각 모델은 한도가 별도라, 2.5-flash가 한도 차도 다음 모델(2.5-flash-lite 등, 한도 남음)로 넘어가 성공한다.

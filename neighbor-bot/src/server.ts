@@ -1,6 +1,6 @@
 import express from "express";
 import cors from "cors";
-import { saveSession, sessionExists, removeSession, crawlBlogIds, crawlBuddyPosts, analyzeBuddyKeywords, addNeighbors, NeighborResult, donePath, engageBlogs, EngageResult, engageDonePath, crawlMyPosts, replyToComments, crawlBlogStats, checkSelectedBlogExposure, pumasiEngage, crawlPumasiReport, pumasiPreview, updatePostTitle, checkProxy, analyzeBlogAuthenticity } from "./naver";
+import { saveSession, sessionExists, removeSession, crawlBlogIds, crawlBuddyPosts, analyzeBuddyKeywords, addNeighbors, NeighborResult, donePath, engageBlogs, EngageResult, engageDonePath, crawlMyPosts, replyToComments, crawlBlogStats, checkSelectedBlogExposure, pumasiEngage, crawlPumasiReport, pumasiPreview, updatePostTitle, checkProxy, analyzeBlogAuthenticity, fetchPostBody } from "./naver";
 import { checkNeighborQuota, incrementNeighborQuota, getNeighborDailyUsage, incrementEngageQuota, getEngageDailyUsage, getUserPlan, NEIGHBOR_DAILY_LIMIT, addNeighborHistory, addReplyHistory, addBlogscoreHistory, incrementPumasiQuota, TITLE_EDIT_DAILY_LIMIT, getTitleEditDailyUsage, incrementTitleEditQuota, getProxyForAccount, supabase, getOutreachSender, getOutreachSentToday, addOutreachLog } from "./supabase";
 import nodemailer from "nodemailer";
 import fs from "fs";
@@ -677,6 +677,16 @@ app.get("/api/outreach/authenticity", async (req, res) => {
     sseSend(res, { type: "error", msg: e.message });
   }
   res.end();
+});
+
+// 📄 글 본문 읽기 — 개선안 제안 시 제목만 보지 않게 실제 내용을 읽어 AI에 준다(공개, 세션 불필요)
+app.get("/api/post-body", async (req, res) => {
+  const { blogId, logNo } = req.query as Record<string, string>;
+  if (!blogId || !logNo) return res.status(400).json({ ok: false, error: "blogId·logNo 필요" });
+  try {
+    const r = await fetchPostBody(blogId, logNo);
+    res.json({ ok: true, ...r });
+  } catch (e: any) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
 app.listen(PORT, "127.0.0.1", () => {

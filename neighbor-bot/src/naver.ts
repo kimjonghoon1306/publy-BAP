@@ -3949,3 +3949,31 @@ export async function analyzeBlogAuthenticity(blogId: string): Promise<{ blogId:
   }
   return { blogId, neighbors, visitors, authenticity };
 }
+
+/* ── 📄 글 본문 읽기 (세션 불필요, 공개) ──
+   개선안 제안 시 "제목만 보고 엉뚱하게 고치는" 문제 방지 → 실제 본문을 읽어 AI에 준다.
+   네이버 모바일 공개 페이지(m.blog.naver.com/{blogId}/{logNo})에서 본문 텍스트 추출. */
+export async function fetchPostBody(blogId: string, logNo: string): Promise<{ title: string; body: string }> {
+  const MUA = "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1";
+  try {
+    const r = await fetch(`https://m.blog.naver.com/${encodeURIComponent(blogId)}/${encodeURIComponent(logNo)}`, { headers: { "User-Agent": MUA } });
+    const html = await r.text();
+    // 제목
+    let title = "";
+    const tm = html.match(/<meta property="og:title" content="([^"]*)"/) || html.match(/<title>([^<]*)<\/title>/);
+    if (tm) title = tm[1].replace(/&[a-z]+;/g, " ").trim();
+    // 본문: se-main-container 또는 postViewArea 영역의 텍스트만 러프하게 추출
+    let seg = html;
+    const bi = html.indexOf("se-main-container");
+    if (bi > 0) seg = html.slice(bi, bi + 60000);
+    const body = seg
+      .replace(/<script[\s\S]*?<\/script>/gi, " ")
+      .replace(/<style[\s\S]*?<\/style>/gi, " ")
+      .replace(/<[^>]+>/g, " ")
+      .replace(/&nbsp;|&amp;|&quot;|&#39;|&lt;|&gt;/g, " ")
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, 1500);   // AI 프롬프트에 넣을 만큼만
+    return { title, body };
+  } catch { return { title: "", body: "" }; }
+}
