@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { createPortal } from "react-dom";
-import { BotEventStream } from "../lib/botApi";
+import { BotEventStream, botFetch } from "../lib/botApi";
 import { PLAN_CONFIG, CRAWL_DAILY_LIMIT, EMAIL_DAILY_LIMIT, getCrawlDailyUsage, incrementCrawlQuota, getEmailDailyUsage, incrementEmailQuota } from "../lib/supabase";
 
 const BOT = "http://127.0.0.1:3334";   // neighbor-bot (발굴·발송)
@@ -103,14 +103,14 @@ export default function CrawlCenter({ showToast, theme: extTheme, userId, plan =
   const [sErr, setSErr] = useState("");              // 발신계정 저장 에러(모달 안에 직접 표시 — 토스트는 모달에 가림)
   const loadSender = async () => {
     if (!userId) return;
-    try { const r = await fetch(`${BOT}/api/outreach/sender/${userId}`); const d = await r.json(); if (d.ok) setSender(d.sender); } catch {}
+    try { const r = await botFetch(`${BOT}/api/outreach/sender/${userId}`); const d = await r.json(); if (d.ok) setSender(d.sender); } catch {}
   };
   // 보낸글 이력
   const [historyOpen, setHistoryOpen] = useState(false);
   const [outHistory, setOutHistory] = useState<any[]>([]);
   const loadOutHistory = async () => {
     if (!userId) return;
-    try { const r = await fetch(`${BOT}/api/outreach/history/${userId}`); const d = await r.json(); if (d.ok) setOutHistory(d.history || []); } catch {}
+    try { const r = await botFetch(`${BOT}/api/outreach/history/${userId}`); const d = await r.json(); if (d.ok) setOutHistory(d.history || []); } catch {}
   };
   const esOutRef = useRef<BotEventStream | null>(null);
   const [manualEmails, setManualEmails] = useState("");   // 직접 입력/붙여넣기한 이메일(발굴 결과에 없는 사람)
@@ -271,7 +271,7 @@ export default function CrawlCenter({ showToast, theme: extTheme, userId, plan =
     if (!sForm.from_email || !sForm.smtp_user || !sForm.smtp_pass) { setSErr("발신 이메일·로그인 아이디·앱 비밀번호를 모두 채워주세요."); return; }
     setSSaving(true);
     try {
-      const r = await fetch(`${BOT}/api/outreach/sender`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ userId, ...sForm }) });
+      const r = await botFetch(`${BOT}/api/outreach/sender`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ userId, ...sForm }) });
       const d = await r.json();
       if (!d.ok) throw new Error(d.error || "저장 실패");
       toast("✅ 발신 계정을 등록했어요 (연결 확인됨)", "success");
