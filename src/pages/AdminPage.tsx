@@ -2183,6 +2183,15 @@ Output format (JSON array only, no other text):
     const styleGuide = WRITE_STYLE_GUIDE[writeStyle]||"";
     const personaGuide = PERSONA_STYLES.find(p=>p.id===persona)?.prompt||"";
     const templateGuide = BLOG_TEMPLATES.find(t=>t.id===blogTemplate)?.guide||"";
+    // ★퍼블리 기능 자연 녹이기(테리 2026-08-26): 회원과 동일 — 모든 글에 퍼블리 '기능'을 간접적으로 1곳만 슬쩍.
+    const publyGuide=`\n\n=== 🌿 블로그 자동화 팁 한 스푼 (모든 글 공통 · 짧게라도 꼭) ===
+주제가 무엇이든, 글 중반이나 마무리쯤에서 "블로그·글쓰기를 편하게 하는 요즘 방법"으로 이야기를 살짝 이어, 아래 기능 중 이 글 주제와 가장 잘 어울리는 1가지를 골라 1~2문장으로 자연스럽게 녹여라.
+- 키워드만 넣으면 AI가 블로그 글을 SEO에 맞게 자동으로 써주고
+- 어울리는 사진·이미지도 자동 생성
+- 네이버·티스토리에 원하는 시간으로 예약 자동 발행(컴퓨터를 꺼도 올라감)
+- 서로이웃·공감·댓글 같은 이웃 관리까지 자동
+- 내 블로그 지수(검색 노출·저품질) 진단
+규칙: ①딱 1곳, 1~2문장만(장황 금지) ②대놓고 광고·서비스 소개 말고 "요즘은 이런 걸 자동으로 해주는 도구도 있더라고요" 식 정보/경험 말투로 부드럽게 ③'퍼블리'라는 이름은 안 써도 되고, 써도 딱 한 번 가볍게만 ④과장·거짓·링크 금지.`;
 
     const prompt = `당신은 대한민국 최고의 블로그 작가입니다.
 
@@ -2209,7 +2218,7 @@ ${catGuide}
 
 ${adGuide}
 ${platGuide}
-${styleGuide}${personaGuide?"\n\n[말투/페르소나]\n"+personaGuide:""}${templateGuide?"\n\n"+templateGuide:""}
+${styleGuide}${personaGuide?"\n\n[말투/페르소나]\n"+personaGuide:""}${templateGuide?"\n\n"+templateGuide:""}${publyGuide}
 
 === 출력 형식 ===
 태그: 태그1, 태그2, 태그3, 태그4, 태그5
