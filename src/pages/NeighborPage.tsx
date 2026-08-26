@@ -1136,10 +1136,11 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
   // ★절전 방지(테리 요청): 서이추·공감댓글 자동작업(추출·실행·분산 자동실행) 중이면 부모(DashboardPage)에 알림.
   //   실제 keepAwake는 항상 떠있는 DashboardPage가 통합 관리 → 작업 중 다른 탭 이동/언마운트돼도 화면 안 꺼짐.
   useEffect(() => {
-    const busy = crawling || working || spreadRunning || eCrawling || eWorking || rWorking || rLoadingPosts || scLoading || pumWorking;
+    // ★bulkRunning(전체 제목변경)·titleEditingKey(제목변경)·scExposureLoading(검색노출검사)도 절전방지 — 오래 걸리는 동안 화면 안 꺼지게
+    const busy = crawling || working || spreadRunning || eCrawling || eWorking || rWorking || rLoadingPosts || scLoading || pumWorking || bulkRunning || !!titleEditingKey || scExposureLoading;
     onBusyChange?.(busy);
     return () => { onBusyChange?.(false); };
-  }, [crawling, working, spreadRunning, eCrawling, eWorking, rWorking, rLoadingPosts, scLoading, pumWorking, onBusyChange]);
+  }, [crawling, working, spreadRunning, eCrawling, eWorking, rWorking, rLoadingPosts, scLoading, pumWorking, bulkRunning, titleEditingKey, scExposureLoading, onBusyChange]);
 
   const stopSpread = () => {
     spreadRunningRef.current = false;
