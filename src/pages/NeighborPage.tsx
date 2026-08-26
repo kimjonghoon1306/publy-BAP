@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
+import { createPortal } from "react-dom";
 import { botFetch, BotEventStream } from "../lib/botApi";
-import { getReplyDailyUsage, incrementReplyQuota, REPLY_DAILY_LIMIT, getBlogscoreDailyUsage, incrementBlogscoreQuota, BLOGSCORE_DAILY_LIMIT, PUMASI_ACCOUNT_LIMIT, PUMASI_POSTS_LIMIT, TAB_ACCOUNT_LIMIT, getPumasiDailyUsage } from "../lib/supabase";
+import { getReplyDailyUsage, incrementReplyQuota, REPLY_DAILY_LIMIT, getBlogscoreDailyUsage, incrementBlogscoreQuota, BLOGSCORE_DAILY_LIMIT, PUMASI_ACCOUNT_LIMIT, PUMASI_POSTS_LIMIT, TAB_ACCOUNT_LIMIT, getPumasiDailyUsage, savePostCareChecks, markPrescribed, markTitleChanged, getPostCare, computeCareStatus, PostCare, OBSERVE_DAYS } from "../lib/supabase";
 
 const BOT = "http://127.0.0.1:3334";
 
@@ -542,6 +543,9 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
   const [rpTick, setRpTick] = useState(0);                   // 재발행 목록 새로고침 트리거
   const [rpSpin, setRpSpin] = useState(false);               // 재발행 새로고침 버튼 회전 애니(눌린 느낌)
   const [republishShow, setRepublishShow] = useState(12);   // 재발행 목록 몇 개까지 보이기(더 보기)
+  // 🩺 주치의 진료차트: logNo → PostCare (검사·개선안·수정 이력). 관찰중 글을 "기다리세요"로 표시해 무한루프 차단.
+  const [careMap, setCareMap] = useState<Record<string, PostCare>>({});
+  const [celebrate, setCelebrate] = useState<PostCare[] | null>(null);   // 🎉 완치(노출) 축포 세리머니 대상
   const [scSolPage, setScSolPage] = useState(0);   // AI 팁 페이지네이션(5개 단위)
   const [scSolSearch, setScSolSearch] = useState(""); // AI 팁 원래 제목 검색
   const [scExpPage, setScExpPage] = useState(0);   // 검색노출 결과 페이지네이션(30개 단위)
@@ -690,6 +694,12 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
   //   미선택/무효면 첫 연결 계정으로 폴백. 품앗이는 연결된 계정 전체를 쓰므로 이 선택과 무관.
   const [selectedAcctId, setSelectedAcctId] = useState<string>("");
   const activeAccount = accounts.find(a => a.accountId === selectedAcctId && a.sessionOk) || accounts.find(a => a.sessionOk);
+  // 🩺 진료차트 로드(activeAccount 확정 후 정의) — 검사/개선안/수정 이력을 careMap에 담아 관찰중 표시에 사용
+  const loadCare = async () => {
+    if (!userId || !activeAccount) return;
+    try { const rows = await getPostCare(userId, activeAccount.accountId); const m: Record<string, PostCare> = {}; rows.forEach(r => { m[r.post_key] = r; }); setCareMap(m); } catch {}
+  };
+  useEffect(() => { loadCare(); /* eslint-disable-next-line */ }, [activeAccount?.accountId, userId, rpTick]);
   // 선택된 계정이 사라지거나 아직 없으면 첫 연결 계정으로 자동 보정
   useEffect(() => {
     const stillOk = accounts.some(a => a.accountId === selectedAcctId && a.sessionOk);
@@ -1329,6 +1339,7 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
     if (!sol) { addScLog("❌ 개선안 생성 실패 (잠시 후 다시 시도)"); return alert("개선안 생성에 실패했어요. 잠시 후 다시 시도해주세요."); }
     addScLog(`✅ "${item.title.slice(0, 16)}" 개선안 완성 — 제목 2개 제안`);
     setRpSolutions(prev => ({ ...prev, [item.logNo!]: sol }));   // 이 글 아래에 펼쳐 보여줌
+    if (userId && activeAccount) markPrescribed(userId, activeAccount.accountId, item.logNo!);   // 🩺 처방(개선안 받은 날) 기록 → 무한루프 차단
   };
 
   /* 개선 제목 → 실제 글 제목 자동 변경(재발행) */
@@ -1350,7 +1361,7 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
       const d = JSON.parse(e.data);
       if (d.type === "log") addScLog(d.msg);
       if (d.type === "done") {
-        if (d.ok) { setTitleEditUsed(u => u + 1); addScLog(`✅ 제목 변경 완료!`); alert(`✅ 제목을 변경했어요!\n"${newTitle}"\n\n검색 반영에는 시간이 걸릴 수 있어요.`); }
+        if (d.ok) { setTitleEditUsed(u => u + 1); addScLog(`✅ 제목 변경 완료!`); if (userId) markTitleChanged(userId, acc.accountId, logNo, newTitle); /* 🩺 수정한 날 기록 → 30일 관찰 시작(무한루프 차단) */ alert(`✅ 제목을 변경했어요!\n"${newTitle}"\n\n검색 반영에는 시간이 걸릴 수 있어요.`); }
         else { addScLog(`❌ 제목 변경 실패: ${d.message || "알 수 없는 오류"}`); alert(`제목 변경 실패: ${d.message || "알 수 없는 오류"}`); }
         setTitleEditingKey(""); es.close();
       }
@@ -1418,6 +1429,14 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
         window.dispatchEvent(new Event("publy-republish-updated"));   // 홈 배너·뱃지 갱신 신호
       } catch {}
       addScLog(`✅ 검색노출 ${data.checks?.length || 0}개 검사 완료`);
+      // 🩺 주치의: 검사 결과를 글별 진료차트(publy_post_care)에 기록 — 순위 누적 + 완치(100위 진입) 감지. 죽은 데이터를 살린다.
+      if (userId) {
+        try {
+          const { newlyCured } = await savePostCareChecks(userId, acc.accountId, checksWithDate);
+          if (newlyCured.length) { addScLog(`🎉 노출 성공(완치) ${newlyCured.length}개! 축하드려요`); setCelebrate(newlyCured); }
+          await loadCare();   // 재발행 목록에 관찰중/처방 상태 즉시 반영
+        } catch {}
+      }
     } catch (e: any) { addScLog(`❌ 검색노출 검사 실패: ${e.message}`); }
     finally { setScExposureLoading(false); }
   };
@@ -2568,6 +2587,52 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
                     <div style={{ marginTop: 10, fontSize: 11, color: "var(--text3)", lineHeight: 1.5 }}>네이버 공식 지수가 아닌, 순환 선택한 글의 제목 검색 결과를 바탕으로 한 퍼블리 자체 진단이에요. 누락만으로 저품질을 확정할 수는 없어요.</div>
                   </div>
 
+                  {/* 🩺 오늘의 회진 — 주치의(도도)가 진료차트 전체를 보고 오늘 뭘 할지 지휘 (careMap 있을 때만) */}
+                  {Object.keys(careMap).length > 0 && (() => {
+                    const cnt: Record<string, number> = { new: 0, needs: 0, prescribed: 0, observing: 0, relapse: 0, cured: 0 };
+                    Object.values(careMap).forEach(c => { cnt[computeCareStatus(c).status]++; });
+                    const todo = cnt.needs + cnt.relapse;   // 지금 손볼 것
+                    const total = Object.keys(careMap).length;
+                    const rate = total ? Math.round(cnt.cured / total * 100) : 0;   // 돌봄지수(회복률)
+                    const chip = (bg: string, col: string, txt: string) => <span style={{ padding: "4px 10px", borderRadius: 20, background: bg, color: col, fontSize: 11, fontWeight: 800, whiteSpace: "nowrap" }}>{txt}</span>;
+                    return (
+                      <div style={{ marginBottom: 14, padding: "16px 18px", borderRadius: 14, background: "linear-gradient(135deg, rgba(0,200,150,.08), rgba(139,92,246,.05))", border: "1px solid rgba(0,200,150,.25)" }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                          {/* ★ 상대경로 + onError 폴백(Electron file://에서 절대경로면 깨짐 — 크롤링서 겪은 이슈 반복 방지) */}
+                          <img src="characters/dodo-checker.png" alt="주치의 도도" onError={e => { const s = document.createElement("div"); s.textContent = "🩺"; s.style.cssText = "font-size:38px;line-height:1"; e.currentTarget.replaceWith(s); }} style={{ width: 46, height: 46, objectFit: "contain", flexShrink: 0, filter: "drop-shadow(0 4px 8px rgba(0,200,150,.3))" }} />
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ fontSize: 14, fontWeight: 850, color: "var(--text)", marginBottom: 3 }}>🩺 오늘의 회진</div>
+                            <div style={{ fontSize: 12.5, color: "var(--text2)", lineHeight: 1.55 }}>
+                              {todo > 0
+                                ? <>지금 손볼 글이 <b style={{ color: "#f59e0b" }}>{todo}개</b> 있어요{cnt.observing > 0 && <> · <b style={{ color: "#8b5cf6" }}>{cnt.observing}개</b>는 관찰 중이라 기다리면 돼요</>}. 하나씩 개선안을 받아보세요.</>
+                                : cnt.observing > 0
+                                  ? <><b style={{ color: "#8b5cf6" }}>{cnt.observing}개</b>가 관찰 중이에요. 지금은 손대지 말고 기다리면 돼요 🌱</>
+                                  : <>지금 손볼 글이 없어요. 아주 잘 관리되고 있어요 👍</>}
+                            </div>
+                          </div>
+                        </div>
+                        {(todo > 0 || cnt.observing > 0 || cnt.cured > 0) && (
+                          <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
+                            {todo > 0 && chip("rgba(245,158,11,.14)", "#f59e0b", `🚑 치료 필요 ${todo}`)}
+                            {cnt.observing > 0 && chip("rgba(139,92,246,.14)", "#8b5cf6", `🌱 관찰 중 ${cnt.observing}`)}
+                            {cnt.cured > 0 && chip("rgba(0,200,150,.14)", "#00c896", `✅ 완치 ${cnt.cured}`)}
+                          </div>
+                        )}
+                        {total > 1 && (
+                          <div style={{ marginTop: 12 }}>
+                            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, marginBottom: 5 }}>
+                              <span style={{ color: "var(--text2)", fontWeight: 700 }}>🩹 블로그 회복률</span>
+                              <span style={{ color: "#00c896", fontWeight: 800 }}>{rate}% <span style={{ color: "var(--text3)", fontWeight: 500 }}>({cnt.cured}/{total})</span></span>
+                            </div>
+                            <div style={{ height: 8, borderRadius: 99, background: "var(--bg)", overflow: "hidden", border: "1px solid var(--border)" }}>
+                              <div style={{ height: "100%", width: `${rate}%`, borderRadius: 99, background: "linear-gradient(90deg,#00c896,#8b5cf6)", transition: "width .6s ease" }} />
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
+
                   {/* ♻️ 오래된 글 재발행 알림 — 누적 저장분(순환 검사로 며칠에 걸쳐 전체 커버) + 기간 설정 */}
                   {(() => {
                     const now = Date.now();
@@ -2613,17 +2678,41 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
                                 const busy = rpBusyLog === c.logNo;
                                 const overLimit = !isUnlimitedPlan && titleEditUsed >= titleEditLimit;
                                 const rpSol = c.logNo ? rpSolutions[c.logNo] : null;
+                                // 🩺 이 글을 최근에 수정했나? 그렇다면 관찰기간(30일) 동안은 "기다리세요"로 무한루프 차단
+                                const care = c.logNo ? careMap[c.logNo] : null;
+                                const careSt = care ? computeCareStatus(care) : null;
+                                const observing = careSt?.status === "observing";
                                 return (
-                                  <div key={i} style={{ background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 10, overflow: "hidden" }}>
+                                  <div key={i} style={{ background: "var(--bg)", border: `1px solid ${observing ? "rgba(139,92,246,.35)" : "var(--border)"}`, borderRadius: 10, overflow: "hidden" }}>
                                     <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 12px" }}>
-                                      <span style={{ fontSize: 13 }}>⏳</span>
+                                      <span style={{ fontSize: 13 }}>{observing ? "🌱" : "⏳"}</span>
                                       <span style={{ flex: 1, minWidth: 0, fontSize: 12.5, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.title}</span>
-                                      <span style={{ fontSize: 10.5, color: "#f59e0b", fontWeight: 800, whiteSpace: "nowrap" }}>{days}일째 미노출</span>
-                                      <button onClick={() => handleRepublishOne(c)} disabled={busy || !!titleEditingKey || !c.logNo}
-                                        style={{ flexShrink: 0, padding: "6px 11px", borderRadius: 8, border: "none", background: (busy || !c.logNo) ? "#8a8a99" : "#f59e0b", color: "#fff", fontSize: 11, fontWeight: 800, cursor: (busy || titleEditingKey || !c.logNo) ? "not-allowed" : "pointer", fontFamily: "inherit", whiteSpace: "nowrap", opacity: (busy || !c.logNo) ? .6 : 1 }}>
-                                        {busy ? "개선안 만드는 중..." : rpSol ? "🔄 다시 받기" : "✏️ 개선안 받기"}
-                                      </button>
+                                      {observing
+                                        ? <span title="제목을 바꾼 지 얼마 안 됐어요. 네이버가 다시 읽고 순위를 매기는 데 보통 30일쯤 걸려요. 지금 또 바꾸면 오히려 손해예요 — 조금만 기다려주세요." style={{ flexShrink: 0, padding: "6px 11px", borderRadius: 8, background: "rgba(139,92,246,.12)", color: "#8b5cf6", fontSize: 11, fontWeight: 800, whiteSpace: "nowrap" }}>🌱 수정함 · {careSt!.daysLeft}일 뒤 재검사</span>
+                                        : <>
+                                            <span style={{ fontSize: 10.5, color: "#f59e0b", fontWeight: 800, whiteSpace: "nowrap" }}>{days}일째 미노출</span>
+                                            <button onClick={() => handleRepublishOne(c)} disabled={busy || !!titleEditingKey || !c.logNo}
+                                              style={{ flexShrink: 0, padding: "6px 11px", borderRadius: 8, border: "none", background: (busy || !c.logNo) ? "#8a8a99" : "#f59e0b", color: "#fff", fontSize: 11, fontWeight: 800, cursor: (busy || titleEditingKey || !c.logNo) ? "not-allowed" : "pointer", fontFamily: "inherit", whiteSpace: "nowrap", opacity: (busy || !c.logNo) ? .6 : 1 }}>
+                                              {busy ? "개선안 만드는 중..." : rpSol ? "🔄 다시 받기" : "✏️ 개선안 받기"}
+                                            </button>
+                                          </>}
                                     </div>
+                                    {/* 🩺 진료 이력 + 회복 그래프(순위 추이 스파크라인) — 검사가 쌓이면 나타남 */}
+                                    {care && ((care.rank_history?.length || 0) > 1 || care.prescribed_at || care.title_changed_at) && (
+                                      <div style={{ padding: "0 12px 9px", display: "flex", alignItems: "center", gap: 7, fontSize: 10.5, color: "var(--text3)", flexWrap: "wrap" }}>
+                                        <span>🔍 검사 {care.rank_history?.length || 0}회</span>
+                                        {care.prescribed_at && <span>· 💊 개선안</span>}
+                                        {care.title_changed_at && <span>· ✍️ 수정함</span>}
+                                        {(() => {
+                                          const pts = (care.rank_history || []).filter(h => h.rank != null) as { date: string; rank: number }[];
+                                          if (pts.length < 2) return null;
+                                          const rs = pts.map(p => p.rank), mn = Math.min(...rs), mx = Math.max(...rs), W = 56, H = 16;
+                                          const d = pts.map((p, i) => `${i ? "L" : "M"}${(pts.length > 1 ? i / (pts.length - 1) : 0) * W},${mx === mn ? H / 2 : ((p.rank - mn) / (mx - mn)) * H}`).join(" ");
+                                          const improved = pts[pts.length - 1].rank <= pts[0].rank;   // 순위 숫자 작아짐 = 개선
+                                          return <svg width={W} height={H} style={{ marginLeft: 4 }} aria-label="순위 추이"><path d={d} fill="none" stroke={improved ? "#00c896" : "#f59e0b"} strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round" /></svg>;
+                                        })()}
+                                      </div>
+                                    )}
                                     {rpSol && (() => {
                                       const ApplyBtn = ({ nt, k }: { nt: string; k: string }) => (
                                         <button onClick={() => handleApplyTitle(rpSol.original, nt, k, rpSol.logNo)} disabled={overLimit || !!titleEditingKey}
@@ -3255,6 +3344,26 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
         </div>
         );
       })()}
+    {/* 🎉 완치(노출) 축포 세리머니 — createPortal로 body에(transform 조상 무관), 하늘에서 색종이 낙하 */}
+    {celebrate && createPortal(
+      <div onClick={() => setCelebrate(null)} style={{ position: "fixed", inset: 0, zIndex: 100000, background: "rgba(12,10,20,.62)", backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20, overflow: "hidden" }}>
+        <style>{`@keyframes bdConfetti{0%{transform:translateY(-15vh) rotate(0);opacity:1}100%{transform:translateY(110vh) rotate(720deg);opacity:.85}}@keyframes bdPop{0%{transform:scale(.7);opacity:0}60%{transform:scale(1.05)}100%{transform:scale(1);opacity:1}}@keyframes bdBob{0%,100%{transform:translateY(0)}50%{transform:translateY(-10px)}}`}</style>
+        {Array.from({ length: 70 }).map((_, i) => {
+          const cols = ["#ff5fa2", "#ffd23f", "#00c896", "#8b5cf6", "#00c8ff", "#ff922e", "#ff4d6d"];
+          const left = Math.random() * 100, dur = 2.2 + Math.random() * 2.3, delay = Math.random() * 1.6, w = 6 + Math.random() * 8;
+          return <div key={i} style={{ position: "absolute", top: 0, left: `${left}%`, width: w, height: w * 1.7, background: cols[i % cols.length], borderRadius: 2, animation: `bdConfetti ${dur}s linear ${delay}s infinite` }} />;
+        })}
+        <div onClick={e => e.stopPropagation()} style={{ position: "relative", zIndex: 2, background: "var(--card)", borderRadius: 24, padding: "38px 42px", textAlign: "center", maxWidth: 460, width: "100%", boxShadow: "0 30px 90px -20px rgba(0,0,0,.55)", border: "1px solid var(--border)", animation: "bdPop .5s ease both" }}>
+          <div style={{ fontSize: 56, marginBottom: 6, animation: "bdBob 1.4s ease-in-out infinite" }}>🎉</div>
+          <div style={{ fontSize: 25, fontWeight: 900, color: "var(--text)", marginBottom: 8, letterSpacing: "-.02em" }}>노출 축하드립니다!</div>
+          <div style={{ fontSize: 14, color: "var(--text2)", lineHeight: 1.65, marginBottom: 22 }}>
+            {celebrate.length === 1
+              ? <>«{(celebrate[0].title || "이 글").slice(0, 26)}» 글이<br />드디어 <b style={{ color: "#00c896" }}>네이버 검색에 떴어요!</b><br /><span style={{ fontSize: 12.5, color: "var(--text3)" }}>주치의가 끝까지 함께했어요 🩺</span></>
+              : <><b style={{ color: "#00c896", fontSize: 18 }}>{celebrate.length}개</b>의 글이 한 번에 검색에 떴어요! 🔥<br /><span style={{ fontSize: 12.5, color: "var(--text3)" }}>대단한 회복이에요, 주치의도 뿌듯해요 🩺</span></>}
+          </div>
+          <button onClick={() => setCelebrate(null)} style={{ padding: "13px 34px", borderRadius: 13, border: "none", background: "linear-gradient(135deg,#00c896,#00a878)", color: "#fff", fontSize: 15, fontWeight: 800, cursor: "pointer", fontFamily: "inherit", boxShadow: "0 10px 24px -8px rgba(0,200,150,.6)" }}>고마워요 🩺</button>
+        </div>
+      </div>, document.body)}
     </div>
   );
 }

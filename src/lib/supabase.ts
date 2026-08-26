@@ -1158,3 +1158,100 @@ export async function checkProxyHealth(bot: string, p: PublyProxy): Promise<{ ok
     return { ok: false, error: err };
   }
 }
+
+// ═══════════════════════════════════════════════════════════════════
+// 🩺 블로그 주치의 — 글별 진료차트(publy_post_care)
+// 검사할 때마다 순위를 기록하고, 개선안·제목수정·완치 날짜를 저장해
+// "언제 손봤는지"를 기억한다(무한루프 차단 + 멘토 지휘의 근거).
+// ★ 제목 자동변경 실행 로직은 건드리지 않음 — 성공 후 날짜만 여기 기록.
+// ═══════════════════════════════════════════════════════════════════
+export interface PostCare {
+  id?: string;
+  user_id: string;
+  account: string | null;
+  post_key: string;                 // 글 고유번호(logNo)
+  title?: string | null;
+  published_at?: string | null;     // YYYY-MM-DD
+  rank_history: { date: string; rank: number | null }[];
+  prescribed_at?: string | null;    // 개선안 받은 시각
+  title_changed_at?: string | null; // 제목 수정한 시각
+  cured_at?: string | null;         // 완치(노출) 시각
+}
+// 완치 기준: 100위 안에 노출되면 완치. / 경과관찰: 제목 수정 후 30일은 "기다리세요"(리서치 근거).
+export const CURE_RANK = 100;
+export const OBSERVE_DAYS = 30;
+
+// 검사 결과 저장 — 각 글의 오늘 순위를 rank_history에 누적(같은 날 재검사면 갱신).
+// 100위 내면 cured_at을 채우고, '이번에 새로 완치된 글'을 반환(→ 축포 세리머니).
+export async function savePostCareChecks(
+  userId: string,
+  account: string,
+  checks: { logNo?: string; title: string; rank: number | null; exposed: boolean | null; date?: string }[],
+): Promise<{ newlyCured: PostCare[] }> {
+  const today = new Date().toISOString().slice(0, 10);
+  const items = checks.filter(c => c.logNo);   // 번호 있는 글만(제목만으론 식별 불안정)
+  if (!items.length) return { newlyCured: [] };
+  const keys = items.map(c => c.logNo!) as string[];
+  const { data: existing } = await supabase
+    .from("publy_post_care").select("*")
+    .eq("user_id", userId).eq("account", account).in("post_key", keys);
+  const byKey: Record<string, any> = {};
+  (existing || []).forEach((r: any) => { byKey[r.post_key] = r; });
+  const newlyCured: PostCare[] = [];
+  const rows = items.map(c => {
+    const prev = byKey[c.logNo!];
+    const hist = ((prev?.rank_history as { date: string; rank: number | null }[]) || []).filter(h => h.date !== today);
+    hist.push({ date: today, rank: c.rank });
+    const exposed = c.exposed === true || (c.rank != null && c.rank <= CURE_RANK);
+    let cured_at = prev?.cured_at || null;
+    const row: any = {
+      user_id: userId, account, post_key: c.logNo,
+      title: c.title, rank_history: hist,
+      published_at: c.date || prev?.published_at || null,
+      updated_at: new Date().toISOString(),
+    };
+    if (exposed && !cured_at) { cured_at = new Date().toISOString(); newlyCured.push({ ...row, cured_at }); }
+    row.cured_at = cured_at;
+    return row;
+  });
+  const { error } = await supabase.from("publy_post_care").upsert(rows, { onConflict: "user_id,account,post_key" });
+  if (error) console.warn("[post_care] 저장 실패:", error.message);
+  return { newlyCured };
+}
+
+export async function getPostCare(userId: string, account: string): Promise<PostCare[]> {
+  const { data } = await supabase.from("publy_post_care").select("*").eq("user_id", userId).eq("account", account);
+  return (data as PostCare[]) || [];
+}
+
+// 개선안 받은 날 기록
+export async function markPrescribed(userId: string, account: string, postKey: string): Promise<void> {
+  const { error } = await supabase.from("publy_post_care").upsert(
+    { user_id: userId, account, post_key: postKey, prescribed_at: new Date().toISOString(), updated_at: new Date().toISOString() },
+    { onConflict: "user_id,account,post_key" });
+  if (error) console.warn("[post_care] 처방 기록 실패:", error.message);
+}
+
+// 제목 수정한 날 기록(자동 변경 실행과 별개 — 성공 후 호출)
+export async function markTitleChanged(userId: string, account: string, postKey: string, newTitle?: string): Promise<void> {
+  const patch: any = { user_id: userId, account, post_key: postKey, title_changed_at: new Date().toISOString(), updated_at: new Date().toISOString() };
+  if (newTitle) patch.title = newTitle;
+  const { error } = await supabase.from("publy_post_care").upsert(patch, { onConflict: "user_id,account,post_key" });
+  if (error) console.warn("[post_care] 수정 기록 실패:", error.message);
+}
+
+// 글의 현재 생애 상태를 날짜로 계산(단일 소스 — 상태를 저장하지 않음).
+export type CareStatus = "new" | "needs" | "prescribed" | "observing" | "relapse" | "cured";
+export function computeCareStatus(c: PostCare): { status: CareStatus; daysLeft?: number; daysUnexposed?: number } {
+  const last = c.rank_history?.[c.rank_history.length - 1];
+  const exposed = c.cured_at || (last && last.rank != null && last.rank <= CURE_RANK);
+  if (exposed) return { status: "cured" };
+  if (c.title_changed_at) {
+    const days = Math.floor((Date.now() - new Date(c.title_changed_at).getTime()) / 86400000);
+    if (days < OBSERVE_DAYS) return { status: "observing", daysLeft: OBSERVE_DAYS - days };
+    return { status: "relapse", daysUnexposed: days };
+  }
+  if (c.prescribed_at) return { status: "prescribed" };
+  if (c.rank_history?.length) return { status: "needs" };
+  return { status: "new" };
+}

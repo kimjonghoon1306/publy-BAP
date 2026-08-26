@@ -1,4 +1,5 @@
 import { useState, useRef } from "react";
+import { createPortal } from "react-dom";
 
 /* ═══════════════════════════════════════════════════════════════
    블로거 발굴 · 아웃리치 컨트롤 센터 — PUBLY DISCOVERY
@@ -6,11 +7,20 @@ import { useState, useRef } from "react";
    ⚖️ 공개된 정보만. 비공개는 건드리지 않음.
    ═══════════════════════════════════════════════════════════════ */
 
+// ★ Electron 설치앱(file://)에서는 절대경로 "/characters/..."가 파일시스템 루트를 가리켜 404 → 이미지 깨짐.
+//   vite base:"./" + SPA(경로 안 바뀜)라 상대경로 "characters/..."가 dist/characters/ 로 정상 로드됨.
 const CH = {
-  bori: "/characters/bori-cheer.png",
-  dodo: "/characters/dodo-checker.png",
-  monggeul: "/characters/monggeul-explorer.png",
-  pumi: "/characters/pumi-guide.png",
+  bori: "characters/bori-cheer.png",
+  dodo: "characters/dodo-checker.png",
+  monggeul: "characters/monggeul-explorer.png",
+  pumi: "characters/pumi-guide.png",
+};
+// 혹시라도 로드 실패 시 마스코트별 이모지로 대체(깨진 아이콘 노출 방지)
+const chErr = (emoji: string) => (e: any) => {
+  const s = document.createElement("span");
+  s.textContent = emoji;
+  s.style.cssText = "font-size:1.4em;line-height:1;display:inline-block";
+  e.currentTarget.replaceWith(s);
 };
 
 // 테마: light = 웜 페이퍼 / dark = 부드러운 웜 차콜(너무 어둡지 않게)
@@ -29,9 +39,12 @@ type Blogger = {
   engageRate: number;      // 참여율(%)
   ship?: ShipState;        // 배송 단계(체험단 제품 발송)
 };
-type ShipStatus = "none" | "accepted" | "ready" | "shipped" | "delivered";
+// 체험단 배송 단계: 제안함(내가 연락) → 수락(블로거가 OK 회신 → 운영자가 확인 눌러 확정) → 발송대기 → 배송중 → 배송완료
+type ShipStatus = "none" | "proposed" | "accepted" | "ready" | "shipped" | "delivered";
 type ShipState = { status: ShipStatus; address?: string; product?: string; courier?: string; tracking?: string };
-const SHIP_LABEL: Record<ShipStatus, string> = { none: "미제안", accepted: "수락", ready: "발송대기", shipped: "배송중", delivered: "배송완료" };
+const SHIP_LABEL: Record<ShipStatus, string> = { none: "미제안", proposed: "제안함·회신대기", accepted: "수락", ready: "발송대기", shipped: "배송중", delivered: "배송완료" };
+// 각 단계가 무슨 뜻인지(운영자용 쉬운 설명)
+const SHIP_DESC: Record<ShipStatus, string> = { none: "아직 제안 안 함", proposed: "내가 이메일·댓글로 연락했고, 블로거의 OK 회신을 기다리는 중이에요", accepted: "블로거가 하겠다고 회신해서 운영자가 수락 처리한 상태예요", ready: "수락돼서 이제 제품을 보낼 준비를 하는 단계예요", shipped: "제품을 택배로 보냈어요(송장 등록됨)", delivered: "블로거가 제품을 받았어요" };
 
 const TOPICS = ["DELIVERY", "FOOD", "TRAVEL", "BEAUTY", "PARENTING", "FASHION", "CAFE", "LIVING", "PET", "FITNESS", "TECH", "HEALTH", "DIGITAL", "INTERIOR", "CULTURE", "EDU", "AUTO", "WEDDING", "FLOWER", "HOBBY"];
 const TOPIC_KR: Record<string, string> = { DELIVERY: "배송·택배", FOOD: "맛집", TRAVEL: "여행", BEAUTY: "뷰티", PARENTING: "육아", FASHION: "패션", CAFE: "카페", LIVING: "리빙", PET: "펫", FITNESS: "운동", TECH: "IT", HEALTH: "건강", DIGITAL: "디지털", INTERIOR: "인테리어", CULTURE: "문화·공연", EDU: "교육", AUTO: "자동차", WEDDING: "웨딩", FLOWER: "플라워", HOBBY: "취미" };
@@ -119,7 +132,7 @@ export default function CrawlCenter({ showToast, theme: extTheme }: { showToast?
   const [outreach, setOutreach] = useState<null | "email" | "comment">(null);
   const [shipOpen, setShipOpen] = useState(false);
   const [ships, setShips] = useState<Record<string, ShipState>>({}); // 블로거별 배송 상태
-  const setShip = (id: string, patch: Partial<ShipState>) => setShips((s) => ({ ...s, [id]: { ...{ status: "accepted" as ShipStatus }, ...s[id], ...patch } }));
+  const setShip = (id: string, patch: Partial<ShipState>) => setShips((s) => ({ ...s, [id]: { ...{ status: "proposed" as ShipStatus }, ...s[id], ...patch } }));
   const timerRef = useRef<any>(null);
 
   const pushLog = (m: string) => setLogs((l) => [...l, `${new Date().toLocaleTimeString("ko-KR")}  ${m}`]);
@@ -198,7 +211,7 @@ export default function CrawlCenter({ showToast, theme: extTheme }: { showToast?
           {/* 테마 토글 */}
           <button onClick={() => setTheme((t) => t === "dark" ? "light" : "dark")} style={{ border: `1px solid ${C.line2}`, background: "transparent", color: C.sub, borderRadius: 2, padding: "6px 10px", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}>{theme === "dark" ? "☀ LIGHT" : "☾ DARK"}</button>
           <span style={{ fontSize: 10, fontWeight: 800, letterSpacing: ".12em", color: C.sub, border: `1px solid ${C.line2}`, padding: "6px 11px", borderRadius: 2, whiteSpace: "nowrap" }}>⚖ 공개 정보만</span>
-          <img src={CH.monggeul} className="ob-bob" style={{ width: 62, height: 62, objectFit: "contain", filter: "saturate(.9) drop-shadow(0 8px 14px rgba(0,0,0,.2))" }} />
+          <img src={CH.monggeul} onError={chErr("🧭")} className="ob-bob" style={{ width: 62, height: 62, objectFit: "contain", filter: "saturate(.9) drop-shadow(0 8px 14px rgba(0,0,0,.2))" }} />
         </div>
       </div>
 
@@ -262,7 +275,7 @@ export default function CrawlCenter({ showToast, theme: extTheme }: { showToast?
           <div style={{ display: "flex", gap: 8 }}><span onClick={() => setActiveOnly((v) => !v)} style={sChip(activeOnly)}>최근 활동중만</span><span onClick={() => setTopicMatch((v) => !v)} style={sChip(topicMatch)}>주제 일치</span></div>
         </div>
         <div className="ob-card" style={{ ...card, padding: 22 }}>
-          <div style={{ display: "flex", alignItems: "center", marginBottom: 18 }}><div style={{ fontFamily: serif, fontSize: 16, fontWeight: 600 }}>Collect — 무엇을 모을까요</div><img src={CH.dodo} style={{ width: 30, height: 30, marginLeft: "auto", filter: "saturate(.9)" }} /></div>
+          <div style={{ display: "flex", alignItems: "center", marginBottom: 18 }}><div style={{ fontFamily: serif, fontSize: 16, fontWeight: 600 }}>Collect — 무엇을 모을까요</div><img src={CH.dodo} onError={chErr("✅")} style={{ width: 30, height: 30, marginLeft: "auto", filter: "saturate(.9)" }} /></div>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 7, marginBottom: 16 }}>{[["email", "이메일"], ["kakao", "카톡 ID"], ["openchat", "오픈채팅"], ["url", "블로그 주소"], ["nick", "닉네임"], ["keywords", "관심 키워드"], ["categories", "주력 품목"]].map(([k, l]) => <span key={k} onClick={() => toggleField(k)} style={sChip(!!fields[k])}>{l}</span>)}</div>
           <div style={{ fontSize: 12, color: C.sub, fontWeight: 600, background: C.surf2, border: `1px solid ${C.line}`, borderRadius: 3, padding: "12px 14px", lineHeight: 1.6 }}>블로그에 <b style={{ color: C.accent }}>공개해 둔 정보</b>만 모읍니다. "협찬·체험단 문의 환영"처럼 열어둔 곳에 정중히 제안하는 건 정당합니다.</div>
         </div>
@@ -322,8 +335,10 @@ export default function CrawlCenter({ showToast, theme: extTheme }: { showToast?
                     {b.email && <span style={{ fontSize: 10, fontWeight: 700, color: C.ink, border: `1px solid ${C.line2}`, padding: "2px 7px", borderRadius: 2 }}>이메일</span>}
                     {b.kakao && <span style={{ fontSize: 10, fontWeight: 700, color: C.ink, border: `1px solid ${C.line2}`, padding: "2px 7px", borderRadius: 2 }}>카톡</span>}
                     {!b.email && !b.kakao && !b.openchat && <span style={{ fontSize: 10, color: C.sub }}>공개 연락처 없음</span>}
-                    {b.proposed && <span style={{ fontSize: 10, fontWeight: 700, color: C.accent, border: `1px solid ${C.accent}`, padding: "2px 7px", borderRadius: 2 }}>제안함</span>}
-                    {ships[b.id] && <span style={{ fontSize: 10, fontWeight: 800, color: C.surf, background: ships[b.id].status === "delivered" ? "#2f9e5e" : C.accent, padding: "2px 7px", borderRadius: 2 }}>📦 {SHIP_LABEL[ships[b.id].status]}</span>}
+                    {/* 배송 진행 배지: 제안함(회신대기)=중립 회색, 수락 이상=강조, 배송완료=초록 */}
+                    {ships[b.id] && <span title={SHIP_DESC[ships[b.id].status]} style={{ fontSize: 10, fontWeight: 800, color: ships[b.id].status === "proposed" ? C.sub : C.surf, background: ships[b.id].status === "proposed" ? C.surf2 : ships[b.id].status === "delivered" ? "#2f9e5e" : C.accent, border: ships[b.id].status === "proposed" ? `1px solid ${C.line2}` : "none", padding: "2px 7px", borderRadius: 2 }}>📦 {SHIP_LABEL[ships[b.id].status]}</span>}
+                    {/* ★ 운영자 수동 수락: 블로거가 "하겠다"고 회신했을 때만 누름. 발송했다고 자동 수락 아님 */}
+                    {ships[b.id]?.status === "proposed" && <button onClick={() => { setShip(b.id, { status: "accepted" }); toast(`${b.nick}님을 '수락'으로 확정했어요 — 이제 배송 준비 단계예요`, "success"); }} title="블로거가 이메일·댓글로 '하겠다'고 회신하면 이 버튼을 눌러 수락 처리하세요. 그래야 배송 단계로 넘어가요." style={{ ...btnGhost, padding: "3px 9px", fontSize: 10.5, fontWeight: 800, color: "#2f9e5e", borderColor: "#2f9e5e" }}>✅ 수락 처리</button>}
                     <button onClick={() => setDetail(b)} style={{ marginLeft: "auto", ...btnGhost, padding: "4px 9px", fontSize: 10.5 }}>상세 →</button>
                   </div>
                 </div>
@@ -332,7 +347,7 @@ export default function CrawlCenter({ showToast, theme: extTheme }: { showToast?
           </div>
           {/* 아웃리치 */}
           <div style={{ display: "flex", alignItems: "center", gap: 14, marginTop: 18, paddingTop: 18, borderTop: `1px solid ${C.line}`, flexWrap: "wrap" }}>
-            <img src={CH.bori} className="ob-bob" style={{ width: 44, height: 44, filter: "saturate(.9)" }} />
+            <img src={CH.bori} onError={chErr("🌱")} className="ob-bob" style={{ width: 44, height: 44, filter: "saturate(.9)" }} />
             <div style={{ flex: 1, minWidth: 150 }}>
               <div style={{ fontSize: 13.5, fontWeight: 800 }}>{selected.size > 0 ? `${selected.size}명 선택됨` : "체험단 제안 보내기"}</div>
               <div style={{ fontSize: 11.5, color: C.sub, fontWeight: 600 }}>이메일 발송 · 블로그 댓글 제안 · 공개 문의처로만</div>
@@ -348,7 +363,7 @@ export default function CrawlCenter({ showToast, theme: extTheme }: { showToast?
       {/* ── 고급 설정 ── */}
       <div className="ob-sec ob-card" style={{ ...card, padding: 22 }}>
         <div onClick={() => setAdvOpen((v) => !v)} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", cursor: "pointer", marginBottom: advOpen ? 18 : 0 }}>
-          <span style={{ fontFamily: serif, fontSize: 16, fontWeight: 600, display: "flex", alignItems: "center", gap: 8 }}>Advanced <img src={CH.pumi} style={{ width: 26, height: 26, filter: "saturate(.9)" }} /></span>
+          <span style={{ fontFamily: serif, fontSize: 16, fontWeight: 600, display: "flex", alignItems: "center", gap: 8 }}>Advanced <img src={CH.pumi} onError={chErr("💬")} style={{ width: 26, height: 26, filter: "saturate(.9)" }} /></span>
           <span style={{ fontSize: 11.5, fontWeight: 800, letterSpacing: ".1em", color: C.sub, textTransform: "uppercase" }}>{advOpen ? "− 닫기" : "+ 열기"}</span>
         </div>
         {advOpen && (
@@ -361,7 +376,7 @@ export default function CrawlCenter({ showToast, theme: extTheme }: { showToast?
       </div>
 
       {/* ═══ 블로거 상세 분석 모달 ═══ */}
-      {detail && (
+      {detail && createPortal((
         <div onClick={() => setDetail(null)} style={{ position: "fixed", inset: 0, background: "rgba(20,16,12,.55)", backdropFilter: "blur(3px)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 99999, padding: 20 }}>
           <div onClick={(e) => e.stopPropagation()} style={{ background: C.surf, border: `1px solid ${C.line2}`, borderRadius: 6, maxWidth: 480, width: "100%", maxHeight: "86vh", overflowY: "auto", boxShadow: "0 30px 80px rgba(0,0,0,.5)" }}>
             <div style={{ padding: "22px 24px", borderBottom: `1px solid ${C.line}`, display: "flex", alignItems: "flex-start", gap: 12 }}>
@@ -409,14 +424,14 @@ export default function CrawlCenter({ showToast, theme: extTheme }: { showToast?
             </div>
           </div>
         </div>
-      )}
+      ), document.body)}
 
       {/* ═══ 아웃리치 모달 (이메일 / 댓글) ═══ */}
-      {outreach && (
+      {outreach && createPortal((
         <div onClick={() => setOutreach(null)} style={{ position: "fixed", inset: 0, background: "rgba(20,16,12,.55)", backdropFilter: "blur(3px)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 99999, padding: 20 }}>
           <div onClick={(e) => e.stopPropagation()} style={{ background: C.surf, border: `1px solid ${C.line2}`, borderRadius: 6, maxWidth: 520, width: "100%", boxShadow: "0 30px 80px rgba(0,0,0,.5)" }}>
             <div style={{ padding: "20px 24px", borderBottom: `1px solid ${C.line}`, display: "flex", alignItems: "center", gap: 10 }}>
-              <img src={CH.bori} style={{ width: 40, height: 40 }} />
+              <img src={CH.bori} onError={chErr("🌱")} style={{ width: 40, height: 40 }} />
               <div style={{ flex: 1 }}>
                 <div style={{ fontFamily: serif, fontSize: 18, fontWeight: 600 }}>{outreach === "email" ? "이메일 제안 보내기" : "블로그 댓글 제안"}</div>
                 <div style={{ fontSize: 11.5, color: C.sub }}>{selected.size}명 대상 · {outreach === "email" ? "공개 이메일로 발송" : "각 블로그에 정중한 댓글"}</div>
@@ -436,19 +451,19 @@ export default function CrawlCenter({ showToast, theme: extTheme }: { showToast?
               </div>
               <div style={{ display: "flex", gap: 8 }}>
                 <button onClick={() => setOutreach(null)} style={{ ...btnGhost, flex: 1 }}>취소</button>
-                <button onClick={() => { const now: Record<string, ShipState> = {}; selected.forEach((id) => { now[id] = { ...{ status: "accepted" as ShipStatus }, ...ships[id] }; }); setShips((s) => ({ ...s, ...now })); toast(`${outreach === "email" ? "이메일" : "댓글"} 발송 엔진 연결 예정 — 배송 대상으로 담았어요`, "info"); setOutreach(null); }} style={{ ...btnSolid, flex: 2 }}>{selected.size}명에게 {outreach === "email" ? "발송" : "댓글 남기기"} →</button>
+                <button onClick={() => { const now: Record<string, ShipState> = {}; selected.forEach((id) => { now[id] = ships[id] || { status: "proposed" as ShipStatus }; }); setShips((s) => ({ ...s, ...now })); toast(`${outreach === "email" ? "이메일" : "댓글"}로 제안했어요 — 블로거가 OK 회신하면 카드에서 '수락'을 눌러주세요`, "info"); setOutreach(null); }} style={{ ...btnSolid, flex: 2 }}>{selected.size}명에게 {outreach === "email" ? "발송" : "댓글 남기기"} →</button>
               </div>
             </div>
           </div>
         </div>
-      )}
+      ), document.body)}
 
       {/* ═══ 배송 관리 모달 (체험단 제품 발송) ═══ */}
-      {shipOpen && (
+      {shipOpen && createPortal((
         <div onClick={() => setShipOpen(false)} style={{ position: "fixed", inset: 0, background: "rgba(20,16,12,.55)", backdropFilter: "blur(3px)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 99999, padding: 20 }}>
           <div onClick={(e) => e.stopPropagation()} style={{ background: C.surf, border: `1px solid ${C.line2}`, borderRadius: 6, maxWidth: 680, width: "100%", maxHeight: "88vh", display: "flex", flexDirection: "column", boxShadow: "0 30px 80px rgba(0,0,0,.5)" }}>
             <div style={{ padding: "20px 24px", borderBottom: `1px solid ${C.line}`, display: "flex", alignItems: "center", gap: 10 }}>
-              <img src={CH.dodo} style={{ width: 40, height: 40 }} />
+              <img src={CH.dodo} onError={chErr("✅")} style={{ width: 40, height: 40 }} />
               <div style={{ flex: 1 }}>
                 <div style={{ fontFamily: serif, fontSize: 18, fontWeight: 600 }}>배송 관리</div>
                 <div style={{ fontSize: 11.5, color: C.sub }}>제안 수락한 블로거에게 체험단 제품을 보내고 송장을 관리해요</div>
@@ -456,15 +471,16 @@ export default function CrawlCenter({ showToast, theme: extTheme }: { showToast?
               <button onClick={() => setShipOpen(false)} style={{ ...btnGhost, padding: "5px 10px" }}>✕</button>
             </div>
             <div className="ob-scroll" style={{ padding: "16px 24px", overflowY: "auto", flex: 1 }}>
-              {/* 배송 단계 요약 */}
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(5,1fr)", border: `1px solid ${C.line}`, marginBottom: 18 }}>
-                {(["accepted", "ready", "shipped", "delivered", "none"] as ShipStatus[]).filter((s) => s !== "none").map((st, i) => (
-                  <div key={st} style={{ padding: "10px 8px", textAlign: "center", borderLeft: i ? `1px solid ${C.line}` : "none" }}>
+              {/* 배송 단계 요약 (제안함 → 수락 → 발송대기 → 배송중 → 배송완료) */}
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(5,1fr)", border: `1px solid ${C.line}`, marginBottom: 8 }}>
+                {(["proposed", "accepted", "ready", "shipped", "delivered"] as ShipStatus[]).map((st, i) => (
+                  <div key={st} title={SHIP_DESC[st]} style={{ padding: "10px 8px", textAlign: "center", borderLeft: i ? `1px solid ${C.line}` : "none" }}>
                     <div style={{ fontFamily: serif, fontSize: 20, fontWeight: 600 }}>{Object.values(ships).filter((s) => s.status === st).length}</div>
                     <div style={{ ...label, marginBottom: 0, fontSize: 9.5 }}>{SHIP_LABEL[st]}</div>
                   </div>
                 ))}
               </div>
+              <div style={{ fontSize: 11, color: C.sub, marginBottom: 18, lineHeight: 1.5 }}>💡 <b>제안함</b>=연락은 했고 블로거의 OK 회신을 기다리는 중이에요. 블로거가 하겠다고 하면 아래에서 <b style={{ color: "#2f9e5e" }}>수락</b>으로 바꿔주세요. 그 다음 제품을 보내며 <b>발송대기 → 배송중 → 배송완료</b> 순으로 넘기면 돼요.</div>
               {Object.keys(ships).length === 0 ? (
                 <div style={{ textAlign: "center", padding: "36px 20px", color: C.sub, fontSize: 13, fontWeight: 600 }}>아직 배송 대상이 없어요.<br />결과에서 블로거를 선택해 <b style={{ color: C.ink }}>이메일/댓글 제안</b>을 보내면 여기로 담겨요.</div>
               ) : (
@@ -475,8 +491,8 @@ export default function CrawlCenter({ showToast, theme: extTheme }: { showToast?
                       <div key={id} style={{ border: `1px solid ${C.line}`, borderRadius: 4, padding: 14 }}>
                         <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
                           <div style={{ fontSize: 14, fontWeight: 800, flex: 1 }}>{b?.nick || id}</div>
-                          <select value={sh.status} onChange={(e) => setShip(id, { status: e.target.value as ShipStatus })} style={{ ...inp, width: "auto", padding: "6px 10px", fontSize: 12 }}>
-                            {(["accepted", "ready", "shipped", "delivered"] as ShipStatus[]).map((st) => <option key={st} value={st}>{SHIP_LABEL[st]}</option>)}
+                          <select value={sh.status} onChange={(e) => setShip(id, { status: e.target.value as ShipStatus })} title={SHIP_DESC[sh.status]} style={{ ...inp, width: "auto", padding: "6px 10px", fontSize: 12 }}>
+                            {(["proposed", "accepted", "ready", "shipped", "delivered"] as ShipStatus[]).map((st) => <option key={st} value={st}>{SHIP_LABEL[st]}</option>)}
                           </select>
                           <button onClick={() => setShips((s) => { const n = { ...s }; delete n[id]; return n; })} style={{ ...btnGhost, padding: "5px 9px", fontSize: 11, color: C.accent, borderColor: C.accent }}>제거</button>
                         </div>
@@ -502,10 +518,10 @@ export default function CrawlCenter({ showToast, theme: extTheme }: { showToast?
             </div>
           </div>
         </div>
-      )}
+      ), document.body)}
 
       {/* ═══ 로그 크게 보기 모달 (전체화면 확대) ═══ */}
-      {logExpand && (
+      {logExpand && createPortal((
         <div onClick={() => setLogExpand(false)} style={{ position: "fixed", inset: 0, background: "rgba(20,16,12,.6)", backdropFilter: "blur(3px)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 99999, padding: 24 }}>
           <div onClick={(e) => e.stopPropagation()} style={{ background: C.surf, border: `1px solid ${C.line2}`, borderRadius: 6, width: "min(1000px,96vw)", height: "min(88vh,900px)", display: "flex", flexDirection: "column", boxShadow: "0 30px 80px rgba(0,0,0,.55)" }}>
             <div style={{ padding: "18px 22px", borderBottom: `1px solid ${C.line}`, display: "flex", alignItems: "center", gap: 10 }}>
@@ -519,7 +535,7 @@ export default function CrawlCenter({ showToast, theme: extTheme }: { showToast?
             </div>
           </div>
         </div>
-      )}
+      ), document.body)}
     </div>
   );
 }

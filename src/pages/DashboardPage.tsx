@@ -1255,6 +1255,8 @@ Output format (JSON array only, no other text):
   const [hotCat, setHotCat] = useState("실시간");
   const [hotItems, setHotItems] = useState<string[]>([]);
   const [hotLoading, setHotLoading] = useState(false);
+  const [hotPage, setHotPage] = useState(0); // 핫이슈 페이지네이션(주제 많아 아래로 길어짐 방지)
+  const HOT_PAGE_SIZE = 20;
   const [quickKw, setQuickKw] = useState(""); // 핫이슈로 '바로 글쓰기'용(캘린더 스케줄과 별개 파이프라인)
   // 봇 오프라인/웹 미리보기 대비 폴백(카테고리별 무난한 인기 주제) — 빈 화면 방지
   const HOT_FALLBACK: Record<string,string[]> = {
@@ -1272,7 +1274,7 @@ Output format (JSON array only, no other text):
     건강:["다이어트 식단","영양제 추천","환절기 건강관리","수면의 질 높이기","면역력 높이는 법","스트레스 해소","눈 건강 관리","장 건강 음식","혈압 관리","단백질 보충","금연 방법","비타민D 부족","목·어깨 스트레칭","물 많이 마시기","혈당 관리","치아 관리","피부 건강","갱년기 관리","정신건강 챙기기","건강검진 항목"],
   };
   const loadHotIssues = async (cat: string, opts?: { refreshed?: boolean }) => {
-    setHotCat(cat); setHotLoading(true);
+    setHotCat(cat); setHotLoading(true); setHotPage(0); // 카테고리 바뀌면 첫 페이지로
     try {
       const r = await botFetch(`${BOT}/api/hot-issues?category=${encodeURIComponent(cat)}`, { signal: AbortSignal.timeout(15000) } as any);
       const d = await r.json();
@@ -1854,7 +1856,8 @@ Output format (JSON array only, no other text):
       getEngageDailyUsage(user.id).then(u=>{ if(alive) setEngageUsed(u); });
       getReplyDailyUsage(user.id).then(u=>{ if(alive) setReplyUsed(u); });
     };
-    const iv=window.setInterval(sync,20000);
+    sync(); // 진입 즉시 1회
+    const iv=window.setInterval(sync,5000); // 실시간성 강화: 20초→5초 (관리자 초기화가 회원 화면에 빠르게 반영)
     return ()=>{ alive=false; window.clearInterval(iv); };
   },[user.id]);
 
@@ -6156,17 +6159,36 @@ POST3: (제목)|(이유)
                   {/* 핫이슈 칩 */}
                   {hotLoading ? <div style={{fontSize:12.5,color:"var(--text3)",padding:"10px 0"}}><span className="spinner"/> 인기 주제 불러오는 중...</div>
                     : hotItems.length===0 ? <div style={{fontSize:12.5,color:"var(--text3)",padding:"10px 0"}}>카테고리를 눌러 지금 뜨는 주제를 확인하세요.</div>
-                    : <div style={{display:"flex",flexWrap:"wrap",gap:7}}>
-                        {hotItems.map((it,i)=>(
-                          <button key={i} onClick={()=>{setCalKeywords(prev=>{const list=prev.split(/[,\n]+/).map(s=>s.trim()).filter(Boolean); if(!list.includes(it)) list.push(it); return list.join(", ");}); showToast(`➕ "${it.slice(0,18)}" 키워드에 추가!`);}}
-                            title="클릭하면 아래 키워드에 추가돼요"
-                            style={{padding:"7px 12px",borderRadius:10,border:"1px solid var(--border)",background:"var(--card)",color:"var(--text)",cursor:"pointer",fontSize:12.5,fontWeight:600,fontFamily:"inherit",lineHeight:1.3,textAlign:"left",maxWidth:"100%",transition:"all .12s"}}
-                            onMouseEnter={e=>{e.currentTarget.style.borderColor="#ff8c00";e.currentTarget.style.background="rgba(255,140,0,.08)";}}
-                            onMouseLeave={e=>{e.currentTarget.style.borderColor="var(--border)";e.currentTarget.style.background="var(--card)";}}>
-                            <span style={{color:"#ff8c00",fontWeight:800,marginRight:4}}>{i+1}</span>{it.length>34?it.slice(0,34)+"…":it}
-                          </button>
-                        ))}
-                      </div>}
+                    : (()=>{
+                        const totalPages = Math.max(1, Math.ceil(hotItems.length / HOT_PAGE_SIZE));
+                        const page = Math.min(hotPage, totalPages-1);
+                        const start = page * HOT_PAGE_SIZE;
+                        const pageItems = hotItems.slice(start, start + HOT_PAGE_SIZE);
+                        const pgBtn = (active:boolean):React.CSSProperties=>({minWidth:30,padding:"5px 9px",borderRadius:8,border:`1.5px solid ${active?"#ff8c00":"var(--border)"}`,background:active?"rgba(255,140,0,.14)":"var(--card)",color:active?"#ff8c00":"var(--text2)",cursor:"pointer",fontSize:12,fontWeight:800,fontFamily:"inherit",transition:"all .12s"});
+                        return (<>
+                          <div style={{display:"flex",flexWrap:"wrap",gap:7}}>
+                            {pageItems.map((it,li)=>{ const i=start+li; return (
+                              <button key={i} onClick={()=>{setCalKeywords(prev=>{const list=prev.split(/[,\n]+/).map(s=>s.trim()).filter(Boolean); if(!list.includes(it)) list.push(it); return list.join(", ");}); showToast(`➕ "${it.slice(0,18)}" 키워드에 추가!`);}}
+                                title="클릭하면 아래 키워드에 추가돼요"
+                                style={{padding:"7px 12px",borderRadius:10,border:"1px solid var(--border)",background:"var(--card)",color:"var(--text)",cursor:"pointer",fontSize:12.5,fontWeight:600,fontFamily:"inherit",lineHeight:1.3,textAlign:"left",maxWidth:"100%",transition:"all .12s"}}
+                                onMouseEnter={e=>{e.currentTarget.style.borderColor="#ff8c00";e.currentTarget.style.background="rgba(255,140,0,.08)";}}
+                                onMouseLeave={e=>{e.currentTarget.style.borderColor="var(--border)";e.currentTarget.style.background="var(--card)";}}>
+                                <span style={{color:"#ff8c00",fontWeight:800,marginRight:4}}>{i+1}</span>{it.length>34?it.slice(0,34)+"…":it}
+                              </button>
+                            );})}
+                          </div>
+                          {totalPages>1 && (
+                            <div style={{display:"flex",alignItems:"center",justifyContent:"center",gap:5,marginTop:12,flexWrap:"wrap"}}>
+                              <button onClick={()=>setHotPage(Math.max(0,page-1))} disabled={page===0} style={{...pgBtn(false),opacity:page===0?.4:1,cursor:page===0?"default":"pointer"}}>‹ 이전</button>
+                              {Array.from({length:totalPages}).map((_,pi)=>(
+                                <button key={pi} onClick={()=>setHotPage(pi)} style={pgBtn(page===pi)}>{pi+1}</button>
+                              ))}
+                              <button onClick={()=>setHotPage(Math.min(totalPages-1,page+1))} disabled={page===totalPages-1} style={{...pgBtn(false),opacity:page===totalPages-1?.4:1,cursor:page===totalPages-1?"default":"pointer"}}>다음 ›</button>
+                              <span style={{fontSize:11,color:"var(--text3)",marginLeft:6}}>총 {hotItems.length}개</span>
+                            </div>
+                          )}
+                        </>);
+                      })()}
                   {/* ✍️ 별도 파이프라인 — 핫이슈로 '바로 글쓰기'(캘린더 스케줄 안 거침) */}
                   {hotItems.length>0 && (
                     <div style={{marginTop:12,padding:"12px 14px",borderRadius:12,background:"var(--card2)",border:"1px solid var(--border)"}}>
@@ -6379,7 +6401,7 @@ POST3: (제목)|(이유)
             {showCrawlLock&&(
               <div onClick={()=>setShowCrawlLock(false)} style={{position:"fixed",inset:0,background:"rgba(12,8,20,.62)",backdropFilter:"blur(4px)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:99999,padding:20}}>
                 <div onClick={e=>e.stopPropagation()} style={{background:"#fff",borderRadius:26,padding:"30px 26px 26px",maxWidth:360,width:"100%",textAlign:"center",boxShadow:"0 26px 70px rgba(255,111,165,.4)",border:"2px solid #ffe0ec",animation:"crawlPop .32s cubic-bezier(.34,1.56,.64,1)"}}>
-                  <img src="/characters/dodo-checker.png" alt="도도" onError={(e)=>{const d=document.createElement("div");d.textContent="🔒";d.style.cssText="font-size:74px;line-height:1;margin:8px 0";e.currentTarget.replaceWith(d);}} style={{width:118,height:118,objectFit:"contain",filter:"drop-shadow(0 10px 16px rgba(255,111,165,.32))",animation:"crawlBob 1.6s ease-in-out infinite"}}/>
+                  <img src="characters/dodo-checker.png" alt="도도" onError={(e)=>{const d=document.createElement("div");d.textContent="🔒";d.style.cssText="font-size:74px;line-height:1;margin:8px 0";e.currentTarget.replaceWith(d);}} style={{width:118,height:118,objectFit:"contain",filter:"drop-shadow(0 10px 16px rgba(255,111,165,.32))",animation:"crawlBob 1.6s ease-in-out infinite"}}/>
                   <div style={{fontSize:20,fontWeight:900,color:"#20242b",margin:"6px 0 8px"}}>🔒 관리자 승인이 필요해요</div>
                   <div style={{fontSize:13.5,color:"#6b7280",lineHeight:1.65,marginBottom:22}}>크롤링은 <b style={{color:"#ff6fa5"}}>관리자 승인</b>을 받은 회원만 쓸 수 있어요.<br/>승인을 요청하면 도도가 열어드릴게요! ✨</div>
                   <button onClick={()=>setShowCrawlLock(false)} style={{width:"100%",padding:"14px",borderRadius:15,border:"none",background:"linear-gradient(135deg,#ff6fa5,#ff9ec4)",color:"#fff",fontSize:15,fontWeight:800,cursor:"pointer",boxShadow:"0 10px 24px rgba(255,111,165,.42)"}}>알겠어요</button>

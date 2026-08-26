@@ -1022,6 +1022,8 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
   const [hotCat, setHotCat] = useState("실시간");
   const [hotItems, setHotItems] = useState<string[]>([]);
   const [hotLoading, setHotLoading] = useState(false);
+  const [hotPage, setHotPage] = useState(0); // 핫이슈 페이지네이션(주제 많아 아래로 길어짐 방지) — 회원 대시보드와 동일
+  const HOT_PAGE_SIZE = 20;
   const [quickKw, setQuickKw] = useState(""); // 핫이슈 '바로 글쓰기'용(캘린더와 별개)
   const HOT_FALLBACK: Record<string,string[]> = {
     실시간:["요즘 뜨는 부업","정부지원금 신청","가을 여행지 추천","제철 음식 요리","전기요금 절약법","1인 창업 아이템","연말정산 미리보기","청년 지원 정책","넷플릭스 추천작","다이어트 식단","반려동물 용품","스마트스토어 창업","환절기 건강관리","실내 인테리어 팁","제철 과일 고르는 법","중고거래 꿀팁","캠핑 초보 준비물","홈카페 레시피","가성비 노트북","주말 나들이 코스"],
@@ -1038,7 +1040,7 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
     건강:["다이어트 식단","영양제 추천","환절기 건강관리","수면의 질 높이기","면역력 높이는 법","스트레스 해소","눈 건강 관리","장 건강 음식","혈압 관리","단백질 보충","금연 방법","비타민D 부족","목·어깨 스트레칭","물 많이 마시기","혈당 관리","치아 관리","피부 건강","갱년기 관리","정신건강 챙기기","건강검진 항목"],
   };
   const loadHotIssues = async (cat: string, opts?: { refreshed?: boolean }) => {
-    setHotCat(cat); setHotLoading(true);
+    setHotCat(cat); setHotLoading(true); setHotPage(0); // 카테고리 바뀌면 첫 페이지로
     try {
       const r = await botFetch(`${BOT}/api/hot-issues?category=${encodeURIComponent(cat)}`, { signal: AbortSignal.timeout(15000) } as any);
       const d = await r.json();
@@ -1582,10 +1584,12 @@ Output format (JSON array only, no other text):
   // 실시간 현황 탭: 진입 시 즉시 로드 + 자동(30초) 새로고침. 통계 탭도 진입 시 1회 로드(기능별 사용량 표시용)
   useEffect(()=>{
     if(tab==="stats"){ loadLiveUsage(); return; }
+    // 회원관리 탭: 회원 카드의 '오늘 발행수/한도'를 위해 5초마다 실시간 갱신(초기화·발행 즉시 반영)
+    if(tab==="users"){ loadLiveUsage(); const t=setInterval(loadLiveUsage,5000); return ()=>clearInterval(t); }
     if(tab!=="live") return;
     loadLiveUsage();
     if(!liveAuto) return;
-    const t = setInterval(loadLiveUsage, 30000);
+    const t = setInterval(loadLiveUsage, 5000); // 실시간성 강화: 30초→5초
     return ()=>clearInterval(t);
   },[tab, liveAuto, loadLiveUsage]);
 
@@ -2524,7 +2528,8 @@ POST3: (제목)|(이유)
       const { error } = await supabase.from("publy_settings").delete().like("key", `%_daily_${uid}_${today}`);
       if (error) throw new Error(error.message);
       await loadUsers();
-      alert("✅ 오늘 사용 건수를 모두 초기화했어요 (발행·서이추·공감·답방·지수 전부). 회원 화면엔 20초 안에 반영됩니다.");
+      loadLiveUsage(); // 카드의 '오늘 발행수' 즉시 0으로 반영
+      alert("✅ 오늘 사용 건수를 모두 초기화했어요 (발행·서이추·공감·답방·지수 전부). 회원 화면엔 5초 안에 반영됩니다.");
     } catch (e: any) { alert("건수 초기화 실패 — " + e.message); }
   }
   async function toggleActive(u: UserFull) { if (!confirm(`${u.name||u.email} ${u.is_active?"비활성화":"활성화"}?`)) return; try { const next=!u.is_active; const {data,error}=await supabase.from("publy_users").update({is_active:next}).eq("id",u.id).select("id,is_active"); if(error)throw new Error(error.message); if(!data?.[0]||data[0].is_active!==next)throw new Error("권한/RLS로 반영된 행이 없습니다"); await loadUsers(); } catch(e:any){alert("활성 상태 저장 실패 — "+e.message);} }
@@ -4168,8 +4173,11 @@ POST3: (제목)|(이유)
                             <div className="user-email-row">{u.email}</div>
                           </div>
                           <div style={{textAlign:"right",flexShrink:0}}>
-                            <div className="quota-mini">{u.quota?.remaining_quota??0}/{u.quota?.total_quota??0}</div>
-                            <div style={{fontSize:10,color:"var(--text3)",marginTop:2}}>발행 {u.history_count??0}건</div>
+                            {/* 오늘 발행 수 / 하루 한도 — 회원 대시보드와 동일한 일일 기준(자정 지나면 0, 건수 초기화 눌러도 0). liveUsage=오늘 실시간 사용량 */}
+                            {(()=>{ const du = liveUsage.find(x=>x.userId===u.id)?.publish ?? 0; const lim = PLAN_QUOTA[u.plan] ?? 2; const unlimited = lim >= 9999; return (
+                              <div className="quota-mini" title="오늘 발행한 글 수 / 하루 한도. 자정이 지나면 0으로 초기화되고, 아래 '건수 초기화'를 눌러도 0이 돼요.">{unlimited ? <>{du} <span style={{color:"var(--text3)",fontWeight:500}}>· 무제한</span></> : <>{du}/{lim}</>}</div>
+                            ); })()}
+                            <div style={{fontSize:10,color:"var(--text3)",marginTop:2}}>누적 발행 {u.history_count??0}건</div>
                             <div style={{fontSize:10,color: u.last_seen && (Date.now()-new Date(u.last_seen).getTime())<300000 ? "var(--success)" : "var(--text3)",marginTop:2,fontWeight:600}}>🕒 {timeAgo(u.last_seen)}</div>
                           </div>
                           <span style={{fontSize:16,color:"var(--text3)"}}>{selUser?.id===u.id?"▲":"▼"}</span>
@@ -4398,17 +4406,36 @@ POST3: (제목)|(이유)
                   </div>
                   {hotLoading ? <div style={{fontSize:12.5,color:"var(--text3)",padding:"10px 0"}}><span className="spinner"/> 인기 주제 불러오는 중...</div>
                     : hotItems.length===0 ? <div style={{fontSize:12.5,color:"var(--text3)",padding:"10px 0"}}>카테고리를 눌러 지금 뜨는 주제를 확인하세요.</div>
-                    : <div style={{display:"flex",flexWrap:"wrap",gap:7}}>
-                        {hotItems.map((it,i)=>(
-                          <button key={i} onClick={()=>{setCalKeywords(prev=>{const list=prev.split(/[,\n]+/).map(s=>s.trim()).filter(Boolean); if(!list.includes(it)) list.push(it); return list.join(", ");}); showToast(`➕ "${it.slice(0,18)}" 키워드에 추가!`);}}
-                            title="클릭하면 아래 키워드에 추가돼요"
-                            style={{padding:"7px 12px",borderRadius:10,border:"1px solid var(--border)",background:"var(--card)",color:"var(--text)",cursor:"pointer",fontSize:12.5,fontWeight:600,fontFamily:"inherit",lineHeight:1.3,textAlign:"left",maxWidth:"100%",transition:"all .12s"}}
-                            onMouseEnter={e=>{e.currentTarget.style.borderColor="#ff8c00";e.currentTarget.style.background="rgba(255,140,0,.08)";}}
-                            onMouseLeave={e=>{e.currentTarget.style.borderColor="var(--border)";e.currentTarget.style.background="var(--card)";}}>
-                            <span style={{color:"#ff8c00",fontWeight:800,marginRight:4}}>{i+1}</span>{it.length>34?it.slice(0,34)+"…":it}
-                          </button>
-                        ))}
-                      </div>}
+                    : (()=>{
+                        const totalPages = Math.max(1, Math.ceil(hotItems.length / HOT_PAGE_SIZE));
+                        const page = Math.min(hotPage, totalPages-1);
+                        const start = page * HOT_PAGE_SIZE;
+                        const pageItems = hotItems.slice(start, start + HOT_PAGE_SIZE);
+                        const pgBtn = (active:boolean):React.CSSProperties=>({minWidth:30,padding:"5px 9px",borderRadius:8,border:`1.5px solid ${active?"#ff8c00":"var(--border)"}`,background:active?"rgba(255,140,0,.14)":"var(--card)",color:active?"#ff8c00":"var(--text2)",cursor:"pointer",fontSize:12,fontWeight:800,fontFamily:"inherit",transition:"all .12s"});
+                        return (<>
+                          <div style={{display:"flex",flexWrap:"wrap",gap:7}}>
+                            {pageItems.map((it,li)=>{ const i=start+li; return (
+                              <button key={i} onClick={()=>{setCalKeywords(prev=>{const list=prev.split(/[,\n]+/).map(s=>s.trim()).filter(Boolean); if(!list.includes(it)) list.push(it); return list.join(", ");}); showToast(`➕ "${it.slice(0,18)}" 키워드에 추가!`);}}
+                                title="클릭하면 아래 키워드에 추가돼요"
+                                style={{padding:"7px 12px",borderRadius:10,border:"1px solid var(--border)",background:"var(--card)",color:"var(--text)",cursor:"pointer",fontSize:12.5,fontWeight:600,fontFamily:"inherit",lineHeight:1.3,textAlign:"left",maxWidth:"100%",transition:"all .12s"}}
+                                onMouseEnter={e=>{e.currentTarget.style.borderColor="#ff8c00";e.currentTarget.style.background="rgba(255,140,0,.08)";}}
+                                onMouseLeave={e=>{e.currentTarget.style.borderColor="var(--border)";e.currentTarget.style.background="var(--card)";}}>
+                                <span style={{color:"#ff8c00",fontWeight:800,marginRight:4}}>{i+1}</span>{it.length>34?it.slice(0,34)+"…":it}
+                              </button>
+                            );})}
+                          </div>
+                          {totalPages>1 && (
+                            <div style={{display:"flex",alignItems:"center",justifyContent:"center",gap:5,marginTop:12,flexWrap:"wrap"}}>
+                              <button onClick={()=>setHotPage(Math.max(0,page-1))} disabled={page===0} style={{...pgBtn(false),opacity:page===0?.4:1,cursor:page===0?"default":"pointer"}}>‹ 이전</button>
+                              {Array.from({length:totalPages}).map((_,pi)=>(
+                                <button key={pi} onClick={()=>setHotPage(pi)} style={pgBtn(page===pi)}>{pi+1}</button>
+                              ))}
+                              <button onClick={()=>setHotPage(Math.min(totalPages-1,page+1))} disabled={page===totalPages-1} style={{...pgBtn(false),opacity:page===totalPages-1?.4:1,cursor:page===totalPages-1?"default":"pointer"}}>다음 ›</button>
+                              <span style={{fontSize:11,color:"var(--text3)",marginLeft:6}}>총 {hotItems.length}개</span>
+                            </div>
+                          )}
+                        </>);
+                      })()}
                   {/* ✍️ 별도 파이프라인 — 핫이슈로 '바로 글쓰기'(캘린더 스케줄 안 거침) */}
                   {hotItems.length>0 && (
                     <div style={{marginTop:12,padding:"12px 14px",borderRadius:12,background:"var(--card2)",border:"1px solid var(--border)"}}>
