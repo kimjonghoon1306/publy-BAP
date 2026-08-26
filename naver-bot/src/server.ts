@@ -533,11 +533,25 @@ app.get("/api/hot-issues", async (req, res) => {
   const cached = HOT_CACHE[category];
   if (cached && now - cached.at < 30 * 60 * 1000) return res.json({ ok: true, category, items: cached.items, cached: true });
   try {
+    // 주제를 풍부하게: 소스에서 당겨올 수 있는 건 최대한 다 당겨와 중복만 제거(양을 크게).
+    const uniq = (arr: string[]) => { const seen = new Set<string>(); const out: string[] = []; for (const x of arr) { const k = x.replace(/\s+/g, ""); if (x && !seen.has(k)) { seen.add(k); out.push(x); } } return out; };
     let items: string[] = [];
     if (category === "실시간") {
-      const r = await fetch("https://trends.google.com/trending/rss?geo=KR", { headers: { "User-Agent": "Mozilla/5.0" } });
-      const t = await r.text();
-      items = [...t.matchAll(/<title>(.*?)<\/title>/g)].map(m => cleanHeadline(m[1])).filter(x => x && !/trends|google|피드/i.test(x)).slice(0, 20);
+      // 구글 트렌드(KR) + 연합뉴스 주요 섹션 헤드라인을 합쳐서 실시간 주제를 최대한 풍부하게
+      const pulls = await Promise.allSettled([
+        fetch("https://trends.google.com/trending/rss?geo=KR", { headers: { "User-Agent": "Mozilla/5.0" } }).then(r => r.text()),
+        ...["economy", "society", "entertainment", "sports", "industry"].map(sec =>
+          fetch(`https://www.yna.co.kr/rss/${sec}.xml`, { headers: { "User-Agent": "Mozilla/5.0" } }).then(r => r.text())),
+      ]);
+      const merged: string[] = [];
+      pulls.forEach((p, i) => {
+        if (p.status !== "fulfilled") return;
+        const cleaned = [...p.value.matchAll(/<title[^>]*>([\s\S]*?)<\/title>/g)].map(m => cleanHeadline(m[1]))
+          .filter(x => x && !/trends|google|피드|연합뉴스|저작권|헤드라인|알림|RSS/i.test(x));
+        // 구글 트렌드는 앞쪽(더 뜨거움) 우선, 뉴스는 섹션당 상위 몇 개만
+        merged.push(...(i === 0 ? cleaned.slice(0, 30) : cleaned.slice(0, 8)));
+      });
+      items = uniq(merged).slice(0, 60);
     } else {
       const sec = YNA_SECTIONS[category];
       if (!sec) return res.status(400).json({ ok: false, error: "알 수 없는 카테고리" });
@@ -545,7 +559,7 @@ app.get("/api/hot-issues", async (req, res) => {
       const t = await r.text();
       const raw = [...t.matchAll(/<title[^>]*>([\s\S]*?)<\/title>/g)].map(m => cleanHeadline(m[1]))
         .filter(x => x && !/연합뉴스|저작권|헤드라인|알림|RSS/i.test(x));
-      items = raw.slice(0, 20);
+      items = uniq(raw).slice(0, 60);
     }
     HOT_CACHE[category] = { at: now, items };
     res.json({ ok: true, category, items });

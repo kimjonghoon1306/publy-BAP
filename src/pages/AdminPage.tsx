@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import GoogleFlowCard from "../GoogleFlowCard";
+import CrawlCenter from "../components/CrawlCenter";
 import { supabase, getAccounts, upsertAccount, PublyAccount, getHistory, getHistoryContent, PublyHistory, addHistory, deleteHistory, deleteAllHistory, setAdminPassword, saveAdminNaverApiKeys, getNaverApiKeys, NaverApiKeys, getNaverDailyUsage, NAVER_DAILY_LIMIT, checkNaverQuota, incrementNaverQuota, getUserNaverApiKeys, getReferrals, getErrorLogs, getUnreadErrorCount, markErrorsAsRead, logError, PLAN_CONFIG, getAllNeighborHistory, NeighborHistory, getAllEngageHistory, EngageHistory, InstaDmTarget, InstaDmHistory, InstaDmQuota, getInstaDmTargets, addInstaDmTarget, updateInstaDmTargetStatus, deleteInstaDmTarget, getInstaDmHistory, addInstaDmHistory, getAllInstaDmHistory, getInstaDmQuota, upsertInstaDmQuota, getAllInstaDmQuotas, INSTA_DM_DAILY_LIMIT, PublyBugReport, getBugReports, updateBugReportStatus, deleteBugReport, resetDailyPublish, getAllDailyUsageToday, DailyUsageRow, getAllReplyHistory, ReplyHistory, getAllBlogscoreHistory, BlogscoreHistory, NEIGHBOR_DAILY_LIMIT, ENGAGE_DAILY_LIMIT, REPLY_DAILY_LIMIT, BLOGSCORE_DAILY_LIMIT, PUMASI_ACCOUNT_LIMIT, PUMASI_POSTS_LIMIT, PublyProxy, getProxies, addProxy, updateProxy, deleteProxy, getProxyAssignments, assignAccountToProxy, unassignAccount, setAccountFeatures, ProxyAssign, PROXY_FEATURES, checkProxyHealth } from "../lib/supabase";
 import NeighborPage from "./NeighborPage";
 import { botFetch, BotEventStream } from "../lib/botApi";
@@ -12,7 +13,7 @@ interface Props {
 }
 
 interface UserFull {
-  id:string; email:string; name:string; plan:string; is_active:boolean; created_at:string; phone?:string; memo?:string; last_seen?:string;
+  id:string; email:string; name:string; plan:string; is_active:boolean; crawl_enabled?:boolean; created_at:string; phone?:string; memo?:string; last_seen?:string;
   quota?: { total_quota:number; used_quota:number; remaining_quota:number; reset_date:string; };
   payments?: any[]; notes?: any[]; history_count?: number;
 }
@@ -601,8 +602,10 @@ const TABS = [
   {k:"publish",         i:"🚀", l:"발행하기"},
   {k:"manage",          i:"📋", l:"발행 관리"},
   {k:"blogscore",       i:"📈", l:"블로그 지수"},
+  {k:"crawl",           i:"🔍", l:"크롤링"},
   {k:"accounts",        i:"🔗", l:"계정관리"},
   {k:"calendar",        i:"📅", l:"콘텐츠 캘린더"},
+  {k:"crawl_manage",    i:"🔎", l:"크롤링 관리"},
   {k:"neighbor",        i:"🤝", l:"서이추"},
   {k:"engage",          i:"❤️", l:"공감·댓글"},
   {k:"reply",           i:"💬", l:"답방"},
@@ -622,7 +625,7 @@ const TABS = [
 ] as const;
 
 export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: Props) {
-  const [tab, setTab] = useState<"keyword"|"write"|"image"|"photo"|"publish"|"manage"|"accounts"|"rank"|"blogscore"|"calendar"|"neighbor"|"engage"|"reply"|"pumasi"|"neighbor_manage"|"engage_manage"|"reply_manage"|"blogscore_manage"|"insta_dm"|"insta_dm_manage"|"users"|"bug"|"stats"|"live"|"settings"|"proxy">("keyword");
+  const [tab, setTab] = useState<"keyword"|"write"|"image"|"photo"|"publish"|"manage"|"accounts"|"rank"|"blogscore"|"calendar"|"crawl"|"crawl_manage"|"neighbor"|"engage"|"reply"|"pumasi"|"neighbor_manage"|"engage_manage"|"reply_manage"|"blogscore_manage"|"insta_dm"|"insta_dm_manage"|"users"|"bug"|"stats"|"live"|"settings"|"proxy">("keyword");
 
   // ── 프록시(계정별 IP) 관리 ──
   const NEIGHBOR_BOT = "http://127.0.0.1:3334";   // 서이추·공감·품앗이 봇(프록시 헬스체크도 여기서 실행)
@@ -1021,18 +1024,18 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
   const [hotLoading, setHotLoading] = useState(false);
   const [quickKw, setQuickKw] = useState(""); // 핫이슈 '바로 글쓰기'용(캘린더와 별개)
   const HOT_FALLBACK: Record<string,string[]> = {
-    실시간:["요즘 뜨는 부업","정부지원금 신청","가을 여행지 추천","제철 음식 요리","전기요금 절약법","1인 창업 아이템"],
-    경제:["금리 전망","연말정산 팁","소상공인 지원금","재테크 초보","청년 목돈 마련"],
-    증권:["배당주 추천","ETF 초보 투자","국장 vs 미장","공모주 청약"],
-    산업:["AI 활용법","전기차 보조금","반도체 전망","스마트스토어 창업"],
-    정치:["정부 지원 정책","청년 정책","주거 지원 제도"],
-    사회:["요즘 생활 물가","전세 사기 예방","실업급여 조건"],
-    전국:["지역 축제 일정","당일치기 여행","지방 맛집 투어"],
-    세계:["해외여행 준비물","환율 여행 팁","면세점 쇼핑"],
-    문화:["넷플릭스 추천작","전시회 나들이","베스트셀러 도서"],
-    연예:["아이돌 컴백 소식","드라마 정주행","예능 다시보기"],
-    스포츠:["프로야구 순위","홈트레이닝 루틴","등산 초보 코스"],
-    건강:["다이어트 식단","영양제 추천","환절기 건강관리","수면의 질 높이기"],
+    실시간:["요즘 뜨는 부업","정부지원금 신청","가을 여행지 추천","제철 음식 요리","전기요금 절약법","1인 창업 아이템","연말정산 미리보기","청년 지원 정책","넷플릭스 추천작","다이어트 식단","반려동물 용품","스마트스토어 창업","환절기 건강관리","실내 인테리어 팁","제철 과일 고르는 법","중고거래 꿀팁","캠핑 초보 준비물","홈카페 레시피","가성비 노트북","주말 나들이 코스"],
+    경제:["금리 전망","연말정산 팁","소상공인 지원금","재테크 초보","청년 목돈 마련","부동산 시장 동향","환율 전망","연금 저축 활용","월세 세액공제","가계부 쓰는 법","금값 시세","비상금 모으기","신용점수 올리는 법","청년도약계좌","절세 상품 정리","가상자산 과세","실손보험 개편","전세대출 금리","배달 물가","최저임금 변화"],
+    증권:["배당주 추천","ETF 초보 투자","국장 vs 미장","공모주 청약","미국 주식 세금","반도체 관련주","2차전지 전망","코스피 전망","고배당 ETF","IRP 계좌 활용","증권사 수수료 비교","리츠 투자","적립식 투자","우량주 장기투자","AI 관련주","환헤지 ETF","실적 시즌 체크","채권 투자 기초","테마주 주의점","분산투자 방법"],
+    산업:["AI 활용법","전기차 보조금","반도체 전망","스마트스토어 창업","2차전지 산업","로봇 자동화","배터리 소재","친환경 에너지","수소차 근황","클라우드 시장","자율주행 기술","디스플레이 신기술","드론 활용 사례","3D 프린팅","스타트업 투자 유치","제조업 스마트팩토리","항공우주 산업","바이오 헬스케어","조선업 수주","반도체 장비"],
+    정치:["정부 지원 정책","청년 정책","주거 지원 제도","소상공인 대책","육아 지원금","기초연금 인상","교육 정책 변화","지방 소멸 대응","복지 혜택 총정리","세금 개편안","국민연금 개혁","최저임금 결정","전월세 대책","일자리 정책","저출생 대책","고령화 대책","의료 정책","교통 정책","환경 규제","디지털 정부"],
+    사회:["요즘 생활 물가","전세 사기 예방","실업급여 조건","보이스피싱 예방","중고거래 사기","교통비 절약","청년 주거 문제","1인 가구 생활","반려동물 에티켓","이웃 갈등 해결","재난 문자 대처","분리수거 방법","응급실 이용 팁","학교폭력 대응","노인 돌봄","기후 변화 체감","미세먼지 대응","층간소음 해결","알뜰폰 요금제","무인점포 이용법"],
+    전국:["지역 축제 일정","당일치기 여행","지방 맛집 투어","제주 여행 코스","부산 가볼 만한 곳","강원도 드라이브","경주 역사 여행","전주 한옥마을","가을 단풍 명소","해돋이 명소","시장 먹거리 투어","템플스테이","섬 여행 추천","캠핑장 추천","기차 여행 코스","야경 명소","벚꽃 명소","계곡 피서지","힐링 여행지","지역 특산물"],
+    세계:["해외여행 준비물","환율 여행 팁","면세점 쇼핑","일본 여행 코스","동남아 휴양지","유럽 배낭여행","해외 직구 방법","여권 재발급","해외여행 보험","항공권 싸게 사는 법","로밍 vs 유심","해외 축제","비자 발급 정보","시차 적응법","환전 꿀팁","해외 맛집","크루즈 여행","트래블 카드","해외 안전 여행","글로벌 트렌드"],
+    문화:["넷플릭스 추천작","전시회 나들이","베스트셀러 도서","뮤지컬 추천","독립영화 추천","OTT 비교","웹툰 추천","클래식 공연","미술관 관람","연극 추천","독서 모임","팟캐스트 추천","다큐멘터리 추천","전시 예매 팁","도서관 활용법","문화생활 할인","페스티벌 일정","작가 인터뷰","신간 소식","오디오북 추천"],
+    연예:["아이돌 컴백 소식","드라마 정주행","예능 다시보기","OTT 신작","영화 개봉 소식","콘서트 티켓팅","연예인 화보","드라마 촬영지","신인 배우","음악 방송 순위","해외 K팝 반응","예능 라인업","OST 추천","팬미팅 일정","시상식 소식","웹드라마 추천","리얼리티쇼","배우 인터뷰","컴백 무대","연말 가요제"],
+    스포츠:["프로야구 순위","홈트레이닝 루틴","등산 초보 코스","러닝 입문","축구 국가대표","프로농구 일정","골프 입문","헬스 식단","마라톤 대회","클라이밍 시작","수영 배우기","자전거 코스","배드민턴 기초","요가 스트레칭","스포츠 중계 일정","다이어트 운동","홈짐 구성","테니스 입문","겨울 스포츠","축구화 추천"],
+    건강:["다이어트 식단","영양제 추천","환절기 건강관리","수면의 질 높이기","면역력 높이는 법","스트레스 해소","눈 건강 관리","장 건강 음식","혈압 관리","단백질 보충","금연 방법","비타민D 부족","목·어깨 스트레칭","물 많이 마시기","혈당 관리","치아 관리","피부 건강","갱년기 관리","정신건강 챙기기","건강검진 항목"],
   };
   const loadHotIssues = async (cat: string, opts?: { refreshed?: boolean }) => {
     setHotCat(cat); setHotLoading(true);
@@ -2516,6 +2519,8 @@ POST3: (제목)|(이유)
     } catch (e: any) { alert("건수 초기화 실패 — " + e.message); }
   }
   async function toggleActive(u: UserFull) { if (!confirm(`${u.name||u.email} ${u.is_active?"비활성화":"활성화"}?`)) return; try { const next=!u.is_active; const {data,error}=await supabase.from("publy_users").update({is_active:next}).eq("id",u.id).select("id,is_active"); if(error)throw new Error(error.message); if(!data?.[0]||data[0].is_active!==next)throw new Error("권한/RLS로 반영된 행이 없습니다"); await loadUsers(); } catch(e:any){alert("활성 상태 저장 실패 — "+e.message);} }
+  // 🔎 크롤링 잠금해제 토글 — 회원 publy_users.crawl_enabled. 반영 검증(.select) 후 목록 갱신.
+  async function toggleCrawl(u: UserFull) { try { const next=!u.crawl_enabled; const {data,error}=await supabase.from("publy_users").update({crawl_enabled:next}).eq("id",u.id).select("id,crawl_enabled"); if(error)throw new Error(error.message); if(!data?.[0]||data[0].crawl_enabled!==next)throw new Error("권한/RLS로 반영된 행이 없습니다"); await loadUsers(); showToast(next?`🔓 ${u.name||u.email} 크롤링 잠금해제`:`🔒 ${u.name||u.email} 크롤링 잠금`, "success"); } catch(e:any){ showToast("크롤링 권한 저장 실패 — "+e.message, "error"); } }
   async function addNote(uid: string) { if (!newNote.trim()) return; try { const content=newNote.trim(); const {data,error}=await supabase.from("publy_notes").insert({user_id:uid,content}).select("id,user_id,content"); if(error)throw new Error(error.message); if(!data?.[0]||data[0].user_id!==uid||data[0].content!==content)throw new Error("권한/RLS로 반영된 행이 없습니다"); setNewNote(""); await loadUsers(); } catch(e:any){alert("메모 추가 실패 — "+e.message);} }
   async function addPayment(uid: string, plan: string) {
     if (!newPayAmt) return; setAddingPay(true);
@@ -2771,40 +2776,31 @@ POST3: (제목)|(이유)
         <div className="layout">
           {/* 사이드바 */}
           <div className="sidebar">
-            <div className="nav-section" style={{fontSize:10,fontWeight:800,color:"var(--text3)",padding:"8px 12px 4px",letterSpacing:".08em"}}>✍️ 블로그 기능</div>
-            {TABS.filter(t=>["keyword","write","image","photo","publish","manage","blogscore","accounts","rank","calendar"].includes(t.k)).map(t => (
-              <button key={t.k} className={`nav-item ${tab===t.k?"active":""}`} onClick={()=>setTab(t.k as any)}>
-                <span className="nav-ico">{t.i}</span>{t.l}
-              </button>
-            ))}
-            <div className="nav-section" style={{fontSize:10,fontWeight:800,padding:"10px 12px 4px",letterSpacing:".08em",borderTop:"1px solid var(--border)",marginTop:6,
-              background:"linear-gradient(90deg,rgba(255,107,157,.08),transparent)",
-              color:"#FF6B9D"}}>📱 SNS 자동화</div>
-            <button className={`nav-item ${tab==="insta_dm"?"active":""}`} onClick={()=>setTab("insta_dm")}
-              style={tab==="insta_dm"?{background:"rgba(255,107,157,.1)",color:"#FF6B9D"}:{}}>
-              <span className="nav-ico">📱</span>인스타 DM
-            </button>
-            <div className="nav-section" style={{fontSize:10,fontWeight:800,color:"var(--text3)",padding:"10px 12px 4px",letterSpacing:".08em",borderTop:"1px solid var(--border)",marginTop:6}}>🤝 이웃 활동</div>
-            {TABS.filter(t=>["neighbor","engage","reply","pumasi"].includes(t.k)).map(t => (
-              <button key={t.k} className={`nav-item ${tab===t.k?"active":""}`} onClick={()=>setTab(t.k as any)}>
-                <span className="nav-ico">{t.i}</span>{t.l}
-              </button>
-            ))}
-            <div className="nav-section" style={{fontSize:10,fontWeight:800,color:"var(--text3)",padding:"10px 12px 4px",letterSpacing:".08em",borderTop:"1px solid var(--border)",marginTop:6}}>🔐 관리자 전용</div>
-            {TABS.filter(t=>["users","stats","proxy"].includes(t.k)).map(t => (
-              <button key={t.k} className={`nav-item ${tab===t.k?"active":""}`} onClick={()=>setTab(t.k as any)}>
-                <span className="nav-ico">{t.i}</span>{t.l}
-                {t.k==="users" && users.length>0 && <span className="nav-badge">{users.length}</span>}
-              </button>
-            ))}
-            <button className={`nav-item ${tab==="insta_dm_manage"?"active":""}`} onClick={()=>setTab("insta_dm_manage")}>
-              <span className="nav-ico">📊</span>DM 회원관리
-            </button>
-            {TABS.filter(t=>["neighbor_manage","engage_manage","reply_manage","blogscore_manage","settings"].includes(t.k)).map(t => (
-              <button key={t.k} className={`nav-item ${tab===t.k?"active":""}`} onClick={()=>setTab(t.k as any)}>
-                <span className="nav-ico">{t.i}</span>{t.l}
-              </button>
-            ))}
+            {/* 🔗 회원 대시보드와 동일한 분류·순서 (관리자 차이=무제한·크롤링 잠금없음뿐). 순서 보장 위해 명시 배열로 렌더 */}
+            {(() => {
+              const navBtn = (k: string) => {
+                const t = TABS.find(x => x.k === k); if (!t) return null;
+                return (
+                  <button key={t.k} className={`nav-item ${tab===t.k?"active":""}`} onClick={()=>setTab(t.k as any)}>
+                    <span className="nav-ico">{t.i}</span>{t.l}
+                    {t.k==="users" && users.length>0 && <span className="nav-badge">{users.length}</span>}
+                  </button>
+                );
+              };
+              const secStyle = {fontSize:10,fontWeight:800,color:"var(--text3)",padding:"10px 12px 4px",letterSpacing:".08em",borderTop:"1px solid var(--border)",marginTop:6} as const;
+              return (<>
+                <div className="nav-section" style={{...secStyle,borderTop:"none",marginTop:0,padding:"8px 12px 4px"}}>콘텐츠 만들기</div>
+                {["keyword","write","image","photo","publish"].map(navBtn)}
+                <div className="nav-section" style={secStyle}>블로그 운영</div>
+                {["calendar","manage","blogscore","crawl"].map(navBtn)}
+                <div className="nav-section" style={secStyle}>관계·소통 자동화</div>
+                {["neighbor","engage","reply","pumasi","insta_dm"].map(navBtn)}
+                <div className="nav-section" style={secStyle}>계정·설정</div>
+                {["accounts","settings"].map(navBtn)}
+                <div className="nav-section" style={{...secStyle,color:"#FF6B9D",background:"linear-gradient(90deg,rgba(255,107,157,.08),transparent)"}}>🔐 관리자 전용</div>
+                {["crawl_manage","users","stats","proxy","insta_dm_manage","neighbor_manage","engage_manage","reply_manage","blogscore_manage"].map(navBtn)}
+              </>);
+            })()}
             <div className="sidebar-stats">
               <div className="stat-box">
                 <div className="stat-num">{users.length}</div>
@@ -2819,6 +2815,52 @@ POST3: (제목)|(이유)
 
           {/* 메인 */}
           <div className="main">
+
+            {/* ───── 🔍 크롤링 (회원과 동일 · 관리자는 잠금 없이 항상 사용) ───── */}
+            {tab === "crawl" && (
+              <div style={{animation:"fadeUp .25s ease both"}}><CrawlCenter showToast={showToast} theme={theme} /></div>
+            )}
+
+            {/* ───── 🔎 크롤링 관리 (관리자 전용 · 회원 크롤링 잠금해제 승인) ───── */}
+            {tab === "crawl_manage" && (
+              <div style={{animation:"fadeUp .25s ease both"}}>
+                <div className="card">
+                  <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap",marginBottom:6}}>
+                    <div className="card-title" style={{margin:0}}>🔎 크롤링 관리</div>
+                    <span style={{fontSize:11,fontWeight:800,color:"#ff6fa5",background:"rgba(255,111,165,.12)",padding:"2px 9px",borderRadius:99}}>회원 잠금해제</span>
+                    <button onClick={loadUsers} style={{marginLeft:"auto",padding:"7px 13px",borderRadius:8,border:"1px solid var(--border)",background:"var(--bg)",color:"var(--text2)",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:"inherit"}}>↻ 새로고침</button>
+                  </div>
+                  <div style={{fontSize:12.5,color:"var(--text2)",lineHeight:1.6,marginBottom:14}}>회원에게 <b style={{color:"var(--text)"}}>크롤링(블로거 발굴)</b> 사용 권한을 켜고 끕니다. 켜면 그 회원의 대시보드에서 🔍크롤링 잠금이 풀립니다. (관리자 본인은 항상 열려 있음)</div>
+                  <input className="inp" placeholder="🔍 이름·이메일 검색" value={search} onChange={e=>setSearch(e.target.value)} style={{marginBottom:12}} />
+                  {(() => {
+                    const q = search.trim().toLowerCase();
+                    const list = users.filter(u => !q || (u.name||"").toLowerCase().includes(q) || (u.email||"").toLowerCase().includes(q));
+                    const onCount = users.filter(u=>u.crawl_enabled).length;
+                    return (<>
+                      <div style={{display:"flex",gap:8,marginBottom:12,flexWrap:"wrap"}}>
+                        <span style={{fontSize:12,fontWeight:800,color:"var(--text2)",background:"var(--bg)",border:"1px solid var(--border)",padding:"6px 12px",borderRadius:99}}>전체 {users.length}명</span>
+                        <span style={{fontSize:12,fontWeight:800,color:"#2f9e5e",background:"rgba(47,158,94,.1)",border:"1px solid rgba(47,158,94,.25)",padding:"6px 12px",borderRadius:99}}>🔓 크롤링 켜짐 {onCount}명</span>
+                      </div>
+                      {loading ? <div style={{padding:"30px 0",textAlign:"center",color:"var(--text3)"}}><span className="spinner"/> 회원 불러오는 중…</div>
+                       : list.length===0 ? <div style={{padding:"30px 0",textAlign:"center",color:"var(--text3)"}}>회원이 없습니다.</div>
+                       : <div style={{display:"flex",flexDirection:"column",gap:8}}>
+                          {list.map(u=>(
+                            <div key={u.id} style={{display:"flex",alignItems:"center",gap:12,padding:"12px 14px",border:"1px solid var(--border)",borderRadius:12,background:"var(--bg)"}}>
+                              <div style={{minWidth:0,flex:1}}>
+                                <div style={{fontSize:14,fontWeight:700,color:"var(--text)",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{u.name||"(이름 없음)"} <span style={{fontSize:11,fontWeight:600,color:"var(--text3)"}}>{u.plan}</span></div>
+                                <div style={{fontSize:11.5,color:"var(--text3)",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{u.email}</div>
+                              </div>
+                              <button onClick={()=>toggleCrawl(u)} style={{padding:"8px 16px",borderRadius:99,border:`1.5px solid ${u.crawl_enabled?"#2f9e5e":"var(--border)"}`,background:u.crawl_enabled?"rgba(47,158,94,.12)":"var(--card)",color:u.crawl_enabled?"#2f9e5e":"var(--text3)",cursor:"pointer",fontSize:12.5,fontWeight:800,fontFamily:"inherit",whiteSpace:"nowrap",transition:"all .15s"}}>
+                                {u.crawl_enabled?"🔓 사용 중":"🔒 잠김"}
+                              </button>
+                            </div>
+                          ))}
+                         </div>}
+                    </>);
+                  })()}
+                </div>
+              </div>
+            )}
 
             {/* ───── ✍️ 글 생성 ───── */}
             {/* ───── 🔍 키워드/제목 ───── */}
@@ -4367,7 +4409,7 @@ POST3: (제목)|(이유)
                           <option value="">위 핫이슈에서 골라주세요…</option>
                           {hotItems.map((it,i)=><option key={i} value={it}>{i+1}. {it.length>42?it.slice(0,42)+"…":it}</option>)}
                         </select>
-                        <button onClick={()=>{const kw=quickKw.trim(); if(!kw){showToast("먼저 핫이슈를 골라주세요");return;} setKeyword(kw);setSelectedTitle("");setPendingPromo(null);setTab("write");showToast(`✍️ "${kw.slice(0,16)}…" 바로 글쓰기로 이동!`);}}
+                        <button onClick={()=>{const kw=quickKw.trim(); if(!kw){showToast("먼저 핫이슈를 골라주세요");return;} setKeyword(kw);setSelectedTitle(kw);setPendingPromo(null);setTab("write");showToast(`✍️ "${kw.slice(0,16)}…" 바로 글쓰기로 이동!`);}}
                           style={{flexShrink:0,padding:"10px 18px",borderRadius:10,border:"none",background:"linear-gradient(135deg,#ff922e,#ff6a3d)",color:"#fff",fontSize:13,fontWeight:800,fontFamily:"inherit",cursor:"pointer",whiteSpace:"nowrap",boxShadow:"0 6px 16px -6px rgba(255,122,61,.5)"}}>바로 글쓰기 →</button>
                       </div>
                     </div>

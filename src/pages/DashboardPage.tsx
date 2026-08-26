@@ -560,9 +560,9 @@ textarea.inp{resize:vertical;line-height:1.75;min-height:80px;}
 @keyframes crawlBob{0%,100%{transform:translateY(0)}50%{transform:translateY(-3px)}}
 .nav-crawl-locked{border:1px dashed rgba(255,111,165,.45)!important;border-radius:9px;}
 .nav-crawl-locked:hover{background:rgba(255,111,165,.09);}
-.crawl-tip{position:absolute;left:calc(100% + 6px);top:50%;transform:translateY(-50%) scale(.9);white-space:nowrap;background:linear-gradient(135deg,#ff6fa5,#ff9ec4);color:#fff;font-size:11.5px;font-weight:700;padding:8px 13px;border-radius:11px;box-shadow:0 8px 22px rgba(255,111,165,.45);opacity:0;pointer-events:none;transition:all .2s cubic-bezier(.34,1.56,.64,1);z-index:200;}
-.crawl-tip::before{content:'';position:absolute;right:100%;top:50%;transform:translateY(-50%);border:6px solid transparent;border-right-color:#ff6fa5;}
-.nav-crawl-locked:hover .crawl-tip{opacity:1;transform:translateY(-50%) scale(1);}
+.crawl-tip{position:absolute;left:6px;right:6px;bottom:calc(100% + 9px);transform:scale(.92);transform-origin:bottom center;text-align:center;white-space:normal;line-height:1.4;background:linear-gradient(135deg,#ff6fa5,#ff9ec4);color:#fff;font-size:11.5px;font-weight:700;padding:8px 11px;border-radius:11px;box-shadow:0 8px 22px rgba(255,111,165,.45);opacity:0;pointer-events:none;transition:all .2s cubic-bezier(.34,1.56,.64,1);z-index:200;}
+.crawl-tip::before{content:'';position:absolute;top:100%;left:50%;transform:translateX(-50%);border:6px solid transparent;border-top-color:#ff9ec4;}
+.nav-crawl-locked:hover .crawl-tip{opacity:1;transform:scale(1);}
 @keyframes crawlPop{0%{opacity:0;transform:scale(.82) translateY(10px)}100%{opacity:1;transform:scale(1) translateY(0)}}
 @keyframes navHotGlow{0%,100%{box-shadow:0 0 6px rgba(255,180,0,.5);transform:scale(1)}50%{box-shadow:0 0 14px rgba(255,180,0,.9);transform:scale(1.06)}}
 /* 🎉 사진 글쓰기 완성 꽃가루 */
@@ -1258,18 +1258,18 @@ Output format (JSON array only, no other text):
   const [quickKw, setQuickKw] = useState(""); // 핫이슈로 '바로 글쓰기'용(캘린더 스케줄과 별개 파이프라인)
   // 봇 오프라인/웹 미리보기 대비 폴백(카테고리별 무난한 인기 주제) — 빈 화면 방지
   const HOT_FALLBACK: Record<string,string[]> = {
-    실시간:["요즘 뜨는 부업","정부지원금 신청","가을 여행지 추천","제철 음식 요리","전기요금 절약법","1인 창업 아이템"],
-    경제:["금리 전망","연말정산 팁","소상공인 지원금","재테크 초보","청년 목돈 마련"],
-    증권:["배당주 추천","ETF 초보 투자","국장 vs 미장","공모주 청약"],
-    산업:["AI 활용법","전기차 보조금","반도체 전망","스마트스토어 창업"],
-    정치:["정부 지원 정책","청년 정책","주거 지원 제도"],
-    사회:["요즘 생활 물가","전세 사기 예방","실업급여 조건"],
-    전국:["지역 축제 일정","당일치기 여행","지방 맛집 투어"],
-    세계:["해외여행 준비물","환율 여행 팁","면세점 쇼핑"],
-    문화:["넷플릭스 추천작","전시회 나들이","베스트셀러 도서"],
-    연예:["아이돌 컴백 소식","드라마 정주행","예능 다시보기"],
-    스포츠:["프로야구 순위","홈트레이닝 루틴","등산 초보 코스"],
-    건강:["다이어트 식단","영양제 추천","환절기 건강관리","수면의 질 높이기"],
+    실시간:["요즘 뜨는 부업","정부지원금 신청","가을 여행지 추천","제철 음식 요리","전기요금 절약법","1인 창업 아이템","연말정산 미리보기","청년 지원 정책","넷플릭스 추천작","다이어트 식단","반려동물 용품","스마트스토어 창업","환절기 건강관리","실내 인테리어 팁","제철 과일 고르는 법","중고거래 꿀팁","캠핑 초보 준비물","홈카페 레시피","가성비 노트북","주말 나들이 코스"],
+    경제:["금리 전망","연말정산 팁","소상공인 지원금","재테크 초보","청년 목돈 마련","부동산 시장 동향","환율 전망","연금 저축 활용","월세 세액공제","가계부 쓰는 법","금값 시세","비상금 모으기","신용점수 올리는 법","청년도약계좌","절세 상품 정리","가상자산 과세","실손보험 개편","전세대출 금리","배달 물가","최저임금 변화"],
+    증권:["배당주 추천","ETF 초보 투자","국장 vs 미장","공모주 청약","미국 주식 세금","반도체 관련주","2차전지 전망","코스피 전망","고배당 ETF","IRP 계좌 활용","증권사 수수료 비교","리츠 투자","적립식 투자","우량주 장기투자","AI 관련주","환헤지 ETF","실적 시즌 체크","채권 투자 기초","테마주 주의점","분산투자 방법"],
+    산업:["AI 활용법","전기차 보조금","반도체 전망","스마트스토어 창업","2차전지 산업","로봇 자동화","배터리 소재","친환경 에너지","수소차 근황","클라우드 시장","자율주행 기술","디스플레이 신기술","드론 활용 사례","3D 프린팅","스타트업 투자 유치","제조업 스마트팩토리","항공우주 산업","바이오 헬스케어","조선업 수주","반도체 장비"],
+    정치:["정부 지원 정책","청년 정책","주거 지원 제도","소상공인 대책","육아 지원금","기초연금 인상","교육 정책 변화","지방 소멸 대응","복지 혜택 총정리","세금 개편안","국민연금 개혁","최저임금 결정","전월세 대책","일자리 정책","저출생 대책","고령화 대책","의료 정책","교통 정책","환경 규제","디지털 정부"],
+    사회:["요즘 생활 물가","전세 사기 예방","실업급여 조건","보이스피싱 예방","중고거래 사기","교통비 절약","청년 주거 문제","1인 가구 생활","반려동물 에티켓","이웃 갈등 해결","재난 문자 대처","분리수거 방법","응급실 이용 팁","학교폭력 대응","노인 돌봄","기후 변화 체감","미세먼지 대응","층간소음 해결","알뜰폰 요금제","무인점포 이용법"],
+    전국:["지역 축제 일정","당일치기 여행","지방 맛집 투어","제주 여행 코스","부산 가볼 만한 곳","강원도 드라이브","경주 역사 여행","전주 한옥마을","가을 단풍 명소","해돋이 명소","시장 먹거리 투어","템플스테이","섬 여행 추천","캠핑장 추천","기차 여행 코스","야경 명소","벚꽃 명소","계곡 피서지","힐링 여행지","지역 특산물"],
+    세계:["해외여행 준비물","환율 여행 팁","면세점 쇼핑","일본 여행 코스","동남아 휴양지","유럽 배낭여행","해외 직구 방법","여권 재발급","해외여행 보험","항공권 싸게 사는 법","로밍 vs 유심","해외 축제","비자 발급 정보","시차 적응법","환전 꿀팁","해외 맛집","크루즈 여행","트래블 카드","해외 안전 여행","글로벌 트렌드"],
+    문화:["넷플릭스 추천작","전시회 나들이","베스트셀러 도서","뮤지컬 추천","독립영화 추천","OTT 비교","웹툰 추천","클래식 공연","미술관 관람","연극 추천","독서 모임","팟캐스트 추천","다큐멘터리 추천","전시 예매 팁","도서관 활용법","문화생활 할인","페스티벌 일정","작가 인터뷰","신간 소식","오디오북 추천"],
+    연예:["아이돌 컴백 소식","드라마 정주행","예능 다시보기","OTT 신작","영화 개봉 소식","콘서트 티켓팅","연예인 화보","드라마 촬영지","신인 배우","음악 방송 순위","해외 K팝 반응","예능 라인업","OST 추천","팬미팅 일정","시상식 소식","웹드라마 추천","리얼리티쇼","배우 인터뷰","컴백 무대","연말 가요제"],
+    스포츠:["프로야구 순위","홈트레이닝 루틴","등산 초보 코스","러닝 입문","축구 국가대표","프로농구 일정","골프 입문","헬스 식단","마라톤 대회","클라이밍 시작","수영 배우기","자전거 코스","배드민턴 기초","요가 스트레칭","스포츠 중계 일정","다이어트 운동","홈짐 구성","테니스 입문","겨울 스포츠","축구화 추천"],
+    건강:["다이어트 식단","영양제 추천","환절기 건강관리","수면의 질 높이기","면역력 높이는 법","스트레스 해소","눈 건강 관리","장 건강 음식","혈압 관리","단백질 보충","금연 방법","비타민D 부족","목·어깨 스트레칭","물 많이 마시기","혈당 관리","치아 관리","피부 건강","갱년기 관리","정신건강 챙기기","건강검진 항목"],
   };
   const loadHotIssues = async (cat: string, opts?: { refreshed?: boolean }) => {
     setHotCat(cat); setHotLoading(true);
@@ -6164,7 +6164,7 @@ POST3: (제목)|(이유)
                           <option value="">위 핫이슈에서 골라주세요…</option>
                           {hotItems.map((it,i)=><option key={i} value={it}>{i+1}. {it.length>42?it.slice(0,42)+"…":it}</option>)}
                         </select>
-                        <button onClick={()=>{const kw=quickKw.trim(); if(!kw){showToast("먼저 핫이슈를 골라주세요","info");return;} setKeyword(kw);setSelectedTitle("");setPendingPromo(null);setTab("write");showToast(`✍️ "${kw.slice(0,16)}…" 바로 글쓰기로 이동!`,"success");}}
+                        <button onClick={()=>{const kw=quickKw.trim(); if(!kw){showToast("먼저 핫이슈를 골라주세요","info");return;} setKeyword(kw);setSelectedTitle(kw);setPendingPromo(null);setTab("write");showToast(`✍️ "${kw.slice(0,16)}…" 바로 글쓰기로 이동!`,"success");}}
                           style={{flexShrink:0,padding:"10px 18px",borderRadius:10,border:"none",background:"linear-gradient(135deg,#ff922e,#ff6a3d)",color:"#fff",fontSize:13,fontWeight:800,fontFamily:"inherit",cursor:"pointer",whiteSpace:"nowrap",boxShadow:"0 6px 16px -6px rgba(255,122,61,.5)"}}>바로 글쓰기 →</button>
                       </div>
                     </div>
