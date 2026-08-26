@@ -336,13 +336,15 @@ export const PLAN_CONFIG: Record<string, {
   label: string;
   maxAccounts: number;
   dailyPublish: number;
+  dailyCrawl: number;    // 크롤링 하루 발굴 인원(무제한=999999)
+  dailyEmail: number;    // 크롤링 아웃리치 하루 이메일 발송(무제한=999999, 계정 안전상 100 권장)
   trialDays: number;
 }> = {
-  free:  { label: "FREE",  maxAccounts: 1, dailyPublish: 2,  trialDays: 7  },
-  basic: { label: "BASIC", maxAccounts: 2, dailyPublish: 6,  trialDays: 30 },
-  pro:   { label: "PRO",   maxAccounts: 3, dailyPublish: 15, trialDays: 30 },
-  unlimited: { label: "무제한", maxAccounts: 999, dailyPublish: 999999, trialDays: 99999 },
-  admin: { label: "ADMIN", maxAccounts: 99, dailyPublish: 9999, trialDays: 9999 },
+  free:  { label: "FREE",  maxAccounts: 1, dailyPublish: 2,  dailyCrawl: 5,  dailyEmail: 5,  trialDays: 7  },
+  basic: { label: "BASIC", maxAccounts: 2, dailyPublish: 6,  dailyCrawl: 20, dailyEmail: 20, trialDays: 30 },
+  pro:   { label: "PRO",   maxAccounts: 3, dailyPublish: 15, dailyCrawl: 50, dailyEmail: 50, trialDays: 30 },
+  unlimited: { label: "무제한", maxAccounts: 999, dailyPublish: 999999, dailyCrawl: 999999, dailyEmail: 999999, trialDays: 99999 },
+  admin: { label: "ADMIN", maxAccounts: 99, dailyPublish: 9999, dailyCrawl: 999999, dailyEmail: 999999, trialDays: 9999 },
 };
 
 function publishQuotaKey(userId: string): string {
@@ -482,6 +484,45 @@ export async function getReplyDailyUsage(userId: string): Promise<number> {
 export async function incrementReplyQuota(userId: string, by = 1): Promise<void> {
   const key = replyQuotaKey(userId);
   const used = await getReplyDailyUsage(userId);
+  await supabase.from("publy_settings").upsert({ key, value: String(used + by) }, { onConflict: "key" });
+}
+
+// ── 🔍 크롤링 발굴 일일 한도(자정 초기화 = 날짜별 키) ──
+export const CRAWL_DAILY_LIMIT: Record<string, number> = {
+  free: PLAN_CONFIG.free.dailyCrawl, basic: PLAN_CONFIG.basic.dailyCrawl, pro: PLAN_CONFIG.pro.dailyCrawl, unlimited: PLAN_CONFIG.unlimited.dailyCrawl, admin: PLAN_CONFIG.admin.dailyCrawl,
+};
+function crawlQuotaKey(userId: string): string {
+  return `crawl_daily_${userId}_${new Date().toISOString().slice(0, 10)}`;
+}
+export async function getCrawlDailyUsage(userId: string): Promise<number> {
+  try {
+    const { data } = await supabase.from("publy_settings").select("value").eq("key", crawlQuotaKey(userId)).maybeSingle();
+    return data?.value ? parseInt(data.value) || 0 : 0;
+  } catch { return 0; }
+}
+export async function incrementCrawlQuota(userId: string, by = 1): Promise<void> {
+  const key = crawlQuotaKey(userId);
+  const used = await getCrawlDailyUsage(userId);
+  await supabase.from("publy_settings").upsert({ key, value: String(used + by) }, { onConflict: "key" });
+}
+
+// ── ✉️ 아웃리치 이메일 발송 일일 한도(자정 초기화). 실제 발송 성공 수는 봇이 publy_outreach에 기록하지만,
+//    게이지/사전차단용 카운터는 여기(publy_settings)에도 둔다(다른 탭과 동일 패턴, 자정 리셋). ──
+export const EMAIL_DAILY_LIMIT: Record<string, number> = {
+  free: PLAN_CONFIG.free.dailyEmail, basic: PLAN_CONFIG.basic.dailyEmail, pro: PLAN_CONFIG.pro.dailyEmail, unlimited: PLAN_CONFIG.unlimited.dailyEmail, admin: PLAN_CONFIG.admin.dailyEmail,
+};
+function emailQuotaKey(userId: string): string {
+  return `email_daily_${userId}_${new Date().toISOString().slice(0, 10)}`;
+}
+export async function getEmailDailyUsage(userId: string): Promise<number> {
+  try {
+    const { data } = await supabase.from("publy_settings").select("value").eq("key", emailQuotaKey(userId)).maybeSingle();
+    return data?.value ? parseInt(data.value) || 0 : 0;
+  } catch { return 0; }
+}
+export async function incrementEmailQuota(userId: string, by = 1): Promise<void> {
+  const key = emailQuotaKey(userId);
+  const used = await getEmailDailyUsage(userId);
   await supabase.from("publy_settings").upsert({ key, value: String(used + by) }, { onConflict: "key" });
 }
 
@@ -1094,6 +1135,7 @@ export const PROXY_FEATURES = [
   { k: "engage",   l: "공감·댓글" },
   { k: "pumasi",   l: "품앗이" },
   { k: "reply",    l: "답방" },
+  { k: "crawl",    l: "크롤링" },
 ] as const;
 export const ALL_PROXY_FEATURES = PROXY_FEATURES.map(f => f.k) as string[];
 

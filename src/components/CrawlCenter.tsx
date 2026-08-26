@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import { createPortal } from "react-dom";
 import { BotEventStream } from "../lib/botApi";
+import { PLAN_CONFIG, CRAWL_DAILY_LIMIT, EMAIL_DAILY_LIMIT, getCrawlDailyUsage, incrementCrawlQuota, getEmailDailyUsage, incrementEmailQuota } from "../lib/supabase";
 
 const BOT = "http://127.0.0.1:3334";   // neighbor-bot (발굴·발송)
 
@@ -29,7 +30,7 @@ const chErr = (emoji: string) => (e: any) => {
 // 테마: light = 웜 페이퍼 / dark = 부드러운 웜 차콜(너무 어둡지 않게)
 const THEMES = {
   light: { bg: "#eee9df", surf: "#faf7f1", surf2: "#f3eee4", ink: "#2b2620", sub: "#8c8377", line: "#e0d7c9", line2: "#d5c9b7", accent: "#a8593a", accentSoft: "#efe2d6", logBg: "#fbf9f4", logInk: "#5c554a" },
-  dark: { bg: "#2a2622", surf: "#33302b", surf2: "#3b3732", ink: "#f0ebe2", sub: "#a89f92", line: "#413c35", line2: "#4d473f", accent: "#e0916b", accentSoft: "#453a33", logBg: "#211e1a", logInk: "#c9bfae" },
+  dark: { bg: "#221f1b", surf: "#2e2b26", surf2: "#39352f", ink: "#f7f3ec", sub: "#cabeae", line: "#4a443c", line2: "#5a5349", accent: "#f0a074", accentSoft: "#4a3d33", logBg: "#1c1a16", logInk: "#d6ccbc" },
 };
 
 type Blogger = {
@@ -57,7 +58,7 @@ const REGIONS = ["전국", "서울", "경기", "부산", "제주", "강원", "�
 
 // (목업 mockFind 제거 — 실제 네이버 발굴 API(/api/crawl)로 교체됨)
 
-export default function CrawlCenter({ showToast, theme: extTheme, userId }: { showToast?: (m: string, t?: any) => void; theme?: "dark" | "light"; userId?: string }) {
+export default function CrawlCenter({ showToast, theme: extTheme, userId, plan = "free" }: { showToast?: (m: string, t?: any) => void; theme?: "dark" | "light"; userId?: string; plan?: string }) {
   const toast = (m: string, t?: string) => showToast?.(m, t);
   // 테마는 메인 헤더 토글(부모 prop)을 그대로 따른다 — 크롤링 자체 토글 제거(테리: 토글 공용화).
   // 다크 색상(THEMES.dark 웜 차콜)은 그대로. 다크면 로그 배경·글씨(logBg/logInk)도 함께 바뀜.
@@ -98,6 +99,8 @@ export default function CrawlCenter({ showToast, theme: extTheme, userId }: { sh
   const [senderOpen, setSenderOpen] = useState(false);
   const [sForm, setSForm] = useState({ from_name: "", from_email: "", smtp_host: "smtp.naver.com", smtp_port: "465", smtp_user: "", smtp_pass: "", daily_limit: "50" });
   const [sSaving, setSSaving] = useState(false);
+  const [showPass, setShowPass] = useState(false);   // 발신계정 비밀번호 미리보기 토글
+  const [sErr, setSErr] = useState("");              // 발신계정 저장 에러(모달 안에 직접 표시 — 토스트는 모달에 가림)
   const loadSender = async () => {
     if (!userId) return;
     try { const r = await fetch(`${BOT}/api/outreach/sender/${userId}`); const d = await r.json(); if (d.ok) setSender(d.sender); } catch {}
@@ -110,6 +113,23 @@ export default function CrawlCenter({ showToast, theme: extTheme, userId }: { sh
     try { const r = await fetch(`${BOT}/api/outreach/history/${userId}`); const d = await r.json(); if (d.ok) setOutHistory(d.history || []); } catch {}
   };
   const esOutRef = useRef<BotEventStream | null>(null);
+  const [manualEmails, setManualEmails] = useState("");   // 직접 입력/붙여넣기한 이메일(발굴 결과에 없는 사람)
+  // 📊 등급별 하루 한도(자정 초기화) — 다른 탭과 동일한 에너지바
+  const crawlLimit = CRAWL_DAILY_LIMIT[plan] ?? CRAWL_DAILY_LIMIT.free;
+  const emailLimit = EMAIL_DAILY_LIMIT[plan] ?? EMAIL_DAILY_LIMIT.free;
+  const unlimitedPlan = plan === "unlimited" || plan === "admin";
+  const [crawlUsed, setCrawlUsed] = useState(0);
+  const [emailUsed, setEmailUsed] = useState(0);
+  const loadUsage = async () => {
+    if (!userId) return;
+    try { setCrawlUsed(await getCrawlDailyUsage(userId)); setEmailUsed(await getEmailDailyUsage(userId)); } catch {}
+  };
+  useEffect(() => { loadUsage(); const iv = setInterval(loadUsage, 20000); return () => clearInterval(iv); /* eslint-disable-next-line */ }, [userId]);
+  // 이메일 텍스트에서 주소만 추출(쉼표·공백·줄바꿈·세미콜론 구분, 형식 검증, 중복 제거)
+  const parseEmails = (raw: string): string[] => {
+    const found = (raw.match(/[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/g) || []);
+    return Array.from(new Set(found.map(e => e.trim().toLowerCase())));
+  };
   // 🎉 크롤링 웰컴 팝업(진입 시 팡!) — 7일 보지않기
   const [welcome, setWelcome] = useState(() => Date.now() > Number(localStorage.getItem("publy_crawl_welcome_until") || "0"));
   const closeWelcome = (week?: boolean) => { if (week) localStorage.setItem("publy_crawl_welcome_until", String(Date.now() + 7 * 86400000)); setWelcome(false); };
@@ -136,6 +156,12 @@ export default function CrawlCenter({ showToast, theme: extTheme, userId }: { sh
 
   const startFind = () => {
     if (running) return;
+    // 📊 등급 한도 체크 — 오늘 남은 발굴 수보다 목표가 크면 막고 업그레이드 유도(무제한 제외)
+    if (!unlimitedPlan) {
+      const remain = Math.max(0, crawlLimit - crawlUsed);
+      if (remain <= 0) { toast(`오늘 크롤링 발굴 한도(${crawlLimit}명)를 다 썼어요. 자정에 초기화되거나, 등급을 올리면 더 발굴할 수 있어요.`, "error"); return; }
+      if (count > remain) { toast(`오늘 남은 발굴이 ${remain}명이에요. 인원을 ${remain}명 이하로 줄이거나, 등급을 올려주세요.`, "info"); return; }
+    }
     if (esRef.current) { esRef.current.close(); esRef.current = null; }
     setRunning(true); setProgress(0); setLogs([]); setResults([]); setSelected(new Set()); setScanned(0);
     const kwList = [TOPIC_KR[topic] || topic, ...(keyword.trim() ? keyword.split(/[,\s]+/).filter(Boolean) : [])];
@@ -174,6 +200,8 @@ export default function CrawlCenter({ showToast, theme: extTheme, userId }: { sh
         toast(`${mapped.length}명 발굴 완료`, "success");
         setRunning(false); es.close(); esRef.current = null;
         if (mapped.length) analyzeAuthenticity(mapped);   // 🩺 발굴 직후 진정성 자동 분석(실제 이웃·방문자)
+        // 📊 실제 발굴한 인원만큼 하루 사용량 차감(자정 초기화)
+        if (userId && mapped.length && !unlimitedPlan) { incrementCrawlQuota(userId, mapped.length).then(() => setCrawlUsed(u => u + mapped.length)); }
       }
       else if (d.type === "error") { pushLog(`❌ 발굴 실패: ${d.msg}`); toast(`발굴 실패: ${d.msg}`, "error"); setRunning(false); es.close(); esRef.current = null; }
     };
@@ -207,34 +235,52 @@ export default function CrawlCenter({ showToast, theme: extTheme, userId }: { sh
   const sendEmails = () => {
     if (!userId) { toast("로그인 정보가 없어요", "error"); return; }
     if (!sender) { toast("먼저 발신 이메일 계정을 등록하세요", "info"); setSenderOpen(true); return; }
+    // ① 발굴 결과에서 고른 사람 + ② 직접 입력/붙여넣은 이메일 = 합쳐서 발송(중복 제거)
     const picks = shown.filter(b => selected.has(b.id) && b.email);
-    if (!picks.length) { toast("선택한 블로거 중 공개 이메일이 있는 사람이 없어요", "info"); return; }
-    setSending(true); pushLog(`📧 이메일 발송 시작 — ${picks.length}명`);
-    const targets = picks.map(b => ({ id: b.id, nick: b.nick, email: b.email, keywords: b.keywords, categories: b.categories }));
+    const pickedEmails = new Set(picks.map(b => (b.email || "").toLowerCase()));
+    const manual = parseEmails(manualEmails).filter(e => !pickedEmails.has(e));
+    const total = picks.length + manual.length;
+    if (!total) { toast("보낼 대상이 없어요 — 블로거를 선택하거나 이메일을 직접 입력하세요", "info"); return; }
+    // 📊 등급 한도 체크(무제한 제외) — 오늘 남은 발송 수 초과 시 막고 업그레이드 유도
+    if (!unlimitedPlan) {
+      const remain = Math.max(0, emailLimit - emailUsed);
+      if (remain <= 0) { toast(`오늘 이메일 발송 한도(${emailLimit}통)를 다 썼어요. 자정에 초기화되거나, 등급을 올리면 더 보낼 수 있어요.`, "error"); return; }
+      if (total > remain) { toast(`오늘 남은 발송이 ${remain}통이에요. 대상을 ${remain}명 이하로 줄이거나, 등급을 올려주세요.`, "info"); return; }
+    }
+    setSending(true); pushLog(`📧 이메일 발송 시작 — 발굴 ${picks.length}명 + 직접입력 ${manual.length}명 = ${total}명`);
+    const targets = [
+      ...picks.map(b => ({ id: b.id, nick: b.nick, email: b.email, keywords: b.keywords, categories: b.categories })),
+      ...manual.map((e, i) => ({ id: `manual-${i}-${e}`, nick: "", email: e, keywords: [] as string[], categories: [] as string[] })),
+    ];
     const url = `${BOT}/api/outreach/send-email?userId=${encodeURIComponent(userId)}&subject=${encodeURIComponent(emailSubject)}&message=${encodeURIComponent(emailBody)}&targets=${encodeURIComponent(JSON.stringify(targets))}`;
     const es = new BotEventStream(url); esOutRef.current = es;
     es.onmessage = (e: MessageEvent) => {
       let d: any; try { d = JSON.parse(e.data); } catch { return; }
       if (d.type === "log") pushLog(d.msg);
       else if (d.type === "sent") { setShips(s => ({ ...s, [d.id]: s[d.id] || { status: "proposed" as ShipStatus } })); }   // 보낸 사람=제안함
-      else if (d.type === "done") { pushLog(`✅ 발송 완료 — 성공 ${d.ok} · 실패 ${d.fail}`); toast(`이메일 ${d.ok}명 발송 완료`, "success"); setSending(false); setOutreach(null); es.close(); esOutRef.current = null; loadOutHistory(); }
+      else if (d.type === "done") { pushLog(`✅ 발송 완료 — 성공 ${d.ok} · 실패 ${d.fail}`); toast(`이메일 ${d.ok}명 발송 완료`, "success"); if (userId && d.ok > 0 && !unlimitedPlan) { incrementEmailQuota(userId, d.ok).then(() => setEmailUsed(u => u + d.ok)); } setSending(false); setOutreach(null); es.close(); esOutRef.current = null; loadOutHistory(); }
       else if (d.type === "error") { pushLog(`❌ ${d.msg}`); toast(d.msg, "error"); setSending(false); es.close(); esOutRef.current = null; }
     };
     es.onerror = () => { pushLog("❌ 봇 연결 오류"); toast("봇 연결 오류", "error"); setSending(false); es.close(); esOutRef.current = null; };
   };
 
-  // 발신 계정 저장(SMTP 검증 후)
+  // 발신 계정 저장(SMTP 검증 후) — 에러는 모달 안에 직접 표시(토스트는 모달에 가려 안 보임)
   const saveSender = async () => {
-    if (!userId) return;
-    if (!sForm.from_email || !sForm.smtp_user || !sForm.smtp_pass) { toast("발신 이메일·아이디·비밀번호를 채워주세요", "info"); return; }
+    if (!userId) { setSErr("로그인 정보가 없어요"); return; }
+    setSErr("");
+    if (!sForm.from_email || !sForm.smtp_user || !sForm.smtp_pass) { setSErr("발신 이메일·로그인 아이디·앱 비밀번호를 모두 채워주세요."); return; }
     setSSaving(true);
     try {
       const r = await fetch(`${BOT}/api/outreach/sender`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ userId, ...sForm }) });
       const d = await r.json();
       if (!d.ok) throw new Error(d.error || "저장 실패");
       toast("✅ 발신 계정을 등록했어요 (연결 확인됨)", "success");
-      setSenderOpen(false); await loadSender();
-    } catch (e: any) { toast(e.message, "error"); }
+      setSenderOpen(false); setSErr(""); await loadSender();
+    } catch (e: any) {
+      // 봇이 안 켜졌으면 fetch 자체가 실패 → 그 경우도 명확히
+      const msg = /Failed to fetch|NetworkError|봇/i.test(e.message || "") ? "봇 서버에 연결할 수 없어요. 앱을 껐다 켜거나 '서버 온라인' 표시를 확인해주세요." : (e.message || "저장 실패");
+      setSErr(msg);
+    }
     setSSaving(false);
   };
 
@@ -286,11 +332,16 @@ export default function CrawlCenter({ showToast, theme: extTheme, userId }: { sh
       {/* 🎉 크롤링 웰컴 팝업 — 몽글(탐험)이 팡! 사용법+재미있는 멘트. [닫기][일주일 보지않기] */}
       {welcome && createPortal(
         <div onClick={() => closeWelcome(false)} style={{ position: "fixed", inset: 0, zIndex: 100000, background: "rgba(20,16,12,.6)", backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
-          <style>{`@keyframes cwPop{0%{transform:scale(.6) translateY(30px);opacity:0}55%{transform:scale(1.04)}100%{transform:scale(1) translateY(0);opacity:1}}@keyframes cwBob{0%,100%{transform:translateY(0) rotate(-2deg)}50%{transform:translateY(-9px) rotate(2deg)}}@keyframes cwRow{0%{opacity:0;transform:translateX(-10px)}100%{opacity:1;transform:translateX(0)}}`}</style>
+          <style>{`@keyframes cwPop{0%{transform:scale(.6) translateY(30px);opacity:0}55%{transform:scale(1.04)}100%{transform:scale(1) translateY(0);opacity:1}}@keyframes cwBob{0%,100%{transform:translateY(0) rotate(-3deg)}50%{transform:translateY(-11px) rotate(3deg)}}@keyframes cwRow{0%{opacity:0;transform:translateX(-10px)}100%{opacity:1;transform:translateX(0)}}@keyframes cwGlow{0%,100%{transform:scale(1);opacity:.85}50%{transform:scale(1.12);opacity:1}}@keyframes cwShadow{0%,100%{transform:translateX(-50%) scale(1);opacity:.85}50%{transform:translateX(-50%) scale(.8);opacity:.5}}`}</style>
           <div onClick={e => e.stopPropagation()} style={{ position: "relative", background: C.surf, borderRadius: 22, padding: "34px 30px 26px", maxWidth: 440, width: "100%", boxShadow: "0 30px 90px -20px rgba(0,0,0,.55)", border: `1px solid ${C.line2}`, animation: "cwPop .5s cubic-bezier(.22,1.4,.4,1) both", maxHeight: "90vh", overflowY: "auto", color: C.ink }}>
             <div style={{ textAlign: "center", marginBottom: 18 }}>
-              <img src="characters/monggeul-explorer.png" alt="탐험가 몽글" onError={e => { const s = document.createElement("div"); s.textContent = "🧭"; s.style.cssText = "font-size:56px"; e.currentTarget.replaceWith(s); }} style={{ width: 82, height: 82, objectFit: "contain", animation: "cwBob 2.4s ease-in-out infinite", filter: `drop-shadow(0 8px 16px ${C.accent}44)` }} />
-              <div style={{ fontFamily: serif, fontSize: 23, fontWeight: 600, color: C.ink, marginTop: 8 }}>탐험 준비 완료! 🧭</div>
+              {/* 🧭 주인공 캐릭터 — 크고 임팩트 있게. 후광 + 바닥 그림자 + 회전 bob */}
+              <div style={{ position: "relative", width: 152, height: 152, margin: "0 auto 2px" }}>
+                <div style={{ position: "absolute", inset: 0, borderRadius: "50%", background: `radial-gradient(circle at 50% 42%, ${C.accent}44, ${C.accent}18 55%, transparent 72%)`, animation: "cwGlow 2.6s ease-in-out infinite" }} />
+                <div style={{ position: "absolute", left: "50%", bottom: 8, transform: "translateX(-50%)", width: 76, height: 13, borderRadius: "50%", background: "rgba(0,0,0,.2)", filter: "blur(5px)", animation: "cwShadow 2.4s ease-in-out infinite" }} />
+                <img src="characters/monggeul-explorer.png" alt="탐험가 몽글" onError={e => { const s = document.createElement("div"); s.textContent = "🧭"; s.style.cssText = "font-size:108px;line-height:152px"; e.currentTarget.replaceWith(s); }} style={{ position: "relative", width: 138, height: 138, marginTop: 6, objectFit: "contain", animation: "cwBob 2.4s ease-in-out infinite", filter: `drop-shadow(0 12px 22px ${C.accent}55)` }} />
+              </div>
+              <div style={{ fontFamily: serif, fontSize: 24, fontWeight: 600, color: C.ink, marginTop: 4 }}>탐험 준비 완료! 🧭</div>
               <div style={{ fontSize: 12.5, color: C.sub, marginTop: 7, lineHeight: 1.6 }}>안녕하세요, 발굴 탐험가 <b style={{ color: C.accent }}>몽글</b>이에요!<br />체험단에 딱 맞는 <b style={{ color: C.ink }}>진짜 블로거</b>를 공개 정보로 찾아드릴게요.</div>
             </div>
             <div style={{ display: "flex", flexDirection: "column", gap: 9, marginBottom: 20 }}>
@@ -324,9 +375,11 @@ export default function CrawlCenter({ showToast, theme: extTheme, userId }: { sh
         <div style={{ position: "relative", zIndex: 1 }}>
           <div style={{ ...eyebrow, color: C.accent }}>✦ Blogger Discovery · Outreach</div>
           <div style={{ fontFamily: serif, fontSize: 40, fontWeight: 600, letterSpacing: "-.015em", lineHeight: 1, marginTop: 8, color: C.ink }}>PUBLY<span style={{ background: `linear-gradient(90deg, ${C.accent}, ${theme === "dark" ? "#f0b088" : "#c9724a"})`, WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent", backgroundClip: "text" }}> Discovery</span></div>
-          <div style={{ fontSize: 12.5, color: C.sub, fontWeight: 600, marginTop: 10, maxWidth: 480, lineHeight: 1.6 }}>체험단에 어울리는 블로거를 <b style={{ color: C.ink }}>공개 정보로</b> 발굴하고, <b style={{ color: C.accent }}>🩺 진정성</b>까지 분석해 정중히 제안합니다.</div>
+          <div style={{ fontSize: 12.5, color: C.sub, fontWeight: 600, marginTop: 10, maxWidth: 620, lineHeight: 1.6, wordBreak: "keep-all" }}>체험단에 어울리는 블로거를 <b style={{ color: C.ink }}>공개 정보로</b> 발굴하고, <b style={{ color: C.accent }}>🩺 진정성</b>까지 분석해 정중히 제안합니다.</div>
         </div>
         <div style={{ position: "relative", zIndex: 1, display: "flex", alignItems: "flex-end", gap: 10 }}>
+          {/* 발굴 없이도 이메일을 직접 입력해 캠페인 보내기(2번) — 선택 없이 모달 열림 */}
+          <button onClick={() => { setSelected(new Set()); setManualEmails(""); setOutreach("email"); }} title="블로거 발굴 없이, 내가 가진 이메일 명단으로 바로 보낼 수 있어요" style={{ fontSize: 11, fontWeight: 800, color: C.surf, background: C.accent, border: "none", padding: "7px 12px", borderRadius: 20, whiteSpace: "nowrap", cursor: "pointer", fontFamily: "inherit" }}>✉ 이메일 직접 보내기</button>
           <span style={{ fontSize: 10, fontWeight: 800, letterSpacing: ".12em", color: C.accent, border: `1px solid ${C.accent}`, background: theme === "dark" ? "transparent" : "#fff", padding: "6px 11px", borderRadius: 20, whiteSpace: "nowrap" }}>⚖ 공개 정보만</span>
           <img src={CH.monggeul} onError={chErr("🧭")} className="ob-bob" style={{ width: 68, height: 68, objectFit: "contain", filter: "saturate(1) drop-shadow(0 10px 18px rgba(0,0,0,.28))" }} />
         </div>
@@ -347,6 +400,55 @@ export default function CrawlCenter({ showToast, theme: extTheme, userId }: { sh
             <div style={{ fontFamily: serif, fontSize: 32, fontWeight: 600, color: C.ink, lineHeight: 1, marginTop: 6 }}>{k.val}<span style={{ fontSize: 12, marginLeft: 3, color: C.sub, fontFamily: "'Noto Sans KR'" }}>{k.unit}</span></div>
           </div>
         ))}
+      </div>
+
+      {/* ── 📊 오늘의 사용량(에너지바) + 발신계정 + 등급표 ── */}
+      <div className="ob-sec ob-card" style={{ ...card, padding: 20, marginBottom: 16 }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap", marginBottom: 14 }}>
+          <div style={{ fontFamily: serif, fontSize: 16, fontWeight: 600, color: C.ink }}>📊 오늘의 사용량 <span style={{ fontSize: 11, fontWeight: 700, color: C.sub, fontFamily: "'Noto Sans KR'" }}>· 자정에 초기화</span></div>
+          {/* 발신 이메일 계정 — 항상 보이게(테리: 계정추가 안 보인다) */}
+          <button onClick={() => setSenderOpen(true)} style={{ fontSize: 12, fontWeight: 800, padding: "8px 14px", borderRadius: 10, border: `1.5px solid ${sender ? "#2f9e5e" : C.accent}`, background: sender ? "rgba(47,158,94,.1)" : C.accent, color: sender ? "#2f9e5e" : C.surf, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}>{sender ? `✅ 발신계정: ${sender.from_email}` : "✉ 발신 이메일 계정 등록"}</button>
+        </div>
+        {(() => {
+          const bar = (label: string, ic: string, used: number, limit: number, col: string) => {
+            const pct = unlimitedPlan ? 100 : Math.min(100, limit ? (used / limit) * 100 : 0);
+            const remain = Math.max(0, limit - used);
+            return (
+              <div style={{ marginBottom: 12 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 5 }}>
+                  <span style={{ fontSize: 12.5, fontWeight: 700, color: C.ink }}>{ic} {label}</span>
+                  <span style={{ fontSize: 12, fontWeight: 800, color: unlimitedPlan ? "#8b5cf6" : remain <= 0 ? "#d64545" : col }}>{unlimitedPlan ? "무제한 ∞" : `${used} / ${limit}통 · ${remain}통 남음`}</span>
+                </div>
+                <div style={{ height: 9, borderRadius: 99, background: C.surf2, overflow: "hidden", border: `1px solid ${C.line}` }}>
+                  <div style={{ height: "100%", width: `${pct}%`, borderRadius: 99, background: unlimitedPlan ? "linear-gradient(90deg,#8b5cf6,#00c8ff)" : remain <= 0 ? "#d64545" : `linear-gradient(90deg,${col},${col}bb)`, transition: "width .5s ease" }} />
+                </div>
+              </div>
+            );
+          };
+          return <>
+            {bar("크롤링 발굴", "🔍", crawlUsed, crawlLimit, C.accent)}
+            {bar("이메일 발송", "✉️", emailUsed, emailLimit, "#2f9e5e")}
+          </>;
+        })()}
+        {/* 등급별 한도 표(무제한 제외 = 무료/베이직/프로) */}
+        {!unlimitedPlan && (
+          <div style={{ marginTop: 14, borderRadius: 10, overflow: "hidden", border: `1px solid ${C.line}` }}>
+            <div style={{ display: "grid", gridTemplateColumns: "1.2fr 1fr 1fr", background: C.surf2 }}>
+              {["등급", "🔍 크롤링/일", "✉️ 이메일/일"].map((h, i) => <div key={h} style={{ padding: "8px 12px", fontSize: 11, fontWeight: 800, color: C.sub, borderLeft: i ? `1px solid ${C.line}` : "none" }}>{h}</div>)}
+            </div>
+            {(["free", "basic", "pro"] as const).map(pl => {
+              const cur = plan === pl;
+              return (
+                <div key={pl} style={{ display: "grid", gridTemplateColumns: "1.2fr 1fr 1fr", borderTop: `1px solid ${C.line}`, background: cur ? C.accentSoft : "transparent" }}>
+                  <div style={{ padding: "9px 12px", fontSize: 12, fontWeight: cur ? 900 : 700, color: cur ? C.accent : C.ink }}>{PLAN_CONFIG[pl].label}{cur ? " (내 등급)" : ""}</div>
+                  <div style={{ padding: "9px 12px", fontSize: 12, fontWeight: 700, color: C.ink, borderLeft: `1px solid ${C.line}` }}>{PLAN_CONFIG[pl].dailyCrawl}명</div>
+                  <div style={{ padding: "9px 12px", fontSize: 12, fontWeight: 700, color: C.ink, borderLeft: `1px solid ${C.line}` }}>{PLAN_CONFIG[pl].dailyEmail}통</div>
+                </div>
+              );
+            })}
+            <div style={{ padding: "8px 12px", fontSize: 10.5, color: C.sub, background: C.surf2, borderTop: `1px solid ${C.line}` }}>💜 무제한 등급은 크롤링·이메일 모두 <b style={{ color: "#8b5cf6" }}>제한 없음</b>이에요. 더 필요하면 등급을 올려보세요.</div>
+          </div>
+        )}
       </div>
 
       {/* ── 검색 설정 ── */}
@@ -571,7 +673,7 @@ export default function CrawlCenter({ showToast, theme: extTheme, userId }: { sh
               <img src={CH.bori} onError={chErr("🌱")} style={{ width: 40, height: 40 }} />
               <div style={{ flex: 1 }}>
                 <div style={{ fontFamily: serif, fontSize: 18, fontWeight: 600 }}>{outreach === "email" ? "이메일 제안 보내기" : "블로그 댓글 제안"}</div>
-                <div style={{ fontSize: 11.5, color: C.sub }}>{selected.size}명 대상 · {outreach === "email" ? "공개 이메일로 발송" : "각 블로그에 정중한 댓글"}</div>
+                <div style={{ fontSize: 11.5, color: C.sub }}>{outreach === "email" ? "선택한 블로거 + 직접 입력한 이메일로 발송" : `${selected.size}명 대상 · 각 블로그에 정중한 댓글`}</div>
               </div>
               <button onClick={() => setOutreach(null)} style={{ ...btnGhost, padding: "5px 10px" }}>✕</button>
             </div>
@@ -591,13 +693,28 @@ export default function CrawlCenter({ showToast, theme: extTheme, userId }: { sh
                   onChange={e => outreach === "email" ? setEmailBody(e.target.value) : setCommentBody(e.target.value)}
                   style={{ ...inp, resize: "vertical", lineHeight: 1.7 }} />
               </div>
+              {/* ✍️ 이메일 직접 추가 — 발굴 결과에 없는 사람에게도 보내기 / 내 명단만으로 캠페인(발굴 0명이어도 됨) */}
+              {outreach === "email" && (() => {
+                const manualList = parseEmails(manualEmails);
+                const pickedN = shown.filter(b => selected.has(b.id) && b.email).length;
+                const pickedSet = new Set(shown.filter(b => selected.has(b.id) && b.email).map(b => (b.email || "").toLowerCase()));
+                const manualN = manualList.filter(e => !pickedSet.has(e)).length;
+                return (
+                  <div style={{ marginBottom: 14 }}>
+                    <div style={label}>✍️ 이메일 직접 추가 <span style={{ fontWeight: 600, textTransform: "none", letterSpacing: 0, color: C.sub }}>· 발굴에 없는 사람도, 내 명단만으로도</span></div>
+                    <textarea rows={2} value={manualEmails} onChange={e => setManualEmails(e.target.value)} placeholder="이메일을 붙여넣거나 입력하세요 (쉼표·줄바꿈 구분)&#10;예: hong@naver.com, kim@daum.net" style={{ ...inp, resize: "vertical", lineHeight: 1.6, fontFamily: "'Noto Sans KR',monospace" }} />
+                    {manualList.length > 0 && <div style={{ fontSize: 11, color: C.accent, fontWeight: 700, marginTop: 5 }}>✓ 유효한 이메일 {manualList.length}개 인식됨{manualN < manualList.length ? ` (선택과 중복 ${manualList.length - manualN}개 제외)` : ""}</div>}
+                    {pickedN === 0 && manualN > 0 && <div style={{ fontSize: 11, color: C.sub, marginTop: 3 }}>💡 발굴 없이 <b>내 명단만으로 발송</b>돼요. (닉네임 자동채움은 발굴한 블로거만 적용)</div>}
+                  </div>
+                );
+              })()}
               <div style={{ fontSize: 11.5, color: C.sub, fontWeight: 600, background: C.surf2, border: `1px solid ${C.line}`, borderRadius: 3, padding: "10px 13px", lineHeight: 1.6, marginBottom: 18 }}>
-                💡 <b>{"{닉네임}"}·{"{관심키워드}"}·{"{관심품목}"}</b>는 블로거마다 자동으로 채워져요. {outreach === "comment" ? "댓글은 계정 연결이 필요해요(서이추·공감댓글처럼)." : `발송은 공개된 이메일 주소로만 나가요. 계정 안전을 위해 하루 ${sender?.daily_limit || 50}통까지, 3~6초 간격으로 보내요.`}
+                💡 <b>{"{닉네임}"}·{"{관심키워드}"}·{"{관심품목}"}</b>는 블로거마다 자동으로 채워져요. {outreach === "comment" ? "댓글은 계정 연결이 필요해요(서이추·공감댓글처럼)." : `발송은 SMTP로 바로 나가요. 계정 안전을 위해 하루 ${sender?.daily_limit || 50}통까지, 3~6초 간격으로 보내요. (한 계정으로 하루 100통 넘기면 계정이 위험해요 — 많으면 계정을 나눠 쓰세요.)`}
               </div>
               <div style={{ display: "flex", gap: 8 }}>
                 <button onClick={() => setOutreach(null)} disabled={sending} style={{ ...btnGhost, flex: 1 }}>취소</button>
                 {outreach === "email"
-                  ? <button onClick={sendEmails} disabled={sending} style={{ ...btnSolid, flex: 2, opacity: sending ? .6 : 1 }}>{sending ? "발송 중..." : `${shown.filter(b => selected.has(b.id) && b.email).length}명에게 실제 발송 →`}</button>
+                  ? (() => { const pickedN = shown.filter(b => selected.has(b.id) && b.email).length; const pickedSet = new Set(shown.filter(b => selected.has(b.id) && b.email).map(b => (b.email || "").toLowerCase())); const manualN = parseEmails(manualEmails).filter(e => !pickedSet.has(e)).length; const totalN = pickedN + manualN; return <button onClick={sendEmails} disabled={sending || totalN === 0} style={{ ...btnSolid, flex: 2, opacity: (sending || totalN === 0) ? .6 : 1 }}>{sending ? "발송 중..." : `${totalN}명에게 실제 발송 →`}</button>; })()
                   : <button onClick={() => { const now: Record<string, ShipState> = {}; selected.forEach((id) => { now[id] = ships[id] || { status: "proposed" as ShipStatus }; }); setShips((s) => ({ ...s, ...now })); toast("댓글 제안 대상으로 담았어요 — 댓글 실발송은 계정 연결 후 지원돼요", "info"); setOutreach(null); }} style={{ ...btnSolid, flex: 2 }}>{selected.size}명 담기 →</button>}
               </div>
             </div>
@@ -615,14 +732,22 @@ export default function CrawlCenter({ showToast, theme: extTheme, userId }: { sh
             </div>
             <div style={{ padding: "20px 24px", display: "flex", flexDirection: "column", gap: 12 }}>
               {[
-                { k: "from_name", l: "보내는 사람 이름 (선택)", ph: "온종일 체험단" },
-                { k: "from_email", l: "발신 이메일 주소 *", ph: "myid@naver.com" },
-                { k: "smtp_user", l: "SMTP 아이디 * (보통 이메일 앞부분 or 전체)", ph: "myid" },
-                { k: "smtp_pass", l: "앱 비밀번호 *", ph: "네이버 메일 앱 비밀번호", pw: true },
+                { k: "from_name", l: "보내는 사람 이름 (선택)", ph: "온종일 체험단", hint: "받는 사람 메일에 표시될 이름이에요." },
+                { k: "from_email", l: "발신 이메일 주소 *", ph: "myid@naver.com", hint: "이 주소에서 메일이 나가요." },
+                { k: "smtp_user", l: "로그인 아이디 *", ph: "myid", hint: "네이버는 이메일 앞부분만(예: hong@naver.com → hong). 구글·다음은 전체 이메일을 넣으세요." },
+                { k: "smtp_pass", l: "앱 비밀번호 *", ph: "네이버 메일 앱 비밀번호", pw: true, hint: "네이버 로그인 비번이 아니라, 메일 설정에서 만든 '앱 비밀번호'예요." },
               ].map(f => (
                 <div key={f.k}>
                   <div style={label}>{f.l}</div>
-                  <input type={(f as any).pw ? "password" : "text"} value={(sForm as any)[f.k]} onChange={e => setSForm(s => ({ ...s, [f.k]: e.target.value }))} placeholder={f.ph} style={inp} />
+                  {(f as any).pw ? (
+                    <div style={{ position: "relative" }}>
+                      <input type={showPass ? "text" : "password"} value={(sForm as any)[f.k]} onChange={e => setSForm(s => ({ ...s, [f.k]: e.target.value }))} placeholder={f.ph} style={{ ...inp, paddingRight: 44 }} />
+                      <button type="button" onClick={() => setShowPass(v => !v)} title={showPass ? "비밀번호 숨기기" : "비밀번호 보기"} style={{ position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)", background: "transparent", border: "none", cursor: "pointer", fontSize: 17, lineHeight: 1, padding: 4 }}>{showPass ? "🙈" : "👁️"}</button>
+                    </div>
+                  ) : (
+                    <input type="text" value={(sForm as any)[f.k]} onChange={e => setSForm(s => ({ ...s, [f.k]: e.target.value }))} placeholder={f.ph} style={inp} />
+                  )}
+                  {(f as any).hint && <div style={{ fontSize: 10.5, color: C.sub, marginTop: 4, lineHeight: 1.5 }}>💬 {(f as any).hint}</div>}
                 </div>
               ))}
               <div style={{ display: "flex", gap: 10 }}>
@@ -631,8 +756,11 @@ export default function CrawlCenter({ showToast, theme: extTheme, userId }: { sh
                 <div style={{ flex: 1 }}><div style={label}>하루 한도</div><input value={sForm.daily_limit} onChange={e => setSForm(s => ({ ...s, daily_limit: e.target.value }))} style={inp} /></div>
               </div>
               <div style={{ fontSize: 11, color: C.sub, lineHeight: 1.55, background: C.surf2, borderRadius: 3, padding: "9px 12px" }}>네이버=smtp.naver.com:465 · 구글=smtp.gmail.com:465. 저장 시 실제 로그인 연결을 확인해요(틀리면 저장 안 됨).</div>
+              {/* 진행/에러를 모달 안에 직접 표시(토스트는 모달에 가려 안 보임) */}
+              {sSaving && <div style={{ fontSize: 12, fontWeight: 700, color: C.accent, padding: "10px 12px", borderRadius: 8, background: C.accentSoft }}>🔌 네이버 메일 서버에 로그인 연결을 확인하는 중...</div>}
+              {sErr && <div style={{ fontSize: 12, fontWeight: 700, color: "#fff", background: "#d64545", padding: "10px 12px", borderRadius: 8, lineHeight: 1.5 }}>❌ {sErr}</div>}
               <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
-                <button onClick={() => setSenderOpen(false)} disabled={sSaving} style={{ ...btnGhost, flex: 1 }}>취소</button>
+                <button onClick={() => { setSenderOpen(false); setSErr(""); }} disabled={sSaving} style={{ ...btnGhost, flex: 1 }}>취소</button>
                 <button onClick={saveSender} disabled={sSaving} style={{ ...btnSolid, flex: 2, opacity: sSaving ? .6 : 1 }}>{sSaving ? "연결 확인 중..." : "연결 확인 후 저장"}</button>
               </div>
             </div>

@@ -537,6 +537,7 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
   const [titleEditingKey, setTitleEditingKey] = useState<string>("");   // 지금 수정 중인 "logNo|번호"
   // ★재발행 알림: 기간 설정(기본 30일) + 누적 대상(localStorage). 재설치돼도 발행이력(서버)은 안전, 이 캐시만 재검사로 복구.
   const [republishDays, setRepublishDays] = useState<number>(()=>{ const v=parseInt(localStorage.getItem("publy_republish_days")||"30",10); return Number.isFinite(v)?v:30; });
+  const [republishAncient, setRepublishAncient] = useState(false);   // "90일 이후"(90일 넘은 오래된 글) 모드
   const [rpBusyLog, setRpBusyLog] = useState<string>("");   // 재발행 목록에서 지금 제목 바꾸는 중인 글의 logNo
   // 재발행 목록에서 글별로 받은 개선안(제목1·2+진단·키워드·팁) — logNo → 솔루션
   const [rpSolutions, setRpSolutions] = useState<Record<string, { original: string; logNo: string; diagnosis: string; newTitle: string; newTitle2: string; keywords: string[]; bodyTip: string; expectedEffect: string }>>({});
@@ -1484,8 +1485,8 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
         const now = Date.now();
         for (const c of checksWithDate) {
           if (!c.logNo) continue;
-          const ageOk = c.date && (now - new Date(c.date).getTime()) >= republishDays*86400000;
-          if (c.exposed === false && ageOk) {
+          // ★미노출(100위 밖) 글은 날짜 상관없이 전부 저장 → 기간 필터는 '표시'에서 적용(15일 이내/90일 이후 등)
+          if (c.exposed === false) {
             store[c.logNo] = { logNo: c.logNo, title: c.title, date: c.date, blogId: acc.blogId || "", at: now };
           } else if (c.exposed === true) {
             delete store[c.logNo];   // 이제 노출되면 대상에서 제거
@@ -2635,9 +2636,9 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
                     return (
                       <div style={{ marginBottom: 20, borderRadius: 16, background: "linear-gradient(135deg, rgba(0,200,150,.07), rgba(139,92,246,.05))", border: "1.5px solid rgba(0,200,150,.28)", overflow: "hidden" }}>
                         <div style={{ padding: "16px 18px", display: "flex", alignItems: "center", gap: 12 }}>
-                          <img src="characters/dodo-checker.png" alt="주치의 도도" onError={e => { const s = document.createElement("div"); s.textContent = "🩺"; s.style.cssText = "font-size:34px;line-height:1"; e.currentTarget.replaceWith(s); }} style={{ width: 44, height: 44, objectFit: "contain", flexShrink: 0, filter: "drop-shadow(0 4px 8px rgba(0,200,150,.3))" }} />
+                          <img src="characters/bori-cheer.png" alt="응원단 보리" onError={e => { const s = document.createElement("div"); s.textContent = "🌱"; s.style.cssText = "font-size:34px;line-height:1"; e.currentTarget.replaceWith(s); }} style={{ width: 44, height: 44, objectFit: "contain", flexShrink: 0, filter: "drop-shadow(0 4px 8px rgba(139,92,246,.3))" }} />
                           <div style={{ flex: 1, minWidth: 0 }}>
-                            <div style={{ fontSize: 14.5, fontWeight: 850, color: "var(--text)" }}>🩺 수정 추적 <span style={{ fontSize: 11.5, fontWeight: 800, color: "#00c896", background: "rgba(0,200,150,.14)", padding: "2px 9px", borderRadius: 20, marginLeft: 4 }}>{tracked.length}개 관리 중</span></div>
+                            <div style={{ fontSize: 14.5, fontWeight: 850, color: "var(--text)" }}>🌱 수정 추적 <span style={{ fontSize: 11.5, fontWeight: 800, color: "#00c896", background: "rgba(0,200,150,.14)", padding: "2px 9px", borderRadius: 20, marginLeft: 4 }}>{tracked.length}개 관리 중</span></div>
                             <div style={{ fontSize: 11.5, color: "var(--text2)", marginTop: 3, lineHeight: 1.5 }}>제목을 바꾼 글이에요. 주치의가 <b style={{ color: "#8b5cf6" }}>완치(검색 노출)될 때까지</b> 함께 지켜봐요.</div>
                           </div>
                           <button onClick={() => { setTrackOpen(o => !o); setTrackPage(0); }} style={{ flexShrink: 0, padding: "8px 14px", borderRadius: 10, border: "none", background: trackOpen ? "var(--card2)" : "linear-gradient(135deg,#00c896,#00a878)", color: trackOpen ? "var(--text2)" : "#fff", cursor: "pointer", fontSize: 12, fontWeight: 800, fontFamily: "inherit" }}>{trackOpen ? "접기 ▲" : "리스트 보기 ▼"}</button>
@@ -2794,9 +2795,14 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
                     try { store = JSON.parse(localStorage.getItem("publy_republish_targets") || "{}"); } catch {}
                     // ★현재 선택한 계정 것만 표시(계정 바뀌면 자동으로 그 계정 목록으로 — 다른 계정 글 섞임 방지)
                     const abid = (activeAccount?.blogId || "").toLowerCase();
-                    const list = Object.values(store).filter((t: any) => t.date && (now - new Date(t.date).getTime()) >= republishDays*86400000)
+                    // 기간 필터: 기본=선택 날짜 '이내(미만)'에 쓴 미노출 글 / '90일 이후' 모드=90일 넘은 오래된 글
+                    const list = Object.values(store).filter((t: any) => {
+                        if (!t.date) return republishAncient ? false : true;   // 날짜 없으면 이내 목록엔 포함, 이후 목록엔 제외
+                        const ageDays = (now - new Date(t.date).getTime()) / 86400000;
+                        return republishAncient ? ageDays > 90 : ageDays < republishDays;
+                      })
                       .filter((t: any) => !abid || !t.blogId || String(t.blogId).toLowerCase() === abid)
-                      .sort((a: any, b: any) => new Date(a.date).getTime() - new Date(b.date).getTime());
+                      .sort((a: any, b: any) => new Date(a.date || 0).getTime() - new Date(b.date || 0).getTime());
                     return (
                       <div style={{ marginBottom: 20, padding: "16px", borderRadius: 14, background: "rgba(245,158,11,.08)", border: "1.5px solid rgba(245,158,11,.4)" }}>
                         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap", marginBottom: 6 }}>
@@ -2815,28 +2821,34 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
                               onMouseLeave={e => (e.currentTarget.style.transform = "scale(1)")}>
                               <span style={{ display: "inline-block", transition: "transform .6s", transform: rpSpin ? "rotate(360deg)" : "none" }}>🔄</span> 새로고침
                             </button>
-                            <span style={{ fontSize: 10.5, color: "var(--text3)", fontWeight: 700, marginLeft: 4 }}>기준</span>
-                            {[15,30,60,90].map(d => (
-                              <button key={d} onClick={() => { setRepublishDays(d); localStorage.setItem("publy_republish_days", String(d)); }}
-                                title={`발행한 지 ${d}일이 지났는데도 검색에 안 뜨는(미노출) 글`}
-                                style={{ padding: "3px 8px", borderRadius: 7, border: `1.5px solid ${republishDays===d?"#f59e0b":"var(--border)"}`, background: republishDays===d?"rgba(245,158,11,.15)":"transparent", color: republishDays===d?"#f59e0b":"var(--text3)", cursor: "pointer", fontSize: 10.5, fontWeight: 800, fontFamily: "inherit" }}>{d}일+</button>
-                            ))}
-                            {/* 직접 기간 설정 — 임의 일수 */}
+                            <span style={{ fontSize: 10.5, color: "var(--text3)", fontWeight: 700, marginLeft: 4 }}>쓴 지</span>
+                            {[15,30,60,90].map(d => {
+                              const on = !republishAncient && republishDays===d;
+                              return (
+                              <button key={d} onClick={() => { setRepublishAncient(false); setRepublishDays(d); localStorage.setItem("publy_republish_days", String(d)); }}
+                                title={`최근 ${d}일 이내에 썼는데도 검색에 안 뜨는(미노출) 글`}
+                                style={{ padding: "3px 8px", borderRadius: 7, border: `1.5px solid ${on?"#f59e0b":"var(--border)"}`, background: on?"rgba(245,158,11,.15)":"transparent", color: on?"#f59e0b":"var(--text3)", cursor: "pointer", fontSize: 10.5, fontWeight: 800, fontFamily: "inherit" }}>{d}일 이내</button>
+                            );})}
+                            {/* 직접 기간 설정 — 임의 일수 '이내' */}
                             <span style={{ display: "inline-flex", alignItems: "center", gap: 3, marginLeft: 2 }}>
-                              <input type="number" min={1} value={republishDays} onChange={e => { const v = Math.max(1, parseInt(e.target.value || "1", 10)); setRepublishDays(v); localStorage.setItem("publy_republish_days", String(v)); }}
-                                title="원하는 일수를 직접 입력하세요(예: 45일 이후)"
-                                style={{ width: 46, padding: "3px 6px", borderRadius: 7, border: `1.5px solid ${![15,30,60,90].includes(republishDays)?"#f59e0b":"var(--border)"}`, background: "transparent", color: ![15,30,60,90].includes(republishDays)?"#f59e0b":"var(--text2)", fontSize: 10.5, fontWeight: 800, fontFamily: "inherit", textAlign: "center", outline: "none" }} />
-                              <span style={{ fontSize: 10.5, color: "var(--text3)", fontWeight: 700 }}>일+ 직접</span>
+                              <input type="number" min={1} value={republishDays} onChange={e => { const v = Math.max(1, parseInt(e.target.value || "1", 10)); setRepublishAncient(false); setRepublishDays(v); localStorage.setItem("publy_republish_days", String(v)); }}
+                                title="원하는 일수를 직접 입력하세요(예: 45 → 최근 45일 이내)"
+                                style={{ width: 46, padding: "3px 6px", borderRadius: 7, border: `1.5px solid ${(!republishAncient && ![15,30,60,90].includes(republishDays))?"#f59e0b":"var(--border)"}`, background: "transparent", color: (!republishAncient && ![15,30,60,90].includes(republishDays))?"#f59e0b":"var(--text2)", fontSize: 10.5, fontWeight: 800, fontFamily: "inherit", textAlign: "center", outline: "none" }} />
+                              <span style={{ fontSize: 10.5, color: "var(--text3)", fontWeight: 700 }}>일 이내(직접)</span>
                             </span>
+                            {/* 90일 이후(90일 넘은 오래된 글) 별도 버튼 */}
+                            <button onClick={() => setRepublishAncient(true)}
+                              title="발행한 지 90일이 넘은 오래된 미노출 글 전부"
+                              style={{ padding: "3px 9px", borderRadius: 7, border: `1.5px solid ${republishAncient?"#f59e0b":"var(--border)"}`, background: republishAncient?"rgba(245,158,11,.15)":"transparent", color: republishAncient?"#f59e0b":"var(--text3)", cursor: "pointer", fontSize: 10.5, fontWeight: 800, fontFamily: "inherit", marginLeft: 2 }}>90일 이후</button>
                           </div>
                         </div>
-                        <div style={{ fontSize: 12, color: "var(--text2)", lineHeight: 1.7, marginBottom: 10, fontWeight: 500 }}>쓴 지 <b>{republishDays}일이 넘었는데도 네이버 검색에 안 나오는</b> 글이에요. 이런 글은 <b style={{ color: "#f59e0b" }}>제목만 바꿔서 다시 올리면</b> 검색에 뜰 기회가 다시 생겨요.<br/>아래에서 <b>AI가 추천한 새 제목</b>을 받아서 <b>제목 변경하러 가기</b>만 누르면, 알아서 제목을 바꿔 다시 발행해줘요.</div>
+                        <div style={{ fontSize: 12, color: "var(--text2)", lineHeight: 1.7, marginBottom: 10, fontWeight: 500 }}>{republishAncient ? <><b>발행한 지 90일이 넘었는데도</b> 네이버 검색에 안 나오는 오래된 글이에요.</> : <>최근 <b>{republishDays}일 이내에 썼는데도</b> 네이버 검색에 안 나오는 글이에요.</>} 이런 글은 <b style={{ color: "#f59e0b" }}>제목만 바꿔서 다시 올리면</b> 검색에 뜰 기회가 다시 생겨요.<br/>아래에서 <b>AI가 추천한 새 제목</b>을 받아서 <b>제목 변경하러 가기</b>만 누르면, 알아서 제목을 바꿔 다시 발행해줘요.</div>
                         {/* ★ 미노출 기준 — 디테일 설명(테리 요청) */}
                         <div style={{ fontSize: 11, color: "var(--text3)", lineHeight: 1.65, marginBottom: 12, padding: "9px 12px", borderRadius: 8, background: "rgba(245,158,11,.06)", border: "1px solid rgba(245,158,11,.2)" }}>
-                          <b style={{ color: "#f59e0b" }}>🔎 '미노출'이 뭔가요?</b> 이 글의 제목으로 네이버 통합검색(블로그탭)을 돌렸을 때 <b>상위 100위 안에 내 글이 안 나오는</b> 상태예요. 발행 후 {republishDays}일이 지나도 100위 밖이면 사실상 <b>검색 유입이 거의 0</b> — 저품질·누락이 의심돼요. 그래서 여기 모인 글은 <b>제목·키워드를 바꿔 다시 검색 기회를 주는</b> 대상이에요. <span style={{ color: "var(--text2)" }}>(이미 100위 안에 뜨는 글은 여기 안 나와요 — 그건 아래 '제목·키워드 살리기 솔루션'에서 더 위로 올려요.)</span>
+                          <b style={{ color: "#f59e0b" }}>🔎 '미노출'이 뭔가요?</b> 이 글의 제목으로 네이버 통합검색(블로그탭)을 돌렸을 때 <b>상위 100위 안에 내 글이 안 나오는</b> 상태예요. 100위 밖이면 사실상 <b>검색 유입이 거의 0</b> — 저품질·누락이 의심돼요. 그래서 여기 모인 글은 <b>제목·키워드를 바꿔 다시 검색 기회를 주는</b> 대상이에요. <span style={{ color: "var(--text2)" }}>(이미 100위 안에 뜨는 글은 여기 안 나와요 — 그건 아래 '제목·키워드 살리기 솔루션'에서 더 위로 올려요.)</span>
                         </div>
                         {list.length === 0
-                          ? <div style={{ fontSize: 12, color: "var(--text3)" }}>아직 재발행 대상이 없어요. 위에서 검색노출 검사를 하면 {republishDays}일+ 미노출 글이 여기 모여요.</div>
+                          ? <div style={{ fontSize: 12, color: "var(--text3)" }}>{republishAncient ? "90일이 넘은 오래된 미노출 글이 없어요." : `최근 ${republishDays}일 이내에 쓴 미노출 글이 없어요.`} 위에서 <b>검색노출 검사</b>를 하면 미노출 글이 여기 모여요. (다른 기간 버튼도 눌러보세요)</div>
                           : <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
                               {list.slice(0, republishShow).map((c: any, i) => {
                                 const days = Math.floor((now - new Date(c.date).getTime())/86400000);
@@ -3513,12 +3525,19 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
       })()}
     {/* 🎉 블로그지수 웰컴 팝업 — 진입 시 팡! 캐릭터+사용순서+멘토 멘트. [닫기][일주일 보지않기] */}
     {welcome && createPortal(
+      /* ★ body로 포탈되면 .app.dark/.light의 CSS변수(--card 등)가 안 먹혀 팝업이 투명해짐 → 테마 클래스로 변수 범위 복원(display:contents=레이아웃 영향 0) */
+      <div className={theme === "dark" ? "app dark" : "app light"} style={{ display: "contents" }}>
       <div onClick={() => closeWelcome(false)} style={{ position: "fixed", inset: 0, zIndex: 100000, background: "rgba(12,10,20,.6)", backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
-        <style>{`@keyframes wcPop{0%{transform:scale(.6) translateY(30px);opacity:0}55%{transform:scale(1.04)}100%{transform:scale(1) translateY(0);opacity:1}}@keyframes wcBob{0%,100%{transform:translateY(0)}50%{transform:translateY(-9px)}}@keyframes wcRow{0%{opacity:0;transform:translateX(-10px)}100%{opacity:1;transform:translateX(0)}}`}</style>
+        <style>{`@keyframes wcPop{0%{transform:scale(.6) translateY(30px);opacity:0}55%{transform:scale(1.04)}100%{transform:scale(1) translateY(0);opacity:1}}@keyframes wcBob{0%,100%{transform:translateY(0)}50%{transform:translateY(-11px)}}@keyframes wcRow{0%{opacity:0;transform:translateX(-10px)}100%{opacity:1;transform:translateX(0)}}@keyframes wcGlow{0%,100%{transform:scale(1);opacity:.85}50%{transform:scale(1.12);opacity:1}}@keyframes wcShadow{0%,100%{transform:translateX(-50%) scale(1);opacity:.85}50%{transform:translateX(-50%) scale(.8);opacity:.5}}`}</style>
         <div onClick={e => e.stopPropagation()} style={{ position: "relative", background: "var(--card)", borderRadius: 24, padding: "34px 30px 26px", maxWidth: 440, width: "100%", boxShadow: "0 30px 90px -20px rgba(0,0,0,.55)", border: "1px solid var(--border)", animation: "wcPop .5s cubic-bezier(.22,1.4,.4,1) both", maxHeight: "90vh", overflowY: "auto" }}>
           <div style={{ textAlign: "center", marginBottom: 18 }}>
-            <img src="characters/pumi-guide.png" alt="가이드 푸미" onError={e => { const s = document.createElement("div"); s.textContent = "🧑‍⚕️"; s.style.cssText = "font-size:56px"; e.currentTarget.replaceWith(s); }} style={{ width: 78, height: 78, objectFit: "contain", animation: "wcBob 2.2s ease-in-out infinite", filter: "drop-shadow(0 8px 16px rgba(0,200,150,.3))" }} />
-            <div style={{ fontSize: 21, fontWeight: 900, color: "var(--text)", marginTop: 8, letterSpacing: "-.02em" }}>블로그 주치의에 오신 걸 환영해요! 🩺</div>
+            {/* 🌱 주인공 캐릭터 — 크고 임팩트 있게. 뒤 후광 + 바닥 그림자 + 등장 스프링 + bob */}
+            <div style={{ position: "relative", width: 148, height: 148, margin: "0 auto 2px" }}>
+              <div style={{ position: "absolute", inset: 0, borderRadius: "50%", background: "radial-gradient(circle at 50% 42%, rgba(0,200,150,.28), rgba(139,92,246,.1) 55%, transparent 72%)", animation: "wcGlow 2.6s ease-in-out infinite" }} />
+              <div style={{ position: "absolute", left: "50%", bottom: 8, transform: "translateX(-50%)", width: 74, height: 13, borderRadius: "50%", background: "rgba(0,0,0,.18)", filter: "blur(5px)", animation: "wcShadow 2.2s ease-in-out infinite" }} />
+              <img src="characters/pumi-guide.png" alt="가이드 푸미" onError={e => { const s = document.createElement("div"); s.textContent = "🧑‍⚕️"; s.style.cssText = "font-size:104px;line-height:148px"; e.currentTarget.replaceWith(s); }} style={{ position: "relative", width: 132, height: 132, marginTop: 6, objectFit: "contain", animation: "wcBob 2.2s ease-in-out infinite", filter: "drop-shadow(0 12px 22px rgba(0,200,150,.34))" }} />
+            </div>
+            <div style={{ fontSize: 22, fontWeight: 900, color: "var(--text)", marginTop: 4, letterSpacing: "-.02em" }}>블로그 주치의에 오신 걸 환영해요! 🩺</div>
             <div style={{ fontSize: 12.5, color: "var(--text2)", marginTop: 7, lineHeight: 1.6 }}>글 하나하나를 <b style={{ color: "#00c896" }}>검색에 뜰 때까지</b> 제가 끝까지 데려갈게요.<br />이 순서대로만 하면 돼요 👇</div>
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 9, marginBottom: 22 }}>
@@ -3543,10 +3562,12 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
             <button onClick={() => closeWelcome(false)} style={{ flex: 1.4, padding: "12px", borderRadius: 12, border: "none", background: "linear-gradient(135deg,#00c896,#00a878)", color: "#fff", cursor: "pointer", fontSize: 13.5, fontWeight: 800, fontFamily: "inherit", boxShadow: "0 8px 20px -8px rgba(0,200,150,.6)" }}>시작할게요 →</button>
           </div>
         </div>
+      </div>
       </div>, document.body)}
 
     {/* 🎉 완치(노출) 축포 세리머니 — createPortal로 body에(transform 조상 무관), 하늘에서 색종이 낙하 */}
     {celebrate && createPortal(
+      <div className={theme === "dark" ? "app dark" : "app light"} style={{ display: "contents" }}>
       <div onClick={() => setCelebrate(null)} style={{ position: "fixed", inset: 0, zIndex: 100000, background: "rgba(12,10,20,.62)", backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20, overflow: "hidden" }}>
         <style>{`@keyframes bdConfetti{0%{transform:translateY(-15vh) rotate(0);opacity:1}100%{transform:translateY(110vh) rotate(720deg);opacity:.85}}@keyframes bdPop{0%{transform:scale(.7);opacity:0}60%{transform:scale(1.05)}100%{transform:scale(1);opacity:1}}@keyframes bdBob{0%,100%{transform:translateY(0)}50%{transform:translateY(-10px)}}`}</style>
         {Array.from({ length: 70 }).map((_, i) => {
@@ -3555,7 +3576,12 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
           return <div key={i} style={{ position: "absolute", top: 0, left: `${left}%`, width: w, height: w * 1.7, background: cols[i % cols.length], borderRadius: 2, animation: `bdConfetti ${dur}s linear ${delay}s infinite` }} />;
         })}
         <div onClick={e => e.stopPropagation()} style={{ position: "relative", zIndex: 2, background: "var(--card)", borderRadius: 24, padding: "38px 42px", textAlign: "center", maxWidth: 460, width: "100%", boxShadow: "0 30px 90px -20px rgba(0,0,0,.55)", border: "1px solid var(--border)", animation: "bdPop .5s ease both" }}>
-          <div style={{ fontSize: 56, marginBottom: 6, animation: "bdBob 1.4s ease-in-out infinite" }}>🎉</div>
+          {/* 🩺 주치의 도도가 크게 등장해 축하 — 주인공답게 */}
+          <div style={{ position: "relative", width: 150, height: 150, margin: "0 auto 4px" }}>
+            <div style={{ position: "absolute", inset: 0, borderRadius: "50%", background: "radial-gradient(circle at 50% 42%, rgba(0,200,150,.32), rgba(255,210,63,.12) 55%, transparent 72%)", animation: "wcGlow 2s ease-in-out infinite" }} />
+            <div style={{ position: "absolute", left: "50%", top: 4, fontSize: 30, animation: "bdBob 1.2s ease-in-out infinite" }}>🎉</div>
+            <img src="characters/dodo-checker.png" alt="주치의 도도" onError={e => { const s = document.createElement("div"); s.textContent = "🩺"; s.style.cssText = "font-size:104px;line-height:150px"; e.currentTarget.replaceWith(s); }} style={{ position: "relative", width: 130, height: 130, marginTop: 12, objectFit: "contain", animation: "bdBob 1.4s ease-in-out infinite", filter: "drop-shadow(0 12px 22px rgba(0,200,150,.4))" }} />
+          </div>
           <div style={{ fontSize: 25, fontWeight: 900, color: "var(--text)", marginBottom: 8, letterSpacing: "-.02em" }}>노출 축하드립니다!</div>
           <div style={{ fontSize: 14, color: "var(--text2)", lineHeight: 1.65, marginBottom: 22 }}>
             {celebrate.length === 1
@@ -3564,6 +3590,7 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
           </div>
           <button onClick={() => setCelebrate(null)} style={{ padding: "13px 34px", borderRadius: 13, border: "none", background: "linear-gradient(135deg,#00c896,#00a878)", color: "#fff", fontSize: 15, fontWeight: 800, cursor: "pointer", fontFamily: "inherit", boxShadow: "0 10px 24px -8px rgba(0,200,150,.6)" }}>고마워요 🩺</button>
         </div>
+      </div>
       </div>, document.body)}
     </div>
   );

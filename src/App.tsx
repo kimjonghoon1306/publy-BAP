@@ -78,7 +78,12 @@ export default function App() {
         if (!alive || !fresh) return;
         // 비활성 처리되면 로그아웃
         if ((fresh as any).is_active === false) { handleLogout(); return; }
-        if (fresh.plan !== user.plan || (fresh as any).is_active !== (user as any).is_active) {
+        // ★관리자가 바꾼 회원 값(등급·활성·크롤링 권한 등)이 회원 앱에 반영되게 — crawl_enabled도 확인해야 잠금해제가 실제로 풀린다.
+        //   (예전엔 plan/is_active만 봐서, 관리자가 크롤링 풀어줘도 회원 앱은 캐시된 잠김 상태 그대로였음)
+        const changed = fresh.plan !== user.plan
+          || (fresh as any).is_active !== (user as any).is_active
+          || (fresh as any).crawl_enabled !== (user as any).crawl_enabled;
+        if (changed) {
           localStorage.setItem("publy_user", JSON.stringify(fresh));
           setUser(fresh);
         }

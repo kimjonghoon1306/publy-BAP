@@ -607,42 +607,55 @@ app.post("/api/outreach/sender", async (req, res) => {
 app.get("/api/outreach/send-email", async (req, res) => {
   const { userId, subject, message, targets } = req.query as Record<string, string>;
   sseSetup(res);
+  const L = (msg: string) => sseSend(res, { type: "log", msg });   // 다른 탭처럼 매 단계 로그
   try {
+    L("📧 이메일 발송 준비를 시작해요…");
     if (!userId) throw new Error("userId 필요");
+    L("① 발신 이메일 계정을 확인하는 중…");
     const sender = await getOutreachSender(userId);
     if (!sender) { sseSend(res, { type: "error", msg: "먼저 발신 이메일 계정을 등록하세요" }); return res.end(); }
+    L(`   → 발신 계정: ${sender.from_email} (${sender.smtp_host}:${sender.smtp_port})`);
     let list: any[] = [];
     try { list = JSON.parse(targets || "[]"); } catch {}
     const withEmail = list.filter(t => t.email);
+    L(`② 받는 사람을 정리하는 중… 이메일 있는 대상 ${withEmail.length}명`);
     if (!withEmail.length) { sseSend(res, { type: "error", msg: "공개 이메일이 있는 대상이 없어요" }); return res.end(); }
 
     const sentToday = await getOutreachSentToday(userId);
     const remain = Math.max(0, sender.daily_limit - sentToday);
+    L(`③ 오늘 발송 현황: 이미 ${sentToday}통 보냄 · 남은 한도 ${remain}통 (하루 ${sender.daily_limit}통)`);
     if (remain <= 0) { sseSend(res, { type: "error", msg: `오늘 발송 한도(${sender.daily_limit}통)를 다 썼어요. 내일 다시 해주세요.` }); return res.end(); }
     const todo = withEmail.slice(0, remain);
-    if (withEmail.length > remain) sseSend(res, { type: "log", msg: `⚠️ 하루 한도 때문에 ${remain}명만 보냅니다(계정 안전). 나머지는 내일.` });
+    if (withEmail.length > remain) L(`⚠️ 하루 한도 때문에 ${remain}명만 보냅니다(계정 안전). 나머지는 내일.`);
 
+    L("④ 네이버 메일 서버에 로그인 연결하는 중…");
     const tx = nodemailer.createTransport({ host: sender.smtp_host, port: sender.smtp_port, secure: sender.smtp_port === 465, auth: { user: sender.smtp_user, pass: sender.smtp_pass } });
+    try { await tx.verify(); L("   → ✅ 서버 연결 성공"); }
+    catch (ve: any) { sseSend(res, { type: "error", msg: `메일 서버 로그인 실패 — 아이디/앱 비밀번호를 확인하세요 (${(ve.message || "").slice(0, 60)})` }); return res.end(); }
+
+    L(`⑤ 이제 ${todo.length}통을 3~6초 간격으로 한 통씩 보낼게요(계정 안전)…`);
     let ok = 0, fail = 0;
     for (let i = 0; i < todo.length; i++) {
       const t = todo[i];
-      // 개인화 토큰 치환
+      const who = t.nick || t.email;
+      const nick = t.nick || "블로거";
       const subj = String(subject || "체험단 제안").replace(/\{닉네임\}/g, t.nick || "").replace(/\{관심키워드\}/g, (t.keywords?.[0] || "")).replace(/\{관심품목\}/g, (t.categories?.[0] || ""));
-      const body = String(message || "").replace(/\{닉네임\}/g, t.nick || "").replace(/\{관심키워드\}/g, (t.keywords?.[0] || "")).replace(/\{관심품목\}/g, (t.categories?.[0] || ""));
+      const body = String(message || "").replace(/\{닉네임\}/g, nick).replace(/\{관심키워드\}/g, (t.keywords?.[0] || "관심 있으신 분야")).replace(/\{관심품목\}/g, (t.categories?.[0] || "관심 품목"));
+      L(`✉️ (${i + 1}/${todo.length}) ${who} <${t.email}> 에게 보내는 중…`);
       try {
         await tx.sendMail({ from: sender.from_name ? `"${sender.from_name}" <${sender.from_email}>` : sender.from_email, to: t.email, subject: subj, text: body });
         ok++;
         await addOutreachLog({ user_id: userId, blog_id: t.id || t.blogId || "", nickname: t.nick, channel: "email", to_email: t.email, subject: subj, message: body, status: "sent" });
-        sseSend(res, { type: "log", msg: `✅ ${t.nick || t.email} 발송 완료 (${ok}/${todo.length})` });
+        L(`   → ✅ 발송 완료 (성공 ${ok} · 실패 ${fail})`);
         sseSend(res, { type: "sent", id: t.id });
       } catch (e: any) {
         fail++;
         await addOutreachLog({ user_id: userId, blog_id: t.id || t.blogId || "", nickname: t.nick, channel: "email", to_email: t.email, subject: subj, message: body, status: "failed", error: e.message });
-        sseSend(res, { type: "log", msg: `❌ ${t.nick || t.email} 실패: ${e.message}` });
+        L(`   → ❌ 실패: ${e.message}`);
       }
-      // 계정 안전: 발송 간격(3~6초 랜덤)
-      if (i < todo.length - 1) await new Promise(r => setTimeout(r, 3000 + Math.random() * 3000));
+      if (i < todo.length - 1) { const wait = 3000 + Math.random() * 3000; L(`   ⏳ 다음 발송까지 ${(wait / 1000).toFixed(1)}초 대기(계정 보호)…`); await new Promise(r => setTimeout(r, wait)); }
     }
+    L(`🎉 발송 마무리 — 성공 ${ok}통 · 실패 ${fail}통`);
     sseSend(res, { type: "done", ok, fail });
   } catch (e: any) {
     sseSend(res, { type: "error", msg: e.message });
