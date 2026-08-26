@@ -4945,27 +4945,27 @@ POST3: (제목)|(이유)
             {/* ───── 자동화 탭 keep-alive: 방문한 탭은 숨기기만(작업·데이터 유지) ───── */}
             {visitedAutoTabs.has("neighbor") && (
               <div style={{ display: tab === "neighbor" ? "block" : "none" }}>
-                <NeighborPage theme={theme} plan="admin" singleTab />
+                <NeighborPage theme={theme} userId={ADM_HISTORY_UID} plan="admin" singleTab />
               </div>
             )}
             {visitedAutoTabs.has("engage") && (
               <div style={{ display: tab === "engage" ? "block" : "none" }}>
-                <NeighborPage theme={theme} plan="admin" initialTab="engage" singleTab />
+                <NeighborPage theme={theme} userId={ADM_HISTORY_UID} plan="admin" initialTab="engage" singleTab />
               </div>
             )}
             {visitedAutoTabs.has("reply") && (
               <div style={{ display: tab === "reply" ? "block" : "none" }}>
-                <NeighborPage theme={theme} plan="admin" initialTab="reply" singleTab />
+                <NeighborPage theme={theme} userId={ADM_HISTORY_UID} plan="admin" initialTab="reply" singleTab />
               </div>
             )}
             {visitedAutoTabs.has("pumasi") && (
               <div style={{ display: tab === "pumasi" ? "block" : "none" }}>
-                <NeighborPage theme={theme} plan="admin" initialTab="pumasi" singleTab />
+                <NeighborPage theme={theme} userId={ADM_HISTORY_UID} plan="admin" initialTab="pumasi" singleTab />
               </div>
             )}
             {visitedAutoTabs.has("blogscore") && (
               <div style={{ display: tab === "blogscore" ? "block" : "none" }}>
-                <NeighborPage theme={theme} plan="admin" initialTab="score" singleTab />
+                <NeighborPage theme={theme} userId={ADM_HISTORY_UID} plan="admin" initialTab="score" singleTab />
               </div>
             )}
 

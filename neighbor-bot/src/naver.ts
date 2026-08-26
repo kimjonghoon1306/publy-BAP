@@ -1260,6 +1260,7 @@ export async function crawlBlogIds(params: {
   orderBy?: "sim" | "recentdate";   // 정렬: 정확도 vs 최신(기본 최신 = 활동중 블로거 우선)
   activeDays?: number;              // 최근 N일 내 글쓴 블로거만 (0/미지정 = 무제한)
   excludeMarket?: boolean;          // 판매·마켓 블로거 제외 (기본 true)
+  ownerUserId?: string | null;      // 프록시 회원 배정 fallback용(크롤링 기능 토글)
   onLog?: (msg: string) => void;
 }): Promise<BlogTarget[]> {
   const { keywords, countPerKeyword, onLog } = params;
@@ -1271,7 +1272,8 @@ export async function crawlBlogIds(params: {
 
   const results: BlogTarget[] = [];
   const seen = new Set<string>();   // ★ 키워드 전체에 걸쳐 중복 블로그 제거(루프 밖에서 유지)
-  const browser = await launchBrowser(params.accountId, { headless: true, log });
+  // 🔒 크롤링 기능 프록시: 관리자가 프록시탭에서 'crawl' 토글을 켠 계정/회원이면 그 IP로 접속
+  const browser = await launchBrowser(params.accountId, { headless: true, log, feature: "crawl", ownerUserId: params.ownerUserId });
   const context = await browser.newContext({ userAgent: UA, locale: "ko-KR" });
   await applyAntiDetection(context);
   const page = await context.newPage();

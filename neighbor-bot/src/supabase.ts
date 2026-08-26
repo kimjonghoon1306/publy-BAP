@@ -312,8 +312,9 @@ async function _lookupProxy(userId: string, feature?: string): Promise<ProxyConf
 // 계정(accountId)에 직접 배정된 프록시 우선, 없으면 그 계정을 쓰는 회원(ownerUserId)에 배정된 프록시를 쓴다.
 //   → 관리자가 "회원"에게 프록시를 배정하면, 그 회원이 어느 계정으로 돌리든 프록시가 적용된다.
 export async function getProxyForAccount(userId?: string | null, feature?: string, ownerUserId?: string | null): Promise<ProxyConfig | null> {
-  if (!userId) return null;
-  let proxy = await _lookupProxy(userId, feature);
+  // ★크롤링은 accountId=""(공개검색)이라 userId가 비어도 ownerUserId(회원 배정)로 프록시를 찾아야 한다.
+  let proxy: ProxyConfig | null = null;
+  if (userId) proxy = await _lookupProxy(userId, feature);
   if (!proxy && ownerUserId && ownerUserId !== userId) proxy = await _lookupProxy(ownerUserId, feature);
   return proxy;
 }

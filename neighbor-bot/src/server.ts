@@ -145,6 +145,7 @@ app.get("/api/crawl", async (req, res) => {
       orderBy: orderBy === "sim" ? "sim" : "recentdate",
       activeDays: activeDays ? parseInt(activeDays, 10) : 0,
       excludeMarket: excludeMarket !== "false",
+      ownerUserId: userId || null,   // 🔒 크롤링 프록시: 이 회원에 crawl 토글이 켜져 있으면 그 IP로 접속
       onLog: (msg) => sseSend(res, { type: "log", msg }),
     });
 
