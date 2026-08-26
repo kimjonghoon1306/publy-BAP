@@ -1461,15 +1461,15 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
     let bodyBlock = "";
     try {
       const bid = activeAccount?.blogId || "";
-      if (bid) { const br = await botFetch(`${BOT}/api/post-body?blogId=${encodeURIComponent(bid)}&logNo=${encodeURIComponent(logNo)}`, { signal: AbortSignal.timeout(12000) } as any); const bd = await br.json(); if (bd.ok && bd.body) bodyBlock = `\n\n[⚠️이 글의 실제 본문 — 반드시 이 내용에 맞는 제목. 내용과 동떨어진 제목 금지]\n${String(bd.body).slice(0, 1000)}`; }
+      if (bid) { const br = await botFetch(`${BOT}/api/post-body?blogId=${encodeURIComponent(bid)}&logNo=${encodeURIComponent(logNo)}`, { signal: AbortSignal.timeout(25000) } as any); const bd = await br.json(); if (bd.ok && bd.body) bodyBlock = `\n\n[⚠️이 글의 실제 본문 — 반드시 이 내용에 맞는 제목. 내용과 동떨어진 제목 금지]\n${String(bd.body).slice(0, 1000)}`; }
     } catch {}
     const prompt = `너는 네이버 블로그 상위노출(SEO) 전문가야. 아래 글은 검색에 안 뜨고 있어(누락). 이 글의 본문 내용에 맞으면서 검색에 잘 잡히는 제목으로 고쳐줘.${bodyBlock}\n\n순수 JSON만: {"diagnosis":"이 제목이 왜 검색 안 되는지 1문장","newTitle":"개선안1(본문내용 일치+실제 검색어 앞배치, 25~35자)","newTitle2":"개선안2(다른 각도, 반드시 채워라)","keywords":["본문 검색 키워드5개"],"bodyTip":"본문/태그 실전팁 1문장","expectedEffect":"기대효과 1문장"}\n[규칙] 내용에 없는 소재로 낚시 금지. 과장·감탄사 금지. newTitle2 절대 비우지 마라.\n\n[원래 제목]\n${title}`;
     for (const model of ["gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-flash-latest", "gemini-flash-lite-latest"]) {
       try {
         const gc: any = { maxOutputTokens: 1200, temperature: 0.8, responseMimeType: "application/json" };
         if (model.includes("2.5")) gc.thinkingConfig = { thinkingBudget: 0 };
-        // ★타임아웃 20초 — Gemini가 응답 안 하면(429 한도·503 과부하) 멈추지 않고 다음 모델/글로 넘어가게
-        const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }], generationConfig: gc }), signal: AbortSignal.timeout(20000) } as any);
+        // ★타임아웃 40초 — 긴 글도 제대로 처리하게 넉넉히(멈춤 방지용 안전장치일 뿐, 건너뛰기용 아님)
+        const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }], generationConfig: gc }), signal: AbortSignal.timeout(40000) } as any);
         if (!r.ok) continue;
         const d: any = await r.json();
         let txt = (d?.candidates?.[0]?.content?.parts?.[0]?.text || "").trim().replace(/^```json\s*/i, "").replace(/^```\s*/i, "").replace(/```\s*$/i, "").trim();
@@ -1511,7 +1511,7 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
     });
     if (!todo.length) { alert("변경할 글을 먼저 체크해주세요."); return; }
     if (!localStorage.getItem("publy_gemini_key")) { alert("AI 제목 추천은 무료 Gemini 키가 필요해요. 설정 → 글쓰기 AI에서 등록해주세요."); return; }
-    if (!window.confirm(`선택한 글 ${todo.length}개의 제목을 AI가 추천안(2개 중 랜덤)으로 자동 변경할까요?\n\n· AI가 글 내용을 읽고 제목을 추천해요\n· 오늘 제목 수정 한도까지만 진행되고, 한도에 걸리면 멈춰요\n· 실제 네이버 블로그에 반영돼요`)) return;
+    if (!window.confirm(`선택한 글 ${todo.length}개의 제목을 AI가 추천안(2개 중 랜덤)으로 자동 변경할까요?\n\n· AI가 글 내용을 하나하나 읽고 제목을 추천해요\n· ⏱ 글이 많으면 오래 걸려요(1개당 약 10~30초, ${todo.length}개면 대략 ${Math.ceil(todo.length * 20 / 60)}분)\n· ✅ 작업 중 화면·컴퓨터는 꺼지지 않아요 — 창 켜두고 두시면 알아서 끝나요\n· 오늘 제목 수정 한도까지만 진행돼요\n· 실제 네이버 블로그에 반영돼요`)) return;
     setBulkRunning(true); bulkStopRef.current = false; setBulkProgress({ done: 0, total: todo.length });
     addScLog(`🚀 전체 제목 변경 시작 — ${todo.length}개 (관찰중 제외)`);
     let done = 0;
@@ -1526,9 +1526,18 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
       const t = todo[i];
       setBulkProgress({ done: i, total: todo.length });
       addScLog(`✏️ (${i + 1}/${todo.length}) "${t.title.slice(0, 20)}" 개선안 받는 중...`);
-      const sol = await getSolutionQuiet(t.title, t.logNo!);
+      // ★"완벽하게 다 바꾸기"(테리): 개선안 실패(Gemini 한도 429)면 건너뛰지 말고 최대 5회까지 끈질기게 재시도.
+      //   한도는 시간 지나면 회복되므로 대기(10·20·30·40초)하며 재시도 → 시간 걸려도 결국 성공시킴.
+      let sol = await getSolutionQuiet(t.title, t.logNo!);
+      for (let retry = 1; retry <= 4 && !sol && !bulkStopRef.current; retry++) {
+        const wait = retry * 10;
+        addScLog(`   → ⏳ AI 한도로 잠시 대기 후 재시도 (${retry}/4 · ${wait}초 — 시간 걸려도 끝까지 해요)`);
+        await new Promise(r => setTimeout(r, wait * 1000));
+        if (bulkStopRef.current) break;
+        sol = await getSolutionQuiet(t.title, t.logNo!);
+      }
       if (bulkStopRef.current) { addScLog("⏹ 사용자가 중단했어요"); break; }   // 개선안 받은 뒤 중단 체크
-      if (!sol) { addScLog(`   → ❌ 개선안 실패, 건너뜀`); continue; }
+      if (!sol) { addScLog(`   → ⚠️ "${t.title.slice(0, 16)}" 5번 시도해도 AI 응답 없음 — 남겨둠(나중에 다시 눌러주세요)`); continue; }
       const pick = Math.random() < 0.5 ? sol.newTitle : sol.newTitle2;   // 제목1·2 랜덤
       addScLog(`   → 새 제목(랜덤): "${pick.slice(0, 24)}" 변경 중...`);
       const ok = await applyTitleQuiet(t.logNo!, pick);
@@ -1538,10 +1547,12 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
       await new Promise(r => setTimeout(r, 1500));   // 계정 안전 간격
     }
     setBulkProgress({ done, total: todo.length });
-    addScLog(`🎉 전체 제목 변경 마무리 — ${done}개 변경 완료`);
+    const failed = todo.length - done;
+    addScLog(`🎉 전체 제목 변경 마무리 — ${done}개 성공${failed > 0 ? ` · ${failed}개는 못 바꿔 목록에 남겨뒀어요(나중에 다시 눌러주세요)` : ""}`);
+    if (done > 0 && failed > 0) alert(`✅ ${done}개 변경 완료!\n\n${failed}개는 AI 한도 등으로 못 바꿔서 재발행 목록에 그대로 남겨뒀어요. 잠시 후(또는 내일) '전체 변경'을 다시 누르면 그 글들부터 이어서 바꿔요.`);
     setBulkRunning(false);
     setRpChecked(new Set());   // 체크 해제
-    await loadCare();   // 방금 바꾼 글 = 관찰중으로 → 재발행 목록에서 빠짐
+    await loadCare();   // 방금 바꾼 글 = 관찰중으로 → 재발행 목록에서 빠짐, 실패한 글은 그대로 남음
     setRpTick(t => t + 1);
   };
 
@@ -2992,6 +3003,10 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
                               {bulkRunning
                                 ? <button onClick={() => { bulkStopRef.current = true; addScLog("⏹ 중단 요청 — 지금 글까지만 끝내고 멈춰요..."); }} style={{ flexShrink: 0, padding: "9px 16px", borderRadius: 10, border: "none", background: bulkStopRef.current ? "#8a8a99" : "#d64545", color: "#fff", cursor: "pointer", fontSize: 12, fontWeight: 800, fontFamily: "inherit" }}>{bulkStopRef.current ? "멈추는 중..." : "⏹ 중단"}</button>
                                 : <button onClick={() => runBulkRetitle(pickedItems as any)} disabled={!!titleEditingKey || pickedItems.length === 0} style={{ flexShrink: 0, padding: "9px 18px", borderRadius: 10, border: "none", background: pickedItems.length === 0 ? "var(--card2)" : "linear-gradient(135deg,#8b5cf6,#a855f7)", color: pickedItems.length === 0 ? "var(--text3)" : "#fff", cursor: pickedItems.length === 0 ? "default" : "pointer", fontSize: 12.5, fontWeight: 800, fontFamily: "inherit", boxShadow: pickedItems.length === 0 ? "none" : "0 4px 12px -4px rgba(139,92,246,.5)" }}>🚀 선택한 {pickedItems.length}개 제목 변경</button>}
+                              {/* ⏱ 소요시간 안내 — 글 많으면 오래 걸림을 미리 알림(문의 방지) */}
+                              <div style={{ flexBasis: "100%", fontSize: 11, color: "var(--text2)", lineHeight: 1.6, marginTop: 4, padding: "9px 12px", borderRadius: 8, background: "rgba(139,92,246,.08)", border: "1px solid rgba(139,92,246,.22)" }}>
+                                ⏱ <b style={{ color: "#8b5cf6" }}>글이 많으면 시간이 오래 걸려요.</b> AI가 <b>글 내용을 하나하나 제대로 읽고</b> 제목을 만든 뒤, 계정 안전을 위해 <b>천천히</b> 바꾸기 때문이에요(글 1개당 대략 10~30초). 100개면 30분 넘게 걸릴 수 있어요.<br />✅ <b>작업 중에는 화면·컴퓨터가 꺼지지 않아요.</b> 창을 켜둔 채 그냥 두시면 알아서 끝까지 진행돼요. 중간에 멈추려면 <b>중단</b>을 누르세요(그때까지 바꾼 글은 저장돼요).
+                              </div>
                             </div>
                           );
                         })()}
