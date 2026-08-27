@@ -4,7 +4,7 @@ import https from "https";
 import http from "http";
 import os from "os";
 import path from "path";
-import { deleteSession, hasSession, readSession, writeSession } from "./session-store";
+import { deleteSession, hasSession, readSession, writeSession, sessionDiagnosis } from "./session-store";
 
 const LEGACY_SESSION_DIRS = [path.join(__dirname, "../sessions")];
 
@@ -233,7 +233,12 @@ async function isSessionAliveNaver(cookies: any[]): Promise<boolean> {
 
 /* ★★세션 원터치 재연결: 살아있으면 그대로, 만료면 저장된 비번으로 자동 재로그인(조용히→캡차면 창 모드). */
 export async function ensureLiveSessionNaver(userId: string, log: (m: string) => void = console.log): Promise<any[]> {
-  if (!naverSessionExists(userId)) throw new Error("네이버 세션 없음. 계정 재연결 필요");
+  if (!naverSessionExists(userId)) {
+    // 🔍 진단 첨부 — 폴더마다 세션 0개면 '계정 연결 안 함', 다른 이름 있으면 '경로/계정 불일치'
+    const diag = sessionDiagnosis(naverSessionName(userId), LEGACY_SESSION_DIRS);
+    log(`[세션] ❌ 세션 없음 — 계정=${userId} · 진단: ${diag}`);
+    throw new Error(`네이버 세션 없음 — 계정 관리 탭에서 네이버 '연결하기'를 먼저 해주세요. [진단 userId=${userId} · ${diag}]`);
+  }
   const cookies = readSession<any>(naverSessionName(userId), LEGACY_SESSION_DIRS).cookies;
   if (await isSessionAliveNaver(cookies)) return cookies;
   log("[세션] 로그인이 만료돼 저장된 정보로 자동 재연결을 시도해요...");

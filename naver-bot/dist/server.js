@@ -86,6 +86,17 @@ function fileLog(args, isErr = false) {
 }
 // ★봇 프로세스 시작 구분선 — 로그에서 "봇이 언제 떴는지/재시작됐는지" 한눈에(오프라인 디버깅 핵심).
 console.log(`\n━━━━━━━━━━━━━━ 봇 시작 (PID ${process.pid}) ━━━━━━━━━━━━━━`);
+// ★★프로세스 크래시 가드(테리 2026-08-26 'Flow 하다 서버 오프라인' 근본해결) ──
+//   Playwright/CDP는 크롬이 닫히거나 탭이 사라질 때 "Target closed"·"browser has been closed" 같은
+//   비동기 에러(unhandledRejection)를 던지는데, 핸들러가 없으면 Node가 봇 프로세스를 통째로 종료한다.
+//   → 헤더 "서버 오프라인" + 이후 모든 요청 "Failed to fetch"의 진짜 원인. 여기서 잡아 로그만 남기고
+//   프로세스는 계속 살려 HTTP 응답을 유지한다(개별 요청은 각 핸들러 try/catch가 이미 처리).
+process.on("unhandledRejection", (reason) => {
+    console.error(`[bot] ⚠️ 처리 안 된 Promise 거부(프로세스 유지): ${String(reason?.stack || reason?.message || reason).split("\n").slice(0, 3).join(" | ")}`);
+});
+process.on("uncaughtException", (err) => {
+    console.error(`[bot] ⚠️ 예기치 못한 예외(프로세스 유지): ${String(err?.stack || err?.message || err).split("\n").slice(0, 3).join(" | ")}`);
+});
 const app = (0, express_1.default)();
 const PORT = 3333;
 const AUTH_TOKEN = process.env.BOT_AUTH_TOKEN || "";
@@ -586,6 +597,38 @@ const YNA_SECTIONS = {
     경제: "economy", 증권: "market", 산업: "industry", 정치: "politics", 사회: "society",
     전국: "local", 세계: "international", 문화: "culture", 연예: "entertainment", 스포츠: "sports", 건강: "health",
 };
+// 🆕 대중 생활 카테고리 — 뉴스에 안 나오는 블로그 실전 주제. 각 카테고리를 여러 '씨앗 키워드'로 잡고,
+//    네이버 실시간 자동완성(지금 사람들이 검색하는 것)으로 실제 인기 주제를 뽑는다(실시간).
+const LIFE_SEEDS = {
+    음식레시피: ["레시피", "집밥", "간단요리", "다이어트 요리", "에어프라이어", "밑반찬", "자취요리"],
+    패션: ["패션", "코디", "여자 코디", "남자 코디", "가을 코디", "데일리룩", "신발 추천"],
+    뷰티: ["화장품 추천", "스킨케어", "메이크업", "다이어트", "헤어스타일", "네일", "향수 추천"],
+    여행: ["여행", "국내여행", "가볼만한곳", "당일치기", "제주 여행", "해외여행", "캠핑"],
+    인테리어: ["인테리어", "셀프 인테리어", "원룸 인테리어", "홈카페", "수납 정리", "소품 추천", "이사 준비"],
+    반려동물: ["강아지", "고양이", "반려동물 용품", "강아지 훈련", "고양이 사료", "펫 미용", "반려견 간식"],
+    재테크: ["재테크", "부업", "적금 추천", "주식 초보", "청약", "절약 방법", "정부지원금"],
+    육아: ["육아", "이유식", "아기 용품", "신생아", "육아템", "어린이집", "출산 준비"],
+    건강운동: ["홈트", "다이어트 운동", "헬스", "스트레칭", "런닝", "요가", "체중 감량"],
+};
+// 네이버 자동완성으로 씨앗 키워드의 실시간 인기 연관검색어를 가져온다(공개 API, 세션 불필요).
+async function naverAutocomplete(seed) {
+    try {
+        const u = `https://ac.search.naver.com/nx/ac?q=${encodeURIComponent(seed)}&con=0&frm=nv&ans=2&r_format=json&r_enc=UTF-8&r_unicode=0&t_koreng=1&run=2&rev=4&q_enc=UTF-8&st=100`;
+        const r = await fetch(u, { headers: { "User-Agent": "Mozilla/5.0", Referer: "https://search.naver.com/" } });
+        const j = await r.json();
+        const items = [];
+        for (const grp of (j.items || []))
+            for (const row of (grp || [])) {
+                const kw = Array.isArray(row) ? row[0] : row;
+                if (typeof kw === "string" && kw.trim())
+                    items.push(kw.trim());
+            }
+        return items;
+    }
+    catch {
+        return [];
+    }
+}
 function cleanHeadline(s) {
     return s.replace(/<!\[CDATA\[|\]\]>/g, "").replace(/&[a-z]+;/g, " ")
         .replace(/^\[[^\]]*\]\s*/g, "").replace(/\([^)]*종합[^)]*\)/g, "").replace(/\.{2,}$/, "")
@@ -598,11 +641,44 @@ app.get("/api/hot-issues", async (req, res) => {
     if (cached && now - cached.at < 30 * 60 * 1000)
         return res.json({ ok: true, category, items: cached.items, cached: true });
     try {
+        // 주제를 풍부하게: 소스에서 당겨올 수 있는 건 최대한 다 당겨와 중복만 제거(양을 크게).
+        const uniq = (arr) => { const seen = new Set(); const out = []; for (const x of arr) {
+            const k = x.replace(/\s+/g, "");
+            if (x && !seen.has(k)) {
+                seen.add(k);
+                out.push(x);
+            }
+        } return out; };
         let items = [];
         if (category === "실시간") {
-            const r = await fetch("https://trends.google.com/trending/rss?geo=KR", { headers: { "User-Agent": "Mozilla/5.0" } });
-            const t = await r.text();
-            items = [...t.matchAll(/<title>(.*?)<\/title>/g)].map(m => cleanHeadline(m[1])).filter(x => x && !/trends|google|피드/i.test(x)).slice(0, 20);
+            // 구글 트렌드(KR) + 연합뉴스 주요 섹션 헤드라인을 합쳐서 실시간 주제를 최대한 풍부하게
+            const pulls = await Promise.allSettled([
+                fetch("https://trends.google.com/trending/rss?geo=KR", { headers: { "User-Agent": "Mozilla/5.0" } }).then(r => r.text()),
+                ...["economy", "society", "entertainment", "sports", "industry"].map(sec => fetch(`https://www.yna.co.kr/rss/${sec}.xml`, { headers: { "User-Agent": "Mozilla/5.0" } }).then(r => r.text())),
+            ]);
+            const merged = [];
+            pulls.forEach((p, i) => {
+                if (p.status !== "fulfilled")
+                    return;
+                const cleaned = [...p.value.matchAll(/<title[^>]*>([\s\S]*?)<\/title>/g)].map(m => cleanHeadline(m[1]))
+                    .filter(x => x && !/trends|google|피드|연합뉴스|저작권|헤드라인|알림|RSS/i.test(x));
+                // 구글 트렌드는 앞쪽(더 뜨거움) 우선, 뉴스는 섹션당 상위 몇 개만
+                merged.push(...(i === 0 ? cleaned.slice(0, 30) : cleaned.slice(0, 8)));
+            });
+            items = uniq(merged).slice(0, 60);
+        }
+        else if (LIFE_SEEDS[category]) {
+            // 🆕 대중 생활 카테고리 — 네이버 실시간 자동완성으로 지금 뜨는 검색 주제 수집(뉴스와 별개)
+            const seeds = LIFE_SEEDS[category];
+            const pulls = await Promise.allSettled(seeds.map(s => naverAutocomplete(s)));
+            const merged = [];
+            pulls.forEach(p => { if (p.status === "fulfilled")
+                merged.push(...p.value); });
+            // 씨앗 단어 자체(너무 일반적)만 남는 건 제외, 2글자 이상만
+            items = uniq(merged).filter(x => x.length >= 2 && !seeds.includes(x)).slice(0, 60);
+            // 혹시 자동완성이 다 막히면 씨앗이라도 넣어 빈 화면 방지
+            if (!items.length)
+                items = uniq(seeds);
         }
         else {
             const sec = YNA_SECTIONS[category];
@@ -612,7 +688,7 @@ app.get("/api/hot-issues", async (req, res) => {
             const t = await r.text();
             const raw = [...t.matchAll(/<title[^>]*>([\s\S]*?)<\/title>/g)].map(m => cleanHeadline(m[1]))
                 .filter(x => x && !/연합뉴스|저작권|헤드라인|알림|RSS/i.test(x));
-            items = raw.slice(0, 20);
+            items = uniq(raw).slice(0, 60);
         }
         HOT_CACHE[category] = { at: now, items };
         res.json({ ok: true, category, items });

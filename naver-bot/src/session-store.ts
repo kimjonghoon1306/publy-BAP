@@ -101,6 +101,21 @@ export function hasSession(name: string, legacyDirs: string[] = []): boolean {
   try { readSession(name, legacyDirs); return true; } catch { return false; }
 }
 
+// 🔍 세션 진단 — "세션 없음" 원인 파악용. 각 후보 폴더에 이 계정 세션이 있는지 + 폴더 안 전체 세션 수.
+//   폴더마다 세션 0개면 = 로그인한 적 없음(계정 연결 안 함). 다른 이름으로 있으면 = 경로/이름 문제.
+export function sessionDiagnosis(name: string, legacyDirs: string[] = []): string {
+  const parts: string[] = [];
+  for (const dir of candidateDirs()) {
+    let mine = false, total = 0, names: string[] = [];
+    try { mine = fs.existsSync(path.join(dir, `${name}.session`)); } catch {}
+    try { names = fs.readdirSync(dir).filter(x => x.endsWith(".session")).map(x => x.replace(".session", "")); total = names.length; } catch {}
+    parts.push(`${dir.replace(os.homedir(), "~")}=[내계정:${mine ? "O" : "X"}, 세션${total}개${total && total <= 4 ? `(${names.join(",")})` : ""}]`);
+  }
+  const legacy = legacyFile(name, legacyDirs);
+  if (legacy) parts.push(`legacy=${legacy.replace(os.homedir(), "~")}`);
+  return parts.join(" | ");
+}
+
 export function deleteSession(name: string, legacyDirs: string[] = []): void {
   const files = [
     ...candidateDirs().map(dir => path.join(dir, `${name}.session`)),

@@ -344,8 +344,12 @@ async function isSessionAliveNaver(cookies) {
 }
 /* ★★세션 원터치 재연결: 살아있으면 그대로, 만료면 저장된 비번으로 자동 재로그인(조용히→캡차면 창 모드). */
 async function ensureLiveSessionNaver(userId, log = console.log) {
-    if (!naverSessionExists(userId))
-        throw new Error("네이버 세션 없음. 계정 재연결 필요");
+    if (!naverSessionExists(userId)) {
+        // 🔍 진단 첨부 — 폴더마다 세션 0개면 '계정 연결 안 함', 다른 이름 있으면 '경로/계정 불일치'
+        const diag = (0, session_store_1.sessionDiagnosis)(naverSessionName(userId), LEGACY_SESSION_DIRS);
+        log(`[세션] ❌ 세션 없음 — 계정=${userId} · 진단: ${diag}`);
+        throw new Error(`네이버 세션 없음 — 계정 관리 탭에서 네이버 '연결하기'를 먼저 해주세요. [진단 userId=${userId} · ${diag}]`);
+    }
     const cookies = (0, session_store_1.readSession)(naverSessionName(userId), LEGACY_SESSION_DIRS).cookies;
     if (await isSessionAliveNaver(cookies))
         return cookies;
@@ -2341,12 +2345,20 @@ async function generateFlowImagesCDP(params) {
             // 첫 화면에서 설정 UI가 늦게 로드되는 경우를 위해 실패했던 경우만 제출 직전 한 번 더 확인한다.
             if (!outputCountIsOne)
                 outputCountIsOne = await setOutputCountToOne();
-            // 입력창(보이는 contenteditable/textarea)에 입력
+            // 입력창(보이는 contenteditable/textarea)에 입력.
+            // ★오락가락 버그 수정: 1장 생성 직후 화면이 '결과 그리드'로 전환되며 입력창이 잠깐 사라졌다 다시 뜬다.
+            //   한 번만 스냅샷 찍으면 그 순간 안 보여서 "입력창 못 찾음"이 됨 → 최대 12초 폴링하며 나타날 때까지 기다린다.
             let entered = false;
-            const editables = await page.$$("[contenteditable=true], textarea");
-            for (const el of editables) {
-                try {
-                    if (await el.isVisible()) {
+            const enterStart = Date.now();
+            const enterDeadline = enterStart + 12000;
+            let triedRecover = false;
+            while (!entered && Date.now() < enterDeadline) {
+                const editables = await page.$$("[contenteditable=true], textarea");
+                for (const el of editables) {
+                    try {
+                        if (!(await el.isVisible()))
+                            continue;
+                        // 업로드/첨부용 숨은 입력이 아니라 실제 프롬프트 입력칸인지 대략 확인(편집 가능 + 화면 하단쪽)
                         await el.click();
                         await page.waitForTimeout(400);
                         await page.keyboard.press(process.platform === "darwin" ? "Meta+A" : "Control+A");
@@ -2355,12 +2367,33 @@ async function generateFlowImagesCDP(params) {
                         entered = true;
                         break;
                     }
+                    catch { }
                 }
-                catch { }
+                if (!entered) {
+                    // ★한 장 만든 뒤 화면이 '결과 그리드'에 머물러 입력창이 안 보일 때: '새로운 세션'을 눌러 입력 화면으로 복귀(한 번만)
+                    if (!triedRecover && Date.now() - enterStart > 4000) {
+                        triedRecover = true;
+                        for (const label of ["새로운 세션", "새 프로젝트", "새 세션", "New session", "New project"]) {
+                            try {
+                                const b = page.locator(`button:has-text("${label}")`).first();
+                                if (await b.count() > 0 && await b.isVisible()) {
+                                    await b.click({ timeout: 3000 });
+                                    log(`[Flow] ↩️ 입력 화면으로 복귀 시도: ${label}`);
+                                    await page.waitForTimeout(2000);
+                                    break;
+                                }
+                            }
+                            catch { }
+                        }
+                    }
+                    await page.waitForTimeout(600); // 아직 안 떴으면 잠깐 기다렸다 다시
+                }
             }
             if (!entered) {
-                log("[Flow] ⚠️ 입력창을 못 찾음");
+                log("[Flow] ⚠️ 입력창을 못 찾음(12초 대기+복귀 시도해도 안 나타남)");
+                await dumpFlowControls("입력창 못 찾음");
                 requeue();
+                await page.waitForTimeout(2500);
                 continue;
             }
             await page.waitForTimeout(1500); // 입력 반영 + 전송버튼 활성화 대기
