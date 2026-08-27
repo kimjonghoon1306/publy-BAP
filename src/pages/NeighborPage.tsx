@@ -792,6 +792,7 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
     const logNos = targets.map(c => c.post_key).filter(Boolean);
     if (!logNos.length) return;
     setAutoTrackLoading(true);
+    addScLog(`🔄 제목 바꾼 글 ${logNos.length}개의 순위를 자동 확인 중...`);
     try {
       // 서버·네이버 부하를 줄이려 10개씩 나눠서(가볍게) 순차 검사
       const CHUNK = 10;
@@ -823,8 +824,9 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
   //    회원은 아무것도 안 함. 계정당 하루 1회. "100위 노출됐는데 조회수 미비" 같은 걸 회진이 보게 해준다.
   const autoCollectViews = async () => {
     const acc = activeAccount;
-    if (!acc || !userId) return;
+    if (!acc || !userId) { addScLog(`🔴 조회수 수집 건너뜀 — 계정/로그인 정보 없음(acc=${!!acc}, userId=${!!userId})`); return; }
     setAutoViewsLoading(true);
+    addScLog(`👁 조회수 자동 수집 시작 — 네이버 통계(조회수 순위)를 읽는 중(최대 1분 걸려요)...`);
     try {
       const r = await botFetch(`${BOT}/api/post-views`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ accountId: acc.accountId }) });
       const d = await r.json();
@@ -857,6 +859,8 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
       msg = `🌱 멘토의 조언\n\n이 글은 제목을 바꾼 지 ${changedDays}일밖에 안 됐어요.\n네이버가 이 글을 다시 읽고 순위를 매기는 데 보통 30일쯤 걸려요. (앞으로 ${st.daysLeft}일 더)\n\n지금 또 바꾸면 그동안의 관찰이 초기화돼서 오히려 손해예요.\n\n👉 조금만 더 기다리는 걸 권해요.\n\n그래도 지금 바로 제목을 다시 바꾸시겠어요?`;
     } else if (st.status === "relapse") {
       msg = `🔴 멘토의 조언\n\n이 글은 제목을 바꾼 지 ${changedDays}일이 지났는데 아직 검색에 안 떴어요.\n충분히 기다렸으니, 이제 제목·키워드를 다시 손볼 때예요.\n\n👉 개선안을 받아 다시 바꿔보는 걸 권해요.\n\n지금 개선안을 받으시겠어요?`;
+    } else if (st.status === "needs" || st.status === "new" || st.status === "prescribed") {
+      msg = `🚑 멘토의 조언\n\n이 글은 아직 검색에 안 떠요(미노출).\n제목·키워드를 더 잘 고치면 노출될 기회가 생겨요.\n\n👉 개선안(새 제목 2개)을 받아 바꿔보세요.\n\n지금 개선안을 받으시겠어요?`;
     } else {
       msg = `이 글의 제목을 다시 바꾸시겠어요?\n\n제목을 바꾼 지 ${changedDays}일 됐어요.`;
     }
@@ -1728,6 +1732,9 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
           const { newlyCured } = await savePostCareChecks(userId, acc.accountId, checksWithDate);
           if (newlyCured.length) { addScLog(`🎉 노출 성공(완치) ${newlyCured.length}개! 축하드려요`); setCelebrate(newlyCured); }
           await loadCare();   // 재발행 목록에 관찰중/처방 상태 즉시 반영
+          // 🩺 검사 끝났으니 곧바로 조회수·(제목 바꾼 글)순위도 이어서 자동 수집 — useEffect 타이밍에 의존하지 않게 확실히 실행
+          try { await autoCollectViews(); } catch {}
+          try { await autoCheckTrackedRanks(); } catch {}
         } catch {}
       }
     } catch (e: any) { addScLog(`🔴 검색노출 검사 실패: ${e.message}`); reportError({ userId, blogId: activeAccount?.blogId, stage: "검색노출 검사", message: e?.message || String(e) }); }
@@ -3031,8 +3038,8 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
                       </button>
                     );
                     // 상태별 글 리스트(제목·순위·보기)
-                    const careList = (items: PostCare[], emptyMsg: string) => (
-                      <div style={{ marginTop: 10, background: "var(--bg)", borderRadius: 10, border: "1px solid var(--border)", padding: "8px 10px", maxHeight: 260, overflowY: "auto" }}>
+                    const careList = (items: PostCare[], emptyMsg: string, showFix = false) => (
+                      <div style={{ marginTop: 10, background: "var(--bg)", borderRadius: 10, border: "1px solid var(--border)", padding: "8px 10px", maxHeight: 320, overflowY: "auto" }}>
                         {items.length === 0 ? <div style={{ fontSize: 11.5, color: "var(--text3)", padding: "8px 2px", textAlign: "center" }}>{emptyMsg}</div> :
                           items.slice(0, 50).map((c, i) => { const rk = rankOf(c); const vw = latestViews(c); return (
                             <div key={c.post_key} style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 2px", borderBottom: i < Math.min(items.length, 50) - 1 ? "1px solid var(--border)" : "none" }}>
@@ -3040,6 +3047,7 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
                               {vw != null && <span title="일 조회수(통계에서 자동 수집)" style={{ flexShrink: 0, fontSize: 10.5, fontWeight: 800, color: vw === 0 ? "#ef4444" : "#0ea5e9" }}>조회 {vw.toLocaleString()}</span>}
                               <b style={{ fontSize: 11, color: rk == null ? "#ef4444" : rk <= 10 ? "#00a878" : rk <= 100 ? "var(--text2)" : "#ef4444", flexShrink: 0 }}>{rk == null ? "미노출" : `${rk}위`}</b>
                               <a href={`https://blog.naver.com/${activeAccount?.blogId || ""}/${c.post_key}`} target="_blank" rel="noopener noreferrer" style={{ flexShrink: 0, fontSize: 10.5, fontWeight: 800, color: "var(--text3)", textDecoration: "none", padding: "3px 8px", borderRadius: 7, border: "1px solid var(--border)" }}>👁 보기</a>
+                              {showFix && <button onClick={() => { const st = computeCareStatus(c); const cd = c.title_changed_at ? Math.floor((Date.now() - new Date(c.title_changed_at).getTime()) / 86400000) : 0; handleTrackedRepublish({ title: c.title || c.post_key, logNo: c.post_key, blogId: activeAccount?.blogId }, cd, st); }} style={{ flexShrink: 0, fontSize: 10.5, fontWeight: 800, color: "#fff", background: "linear-gradient(135deg,#8b5cf6,#a855f7)", border: "none", cursor: "pointer", padding: "4px 10px", borderRadius: 7, fontFamily: "inherit" }}>✏️ 고치기</button>}
                             </div>
                           ); })}
                         {items.length > 50 && <div style={{ fontSize: 10.5, color: "var(--text3)", textAlign: "center", paddingTop: 6 }}>+ {items.length - 50}개 더</div>}
@@ -3070,7 +3078,7 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
                             </div>
                             <div style={{ fontSize: 10.5, color: "var(--text3)", marginTop: 6 }}>👆 눌러서 어떤 글인지 확인하세요{autoViewsLoading && <span style={{ color: "#0ea5e9", fontWeight: 700 }}> · 🔄 조회수 자동 수집 중…</span>}</div>
                             {/* 클릭한 칩의 글 리스트 */}
-                            {careListOpen === "todo" && careList(byStatus.todo, "치료할 글이 없어요 👍")}
+                            {careListOpen === "todo" && careList(byStatus.todo, "치료할 글이 없어요 👍", true)}
                             {careListOpen === "observing" && careList(byStatus.observing, "관찰 중인 글이 없어요")}
                             {careListOpen === "cured" && <>
                               <div style={{ fontSize: 10.5, color: "var(--text2)", marginTop: 8, padding: "8px 10px", borderRadius: 9, background: "rgba(14,165,233,.08)", border: "1px solid rgba(14,165,233,.25)", lineHeight: 1.55 }}>✅ 완치=검색 100위 안에 뜬다는 뜻이에요. 하지만 <b style={{ color: "#ef4444" }}>조회 0</b>이면 노출돼도 안 읽히는 거예요 — <b>제목·썸네일을 더 끌리게</b> 바꾸면 조회수가 올라요. (100위 진입이 끝이 아니에요!)</div>
