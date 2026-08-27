@@ -285,9 +285,6 @@ export default function CrawlCenter({ showToast, theme: extTheme, userId, plan =
   // 🎉 크롤링 웰컴 팝업(진입 시 팡!) — 7일 보지않기
   const [welcome, setWelcome] = useState(() => Date.now() > Number(localStorage.getItem("publy_crawl_welcome_until") || "0"));
   const closeWelcome = (week?: boolean) => { if (week) localStorage.setItem("publy_crawl_welcome_until", String(Date.now() + 7 * 86400000)); setWelcome(false); };
-  const [shipOpen, setShipOpen] = useState(false);
-  const [ships, setShips] = useState<Record<string, ShipState>>({}); // 블로거별 배송 상태
-  const setShip = (id: string, patch: Partial<ShipState>) => setShips((s) => ({ ...s, [id]: { ...{ status: "proposed" as ShipStatus }, ...s[id], ...patch } }));
   const timerRef = useRef<any>(null);
   const esRef = useRef<BotEventStream | null>(null);
   const [scanned, setScanned] = useState(0);   // 지금까지 스캔(수집)한 블로거 수 — 실시간 표시
@@ -414,7 +411,7 @@ export default function CrawlCenter({ showToast, theme: extTheme, userId, plan =
     es.onmessage = (e: MessageEvent) => {
       let d: any; try { d = JSON.parse(e.data); } catch { return; }
       if (d.type === "log") pushLog(d.msg);
-      else if (d.type === "sent") { setShips(s => ({ ...s, [d.id]: s[d.id] || { status: "proposed" as ShipStatus } })); }   // 보낸 사람=제안함
+      // 보낸 기록은 아웃리치 대시보드(outHistory)에서 관리 — 카드 배지 안 씀
       else if (d.type === "done") { pushLog(`✅ 발송 완료 — 성공 ${d.ok} · 실패 ${d.fail}`); toast(`이메일 ${d.ok}명 발송 완료`, "success"); if (userId && d.ok > 0 && !unlimitedPlan) { incrementEmailQuota(userId, d.ok).then(() => setEmailUsed(u => u + d.ok)); } setSending(false); setOutreach(null); es.close(); esOutRef.current = null; loadOutHistory(); try { (window as any).electron?.focusApp?.(); } catch {} }
       else if (d.type === "error") { pushLog(`❌ ${d.msg}`); toast(d.msg, "error"); setSending(false); es.close(); esOutRef.current = null; }
     };
@@ -605,25 +602,22 @@ export default function CrawlCenter({ showToast, theme: extTheme, userId, plan =
         </div>
       </div>
 
-      {/* ── 🎛️ 아웃리치 컨트롤 대시보드: 단계별 현황(발굴→연락처→보냄→회신→배송→완료) ── */}
+      {/* ── 🎛️ 아웃리치 컨트롤 대시보드: 단계별 현황(발굴→연락처→이메일→댓글→회신) ── */}
       {(() => {
-        // 단계 집계: 발송 이력(outHistory) + 배송상태(ships)에서
-        const sentCnt = outHistory.filter(h => h.channel === "email" && h.status === "sent").length;
+        // 단계 집계: 발송 이력(outHistory)에서 — 이메일/댓글 채널별 + 회신
+        const emailCnt = outHistory.filter(h => h.channel === "email" && h.status === "sent").length;
+        const commentCnt = outHistory.filter(h => h.channel === "comment" && h.status === "sent").length;
         const repliedCnt = outHistory.filter(h => h.reply_status === "replied").length;
-        const shipVals = Object.values(ships) as any[];
-        const shippingCnt = shipVals.filter(s => s.status === "shipped" || s.status === "ready").length;
-        const doneCnt = shipVals.filter(s => s.status === "delivered").length;
         const contactCnt = results.filter(b => b.email || b.kakao || b.openchat).length;
         const stages = [
           { lab: "발굴", en: "Discovered", val: results.length, Ic: IC_RADAR, col: C.accent },
           { lab: "연락처", en: "Reachable", val: contactCnt, Ic: IC_CARD, col: "#0e9f6e" },
-          { lab: "보냄", en: "Sent", val: sentCnt, Ic: IC_PLANE, col: "#6d5dd3" },
+          { lab: "이메일", en: "Email", val: emailCnt, Ic: IC_PLANE, col: "#6d5dd3" },
+          { lab: "댓글", en: "Comment", val: commentCnt, Ic: IC_BOX, col: "#d98a1f" },
           { lab: "회신", en: "Replied", val: repliedCnt, Ic: IC_REPLY, col: "#0ea5e9" },
-          { lab: "배송중", en: "Shipping", val: shippingCnt, Ic: IC_BOX, col: "#d98a1f" },
-          { lab: "완료", en: "Done", val: doneCnt, Ic: IC_FLAG, col: "#2f9e5e" },
         ];
         return (
-          <div className="ob-sec" style={{ display: "grid", gridTemplateColumns: "repeat(6,1fr)", gap: 10, marginBottom: 14 }}>
+          <div className="ob-sec" style={{ display: "grid", gridTemplateColumns: "repeat(5,1fr)", gap: 10, marginBottom: 14 }}>
             {stages.map((k, i) => (
               <div key={i} className="ob-stat" onMouseEnter={e => { e.currentTarget.style.transform = "translateY(-4px)"; e.currentTarget.style.boxShadow = `0 14px 28px -12px ${k.col}88`; }} onMouseLeave={e => { e.currentTarget.style.transform = "translateY(0)"; e.currentTarget.style.boxShadow = `0 4px 10px -6px ${C.ink}22`; }}
                 style={{ padding: "15px 14px 14px", background: C.surf, border: `1px solid ${C.line2}`, borderRadius: 14, position: "relative", overflow: "hidden", transition: "transform .2s cubic-bezier(.22,1,.36,1), box-shadow .2s", boxShadow: `0 4px 10px -6px ${C.ink}22`, cursor: "default" }}>
@@ -646,14 +640,13 @@ export default function CrawlCenter({ showToast, theme: extTheme, userId, plan =
 
       {/* ── 📬 아웃리치 추적 대시보드 — 보낸 이메일 관리·회신·팔로우업 한곳에 ── */}
       {(() => {
-        const sent = outHistory.filter(h => h.channel === "email" && h.status === "sent");
+        // 이메일 + 댓글 둘 다 추적 목록에 (채널 무관)
+        const sent = outHistory.filter(h => (h.channel === "email" || h.channel === "comment") && h.status === "sent");
         const stageOf = (h: any) => {
-          const sh = ships[h.blog_id];
-          if (sh?.status === "delivered") return { t: "완료", c: "#2f9e5e", Ic: IC_FLAG };
-          if (sh?.status === "shipped" || sh?.status === "ready") return { t: "배송중", c: "#d98a1f", Ic: IC_BOX };
-          if (h.reply_status === "replied" || sh?.status === "accepted") return { t: "회신옴", c: "#0ea5e9", Ic: IC_REPLY };
+          const isComment = h.channel === "comment";
+          if (h.reply_status === "replied") return { t: "회신옴", c: "#0ea5e9", Ic: IC_REPLY };
           if (h.reply_status === "no_reply") return { t: "무응답", c: C.sub, Ic: IC_PLANE };
-          return { t: "회신대기", c: "#6d5dd3", Ic: IC_PLANE };
+          return isComment ? { t: "댓글 담", c: "#d98a1f", Ic: IC_BOX } : { t: "회신대기", c: "#6d5dd3", Ic: IC_PLANE };
         };
         const daysAgo = (iso: string) => Math.floor((Date.now() - new Date(iso).getTime()) / 86400000);
         const fmt = (iso: string) => { const d = new Date(iso); return `${d.getMonth() + 1}/${d.getDate()}`; };
@@ -921,10 +914,7 @@ export default function CrawlCenter({ showToast, theme: extTheme, userId, plan =
                     {b.email && <span style={{ fontSize: 10, fontWeight: 700, color: C.ink, border: `1px solid ${C.line2}`, padding: "2px 7px", borderRadius: 2 }}>이메일</span>}
                     {b.kakao && <span style={{ fontSize: 10, fontWeight: 700, color: C.ink, border: `1px solid ${C.line2}`, padding: "2px 7px", borderRadius: 2 }}>카톡</span>}
                     {!b.email && !b.kakao && !b.openchat && <span style={{ fontSize: 10, color: C.sub }}>공개 연락처 없음</span>}
-                    {/* 배송 진행 배지: 제안함(회신대기)=중립 회색, 수락 이상=강조, 배송완료=초록 */}
-                    {ships[b.id] && <span title={SHIP_DESC[ships[b.id].status]} style={{ fontSize: 10, fontWeight: 800, color: ships[b.id].status === "proposed" ? C.sub : C.surf, background: ships[b.id].status === "proposed" ? C.surf2 : ships[b.id].status === "delivered" ? "#2f9e5e" : C.accent, border: ships[b.id].status === "proposed" ? `1px solid ${C.line2}` : "none", padding: "2px 7px", borderRadius: 2 }}>📦 {SHIP_LABEL[ships[b.id].status]}</span>}
-                    {/* ★ 운영자 수동 수락: 블로거가 "하겠다"고 회신했을 때만 누름. 발송했다고 자동 수락 아님 */}
-                    {ships[b.id]?.status === "proposed" && <button onClick={() => { setShip(b.id, { status: "accepted" }); toast(`${b.nick}님을 '수락'으로 확정했어요 — 이제 배송 준비 단계예요`, "success"); }} title="블로거가 이메일·댓글로 '하겠다'고 회신하면 이 버튼을 눌러 수락 처리하세요. 그래야 배송 단계로 넘어가요." style={{ ...btnGhost, padding: "3px 9px", fontSize: 10.5, fontWeight: 800, color: "#2f9e5e", borderColor: "#2f9e5e" }}>✅ 수락 처리</button>}
+                    {/* 발송 여부는 위쪽 '아웃리치 추적 대시보드'에서 한곳에서 관리 (카드엔 배지 안 둠) */}
                     <button onClick={() => setDetail(b)} style={{ marginLeft: "auto", ...btnGhost, padding: "4px 9px", fontSize: 10.5 }}>상세 →</button>
                   </div>
                 </div>
@@ -939,8 +929,7 @@ export default function CrawlCenter({ showToast, theme: extTheme, userId, plan =
               <div style={{ fontSize: 11.5, color: C.sub, fontWeight: 600 }}>이메일 발송 · 블로그 댓글 제안 · 공개 문의처로만</div>
             </div>
             <button onClick={() => { if (!selected.size) { toast("먼저 블로거를 선택하세요", "info"); return; } setOutreach("email"); }} style={btnGhost}>✉ 이메일 보내기</button>
-            <button onClick={() => { if (!selected.size) { toast("먼저 블로거를 선택하세요", "info"); return; } setOutreach("comment"); }} style={btnGhost}>💬 댓글 제안</button>
-            <button onClick={() => setShipOpen(true)} style={btnGhost}>📦 배송 관리{Object.keys(ships).length ? ` (${Object.keys(ships).length})` : ""}</button>
+            <button onClick={() => { if (!selected.size) { toast("먼저 블로거를 선택하세요", "info"); return; } setOutreach("comment"); }} style={btnGhost}>💬 댓글 달기</button>
             <button onClick={downloadCsv} style={btnSolid}>명단 CSV ↓</button>
           </div>
         </div>
@@ -1214,68 +1203,6 @@ export default function CrawlCenter({ showToast, theme: extTheme, userId, plan =
                 <button onClick={() => { sendFollowup(followTargets.map(t => t.id)); }} disabled={followSending} style={{ ...btnSolid, flex: 2, background: "#d98a1f", borderColor: "#d98a1f", color: "#fff", opacity: followSending ? .6 : 1 }}>{followSending ? "보내는 중…" : `${followTargets.length}명 모두에게 리마인드 보내기 →`}</button>
               </div>
             )}
-          </div>
-        </div>
-      ), document.body)}
-
-      {/* ═══ 배송 관리 모달 (체험단 제품 발송) ═══ */}
-      {shipOpen && createPortal((
-        <div onClick={() => setShipOpen(false)} style={{ position: "fixed", inset: 0, background: "rgba(20,16,12,.55)", backdropFilter: "blur(3px)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 99999, padding: 20 }}>
-          <div onClick={(e) => e.stopPropagation()} style={{ background: C.surf, border: `1px solid ${C.line2}`, borderRadius: 6, maxWidth: 680, width: "100%", maxHeight: "88vh", display: "flex", flexDirection: "column", boxShadow: "0 30px 80px rgba(0,0,0,.5)" }}>
-            <div style={{ padding: "20px 24px", borderBottom: `1px solid ${C.line}`, display: "flex", alignItems: "center", gap: 10 }}>
-              <img src={CH.dodo} onError={chErr("✅")} style={{ width: 40, height: 40 }} />
-              <div style={{ flex: 1 }}>
-                <div style={{ fontFamily: serif, fontSize: 18, fontWeight: 600 }}>배송 관리</div>
-                <div style={{ fontSize: 11.5, color: C.sub }}>제안 수락한 블로거에게 체험단 제품을 보내고 송장을 관리해요</div>
-              </div>
-              <button onClick={() => setShipOpen(false)} style={{ ...btnGhost, padding: "5px 10px" }}>✕</button>
-            </div>
-            <div className="ob-scroll" style={{ padding: "16px 24px", overflowY: "auto", flex: 1 }}>
-              {/* 배송 단계 요약 (제안함 → 수락 → 발송대기 → 배송중 → 배송완료) */}
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(5,1fr)", border: `1px solid ${C.line}`, marginBottom: 8 }}>
-                {(["proposed", "accepted", "ready", "shipped", "delivered"] as ShipStatus[]).map((st, i) => (
-                  <div key={st} title={SHIP_DESC[st]} style={{ padding: "10px 8px", textAlign: "center", borderLeft: i ? `1px solid ${C.line}` : "none" }}>
-                    <div style={{ fontFamily: serif, fontSize: 20, fontWeight: 600 }}>{Object.values(ships).filter((s) => s.status === st).length}</div>
-                    <div style={{ ...label, marginBottom: 0, fontSize: 9.5 }}>{SHIP_LABEL[st]}</div>
-                  </div>
-                ))}
-              </div>
-              <div style={{ fontSize: 11, color: C.sub, marginBottom: 18, lineHeight: 1.5 }}>💡 <b>제안함</b>=연락은 했고 블로거의 OK 회신을 기다리는 중이에요. 블로거가 하겠다고 하면 아래에서 <b style={{ color: "#2f9e5e" }}>수락</b>으로 바꿔주세요. 그 다음 제품을 보내며 <b>발송대기 → 배송중 → 배송완료</b> 순으로 넘기면 돼요.</div>
-              {Object.keys(ships).length === 0 ? (
-                <div style={{ textAlign: "center", padding: "36px 20px", color: C.sub, fontSize: 13, fontWeight: 600 }}>아직 배송 대상이 없어요.<br />결과에서 블로거를 선택해 <b style={{ color: C.ink }}>이메일/댓글 제안</b>을 보내면 여기로 담겨요.</div>
-              ) : (
-                <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                  {Object.entries(ships).map(([id, sh]) => {
-                    const b = results.find((r) => r.id === id);
-                    return (
-                      <div key={id} style={{ border: `1px solid ${C.line}`, borderRadius: 4, padding: 14 }}>
-                        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
-                          <div style={{ fontSize: 14, fontWeight: 800, flex: 1 }}>{b?.nick || id}</div>
-                          <select value={sh.status} onChange={(e) => setShip(id, { status: e.target.value as ShipStatus })} title={SHIP_DESC[sh.status]} style={{ ...inp, width: "auto", padding: "6px 10px", fontSize: 12 }}>
-                            {(["proposed", "accepted", "ready", "shipped", "delivered"] as ShipStatus[]).map((st) => <option key={st} value={st}>{SHIP_LABEL[st]}</option>)}
-                          </select>
-                          <button onClick={() => setShips((s) => { const n = { ...s }; delete n[id]; return n; })} style={{ ...btnGhost, padding: "5px 9px", fontSize: 11, color: C.accent, borderColor: C.accent }}>제거</button>
-                        </div>
-                        <div style={{ display: "grid", gridTemplateColumns: "1.4fr 1fr", gap: 8, marginBottom: 8 }}>
-                          <input value={sh.address || ""} onChange={(e) => setShip(id, { address: e.target.value })} placeholder="배송지 주소 (수락 후 받은 주소)" style={{ ...inp, fontSize: 12 }} />
-                          <input value={sh.product || ""} onChange={(e) => setShip(id, { product: e.target.value })} placeholder="보낼 제품" style={{ ...inp, fontSize: 12 }} />
-                        </div>
-                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1.4fr", gap: 8 }}>
-                          <select value={sh.courier || ""} onChange={(e) => setShip(id, { courier: e.target.value })} style={{ ...inp, fontSize: 12 }}>
-                            <option value="">택배사</option>{["CJ대한통운", "우체국", "한진", "롯데", "로젠", "쿠팡"].map((c) => <option key={c}>{c}</option>)}
-                          </select>
-                          <input value={sh.tracking || ""} onChange={(e) => setShip(id, { tracking: e.target.value })} placeholder="송장번호" style={{ ...inp, fontSize: 12 }} />
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-            <div style={{ padding: "14px 24px", borderTop: `1px solid ${C.line}`, display: "flex", gap: 8 }}>
-              <button onClick={() => setShipOpen(false)} style={{ ...btnGhost, flex: 1 }}>닫기</button>
-              <button onClick={() => { toast("배송 정보를 저장했어요 (실 저장은 엔진 연결 시)", "success"); }} style={{ ...btnSolid, flex: 2 }}>배송 정보 저장</button>
-            </div>
           </div>
         </div>
       ), document.body)}
