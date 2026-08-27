@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from "react";
 import { createPortal } from "react-dom";
 import { botFetch, BotEventStream } from "../lib/botApi";
 import { getReplyDailyUsage, incrementReplyQuota, REPLY_DAILY_LIMIT, getBlogscoreDailyUsage, incrementBlogscoreQuota, BLOGSCORE_DAILY_LIMIT, PUMASI_ACCOUNT_LIMIT, PUMASI_POSTS_LIMIT, TAB_ACCOUNT_LIMIT, getPumasiDailyUsage, savePostCareChecks, markPrescribed, markTitleChanged, getPostCare, computeCareStatus, PostCare, OBSERVE_DAYS, savePostViews, latestViews, reportError } from "../lib/supabase";
+import UsageGuide from "../components/UsageGuide";
 
 const BOT = "http://127.0.0.1:3334";
 
@@ -1925,6 +1926,18 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
           .npg-2col .card,.npg-2col button,.npg-2col input,.npg-2col textarea{max-width:100%;box-sizing:border-box;}
         }
       `}</style>
+
+      {tabKey === "neighbor" ? (
+        <UsageGuide theme={theme} subtitle="서로이웃을 자동으로 신청해 이웃을 늘려요." steps={[{ico:"👤",title:"계정 연결",desc:"작업할 네이버 계정을 연결해요."},{ico:"🎯",title:"대상·개수 설정",desc:"어떤 블로거에게 몇 명 신청할지 정해요."},{ico:"▶️",title:"시작",desc:"시작을 누르면 천천히 서로이웃을 신청해요."}]} />
+      ) : tabKey === "engage" ? (
+        <UsageGuide theme={theme} subtitle="다른 블로그에 공감·댓글을 자동으로 남겨요." steps={[{ico:"👤",title:"계정 연결",desc:"작업할 네이버 계정을 연결해요."},{ico:"🎯",title:"키워드·개수",desc:"어떤 글에 몇 개 남길지 정해요."},{ico:"▶️",title:"시작",desc:"시작을 누르면 안전하게 공감·댓글을 남겨요."}]} />
+      ) : tabKey === "reply" ? (
+        <UsageGuide theme={theme} subtitle="내 글에 달린 댓글에 답글을 자동으로 달아요." steps={[{ico:"👤",title:"계정 연결",desc:"내 블로그 계정을 연결해요."},{ico:"📥",title:"내 글 불러오기",desc:"답글 달 내 글 목록을 불러와요."},{ico:"▶️",title:"시작",desc:"시작을 누르면 미답변 댓글에 답글을 달아요."}]} />
+      ) : tabKey === "pumasi" ? (
+        <UsageGuide theme={theme} subtitle="내 여러 계정끼리 서로 공감·댓글을 주고받아요." steps={[{ico:"👥",title:"내 계정 등록",desc:"품앗이할 내 계정들을 등록해요."},{ico:"📄",title:"대상 확인",desc:"서로 방문할 글을 확인해요."},{ico:"▶️",title:"시작",desc:"시작을 누르면 계정을 바꿔가며 서로 공감·댓글해요."}]} />
+      ) : (
+        <UsageGuide theme={theme} subtitle="내 블로그 건강(지수)을 검사하고 고쳐가요." steps={[{ico:"👤",title:"계정 연결",desc:"검사할 블로그 계정을 연결해요."},{ico:"🩺",title:"검사 시작",desc:"검색 노출·저품질·방문자 등을 검사해요."},{ico:"📈",title:"진단·회진",desc:"결과와 오늘의 회진으로 부족한 점을 고쳐가요."}]} />
+      )}
 
       {/* 봇 오프라인 배너 */}
       {!botOnline && (

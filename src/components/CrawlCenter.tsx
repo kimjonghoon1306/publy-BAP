@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from "react";
 import { createPortal } from "react-dom";
 import { BotEventStream, botFetch } from "../lib/botApi";
 import { PLAN_CONFIG, CRAWL_DAILY_LIMIT, EMAIL_DAILY_LIMIT, COMMENT_DAILY_LIMIT, getCrawlDailyUsage, incrementCrawlQuota, getEmailDailyUsage, incrementEmailQuota } from "../lib/supabase";
+import UsageGuide from "./UsageGuide";
 
 const BOT = "http://127.0.0.1:3334";   // neighbor-bot (발굴·발송)
 
@@ -562,6 +563,15 @@ export default function CrawlCenter({ showToast, theme: extTheme, userId, plan =
         .ob-stat:hover{transform:translateY(-3px);box-shadow:0 12px 24px -14px rgba(0,0,0,.35)}
         .ob-scroll::-webkit-scrollbar{height:6px;width:6px}.ob-scroll::-webkit-scrollbar-thumb{background:${C.line2};border-radius:0}
       `}</style>
+
+      <UsageGuide theme={theme} accent={C.accent}
+        subtitle="펄리예요! 체험단·홍보할 블로거를 키워드로 찾아 이메일·댓글로 제안할 수 있어요."
+        steps={[
+          { ico: "👤", title: "작업 네이버 계정 연결·선택", desc: "‘작업 네이버 계정’에서 아이디·비번으로 연결하고 ◉ 동그라미로 골라요(발굴·발송에 이 계정을 써요)." },
+          { ico: "🔍", title: "블로거 발굴", desc: "주제·지역·키워드와 인원을 정하고 START SCAN을 누르면 진짜 블로거를 찾아와요." },
+          { ico: "🩺", title: "고르고 → 제안", desc: "카드를 골라 진정성·연락처를 확인하고, 이메일 보내기(또는 댓글)로 체험단을 제안해요." },
+          { ico: "📮", title: "보낸 뒤 관리", desc: "‘보낸 글 이력·아웃리치 추적’에서 회신 여부를 보고 팔로우업(리마인드)까지 해요." },
+        ]} />
 
       {/* 🎉 크롤링 웰컴 팝업 — 몽글(탐험)이 팡! 사용법+재미있는 멘트. [닫기][일주일 보지않기] */}
       {welcome && createPortal(

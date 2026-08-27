@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { BotEventStream, botFetch } from "../lib/botApi";
 import { PLAN_CONFIG, CRAWL_DAILY_LIMIT } from "../lib/supabase";
+import UsageGuide from "./UsageGuide";
 
 const BOT = "http://127.0.0.1:3334";
 
@@ -177,25 +178,13 @@ export default function PlaceCenter({ showToast, theme: extTheme, userId, plan =
       <div style={{ color: C.sub, fontSize: 12.5, marginTop: 7, lineHeight: 1.6 }}>지역 업체를 지도처럼 모으고, 실제 리뷰를 쓴 블로거를 이어서 찾아요.</div>
     </div>
 
-    {/* 👣 처음 쓰는 사람도 알게 — 큼직한 3단계 사용법(어르신 배려: 큰 글씨·번호·쉬운 말) */}
-    <section style={{ ...card, padding: "18px clamp(16px,3vw,24px)", marginBottom: 15, background: C.accentSoft, border: `1px solid ${C.accent}55` }}>
-      <div style={{ fontSize: 16, fontWeight: 900, color: C.ink, marginBottom: 12 }}>👣 이렇게 쓰세요 <span style={{ fontSize: 12, fontWeight: 700, color: C.sub }}>· 처음이면 순서대로만 하면 돼요</span></div>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(min(100%,230px),1fr))", gap: 12 }}>
-        {[
-          { n: "1", t: "네이버 계정 연결·선택", d: "아래 ‘작업 네이버 계정’에서 아이디·비번으로 연결하고 ◉ 동그라미로 골라요.", ico: "👤" },
-          { n: "2", t: "① 업체 발굴", d: "지역(예: 강남)과 업종(예: 맛집)을 고르고 START를 누르면 동네 업체가 쭉 나와요.", ico: "📍" },
-          { n: "3", t: "업체 고르고 → ② 블로거 역추적", d: "마음에 드는 업체를 체크한 뒤 ‘이 업체 리뷰 쓴 블로거 찾기’를 누르면, 그 가게에 후기 쓴 블로거가 나와요. 필요하면 CSV로 저장!", ico: "🧭" },
-        ].map(s => (
-          <div key={s.n} style={{ display: "flex", gap: 11, alignItems: "flex-start", background: C.surf, borderRadius: 14, padding: "13px 14px", border: `1px solid ${C.line}` }}>
-            <div style={{ flexShrink: 0, width: 30, height: 30, borderRadius: "50%", background: C.accent, color: theme === "dark" ? "#17382f" : "#fff", fontWeight: 900, fontSize: 15, display: "flex", alignItems: "center", justifyContent: "center" }}>{s.n}</div>
-            <div style={{ minWidth: 0 }}>
-              <div style={{ fontSize: 13.5, fontWeight: 900, color: C.ink, marginBottom: 3 }}>{s.ico} {s.t}</div>
-              <div style={{ fontSize: 12, color: C.sub, lineHeight: 1.55 }}>{s.d}</div>
-            </div>
-          </div>
-        ))}
-      </div>
-    </section>
+    <UsageGuide theme={theme} accent={C.accent}
+      subtitle="펄리예요! 동네 업체를 찾고, 그 가게에 후기 쓴 블로거까지 찾아줄게요. 순서대로만 하면 돼요."
+      steps={[
+        { ico: "👤", title: "네이버 계정 연결·선택", desc: "아래 ‘작업 네이버 계정’에서 아이디·비번으로 연결하고 ◉ 동그라미로 골라요." },
+        { ico: "📍", title: "① 업체 발굴", desc: "지역(예: 강남)과 업종(예: 맛집)을 고르고 START를 누르면 동네 업체가 쭉 나와요." },
+        { ico: "🧭", title: "업체 고르고 → ② 블로거 역추적", desc: "마음에 드는 업체를 체크한 뒤 ‘리뷰 쓴 블로거 찾기’를 누르면 그 가게 후기 블로거가 나와요. CSV로 저장도!" },
+      ]} />
 
     <section style={{ ...card, padding: "18px", marginBottom: 15 }}>{renderMailAccounts()}</section>
 

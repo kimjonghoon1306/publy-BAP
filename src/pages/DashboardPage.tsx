@@ -7,6 +7,7 @@ import CrawlCenter from "../components/CrawlCenter";
 import PlaceCenter from "../components/PlaceCenter";
 import { botFetch, BotEventStream } from "../lib/botApi";
 import WebInstallNotice from "../WebInstallNotice";
+import UsageGuide from "../components/UsageGuide";
 
 type MainTab = "control" | "keyword" | "write" | "image" | "photo" | "publish" | "manage" | "accounts" | "rank" | "blogscore" | "calendar" | "settings" | "neighbor" | "engage" | "reply" | "pumasi" | "insta_dm" | "crawl" | "place";
 type OnPartnerProduct = {id:string|null;name:string;image:string;price:number|null;available:boolean;partnerUrl:string;shopUrl:string};
@@ -4379,6 +4380,7 @@ POST3: (제목)|(이유)
             {/* ═══ 🔍 키워드/제목 탭 ═══ */}
             {tab==="keyword"&&(
               <div style={{animation:"fadeUp .25s ease both"}}>
+                <UsageGuide theme={theme==="dark"?"dark":"light"} subtitle="펄리예요! 쓸 주제부터 정해봐요. 인기 키워드와 제목을 추천해줄게요." steps={[{ico:"✏️",title:"주제·키워드 입력",desc:"쓰고 싶은 주제나 키워드를 적어요(예: 강남 맛집)."},{ico:"💡",title:"추천 받기",desc:"버튼을 누르면 인기 키워드와 제목 후보를 보여줘요."},{ico:"➡️",title:"제목 고르기",desc:"마음에 드는 제목을 고르면 ‘글 생성’으로 이어가요."}]} />
                 <div className="steps">
                   {[{n:"1",t:"키워드 입력"},{n:"2",t:"제목 추천"},{n:"3",t:"제목 선택"}].map((s,i)=>{
                     const done=(i===0&&keywords.length>0)||(i===1&&titles.length>0)||(i===2&&!!selectedTitle);
@@ -4627,6 +4629,7 @@ POST3: (제목)|(이유)
             {/* ═══ ✍️ 글 생성 탭 ═══ */}
             {tab==="write"&&(
               <div style={{animation:"fadeUp .25s ease both"}}>
+                <UsageGuide theme={theme==="dark"?"dark":"light"} subtitle="고른 제목으로 본문을 자동으로 써줄게요." steps={[{ico:"📝",title:"제목·키워드 확인",desc:"위에서 고른 제목과 키워드가 맞는지 봐요."},{ico:"🎨",title:"스타일 고르기",desc:"말투·글 유형(정보/후기 등)을 골라요."},{ico:"✨",title:"글 생성",desc:"‘글 생성’을 누르면 본문이 자동으로 써져요. 이미지·발행으로 이어가요."}]} />
 
                 {/* 임시저장 불러오기 배너 */}
                 {draftAvailable&&draftData&&!genContent&&(
@@ -4824,6 +4827,7 @@ POST3: (제목)|(이유)
             {/* ===== 이미지 생성 ===== */}
             {tab==="image"&&(
               <div style={{animation:"fadeUp .25s ease both"}}>
+                <UsageGuide theme={theme==="dark"?"dark":"light"} subtitle="글과 어울리는 이미지를 만들어줄게요." steps={[{ico:"🖼️",title:"이미지 키워드 입력",desc:"글과 어울리는 이미지 키워드를 적어요."},{ico:"🆓",title:"방식 고르기",desc:"무료(Google Flow) 또는 유료 방식 중 골라요."},{ico:"➡️",title:"생성·확인",desc:"이미지를 만들고 캡션을 확인한 뒤 발행에 넣어요."}]} />
                 {!genContent&&(<div className="alert-box alert-warn">⚠️ 먼저 글 생성 탭에서 글을 생성해주세요!<button className="btn btn-sm btn-secondary" style={{marginLeft:"auto",flexShrink:0}} onClick={()=>setTab("write")}>글 생성하러 가기</button></div>)}
 
                 {/* ── 이미지 생성 방식 스위치 ── */}
@@ -5281,6 +5285,7 @@ POST3: (제목)|(이유)
             {/* ===== 발행하기 ===== */}
             {tab==="photo"&&(
               <div className="photo-root">
+                <UsageGuide theme={theme==="dark"?"dark":"light"} subtitle="사진만 올리면 그 사진으로 블로그 글을 만들어줄게요." steps={[{ico:"👤",title:"발행 계정 선택",desc:"‘네이버 발행 계정’에서 올릴 계정을 ◉ 로 골라요."},{ico:"📷",title:"사진 올리기",desc:"글에 넣을 사진을 업로드해요(최대 20장)."},{ico:"✨",title:"생성·발행",desc:"핵심 포인트를 적고 생성하면 사진 글이 만들어져요. 발행까지!"}]} />
 
                 {/* 스토리 섹션 */}
                 <div className="photo-story">
@@ -5590,6 +5595,7 @@ POST3: (제목)|(이유)
 
             {tab==="publish"&&(
               <div style={{animation:"fadeUp .25s ease both"}}>
+                <UsageGuide theme={theme==="dark"?"dark":"light"} subtitle="다 된 글을 블로그에 자동으로 올려줄게요." steps={[{ico:"👤",title:"계정·플랫폼 선택",desc:"네이버/티스토리와 올릴 계정을 골라요."},{ico:"🧩",title:"발행 방식",desc:"전체/본문+FAQ/본문만 중 골라요. 예약 발행도 돼요."},{ico:"🚀",title:"발행",desc:"🚀 발행 버튼을 누르면 블로그에 자동으로 올라가요."}]} />
                 {!botOnline&&<div className="alert-box alert-warn" style={{margin:"12px 16px 0"}}>⚠️ 봇 오프라인 — PC에서 Publy 앱 실행 시 즉시 발행, 아니면 대기열 저장돼요.</div>}
                 {quota&&quota.remaining_quota<=0&&!(["unlimited","admin"] as string[]).includes(user.plan)&&<div className="alert-box alert-danger" style={{margin:"12px 16px 0"}}>⚠️ 발행 건수 초과. 플랜을 업그레이드해주세요.</div>}
 
@@ -5899,6 +5905,7 @@ POST3: (제목)|(이유)
             {/* ===== 발행 기록 ===== */}
             {tab==="manage"&&(
               <div style={{animation:"fadeUp .25s ease both"}}>
+                <UsageGuide theme={theme==="dark"?"dark":"light"} subtitle="지금까지 올린 글을 모아서 관리해요." steps={[{ico:"📋",title:"목록 확인",desc:"발행한 글이 모두 여기 모여요."},{ico:"✅",title:"상태 보기",desc:"성공/실패와 올라간 주소를 확인해요."},{ico:"📈",title:"성과 추적",desc:"순위·조회 변화를 보고 다음 글에 참고해요."}]} />
 
                 {/* ── 발행 통계 + 수익 예측 ── */}
                 {(()=>{
@@ -6169,6 +6176,7 @@ POST3: (제목)|(이유)
             {/* ===== 📅 콘텐츠 캘린더 ===== */}
             {tab==="calendar"&&(
               <div style={{animation:"fadeUp .25s ease both"}}>
+                <UsageGuide theme={theme==="dark"?"dark":"light"} subtitle="매일 뭘 쓸지 정해주고, 꾸준함도 챙겨줄게요." steps={[{ico:"🗓️",title:"글감 보기",desc:"날짜별 추천 주제와 핫이슈를 봐요."},{ico:"✍️",title:"글쓰기",desc:"글쓰기 버튼으로 바로 작성을 시작해요."},{ico:"🔥",title:"완료 체크",desc:"쓴 날은 체크! 며칠 연속 썼는지 스트릭도 쌓여요."}]} />
 
                 {/* 🔥 핫이슈 추천 (무료·누구나) */}
                 <div className="card" style={{marginBottom:14,border:"1.5px solid rgba(255,180,0,.35)",background:"linear-gradient(135deg,rgba(255,196,0,.06),rgba(255,146,10,.03))"}}>
@@ -6478,6 +6486,7 @@ POST3: (제목)|(이유)
 
             {tab==="insta_dm"&&(
               <div style={{animation:"fadeUp .25s ease both"}}>
+                <UsageGuide theme={theme==="dark"?"dark":"light"} subtitle="인스타에서 관심 고객을 찾아 DM을 보내요." steps={[{ico:"📱",title:"인스타 로그인",desc:"인스타 계정으로 로그인해요."},{ico:"🔍",title:"대상 수집",desc:"키워드로 보낼 대상을 모아요."},{ico:"✉️",title:"메시지 발송",desc:"메시지를 적고 천천히 안전하게 보내요."}]} />
 
                 {/* 헤더 */}
                 <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:20}}>
