@@ -1,6 +1,6 @@
 import express from "express";
 import cors from "cors";
-import { saveSession, sessionExists, removeSession, crawlBlogIds, crawlBuddyPosts, analyzeBuddyKeywords, addNeighbors, NeighborResult, donePath, engageBlogs, EngageResult, engageDonePath, crawlMyPosts, replyToComments, crawlBlogStats, checkSelectedBlogExposure, pumasiEngage, crawlPumasiReport, pumasiPreview, updatePostTitle, checkProxy, analyzeBlogAuthenticity, fetchPostBody, crawlPostViews, sendWebmail } from "./naver";
+import { saveSession, sessionExists, removeSession, crawlBlogIds, crawlBuddyPosts, analyzeBuddyKeywords, addNeighbors, NeighborResult, donePath, engageBlogs, EngageResult, engageDonePath, crawlMyPosts, replyToComments, crawlBlogStats, checkSelectedBlogExposure, pumasiEngage, crawlPumasiReport, pumasiPreview, updatePostTitle, checkProxy, analyzeBlogAuthenticity, fetchPostBody, crawlPostViews, sendWebmail, sendBlogComments } from "./naver";
 import { checkNeighborQuota, incrementNeighborQuota, getNeighborDailyUsage, incrementEngageQuota, getEngageDailyUsage, getUserPlan, NEIGHBOR_DAILY_LIMIT, addNeighborHistory, addReplyHistory, addBlogscoreHistory, incrementPumasiQuota, TITLE_EDIT_DAILY_LIMIT, getTitleEditDailyUsage, incrementTitleEditQuota, getProxyForAccount, supabase, getOutreachSender, getOutreachSentToday, addOutreachLog } from "./supabase";
 import nodemailer from "nodemailer";
 import fs from "fs";
@@ -625,6 +625,35 @@ app.post("/api/outreach/sender", async (req, res) => {
 });
 
 // 이메일 실발송(SSE) — 선택한 블로거들에게 개인화 발송. 블로그 창 안 열고 SMTP로 바로.
+// 💬 블로그 댓글 제안 발송 (러프·계정 안전 최우선) — 로그인 계정으로 발굴 블로거 최근 글에 댓글
+app.get("/api/outreach/send-comment", async (req, res) => {
+  const { userId, accountId, message, targets, dailyLimit } = req.query as Record<string, string>;
+  sseSetup(res);
+  const L = (msg: string) => sseSend(res, { type: "log", msg });
+  try {
+    if (!userId || !accountId) throw new Error("userId·accountId 필요");
+    let list: any[] = [];
+    try { list = JSON.parse(targets || "[]"); } catch {}
+    const withBlog = list.filter(t => t.blogId);
+    if (!withBlog.length) { sseSend(res, { type: "error", msg: "댓글 달 블로거가 없어요" }); return res.end(); }
+    // ★계정 안전: 하루 상한을 아주 낮게(기본 5, 최대 10). 도배 감지 회피.
+    const cap = Math.min(10, Math.max(1, Number(dailyLimit) || 5));
+    const todo = withBlog.slice(0, cap).map(t => ({ id: t.id, blogId: t.blogId, nick: t.nick, body: String(message || "").replace(/\{닉네임\}/g, t.nick || "블로거").replace(/\{관심키워드\}/g, (t.keywords?.[0] || "")).replace(/\{관심품목\}/g, (t.categories?.[0] || "")) }));
+    if (withBlog.length > cap) L(`⚠️ 계정 안전을 위해 오늘은 ${cap}명까지만 답니다(나머지는 다음에).`);
+    const { ok, fail } = await sendBlogComments({
+      accountId, ownerUserId: userId, targets: todo, onLog: L,
+      onSent: async (id, success, error) => {
+        const t = todo.find(x => x.id === id) || todo[0];
+        await addOutreachLog({ user_id: userId, blog_id: t?.blogId || "", nickname: t?.nick, channel: "comment", to_email: "", subject: "블로그 댓글 제안", message: t?.body || "", status: success ? "sent" : "failed", error });
+        if (success) sseSend(res, { type: "sent", id });
+      },
+    });
+    L(`🎉 댓글 마무리 — 성공 ${ok} · 실패 ${fail}`);
+    sseSend(res, { type: "done", ok, fail });
+  } catch (e: any) { sseSend(res, { type: "error", msg: e.message }); }
+  res.end();
+});
+
 app.get("/api/outreach/send-email", async (req, res) => {
   // ✉️ 웹메일 방식: 로그인된 네이버 창을 열어 사람처럼 메일을 쓴다. SMTP·앱비밀번호 불필요(회원 설정 0).
   const { userId, accountId, subject, message, fromName, targets, dailyLimit, brand } = req.query as Record<string, string>;

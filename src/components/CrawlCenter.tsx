@@ -377,8 +377,12 @@ export default function CrawlCenter({ showToast, theme: extTheme, userId, plan =
     es.onmessage = (e: MessageEvent) => {
       let d: any; try { d = JSON.parse(e.data); } catch { return; }
       if (d.type === "auth") {
-        setResults(prev => prev.map(b => b.id === d.blogId ? { ...b, neighbors: d.neighbors || b.neighbors, visitors: d.visitors || b.visitors, authenticity: d.authenticity ?? b.authenticity, score: d.authenticity ?? b.score } : b));
-      } else if (d.type === "done") { pushLog(`✅ 진정성 분석 완료`); setAnalyzing(false); es.close(); esAuthRef.current = null; }
+        // 📇 진정성 분석하며 긁어온 공개 연락처(이메일·카톡·오픈채팅)도 카드에 반영
+        setResults(prev => prev.map(b => b.id === d.blogId ? { ...b, neighbors: d.neighbors || b.neighbors, visitors: d.visitors || b.visitors, authenticity: d.authenticity ?? b.authenticity, score: d.authenticity ?? b.score, email: d.email || b.email, kakao: d.kakao || b.kakao, openchat: d.openchat || b.openchat } : b));
+      } else if (d.type === "done") {
+        setAnalyzing(false); es.close(); esAuthRef.current = null;
+        setResults(prev => { const c = prev.filter(b => b.email || b.kakao || b.openchat).length; pushLog(`✅ 진정성·연락처 분석 완료 — 📇 공개 연락처 있는 블로거 ${c}명`); return prev; });
+      }
       else if (d.type === "error") { pushLog(`❌ 진정성 분석 실패: ${d.msg}`); setAnalyzing(false); es.close(); esAuthRef.current = null; }
     };
     es.onerror = () => { setAnalyzing(false); es.close(); esAuthRef.current = null; };
@@ -415,6 +419,28 @@ export default function CrawlCenter({ showToast, theme: extTheme, userId, plan =
       else if (d.type === "error") { pushLog(`❌ ${d.msg}`); toast(d.msg, "error"); setSending(false); es.close(); esOutRef.current = null; }
     };
     es.onerror = () => { pushLog("❌ 봇 연결 오류"); toast("봇 연결 오류", "error"); setSending(false); es.close(); esOutRef.current = null; };
+  };
+
+  // 💬 블로그 댓글 제안 실발송 (러프·계정 안전 최우선 — 텀 길게, 소량만)
+  const sendComments = () => {
+    if (!userId) { toast("로그인 정보가 없어요", "error"); return; }
+    if (!mailAcctId || !connectedMail.some(a => a.accountId === mailAcctId)) { toast("발송할 네이버 계정을 먼저 연결하세요(위 오늘의 사용량)", "info"); return; }
+    if (!commentBody.trim()) { toast("댓글 내용을 적으세요", "info"); return; }
+    const picks = shown.filter(b => selected.has(b.id));
+    if (!picks.length) { toast("먼저 블로거를 선택하세요", "info"); return; }
+    // ⚠️ 계정 안전 경고 — 확실히 동의받고 진행
+    if (!window.confirm(`⚠️ 계정 안전 주의\n\n모르는 블로거 글에 홍보 댓글을 다는 건 네이버가 스팸·도배로 감지해 계정이 제한될 수 있어요.\n\n안전을 위해:\n· 오늘 최대 5명까지만\n· 40~90초 간격으로 아주 천천히\n· 자연스러운 댓글 권장(홍보 티 최소화)\n\n그래도 ${Math.min(5, picks.length)}명에게 댓글을 달까요?`)) return;
+    setSending(true); pushLog(`💬 댓글 제안 시작 — ${Math.min(5, picks.length)}명 (계정 보호: 천천히)`);
+    const targets = picks.map(b => ({ id: b.id, blogId: b.id, nick: b.nick, keywords: b.keywords, categories: b.categories }));
+    const url = `${BOT}/api/outreach/send-comment?userId=${encodeURIComponent(userId)}&accountId=${encodeURIComponent(mailAcctId)}&dailyLimit=5&message=${encodeURIComponent(commentBody)}&targets=${encodeURIComponent(JSON.stringify(targets))}`;
+    const es = new BotEventStream(url); esOutRef.current = es;
+    es.onmessage = (e: MessageEvent) => {
+      let d: any; try { d = JSON.parse(e.data); } catch { return; }
+      if (d.type === "log") pushLog(d.msg);
+      else if (d.type === "done") { pushLog(`✅ 댓글 완료 — 성공 ${d.ok} · 실패 ${d.fail}`); toast(`댓글 ${d.ok}건 발송`, "success"); setSending(false); setOutreach(null); es.close(); esOutRef.current = null; loadOutHistory(); try { (window as any).electron?.focusApp?.(); } catch {} }
+      else if (d.type === "error") { pushLog(`🔴 ${d.msg}`); toast(d.msg, "error"); setSending(false); es.close(); esOutRef.current = null; }
+    };
+    es.onerror = () => { pushLog("🔴 봇 연결 오류"); toast("봇 연결 오류", "error"); setSending(false); es.close(); esOutRef.current = null; };
   };
 
 
@@ -1088,7 +1114,8 @@ export default function CrawlCenter({ showToast, theme: extTheme, userId, plan =
                 );
               })()}
               <div style={{ fontSize: 11.5, color: C.sub, fontWeight: 600, background: C.surf2, border: `1px solid ${C.line}`, borderRadius: 3, padding: "10px 13px", lineHeight: 1.6, marginBottom: 18 }}>
-                💡 <b>{"{업체명}"}·{"{닉네임}"}·{"{관심키워드}"}·{"{관심품목}"}</b>는 자동으로 채워져요({"{업체명}"}=위에 적은 내 업체명). {outreach === "comment" ? "댓글은 계정 연결이 필요해요(서이추·공감댓글처럼)." : `발송은 로그인된 네이버 창을 열어 서이추처럼 보내요(앱 비밀번호 불필요). 계정 안전을 위해 하루 ${emailLimit || 50}통까지, 3~6초 간격으로 보내요. 발송 중엔 창을 닫지 마세요.`}
+                💡 <b>{"{업체명}"}·{"{닉네임}"}·{"{관심키워드}"}·{"{관심품목}"}</b>는 자동으로 채워져요({"{업체명}"}=위에 적은 내 업체명). {outreach === "comment" ? "" : `발송은 로그인된 네이버 창을 열어 서이추처럼 보내요(앱 비밀번호 불필요). 계정 안전을 위해 하루 ${emailLimit || 50}통까지, 3~6초 간격으로 보내요. 발송 중엔 창을 닫지 마세요.`}
+                {outreach === "comment" && <span style={{ display: "block", marginTop: 8, padding: "10px 12px", borderRadius: 8, background: "rgba(214,69,69,.1)", border: "1px solid rgba(214,69,69,.35)", color: "#d64545", fontWeight: 700, lineHeight: 1.6 }}>⚠️ <b>계정 안전 주의</b> — 모르는 블로거 글에 홍보 댓글은 네이버가 <b>스팸·도배로 감지</b>해 계정이 제한될 수 있어요. 그래서 <b>오늘 5명까지·40~90초 간격</b>으로만 아주 천천히 답니다. 되도록 <b>자연스러운 댓글</b>(홍보 티 최소화)을 권해요. 이메일이 더 안전해요.</span>}
               </div>
             </div>
             {/* 하단 고정 버튼 바(스크롤 밖) — 내용이 길어도 발송 버튼이 항상 보이게 */}
@@ -1096,7 +1123,7 @@ export default function CrawlCenter({ showToast, theme: extTheme, userId, plan =
               <button onClick={() => setOutreach(null)} disabled={sending} style={{ ...btnGhost, flex: 1 }}>취소</button>
               {outreach === "email"
                 ? (() => { const pickedN = shown.filter(b => selected.has(b.id) && b.email).length; const pickedSet = new Set(shown.filter(b => selected.has(b.id) && b.email).map(b => (b.email || "").toLowerCase())); const manualN = parseEmails(manualEmails).filter(e => !pickedSet.has(e)).length; const totalN = pickedN + manualN; return <button onClick={sendEmails} disabled={sending || totalN === 0} style={{ ...btnSolid, flex: 2, opacity: (sending || totalN === 0) ? .6 : 1 }}>{sending ? "발송 중..." : `${totalN}명에게 실제 발송 →`}</button>; })()
-                : <button onClick={() => { const now: Record<string, ShipState> = {}; selected.forEach((id) => { now[id] = ships[id] || { status: "proposed" as ShipStatus }; }); setShips((s) => ({ ...s, ...now })); toast("댓글 제안 대상으로 담았어요 — 댓글 실발송은 계정 연결 후 지원돼요", "info"); setOutreach(null); }} style={{ ...btnSolid, flex: 2 }}>{selected.size}명 담기 →</button>}
+                : <button onClick={sendComments} disabled={sending || selected.size === 0} style={{ ...btnSolid, flex: 2, opacity: (sending || selected.size === 0) ? .6 : 1 }}>{sending ? "댓글 다는 중..." : `${Math.min(5, selected.size)}명에게 댓글 달기 →`}</button>}
             </div>
           </div>
         </div>

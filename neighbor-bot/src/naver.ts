@@ -2595,6 +2595,94 @@ export async function checkSelectedBlogExposure(params: {
   return { ...progress, totalPostsForExposure: list.totalCount || list.posts.length, lowQualitySuspected: known.length >= 3 ? missing / known.length > 0.5 : null };
 }
 
+/* ── 💬 블로그 댓글 제안 발송 (러프 버전 · 계정 안전 최우선) ──
+   ⚠️ 모르는 블로거 글에 홍보 댓글 = 네이버 스팸/도배 감지 위험이 큼. 그래서:
+   - 텀을 아주 길게(기본 40~90초), 하루 소량만(호출 측에서 제한)
+   - 로그인 세션으로 각 블로거 최근 글을 열어 댓글창에 자연스럽게 작성
+   - 실패해도 조용히 다음으로(도배로 오해받지 않게 무리한 재시도 안 함) */
+export type CommentTarget = { id?: string; blogId: string; nick?: string; body: string };
+export async function sendBlogComments(params: {
+  accountId: string; ownerUserId?: string | null; targets: CommentTarget[];
+  delayMinMs?: number; delayMaxMs?: number;
+  onLog?: (m: string) => void; onSent?: (id: string | undefined, ok: boolean, error?: string) => Promise<void> | void; stopSignal?: () => boolean;
+}): Promise<{ ok: number; fail: number }> {
+  const { accountId, ownerUserId, targets, delayMinMs = 40000, delayMaxMs = 90000, onLog, onSent, stopSignal } = params;
+  const log = onLog || console.log;
+  const cookies = await ensureLiveSession(accountId, log);
+  const MUA = "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1";
+  const browser = await launchBrowser(accountId, { headless: false, maximized: true, log, feature: "neighbor", ownerUserId });
+  const context = await browser.newContext({ userAgent: MUA, viewport: { width: 390, height: 844 }, locale: "ko-KR", isMobile: true, hasTouch: true });
+  await applyAntiDetection(context);
+  await context.addCookies(cookies);
+  const page = await context.newPage();
+  let ok = 0, fail = 0;
+  try {
+    log("⚠️ 계정 안전을 위해 아주 천천히(40~90초 간격) 소량만 답니다. 창을 닫지 마세요.");
+    for (let i = 0; i < targets.length; i++) {
+      if (stopSignal?.()) { log("⏹️ 중단 요청 — 멈춰요"); break; }
+      const t = targets[i];
+      log(`💬 (${i + 1}/${targets.length}) ${t.nick || t.blogId} 블로그에 댓글 다는 중…`);
+      try {
+        await commentOnLatestPost(page, t.blogId, t.body, log);
+        ok++; log(`   → ✅ 완료 (성공 ${ok} · 실패 ${fail})`);
+        await onSent?.(t.id, true);
+      } catch (e: any) {
+        fail++; const msg = (e?.message || String(e)).slice(0, 100);
+        log(`   → ❌ 실패: ${msg}`); await onSent?.(t.id, false, msg);
+      }
+      if (i < targets.length - 1 && !stopSignal?.()) {
+        const wait = delayMinMs + Math.random() * (delayMaxMs - delayMinMs);
+        log(`   ⏳ 계정 보호를 위해 ${Math.round(wait / 1000)}초 대기…`);
+        await page.waitForTimeout(wait);
+      }
+    }
+  } finally { await browser.close().catch(() => {}); }
+  return { ok, fail };
+}
+// 한 블로거의 최근 글을 열어 댓글 작성. 실패 시 throw.
+async function commentOnLatestPost(page: import("playwright").Page, blogId: string, body: string, log: (m: string) => void) {
+  // 최근 글 logNo 확보(공개 목록 API)
+  let logNo = "";
+  try {
+    const r = await page.evaluate(async (id: string) => {
+      try { const res = await fetch(`https://m.blog.naver.com/api/blogs/${id}/posts?categoryNo=0&itemCount=1&page=1`, { headers: { Referer: `https://m.blog.naver.com/${id}` } }); const raw = (await res.text()).replace(/^\)\]\}',?\s*/, ""); const j = JSON.parse(raw); const it = (j?.result?.items || j?.items || [])[0]; return it ? String(it.logNo || it.logno || "") : ""; } catch { return ""; }
+    }, blogId);
+    logNo = r || "";
+  } catch {}
+  if (!logNo) throw new Error("최근 글을 찾지 못했어요");
+  // 모바일 글 페이지 열기
+  await page.goto(`https://m.blog.naver.com/${blogId}/${logNo}`, { waitUntil: "domcontentloaded", timeout: 25000 });
+  await page.waitForTimeout(2500);
+  // 댓글 영역으로 이동(댓글 버튼 클릭)
+  for (const sel of ["a[href*='comment']", "button:has-text('댓글')", "[class*='comment'] a", ".btn_comment"]) {
+    try { const b = page.locator(sel).first(); if (await b.count() && await b.isVisible()) { await b.click({ timeout: 3000 }); await page.waitForTimeout(1500); break; } } catch {}
+  }
+  // 댓글 입력창 찾기(에디터/텍스트영역)
+  let wrote = false;
+  const deadline = Date.now() + 8000;
+  while (!wrote && Date.now() < deadline) {
+    for (const sel of ["textarea[placeholder*='댓글']", "div[contenteditable='true'][class*='comment' i]", "textarea[class*='comment' i]", "div[contenteditable='true']", "textarea"]) {
+      try {
+        const el = page.locator(sel).first();
+        if (await el.count() && await el.isVisible()) {
+          await el.click(); await page.waitForTimeout(400);
+          await el.type(body, { delay: 30 });
+          wrote = true; break;
+        }
+      } catch {}
+    }
+    if (!wrote) await page.waitForTimeout(700);
+  }
+  if (!wrote) throw new Error("댓글 입력창을 찾지 못했어요(블로그가 댓글을 막았을 수 있어요)");
+  await page.waitForTimeout(800);
+  // 등록 버튼
+  let submitted = false;
+  for (const sel of ["button:has-text('등록')", "a:has-text('등록')", "button[class*='register' i]", "button[class*='submit' i]", "button[class*='comment'][class*='btn' i]"]) {
+    try { const b = page.locator(sel).first(); if (await b.count() && await b.isVisible()) { await b.click({ timeout: 3000 }); submitted = true; await page.waitForTimeout(2000); break; } } catch {}
+  }
+  if (!submitted) throw new Error("댓글 등록 버튼을 찾지 못했어요");
+}
+
 /* ── ✉️ 네이버 웹메일로 제안 메일 발송 (SMTP·앱비밀번호 불필요) ──
    서이추·공감처럼 로그인된 브라우저 창을 열어 사람처럼 메일을 쓴다.
    네이버가 SMTP를 막았어도(2단계+앱비번 강제) 웹메일 쓰기는 그대로 되므로, 회원은 아무 설정도 안 한다.
@@ -4195,14 +4283,37 @@ export function engageDonePath(accountId: string): string {
 /* ── 🩺 공개 정보로 남의 블로그 진정성 분석 (세션 불필요) ──
    m.blog.naver.com 공개 API의 이웃수(subscriberCount) + NVisitorgp4Ajax 공개 방문자 XML.
    참여율(방문자/이웃) 대비로 "진짜 영향력 vs 품앗이·봇 부풀림"을 추정한다. */
-export async function analyzeBlogAuthenticity(blogId: string): Promise<{ blogId: string; neighbors: number; visitors: number; authenticity: number | null }> {
+export async function analyzeBlogAuthenticity(blogId: string): Promise<{ blogId: string; neighbors: number; visitors: number; authenticity: number | null; email?: string; kakao?: string; openchat?: string }> {
   const MUA = "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1";
   let neighbors = 0, visitors = 0;
+  let email: string | undefined, kakao: string | undefined, openchat: string | undefined;
+  // 📇 공개 연락처 추출 — 블로그 소개글/프로필에 공개한 이메일·카톡·오픈채팅을 정규식으로. (공개정보만)
+  const pickContacts = (text: string) => {
+    if (!text) return;
+    const t = text.replace(/&#(\d+);/g, (_, n) => String.fromCharCode(Number(n))).replace(/\[at\]|\(at\)|＠/gi, "@").replace(/\[dot\]|\(dot\)/gi, ".");
+    if (!email) { const m = t.match(/[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/); if (m && !/example\.com|naver\.com\/|\.png|\.jpg/i.test(m[0])) email = m[0]; }
+    if (!openchat) { const m = t.match(/open\.kakao\.com\/[a-zA-Z0-9/_-]+/); if (m) openchat = "https://" + m[0].replace(/^https?:\/\//, ""); }
+    if (!kakao) { const m = t.match(/(?:카톡|카카오톡|kakao\s*id|오픈채팅)\s*[:：]?\s*([a-zA-Z0-9_.\-]{3,20})/i); if (m && !/open\.kakao/i.test(m[0])) kakao = m[1]; }
+  };
   try {
     const r = await fetch(`https://m.blog.naver.com/api/blogs/${encodeURIComponent(blogId)}`, { headers: { "User-Agent": MUA, Referer: `https://m.blog.naver.com/${blogId}` } });
-    const j: any = JSON.parse((await r.text()).replace(/^\)\]\}',?\s*/, ""));
+    const raw = (await r.text()).replace(/^\)\]\}',?\s*/, "");
+    const j: any = JSON.parse(raw);
     neighbors = Number(j?.result?.subscriberCount ?? j?.subscriberCount ?? 0) || 0;
+    // 소개글(introduction/blogIntroduction 등)에서 연락처
+    const intro = String(j?.result?.blogIntroduction ?? j?.result?.introduction ?? j?.blogIntroduction ?? j?.introduction ?? "");
+    pickContacts(intro);
   } catch {}
+  // 프로필 페이지 HTML에서도 한 번 더(소개에 없을 때)
+  if (!email && !kakao && !openchat) {
+    try {
+      const pr = await fetch(`https://m.blog.naver.com/${encodeURIComponent(blogId)}`, { headers: { "User-Agent": MUA } });
+      const html = await pr.text();
+      const introM = html.match(/"blogIntroduction"\s*:\s*"([^"]*)"/) || html.match(/class="[^"]*profile[^"]*desc[^"]*"[^>]*>([^<]+)</i);
+      if (introM) pickContacts(introM[1]);
+      else pickContacts(html.slice(0, 20000));   // 상단 일부만(과도한 파싱 방지)
+    } catch {}
+  }
   try {
     const vres = await fetch(`https://blog.naver.com/NVisitorgp4Ajax.naver?blogId=${encodeURIComponent(blogId)}`, { headers: { "User-Agent": MUA, Referer: `https://blog.naver.com/${blogId}` } });
     const xml = await vres.text();
@@ -4218,7 +4329,7 @@ export async function analyzeBlogAuthenticity(blogId: string): Promise<{ blogId:
     if (visitors === 0) s = Math.min(s, 30);          // 방문자 0 = 죽은 블로그 의심
     authenticity = Math.max(5, Math.min(99, s));
   }
-  return { blogId, neighbors, visitors, authenticity };
+  return { blogId, neighbors, visitors, authenticity, email, kakao, openchat };
 }
 
 /* ── 📄 글 본문 읽기 (세션 불필요, 공개) ──
