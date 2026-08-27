@@ -4304,14 +4304,31 @@ export async function analyzeBlogAuthenticity(blogId: string): Promise<{ blogId:
     const intro = String(j?.result?.blogIntroduction ?? j?.result?.introduction ?? j?.blogIntroduction ?? j?.introduction ?? "");
     pickContacts(intro);
   } catch {}
-  // 프로필 페이지 HTML에서도 한 번 더(소개에 없을 때)
+  // 프로필 페이지 HTML에서도 한 번 더(소개글 API가 비어있는 경우가 많음 → description 메타·프로필 desc·HTML 전체)
   if (!email && !kakao && !openchat) {
     try {
       const pr = await fetch(`https://m.blog.naver.com/${encodeURIComponent(blogId)}`, { headers: { "User-Agent": MUA } });
       const html = await pr.text();
-      const introM = html.match(/"blogIntroduction"\s*:\s*"([^"]*)"/) || html.match(/class="[^"]*profile[^"]*desc[^"]*"[^>]*>([^<]+)</i);
+      const meta = html.match(/<meta[^>]+(?:name|property)=["'](?:description|og:description)["'][^>]+content=["']([^"']+)["']/i);
+      if (meta) pickContacts(meta[1]);                                   // 소개 = description 메타(실측: 여기 있음)
+      const introM = html.match(/"blogIntroduction"\s*:\s*"([^"]*)"/) || html.match(/class="[^"]*desc[^"]*"[^>]*>([^<]+)</i);
       if (introM) pickContacts(introM[1]);
-      else pickContacts(html.slice(0, 20000));   // 상단 일부만(과도한 파싱 방지)
+      pickContacts(html.slice(0, 30000));                               // 프로필 상단 HTML 전체에서 한 번 더
+    } catch {}
+  }
+  // 최근 게시글 본문에서도(협찬·제휴 문의 이메일이 글 하단에 있는 경우가 많음) — 1~2개만
+  if (!email && !kakao && !openchat) {
+    try {
+      const lr = await fetch(`https://m.blog.naver.com/api/blogs/${encodeURIComponent(blogId)}/posts?categoryNo=0&itemCount=2&page=1`, { headers: { "User-Agent": MUA, Referer: `https://m.blog.naver.com/${blogId}` } });
+      const lraw = (await lr.text()).replace(/^\)\]\}',?\s*/, "");
+      const lj: any = JSON.parse(lraw);
+      const items = (lj?.result?.items || lj?.result?.postList || lj?.items || []).slice(0, 2);
+      for (const it of items) {
+        const logNo = String(it.logNo || it.logno || it.postId || "");
+        if (!logNo) continue;
+        try { const pv = await fetch(`https://m.blog.naver.com/${encodeURIComponent(blogId)}/${logNo}`, { headers: { "User-Agent": MUA } }); pickContacts((await pv.text()).slice(0, 50000)); } catch {}
+        if (email || kakao || openchat) break;
+      }
     } catch {}
   }
   try {

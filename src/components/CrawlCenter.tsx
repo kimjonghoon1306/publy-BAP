@@ -878,6 +878,9 @@ export default function CrawlCenter({ showToast, theme: extTheme, userId, plan =
               <select value={sortBy} onChange={(e) => setSortBy(e.target.value as any)} title="블로거 정렬 기준" style={{ ...inp, width: "auto", padding: "7px 10px", fontSize: 12 }}><option value="score">진정성순</option><option value="neighbors">이웃순</option><option value="posts">글 많은순</option></select>
               <span onClick={() => setSelected(new Set(shown.map((b) => b.id)))} style={sChip(false)}>전체선택</span>
               {selected.size > 0 && <span onClick={() => setSelected(new Set())} style={{ ...sChip(false), color: C.accent, borderColor: C.accent }}>해제 {selected.size}</span>}
+              {/* 🗑️ 수집 데이터 삭제 — 선택 삭제 / 전체 삭제 */}
+              {selected.size > 0 && <span onClick={() => { setResults(prev => prev.filter(b => !selected.has(b.id))); const n = selected.size; setSelected(new Set()); toast(`🗑️ ${n}명 삭제했어요`, "success"); }} title="선택한 블로거를 목록에서 지워요" style={{ ...sChip(false), color: "#d64545", borderColor: "#d64545" }}>🗑 선택 삭제 {selected.size}</span>}
+              {shown.length > 0 && <span onClick={() => { if (window.confirm(`발굴한 ${results.length}명을 전부 지울까요?`)) { setResults([]); setSelected(new Set()); toast("🗑️ 발굴 목록을 비웠어요", "success"); } }} title="발굴한 목록을 전부 지워요" style={{ ...sChip(false), color: "#d64545", borderColor: "#d64545" }}>🗑 전체 삭제</span>}
             </div>
           </div>
           <Help>발굴된 블로거예요. <b style={{ color: C.ink }}>🩺 진정성</b>은 가짜·품앗이인지 감별한 점수(<b style={{ color: "#2f9e5e" }}>초록=진짜</b>/<b style={{ color: "#d98a1f" }}>주황=주의</b>/<b style={{ color: "#d64545" }}>빨강=의심</b>). 카드를 <b style={{ color: C.ink }}>골라서</b> 아래 <b style={{ color: C.accent }}>이메일 보내기</b>로 체험단을 제안해요. <b style={{ color: C.ink }}>상세 →</b>를 누르면 그 블로그를 직접 열어볼 수 있어요.</Help>
