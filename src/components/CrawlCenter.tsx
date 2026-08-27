@@ -104,6 +104,7 @@ export default function CrawlCenter({ showToast, theme: extTheme, userId, plan =
     return [{ accountId: "crawl_acc_1", id: "", pw: "", blogId: "", sessionOk: false }];
   });
   const [mailAcctId, setMailAcctId] = useState("");   // 선택된 발송 계정(연결된 것 중)
+  const [showMailPw, setShowMailPw] = useState<Record<string, boolean>>({});   // 계정별 비밀번호 미리보기 토글
   const saveCrawlAccts = (list: CrawlAcct[]) => { try { localStorage.setItem(CRAWL_LS_KEY, JSON.stringify(list.map(a => ({ accountId: a.accountId, id: a.id, pw: a.pw, blogId: a.blogId, sessionOk: a.sessionOk })))); } catch {} };
   const connectedMail = mailAccounts.filter(a => a.sessionOk && a.blogId);   // 실제 로그인된 것만 발송 후보
   // 크롤링 계정 로그인(서이추와 동일한 /api/login, tabKey=crawl로 격리)
@@ -126,6 +127,8 @@ export default function CrawlCenter({ showToast, theme: extTheme, userId, plan =
     } catch (e: any) {
       setMailAccounts(list => list.map(a => a.accountId === accountId ? { ...a, loginLoading: false } : a));
       toast(/Failed to fetch|봇/i.test(e?.message || "") ? "봇 서버에 연결할 수 없어요(앱을 껐다 켜보세요)" : (e?.message || "연결 실패"), "error");
+    } finally {
+      try { (window as any).electron?.focusApp?.(); } catch {}
     }
   };
   const addCrawlAccount = () => setMailAccounts(list => [...list, { accountId: `crawl_acc_${Date.now()}`, id: "", pw: "", blogId: "", sessionOk: false }]);
@@ -284,7 +287,7 @@ export default function CrawlCenter({ showToast, theme: extTheme, userId, plan =
       let d: any; try { d = JSON.parse(e.data); } catch { return; }
       if (d.type === "log") pushLog(d.msg);
       else if (d.type === "sent") { setShips(s => ({ ...s, [d.id]: s[d.id] || { status: "proposed" as ShipStatus } })); }   // 보낸 사람=제안함
-      else if (d.type === "done") { pushLog(`✅ 발송 완료 — 성공 ${d.ok} · 실패 ${d.fail}`); toast(`이메일 ${d.ok}명 발송 완료`, "success"); if (userId && d.ok > 0 && !unlimitedPlan) { incrementEmailQuota(userId, d.ok).then(() => setEmailUsed(u => u + d.ok)); } setSending(false); setOutreach(null); es.close(); esOutRef.current = null; loadOutHistory(); }
+      else if (d.type === "done") { pushLog(`✅ 발송 완료 — 성공 ${d.ok} · 실패 ${d.fail}`); toast(`이메일 ${d.ok}명 발송 완료`, "success"); if (userId && d.ok > 0 && !unlimitedPlan) { incrementEmailQuota(userId, d.ok).then(() => setEmailUsed(u => u + d.ok)); } setSending(false); setOutreach(null); es.close(); esOutRef.current = null; loadOutHistory(); try { (window as any).electron?.focusApp?.(); } catch {} }
       else if (d.type === "error") { pushLog(`❌ ${d.msg}`); toast(d.msg, "error"); setSending(false); es.close(); esOutRef.current = null; }
     };
     es.onerror = () => { pushLog("❌ 봇 연결 오류"); toast("봇 연결 오류", "error"); setSending(false); es.close(); esOutRef.current = null; };
@@ -318,6 +321,38 @@ export default function CrawlCenter({ showToast, theme: extTheme, userId, plan =
   const inp = { background: theme === "dark" ? C.surf2 : "#fff", border: `1px solid ${C.line2}`, borderRadius: 3, padding: "10px 12px", fontSize: 13, fontWeight: 600, color: C.ink, width: "100%", outline: "none", fontFamily: "'Noto Sans KR',sans-serif", boxSizing: "border-box" as const };
   const btnSolid = { border: `1px solid ${C.ink}`, borderRadius: 3, padding: "11px 18px", fontSize: 12.5, fontWeight: 800, cursor: "pointer", color: C.surf, fontFamily: "inherit" as const, background: C.ink, letterSpacing: ".06em" };
   const btnGhost = { border: `1px solid ${C.line2}`, borderRadius: 3, padding: "11px 16px", fontSize: 12.5, fontWeight: 800, cursor: "pointer", color: C.ink, fontFamily: "inherit" as const, background: "transparent", letterSpacing: ".04em" };
+  // ✉️ 크롤링 전용 발송 계정 로그인 UI(헤더·발송패널 두 곳에서 재사용). 아이디/비번으로 로그인 → 그 계정으로만 발송.
+  const renderMailAccounts = () => (
+    <div style={{ padding: "12px 13px", borderRadius: 6, background: "rgba(47,158,94,.06)", border: `1px solid ${C.line2}` }}>
+      <div style={{ fontSize: 11.5, fontWeight: 800, color: C.ink, marginBottom: 8 }}>✉️ 발송 네이버 계정 <span style={{ fontSize: 10, fontWeight: 700, color: C.sub }}>· 크롤링 전용(다른 탭과 안 섞여요)</span></div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
+        {mailAccounts.map(a => (
+          <div key={a.accountId} style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", padding: "7px 9px", borderRadius: 6, background: a.sessionOk ? "rgba(47,158,94,.1)" : C.surf, border: `1px solid ${a.sessionOk ? "rgba(47,158,94,.35)" : C.line2}` }}>
+            {a.sessionOk ? (
+              <>
+                <input type="radio" name="mailAcct" checked={mailAcctId === a.accountId} onChange={() => setMailAcctId(a.accountId)} style={{ accentColor: "#2f9e5e" }} />
+                <span style={{ color: "#2f9e5e", fontWeight: 800, fontSize: 12 }}>✅ {a.blogId}</span>
+                <span style={{ fontSize: 10, color: C.sub }}>연결됨 (이 계정으로 발송)</span>
+                <button onClick={() => removeCrawlAccount(a.accountId)} style={{ ...btnGhost, marginLeft: "auto", padding: "2px 8px", fontSize: 10.5 }}>삭제</button>
+              </>
+            ) : (
+              <>
+                <input value={a.id} onChange={e => changeCrawlAccount(a.accountId, { id: e.target.value })} placeholder="네이버 아이디" style={{ flex: 1, minWidth: 90, padding: "6px 9px", borderRadius: 6, border: `1px solid ${C.line2}`, background: C.surf, color: C.ink, fontFamily: "inherit", fontSize: 12 }} />
+                <div style={{ position: "relative", flex: 1, minWidth: 90, display: "flex" }}>
+                  <input type={showMailPw[a.accountId] ? "text" : "password"} value={a.pw} onChange={e => changeCrawlAccount(a.accountId, { pw: e.target.value })} onKeyDown={e => { if (e.key === "Enter" && a.id && a.pw) connectCrawlAccount(a.accountId); }} placeholder="비밀번호" style={{ width: "100%", boxSizing: "border-box", padding: "6px 32px 6px 9px", borderRadius: 6, border: `1px solid ${C.line2}`, background: C.surf, color: C.ink, fontFamily: "inherit", fontSize: 12 }} />
+                  <button type="button" onClick={() => setShowMailPw(s => ({ ...s, [a.accountId]: !s[a.accountId] }))} title={showMailPw[a.accountId] ? "숨기기" : "보기"} style={{ position: "absolute", right: 4, top: "50%", transform: "translateY(-50%)", background: "transparent", border: "none", cursor: "pointer", fontSize: 15, lineHeight: 1, padding: 3 }}>{showMailPw[a.accountId] ? "🙈" : "👁️"}</button>
+                </div>
+                <button onClick={() => connectCrawlAccount(a.accountId)} disabled={a.loginLoading || !a.id || !a.pw} style={{ ...btnSolid, padding: "6px 12px", fontSize: 11, opacity: (a.loginLoading || !a.id || !a.pw) ? .6 : 1 }}>{a.loginLoading ? "연결 중..." : "🔗 연결"}</button>
+                {mailAccounts.length > 1 && <button onClick={() => removeCrawlAccount(a.accountId)} style={{ ...btnGhost, padding: "6px 8px", fontSize: 10.5 }}>✕</button>}
+              </>
+            )}
+          </div>
+        ))}
+        <button onClick={addCrawlAccount} style={{ ...btnGhost, padding: "6px 10px", fontSize: 11, alignSelf: "flex-start" }}>+ 계정 추가</button>
+      </div>
+      <div style={{ fontSize: 10.5, color: C.sub, marginTop: 8, lineHeight: 1.5 }}>💡 서이추처럼 <b>로그인된 네이버 창을 열어</b> 메일을 써요. 앱 비밀번호·SMTP 설정 필요 없어요.</div>
+    </div>
+  );
   // 📖 기능 설명 — 각 섹션에 "이게 뭐예요" 한 줄(어르신도 알게, 문의 방지)
   const Help = ({ children }: { children: React.ReactNode }) => (
     <div style={{ fontSize: 11.5, color: C.sub, lineHeight: 1.6, marginBottom: 14, display: "flex", gap: 6, alignItems: "flex-start" }}><span style={{ flexShrink: 0 }}>💬</span><span>{children}</span></div>
@@ -435,11 +470,11 @@ export default function CrawlCenter({ showToast, theme: extTheme, userId, plan =
       <div className="ob-sec ob-card" style={{ ...card, padding: 20, marginBottom: 16 }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap", marginBottom: 14 }}>
           <div style={{ fontFamily: serif, fontSize: 16, fontWeight: 600, color: C.ink }}>📊 오늘의 사용량 <span style={{ fontSize: 11, fontWeight: 700, color: C.sub, fontFamily: "'Noto Sans KR'" }}>· 자정에 초기화</span></div>
-          {/* ✉️ 발송 계정 — 크롤링 전용으로 로그인한 네이버 계정(다른 탭과 별개). 실제 로그인된 것만 셈. */}
-          {connectedMail.length > 0
-            ? <span style={{ fontSize: 12, fontWeight: 800, padding: "8px 14px", borderRadius: 10, border: "1.5px solid #2f9e5e", background: "rgba(47,158,94,.1)", color: "#2f9e5e", whiteSpace: "nowrap" }}>✅ 발송 계정 {connectedMail.length}개 로그인됨</span>
-            : <span style={{ fontSize: 12, fontWeight: 800, padding: "8px 14px", borderRadius: 10, border: `1.5px solid ${C.accent}`, background: C.accent, color: C.surf, whiteSpace: "nowrap" }}>✉️ 발송할 네이버 계정을 연결하세요</span>}
+          {/* 계정 상태 요약(자세한 연결 UI는 아래에 항상 표시) */}
+          <span style={{ fontSize: 12, fontWeight: 800, padding: "8px 14px", borderRadius: 10, border: `1.5px solid ${connectedMail.length ? "#2f9e5e" : C.line2}`, background: connectedMail.length ? "rgba(47,158,94,.1)" : "transparent", color: connectedMail.length ? "#2f9e5e" : C.sub, whiteSpace: "nowrap" }}>{connectedMail.length ? `✅ 발송 계정 ${connectedMail.length}개 연결됨` : "아래에서 발송 계정을 연결하세요 ↓"}</span>
         </div>
+        {/* ✉️ 발송 네이버 계정 연결 — 서이추처럼 항상 눈에 보이게(발송과 별개). 크롤링 전용. */}
+        <div style={{ marginBottom: 14 }}>{renderMailAccounts()}</div>
         {(() => {
           const bar = (label: string, ic: string, used: number, limit: number, col: string) => {
             const pct = unlimitedPlan ? 100 : Math.min(100, limit ? (used / limit) * 100 : 0);
@@ -701,8 +736,8 @@ export default function CrawlCenter({ showToast, theme: extTheme, userId, plan =
       {/* ═══ 아웃리치 모달 (이메일 / 댓글) ═══ */}
       {outreach && createPortal((
         <div onClick={() => setOutreach(null)} style={{ position: "fixed", inset: 0, background: "rgba(20,16,12,.55)", backdropFilter: "blur(3px)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 99999, padding: 20 }}>
-          <div onClick={(e) => e.stopPropagation()} style={{ background: C.surf, border: `1px solid ${C.line2}`, borderRadius: 6, maxWidth: 520, width: "100%", boxShadow: "0 30px 80px rgba(0,0,0,.5)" }}>
-            <div style={{ padding: "20px 24px", borderBottom: `1px solid ${C.line}`, display: "flex", alignItems: "center", gap: 10 }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ background: C.surf, border: `1px solid ${C.line2}`, borderRadius: 6, maxWidth: 520, width: "100%", maxHeight: "90vh", display: "flex", flexDirection: "column", boxShadow: "0 30px 80px rgba(0,0,0,.5)" }}>
+            <div style={{ padding: "20px 24px", borderBottom: `1px solid ${C.line}`, display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
               <img src={CH.bori} onError={chErr("🌱")} style={{ width: 40, height: 40 }} />
               <div style={{ flex: 1 }}>
                 <div style={{ fontFamily: serif, fontSize: 18, fontWeight: 600 }}>{outreach === "email" ? "이메일 제안 보내기" : "블로그 댓글 제안"}</div>
@@ -710,41 +745,20 @@ export default function CrawlCenter({ showToast, theme: extTheme, userId, plan =
               </div>
               <button onClick={() => setOutreach(null)} style={{ ...btnGhost, padding: "5px 10px" }}>✕</button>
             </div>
-            <div style={{ padding: "20px 24px" }}>
+            <div style={{ padding: "20px 24px", overflowY: "auto", flex: 1 }}>
               {/* 이메일: 크롤링 전용 발송 계정 연결(다른 탭과 별개) + 선택 + 제목 */}
               {outreach === "email" && (
-                <div style={{ marginBottom: 14, padding: "12px 13px", borderRadius: 6, background: "rgba(47,158,94,.06)", border: `1px solid ${C.line2}`, fontSize: 11.5, fontWeight: 600 }}>
-                  <div style={{ fontSize: 11.5, fontWeight: 800, color: C.ink, marginBottom: 8 }}>✉️ 발송 네이버 계정 <span style={{ fontSize: 10, fontWeight: 700, color: C.sub }}>· 크롤링 전용(다른 탭과 안 섞여요)</span></div>
-                  {/* 계정 목록: 로그인 폼(미연결) 또는 연결됨 표시 */}
-                  <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
-                    {mailAccounts.map(a => (
-                      <div key={a.accountId} style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", padding: "7px 9px", borderRadius: 6, background: a.sessionOk ? "rgba(47,158,94,.1)" : C.surf, border: `1px solid ${a.sessionOk ? "rgba(47,158,94,.35)" : C.line2}` }}>
-                        {a.sessionOk ? (
-                          <>
-                            <input type="radio" name="mailAcct" checked={mailAcctId === a.accountId} onChange={() => setMailAcctId(a.accountId)} style={{ accentColor: "#2f9e5e" }} />
-                            <span style={{ color: "#2f9e5e", fontWeight: 800 }}>✅ {a.blogId}</span>
-                            <span style={{ fontSize: 10, color: C.sub }}>연결됨 (이 계정으로 발송)</span>
-                            <button onClick={() => removeCrawlAccount(a.accountId)} style={{ ...btnGhost, marginLeft: "auto", padding: "2px 8px", fontSize: 10.5 }}>삭제</button>
-                          </>
-                        ) : (
-                          <>
-                            <input value={a.id} onChange={e => changeCrawlAccount(a.accountId, { id: e.target.value })} placeholder="네이버 아이디" style={{ flex: 1, minWidth: 90, padding: "6px 9px", borderRadius: 6, border: `1px solid ${C.line2}`, background: C.surf, color: C.ink, fontFamily: "inherit", fontSize: 12 }} />
-                            <input type="password" value={a.pw} onChange={e => changeCrawlAccount(a.accountId, { pw: e.target.value })} placeholder="비밀번호" style={{ flex: 1, minWidth: 90, padding: "6px 9px", borderRadius: 6, border: `1px solid ${C.line2}`, background: C.surf, color: C.ink, fontFamily: "inherit", fontSize: 12 }} />
-                            <button onClick={() => connectCrawlAccount(a.accountId)} disabled={a.loginLoading || !a.id || !a.pw} style={{ ...btnSolid, padding: "6px 12px", fontSize: 11, opacity: (a.loginLoading || !a.id || !a.pw) ? .6 : 1 }}>{a.loginLoading ? "연결 중..." : "🔗 연결"}</button>
-                            {mailAccounts.length > 1 && <button onClick={() => removeCrawlAccount(a.accountId)} style={{ ...btnGhost, padding: "6px 8px", fontSize: 10.5 }}>✕</button>}
-                          </>
-                        )}
-                      </div>
-                    ))}
-                    <button onClick={addCrawlAccount} style={{ ...btnGhost, padding: "6px 10px", fontSize: 11, alignSelf: "flex-start" }}>+ 계정 추가</button>
+                <div style={{ marginBottom: 14 }}>
+                  {/* 발송 계정은 위(오늘의 사용량)에서 이미 연결 — 여기선 어느 계정으로 보낼지 확인만 */}
+                  <div style={{ fontSize: 11.5, fontWeight: 700, color: connectedMail.length ? "#2f9e5e" : "#d98a1f", marginBottom: 8, padding: "8px 11px", borderRadius: 6, background: connectedMail.length ? "rgba(47,158,94,.08)" : "rgba(217,138,31,.1)", border: `1px solid ${connectedMail.length ? "rgba(47,158,94,.3)" : "rgba(217,138,31,.35)"}` }}>
+                    {connectedMail.length
+                      ? <>✉️ 발송 계정: <b>{connectedMail.find(a => a.accountId === mailAcctId)?.blogId || connectedMail[0].blogId}</b>{connectedMail.length > 1 ? ` 외 ${connectedMail.length - 1}개 (위에서 선택)` : ""}</>
+                      : <>⚠️ 위 <b>‘오늘의 사용량’</b>에서 발송할 네이버 계정을 먼저 연결하세요.</>}
                   </div>
                   {/* 메일 제목 */}
-                  <div style={{ marginTop: 10 }}>
-                    <span style={{ color: C.sub, whiteSpace: "nowrap", display: "block", marginBottom: 4 }}>메일 제목:</span>
-                    <input value={emailSubject} onChange={e => setEmailSubject(e.target.value)} placeholder="칸에 제목을 입력하세요 (예: 온종일 체험단)" style={{ width: "100%", boxSizing: "border-box", padding: "8px 11px", borderRadius: 6, border: `1px solid ${C.line2}`, background: C.surf, color: C.ink, fontFamily: "inherit", fontSize: 13 }} />
-                    <div style={{ fontSize: 10.5, color: C.sub, marginTop: 4, lineHeight: 1.5 }}>💬 여기 적은 그대로 메일 제목이 돼요. (예: "온종일 체험단" 적으면 제목이 <b>온종일 체험단</b>)</div>
-                  </div>
-                  <div style={{ fontSize: 10.5, color: C.sub, marginTop: 10, lineHeight: 1.5 }}>💡 서이추처럼 <b>로그인된 네이버 창을 열어</b> 메일을 써요. 앱 비밀번호·SMTP 설정 필요 없어요. 발송 중엔 창을 닫지 마세요.</div>
+                  <span style={{ color: C.sub, whiteSpace: "nowrap", display: "block", marginBottom: 4, fontSize: 11.5, fontWeight: 600 }}>메일 제목:</span>
+                  <input value={emailSubject} onChange={e => setEmailSubject(e.target.value)} placeholder="칸에 제목을 입력하세요 (예: 온종일 체험단)" style={{ width: "100%", boxSizing: "border-box", padding: "8px 11px", borderRadius: 6, border: `1px solid ${C.line2}`, background: C.surf, color: C.ink, fontFamily: "inherit", fontSize: 13 }} />
+                  <div style={{ fontSize: 10.5, color: C.sub, marginTop: 4, lineHeight: 1.5 }}>💬 여기 적은 그대로 메일 제목이 돼요. (예: "온종일 체험단" 적으면 제목이 <b>온종일 체험단</b>)</div>
                 </div>
               )}
               <div style={{ marginBottom: 14 }}>
@@ -772,12 +786,13 @@ export default function CrawlCenter({ showToast, theme: extTheme, userId, plan =
               <div style={{ fontSize: 11.5, color: C.sub, fontWeight: 600, background: C.surf2, border: `1px solid ${C.line}`, borderRadius: 3, padding: "10px 13px", lineHeight: 1.6, marginBottom: 18 }}>
                 💡 <b>{"{닉네임}"}·{"{관심키워드}"}·{"{관심품목}"}</b>는 블로거마다 자동으로 채워져요. {outreach === "comment" ? "댓글은 계정 연결이 필요해요(서이추·공감댓글처럼)." : `발송은 로그인된 네이버 창을 열어 서이추처럼 보내요(앱 비밀번호 불필요). 계정 안전을 위해 하루 ${emailLimit || 50}통까지, 3~6초 간격으로 보내요. 발송 중엔 창을 닫지 마세요.`}
               </div>
-              <div style={{ display: "flex", gap: 8 }}>
-                <button onClick={() => setOutreach(null)} disabled={sending} style={{ ...btnGhost, flex: 1 }}>취소</button>
-                {outreach === "email"
-                  ? (() => { const pickedN = shown.filter(b => selected.has(b.id) && b.email).length; const pickedSet = new Set(shown.filter(b => selected.has(b.id) && b.email).map(b => (b.email || "").toLowerCase())); const manualN = parseEmails(manualEmails).filter(e => !pickedSet.has(e)).length; const totalN = pickedN + manualN; return <button onClick={sendEmails} disabled={sending || totalN === 0} style={{ ...btnSolid, flex: 2, opacity: (sending || totalN === 0) ? .6 : 1 }}>{sending ? "발송 중..." : `${totalN}명에게 실제 발송 →`}</button>; })()
-                  : <button onClick={() => { const now: Record<string, ShipState> = {}; selected.forEach((id) => { now[id] = ships[id] || { status: "proposed" as ShipStatus }; }); setShips((s) => ({ ...s, ...now })); toast("댓글 제안 대상으로 담았어요 — 댓글 실발송은 계정 연결 후 지원돼요", "info"); setOutreach(null); }} style={{ ...btnSolid, flex: 2 }}>{selected.size}명 담기 →</button>}
-              </div>
+            </div>
+            {/* 하단 고정 버튼 바(스크롤 밖) — 내용이 길어도 발송 버튼이 항상 보이게 */}
+            <div style={{ display: "flex", gap: 8, padding: "14px 24px", borderTop: `1px solid ${C.line}`, flexShrink: 0, background: C.surf }}>
+              <button onClick={() => setOutreach(null)} disabled={sending} style={{ ...btnGhost, flex: 1 }}>취소</button>
+              {outreach === "email"
+                ? (() => { const pickedN = shown.filter(b => selected.has(b.id) && b.email).length; const pickedSet = new Set(shown.filter(b => selected.has(b.id) && b.email).map(b => (b.email || "").toLowerCase())); const manualN = parseEmails(manualEmails).filter(e => !pickedSet.has(e)).length; const totalN = pickedN + manualN; return <button onClick={sendEmails} disabled={sending || totalN === 0} style={{ ...btnSolid, flex: 2, opacity: (sending || totalN === 0) ? .6 : 1 }}>{sending ? "발송 중..." : `${totalN}명에게 실제 발송 →`}</button>; })()
+                : <button onClick={() => { const now: Record<string, ShipState> = {}; selected.forEach((id) => { now[id] = ships[id] || { status: "proposed" as ShipStatus }; }); setShips((s) => ({ ...s, ...now })); toast("댓글 제안 대상으로 담았어요 — 댓글 실발송은 계정 연결 후 지원돼요", "info"); setOutreach(null); }} style={{ ...btnSolid, flex: 2 }}>{selected.size}명 담기 →</button>}
             </div>
           </div>
         </div>

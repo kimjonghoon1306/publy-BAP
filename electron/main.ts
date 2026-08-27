@@ -264,6 +264,19 @@ ipcMain.handle("open-app-update", async (_event, url: string) => {
 /* ── 앱 버전 (화면에 표시해 회원이 최신인지 눈으로 확인) ── */
 ipcMain.handle("get-app-version", () => app.getVersion());
 
+/* ── 앱 창 앞으로 가져오기 ──
+   봇이 로그인용 브라우저 창(headless:false)을 띄웠다 닫으면, macOS에서 포커스가 딴 데로 가며
+   퍼블리 창이 뒤로 숨는 현상이 있다. 로그인·발송 등 봇 브라우저 작업 후 renderer가 이걸 호출해 앱을 다시 앞으로. */
+ipcMain.handle("focus-app", () => {
+  try {
+    if (!mainWindow) return;
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.show();
+    mainWindow.focus();
+    if (process.platform === "darwin") app.focus({ steal: true });
+  } catch {}
+});
+
 /* ── 절전 방지: 글쓰기(발행)·이미지 생성 중에는 화면/시스템이 안 꺼지게 (맥·윈도우 공통) ──
    powerSaveBlocker('prevent-display-sleep')는 디스플레이+시스템 잠자기를 둘 다 막는다.
    작업 끝나면 renderer가 keepAwake(false)로 꺼서 원래대로 복귀(평소엔 정상 절전). */

@@ -2659,14 +2659,31 @@ async function sendOneWebmail(page: import("playwright").Page, t: MailTarget): P
   }
   if (!loaded) throw new Error("메일 쓰기 화면을 열지 못했어요(네이버 로그인 만료 또는 화면 변경)");
 
-  // 1) 받는사람
+  // 1) 받는사람 — ★기존에 남아있던 수신자(이전 작성 잔재 등)를 먼저 다 지우고, 정확히 이 주소만 넣는다.
   const recip = await findFirst(page, RECIPIENT_SELECTORS, 5000);
   if (!recip) throw new Error("받는사람 입력칸을 찾지 못했어요");
   await recip.click();
-  await recip.fill("");
-  await recip.type(t.email, { delay: 20 });
-  await page.keyboard.press("Enter");   // 주소 확정(태그화)
-  await page.waitForTimeout(400);
+  await page.waitForTimeout(200);
+  // ① 기존 수신자 태그 제거: × 버튼이 있으면 다 클릭(최대 12개), 안 되면 키보드로 정리
+  for (let g = 0; g < 12; g++) {
+    const del = await page.$('[class*="recipient" i] button[class*="delete" i], [class*="recipient" i] button[class*="remove" i], [class*="recipient" i] [class*="btn_delete" i], [class*="to" i] button[aria-label*="삭제"]');
+    if (!del) break;
+    try { await del.click({ timeout: 800 }); await page.waitForTimeout(150); } catch { break; }
+  }
+  // ② 남은 텍스트/태그를 키보드로도 정리(맨 뒤로 가서 backspace 반복 — 남은 태그·글자 제거)
+  try { await recip.click(); await page.keyboard.press("End"); for (let k = 0; k < 12; k++) await page.keyboard.press("Backspace"); } catch {}
+  await page.waitForTimeout(200);
+  // ③ 정확한 주소 입력 후, 자동완성 목록(같은 주소가 여러 개 떠도)에서 엉뚱한 항목이 선택되지 않게
+  //    Enter(하이라이트 선택) 대신 쉼표로 '입력한 텍스트 그대로' 태그화한다.
+  await recip.type(t.email, { delay: 25 });
+  await page.waitForTimeout(500);
+  await page.keyboard.press("Escape");   // 자동완성 드롭다운 닫기(잘못 선택 방지)
+  await page.waitForTimeout(120);
+  await page.keyboard.type(",");          // 쉼표 = 입력한 주소 그대로 확정(자동완성 무시)
+  await page.waitForTimeout(300);
+  // ④ 검증: 실제로 이 주소가 받는사람에 들어갔는지 확인(엉뚱한 주소면 실패 처리)
+  const recipOk = await page.evaluate((email: string) => document.body.innerText.includes(email), t.email).catch(() => true);
+  if (!recipOk) throw new Error(`받는사람에 ${t.email}이(가) 안 들어갔어요(자동완성 오선택 의심)`);
 
   // 2) 제목
   const subj = await findFirst(page, SUBJECT_SELECTORS, 4000);

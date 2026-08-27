@@ -1076,6 +1076,9 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
       addLog(`❌ [${acc.id}] 로그인 오류: ${e.message}`);
       if (!silent) alert(`로그인 오류: ${e.message}`);
       return false;
+    } finally {
+      // 봇 로그인 브라우저가 닫히며 앱이 뒤로 숨는 현상 방지 — 앱을 다시 앞으로
+      try { (window as any).electron?.focusApp?.(); } catch {}
     }
   };
 

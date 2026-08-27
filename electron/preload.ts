@@ -13,4 +13,5 @@ contextBridge.exposeInMainWorld("electron", {
   readBotLog:       () => ipcRenderer.invoke("read-bot-log"),
   getAppVersion:    () => ipcRenderer.invoke("get-app-version"),
   keepAwake:        (on: boolean) => ipcRenderer.invoke("keep-awake", on),
+  focusApp:         () => ipcRenderer.invoke("focus-app"),
 });

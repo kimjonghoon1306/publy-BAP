@@ -534,6 +534,30 @@ const YNA_SECTIONS: Record<string, string> = {
   경제: "economy", 증권: "market", 산업: "industry", 정치: "politics", 사회: "society",
   전국: "local", 세계: "international", 문화: "culture", 연예: "entertainment", 스포츠: "sports", 건강: "health",
 };
+// 🆕 대중 생활 카테고리 — 뉴스에 안 나오는 블로그 실전 주제. 각 카테고리를 여러 '씨앗 키워드'로 잡고,
+//    네이버 실시간 자동완성(지금 사람들이 검색하는 것)으로 실제 인기 주제를 뽑는다(실시간).
+const LIFE_SEEDS: Record<string, string[]> = {
+  음식레시피: ["레시피", "집밥", "간단요리", "다이어트 요리", "에어프라이어", "밑반찬", "자취요리"],
+  패션: ["패션", "코디", "여자 코디", "남자 코디", "가을 코디", "데일리룩", "신발 추천"],
+  뷰티: ["화장품 추천", "스킨케어", "메이크업", "다이어트", "헤어스타일", "네일", "향수 추천"],
+  여행: ["여행", "국내여행", "가볼만한곳", "당일치기", "제주 여행", "해외여행", "캠핑"],
+  인테리어: ["인테리어", "셀프 인테리어", "원룸 인테리어", "홈카페", "수납 정리", "소품 추천", "이사 준비"],
+  반려동물: ["강아지", "고양이", "반려동물 용품", "강아지 훈련", "고양이 사료", "펫 미용", "반려견 간식"],
+  재테크: ["재테크", "부업", "적금 추천", "주식 초보", "청약", "절약 방법", "정부지원금"],
+  육아: ["육아", "이유식", "아기 용품", "신생아", "육아템", "어린이집", "출산 준비"],
+  건강운동: ["홈트", "다이어트 운동", "헬스", "스트레칭", "런닝", "요가", "체중 감량"],
+};
+// 네이버 자동완성으로 씨앗 키워드의 실시간 인기 연관검색어를 가져온다(공개 API, 세션 불필요).
+async function naverAutocomplete(seed: string): Promise<string[]> {
+  try {
+    const u = `https://ac.search.naver.com/nx/ac?q=${encodeURIComponent(seed)}&con=0&frm=nv&ans=2&r_format=json&r_enc=UTF-8&r_unicode=0&t_koreng=1&run=2&rev=4&q_enc=UTF-8&st=100`;
+    const r = await fetch(u, { headers: { "User-Agent": "Mozilla/5.0", Referer: "https://search.naver.com/" } });
+    const j: any = await r.json();
+    const items: string[] = [];
+    for (const grp of (j.items || [])) for (const row of (grp || [])) { const kw = Array.isArray(row) ? row[0] : row; if (typeof kw === "string" && kw.trim()) items.push(kw.trim()); }
+    return items;
+  } catch { return []; }
+}
 function cleanHeadline(s: string): string {
   return s.replace(/<!\[CDATA\[|\]\]>/g, "").replace(/&[a-z]+;/g, " ")
     .replace(/^\[[^\]]*\]\s*/g, "").replace(/\([^)]*종합[^)]*\)/g, "").replace(/\.{2,}$/, "")
@@ -564,6 +588,16 @@ app.get("/api/hot-issues", async (req, res) => {
         merged.push(...(i === 0 ? cleaned.slice(0, 30) : cleaned.slice(0, 8)));
       });
       items = uniq(merged).slice(0, 60);
+    } else if (LIFE_SEEDS[category]) {
+      // 🆕 대중 생활 카테고리 — 네이버 실시간 자동완성으로 지금 뜨는 검색 주제 수집(뉴스와 별개)
+      const seeds = LIFE_SEEDS[category];
+      const pulls = await Promise.allSettled(seeds.map(s => naverAutocomplete(s)));
+      const merged: string[] = [];
+      pulls.forEach(p => { if (p.status === "fulfilled") merged.push(...p.value); });
+      // 씨앗 단어 자체(너무 일반적)만 남는 건 제외, 2글자 이상만
+      items = uniq(merged).filter(x => x.length >= 2 && !seeds.includes(x)).slice(0, 60);
+      // 혹시 자동완성이 다 막히면 씨앗이라도 넣어 빈 화면 방지
+      if (!items.length) items = uniq(seeds);
     } else {
       const sec = YNA_SECTIONS[category];
       if (!sec) return res.status(400).json({ ok: false, error: "알 수 없는 카테고리" });
