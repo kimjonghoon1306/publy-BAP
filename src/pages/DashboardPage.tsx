@@ -874,6 +874,8 @@ export default function DashboardPage({user, onLogout, onAdminLogin, onThemeTogg
   const [engageUsed, setEngageUsed] = useState(0);
   const [instaUsed, setInstaUsed] = useState(0);
   const [alertPopup, setAlertPopup] = useState<{type:"expire"|"publish"|"insta"; daysLeft?:number; used?:number; limit?:number} | null>(null);
+  // 🔒 무료체험(7일) 만료 = 전체 잠금. 무료 회원은 가입 후 7일간만 모든 기능 무료, 이후 결제 전까지 사용 불가(대시보드는 보이되 기능 잠김).
+  const [locked, setLocked] = useState(false);
   // 재연결 비밀번호 입력 모달 (window.prompt는 Electron에서 안 뜸 → 커스텀 모달)
   const [pwPrompt, setPwPrompt] = useState<{acc:PublyAccount; value:string} | null>(null);
   const pwPromptResolve = useRef<((pw:string|null)=>void)|null>(null);
@@ -1888,6 +1890,9 @@ Output format (JSON array only, no other text):
       // ── 알림 체크 ──
       const now = new Date();
       const daysLeft = daysUntil(q.reset_date) ?? 0;
+
+      // 🔒 무료체험(7일) 만료 → 전체 잠금(무료 회원만). 결제 전까지 대시보드는 보이되 기능 사용 불가.
+      if (user.plan === "free" && daysLeft <= 0) setLocked(true);
 
       // 만료 알림 (3일 이하 또는 만료됨)
       if (daysLeft <= 3) {
@@ -3884,6 +3889,24 @@ POST3: (제목)|(이유)
     <>
       <style>{CSS}</style>
       <div className={`app ${theme} ${fontMode==="large"?"large":""}`}>
+
+        {/* ── 🔒 무료체험 만료 잠금(페이월) — 무료 7일 끝나면 전체 기능 잠금. 결제 전까지 이 화면이 덮음 ── */}
+        {locked && (
+          <div style={{position:"fixed",inset:0,zIndex:2147483000,background:"rgba(15,10,20,.82)",backdropFilter:"blur(6px)",display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
+            <div style={{width:"100%",maxWidth:430,background:"var(--card,#fff)",color:"var(--text,#1a1a1a)",borderRadius:24,padding:"32px 26px 26px",boxShadow:"0 30px 90px rgba(0,0,0,.6)",border:"1px solid rgba(255,111,165,.4)",textAlign:"center",animation:"fadeUp .3s ease"}}>
+              <div style={{fontSize:52,marginBottom:8}}>🔒</div>
+              <div style={{fontSize:21,fontWeight:900,letterSpacing:"-.02em",marginBottom:10,color:"var(--text,#1a1a1a)"}}>무료 체험이 끝났어요</div>
+              <div style={{fontSize:14,lineHeight:1.7,color:"var(--text2,#555)",marginBottom:6}}>퍼블리의 <b style={{color:"#ff4d8d"}}>모든 기능</b>은 회원가입 후 <b style={{color:"#ff4d8d"}}>7일간 무료</b>로 드려요.</div>
+              <div style={{fontSize:14,lineHeight:1.7,color:"var(--text2,#555)",marginBottom:22}}>체험 기간이 끝나 지금은 사용이 잠겼어요.<br/>계속 이용하시려면 <b>결제</b>가 필요해요.</div>
+              <a href="https://open.kakao.com/o/s0lQ66wi" target="_blank" rel="noopener noreferrer"
+                style={{display:"flex",alignItems:"center",justifyContent:"center",gap:9,width:"100%",boxSizing:"border-box",padding:"16px",borderRadius:14,background:"#FEE500",color:"#191600",fontSize:16,fontWeight:900,textDecoration:"none",marginBottom:11,boxShadow:"0 8px 22px rgba(254,229,0,.4)"}}>
+                💬 카톡으로 결제 문의하기
+              </a>
+              <div style={{fontSize:12,color:"var(--text3,#999)",marginBottom:16}}>버튼을 누르면 카카오톡 상담으로 연결돼요.</div>
+              <button onClick={()=>window.location.reload()} style={{background:"transparent",border:"1px solid var(--border,#ddd)",color:"var(--text2,#666)",borderRadius:10,padding:"9px 16px",fontSize:12.5,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>결제 완료 후 새로고침</button>
+            </div>
+          </div>
+        )}
 
         {/* ── 웹 접속자용 앱 설치 안내 배너 (Electron 앱에서는 안 뜸) ── */}
         <WebInstallNotice />

@@ -518,7 +518,7 @@ export const COMMENT_DAILY_LIMIT: Record<string, number> = {
 };
 // 🗺️ 플레이스 블로거 역추적 — 업체당 몇 명까지 긁어올지 등급 상한(무제한=∞). ★적당히 잡음, 나중에 조정 가능.
 export const PLACE_BLOGGER_LIMIT: Record<string, number> = {
-  free: 10, basic: 30, pro: 60, unlimited: 999999, admin: 999999,
+  free: 5, basic: 15, pro: 30, unlimited: 999999, admin: 999999,
 };
 function emailQuotaKey(userId: string): string {
   return `email_daily_${userId}_${new Date().toISOString().slice(0, 10)}`;
