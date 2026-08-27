@@ -696,6 +696,17 @@ app.post("/api/outreach/reply-status", async (req, res) => {
   } catch (e: any) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
+// 🗑️ 아웃리치 기록 삭제(회원이 추적 목록에서 지움)
+app.post("/api/outreach/delete", async (req, res) => {
+  const { id } = req.body || {};
+  if (!id) return res.status(400).json({ ok: false, error: "id 필요" });
+  try {
+    const { error } = await supabase.from("publy_outreach").delete().eq("id", id);
+    if (error) throw new Error(error.message);
+    res.json({ ok: true });
+  } catch (e: any) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
 // 📬 팔로우업 대상 조회 — 보낸 지 N일(기본 3) 넘도록 회신(replied) 없는 이메일 건. "할 일" 팝업용.
 app.get("/api/outreach/followup-targets/:userId", async (req, res) => {
   const days = Math.max(1, Number(req.query.days) || 3);

@@ -208,6 +208,17 @@ export default function CrawlCenter({ showToast, theme: extTheme, userId, plan =
   const [followTargets, setFollowTargets] = useState<any[]>([]);   // N일+ 무응답 = 할 일
   const [todoOpen, setTodoOpen] = useState(false);                 // "할 일 N건" 큰 팝업
   const [followSending, setFollowSending] = useState(false);
+  const [outPage, setOutPage] = useState(0);                       // 아웃리치 목록 페이지(20개씩)
+  // 🗑️ 아웃리치 기록 삭제
+  const deleteOutreach = async (id: string) => {
+    if (!window.confirm("이 기록을 목록에서 지울까요?")) return;
+    try {
+      await botFetch(`${BOT}/api/outreach/delete`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id }) });
+      setOutHistory(h => h.filter(x => x.id !== id));
+      setFollowTargets(t => t.filter(x => x.id !== id));
+      toast("🗑️ 기록을 지웠어요", "success");
+    } catch { toast("삭제 실패", "error"); }
+  };
   const esFollowRef = useRef<BotEventStream | null>(null);
   useEffect(() => { localStorage.setItem("publy_followup_auto", followupAuto ? "1" : "0"); }, [followupAuto]);
   useEffect(() => { localStorage.setItem("publy_followup_days", String(followupDays)); }, [followupDays]);
@@ -654,39 +665,53 @@ export default function CrawlCenter({ showToast, theme: extTheme, userId, plan =
                 <span style={{ fontSize: 11.5, fontWeight: 800, color: "#d98a1f", whiteSpace: "nowrap" }}>열기 →</span>
               </div>
             )}
-            {/* 보낸 목록 */}
-            <div style={{ padding: "6px 8px 10px", maxHeight: 340, overflowY: "auto" }}>
-              {sent.length === 0 ? (
-                <div style={{ padding: "34px 20px", textAlign: "center", color: C.sub }}>
-                  <div style={{ display: "inline-flex", marginBottom: 8, opacity: .5 }}><IC_PLANE s={30} col={C.sub} /></div>
-                  <div style={{ fontSize: 13, fontWeight: 700 }}>아직 보낸 이메일이 없어요</div>
-                  <div style={{ fontSize: 11.5, marginTop: 3 }}>블로거를 발굴해 제안 메일을 보내면 여기서 추적할 수 있어요.</div>
-                </div>
-              ) : sent.slice(0, 100).map((h, i) => {
-                const st = stageOf(h); const dA = daysAgo(h.sent_at);
-                const needFollow = h.reply_status !== "replied" && h.reply_status !== "no_reply" && !h.followup_at && dA >= followupDays;
-                return (
-                  <div key={h.id || i} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", borderRadius: 10, transition: "background .15s", borderBottom: i < Math.min(sent.length, 100) - 1 ? `1px solid ${C.line}` : "none" }}
-                    onMouseEnter={e => e.currentTarget.style.background = C.surf2} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
-                    {/* 단계 아이콘 배지 */}
-                    <span style={{ display: "inline-flex", width: 32, height: 32, borderRadius: 9, background: `${st.c}18`, color: st.c, alignItems: "center", justifyContent: "center", flexShrink: 0 }}><st.Ic s={17} col={st.c} /></span>
-                    {/* 이름·이메일·날짜 */}
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: 12.5, fontWeight: 800, color: C.ink, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{h.nickname || h.blog_id || "블로거"} {h.followup_at && <span style={{ fontSize: 9.5, fontWeight: 700, color: "#6d5dd3", marginLeft: 4 }}>· 리마인드함</span>}</div>
-                      <div style={{ fontSize: 10.5, color: C.sub, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{h.to_email} · {fmt(h.sent_at)} 보냄 ({dA === 0 ? "오늘" : `${dA}일 전`})</div>
-                    </div>
-                    {/* 단계 배지 */}
-                    <span style={{ fontSize: 10.5, fontWeight: 800, color: st.c, background: `${st.c}14`, border: `1px solid ${st.c}44`, padding: "3px 9px", borderRadius: 20, whiteSpace: "nowrap", flexShrink: 0 }}>{st.t}{needFollow ? " ·촉진" : ""}</span>
-                    {/* 액션 버튼 */}
-                    <div style={{ display: "flex", gap: 5, flexShrink: 0 }}>
-                      {h.reply_status !== "replied" && <button onClick={() => setReplyStatus(h.id, "replied")} title="이 블로거가 회신했어요" style={{ padding: "5px 9px", borderRadius: 7, border: `1px solid ${C.line2}`, background: C.surf, color: "#0ea5e9", cursor: "pointer", fontSize: 10.5, fontWeight: 800, fontFamily: "inherit", whiteSpace: "nowrap" }}>회신옴</button>}
-                      {needFollow && <button onClick={() => sendFollowup([h.id])} disabled={followSending} title="리마인드 이메일을 보내요" style={{ padding: "5px 9px", borderRadius: 7, border: "none", background: "#d98a1f", color: "#fff", cursor: "pointer", fontSize: 10.5, fontWeight: 800, fontFamily: "inherit", whiteSpace: "nowrap" }}>팔로우업</button>}
-                      {h.blog_id && <a href={`https://blog.naver.com/${h.blog_id}`} target="_blank" rel="noopener noreferrer" title="블로그 열기" style={{ display: "inline-flex", alignItems: "center", padding: "5px 7px", borderRadius: 7, border: `1px solid ${C.line2}`, background: C.surf, color: C.sub, textDecoration: "none" }}><IC_CARD s={14} col={C.sub} /></a>}
-                    </div>
+            {/* 보낸 목록 — 20개씩 페이지네이션 */}
+            {(() => {
+              const PER = 20; const totalPages = Math.max(1, Math.ceil(sent.length / PER));
+              const pg = Math.min(outPage, totalPages - 1);
+              const pageItems = sent.slice(pg * PER, pg * PER + PER);
+              return (
+                <>
+                  <div style={{ padding: "6px 8px 4px" }}>
+                    {sent.length === 0 ? (
+                      <div style={{ padding: "34px 20px", textAlign: "center", color: C.sub }}>
+                        <div style={{ display: "inline-flex", marginBottom: 8, opacity: .5 }}><IC_PLANE s={30} col={C.sub} /></div>
+                        <div style={{ fontSize: 13, fontWeight: 700 }}>아직 보낸 이메일이 없어요</div>
+                        <div style={{ fontSize: 11.5, marginTop: 3 }}>블로거를 발굴해 제안 메일을 보내면 여기서 추적할 수 있어요.</div>
+                      </div>
+                    ) : pageItems.map((h, i) => {
+                      const st = stageOf(h); const dA = daysAgo(h.sent_at);
+                      const needFollow = h.reply_status !== "replied" && h.reply_status !== "no_reply" && !h.followup_at && dA >= followupDays;
+                      return (
+                        <div key={h.id || i} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", borderRadius: 10, transition: "background .15s", borderBottom: i < pageItems.length - 1 ? `1px solid ${C.line}` : "none" }}
+                          onMouseEnter={e => e.currentTarget.style.background = C.surf2} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+                          <span style={{ display: "inline-flex", width: 32, height: 32, borderRadius: 9, background: `${st.c}18`, color: st.c, alignItems: "center", justifyContent: "center", flexShrink: 0 }}><st.Ic s={17} col={st.c} /></span>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ fontSize: 12.5, fontWeight: 800, color: C.ink, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{h.nickname || h.blog_id || "블로거"} {h.followup_at && <span style={{ fontSize: 9.5, fontWeight: 700, color: "#6d5dd3", marginLeft: 4 }}>· 리마인드함</span>}</div>
+                            <div style={{ fontSize: 10.5, color: C.sub, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{h.to_email} · {fmt(h.sent_at)} 보냄 ({dA === 0 ? "오늘" : `${dA}일 전`})</div>
+                          </div>
+                          <span style={{ fontSize: 10.5, fontWeight: 800, color: st.c, background: `${st.c}14`, border: `1px solid ${st.c}44`, padding: "3px 9px", borderRadius: 20, whiteSpace: "nowrap", flexShrink: 0 }}>{st.t}{needFollow ? " ·촉진" : ""}</span>
+                          <div style={{ display: "flex", gap: 5, flexShrink: 0 }}>
+                            {h.reply_status !== "replied" && <button onClick={() => setReplyStatus(h.id, "replied")} title="이 블로거가 회신했어요" style={{ padding: "5px 9px", borderRadius: 7, border: `1px solid ${C.line2}`, background: C.surf, color: "#0ea5e9", cursor: "pointer", fontSize: 10.5, fontWeight: 800, fontFamily: "inherit", whiteSpace: "nowrap" }}>회신옴</button>}
+                            {needFollow && <button onClick={() => sendFollowup([h.id])} disabled={followSending} title="리마인드 이메일을 보내요" style={{ padding: "5px 9px", borderRadius: 7, border: "none", background: "#d98a1f", color: "#fff", cursor: "pointer", fontSize: 10.5, fontWeight: 800, fontFamily: "inherit", whiteSpace: "nowrap" }}>팔로우업</button>}
+                            {h.blog_id && <a href={`https://blog.naver.com/${h.blog_id}`} target="_blank" rel="noopener noreferrer" title="블로그 열기" style={{ display: "inline-flex", alignItems: "center", padding: "5px 7px", borderRadius: 7, border: `1px solid ${C.line2}`, background: C.surf, color: C.sub, textDecoration: "none" }}><IC_CARD s={14} col={C.sub} /></a>}
+                            <button onClick={() => deleteOutreach(h.id)} title="이 기록 삭제" style={{ display: "inline-flex", alignItems: "center", padding: "5px 7px", borderRadius: 7, border: `1px solid ${C.line2}`, background: C.surf, color: "#d64545", cursor: "pointer", fontSize: 12, fontWeight: 800 }}>🗑</button>
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
-                );
-              })}
-            </div>
+                  {/* 페이지네이션 */}
+                  {totalPages > 1 && (
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, padding: "10px 0 12px", borderTop: `1px solid ${C.line}` }}>
+                      <button onClick={() => setOutPage(Math.max(0, pg - 1))} disabled={pg === 0} style={{ padding: "6px 12px", borderRadius: 8, border: `1px solid ${C.line2}`, background: C.surf, color: pg === 0 ? C.sub : C.ink, cursor: pg === 0 ? "default" : "pointer", fontSize: 12, fontWeight: 700, fontFamily: "inherit", opacity: pg === 0 ? .5 : 1 }}>← 이전</button>
+                      <span style={{ fontSize: 12, color: C.sub, fontWeight: 700 }}>{pg + 1} / {totalPages} <span style={{ fontWeight: 500 }}>(총 {sent.length}건)</span></span>
+                      <button onClick={() => setOutPage(Math.min(totalPages - 1, pg + 1))} disabled={pg >= totalPages - 1} style={{ padding: "6px 12px", borderRadius: 8, border: `1px solid ${C.line2}`, background: C.surf, color: pg >= totalPages - 1 ? C.sub : C.ink, cursor: pg >= totalPages - 1 ? "default" : "pointer", fontSize: 12, fontWeight: 700, fontFamily: "inherit", opacity: pg >= totalPages - 1 ? .5 : 1 }}>다음 →</button>
+                    </div>
+                  )}
+                </>
+              );
+            })()}
           </div>
         );
       })()}
