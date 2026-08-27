@@ -1345,6 +1345,140 @@ export async function crawlBlogIds(params: {
   return results;
 }
 
+/* ── 🗺️ 네이버 플레이스 업체 발굴 ──
+   지역+업종으로 네이버 지도의 업체를 수집(사장님 대상 영업 / 블로거 역추적의 출발점).
+   ★검증(2026-08-28): pcmap.place.naver.com/{도메인}/list?query=... 페이지의 window.__APOLLO_STATE__에
+     업체(이름·카테고리·주소·방문자리뷰수·블로그리뷰수)가 들어있음. raw curl은 ncaptcha로 막히지만
+     anti-detection 브라우저 컨텍스트 안에선 통과(블로그 발굴과 동일 원리). 프록시는 계정 배정 IP 사용. */
+export interface PlaceTarget {
+  placeId: string;
+  name: string;
+  category?: string;
+  address?: string;
+  visitorReviewCount?: number;
+  blogReviewCount?: number;
+  placeUrl: string;
+}
+export async function crawlPlaces(params: {
+  accountId: string;
+  query: string;                    // "강남 맛집" 처럼 지역+업종을 이미 합친 검색어
+  domain?: string;                  // pcmap 도메인(restaurant/hairshop/hospital/place 등). 기본 place(통합)
+  count: number;
+  ownerUserId?: string | null;
+  onLog?: (msg: string) => void;
+}): Promise<PlaceTarget[]> {
+  const { query, count, onLog } = params;
+  const domain = params.domain || "place";
+  const log = onLog || console.log;
+  const results: PlaceTarget[] = [];
+  const seen = new Set<string>();
+  const browser = await launchBrowser(params.accountId, { headless: true, log, feature: "crawl", ownerUserId: params.ownerUserId });
+  const context = await browser.newContext({ userAgent: UA, locale: "ko-KR", viewport: { width: 1280, height: 900 } });
+  await applyAntiDetection(context);
+  const page = await context.newPage();
+  try {
+    for (let pageNo = 1; pageNo <= 5 && results.length < count; pageNo++) {
+      const url = `https://pcmap.place.naver.com/${domain}/list?query=${encodeURIComponent(query)}&page=${pageNo}`;
+      log(`[플레이스] "${query}" ${pageNo}페이지 수집 중...`);
+      try {
+        await page.goto(url, { waitUntil: "domcontentloaded", timeout: 25000 });
+        await page.waitForTimeout(2200);
+      } catch { log(`[플레이스] ${pageNo}페이지 로드 지연 — 스킵`); continue; }
+      const items: PlaceTarget[] = await page.evaluate(() => {
+        const st: any = (window as any).__APOLLO_STATE__ || {};
+        const out: any[] = [];
+        for (const k in st) {
+          const v = st[k];
+          if (!v || typeof v !== "object" || !v.name) continue;
+          // 업체 노드만: 이름 + (카테고리 또는 주소) 보유. 리뷰수 필드는 있으면 담고 없으면 생략.
+          const hasBiz = v.category || v.businessCategory || v.roadAddress || v.address || v.fullAddress;
+          if (!hasBiz) continue;
+          const id = String(v.id || (k.includes(":") ? k.split(":").pop() : "") || "");
+          if (!id) continue;
+          out.push({
+            placeId: id,
+            name: String(v.name),
+            category: v.category || v.businessCategory || undefined,
+            address: v.roadAddress || v.address || v.fullAddress || undefined,
+            visitorReviewCount: Number(v.visitorReviewCount ?? v.visitorReviewsTotal ?? 0) || undefined,
+            blogReviewCount: Number(v.blogCafeReviewCount ?? v.blogReviewCount ?? 0) || undefined,
+            placeUrl: `https://m.place.naver.com/${(window as any).__PLACE_DOMAIN__ || "place"}/${id}/home`,
+          });
+        }
+        return out;
+      }).catch(() => [] as PlaceTarget[]);
+      let added = 0;
+      for (const it of items) {
+        if (!it.placeId || seen.has(it.placeId)) continue;
+        seen.add(it.placeId);
+        it.placeUrl = `https://m.place.naver.com/${domain}/${it.placeId}/home`;
+        results.push(it);
+        added++;
+        if (results.length >= count) break;
+      }
+      log(`[플레이스] ${pageNo}페이지 → ${added}개 (누적 ${results.length})`);
+      if (added === 0) break;   // 더 없음
+      await page.waitForTimeout(400);
+    }
+  } finally {
+    await browser.close().catch(() => {});
+  }
+  log(`[플레이스] 총 ${results.length}개 업체 수집 완료`);
+  return results;
+}
+
+/* ── 🗺️ 플레이스 업체 → 블로그 리뷰 작성자(블로거) 역추적 ──
+   업체의 블로그 리뷰 탭에서 blog.naver.com/{blogId} 링크를 긁어 실제 방문 리뷰를 쓰는 블로거를 발굴.
+   (영수증 리뷰어는 익명이라 제외 — 블로그 리뷰어만 블로그로 넘어가 연락처 확보 가능) */
+export interface PlaceBloggerHit { blogId: string; nick?: string; title?: string; }
+export async function crawlPlaceBloggers(params: {
+  accountId: string;
+  placeId: string;
+  domain?: string;
+  ownerUserId?: string | null;
+  onLog?: (msg: string) => void;
+}): Promise<PlaceBloggerHit[]> {
+  const { placeId, onLog } = params;
+  const domain = params.domain || "place";
+  const log = onLog || console.log;
+  const browser = await launchBrowser(params.accountId, { headless: true, log, feature: "crawl", ownerUserId: params.ownerUserId });
+  const context = await browser.newContext({ userAgent: UA, locale: "ko-KR", viewport: { width: 1280, height: 900 } });
+  await applyAntiDetection(context);
+  const page = await context.newPage();
+  const hits: PlaceBloggerHit[] = [];
+  try {
+    const url = `https://pcmap.place.naver.com/${domain}/${placeId}/review/blog`;
+    await page.goto(url, { waitUntil: "domcontentloaded", timeout: 25000 });
+    await page.waitForTimeout(2500);
+    for (let s = 0; s < 3; s++) { await page.mouse.wheel(0, 3000); await page.waitForTimeout(500); }
+    // ★실측(2026-08-28): 블로그 리뷰는 <a>가 아니라 __APOLLO_STATE__의 FsasReview:blog_* 노드에 있음
+    //   (url=m.blog.naver.com/{blogId}/{logNo}, name=닉네임, title=글제목). 앵커 스크레이핑은 0건이라 APOLLO 파싱해야 함.
+    const found: PlaceBloggerHit[] = await page.evaluate(() => {
+      const st: any = (window as any).__APOLLO_STATE__ || {};
+      const bad = ["PostList", "BlogHome", "GoBlogWrite", "section", "m", "PostView"];
+      const seen = new Set<string>();
+      const out: PlaceBloggerHit[] = [];
+      for (const k in st) {
+        const v = st[k];
+        if (!v || typeof v !== "object") continue;
+        const isBlog = v.type === "blog" || /blog/i.test(String(v.typeName || "")) || (typeof k === "string" && k.includes("blog_"));
+        const u = String(v.url || v.home || "");
+        if ((!isBlog && !/blog\.naver\.com/.test(u)) || !/blog\.naver\.com/.test(u)) continue;
+        const m = u.match(/(?:m\.)?blog\.naver\.com\/([a-zA-Z0-9_-]+)/);
+        if (!m || !m[1] || bad.includes(m[1]) || seen.has(m[1])) continue;
+        seen.add(m[1]);
+        out.push({ blogId: m[1], nick: String(v.name || "").trim() || undefined, title: String(v.title || "").trim() || undefined });
+      }
+      return out;
+    }).catch(() => [] as PlaceBloggerHit[]);
+    hits.push(...found);
+  } finally {
+    await browser.close().catch(() => {});
+  }
+  log(`[플레이스] 업체 ${placeId} 블로그 리뷰어 ${hits.length}명 발굴`);
+  return hits;
+}
+
 /* ── 내 이웃새글 수집 (키워드 대신 "내 서로이웃들의 최근 글") ──
    네이버 이웃새글 API(BuddyPostList.naver)를 세션으로 호출 → 이웃 블로거 중복제거해 반환.
    실측: blogId/nickName/postUrl/addDate/sympathyEnable/commentEnable 제공. */

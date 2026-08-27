@@ -1,6 +1,6 @@
 import express from "express";
 import cors from "cors";
-import { saveSession, sessionExists, removeSession, crawlBlogIds, crawlBuddyPosts, analyzeBuddyKeywords, addNeighbors, NeighborResult, donePath, engageBlogs, EngageResult, engageDonePath, crawlMyPosts, replyToComments, crawlBlogStats, checkSelectedBlogExposure, pumasiEngage, crawlPumasiReport, pumasiPreview, updatePostTitle, checkProxy, analyzeBlogAuthenticity, fetchPostBody, crawlPostViews, sendWebmail, sendBlogComments } from "./naver";
+import { saveSession, sessionExists, removeSession, crawlBlogIds, crawlBuddyPosts, analyzeBuddyKeywords, addNeighbors, NeighborResult, donePath, engageBlogs, EngageResult, engageDonePath, crawlMyPosts, replyToComments, crawlBlogStats, checkSelectedBlogExposure, pumasiEngage, crawlPumasiReport, pumasiPreview, updatePostTitle, checkProxy, analyzeBlogAuthenticity, fetchPostBody, crawlPostViews, sendWebmail, sendBlogComments, crawlPlaces, crawlPlaceBloggers } from "./naver";
 import { checkNeighborQuota, incrementNeighborQuota, getNeighborDailyUsage, incrementEngageQuota, getEngageDailyUsage, getUserPlan, NEIGHBOR_DAILY_LIMIT, addNeighborHistory, addReplyHistory, addBlogscoreHistory, incrementPumasiQuota, TITLE_EDIT_DAILY_LIMIT, getTitleEditDailyUsage, incrementTitleEditQuota, getProxyForAccount, supabase, getOutreachSender, getOutreachSentToday, addOutreachLog } from "./supabase";
 import nodemailer from "nodemailer";
 import fs from "fs";
@@ -115,7 +115,7 @@ app.post("/api/stop/:jobId", (req, res) => {
 
 /* ── 블로그 수집 (SSE) ── */
 app.get("/api/crawl", async (req, res) => {
-  const { userId, keywords, countPerKeyword, orderBy, activeDays, excludeMarket } = req.query as Record<string, string>;
+  const { userId, accountId, keywords, countPerKeyword, orderBy, activeDays, excludeMarket } = req.query as Record<string, string>;
   if (!keywords)
     return res.status(400).json({ error: "keywords 필요" });
 
@@ -139,7 +139,7 @@ app.get("/api/crawl", async (req, res) => {
     const count = parseInt(countPerKeyword || "30", 10);
 
     const results = await crawlBlogIds({
-      accountId: "",
+      accountId: accountId || "",   // ★선택한 작업 계정 → 그 계정 배정 프록시로 접속(미선택이면 익명+회원 프록시)
       keywords: kwList,
       countPerKeyword: count,
       orderBy: orderBy === "sim" ? "sim" : "recentdate",
@@ -150,6 +150,60 @@ app.get("/api/crawl", async (req, res) => {
     });
 
     sseSend(res, { type: "crawl_done", results });
+  } catch (e: any) {
+    sseSend(res, { type: "error", msg: e.message });
+  }
+  res.end();
+});
+
+/* ── 🗺️ 플레이스 업체 발굴 (SSE) ── */
+app.get("/api/place/search", async (req, res) => {
+  const { userId, accountId, query, domain, count } = req.query as Record<string, string>;
+  if (!query) return res.status(400).json({ error: "query 필요" });
+  stopAllActiveJobs();
+  sseSetup(res);
+  try {
+    // 크롤링과 같은 발굴 쿼타 사용(플레이스도 발굴이므로)
+    if (userId) {
+      const plan = await getUserPlan(userId);
+      const quota = await checkNeighborQuota(userId, plan);
+      if (!quota.ok) { sseSend(res, { type: "quota_exceeded", used: quota.used, limit: quota.limit }); res.end(); return; }
+      sseSend(res, { type: "quota_info", used: quota.used, limit: quota.limit, remaining: quota.limit - quota.used });
+    }
+    const results = await crawlPlaces({
+      accountId: accountId || "",
+      query,
+      domain: domain || "place",
+      count: parseInt(count || "30", 10),
+      ownerUserId: userId || null,
+      onLog: (msg) => sseSend(res, { type: "log", msg }),
+    });
+    sseSend(res, { type: "place_done", results });
+  } catch (e: any) {
+    sseSend(res, { type: "error", msg: e.message });
+  }
+  res.end();
+});
+
+/* ── 🗺️ 플레이스 업체 → 블로그 리뷰어 역추적 (SSE) ── */
+app.get("/api/place/bloggers", async (req, res) => {
+  const { userId, accountId, places, domain } = req.query as Record<string, string>;
+  sseSetup(res);
+  try {
+    let list: { placeId: string; name?: string }[] = [];
+    try { list = JSON.parse(places || "[]"); } catch {}
+    list = list.filter(p => p && p.placeId).slice(0, 40);   // 과부하 방지
+    const seen = new Set<string>();
+    for (const p of list) {
+      const hits = await crawlPlaceBloggers({ accountId: accountId || "", placeId: p.placeId, domain: domain || "place", ownerUserId: userId || null, onLog: (msg) => sseSend(res, { type: "log", msg }) });
+      for (const h of hits) {
+        if (seen.has(h.blogId)) continue;
+        seen.add(h.blogId);
+        sseSend(res, { type: "blogger", ...h, fromPlace: p.name || p.placeId });
+      }
+      await new Promise(rs => setTimeout(rs, 300));
+    }
+    sseSend(res, { type: "bloggers_done", count: seen.size });
   } catch (e: any) {
     sseSend(res, { type: "error", msg: e.message });
   }

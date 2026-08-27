@@ -336,7 +336,9 @@ export default function CrawlCenter({ showToast, theme: extTheme, userId, plan =
     pushLog(`🔎 발굴 시작 — ${isAll ? `전체(${kwList.length}개 주제)` : `"${kwList.join(", ")}"`} · 목표 ${count}명`);
     pushLog(`필터 — 이웃 ${minNeighbors.toLocaleString()}+ · 주 ${minPosts}글+ ${activeOnly ? "· 최근 활동중만" : ""}`);
     // 실제 네이버 검색 발굴 API(neighbor-bot /api/crawl, SSE) — 목업 아님. thumbnail=프로필 이미지 제공.
-    const url = `${BOT}/api/crawl?keywords=${encodeURIComponent(kwList.join(","))}&countPerKeyword=${perKw}&orderBy=${topicMatch ? "sim" : "recentdate"}&activeDays=${activeOnly ? 30 : 0}&excludeMarket=true${userId ? `&userId=${userId}` : ""}`;
+    // ★발굴도 '선택한 작업 계정'으로 — 그 계정에 배정된 프록시(IP)로 접속(발송 계정과 동일 선택 공유). 미선택이면 회원 기본 프록시.
+    const scanAcct = (mailAcctId && connectedMail.some(a => a.accountId === mailAcctId)) ? mailAcctId : "";
+    const url = `${BOT}/api/crawl?keywords=${encodeURIComponent(kwList.join(","))}&countPerKeyword=${perKw}&orderBy=${topicMatch ? "sim" : "recentdate"}&activeDays=${activeOnly ? 30 : 0}&excludeMarket=true${userId ? `&userId=${userId}` : ""}${scanAcct ? `&accountId=${encodeURIComponent(scanAcct)}` : ""}`;
     const es = new BotEventStream(url);
     esRef.current = es;
     es.onmessage = (e: MessageEvent) => {
@@ -510,7 +512,7 @@ export default function CrawlCenter({ showToast, theme: extTheme, userId, plan =
   // ✉️ 크롤링 전용 발송 계정 로그인 UI(헤더·발송패널 두 곳에서 재사용). 아이디/비번으로 로그인 → 그 계정으로만 발송.
   const renderMailAccounts = () => (
     <div style={{ padding: "12px 13px", borderRadius: 6, background: "rgba(47,158,94,.06)", border: `1px solid ${C.line2}` }}>
-      <div style={{ fontSize: 11.5, fontWeight: 800, color: C.ink, marginBottom: 8 }}>✉️ 발송 네이버 계정 <span style={{ fontSize: 10, fontWeight: 700, color: C.sub }}>· 크롤링 전용(다른 탭과 안 섞여요)</span></div>
+      <div style={{ fontSize: 11.5, fontWeight: 800, color: C.ink, marginBottom: 8 }}>👤 작업 네이버 계정 <span style={{ fontSize: 10, fontWeight: 700, color: C.sub }}>· 계정 추가 후 <b style={{ color: "#2f9e5e" }}>◉ 라디오로 선택</b> — 이 계정으로 발굴·발송(다른 탭과 안 섞여요)</span></div>
       <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
         {mailAccounts.map(a => (
           <div key={a.accountId} style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", padding: "7px 9px", borderRadius: 6, background: a.sessionOk ? "rgba(47,158,94,.1)" : C.surf, border: `1px solid ${a.sessionOk ? "rgba(47,158,94,.35)" : C.line2}` }}>
@@ -518,7 +520,7 @@ export default function CrawlCenter({ showToast, theme: extTheme, userId, plan =
               <>
                 <input type="radio" name="mailAcct" checked={mailAcctId === a.accountId} onChange={() => setMailAcctId(a.accountId)} style={{ accentColor: "#2f9e5e" }} />
                 <span style={{ color: "#2f9e5e", fontWeight: 800, fontSize: 12 }}>✅ {a.blogId}</span>
-                <span style={{ fontSize: 10, color: C.sub }}>연결됨 (이 계정으로 발송)</span>
+                <span style={{ fontSize: 10, color: C.sub }}>연결됨 (이 계정으로 발굴·발송)</span>
                 {/* 재연결 — 세션 만료 시 저장된 아이디·비번으로 다시 로그인(발송이 안 되면 눌러요) */}
                 <button onClick={() => connectCrawlAccount(a.accountId)} disabled={a.loginLoading} title="발송이 안 되면 세션이 만료된 거예요. 다시 로그인합니다." style={{ ...btnGhost, marginLeft: "auto", padding: "2px 9px", fontSize: 10.5, color: "#2f9e5e", borderColor: "rgba(47,158,94,.4)" }}>{a.loginLoading ? "재연결 중…" : "🔄 재연결"}</button>
                 <button onClick={() => removeCrawlAccount(a.accountId)} style={{ ...btnGhost, padding: "2px 8px", fontSize: 10.5 }}>삭제</button>

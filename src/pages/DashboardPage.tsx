@@ -4,10 +4,11 @@ import { PublyUser, getQuota, getHistory, getAccounts, PublyQuota, PublyHistory,
 import { supabase, submitBugReportRow, getMyResolvedBugAlerts, markBugNotified, PublyBugReport } from "../lib/supabase";
 import NeighborPage from "./NeighborPage";
 import CrawlCenter from "../components/CrawlCenter";
+import PlaceCenter from "../components/PlaceCenter";
 import { botFetch, BotEventStream } from "../lib/botApi";
 import WebInstallNotice from "../WebInstallNotice";
 
-type MainTab = "control" | "keyword" | "write" | "image" | "photo" | "publish" | "manage" | "accounts" | "rank" | "blogscore" | "calendar" | "settings" | "neighbor" | "engage" | "reply" | "pumasi" | "insta_dm" | "crawl";
+type MainTab = "control" | "keyword" | "write" | "image" | "photo" | "publish" | "manage" | "accounts" | "rank" | "blogscore" | "calendar" | "settings" | "neighbor" | "engage" | "reply" | "pumasi" | "insta_dm" | "crawl" | "place";
 type OnPartnerProduct = {id:string|null;name:string;image:string;price:number|null;available:boolean;partnerUrl:string;shopUrl:string};
 type OnPartnerPlacement = "auto"|"adpost"|"after_first"|"middle"|"before_last"|"bottom";
 type PublishConcept = "full" | "body_faq" | "body_only";
@@ -151,7 +152,7 @@ const NAV_GROUPS = [
     {k:"keyword",i:"🔍",l:"키워드/제목"},{k:"write",i:"✍️",l:"글 생성"},{k:"image",i:"🖼️",l:"이미지 생성"},{k:"photo",i:"📷",l:"사진 글쓰기"},{k:"publish",i:"🚀",l:"발행하기"},
   ]},
   {label:"블로그 운영",tabs:[
-    {k:"calendar",i:"📅",l:"콘텐츠 캘린더",shine:true},{k:"manage",i:"📋",l:"발행 관리"},{k:"blogscore",i:"📈",l:"블로그 지수"},{k:"crawl",i:"🔍",l:"크롤링"},
+    {k:"calendar",i:"📅",l:"콘텐츠 캘린더",shine:true},{k:"manage",i:"📋",l:"발행 관리"},{k:"blogscore",i:"📈",l:"블로그 지수"},{k:"crawl",i:"🔍",l:"크롤링"},{k:"place",i:"🗺️",l:"플레이스"},
   ]},
   {label:"관계·소통 자동화",tabs:[
     {k:"neighbor",i:"🤝",l:"서이추"},{k:"engage",i:"❤️",l:"공감·댓글"},{k:"reply",i:"💬",l:"답방"},{k:"pumasi",i:"💞",l:"품앗이"},{k:"insta_dm",i:"📱",l:"인스타 DM"},
@@ -4153,9 +4154,9 @@ POST3: (제목)|(이유)
             {NAV_GROUPS.map(group=>(
               <div key={group.label}>
                 {group.label&&<div className="nav-lbl">{group.label}</div>}
-                {group.tabs.map(t=> t.k==="crawl" ? (
-                  <button key={t.k} className={`nav-item nav-crawl nav-shine ${tab==="crawl"&&crawlEnabled?"active":""} ${crawlEnabled?"":"nav-crawl-locked"}`} onClick={()=>{ if(!crawlEnabled){ setShowCrawlLock(true); return; } setTab("crawl"); }}>
-                    <span className="nav-ico">🔍</span><span className="nav-crawl-label">크롤링</span>
+                {group.tabs.map(t=> (t.k==="crawl" || t.k==="place") ? (
+                  <button key={t.k} className={`nav-item nav-crawl nav-shine ${tab===t.k&&crawlEnabled?"active":""} ${crawlEnabled?"":"nav-crawl-locked"}`} onClick={()=>{ if(!crawlEnabled){ setShowCrawlLock(true); return; } setTab(t.k); }}>
+                    <span className="nav-ico">{t.i}</span><span className="nav-crawl-label">{t.l}</span>
                     <span className="nav-hot">HOT</span>
                     {!crawlEnabled && <span className="nav-crawl-lock">🔒</span>}
                     {!crawlEnabled && <span className="crawl-tip">🔒 <b>관리자 승인</b>이 필요한 기능이에요</span>}
@@ -6816,6 +6817,9 @@ POST3: (제목)|(이유)
             )}
             {tab==="crawl" && crawlEnabled && (
               <div style={{animation:"fadeUp .25s ease both"}}><CrawlCenter showToast={showToast} theme={theme==="dark"?"dark":"light"} userId={user.id} plan={user.plan} /></div>
+            )}
+            {tab==="place" && crawlEnabled && (
+              <div style={{animation:"fadeUp .25s ease both"}}><PlaceCenter showToast={showToast} theme={theme==="dark"?"dark":"light"} userId={user.id} plan={user.plan} /></div>
             )}
             {visitedAutoTabs.has("pumasi") && (
               <div style={{ display: tab==="pumasi" ? "block" : "none" }}>
