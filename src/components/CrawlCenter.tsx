@@ -108,15 +108,50 @@ export default function CrawlCenter({ showToast, theme: extTheme, userId, plan =
   const [outreach, setOutreach] = useState<null | "email" | "comment">(null);
   // ★회사명 하드코딩 금지 — 모든 회원이 쓰므로 중립 템플릿 + {업체명} 변수. 회원이 자기 걸로 쓰면 localStorage에 저장돼 유지.
   //   {업체명}은 아래 outreachBrand에 회원이 한 번 넣으면 발송 시 자동 치환.
-  const [emailSubject, setEmailSubject] = useState(() => localStorage.getItem("publy_outreach_subject") || "블로그 체험단 제안드려요 (주제: {관심품목})");
-  const [emailBody, setEmailBody] = useState(() => localStorage.getItem("publy_outreach_body") || "{닉네임}님 안녕하세요! 블로그 잘 보고 있어요 😊\n{관심품목} 관련 글을 즐겨 쓰시는 것 같아, {업체명} 체험단에 함께하시면 좋을 것 같아 연락드려요.\n관심 있으시면 회신 주세요. 감사합니다!");
-  const [commentBody, setCommentBody] = useState(() => localStorage.getItem("publy_outreach_comment") || "{닉네임}님 글 잘 봤어요! {관심키워드} 관련해 {업체명} 체험단 함께하실래요? 문의는 프로필 링크로 :)");
+  // ★기본 내용 하드코딩 금지 — 처음엔 빈칸(사용자마다 다름). 예시 선택 또는 AI 작성 또는 직접 입력.
+  //   키 버전업(v2)으로 옛날 하드코딩 저장값도 안 뜨게.
+  const [emailSubject, setEmailSubject] = useState(() => localStorage.getItem("publy_outreach_subject2") || "");
+  const [emailBody, setEmailBody] = useState(() => localStorage.getItem("publy_outreach_body2") || "");
+  const [commentBody, setCommentBody] = useState(() => localStorage.getItem("publy_outreach_comment2") || "");
   const [outreachBrand, setOutreachBrand] = useState(() => localStorage.getItem("publy_outreach_brand") || "");   // 회원 본인 업체명({업체명} 치환)
   // 회원이 수정하면 저장(다음에 다시 안 써도 됨)
-  useEffect(() => { localStorage.setItem("publy_outreach_subject", emailSubject); }, [emailSubject]);
-  useEffect(() => { localStorage.setItem("publy_outreach_body", emailBody); }, [emailBody]);
-  useEffect(() => { localStorage.setItem("publy_outreach_comment", commentBody); }, [commentBody]);
+  useEffect(() => { localStorage.setItem("publy_outreach_subject2", emailSubject); }, [emailSubject]);
+  useEffect(() => { localStorage.setItem("publy_outreach_body2", emailBody); }, [emailBody]);
+  useEffect(() => { localStorage.setItem("publy_outreach_comment2", commentBody); }, [commentBody]);
   useEffect(() => { localStorage.setItem("publy_outreach_brand", outreachBrand); }, [outreachBrand]);
+  // 📝 본문 작성 모드(일반=예시 선택 / AI=제목 기반 자동작성) + 예시 펼치기
+  const [bodyMode, setBodyMode] = useState<"normal" | "ai">("normal");
+  const [exampleOpen, setExampleOpen] = useState(false);
+  const [aiWriting, setAiWriting] = useState(false);
+  // 예시 인사말 5종 — 변수({닉네임}·{관심품목}·{업체명}) 사용, 줄바꿈으로 가독성 좋게
+  const BODY_EXAMPLES: { label: string; text: string }[] = [
+    { label: "친근한 인사형", text: "{닉네임}님, 안녕하세요!\n\n{관심품목} 관련 글을 즐겨 쓰시는 걸 보고 반가운 마음에 연락드려요.\n\n{업체명}에서 함께해 주실 분을 찾고 있는데, {닉네임}님 블로그와 잘 어울릴 것 같아요.\n\n관심 있으시면 편하게 회신 주세요. 감사합니다!" },
+    { label: "정중한 제안형", text: "안녕하세요, {닉네임}님.\n\n{업체명} 담당자입니다.\n\n{관심품목} 분야에서 꾸준히 활동하시는 모습이 인상 깊어 제안드리고자 연락드렸습니다.\n\n자세한 내용은 회신 주시면 안내해 드리겠습니다.\n\n좋은 하루 보내세요." },
+    { label: "간결한 형", text: "{닉네임}님, 안녕하세요!\n\n{업체명}에서 {관심품목} 관련 협업을 제안드려요.\n\n관심 있으시면 회신 부탁드립니다. 감사합니다." },
+    { label: "혜택 강조형", text: "{닉네임}님, 안녕하세요!\n\n{관심품목} 콘텐츠를 즐겨 보고 있어요.\n\n{업체명}에서 준비한 제품을 직접 경험해 보실 수 있는 기회를 드리려고 해요.\n\n부담 없이 살펴보시고, 관심 있으시면 회신 주세요!" },
+    { label: "진솔한 형", text: "{닉네임}님, 안녕하세요.\n\n{닉네임}님의 {관심품목} 글을 인상 깊게 봤어요.\n\n{업체명}과 함께 솔직한 이야기를 나눠 주실 수 있을까 해서 조심스레 연락드립니다.\n\n편하게 회신 주시면 감사하겠습니다." },
+  ];
+  // AI로 본문 작성 — 제목·업체명·주제를 바탕으로 Gemini가 초안 생성
+  const writeBodyWithAI = async () => {
+    const key = localStorage.getItem("publy_gemini_key") || "";
+    if (!key) { toast("AI 작성은 무료 Gemini 키가 필요해요. 설정 → 글쓰기 AI에서 등록해주세요.", "info"); return; }
+    setAiWriting(true);
+    try {
+      const brand = outreachBrand || "저희";
+      const subj = emailSubject || "블로그 협업 제안";
+      const prompt = `너는 블로그 체험단·협업 제안 이메일을 쓰는 마케터야. 아래 조건으로 블로거에게 보낼 정중하고 자연스러운 제안 이메일 본문을 한국어로 써줘.\n\n- 업체명: ${brand}\n- 메일 제목: ${subj}\n- 반드시 {닉네임}, {관심품목} 변수를 자연스럽게 포함(발송 시 블로거별로 자동 치환됨)\n- 3~5문단, 각 문단은 1~2문장으로 짧게, 문단 사이에 빈 줄을 넣어 가독성 좋게\n- 과장·스팸 느낌 없이 진솔하게, 마지막에 회신 요청\n- 본문만 출력(제목·설명·따옴표 없이)`;
+      const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${encodeURIComponent(key)}`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }], generationConfig: { temperature: 0.9, maxOutputTokens: 2048, thinkingConfig: { thinkingBudget: 0 } } }),
+      });
+      const d = await r.json();
+      const txt = (d?.candidates?.[0]?.content?.parts || []).map((p: any) => p.text || "").join("").trim();
+      if (!txt) throw new Error(d?.error?.message || "생성 실패");
+      setEmailBody(txt);
+      toast("✨ AI가 본문을 작성했어요! 필요하면 수정하세요.", "success");
+    } catch (e: any) { toast("AI 작성 실패: " + (e?.message || e), "error"); }
+    finally { setAiWriting(false); }
+  };
   const [sending, setSending] = useState(false);
   // ✉️ 웹메일 방식: SMTP·앱비밀번호 없이, 로그인된 네이버 계정 창을 열어 메일을 쓴다(서이추처럼).
   //    ★크롤링은 다른 탭과 완전 별개(테리 원칙: 탭별 계정 격리). 크롤링 전용으로 로그인한 계정만 쓴다.
@@ -411,7 +446,9 @@ export default function CrawlCenter({ showToast, theme: extTheme, userId, plan =
                 <input type="radio" name="mailAcct" checked={mailAcctId === a.accountId} onChange={() => setMailAcctId(a.accountId)} style={{ accentColor: "#2f9e5e" }} />
                 <span style={{ color: "#2f9e5e", fontWeight: 800, fontSize: 12 }}>✅ {a.blogId}</span>
                 <span style={{ fontSize: 10, color: C.sub }}>연결됨 (이 계정으로 발송)</span>
-                <button onClick={() => removeCrawlAccount(a.accountId)} style={{ ...btnGhost, marginLeft: "auto", padding: "2px 8px", fontSize: 10.5 }}>삭제</button>
+                {/* 재연결 — 세션 만료 시 저장된 아이디·비번으로 다시 로그인(발송이 안 되면 눌러요) */}
+                <button onClick={() => connectCrawlAccount(a.accountId)} disabled={a.loginLoading} title="발송이 안 되면 세션이 만료된 거예요. 다시 로그인합니다." style={{ ...btnGhost, marginLeft: "auto", padding: "2px 9px", fontSize: 10.5, color: "#2f9e5e", borderColor: "rgba(47,158,94,.4)" }}>{a.loginLoading ? "재연결 중…" : "🔄 재연결"}</button>
+                <button onClick={() => removeCrawlAccount(a.accountId)} style={{ ...btnGhost, padding: "2px 8px", fontSize: 10.5 }}>삭제</button>
               </>
             ) : (
               <>
@@ -695,22 +732,23 @@ export default function CrawlCenter({ showToast, theme: extTheme, userId, plan =
         {/* 등급별 한도 표 — ★항상 보이게(블로그지수 탭과 동일). 무제한 등급도 자기 등급이 표에 뜸 */}
         <div style={{ marginTop: 14, borderRadius: 10, overflow: "hidden", border: `1px solid ${C.line}` }}>
           <div style={{ padding: "9px 12px", fontSize: 12, fontWeight: 800, color: C.ink, background: C.surf2 }}>📋 등급별 크롤링 한도 <span style={{ fontSize: 10.5, fontWeight: 600, color: C.sub }}>· 내 등급에서 하루에 얼마나 발굴·발송할 수 있는지</span></div>
-          <div style={{ display: "grid", gridTemplateColumns: "1.2fr 1fr 1fr", background: C.surf2, borderTop: `1px solid ${C.line}` }}>
-            {["등급", "🔍 크롤링 발굴/일", "✉️ 이메일 발송/일"].map((h, i) => <div key={h} style={{ padding: "8px 12px", fontSize: 11, fontWeight: 800, color: C.sub, borderLeft: i ? `1px solid ${C.line}` : "none" }}>{h}</div>)}
+          <div style={{ display: "grid", gridTemplateColumns: "1.1fr .8fr 1fr 1fr", background: C.surf2, borderTop: `1px solid ${C.line}` }}>
+            {["등급", "👤 계정", "🔍 발굴/일", "✉️ 발송/일"].map((h, i) => <div key={h} style={{ padding: "8px 12px", fontSize: 11, fontWeight: 800, color: C.sub, borderLeft: i ? `1px solid ${C.line}` : "none" }}>{h}</div>)}
           </div>
           {/* ★무제한(관리자 권한)은 회원 등급표에서 제외 — 무료/베이직/프로만 */}
           {(["free", "basic", "pro"] as const).map(pl => {
             const cur = plan === pl;
             const c = PLAN_CONFIG[pl];
             return (
-              <div key={pl} style={{ display: "grid", gridTemplateColumns: "1.2fr 1fr 1fr", borderTop: `1px solid ${C.line}`, background: cur ? C.accentSoft : "transparent" }}>
+              <div key={pl} style={{ display: "grid", gridTemplateColumns: "1.1fr .8fr 1fr 1fr", borderTop: `1px solid ${C.line}`, background: cur ? C.accentSoft : "transparent" }}>
                 <div style={{ padding: "9px 12px", fontSize: 12, fontWeight: cur ? 900 : 700, color: cur ? C.accent : C.ink }}>{c.label}{cur ? " (내 등급)" : ""}</div>
+                <div style={{ padding: "9px 12px", fontSize: 12, fontWeight: 700, color: C.ink, borderLeft: `1px solid ${C.line}` }}>{c.maxAccounts}개</div>
                 <div style={{ padding: "9px 12px", fontSize: 12, fontWeight: 700, color: C.ink, borderLeft: `1px solid ${C.line}` }}>{c.dailyCrawl}명</div>
                 <div style={{ padding: "9px 12px", fontSize: 12, fontWeight: 700, color: C.ink, borderLeft: `1px solid ${C.line}` }}>{c.dailyEmail}통</div>
               </div>
             );
           })}
-          <div style={{ padding: "8px 12px", fontSize: 10.5, color: C.sub, background: C.surf2, borderTop: `1px solid ${C.line}` }}>💡 크롤링=하루 발굴 인원(<b style={{ color: "#2f9e5e" }}>연락처 있는 사람만 차감</b>), 이메일=하루 발송 통수. 모두 자정에 초기화돼요. 이메일은 계정 안전상 하루 100통 이하 권장.</div>
+          <div style={{ padding: "8px 12px", fontSize: 10.5, color: C.sub, background: C.surf2, borderTop: `1px solid ${C.line}` }}>💡 계정=연결 가능한 네이버 계정 수, 크롤링=하루 발굴 인원(<b style={{ color: "#2f9e5e" }}>연락처 있는 사람만 차감</b>), 이메일=하루 발송 통수. 발굴·발송은 자정에 초기화돼요. 이메일은 계정 안전상 하루 100통 이하 권장.</div>
         </div>
       </div>
 
@@ -960,11 +998,54 @@ export default function CrawlCenter({ showToast, theme: extTheme, userId, plan =
                 </div>
               )}
               <div style={{ marginBottom: 14 }}>
-                <div style={label}>메시지 (개인화 변수 사용 가능)</div>
-                <textarea rows={outreach === "email" ? 7 : 4}
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
+                  <div style={label}>메시지 (개인화 변수 사용 가능)</div>
+                  {/* 일반/AI 작성 모드 토글 (이메일만) */}
+                  {outreach === "email" && (
+                    <div style={{ display: "flex", gap: 0, borderRadius: 8, overflow: "hidden", border: `1px solid ${C.line2}` }}>
+                      <button onClick={() => setBodyMode("normal")} style={{ padding: "5px 12px", fontSize: 11, fontWeight: 800, border: "none", cursor: "pointer", fontFamily: "inherit", background: bodyMode === "normal" ? C.accent : "transparent", color: bodyMode === "normal" ? C.surf : C.sub }}>✍️ 일반</button>
+                      <button onClick={() => setBodyMode("ai")} style={{ padding: "5px 12px", fontSize: 11, fontWeight: 800, border: "none", cursor: "pointer", fontFamily: "inherit", background: bodyMode === "ai" ? "#6d5dd3" : "transparent", color: bodyMode === "ai" ? "#fff" : C.sub }}>✨ AI</button>
+                    </div>
+                  )}
+                </div>
+
+                {/* 일반 모드: 예시 인사말 펼치기/접기 */}
+                {outreach === "email" && bodyMode === "normal" && (
+                  <div style={{ marginBottom: 8 }}>
+                    <button onClick={() => setExampleOpen(o => !o)} style={{ display: "flex", alignItems: "center", gap: 6, width: "100%", padding: "9px 12px", borderRadius: 8, border: `1px solid ${C.line2}`, background: C.surf2, color: C.ink, cursor: "pointer", fontFamily: "inherit", fontSize: 12, fontWeight: 700 }}>
+                      <span style={{ transition: "transform .2s", transform: exampleOpen ? "rotate(90deg)" : "none" }}>▶</span>
+                      예시 인사말에서 고르기 <span style={{ color: C.sub, fontWeight: 600 }}>· 클릭하면 본문에 채워져요</span>
+                    </button>
+                    {exampleOpen && (
+                      <div style={{ marginTop: 6, display: "flex", flexDirection: "column", gap: 6 }}>
+                        {BODY_EXAMPLES.map((ex, i) => (
+                          <button key={i} onClick={() => { setEmailBody(ex.text); setExampleOpen(false); toast(`"${ex.label}" 예시를 넣었어요`, "success"); }}
+                            style={{ textAlign: "left", padding: "10px 12px", borderRadius: 8, border: `1px solid ${C.line2}`, background: C.surf, cursor: "pointer", fontFamily: "inherit", transition: "border .15s" }}
+                            onMouseEnter={e => e.currentTarget.style.borderColor = C.accent} onMouseLeave={e => e.currentTarget.style.borderColor = C.line2}>
+                            <div style={{ fontSize: 11.5, fontWeight: 800, color: C.accent, marginBottom: 3 }}>{ex.label}</div>
+                            <div style={{ fontSize: 11, color: C.sub, lineHeight: 1.5, whiteSpace: "pre-wrap", maxHeight: 44, overflow: "hidden" }}>{ex.text.replace(/\n\n/g, " ").slice(0, 60)}…</div>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* AI 모드: 제목 기반 자동 작성 버튼 */}
+                {outreach === "email" && bodyMode === "ai" && (
+                  <div style={{ marginBottom: 8, padding: "11px 13px", borderRadius: 8, background: "rgba(109,93,211,.08)", border: "1px solid rgba(109,93,211,.28)" }}>
+                    <div style={{ fontSize: 11.5, color: C.sub, marginBottom: 8, lineHeight: 1.5 }}>💬 <b>메일 제목</b>과 <b>내 업체명</b>을 바탕으로 AI가 자연스러운 제안 본문을 써줘요. (제목을 먼저 적어주세요)</div>
+                    <button onClick={writeBodyWithAI} disabled={aiWriting} style={{ display: "inline-flex", alignItems: "center", gap: 7, padding: "9px 16px", borderRadius: 9, border: "none", background: "linear-gradient(135deg,#6d5dd3,#9d7bff)", color: "#fff", cursor: "pointer", fontFamily: "inherit", fontSize: 12.5, fontWeight: 800, opacity: aiWriting ? .6 : 1 }}>
+                      {aiWriting ? "✨ 작성 중…" : "✨ AI로 본문 작성하기"}
+                    </button>
+                  </div>
+                )}
+
+                <textarea rows={outreach === "email" ? 8 : 4}
                   value={outreach === "email" ? emailBody : commentBody}
                   onChange={e => outreach === "email" ? setEmailBody(e.target.value) : setCommentBody(e.target.value)}
-                  style={{ ...inp, resize: "vertical", lineHeight: 1.7 }} />
+                  placeholder={outreach === "email" ? "여기에 보낼 내용을 적으세요.\n\n위에서 예시를 고르거나, AI로 작성할 수도 있어요.\n{닉네임}·{관심품목}·{업체명}을 넣으면 블로거마다 자동으로 채워져요." : "댓글 내용을 적으세요"}
+                  style={{ ...inp, resize: "vertical", lineHeight: 1.8 }} />
               </div>
               {/* ✍️ 이메일 직접 추가 — 발굴 결과에 없는 사람에게도 보내기 / 내 명단만으로 캠페인(발굴 0명이어도 됨) */}
               {outreach === "email" && (() => {
