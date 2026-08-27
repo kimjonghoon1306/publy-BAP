@@ -2,7 +2,7 @@ import express from "express";
 import cors from "cors";
 import fs from "fs";
 import path from "path";
-import { saveNaverSession, publishNaver, naverSessionExists, generateFlowImages, generateFlowImagesCDP, getNaverCategories, saveGoogleSession, googleSessionExists, deleteNaverSession, deleteGoogleSession } from "./naver";
+import { saveNaverSession, publishNaver, activateNaverAccount, naverSessionExists, generateFlowImages, generateFlowImagesCDP, getNaverCategories, saveGoogleSession, googleSessionExists, deleteNaverSession, deleteGoogleSession } from "./naver";
 import { saveTistorySession, publishTistory, tistorySessionExists, deleteTistorySession } from "./tistory";
 import { fetchPendingJobs, updateJob, addHistory, useQuota } from "./supabase";
 
@@ -158,7 +158,7 @@ app.delete("/api/session/:platform/:userId", (req, res) => {
 
 /* ── 직접 발행 (앱에서 즉시 발행) ── */
 app.post("/api/publish-full", async (req, res) => {
-  const { userId, platform, title, content, pubScope = "full", tags = [], imageUrl, categoryId, visibility, scheduleTime, blocks,
+  const { userId, platform, naverId, title, content, pubScope = "full", tags = [], imageUrl, categoryId, visibility, scheduleTime, blocks,
     videoUrl, videoPosition,
     useFlow, flowImgCount, flowPrompts, flowCaptions } = req.body;
   if (!userId || !platform || !title || !content) {
@@ -218,6 +218,10 @@ app.post("/api/publish-full", async (req, res) => {
 
     let postUrl = "";
     if (platform === "naver") {
+      if (naverId) {
+        const ok = activateNaverAccount(userId, naverId);
+        if (!ok) console.log(`[publish] 계정 세션 없음: ${naverId}`);
+      }
       postUrl = await publishNaver({ userId, title, content, pubScope, tags, imageUrl, categoryId, visibility, scheduleTime, blocks: finalBlocks, videoUrl, videoPosition });
     } else if (platform === "tistory") {
       postUrl = await publishTistory({ userId, title, content, tags, categoryId, visibility });
@@ -273,6 +277,10 @@ async function processJobs() {
         const sched = (job as any).schedule_time as string | undefined;
         const schedFuture = sched && new Date(sched).getTime() > Date.now() ? sched : undefined;
         if (job.platform === "naver") {
+          if (p?.naverId) {
+            const ok = activateNaverAccount(job.user_id, p.naverId);
+            if (!ok) console.log(`[publish] 계정 세션 없음: ${p.naverId}`);
+          }
           postUrl = p
             ? await publishNaver({ userId: job.user_id, title: p.title || job.title, content: p.content ?? job.content, pubScope: p.pubScope, tags: p.tags || job.tags, imageUrl: p.imageUrl, categoryId: p.categoryId ?? (job as any).category_id, visibility: p.visibility, blocks: p.blocks as any, videoUrl: p.videoUrl, videoPosition: p.videoPosition, scheduleTime: schedFuture })
             : await publishNaver({ userId: job.user_id, title: job.title, content: job.content, tags: job.tags, imageUrl: job.image_url || undefined, categoryId: (job as any).category_id, visibility: (job as any).visibility, scheduleTime: schedFuture });

@@ -3131,6 +3131,7 @@ ${segList}`;
     }
     const publishBody={
       userId:user.id,platform,title:effTitle,content,
+      naverId:platform==="naver"?(connAccs.find(a=>a.id===pubAccId)?.username||undefined):undefined,
       pubScope,
       tags,
       imageUrl:thumbnail||activeImgs[0]||undefined,
@@ -5316,6 +5317,23 @@ POST3: (제목)|(이유)
                     </span>
                   </div>
                 );})()}
+
+                {/* 네이버 발행 계정 */}
+                <div className="card" style={{padding:"14px 16px",marginBottom:14}}>
+                  <div className="card-title" style={{marginBottom:10}}>🔗 네이버 발행 계정</div>
+                  {connAccs.length===0?(
+                    <div style={{textAlign:"center",padding:"16px"}}>
+                      <div style={{fontSize:13,color:"var(--text3)",marginBottom:10}}>연결된 계정이 없어요</div>
+                      <button className="btn btn-primary btn-sm" onClick={()=>setTab("accounts")}>계정 관리에서 연결 →</button>
+                    </div>
+                  ):connAccs.map(a=>(
+                    <label key={a.id} onClick={()=>{setPubAccId(a.id);loadCategories("naver");}} style={{display:"flex",alignItems:"center",gap:10,padding:"12px 14px",borderRadius:10,cursor:"pointer",marginBottom:6,background:pubAccId===a.id?"var(--accent-bg)":"var(--bg)",border:`2px solid ${pubAccId===a.id?"var(--accent)":"var(--border)"}`,transition:"all .15s"}}>
+                      <input type="radio" name="photo-pacc" checked={pubAccId===a.id} onChange={()=>{}} style={{accentColor:"var(--accent)",width:16,height:16,flexShrink:0}}/>
+                      <div style={{flex:1}}><div style={{fontSize:14,fontWeight:700,color:"var(--text)"}}>{a.username}</div>{a.blog_name&&<div style={{fontSize:11,color:"var(--text3)"}}>{a.blog_name}</div>}</div>
+                      {pubAccId===a.id&&<span style={{fontSize:11,fontWeight:700,padding:"2px 8px",borderRadius:99,background:"var(--accent-bg)",color:"var(--accent-text)",border:"1px solid var(--accent-border)"}}>✅</span>}
+                    </label>
+                  ))}
+                </div>
 
                 {/* 사진 업로드 */}
                 <div className="card" style={{padding:"18px",marginBottom:14}}>

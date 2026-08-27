@@ -9,6 +9,7 @@ import { deleteSession, hasSession, readSession, writeSession, sessionDiagnosis 
 const LEGACY_SESSION_DIRS = [path.join(__dirname, "../sessions")];
 
 const naverSessionName = (userId: string) => `naver_${userId}`;
+const naverAcctSessionName = (userId: string, naverId: string) => `naver_${userId}__${String(naverId).replace(/[^a-zA-Z0-9_-]/g, "")}`;
 const googleSessionName = (userId: string) => `google_${userId}`;
 
 export function naverSessionExists(userId: string): boolean {
@@ -16,6 +17,18 @@ export function naverSessionExists(userId: string): boolean {
 }
 export function deleteNaverSession(userId: string): void { deleteSession(naverSessionName(userId), LEGACY_SESSION_DIRS); }
 export function deleteGoogleSession(userId: string): void { deleteSession(googleSessionName(userId), LEGACY_SESSION_DIRS); }
+
+export function activateNaverAccount(userId: string, naverId: string): boolean {
+  try {
+    const accountSessionName = naverAcctSessionName(userId, naverId);
+    if (!hasSession(accountSessionName, LEGACY_SESSION_DIRS)) return false;
+    const session = readSession<any>(accountSessionName, LEGACY_SESSION_DIRS);
+    writeSession(naverSessionName(userId), session);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 /* ── 봇 탐지 우회 ── */
 const ANTI_DETECTION_SCRIPT = `
@@ -165,12 +178,14 @@ export async function saveNaverSession(
 
     const cookies = await context.cookies();
     // ★비번 저장(자동 재로그인용, base64) — 재진입 시 세션 만료돼도 저장된 정보로 원터치 재연결.
-    writeSession(naverSessionName(userId), {
+    const session = {
       loginId: id,
       blogId,
       cookies,
       pw: Buffer.from(pw, "utf-8").toString("base64"),
-    });
+    };
+    writeSession(naverAcctSessionName(userId, id), session);
+    writeSession(naverSessionName(userId), session);
     await browser.close();
     return { blogId };
   } catch (e) {
