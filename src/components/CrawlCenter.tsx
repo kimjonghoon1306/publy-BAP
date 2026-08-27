@@ -268,7 +268,7 @@ export default function CrawlCenter({ showToast, theme: extTheme, userId, plan =
   const saveSender = async () => {
     if (!userId) { setSErr("로그인 정보가 없어요"); return; }
     setSErr("");
-    if (!sForm.from_email || !sForm.smtp_user || !sForm.smtp_pass) { setSErr("발신 이메일·로그인 아이디·앱 비밀번호를 모두 채워주세요."); return; }
+    if (!sForm.from_email || !sForm.smtp_user || !sForm.smtp_pass) { setSErr("발신 이메일·로그인 아이디·비밀번호를 모두 채워주세요."); return; }
     setSSaving(true);
     try {
       const r = await botFetch(`${BOT}/api/outreach/sender`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ userId, ...sForm }) });
@@ -750,14 +750,19 @@ export default function CrawlCenter({ showToast, theme: extTheme, userId, plan =
           <div onClick={e => e.stopPropagation()} style={{ background: C.surf, border: `1px solid ${C.line2}`, borderRadius: 6, maxWidth: 480, width: "100%", maxHeight: "88vh", overflowY: "auto", boxShadow: "0 30px 80px rgba(0,0,0,.5)" }}>
             <div style={{ padding: "20px 24px", borderBottom: `1px solid ${C.line}` }}>
               <div style={{ fontFamily: serif, fontSize: 18, fontWeight: 600 }}>발신 이메일 계정 등록</div>
-              <div style={{ fontSize: 11.5, color: C.sub, marginTop: 3, lineHeight: 1.55 }}>이 계정으로 블로거에게 제안 메일이 나가요. <b>네이버 메일은 '앱 비밀번호'</b>가 필요해요(네이버 메일 설정 → POP3/SMTP → 앱 비밀번호 생성).</div>
+              <div style={{ fontSize: 11.5, color: C.sub, marginTop: 3, lineHeight: 1.55 }}>이 계정으로 블로거에게 제안 메일이 나가요. 블로그 로그인과는 <b>별개의 메일 서버 로그인</b>이라, 아래 설정을 먼저 켜야 등록돼요.</div>
             </div>
             <div style={{ padding: "20px 24px", display: "flex", flexDirection: "column", gap: 12 }}>
+              <div style={{ fontSize: 11.5, color: "#8a5a00", lineHeight: 1.6, background: "#fff5e0", border: "1px solid #f0c669", borderRadius: 6, padding: "11px 13px" }}>
+                <div style={{ fontWeight: 800, marginBottom: 4, color: "#a8620a" }}>⚠️ 등록 전 네이버 메일에서 꼭 켜세요 (안 켜면 무조건 실패)</div>
+                <div><b>1) IMAP/SMTP 사용 켜기</b> — 네이버 메일 → 좌측 하단 <b>환경설정(⚙)</b> → <b>POP3/IMAP 설정</b> → <b>IMAP/SMTP 설정</b> 탭 → <b>“IMAP/SMTP 사용”을 ‘사용함’</b>으로 → 저장. <span style={{ opacity: .85 }}>(이게 꺼져 있으면 비번이 맞아도 로그인 실패해요)</span></div>
+                <div style={{ marginTop: 3 }}><b>2) 2단계 인증 쓰는 계정만</b> — 앱 비밀번호 16자리를 만들어 아래 비밀번호 칸에 넣기.</div>
+              </div>
               {[
                 { k: "from_name", l: "보내는 사람 이름 (선택)", ph: "온종일 체험단", hint: "받는 사람 메일에 표시될 이름이에요." },
                 { k: "from_email", l: "발신 이메일 주소 *", ph: "myid@naver.com", hint: "이 주소에서 메일이 나가요." },
                 { k: "smtp_user", l: "로그인 아이디 *", ph: "myid", hint: "네이버는 이메일 앞부분만(예: hong@naver.com → hong). 구글·다음은 전체 이메일을 넣으세요." },
-                { k: "smtp_pass", l: "앱 비밀번호 *", ph: "네이버 메일 앱 비밀번호", pw: true, hint: "네이버 로그인 비번이 아니라, 메일 설정에서 만든 '앱 비밀번호'예요." },
+                { k: "smtp_pass", l: "비밀번호 *", ph: "네이버 로그인 비번 또는 앱 비밀번호", pw: true, hint: "2단계 인증 안 쓰면 네이버 로그인 비번 그대로. 2단계 인증(휴대폰 인증) 쓰면 로그인 비번은 안 되고 '앱 비밀번호 16자리'를 만들어 넣어야 해요." },
               ].map(f => (
                 <div key={f.k}>
                   <div style={label}>{f.l}</div>

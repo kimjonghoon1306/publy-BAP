@@ -2586,6 +2586,81 @@ export async function checkSelectedBlogExposure(params: {
   return { ...progress, totalPostsForExposure: list.totalCount || list.posts.length, lowQualitySuspected: known.length >= 3 ? missing / known.length > 0.5 : null };
 }
 
+// 🩺 P4: 글별 조회수 수집 — 네이버 블로그통계 '조회수 순위(PV)' 페이지(blog.stat.naver.com/stat/rank_pv)를
+//   로그인 세션으로 열어 [순위·제목·조회수] 표를 읽는다. (크롬확장과 동일한 DOM 파싱 방식, 회원은 아무것도 안 함)
+export type PostView = { logNo: string | null; title: string; views: number; rank: number | null };
+export async function crawlPostViews(params: { accountId: string; onLog?: (m: string) => void }): Promise<PostView[]> {
+  const { accountId, onLog } = params;
+  const log = onLog || console.log;
+  let blogId = loadSession(accountId).blogId;
+  const cookies = await ensureLiveSession(accountId, log);   // 세션 만료면 자동 재연결
+  if (!blogId) throw new Error("내 블로그 ID를 찾을 수 없어요 — 계정을 다시 연결해주세요");
+  const browser = await launchBrowser(accountId, { headless: true, log });
+  const context = await browser.newContext({ userAgent: UA, viewport: { width: 1280, height: 900 }, locale: "ko-KR" });
+  await applyAntiDetection(context);
+  await context.addCookies(cookies);
+  const page = await context.newPage();
+  blogId = await resolveBlogIdFast(blogId, cookies, accountId, log);
+  let rows: PostView[] = [];
+  try {
+    log(`[조회수] 통계(조회수 순위) 수집 중... blogId=${blogId}`);
+    const urls = [
+      `https://blog.stat.naver.com/stat/rank_pv?blogId=${encodeURIComponent(blogId)}`,
+      `https://blog.stat.naver.com/stat/rank_pv.naver?blogId=${encodeURIComponent(blogId)}`,
+      `https://blog.stat.naver.com/stat/rank_pv`,
+    ];
+    for (const u of urls) {
+      try {
+        await page.goto(u, { waitUntil: "domcontentloaded", timeout: 20000 }).catch(() => {});
+        await page.waitForTimeout(1500);
+        // 페이지의 모든 프레임에서 [순위/제목/조회수] 헤더를 가진 표를 찾아 파싱
+        for (const fr of page.frames()) {
+          const parsed: PostView[] = await fr.evaluate(() => {
+            const clean = (t: string) => (t || "").replace(/ /g, " ").replace(/\s+/g, " ").trim();
+            const headerKey = (txt: string) => {
+              const s = clean(txt).toLowerCase();
+              if (/^(순위|랭킹)$/.test(s)) return "rank";
+              if (/^(제목|게시물|포스트)$/.test(s)) return "title";
+              if (/^(조회수|pv)$/.test(s)) return "views";
+              return "";
+            };
+            const tables = Array.from(document.querySelectorAll("table"));
+            for (const table of tables) {
+              const ths = Array.from(table.querySelectorAll("thead th, tr th")).map(th => clean((th as HTMLElement).textContent || ""));
+              const map: Record<string, number> = {};
+              ths.forEach((h, i) => { const k = headerKey(h); if (k && map[k] === undefined) map[k] = i; });
+              if (map.title === undefined || map.views === undefined) continue;
+              const out: { logNo: string | null; title: string; views: number; rank: number | null }[] = [];
+              const trs = Array.from(table.querySelectorAll("tbody tr"));
+              for (const tr of trs) {
+                const tds = Array.from(tr.querySelectorAll("td, th")) as HTMLElement[];
+                if (!tds.length) continue;
+                const cellText = (i: number) => (i != null && tds[i] ? clean(tds[i].textContent || "") : "");
+                const title = cellText(map.title);
+                if (!title) continue;
+                const views = Number(cellText(map.views).replace(/[^\d]/g, "")) || 0;
+                const rankStr = map.rank != null ? cellText(map.rank).replace(/[^\d]/g, "") : "";
+                let logNo: string | null = null;
+                const a = map.title != null && tds[map.title] ? tds[map.title].querySelector("a[href]") : null;
+                if (a) { const h = a.getAttribute("href") || ""; const m = h.match(/logNo=(\d+)/) || h.match(/\/(\d{9,})/); if (m) logNo = m[1]; }
+                out.push({ logNo, title, views, rank: rankStr ? Number(rankStr) : null });
+              }
+              if (out.length) return out;
+            }
+            return [];
+          }).catch(() => [] as PostView[]);
+          if (Array.isArray(parsed) && parsed.length) { rows = parsed; break; }
+        }
+        if (rows.length) break;
+      } catch {}
+    }
+    log(`[조회수] ${rows.length}개 글 조회수 수집 완료`);
+  } finally {
+    await browser.close().catch(() => {});
+  }
+  return rows;
+}
+
 export async function crawlBlogStats(params: {
   accountId: string;
   plan?: string;

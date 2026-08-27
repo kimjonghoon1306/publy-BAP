@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { createPortal } from "react-dom";
 import { botFetch, BotEventStream } from "../lib/botApi";
-import { getReplyDailyUsage, incrementReplyQuota, REPLY_DAILY_LIMIT, getBlogscoreDailyUsage, incrementBlogscoreQuota, BLOGSCORE_DAILY_LIMIT, PUMASI_ACCOUNT_LIMIT, PUMASI_POSTS_LIMIT, TAB_ACCOUNT_LIMIT, getPumasiDailyUsage, savePostCareChecks, markPrescribed, markTitleChanged, getPostCare, computeCareStatus, PostCare, OBSERVE_DAYS } from "../lib/supabase";
+import { getReplyDailyUsage, incrementReplyQuota, REPLY_DAILY_LIMIT, getBlogscoreDailyUsage, incrementBlogscoreQuota, BLOGSCORE_DAILY_LIMIT, PUMASI_ACCOUNT_LIMIT, PUMASI_POSTS_LIMIT, TAB_ACCOUNT_LIMIT, getPumasiDailyUsage, savePostCareChecks, markPrescribed, markTitleChanged, getPostCare, computeCareStatus, PostCare, OBSERVE_DAYS, savePostViews, latestViews, reportError } from "../lib/supabase";
 
 const BOT = "http://127.0.0.1:3334";
 
@@ -48,7 +48,7 @@ const LogBox = ({ logs, logRef, onClear }: { logs: string[]; logRef: React.RefOb
     {/* userSelect:text + WebkitUserSelect:text → Electron에서도 드래그로 로그 직접 복사 가능 */}
     <div ref={logRef} onScroll={onScroll} style={{ height: "min(90vh, 1400px)", minHeight: 680, overflowY: "auto", padding: "14px 18px", fontFamily: "'JetBrains Mono', monospace", fontSize: 12.5, lineHeight: 1.85, background: "#050a0f", userSelect: "text", WebkitUserSelect: "text", cursor: "text" }}>
       {logs.length === 0 ? <span style={{ color: "#3a5a7a" }}>대기 중...</span> : logs.map((l, i) => (
-        <div key={i} style={{ color: l.includes("✅")||l.includes("🎉")||l.includes("❤️")||l.includes("💬") ? "#00d68f" : l.includes("❌")||l.includes("🚫") ? "#ff5363" : l.includes("⏭️") ? "#7a9ab5" : "#00c8ff", userSelect: "text", WebkitUserSelect: "text" }}>{l}</div>
+        <div key={i} style={{ color: l.includes("✅")||l.includes("🎉")||l.includes("❤️")||l.includes("💬") ? "#00d68f" : l.includes("❌")||l.includes("🚫")||l.includes("🔴") ? "#ff5363" : l.includes("⏭️") ? "#7a9ab5" : "#00c8ff", fontWeight: l.includes("🔴") ? 800 : 400, userSelect: "text", WebkitUserSelect: "text" }}>{l}</div>
       ))}
     </div>
   </div>
@@ -560,6 +560,11 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
   const [trackPage, setTrackPage] = useState(0);
   const [rankChecking, setRankChecking] = useState<string>("");   // 지금 순위 검사 중인 postKey
   const [liveRanks, setLiveRanks] = useState<Record<string, { rank: number | null; at: number }>>({});   // postKey → 방금 검사한 실시간 순위
+  const [autoTrackLoading, setAutoTrackLoading] = useState(false);   // 🩺 추적글 순위 자동 일괄검사 중(회원이 버튼 안 눌러도 알아서)
+  const [autoViewsLoading, setAutoViewsLoading] = useState(false);   // 🩺 P4: 글별 조회수 자동 수집 중
+  const autoViewsStartedRef = useRef<string>("");   // 조회수 자동수집도 계정당 하루 1회
+  const [careListOpen, setCareListOpen] = useState<""|"todo"|"observing"|"cured">("");   // 🩺 회진 칩 클릭 → 해당 글 리스트 펼침
+  const autoTrackStartedRef = useRef<string>("");   // `${accountId}:${today}` — 계정당 하루 1회만 자동검사(중복·무한루프 차단)
   const TRACK_PAGE_SIZE = 8;
   // 🎉 블로그지수 웰컴 팝업(진입 시 팡!) — 7일 보지않기(localStorage until)
   const [welcome, setWelcome] = useState(false);
@@ -576,6 +581,7 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
   const [scSolSearch, setScSolSearch] = useState(""); // AI 팁 원래 제목 검색
   const [scExpPage, setScExpPage] = useState(0);   // 검색노출 결과 페이지네이션(30개 단위)
   const [scExpSearch, setScExpSearch] = useState(""); // 검색노출 결과 제목 검색
+  const [scRankFilter, setScRankFilter] = useState<"all"|"t10"|"t20"|"t50"|"t100"|"out">("all");   // 순위 구간 필터(10/20/50/100위 이내·100위 밖)
   const [scPostPage, setScPostPage] = useState(0);    // 검사할 글 목록 페이지네이션(30개 단위)
   const [scPostSearch, setScPostSearch] = useState(""); // 검사할 글 제목 검색
   const [scPostMode, setScPostMode] = useState<"period"|"all">("period");
@@ -726,6 +732,31 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
     try { const rows = await getPostCare(userId, activeAccount.accountId); const m: Record<string, PostCare> = {}; rows.forEach(r => { m[r.post_key] = r; }); setCareMap(m); } catch {}
   };
   useEffect(() => { loadCare(); /* eslint-disable-next-line */ }, [activeAccount?.accountId, userId, rpTick]);
+  // 🩺 P1: 블로그지수 탭에서 추적글(제목 바꾼 글)이 로드되면, 계정당 하루 1회 자동으로 순위를 채운다.
+  //    (careMap이 loadCare로 갱신될 때마다 돌지만, 계정+날짜 key로 1회만 실행 → 무한루프 없음)
+  useEffect(() => {
+    if (tab !== "score") return;
+    const acc = activeAccount;
+    if (!acc || !userId) return;
+    if (!Object.values(careMap).some(c => c.title_changed_at)) return;   // 추적글 아직 없음 → 대기
+    const key = `${acc.accountId}:${new Date().toISOString().slice(0, 10)}`;
+    if (autoTrackStartedRef.current === key) return;   // 이 계정 오늘 이미 자동검사함
+    autoTrackStartedRef.current = key;
+    autoCheckTrackedRanks();
+    /* eslint-disable-next-line */
+  }, [careMap, activeAccount?.accountId, userId, tab]);
+  // 🩺 P4: 카르테가 로드되면 계정당 하루 1회 글별 조회수 자동 수집(봇이 통계 긁어옴)
+  useEffect(() => {
+    if (tab !== "score") return;
+    const acc = activeAccount;
+    if (!acc || !userId) return;
+    if (!Object.keys(careMap).length) return;   // 매칭할 카르테가 있어야 함
+    const key = `${acc.accountId}:${new Date().toISOString().slice(0, 10)}`;
+    if (autoViewsStartedRef.current === key) return;
+    autoViewsStartedRef.current = key;
+    autoCollectViews();
+    /* eslint-disable-next-line */
+  }, [careMap, activeAccount?.accountId, userId, tab]);
 
   // 🆕 수정 추적: 그 글 하나만 실시간으로 현재 검색 순위 검사(exposure-check 단건). 결과를 카르테에도 누적.
   const checkOneRank = async (postKey: string) => {
@@ -740,8 +771,83 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
       setLiveRanks(p => ({ ...p, [postKey]: { rank, at: Date.now() } }));
       // 카르테에 이 순위도 저장(회복 그래프·완치 감지에 반영)
       if (userId && chk) { try { const { newlyCured } = await savePostCareChecks(userId, acc.accountId, [{ logNo: postKey, title: chk.title || careMap[postKey]?.title || "", rank, exposed: chk.exposed ?? null }]); if (newlyCured.length) setCelebrate(newlyCured); await loadCare(); } catch {} }
-    } catch { setLiveRanks(p => ({ ...p, [postKey]: { rank: null, at: Date.now() } })); }
+    } catch (e: any) {
+      setLiveRanks(p => ({ ...p, [postKey]: { rank: null, at: Date.now() } }));
+      addScLog(`🔴 순위 검사 실패 (글 ${postKey}): ${e?.message || e}`);
+      reportError({ userId, blogId: acc.blogId, stage: "순위검사", message: e?.message || String(e), detail: `logNo=${postKey}` });
+    }
     setRankChecking("");
+  };
+
+  // 🩺 P1: 추적하기(제목 바꾼 글)를 실시간으로 — 회원이 글마다 [순위검사]를 누르지 않아도,
+  //    추적하기가 열릴 때 '오늘 아직 안 본' 관찰중 글들의 순위를 한 번에 자동으로 채워 카르테에 반영한다.
+  //    (팝업 완치 수 ↔ 추적하기 순위가 어긋나던 문제 해결. 계정당 하루 1회만.)
+  const autoCheckTrackedRanks = async () => {
+    const acc = activeAccount;
+    if (!acc || !userId) return;
+    const today = new Date().toISOString().slice(0, 10);
+    // 제목 바꾼 글(추적 대상) 중 오늘 순위를 아직 기록 안 한 것만
+    const targets = Object.values(careMap).filter(c => c.title_changed_at && !(c.rank_history || []).some(h => h.date === today));
+    if (!targets.length) return;
+    const logNos = targets.map(c => c.post_key).filter(Boolean);
+    if (!logNos.length) return;
+    setAutoTrackLoading(true);
+    try {
+      // 서버·네이버 부하를 줄이려 10개씩 나눠서(가볍게) 순차 검사
+      const CHUNK = 10;
+      for (let i = 0; i < logNos.length; i += CHUNK) {
+        const slice = logNos.slice(i, i + CHUNK);
+        try {
+          const r = await botFetch(`${BOT}/api/exposure-check`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ accountId: acc.accountId, plan, logNos: slice }) });
+          const d = await r.json();
+          if (!r.ok || d.ok === false) throw new Error(d.error || `HTTP ${r.status}`);
+          const checks = (d.checks || []).map((c: any) => ({ logNo: c.logNo, title: c.title || careMap[c.logNo]?.title || "", rank: c.rank ?? null, exposed: c.exposed ?? null }));
+          if (checks.length) {
+            setLiveRanks(p => { const n = { ...p }; checks.forEach((c: any) => { if (c.logNo) n[c.logNo] = { rank: c.rank ?? null, at: Date.now() }; }); return n; });
+            const { newlyCured } = await savePostCareChecks(userId, acc.accountId, checks);
+            if (newlyCured.length) setCelebrate(newlyCured);   // 자동검사 중 완치 발견되면 축포도
+          }
+        } catch (e: any) {
+          addScLog(`🔴 추적글 순위 자동검사 실패 (${slice.length}개): ${e?.message || e} — 봇이 켜져 있는지 확인해주세요`);
+          reportError({ userId, blogId: acc.blogId, stage: "추적글 자동순위검사", message: e?.message || String(e), detail: `logNos=${slice.join(",")}` });
+        }
+      }
+      await loadCare();   // 채워진 순위를 화면(추적하기·회진)에 반영
+    } catch (e: any) {
+      addScLog(`🔴 순위 자동검사 오류: ${e?.message || e}`);
+      reportError({ userId, blogId: acc.blogId, stage: "추적글 자동순위검사(전체)", message: e?.message || String(e) });
+    } finally { setAutoTrackLoading(false); }
+  };
+
+  // 🩺 P4: 글별 조회수 자동 수집 — 봇이 로그인 세션으로 통계(조회수 순위)를 긁어 카르테에 누적.
+  //    회원은 아무것도 안 함. 계정당 하루 1회. "100위 노출됐는데 조회수 미비" 같은 걸 회진이 보게 해준다.
+  const autoCollectViews = async () => {
+    const acc = activeAccount;
+    if (!acc || !userId) return;
+    setAutoViewsLoading(true);
+    try {
+      const r = await botFetch(`${BOT}/api/post-views`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ accountId: acc.accountId }) });
+      const d = await r.json();
+      if (!r.ok || d.ok === false) { throw new Error(d.error || `HTTP ${r.status}`); }
+      const views = Array.isArray(d.views) ? d.views : [];
+      if (views.length === 0) {
+        // 봇은 정상 응답했는데 0개 = 통계(조회수 순위) 페이지를 못 읽은 것(로그인 만료 or rank_pv 주소/구조 변경)
+        addScLog(`🔴 조회수 수집: 0개 — 네이버 통계(조회수 순위) 페이지를 못 읽었어요. 로그인 세션 만료 또는 통계 페이지 주소 변경일 수 있어요`);
+        reportError({ userId, blogId: acc.blogId, stage: "조회수 수집(빈결과)", message: "rank_pv에서 0개 수집 — URL/셀렉터/세션 점검 필요" });
+      } else {
+        const matched = views.filter((v: any) => v.logNo).length;
+        await savePostViews(userId, acc.accountId, views.map((v: any) => ({ logNo: v.logNo, views: v.views })));
+        await loadCare();
+        addScLog(`👁 조회수 자동 수집 완료: ${views.length}개(글번호 매칭 ${matched}개)`);
+        if (matched === 0) {   // 조회수는 읽었는데 글번호(logNo)를 못 붙임 = 진료차트에 반영 안 됨
+          addScLog(`🔴 조회수는 읽었지만 글번호 매칭 0개 — 통계 표에 글 링크가 없어 카르테에 반영 못 했어요(셀렉터 조정 필요)`);
+          reportError({ userId, blogId: acc.blogId, stage: "조회수 매칭실패", message: `${views.length}개 읽었으나 logNo 매칭 0` });
+        }
+      }
+    } catch (e: any) {
+      addScLog(`🔴 조회수 수집 오류: ${e?.message || e} — 봇이 켜져 있는지 확인해주세요`);
+      reportError({ userId, blogId: acc.blogId, stage: "조회수 수집", message: e?.message || String(e) });
+    } finally { setAutoViewsLoading(false); }
   };
 
   // 🩺 수정 추적에서 '제목 변경' 클릭 → 멘토가 관찰기간을 보고 판단하는 팝업. 무시하고 강행 OR 지휘 따라 기다리기.
@@ -1367,7 +1473,7 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
       const d = JSON.parse(e.data);
       if (d.type === "log") addScLog(d.msg);
       if (d.type === "stats") { setScResult(d.stats); addScLog("✅ 진단 완료!"); setScLoading(false); es.close(); }
-      if (d.type === "error") { addScLog(`❌ ${d.msg}`); setScLoading(false); es.close(); }
+      if (d.type === "error") { addScLog(`🔴 ${d.msg}`); reportError({ userId, blogId: activeAccount?.blogId, stage: "블로그 진단", message: d.msg || "" }); setScLoading(false); es.close(); }
     };
     es.onerror = () => { addScLog("❌ 연결 오류 (다시 시도해주세요)"); setScLoading(false); es.close(); };
   };
@@ -1576,7 +1682,7 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
         setScPosts(posts); setScSelectedLogNos(ids); setScPostsLoading(false);
         addScLog(`✅ 검사 후보 ${posts.length}개를 불러왔어요`); es.close();
       }
-      if (d.type === "error") { addScLog(`❌ ${d.msg}`); setScPostsLoading(false); es.close(); }
+      if (d.type === "error") { addScLog(`🔴 ${d.msg}`); reportError({ userId, blogId: activeAccount?.blogId, stage: "글 목록 불러오기", message: d.msg || "" }); setScPostsLoading(false); es.close(); }
     };
     es.onerror = () => { addScLog("❌ 글 목록 연결 오류"); setScPostsLoading(false); es.close(); };
   };
@@ -1624,7 +1730,7 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
           await loadCare();   // 재발행 목록에 관찰중/처방 상태 즉시 반영
         } catch {}
       }
-    } catch (e: any) { addScLog(`❌ 검색노출 검사 실패: ${e.message}`); }
+    } catch (e: any) { addScLog(`🔴 검색노출 검사 실패: ${e.message}`); reportError({ userId, blogId: activeAccount?.blogId, stage: "검색노출 검사", message: e?.message || String(e) }); }
     finally { setScExposureLoading(false); }
   };
 
@@ -2758,8 +2864,8 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
                         <div style={{ padding: "16px 18px", display: "flex", alignItems: "center", gap: 12 }}>
                           <img src="characters/bori-cheer.png" alt="응원단 보리" onError={e => { const s = document.createElement("div"); s.textContent = "🌱"; s.style.cssText = "font-size:34px;line-height:1"; e.currentTarget.replaceWith(s); }} style={{ width: 44, height: 44, objectFit: "contain", flexShrink: 0, filter: "drop-shadow(0 4px 8px rgba(139,92,246,.3))" }} />
                           <div style={{ flex: 1, minWidth: 0 }}>
-                            <div style={{ fontSize: 14.5, fontWeight: 850, color: "var(--text)" }}>🌱 수정 추적 <span style={{ fontSize: 11.5, fontWeight: 800, color: "#00c896", background: "rgba(0,200,150,.14)", padding: "2px 9px", borderRadius: 20, marginLeft: 4 }}>{tracked.length}개 관리 중</span></div>
-                            <div style={{ fontSize: 11.5, color: "var(--text2)", marginTop: 3, lineHeight: 1.5 }}>제목을 바꾼 글이에요. 주치의가 <b style={{ color: "#8b5cf6" }}>완치(검색 노출)될 때까지</b> 함께 지켜봐요.</div>
+                            <div style={{ fontSize: 14.5, fontWeight: 850, color: "var(--text)" }}>🌱 수정 추적 <span style={{ fontSize: 11.5, fontWeight: 800, color: "#00c896", background: "rgba(0,200,150,.14)", padding: "2px 9px", borderRadius: 20, marginLeft: 4 }}>{tracked.length}개 관리 중</span>{autoTrackLoading && <span style={{ fontSize: 11, fontWeight: 800, color: "#8b5cf6", background: "rgba(139,92,246,.12)", padding: "2px 9px", borderRadius: 20, marginLeft: 6 }}>🔄 순위 자동 확인 중…</span>}</div>
+                            <div style={{ fontSize: 11.5, color: "var(--text2)", marginTop: 3, lineHeight: 1.5 }}>제목을 바꾼 글이에요. 주치의가 <b style={{ color: "#8b5cf6" }}>완치(검색 노출)될 때까지</b> 함께 지켜봐요. <b style={{ color: "#00c896" }}>순위는 자동으로 채워져요</b> — 직접 안 눌러도 돼요.</div>
                           </div>
                           <button onClick={() => { setTrackOpen(o => !o); setTrackPage(0); }} style={{ flexShrink: 0, padding: "8px 14px", borderRadius: 10, border: "none", background: trackOpen ? "var(--card2)" : "linear-gradient(135deg,#00c896,#00a878)", color: trackOpen ? "var(--text2)" : "#fff", cursor: "pointer", fontSize: 12, fontWeight: 800, fontFamily: "inherit" }}>{trackOpen ? "접기 ▲" : "리스트 보기 ▼"}</button>
                         </div>
@@ -2789,6 +2895,7 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
                                         <span>✍️ 수정 {changedDays === 0 ? "오늘" : `${changedDays}일 전`}</span>
                                         <span style={{ color: stColor, fontWeight: 800 }}>{stLabel}</span>
                                         <span>📊 순위 {shownRank == null ? "미노출" : `${shownRank}위`}{live && <span style={{ color: "#00c896" }}> ·방금</span>}</span>
+                                        {(() => { const vw = latestViews(c); return vw != null ? <span style={{ color: vw === 0 ? "#ef4444" : "#0ea5e9", fontWeight: 800 }}>👁 조회 {vw.toLocaleString()}</span> : null; })()}
                                       </div>
                                     </div>
                                     <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
@@ -2827,12 +2934,51 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
                     </div>
                     {exposureChecks.length ? (() => {
                       const q = scExpSearch.trim().toLowerCase();
-                      const filtered = q ? exposureChecks.filter(item => item.title.toLowerCase().includes(q)) : exposureChecks;
+                      const base = q ? exposureChecks.filter(item => item.title.toLowerCase().includes(q)) : exposureChecks;
+                      // 순위 구간 필터: 노출(exposed) 글은 rank로, '100위 밖'은 미노출(exposed===false)
+                      const inRank = (item: any, max: number) => item.exposed === true && item.rank != null && item.rank <= max;
+                      const rankMatch = (item: any) =>
+                        scRankFilter === "all" ? true :
+                        scRankFilter === "out" ? item.exposed === false :
+                        scRankFilter === "t10" ? inRank(item, 10) :
+                        scRankFilter === "t20" ? inRank(item, 20) :
+                        scRankFilter === "t50" ? inRank(item, 50) :
+                        scRankFilter === "t100" ? inRank(item, 100) : true;
+                      const filtered = base.filter(rankMatch);
+                      // 각 구간 개수(전체 기준 — 버튼에 숫자 표시)
+                      const rc = {
+                        all: exposureChecks.length,
+                        t10: exposureChecks.filter(x => inRank(x, 10)).length,
+                        t20: exposureChecks.filter(x => inRank(x, 20)).length,
+                        t50: exposureChecks.filter(x => inRank(x, 50)).length,
+                        t100: exposureChecks.filter(x => inRank(x, 100)).length,
+                        out: exposureChecks.filter(x => x.exposed === false).length,
+                      };
+                      const rankTabs: { k: typeof scRankFilter; label: string; n: number; col: string }[] = [
+                        { k: "all", label: "전체", n: rc.all, col: "#6b7280" },
+                        { k: "t10", label: "10위 이내", n: rc.t10, col: "#00a878" },
+                        { k: "t20", label: "20위 이내", n: rc.t20, col: "#0ea5e9" },
+                        { k: "t50", label: "50위 이내", n: rc.t50, col: "#8b5cf6" },
+                        { k: "t100", label: "100위 이내", n: rc.t100, col: "#f59e0b" },
+                        { k: "out", label: "100위 밖(누락)", n: rc.out, col: "#ef4444" },
+                      ];
                       const PER = 30; const totalPages = Math.max(1, Math.ceil(filtered.length / PER));
                       const page = Math.min(scExpPage, totalPages - 1);
                       const shown = filtered.slice(page * PER, page * PER + PER);
                       return (
                         <>
+                          {/* 순위 구간 필터 — 클릭하면 분류(테리 요청) */}
+                          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 10 }}>
+                            {rankTabs.map(t => {
+                              const on = scRankFilter === t.k;
+                              return (
+                                <button key={t.k} onClick={() => { setScRankFilter(t.k); setScExpPage(0); }}
+                                  style={{ padding: "6px 11px", borderRadius: 20, border: `1.5px solid ${on ? t.col : "var(--border)"}`, background: on ? t.col : "transparent", color: on ? "#fff" : "var(--text2)", cursor: "pointer", fontSize: 11.5, fontWeight: 800, fontFamily: "inherit", transition: "all .15s", whiteSpace: "nowrap" }}>
+                                  {t.label} <span style={{ opacity: on ? .9 : .6 }}>{t.n}</span>
+                                </button>
+                              );
+                            })}
+                          </div>
                           {/* 제목 검색 */}
                           <div style={{ marginBottom: 10 }}>
                             <input className="inp" value={scExpSearch} onChange={e => { setScExpSearch(e.target.value); setScExpPage(0); }} placeholder="🔍 제목으로 검색..." style={{ fontSize: 12.5, padding: "9px 12px" }} />
@@ -2864,11 +3010,41 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
                     const notChanged = Object.values(careMap).filter(c => !c.title_changed_at);
                     if (notChanged.length === 0) return null;
                     const cnt: Record<string, number> = { new: 0, needs: 0, prescribed: 0, observing: 0, relapse: 0, cured: 0 };
-                    notChanged.forEach(c => { cnt[computeCareStatus(c).status]++; });
+                    // 상태별로 글을 실제로 모아둔다(칩 클릭 시 어떤 글인지 리스트로 보여주려고)
+                    const byStatus: { todo: PostCare[]; observing: PostCare[]; cured: PostCare[] } = { todo: [], observing: [], cured: [] };
+                    notChanged.forEach(c => {
+                      const s = computeCareStatus(c).status; cnt[s]++;
+                      if (s === "needs" || s === "relapse") byStatus.todo.push(c);
+                      else if (s === "observing") byStatus.observing.push(c);
+                      else if (s === "cured") byStatus.cured.push(c);
+                    });
                     const todo = cnt.needs + cnt.relapse;   // 지금 손볼 것
                     const total = notChanged.length;
-                    const rate = total ? Math.round(cnt.cured / total * 100) : 0;   // 돌봄지수(회복률)
-                    const chip = (bg: string, col: string, txt: string) => <span style={{ padding: "4px 10px", borderRadius: 20, background: bg, color: col, fontSize: 11, fontWeight: 800, whiteSpace: "nowrap" }}>{txt}</span>;
+                    const rate = total ? Math.round(cnt.cured / total * 100) : 0;   // 노출률(검색에 뜨는 글 비율)
+                    // 글의 현재 순위(자동검사로 채워진 실시간값 우선, 없으면 마지막 기록)
+                    const rankOf = (c: PostCare) => { const live = liveRanks[c.post_key]; const last = c.rank_history?.[c.rank_history.length - 1]; return live ? live.rank : (last?.rank ?? null); };
+                    // 클릭 가능한 칩(누르면 아래에 해당 글 리스트가 열림)
+                    const clickChip = (key: "todo"|"observing"|"cured", bg: string, col: string, txt: string) => (
+                      <button onClick={() => setCareListOpen(o => o === key ? "" : key)}
+                        style={{ padding: "5px 12px", borderRadius: 20, background: careListOpen === key ? col : bg, color: careListOpen === key ? "#fff" : col, fontSize: 11.5, fontWeight: 800, whiteSpace: "nowrap", border: `1.5px solid ${col}`, cursor: "pointer", fontFamily: "inherit", transition: "all .15s" }}>
+                        {txt} <span style={{ opacity: .8 }}>{careListOpen === key ? "▲" : "▾"}</span>
+                      </button>
+                    );
+                    // 상태별 글 리스트(제목·순위·보기)
+                    const careList = (items: PostCare[], emptyMsg: string) => (
+                      <div style={{ marginTop: 10, background: "var(--bg)", borderRadius: 10, border: "1px solid var(--border)", padding: "8px 10px", maxHeight: 260, overflowY: "auto" }}>
+                        {items.length === 0 ? <div style={{ fontSize: 11.5, color: "var(--text3)", padding: "8px 2px", textAlign: "center" }}>{emptyMsg}</div> :
+                          items.slice(0, 50).map((c, i) => { const rk = rankOf(c); const vw = latestViews(c); return (
+                            <div key={c.post_key} style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 2px", borderBottom: i < Math.min(items.length, 50) - 1 ? "1px solid var(--border)" : "none" }}>
+                              <span style={{ flex: 1, minWidth: 0, fontSize: 12, color: "var(--text2)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{c.title || c.post_key}</span>
+                              {vw != null && <span title="일 조회수(통계에서 자동 수집)" style={{ flexShrink: 0, fontSize: 10.5, fontWeight: 800, color: vw === 0 ? "#ef4444" : "#0ea5e9" }}>조회 {vw.toLocaleString()}</span>}
+                              <b style={{ fontSize: 11, color: rk == null ? "#ef4444" : rk <= 10 ? "#00a878" : rk <= 100 ? "var(--text2)" : "#ef4444", flexShrink: 0 }}>{rk == null ? "미노출" : `${rk}위`}</b>
+                              <a href={`https://blog.naver.com/${activeAccount?.blogId || ""}/${c.post_key}`} target="_blank" rel="noopener noreferrer" style={{ flexShrink: 0, fontSize: 10.5, fontWeight: 800, color: "var(--text3)", textDecoration: "none", padding: "3px 8px", borderRadius: 7, border: "1px solid var(--border)" }}>👁 보기</a>
+                            </div>
+                          ); })}
+                        {items.length > 50 && <div style={{ fontSize: 10.5, color: "var(--text3)", textAlign: "center", paddingTop: 6 }}>+ {items.length - 50}개 더</div>}
+                      </div>
+                    );
                     return (
                       <div style={{ marginBottom: 14, padding: "16px 18px", borderRadius: 14, background: "linear-gradient(135deg, rgba(0,200,150,.08), rgba(139,92,246,.05))", border: "1px solid rgba(0,200,150,.25)" }}>
                         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
@@ -2886,21 +3062,32 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
                           </div>
                         </div>
                         {(todo > 0 || cnt.observing > 0 || cnt.cured > 0) && (
-                          <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
-                            {todo > 0 && chip("rgba(245,158,11,.14)", "#f59e0b", `🚑 치료 필요 ${todo}`)}
-                            {cnt.observing > 0 && chip("rgba(139,92,246,.14)", "#8b5cf6", `🌱 관찰 중 ${cnt.observing}`)}
-                            {cnt.cured > 0 && chip("rgba(0,200,150,.14)", "#00c896", `✅ 완치 ${cnt.cured}`)}
-                          </div>
+                          <>
+                            <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
+                              {todo > 0 && clickChip("todo", "rgba(245,158,11,.14)", "#f59e0b", `🚑 치료 필요 ${todo}`)}
+                              {cnt.observing > 0 && clickChip("observing", "rgba(139,92,246,.14)", "#8b5cf6", `🌱 관찰 중 ${cnt.observing}`)}
+                              {cnt.cured > 0 && clickChip("cured", "rgba(0,200,150,.14)", "#00c896", `✅ 완치 ${cnt.cured}`)}
+                            </div>
+                            <div style={{ fontSize: 10.5, color: "var(--text3)", marginTop: 6 }}>👆 눌러서 어떤 글인지 확인하세요{autoViewsLoading && <span style={{ color: "#0ea5e9", fontWeight: 700 }}> · 🔄 조회수 자동 수집 중…</span>}</div>
+                            {/* 클릭한 칩의 글 리스트 */}
+                            {careListOpen === "todo" && careList(byStatus.todo, "치료할 글이 없어요 👍")}
+                            {careListOpen === "observing" && careList(byStatus.observing, "관찰 중인 글이 없어요")}
+                            {careListOpen === "cured" && <>
+                              <div style={{ fontSize: 10.5, color: "var(--text2)", marginTop: 8, padding: "8px 10px", borderRadius: 9, background: "rgba(14,165,233,.08)", border: "1px solid rgba(14,165,233,.25)", lineHeight: 1.55 }}>✅ 완치=검색 100위 안에 뜬다는 뜻이에요. 하지만 <b style={{ color: "#ef4444" }}>조회 0</b>이면 노출돼도 안 읽히는 거예요 — <b>제목·썸네일을 더 끌리게</b> 바꾸면 조회수가 올라요. (100위 진입이 끝이 아니에요!)</div>
+                              {careList(byStatus.cured, "아직 완치된 글이 없어요")}
+                            </>}
+                          </>
                         )}
                         {total > 1 && (
-                          <div style={{ marginTop: 12 }}>
-                            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, marginBottom: 5 }}>
-                              <span style={{ color: "var(--text2)", fontWeight: 700 }}>🩹 블로그 회복률</span>
-                              <span style={{ color: "#00c896", fontWeight: 800 }}>{rate}% <span style={{ color: "var(--text3)", fontWeight: 500 }}>({cnt.cured}/{total})</span></span>
+                          <div style={{ marginTop: 14 }}>
+                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", fontSize: 11.5, marginBottom: 5 }}>
+                              <span style={{ color: "var(--text2)", fontWeight: 700 }}>🔎 검색 노출률</span>
+                              <span style={{ color: "#00c896", fontWeight: 800 }}>{rate}%</span>
                             </div>
                             <div style={{ height: 8, borderRadius: 99, background: "var(--bg)", overflow: "hidden", border: "1px solid var(--border)" }}>
                               <div style={{ height: "100%", width: `${rate}%`, borderRadius: 99, background: "linear-gradient(90deg,#00c896,#8b5cf6)", transition: "width .6s ease" }} />
                             </div>
+                            <div style={{ fontSize: 10.5, color: "var(--text3)", marginTop: 5, lineHeight: 1.5 }}>제목 안 바꾼 글 <b>{total}개</b> 중 <b style={{ color: "#00c896" }}>{cnt.cured}개</b>가 검색 100위 안에 떠요. 나머지 <b style={{ color: "#f59e0b" }}>{todo}개</b>는 손보면 노출될 수 있어요.</div>
                           </div>
                         )}
                       </div>

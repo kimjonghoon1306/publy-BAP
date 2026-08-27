@@ -1218,6 +1218,7 @@ export interface PostCare {
   prescribed_at?: string | null;    // 개선안 받은 시각
   title_changed_at?: string | null; // 제목 수정한 시각
   cured_at?: string | null;         // 완치(노출) 시각
+  view_history?: { date: string; views: number }[] | null;   // 🩺 P4: 글별 조회수 일별 누적(통계 rank_pv에서 수집)
 }
 // 완치 기준: 100위 안에 노출되면 완치. / 경과관찰: 제목 수정 후 30일은 "기다리세요"(리서치 근거).
 export const CURE_RANK = 100;
@@ -1264,6 +1265,49 @@ export async function savePostCareChecks(
 export async function getPostCare(userId: string, account: string): Promise<PostCare[]> {
   const { data } = await supabase.from("publy_post_care").select("*").eq("user_id", userId).eq("account", account);
   return (data as PostCare[]) || [];
+}
+
+// 🩺 P4: 글별 조회수를 진료차트에 누적(같은 날 재수집이면 갱신). 이미 카르테가 있는 글(logNo 매칭)만 update.
+export async function savePostViews(
+  userId: string, account: string,
+  views: { logNo?: string | null; views: number }[],
+): Promise<void> {
+  const today = new Date().toISOString().slice(0, 10);
+  const items = views.filter(v => v.logNo);
+  if (!items.length) return;
+  const keys = items.map(v => v.logNo!) as string[];
+  const { data: existing } = await supabase
+    .from("publy_post_care").select("post_key, view_history")
+    .eq("user_id", userId).eq("account", account).in("post_key", keys);
+  const byKey: Record<string, any> = {};
+  (existing || []).forEach((r: any) => { byKey[r.post_key] = r; });
+  // 카르테가 이미 있는 글만(신규 insert는 rank_history 제약 때문에 피함 — 순위검사로 먼저 등록됨)
+  const rows = items.filter(v => byKey[v.logNo!]).map(v => {
+    const prev = byKey[v.logNo!];
+    const hist = ((prev?.view_history as { date: string; views: number }[]) || []).filter(h => h.date !== today);
+    hist.push({ date: today, views: v.views });
+    return { user_id: userId, account, post_key: v.logNo, view_history: hist, updated_at: new Date().toISOString() };
+  });
+  if (!rows.length) return;
+  const { error } = await supabase.from("publy_post_care").upsert(rows, { onConflict: "user_id,account,post_key" });
+  if (error) console.warn("[post_care] 조회수 저장 실패:", error.message);
+}
+
+// 글의 최신 조회수(가장 최근 기록). 없으면 null.
+export function latestViews(c: PostCare): number | null {
+  const h = c.view_history; if (!h || !h.length) return null;
+  return h[h.length - 1].views ?? null;
+}
+
+// 🔴 오류를 관리자에게 중앙 전송 — 기존 오류로그 시스템(publy_error_logs)을 재사용하는 얇은 래퍼.
+//    블로그지수 파이프라인(순위검사·조회수·진단)이 실패하면 관리자 '버그 신고/오류' 화면에 빨간 항목으로 뜬다.
+//    수천 명이 써도 관리자가 한곳에서 어디서 뻑나는지 바로 인지. (리포트 자체가 에러 내도 logError가 삼킴)
+export async function reportError(info: { userId?: string | null; blogId?: string | null; stage: string; message: string; detail?: string }): Promise<void> {
+  await logError({
+    user_id: info.userId || "",
+    feature: `블로그지수·${info.stage}`,
+    error_message: `${info.message || ""}${info.blogId ? ` [blogId=${info.blogId}]` : ""}${info.detail ? ` (${info.detail})` : ""}`.slice(0, 500),
+  });
 }
 
 // 개선안 받은 날 기록

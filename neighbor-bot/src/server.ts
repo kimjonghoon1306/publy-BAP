@@ -1,6 +1,6 @@
 import express from "express";
 import cors from "cors";
-import { saveSession, sessionExists, removeSession, crawlBlogIds, crawlBuddyPosts, analyzeBuddyKeywords, addNeighbors, NeighborResult, donePath, engageBlogs, EngageResult, engageDonePath, crawlMyPosts, replyToComments, crawlBlogStats, checkSelectedBlogExposure, pumasiEngage, crawlPumasiReport, pumasiPreview, updatePostTitle, checkProxy, analyzeBlogAuthenticity, fetchPostBody } from "./naver";
+import { saveSession, sessionExists, removeSession, crawlBlogIds, crawlBuddyPosts, analyzeBuddyKeywords, addNeighbors, NeighborResult, donePath, engageBlogs, EngageResult, engageDonePath, crawlMyPosts, replyToComments, crawlBlogStats, checkSelectedBlogExposure, pumasiEngage, crawlPumasiReport, pumasiPreview, updatePostTitle, checkProxy, analyzeBlogAuthenticity, fetchPostBody, crawlPostViews } from "./naver";
 import { checkNeighborQuota, incrementNeighborQuota, getNeighborDailyUsage, incrementEngageQuota, getEngageDailyUsage, getUserPlan, NEIGHBOR_DAILY_LIMIT, addNeighborHistory, addReplyHistory, addBlogscoreHistory, incrementPumasiQuota, TITLE_EDIT_DAILY_LIMIT, getTitleEditDailyUsage, incrementTitleEditQuota, getProxyForAccount, supabase, getOutreachSender, getOutreachSentToday, addOutreachLog } from "./supabase";
 import nodemailer from "nodemailer";
 import fs from "fs";
@@ -293,6 +293,19 @@ app.get("/api/blog-stats", async (req, res) => {
     sseSend(res, { type: "error", msg: e.message });
   }
   res.end();
+});
+
+/* ── 🩺 P4: 글별 조회수 수집 (통계 조회수 순위 페이지 파싱) ── */
+app.post("/api/post-views", async (req, res) => {
+  const { accountId } = req.body || {};
+  if (!accountId) return res.status(400).json({ ok: false, error: "accountId 필요" });
+  try {
+    const views = await crawlPostViews({ accountId, onLog: (msg) => console.log(msg) });
+    res.json({ ok: true, views });
+  } catch (e: any) {
+    console.error(`[post-views] 실패: ${e.message || e}`);
+    res.status(400).json({ ok: false, error: e.message || "조회수 수집 실패" });
+  }
 });
 
 /* ── 블로그 건강검진 2단계: 사용자가 선택한 글만 검색 노출 검사 ── */
@@ -588,18 +601,25 @@ app.post("/api/outreach/sender", async (req, res) => {
   if (!userId || !from_email || !smtp_user || !smtp_pass) return res.status(400).json({ ok: false, error: "필수 항목(발신 이메일·아이디·비밀번호)을 채워주세요" });
   const host = smtp_host || "smtp.naver.com";
   const port = Number(smtp_port) || 465;
+  console.log(`[sender] 발신계정 저장 시도 user=${userId} host=${host}:${port} user=${smtp_user} from=${from_email}`);
   try {
     // 실제 연결 검증(잘못된 비번이면 여기서 실패 → 저장 안 함)
     const tx = nodemailer.createTransport({ host, port, secure: port === 465, auth: { user: smtp_user, pass: smtp_pass } });
     await tx.verify();
+    console.log(`[sender] ✅ SMTP 연결/로그인 성공 (${smtp_user}@${host})`);
     const { error } = await supabase.from("publy_outreach_sender").upsert({
       user_id: userId, from_name: from_name || null, from_email, smtp_host: host, smtp_port: port,
       smtp_user, smtp_pass, daily_limit: Number(daily_limit) || 50, updated_at: new Date().toISOString(),
     }, { onConflict: "user_id" });
     if (error) throw new Error(error.message);
+    console.log(`[sender] ✅ 저장 완료 user=${userId}`);
     res.json({ ok: true });
   } catch (e: any) {
-    const msg = /auth|credential|password|535/i.test(e.message || "") ? "로그인 실패 — 아이디/앱 비밀번호를 확인하세요(네이버는 '메일 앱 비밀번호' 필요)" : e.message;
+    // 실패 원인을 로그에 그대로 남김(535/응답코드·서버 응답 전문 포함)
+    const code = e.responseCode || e.code || "";
+    console.error(`[sender] ❌ 저장 실패 user=${userId} host=${host}:${port} smtp_user=${smtp_user} code=${code} :: ${e.message || e}`);
+    if (e.response) console.error(`[sender]    ↳ 서버 응답: ${e.response}`);
+    const msg = /auth|credential|password|535/i.test(e.message || "") ? "로그인 실패 — 네이버 메일 '환경설정 → POP3/IMAP → IMAP/SMTP 사용'을 먼저 켜세요. 2단계 인증 쓰면 '앱 비밀번호 16자리'가 필요해요(로그인 비번 불가)." : e.message;
     res.status(400).json({ ok: false, error: msg });
   }
 });
@@ -631,8 +651,14 @@ app.get("/api/outreach/send-email", async (req, res) => {
 
     L("④ 네이버 메일 서버에 로그인 연결하는 중…");
     const tx = nodemailer.createTransport({ host: sender.smtp_host, port: sender.smtp_port, secure: sender.smtp_port === 465, auth: { user: sender.smtp_user, pass: sender.smtp_pass } });
-    try { await tx.verify(); L("   → ✅ 서버 연결 성공"); }
-    catch (ve: any) { sseSend(res, { type: "error", msg: `메일 서버 로그인 실패 — 아이디/앱 비밀번호를 확인하세요 (${(ve.message || "").slice(0, 60)})` }); return res.end(); }
+    try { await tx.verify(); L("   → ✅ 서버 연결 성공"); console.log(`[send] ✅ SMTP 로그인 성공 (${sender.smtp_user}@${sender.smtp_host})`); }
+    catch (ve: any) {
+      const code = ve.responseCode || ve.code || "";
+      console.error(`[send] ❌ SMTP 로그인 실패 smtp_user=${sender.smtp_user} host=${sender.smtp_host}:${sender.smtp_port} code=${code} :: ${ve.message || ve}`);
+      if (ve.response) console.error(`[send]    ↳ 서버 응답: ${ve.response}`);
+      sseSend(res, { type: "error", msg: `메일 서버 로그인 실패 — 네이버 메일 '환경설정 → POP3/IMAP → IMAP/SMTP 사용'을 먼저 켜세요. 2단계 인증 쓰면 '앱 비밀번호 16자리' 필요 (${code || ""} ${(ve.message || "").slice(0, 50)})` });
+      return res.end();
+    }
 
     L(`⑤ 이제 ${todo.length}통을 3~6초 간격으로 한 통씩 보낼게요(계정 안전)…`);
     let ok = 0, fail = 0;
