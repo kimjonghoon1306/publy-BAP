@@ -68,8 +68,11 @@ const SHIP_LABEL: Record<ShipStatus, string> = { none: "미제안", proposed: "�
 // 각 단계가 무슨 뜻인지(운영자용 쉬운 설명)
 const SHIP_DESC: Record<ShipStatus, string> = { none: "아직 제안 안 함", proposed: "내가 이메일·댓글로 연락했고, 블로거의 OK 회신을 기다리는 중이에요", accepted: "블로거가 하겠다고 회신해서 운영자가 수락 처리한 상태예요", ready: "수락돼서 이제 제품을 보낼 준비를 하는 단계예요", shipped: "제품을 택배로 보냈어요(송장 등록됨)", delivered: "블로거가 제품을 받았어요" };
 
-const TOPICS = ["DELIVERY", "FOOD", "TRAVEL", "BEAUTY", "PARENTING", "FASHION", "CAFE", "LIVING", "PET", "FITNESS", "TECH", "HEALTH", "DIGITAL", "INTERIOR", "CULTURE", "EDU", "AUTO", "WEDDING", "FLOWER", "HOBBY"];
-const TOPIC_KR: Record<string, string> = { DELIVERY: "배송·택배", FOOD: "맛집", TRAVEL: "여행", BEAUTY: "뷰티", PARENTING: "육아", FASHION: "패션", CAFE: "카페", LIVING: "리빙", PET: "펫", FITNESS: "운동", TECH: "IT", HEALTH: "건강", DIGITAL: "디지털", INTERIOR: "인테리어", CULTURE: "문화·공연", EDU: "교육", AUTO: "자동차", WEDDING: "웨딩", FLOWER: "플라워", HOBBY: "취미" };
+// "ALL"=전체 주제 다 포함(모든 카테고리를 돌아가며 발굴)
+const TOPICS = ["ALL", "DELIVERY", "FOOD", "TRAVEL", "BEAUTY", "PARENTING", "FASHION", "CAFE", "LIVING", "PET", "FITNESS", "TECH", "HEALTH", "DIGITAL", "INTERIOR", "CULTURE", "EDU", "AUTO", "WEDDING", "FLOWER", "HOBBY"];
+const TOPIC_KR: Record<string, string> = { ALL: "전체", DELIVERY: "배송·택배", FOOD: "맛집", TRAVEL: "여행", BEAUTY: "뷰티", PARENTING: "육아", FASHION: "패션", CAFE: "카페", LIVING: "리빙", PET: "펫", FITNESS: "운동", TECH: "IT", HEALTH: "건강", DIGITAL: "디지털", INTERIOR: "인테리어", CULTURE: "문화·공연", EDU: "교육", AUTO: "자동차", WEDDING: "웨딩", FLOWER: "플라워", HOBBY: "취미" };
+// 전체 발굴 시 실제로 검색에 넣을 대표 키워드들(협찬 친화적 주제 우선 — 이메일 공개율 높은 순)
+const ALL_TOPIC_KEYWORDS = ["맛집", "뷰티", "육아", "카페", "패션", "여행", "펫", "인테리어", "운동", "건강"];
 const REGIONS = ["전국", "서울", "경기", "부산", "제주", "강원", "인천", "대구", "광주", "대전"];
 
 // (목업 mockFind 제거 — 실제 네이버 발굴 API(/api/crawl)로 교체됨)
@@ -313,12 +316,18 @@ export default function CrawlCenter({ showToast, theme: extTheme, userId, plan =
     }
     if (esRef.current) { esRef.current.close(); esRef.current = null; }
     setRunning(true); setProgress(0); setLogs([]); setResults([]); setSelected(new Set()); setScanned(0);
-    const kwList = [TOPIC_KR[topic] || topic, ...(keyword.trim() ? keyword.split(/[,\s]+/).filter(Boolean) : [])];
-    if (region && region !== "전국") kwList[0] = `${region} ${kwList[0]}`;
-    pushLog(`🔎 발굴 시작 — "${kwList.join(", ")}" · 목표 ${count}명`);
+    // ★"전체(ALL)"=모든 주제 대표 키워드로 폭넓게 발굴. 단일 주제=그 주제 키워드.
+    const isAll = topic === "ALL";
+    let kwList = isAll
+      ? (keyword.trim() ? keyword.split(/[,\s]+/).filter(Boolean) : ALL_TOPIC_KEYWORDS.slice())
+      : [TOPIC_KR[topic] || topic, ...(keyword.trim() ? keyword.split(/[,\s]+/).filter(Boolean) : [])];
+    if (region && region !== "전국") kwList = isAll ? kwList.map(k => `${region} ${k}`) : [`${region} ${kwList[0]}`, ...kwList.slice(1)];
+    // 총 목표(count)를 키워드로 나눠 과다 발굴 방지. 전체면 키워드당 소량씩 합쳐 count 근처.
+    const perKw = isAll ? Math.max(3, Math.ceil(count / kwList.length)) : count;
+    pushLog(`🔎 발굴 시작 — ${isAll ? `전체(${kwList.length}개 주제)` : `"${kwList.join(", ")}"`} · 목표 ${count}명`);
     pushLog(`필터 — 이웃 ${minNeighbors.toLocaleString()}+ · 주 ${minPosts}글+ ${activeOnly ? "· 최근 활동중만" : ""}`);
     // 실제 네이버 검색 발굴 API(neighbor-bot /api/crawl, SSE) — 목업 아님. thumbnail=프로필 이미지 제공.
-    const url = `${BOT}/api/crawl?keywords=${encodeURIComponent(kwList.join(","))}&countPerKeyword=${count}&orderBy=${topicMatch ? "sim" : "recentdate"}&activeDays=${activeOnly ? 30 : 0}&excludeMarket=true${userId ? `&userId=${userId}` : ""}`;
+    const url = `${BOT}/api/crawl?keywords=${encodeURIComponent(kwList.join(","))}&countPerKeyword=${perKw}&orderBy=${topicMatch ? "sim" : "recentdate"}&activeDays=${activeOnly ? 30 : 0}&excludeMarket=true${userId ? `&userId=${userId}` : ""}`;
     const es = new BotEventStream(url);
     esRef.current = es;
     es.onmessage = (e: MessageEvent) => {
@@ -378,7 +387,18 @@ export default function CrawlCenter({ showToast, theme: extTheme, userId, plan =
         setResults(prev => prev.map(b => b.id === d.blogId ? { ...b, neighbors: d.neighbors || b.neighbors, visitors: d.visitors || b.visitors, authenticity: d.authenticity ?? b.authenticity, score: d.authenticity ?? b.score, email: d.email || b.email, kakao: d.kakao || b.kakao, openchat: d.openchat || b.openchat } : b));
       } else if (d.type === "done") {
         setAnalyzing(false); es.close(); esAuthRef.current = null;
-        setResults(prev => { const c = prev.filter(b => b.email || b.kakao || b.openchat).length; pushLog(`✅ 진정성·연락처 분석 완료 — 📇 공개 연락처 있는 블로거 ${c}명`); return prev; });
+        // ★"연락처 있는 것만" 체크했으면 = 분석 끝나고 연락처 없는 사람을 목록에서 실제 제거(수집=체크에 맞게)
+        setResults(prev => {
+          const withC = prev.filter(b => b.email || b.kakao || b.openchat);
+          if (onlyContact) {
+            const removed = prev.length - withC.length;
+            setSelected(s => new Set([...s].filter(id => withC.some(b => b.id === id))));
+            pushLog(`✅ 분석 완료 — 📇 연락처 있는 ${withC.length}명만 남김(연락처 없는 ${removed}명 제외 · '연락처 있는 것만' 켜짐)`);
+            return withC;
+          }
+          pushLog(`✅ 진정성·연락처 분석 완료 — 📇 공개 연락처 있는 블로거 ${withC.length}명`);
+          return prev;
+        });
       }
       else if (d.type === "error") { pushLog(`❌ 진정성 분석 실패: ${d.msg}`); setAnalyzing(false); es.close(); esAuthRef.current = null; }
     };
@@ -802,7 +822,10 @@ export default function CrawlCenter({ showToast, theme: extTheme, userId, plan =
         <Help>어떤 블로거를 찾을지 정하는 곳이에요. <b style={{ color: C.ink }}>주제·지역·키워드</b>를 고르고 <b style={{ color: C.ink }}>몇 명</b> 찾을지 정한 뒤, 맨 아래 <b style={{ color: C.accent }}>START SCAN</b>을 누르면 네이버에서 진짜 블로거를 찾아와요.</Help>
         <div style={{ marginBottom: 18 }}>
           <div style={label}>Topic · 주제</div>
-          <div className="ob-scroll" style={{ display: "flex", gap: 7, flexWrap: "wrap" }}>{TOPICS.map((t) => <span key={t} onClick={() => setTopic(t)} style={chip(topic === t)}>{t} <span style={{ opacity: .6, fontSize: 11 }}>{TOPIC_KR[t]}</span></span>)}</div>
+          <div className="ob-scroll" style={{ display: "flex", gap: 7, flexWrap: "wrap" }}>{TOPICS.map((t) => t === "ALL"
+            ? <span key={t} onClick={() => setTopic(t)} style={{ ...chip(topic === t), fontWeight: 900, ...(topic === t ? {} : { borderColor: C.accent, color: C.accent }) }}>🌐 전체</span>
+            : <span key={t} onClick={() => setTopic(t)} style={chip(topic === t)}>{t} <span style={{ opacity: .6, fontSize: 11 }}>{TOPIC_KR[t]}</span></span>)}</div>
+          {topic === "ALL" && <div style={{ fontSize: 11, color: C.sub, marginTop: 6, lineHeight: 1.5 }}>🌐 <b>전체</b>: 맛집·뷰티·육아·카페·패션·여행·펫·인테리어·운동·건강 등 <b>모든 주제를 골고루</b> 발굴해요(협찬 친화 주제 우선 = 이메일 공개율 높음).</div>}
         </div>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1.4fr 110px", gap: 14, alignItems: "end" }}>
           <div><div style={label}>Region · 지역</div><select value={region} onChange={(e) => setRegion(e.target.value)} style={inp}>{REGIONS.map((r) => <option key={r}>{r}</option>)}</select></div>
@@ -814,8 +837,14 @@ export default function CrawlCenter({ showToast, theme: extTheme, userId, plan =
           {!running
             ? <button onClick={startFind} style={{ ...btnSolid, padding: "13px 26px", fontSize: 14, textTransform: "uppercase" }}>Start Scan →</button>
             : <button onClick={stopFind} style={{ border: `1px solid ${C.accent}`, borderRadius: 3, padding: "13px 26px", fontSize: 14, fontWeight: 800, letterSpacing: ".08em", cursor: "pointer", color: C.accent, fontFamily: "inherit", background: "transparent", textTransform: "uppercase" }}>■ Stop</button>}
+          {/* 📇 연락처 있는 것만 수집 — 켜면 분석 후 연락처 없는 블로거를 자동으로 빼고 남김 */}
+          <label style={{ display: "flex", alignItems: "center", gap: 7, cursor: "pointer", fontSize: 12.5, fontWeight: 700, color: onlyContact ? "#2f9e5e" : C.sub, padding: "8px 12px", borderRadius: 8, border: `1.5px solid ${onlyContact ? "#2f9e5e" : C.line2}`, background: onlyContact ? "rgba(47,158,94,.08)" : "transparent" }}>
+            <input type="checkbox" checked={onlyContact} onChange={e => setOnlyContact(e.target.checked)} style={{ accentColor: "#2f9e5e", width: 16, height: 16 }} />
+            📇 연락처 있는 사람만 수집
+          </label>
           <div style={{ fontSize: 12, color: C.sub, fontWeight: 600 }}>비공개 블로그는 <b style={{ color: C.ink }}>자동으로 건너뜁니다</b></div>
         </div>
+        {onlyContact && <div style={{ fontSize: 11, color: C.sub, marginTop: 10, lineHeight: 1.5 }}>💬 발굴 시점엔 연락처를 알 수 없어서(프로필을 방문해야 나와요), <b>먼저 발굴 → 프로필에서 연락처 확인 → 연락처 없는 사람 자동 제외</b> 순으로 처리돼요. 그래서 최종 목록엔 <b style={{ color: "#2f9e5e" }}>연락처 있는 사람만</b> 남아요.</div>}
       </div>
 
       {/* ── 필터 · 수집항목 ── */}
@@ -874,12 +903,14 @@ export default function CrawlCenter({ showToast, theme: extTheme, userId, plan =
             <div><div style={eyebrow}>Curated</div><div style={{ fontFamily: serif, fontSize: 20, fontWeight: 600, marginTop: 5 }}>발굴된 블로거 {shown.length}명</div></div>
             <div style={{ marginLeft: "auto", display: "flex", gap: 7, alignItems: "center", flexWrap: "wrap" }}>
               <span onClick={() => { loadOutHistory(); setHistoryOpen(true); }} title="지금까지 누구에게 이메일을 보냈는지 기록을 봐요" style={sChip(false)}>📮 보낸 글 이력</span>
-              <span onClick={() => setOnlyContact((v) => !v)} title="공개 이메일·카톡이 있는 블로거만 보여줘요(바로 제안 가능한 사람)" style={sChip(onlyContact)}>연락처 있는 것만</span>
+              <span onClick={() => setOnlyContact((v) => !v)} title="공개 연락처(이메일·카톡·오픈채팅)가 있는 블로거만 화면에 보여줘요" style={sChip(onlyContact)}>연락처 있는 것만</span>
               <select value={sortBy} onChange={(e) => setSortBy(e.target.value as any)} title="블로거 정렬 기준" style={{ ...inp, width: "auto", padding: "7px 10px", fontSize: 12 }}><option value="score">진정성순</option><option value="neighbors">이웃순</option><option value="posts">글 많은순</option></select>
               <span onClick={() => setSelected(new Set(shown.map((b) => b.id)))} style={sChip(false)}>전체선택</span>
               {selected.size > 0 && <span onClick={() => setSelected(new Set())} style={{ ...sChip(false), color: C.accent, borderColor: C.accent }}>해제 {selected.size}</span>}
-              {/* 🗑️ 수집 데이터 삭제 — 선택 삭제 / 전체 삭제 */}
-              {selected.size > 0 && <span onClick={() => { setResults(prev => prev.filter(b => !selected.has(b.id))); const n = selected.size; setSelected(new Set()); toast(`🗑️ ${n}명 삭제했어요`, "success"); }} title="선택한 블로거를 목록에서 지워요" style={{ ...sChip(false), color: "#d64545", borderColor: "#d64545" }}>🗑 선택 삭제 {selected.size}</span>}
+              {/* 🗑️ 수집 데이터 삭제 — 선택 / 선택 외 / 연락처 없는 것 / 전체 */}
+              {selected.size > 0 && <span onClick={() => { setResults(prev => prev.filter(b => !selected.has(b.id))); const n = selected.size; setSelected(new Set()); toast(`🗑️ 선택한 ${n}명 삭제`, "success"); }} title="선택한 블로거를 지워요" style={{ ...sChip(false), color: "#d64545", borderColor: "#d64545" }}>🗑 선택 삭제 {selected.size}</span>}
+              {selected.size > 0 && <span onClick={() => { const keep = results.filter(b => selected.has(b.id)); const removed = results.length - keep.length; setResults(keep); toast(`🗑️ 선택 안 한 ${removed}명 삭제(선택 ${keep.length}명만 남김)`, "success"); }} title="선택한 블로거만 남기고 나머지는 다 지워요(안 쓸 블로거 정리)" style={{ ...sChip(false), color: "#d64545", borderColor: "#d64545" }}>🗑 선택 외 삭제</span>}
+              {results.some(b => !(b.email || b.kakao || b.openchat)) && <span onClick={() => { const keep = results.filter(b => b.email || b.kakao || b.openchat); const removed = results.length - keep.length; if (window.confirm(`연락처 없는 ${removed}명을 지울까요? (연락처 있는 ${keep.length}명만 남겨요)`)) { setResults(keep); setSelected(s => new Set([...s].filter(id => keep.some(b => b.id === id)))); toast(`🗑️ 연락처 없는 ${removed}명 삭제`, "success"); } }} title="공개 연락처가 없는 블로거를 전부 지워요(제안 못 하는 사람 정리)" style={{ ...sChip(false), color: "#d64545", borderColor: "#d64545" }}>🗑 연락처 없는 것 삭제</span>}
               {shown.length > 0 && <span onClick={() => { if (window.confirm(`발굴한 ${results.length}명을 전부 지울까요?`)) { setResults([]); setSelected(new Set()); toast("🗑️ 발굴 목록을 비웠어요", "success"); } }} title="발굴한 목록을 전부 지워요" style={{ ...sChip(false), color: "#d64545", borderColor: "#d64545" }}>🗑 전체 삭제</span>}
             </div>
           </div>
