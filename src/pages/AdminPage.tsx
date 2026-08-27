@@ -183,6 +183,12 @@ const CSS = `
 .nav-item.active::before{content:'';position:absolute;left:0;top:25%;bottom:25%;width:3px;border-radius:99px;background:var(--danger);}
 .nav-ico{font-size:16px;flex-shrink:0;}
 .nav-badge{margin-left:auto;font-size:10px;font-weight:800;padding:2px 7px;border-radius:99px;background:rgba(248,81,73,.1);color:var(--danger);border:1px solid rgba(248,81,73,.25);}
+.nav-item.nav-shine{position:relative;background:linear-gradient(100deg,rgba(255,196,0,.14),rgba(255,146,10,.10),rgba(255,196,0,.14));background-size:220% 100%;animation:navShineFlow 2.6s linear infinite;border:1px solid rgba(255,180,0,.35);border-radius:10px;overflow:hidden;}
+.nav-item.nav-shine::after{content:"";position:absolute;top:0;left:-60%;width:45%;height:100%;background:linear-gradient(90deg,transparent,rgba(255,255,255,.55),transparent);transform:skewX(-20deg);animation:navShineSweep 2.6s ease-in-out infinite;}
+@keyframes navShineFlow{0%{background-position:0% 0}100%{background-position:220% 0}}
+@keyframes navShineSweep{0%{left:-60%}45%,100%{left:130%}}
+.nav-hot{margin-left:auto;font-size:9px;font-weight:900;letter-spacing:.5px;color:#3a2500;background:linear-gradient(135deg,#ffd85e,#ffab2e);padding:2px 7px;border-radius:99px;box-shadow:0 0 8px rgba(255,180,0,.6);animation:navHotGlow 1.6s ease-in-out infinite;}
+@keyframes navHotGlow{0%,100%{box-shadow:0 0 6px rgba(255,180,0,.5);transform:scale(1)}50%{box-shadow:0 0 14px rgba(255,180,0,.9);transform:scale(1.06)}}
 .sidebar-stats{margin-top:auto;padding:12px 8px 4px;border-top:1px solid var(--border);display:grid;grid-template-columns:1fr 1fr;gap:6px;}
 .stat-box{padding:10px 12px;border-radius:10px;background:var(--card);border:1px solid var(--border);}
 .stat-num{font-size:22px;font-weight:900;color:var(--text);line-height:1;}
@@ -2803,9 +2809,11 @@ POST3: (제목)|(이유)
             {(() => {
               const navBtn = (k: string) => {
                 const t = TABS.find(x => x.k === k); if (!t) return null;
+                const isHot = t.k==="crawl";
                 return (
-                  <button key={t.k} className={`nav-item ${tab===t.k?"active":""}`} onClick={()=>setTab(t.k as any)}>
+                  <button key={t.k} className={`nav-item ${tab===t.k?"active":""} ${isHot?"nav-shine":""}`} onClick={()=>setTab(t.k as any)}>
                     <span className="nav-ico">{t.i}</span>{t.l}
+                    {isHot && <span className="nav-hot">HOT</span>}
                     {t.k==="users" && users.length>0 && <span className="nav-badge">{users.length}</span>}
                   </button>
                 );

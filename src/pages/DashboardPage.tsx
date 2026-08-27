@@ -4153,8 +4153,9 @@ POST3: (제목)|(이유)
               <div key={group.label}>
                 {group.label&&<div className="nav-lbl">{group.label}</div>}
                 {group.tabs.map(t=> t.k==="crawl" ? (
-                  <button key={t.k} className={`nav-item nav-crawl ${tab==="crawl"&&crawlEnabled?"active":""} ${crawlEnabled?"":"nav-crawl-locked"}`} onClick={()=>{ if(!crawlEnabled){ setShowCrawlLock(true); return; } setTab("crawl"); }}>
+                  <button key={t.k} className={`nav-item nav-crawl nav-shine ${tab==="crawl"&&crawlEnabled?"active":""} ${crawlEnabled?"":"nav-crawl-locked"}`} onClick={()=>{ if(!crawlEnabled){ setShowCrawlLock(true); return; } setTab("crawl"); }}>
                     <span className="nav-ico">🔍</span><span className="nav-crawl-label">크롤링</span>
+                    <span className="nav-hot">HOT</span>
                     {!crawlEnabled && <span className="nav-crawl-lock">🔒</span>}
                     {!crawlEnabled && <span className="crawl-tip">🔒 <b>관리자 승인</b>이 필요한 기능이에요</span>}
                   </button>

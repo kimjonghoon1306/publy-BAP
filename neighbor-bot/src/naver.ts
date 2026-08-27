@@ -1620,6 +1620,8 @@ export async function updatePostTitle(params: {
     // ── 제목 교체 = 발행(글쓰기)과 동일 방식: 제목칸 클릭 → 전체선택·삭제 → keyboard.type(사람같은 타이핑).
     //   ★execCommand insertText는 이 에디터에서 멈추는 문제가 있어 제거. 발행이 쓰는 keyboard 입력으로 통일.
     const SEL_A = process.platform === "darwin" ? "Meta+A" : "Control+A";
+    const titleOk = async () => { const cur = await editor.evaluate(() => (document.querySelector(".se-section-documentTitle")?.textContent || "").trim()).catch(() => ""); return { ok: cur.includes(title.slice(0, 6)), cur }; };
+    const clearTitle = async () => { await page.keyboard.press(SEL_A); await page.waitForTimeout(150); await page.keyboard.press("Backspace"); await page.waitForTimeout(200); };
     let replaced = false;
     for (const clickSel of [".se-section-documentTitle .se-text-paragraph", ".se-section-documentTitle [contenteditable='true']", ".se-section-documentTitle", ".se-placeholder__buttons"]) {
       try {
@@ -1627,15 +1629,22 @@ export async function updatePostTitle(params: {
         if (!el) continue;
         await editor.click(clickSel, { timeout: 5000 });
         await page.waitForTimeout(400);
-        await page.keyboard.press(SEL_A);
-        await page.waitForTimeout(150);
-        await page.keyboard.press("Backspace");
-        await page.waitForTimeout(200);
+        // 방식 1: keyboard.type (맥에서 잘 됨)
+        await clearTitle();
         await page.keyboard.type(title, { delay: 30 });
         await page.waitForTimeout(500);
-        const cur = await editor.evaluate(() => (document.querySelector(".se-section-documentTitle")?.textContent || "").trim()).catch(() => "");
-        if (cur.includes(title.slice(0, 6))) { replaced = true; break; }
-        log(`[제목수정] 입력 확인 실패(현재:"${cur.slice(0, 20)}") → 다음 방식 재시도`);
+        let r = await titleOk();
+        if (r.ok) { replaced = true; break; }
+        // 방식 2: keyboard.insertText — ★윈도우 한글 IME 우회(맥에서 type이 씹히던 게 아니라 윈도우 IME가 원인). 텍스트 직접 삽입.
+        log(`[제목수정] type 방식 안 먹힘(현재:"${r.cur.slice(0, 16)}") → insertText 재시도(IME 우회)`);
+        await editor.click(clickSel, { timeout: 5000 }).catch(() => {});
+        await page.waitForTimeout(300);
+        await clearTitle();
+        await page.keyboard.insertText(title);
+        await page.waitForTimeout(500);
+        r = await titleOk();
+        if (r.ok) { replaced = true; break; }
+        log(`[제목수정] 입력 확인 실패(현재:"${r.cur.slice(0, 20)}") → 다음 요소 재시도`);
       } catch (e: any) { log(`[제목수정] 제목칸 시도 오류: ${(e?.message || "").slice(0, 40)}`); }
     }
     if (!replaced) throw new Error("제목 입력칸을 찾지 못했어요(에디터 구조 변경 가능)");
