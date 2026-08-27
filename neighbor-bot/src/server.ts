@@ -187,15 +187,16 @@ app.get("/api/place/search", async (req, res) => {
 
 /* ── 🗺️ 플레이스 업체 → 블로그 리뷰어 역추적 (SSE) ── */
 app.get("/api/place/bloggers", async (req, res) => {
-  const { userId, accountId, places, domain } = req.query as Record<string, string>;
+  const { userId, accountId, places, domain, perPlace } = req.query as Record<string, string>;
   sseSetup(res);
   try {
     let list: { placeId: string; name?: string }[] = [];
     try { list = JSON.parse(places || "[]"); } catch {}
     list = list.filter(p => p && p.placeId).slice(0, 40);   // 과부하 방지
+    const maxPerPlace = parseInt(perPlace || "0", 10) || 0;   // 등급 상한(0=무제한)
     const seen = new Set<string>();
     for (const p of list) {
-      const hits = await crawlPlaceBloggers({ accountId: accountId || "", placeId: p.placeId, domain: domain || "place", ownerUserId: userId || null, onLog: (msg) => sseSend(res, { type: "log", msg }) });
+      const hits = await crawlPlaceBloggers({ accountId: accountId || "", placeId: p.placeId, domain: domain || "place", maxPerPlace, ownerUserId: userId || null, onLog: (msg) => sseSend(res, { type: "log", msg }) });
       for (const h of hits) {
         if (seen.has(h.blogId)) continue;
         seen.add(h.blogId);

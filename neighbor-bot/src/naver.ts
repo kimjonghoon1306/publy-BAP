@@ -1435,47 +1435,66 @@ export async function crawlPlaceBloggers(params: {
   accountId: string;
   placeId: string;
   domain?: string;
+  maxPerPlace?: number;          // 업체당 최대 몇 명까지(등급 상한). 미지정/0=무제한.
   ownerUserId?: string | null;
   onLog?: (msg: string) => void;
 }): Promise<PlaceBloggerHit[]> {
   const { placeId, onLog } = params;
   const domain = params.domain || "place";
+  const cap = (params.maxPerPlace && params.maxPerPlace > 0) ? params.maxPerPlace : Number.MAX_SAFE_INTEGER;
   const log = onLog || console.log;
   const browser = await launchBrowser(params.accountId, { headless: true, log, feature: "crawl", ownerUserId: params.ownerUserId });
   const context = await browser.newContext({ userAgent: UA, locale: "ko-KR", viewport: { width: 1280, height: 900 } });
   await applyAntiDetection(context);
   const page = await context.newPage();
-  const hits: PlaceBloggerHit[] = [];
+  // ★실측(2026-08-28): 블로그 리뷰는 <a>가 아니라 __APOLLO_STATE__의 FsasReview:blog_* 노드에 있음
+  //   (url=m.blog.naver.com/{blogId}/{logNo}, name=닉네임, title=글제목). 앵커 스크레이핑은 0건이라 APOLLO 파싱해야 함.
+  const parseFromApollo = () => page.evaluate(() => {
+    const st: any = (window as any).__APOLLO_STATE__ || {};
+    const bad = ["PostList", "BlogHome", "GoBlogWrite", "section", "m", "PostView"];
+    const seen = new Set<string>();
+    const out: { blogId: string; nick?: string; title?: string }[] = [];
+    for (const k in st) {
+      const v = st[k];
+      if (!v || typeof v !== "object") continue;
+      const isBlog = v.type === "blog" || /blog/i.test(String(v.typeName || "")) || (typeof k === "string" && k.includes("blog_"));
+      const u = String(v.url || v.home || "");
+      if ((!isBlog && !/blog\.naver\.com/.test(u)) || !/blog\.naver\.com/.test(u)) continue;
+      const m = u.match(/(?:m\.)?blog\.naver\.com\/([a-zA-Z0-9_-]+)/);
+      if (!m || !m[1] || bad.includes(m[1]) || seen.has(m[1])) continue;
+      seen.add(m[1]);
+      out.push({ blogId: m[1], nick: String(v.name || "").trim() || undefined, title: String(v.title || "").trim() || undefined });
+    }
+    return out;
+  }).catch(() => [] as PlaceBloggerHit[]);
+
+  const merged = new Map<string, PlaceBloggerHit>();
   try {
     const url = `https://pcmap.place.naver.com/${domain}/${placeId}/review/blog`;
     await page.goto(url, { waitUntil: "domcontentloaded", timeout: 25000 });
     await page.waitForTimeout(2500);
-    for (let s = 0; s < 3; s++) { await page.mouse.wheel(0, 3000); await page.waitForTimeout(500); }
-    // ★실측(2026-08-28): 블로그 리뷰는 <a>가 아니라 __APOLLO_STATE__의 FsasReview:blog_* 노드에 있음
-    //   (url=m.blog.naver.com/{blogId}/{logNo}, name=닉네임, title=글제목). 앵커 스크레이핑은 0건이라 APOLLO 파싱해야 함.
-    const found: PlaceBloggerHit[] = await page.evaluate(() => {
-      const st: any = (window as any).__APOLLO_STATE__ || {};
-      const bad = ["PostList", "BlogHome", "GoBlogWrite", "section", "m", "PostView"];
-      const seen = new Set<string>();
-      const out: PlaceBloggerHit[] = [];
-      for (const k in st) {
-        const v = st[k];
-        if (!v || typeof v !== "object") continue;
-        const isBlog = v.type === "blog" || /blog/i.test(String(v.typeName || "")) || (typeof k === "string" && k.includes("blog_"));
-        const u = String(v.url || v.home || "");
-        if ((!isBlog && !/blog\.naver\.com/.test(u)) || !/blog\.naver\.com/.test(u)) continue;
-        const m = u.match(/(?:m\.)?blog\.naver\.com\/([a-zA-Z0-9_-]+)/);
-        if (!m || !m[1] || bad.includes(m[1]) || seen.has(m[1])) continue;
-        seen.add(m[1]);
-        out.push({ blogId: m[1], nick: String(v.name || "").trim() || undefined, title: String(v.title || "").trim() || undefined });
-      }
-      return out;
-    }).catch(() => [] as PlaceBloggerHit[]);
-    hits.push(...found);
+    // ★페이징: '더보기' 버튼을 눌러가며(없으면 스크롤) 상한(cap)까지 계속 로드. 늘어나지 않으면 중단.
+    let stagnant = 0;
+    for (let round = 0; round < 40 && merged.size < cap && stagnant < 2; round++) {
+      for (const h of await parseFromApollo()) if (!merged.has(h.blogId)) merged.set(h.blogId, h);
+      if (merged.size >= cap) break;
+      // 리뷰 목록의 '더보기'(a.fvwqf 등 텍스트 '더보기') 클릭 시도 → 없으면 맨 아래로 스크롤
+      const before = merged.size;
+      const clicked = await page.evaluate(() => {
+        const el = Array.from(document.querySelectorAll("a,button")).find(e => /더보기/.test(e.textContent || "") && (e as HTMLElement).offsetParent !== null);
+        if (el) { (el as HTMLElement).click(); return true; }
+        return false;
+      }).catch(() => false);
+      if (!clicked) { await page.mouse.wheel(0, 6000); await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight)).catch(() => {}); }
+      await page.waitForTimeout(1600);
+      for (const h of await parseFromApollo()) if (!merged.has(h.blogId)) merged.set(h.blogId, h);
+      stagnant = merged.size > before ? 0 : stagnant + 1;   // 두 번 연속 안 늘면 끝(더보기 없음)
+    }
   } finally {
     await browser.close().catch(() => {});
   }
-  log(`[플레이스] 업체 ${placeId} 블로그 리뷰어 ${hits.length}명 발굴`);
+  const hits = Array.from(merged.values()).slice(0, cap === Number.MAX_SAFE_INTEGER ? undefined : cap);
+  log(`[플레이스] 업체 ${placeId} 블로그 리뷰어 ${hits.length}명 발굴${cap !== Number.MAX_SAFE_INTEGER ? ` (상한 ${cap})` : ""}`);
   return hits;
 }
 

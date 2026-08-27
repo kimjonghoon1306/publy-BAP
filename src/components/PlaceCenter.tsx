@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { BotEventStream, botFetch } from "../lib/botApi";
-import { PLAN_CONFIG, CRAWL_DAILY_LIMIT } from "../lib/supabase";
+import { PLAN_CONFIG, CRAWL_DAILY_LIMIT, PLACE_BLOGGER_LIMIT } from "../lib/supabase";
 import UsageGuide from "./UsageGuide";
 
 const BOT = "http://127.0.0.1:3334";
@@ -29,6 +29,10 @@ export default function PlaceCenter({ showToast, theme: extTheme, userId, plan =
   const [region, setRegion] = useState("");
   const [domain, setDomain] = useState("restaurant");
   const [count, setCount] = useState(20);
+  // 🗺️ 역추적 업체당 인원 상한(등급별). 무제한이면 클램프 없음.
+  const bloggerLimit = PLACE_BLOGGER_LIMIT[plan] ?? PLACE_BLOGGER_LIMIT.free;
+  const unlimitedBloggers = bloggerLimit >= 9999;
+  const [bloggerTarget, setBloggerTarget] = useState(() => (unlimitedBloggers ? 50 : bloggerLimit));
   const [places, setPlaces] = useState<Place[]>([]);
   const [selectedPlaces, setSelectedPlaces] = useState<Set<string>>(new Set());
   const [bloggers, setBloggers] = useState<Blogger[]>([]);
@@ -118,7 +122,8 @@ export default function PlaceCenter({ showToast, theme: extTheme, userId, plan =
     if (!picked.length) { toast("먼저 업체 카드에서 한 곳 이상 체크하세요", "info"); return; }
     bloggersRef.current?.close(); setMode("bloggers"); setBloggerRunning(true); setBloggers([]); setSelectedBloggers(new Set());
     pushLog(`🧭 선택한 업체 ${picked.length}곳의 리뷰 블로거를 찾기 시작해요`);
-    const url = `${BOT}/api/place/bloggers?userId=${encodeURIComponent(userId || "")}&accountId=${encodeURIComponent(mailAcctId)}&places=${encodeURIComponent(JSON.stringify(picked))}&domain=${encodeURIComponent(domain)}`;
+    const perPlace = unlimitedBloggers ? 0 : bloggerTarget;   // 0 = 무제한
+    const url = `${BOT}/api/place/bloggers?userId=${encodeURIComponent(userId || "")}&accountId=${encodeURIComponent(mailAcctId)}&places=${encodeURIComponent(JSON.stringify(picked))}&domain=${encodeURIComponent(domain)}&perPlace=${perPlace}`;
     const es = new BotEventStream(url); bloggersRef.current = es;
     es.onmessage = (event: MessageEvent) => {
       let d: any; try { d = JSON.parse(event.data); } catch { return; }
@@ -150,6 +155,20 @@ export default function PlaceCenter({ showToast, theme: extTheme, userId, plan =
   const ghost = { ...btn, color: C.ink, background: "transparent", border: `1px solid ${C.line2}` } as const;
   const Help = ({ children }: { children: React.ReactNode }) => <div style={{ fontSize: 11.5, color: C.sub, lineHeight: 1.6, marginBottom: 14, display: "flex", gap: 6, alignItems: "flex-start" }}><span>💬</span><span>{children}</span></div>;
   const ActionButton = ({ children, onClick, disabled, style }: { children: React.ReactNode; onClick: () => void; disabled?: boolean; style?: React.CSSProperties }) => <button className="pc-action" onClick={onClick} disabled={disabled} style={{ ...btn, opacity: disabled ? .55 : 1, ...style }}>{children}</button>;
+  // 🔢 인원/개수 입력 = 버튼 프리셋 + 직접 숫자 입력 칸(둘 다). max 지정 시 그 값으로 클램프(무제한이면 max 생략).
+  const CountPicker = ({ value, onChange, presets, max, unit = "" }: { value: number; onChange: (n: number) => void; presets: number[]; max?: number; unit?: string }) => {
+    const clamp = (n: number) => Math.max(1, max ? Math.min(max, n) : n);
+    return (
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+        {presets.filter(p => !max || p <= max).map(p => (
+          <button key={p} type="button" className="pc-action" onClick={() => onChange(clamp(p))} style={{ border: `1px solid ${value === p ? C.accent : C.line2}`, background: value === p ? C.accent : "transparent", color: value === p ? (theme === "dark" ? "#17382f" : "#fff") : C.ink, borderRadius: 10, padding: "8px 12px", fontSize: 12.5, fontWeight: 800, cursor: "pointer", fontFamily: "inherit" }}>{p}{unit}</button>
+        ))}
+        {max && <button key="max" type="button" className="pc-action" onClick={() => onChange(max)} title="내 등급 최대" style={{ border: `1px solid ${value === max ? C.accent : C.line2}`, background: value === max ? C.accent : "transparent", color: value === max ? (theme === "dark" ? "#17382f" : "#fff") : C.ink, borderRadius: 10, padding: "8px 12px", fontSize: 12.5, fontWeight: 800, cursor: "pointer", fontFamily: "inherit" }}>최대 {max}{unit}</button>}
+        <input type="number" min={1} max={max || undefined} value={value} onChange={e => onChange(clamp(Number(e.target.value) || 1))} title="직접 숫자를 입력하세요" style={{ ...inp, width: 92, padding: "8px 10px", textAlign: "center" }} />
+        {max ? <span style={{ fontSize: 11, color: C.sub }}>최대 {max}{unit}</span> : <span style={{ fontSize: 11, color: C.accent, fontWeight: 800 }}>무제한 ∞</span>}
+      </div>
+    );
+  };
 
   const renderMailAccounts = () => <div style={{ padding: 14, borderRadius: 15, background: `${C.accent}0d`, border: `1px solid ${C.line2}` }}>
     <div style={{ fontSize: 12.5, fontWeight: 900, color: C.ink, marginBottom: 5 }}>👤 플레이스 작업 네이버 계정</div>
@@ -196,11 +215,11 @@ export default function PlaceCenter({ showToast, theme: extTheme, userId, plan =
       <section style={{ ...card, padding: 19, marginBottom: 15 }}>
         <div style={{ fontSize: 17, fontWeight: 900, marginBottom: 5 }}>📍 업체 발굴</div>
         <Help>찾을 <b style={{ color: C.ink }}>지역</b>과 <b style={{ color: C.ink }}>업종</b>을 고른 뒤 START를 누르세요. 예: 지역에 “강남”, 업종에 “맛집”을 고르면 “강남 맛집”을 찾아요.</Help>
-        <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1.5fr) minmax(110px,.8fr) minmax(90px,.45fr)", gap: 10, alignItems: "end" }}>
+        <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1.5fr) minmax(110px,.7fr)", gap: 10, alignItems: "end" }}>
           <div className="pc-wide"><div style={label}>지역</div><input value={region} onChange={e => setRegion(e.target.value)} onKeyDown={e => { if (e.key === "Enter") startSearch(); }} placeholder="예: 강남, 성수, 부산 해운대" style={inp} /></div>
           <div><div style={label}>업종</div><select value={domain} onChange={e => setDomain(e.target.value)} style={inp}>{CATEGORIES.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}</select></div>
-          <div><div style={label}>개수</div><select value={count} onChange={e => setCount(Number(e.target.value))} style={inp}>{[10, 20, 30, 50, 100].map(n => <option key={n} value={n}>{n}곳</option>)}</select></div>
         </div>
+        <div style={{ marginTop: 12 }}><div style={label}>업체 개수 <span style={{ textTransform: "none", letterSpacing: 0, fontWeight: 600 }}>· 버튼으로 고르거나 직접 입력</span></div><CountPicker value={count} onChange={setCount} presets={[10, 20, 30, 50, 100]} unit="곳" /></div>
         <Help><b style={{ color: C.accent }}>START</b>는 위 조건으로 업체 찾기를 시작해요. 작업 계정이 선택되어 있어야 해요.</Help>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>{running ? <ActionButton onClick={() => stop("places")} style={{ background: "#d45b50" }}>■ 찾기 중단</ActionButton> : <ActionButton onClick={startSearch}>📌 START · 업체 찾기</ActionButton>}<button className="pc-action" onClick={() => exportCsv("places")} title="체크한 업체만, 체크가 없으면 전체 업체를 엑셀용 파일로 저장해요" style={ghost}>CSV 내보내기</button></div>
       </section>
@@ -213,7 +232,11 @@ export default function PlaceCenter({ showToast, theme: extTheme, userId, plan =
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap", fontSize: 11, color: C.ink, fontWeight: 700 }}><span>👥 방문자리뷰 {(p.visitorReviewCount || 0).toLocaleString()}</span><span>✍️ 블로그리뷰 {(p.blogReviewCount || 0).toLocaleString()}</span></div>
           <a href={p.placeUrl} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()} style={{ display: "inline-block", marginTop: 12, color: C.accent, fontSize: 11.5, fontWeight: 900 }}>지도에서 보기 ↗</a>
         </article>)}</div>}
-        <div style={{ marginTop: 14 }}><Help><b style={{ color: C.accent }}>이 업체 리뷰 쓴 블로거 찾기</b>는 체크한 업체의 리뷰 작성자를 이어서 찾아요. 업체를 먼저 골라야 해요.</Help><ActionButton onClick={startBloggers} disabled={!selectedPlaces.size || bloggerRunning}>🧭 이 업체 리뷰 쓴 블로거 찾기 ({selectedPlaces.size})</ActionButton></div>
+        <div style={{ marginTop: 14 }}>
+          <Help><b style={{ color: C.accent }}>이 업체 리뷰 쓴 블로거 찾기</b>는 체크한 업체의 리뷰 작성자를 이어서 찾아요. 업체를 먼저 골라야 해요.</Help>
+          <div style={{ marginBottom: 10 }}><div style={label}>업체당 역추적 인원 <span style={{ textTransform: "none", letterSpacing: 0, fontWeight: 600 }}>· 버튼으로 고르거나 직접 입력{unlimitedBloggers ? " (무제한)" : ` (내 등급 최대 ${bloggerLimit}명)`}</span></div><CountPicker value={bloggerTarget} onChange={setBloggerTarget} presets={[5, 10, 20, 30, 50]} max={unlimitedBloggers ? undefined : bloggerLimit} unit="명" /></div>
+          <ActionButton onClick={startBloggers} disabled={!selectedPlaces.size || bloggerRunning}>🧭 이 업체 리뷰 쓴 블로거 찾기 ({selectedPlaces.size})</ActionButton>
+        </div>
       </section>
     </> : <section style={{ ...card, padding: 19, marginBottom: 15 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 9, flexWrap: "wrap" }}><b style={{ fontSize: 17 }}>🧭 블로거 역추적 · {bloggers.length}명</b><span style={{ color: C.accent, fontSize: 12, fontWeight: 800 }}>선택 {selectedBloggers.size}명</span></div>
@@ -228,6 +251,6 @@ export default function PlaceCenter({ showToast, theme: extTheme, userId, plan =
 
     <section style={{ ...card, padding: 18, marginBottom: 15 }}><div style={{ fontSize: 15, fontWeight: 900, marginBottom: 5 }}>📟 진행 안내</div><Help>찾는 동안 봇이 무엇을 하고 있는지 보여줘요. 문제가 생기면 마지막 빨간 안내를 확인하세요.</Help>{quota && <div style={{ fontSize: 12, color: quota.remaining <= 0 ? "#d45b50" : C.accent, fontWeight: 900, marginBottom: 8 }}>{plan === "admin" || plan === "unlimited" ? "관리자 무제한 ∞" : `오늘 발굴 ${quota.used} / ${quota.limit} · ${quota.remaining} 남음`}</div>}<div style={{ background: C.logBg, color: C.logInk, borderRadius: 13, padding: 13, maxHeight: 150, overflowY: "auto", fontFamily: "monospace", fontSize: 11, lineHeight: 1.7, whiteSpace: "pre-wrap" }}>{logs.length ? logs.join("\n") : "작업을 시작하면 진행 내용이 여기에 나와요."}</div></section>
 
-    <section style={{ ...card, padding: 18 }}><div style={{ fontSize: 15, fontWeight: 900, marginBottom: 5 }}>📋 등급별 플레이스 발굴 한도</div><Help>플레이스 발굴은 크롤링 발굴과 <b style={{ color: C.ink }}>같은 하루 한도</b>를 함께 써요. 매일 자정에 다시 채워져요.</Help><div style={{ border: `1px solid ${C.line}`, borderRadius: 13, overflow: "hidden" }}><div style={{ display: "grid", gridTemplateColumns: "1fr .8fr 1fr", background: C.surf2 }}>{["등급", "계정", "발굴/일"].map((h, i) => <div key={h} style={{ padding: "9px 10px", fontSize: 10.5, color: C.sub, fontWeight: 900, borderLeft: i ? `1px solid ${C.line}` : "none" }}>{h}</div>)}</div>{(["free", "basic", "pro"] as const).map(pl => { const conf = PLAN_CONFIG[pl]; const current = plan === pl; return <div key={pl} style={{ display: "grid", gridTemplateColumns: "1fr .8fr 1fr", borderTop: `1px solid ${C.line}`, background: current ? C.accentSoft : "transparent" }}><div style={{ padding: 10, fontSize: 12, color: current ? C.accent : C.ink, fontWeight: 900 }}>{conf.label}{current ? " (내 등급)" : ""}</div><div style={{ padding: 10, fontSize: 12, borderLeft: `1px solid ${C.line}` }}>{conf.maxAccounts}개</div><div style={{ padding: 10, fontSize: 12, borderLeft: `1px solid ${C.line}`, fontWeight: 800 }}>{CRAWL_DAILY_LIMIT[pl] ?? conf.dailyCrawl}곳</div></div>; })}</div><div style={{ fontSize: 10.5, color: C.sub, marginTop: 9 }}>💡 관리자·무제한 등급은 이 회원용 표에서 제외되며 실제 작업은 무제한으로 처리돼요.</div></section>
+    <section style={{ ...card, padding: 18 }}><div style={{ fontSize: 15, fontWeight: 900, marginBottom: 5 }}>📋 등급별 플레이스 발굴 한도</div><Help>플레이스 발굴은 크롤링 발굴과 <b style={{ color: C.ink }}>같은 하루 한도</b>를 함께 써요. 매일 자정에 다시 채워져요.</Help><div style={{ border: `1px solid ${C.line}`, borderRadius: 13, overflow: "hidden" }}><div style={{ display: "grid", gridTemplateColumns: "1fr .7fr .9fr 1fr", background: C.surf2 }}>{["등급", "계정", "발굴/일", "역추적/업체"].map((h, i) => <div key={h} style={{ padding: "9px 10px", fontSize: 10.5, color: C.sub, fontWeight: 900, borderLeft: i ? `1px solid ${C.line}` : "none" }}>{h}</div>)}</div>{(["free", "basic", "pro"] as const).map(pl => { const conf = PLAN_CONFIG[pl]; const current = plan === pl; return <div key={pl} style={{ display: "grid", gridTemplateColumns: "1fr .7fr .9fr 1fr", borderTop: `1px solid ${C.line}`, background: current ? C.accentSoft : "transparent" }}><div style={{ padding: 10, fontSize: 12, color: current ? C.accent : C.ink, fontWeight: 900 }}>{conf.label}{current ? " (내 등급)" : ""}</div><div style={{ padding: 10, fontSize: 12, borderLeft: `1px solid ${C.line}` }}>{conf.maxAccounts}개</div><div style={{ padding: 10, fontSize: 12, borderLeft: `1px solid ${C.line}`, fontWeight: 800 }}>{CRAWL_DAILY_LIMIT[pl] ?? conf.dailyCrawl}곳</div><div style={{ padding: 10, fontSize: 12, borderLeft: `1px solid ${C.line}`, fontWeight: 800, color: C.accent }}>{(PLACE_BLOGGER_LIMIT[pl] ?? 0) >= 9999 ? "∞" : `${PLACE_BLOGGER_LIMIT[pl]}명`}</div></div>; })}</div><div style={{ fontSize: 10.5, color: C.sub, marginTop: 9 }}>💡 관리자·무제한 등급은 이 회원용 표에서 제외되며 실제 작업은 무제한으로 처리돼요.</div></section>
   </div>;
 }
