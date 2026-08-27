@@ -94,17 +94,26 @@ export default function CrawlCenter({ showToast, theme: extTheme, userId, plan =
   const [emailBody, setEmailBody] = useState("{닉네임}님 안녕하세요! 블로그 잘 보고 있어요 😊\n{관심품목} 관련 글을 즐겨 쓰시는 것 같아, 온종일 체험단에 함께하시면 좋을 것 같아 연락드려요.\n관심 있으시면 회신 주세요. 감사합니다!");
   const [commentBody, setCommentBody] = useState("{닉네임}님 글 잘 봤어요! {관심키워드} 관련해 온종일 체험단 함께하실래요? 문의는 프로필 링크로 :)");
   const [sending, setSending] = useState(false);
-  // 발신 이메일 계정(등록 여부)
-  const [sender, setSender] = useState<any>(null);
-  const [senderOpen, setSenderOpen] = useState(false);
-  const [sForm, setSForm] = useState({ from_name: "", from_email: "", smtp_host: "smtp.naver.com", smtp_port: "465", smtp_user: "", smtp_pass: "", daily_limit: "50" });
-  const [sSaving, setSSaving] = useState(false);
-  const [showPass, setShowPass] = useState(false);   // 발신계정 비밀번호 미리보기 토글
-  const [sErr, setSErr] = useState("");              // 발신계정 저장 에러(모달 안에 직접 표시 — 토스트는 모달에 가림)
-  const loadSender = async () => {
-    if (!userId) return;
-    try { const r = await botFetch(`${BOT}/api/outreach/sender/${userId}`); const d = await r.json(); if (d.ok) setSender(d.sender); } catch {}
+  // ✉️ 웹메일 방식: SMTP·앱비밀번호 없이, 로그인된 네이버 계정 창을 열어 메일을 쓴다(서이추처럼).
+  //    회원이 서이추·공감·답방·품앗이 탭에서 이미 연결한 계정을 그대로 재사용 → 회원 추가 설정 0.
+  const [mailAccounts, setMailAccounts] = useState<{ accountId: string; blogId: string; label: string }[]>([]);
+  const [mailAcctId, setMailAcctId] = useState("");   // 선택된 발송 계정
+  const loadMailAccounts = () => {
+    const seen = new Set<string>();
+    const out: { accountId: string; blogId: string; label: string }[] = [];
+    ["neighbor", "engage", "reply", "pumasi"].forEach(k => {
+      try {
+        (JSON.parse(localStorage.getItem(`publy_accounts_${k}`) || "[]") || []).forEach((a: any) => {
+          if (a?.accountId && a?.sessionOk && a?.blogId && !seen.has(a.blogId)) {
+            seen.add(a.blogId); out.push({ accountId: a.accountId, blogId: a.blogId, label: a.blogId });
+          }
+        });
+      } catch {}
+    });
+    setMailAccounts(out);
+    setMailAcctId(prev => (out.some(o => o.accountId === prev) ? prev : (out[0]?.accountId || "")));
   };
+  useEffect(() => { loadMailAccounts(); /* eslint-disable-next-line */ }, [userId]);
   // 보낸글 이력
   const [historyOpen, setHistoryOpen] = useState(false);
   const [outHistory, setOutHistory] = useState<any[]>([]);
@@ -209,7 +218,6 @@ export default function CrawlCenter({ showToast, theme: extTheme, userId, plan =
   };
   const stopFind = () => { if (esRef.current) { esRef.current.close(); esRef.current = null; } if (timerRef.current) clearInterval(timerRef.current); setRunning(false); pushLog("⏹ 사용자가 중단했어요"); };
 
-  useEffect(() => { loadSender(); /* eslint-disable-next-line */ }, [userId]);
 
   // 🩺 진정성 정밀 분석 — 발굴된 블로거들의 실제 이웃수·방문자를 공개 API로 읽어 진정성 점수 채움(세션 불필요)
   const [analyzing, setAnalyzing] = useState(false);
@@ -231,10 +239,10 @@ export default function CrawlCenter({ showToast, theme: extTheme, userId, plan =
     es.onerror = () => { setAnalyzing(false); es.close(); esAuthRef.current = null; };
   };
 
-  // 📧 이메일 실발송(SSE) — 발신계정 필요. 블로그 창 안 열고 SMTP로 바로. 개인화 토큰은 봇에서 치환.
+  // 📧 이메일 실발송(SSE) — 웹메일 방식: 로그인된 네이버 창을 열어 사람처럼 메일을 쓴다(SMTP·앱비번 불필요).
   const sendEmails = () => {
     if (!userId) { toast("로그인 정보가 없어요", "error"); return; }
-    if (!sender) { toast("먼저 발신 이메일 계정을 등록하세요", "info"); setSenderOpen(true); return; }
+    if (!mailAcctId) { toast("발송할 네이버 계정을 먼저 연결하세요 — 서이추·공감 탭에서 로그인한 계정이 여기 나와요", "info"); loadMailAccounts(); return; }
     // ① 발굴 결과에서 고른 사람 + ② 직접 입력/붙여넣은 이메일 = 합쳐서 발송(중복 제거)
     const picks = shown.filter(b => selected.has(b.id) && b.email);
     const pickedEmails = new Set(picks.map(b => (b.email || "").toLowerCase()));
@@ -252,7 +260,7 @@ export default function CrawlCenter({ showToast, theme: extTheme, userId, plan =
       ...picks.map(b => ({ id: b.id, nick: b.nick, email: b.email, keywords: b.keywords, categories: b.categories })),
       ...manual.map((e, i) => ({ id: `manual-${i}-${e}`, nick: "", email: e, keywords: [] as string[], categories: [] as string[] })),
     ];
-    const url = `${BOT}/api/outreach/send-email?userId=${encodeURIComponent(userId)}&subject=${encodeURIComponent(emailSubject)}&message=${encodeURIComponent(emailBody)}&targets=${encodeURIComponent(JSON.stringify(targets))}`;
+    const url = `${BOT}/api/outreach/send-email?userId=${encodeURIComponent(userId)}&accountId=${encodeURIComponent(mailAcctId)}&dailyLimit=${encodeURIComponent(String(emailLimit || 50))}&subject=${encodeURIComponent(emailSubject)}&message=${encodeURIComponent(emailBody)}&targets=${encodeURIComponent(JSON.stringify(targets))}`;
     const es = new BotEventStream(url); esOutRef.current = es;
     es.onmessage = (e: MessageEvent) => {
       let d: any; try { d = JSON.parse(e.data); } catch { return; }
@@ -264,25 +272,6 @@ export default function CrawlCenter({ showToast, theme: extTheme, userId, plan =
     es.onerror = () => { pushLog("❌ 봇 연결 오류"); toast("봇 연결 오류", "error"); setSending(false); es.close(); esOutRef.current = null; };
   };
 
-  // 발신 계정 저장(SMTP 검증 후) — 에러는 모달 안에 직접 표시(토스트는 모달에 가려 안 보임)
-  const saveSender = async () => {
-    if (!userId) { setSErr("로그인 정보가 없어요"); return; }
-    setSErr("");
-    if (!sForm.from_email || !sForm.smtp_user || !sForm.smtp_pass) { setSErr("발신 이메일·로그인 아이디·비밀번호를 모두 채워주세요."); return; }
-    setSSaving(true);
-    try {
-      const r = await botFetch(`${BOT}/api/outreach/sender`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ userId, ...sForm }) });
-      const d = await r.json();
-      if (!d.ok) throw new Error(d.error || "저장 실패");
-      toast("✅ 발신 계정을 등록했어요 (연결 확인됨)", "success");
-      setSenderOpen(false); setSErr(""); await loadSender();
-    } catch (e: any) {
-      // 봇이 안 켜졌으면 fetch 자체가 실패 → 그 경우도 명확히
-      const msg = /Failed to fetch|NetworkError|봇/i.test(e.message || "") ? "봇 서버에 연결할 수 없어요. 앱을 껐다 켜거나 '서버 온라인' 표시를 확인해주세요." : (e.message || "저장 실패");
-      setSErr(msg);
-    }
-    setSSaving(false);
-  };
 
   const shown = results
     .filter((b) => !onlyContact || b.email || b.kakao || b.openchat)
@@ -428,8 +417,10 @@ export default function CrawlCenter({ showToast, theme: extTheme, userId, plan =
       <div className="ob-sec ob-card" style={{ ...card, padding: 20, marginBottom: 16 }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap", marginBottom: 14 }}>
           <div style={{ fontFamily: serif, fontSize: 16, fontWeight: 600, color: C.ink }}>📊 오늘의 사용량 <span style={{ fontSize: 11, fontWeight: 700, color: C.sub, fontFamily: "'Noto Sans KR'" }}>· 자정에 초기화</span></div>
-          {/* 발신 이메일 계정 — 항상 보이게(테리: 계정추가 안 보인다) */}
-          <button onClick={() => setSenderOpen(true)} style={{ fontSize: 12, fontWeight: 800, padding: "8px 14px", borderRadius: 10, border: `1.5px solid ${sender ? "#2f9e5e" : C.accent}`, background: sender ? "rgba(47,158,94,.1)" : C.accent, color: sender ? "#2f9e5e" : C.surf, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}>{sender ? `✅ 발신계정: ${sender.from_email}` : "✉ 발신 이메일 계정 등록"}</button>
+          {/* ✉️ 발송 계정 — 서이추처럼 로그인된 네이버 계정으로 메일을 씀(SMTP·앱비밀번호 불필요) */}
+          {mailAccounts.length > 0
+            ? <span style={{ fontSize: 12, fontWeight: 800, padding: "8px 14px", borderRadius: 10, border: "1.5px solid #2f9e5e", background: "rgba(47,158,94,.1)", color: "#2f9e5e", whiteSpace: "nowrap" }}>✅ 발송 계정 {mailAccounts.length}개 연결됨</span>
+            : <span style={{ fontSize: 12, fontWeight: 800, padding: "8px 14px", borderRadius: 10, border: `1.5px solid ${C.accent}`, background: C.accent, color: C.surf, whiteSpace: "nowrap" }}>⚠️ 서이추·공감 탭에서 네이버 로그인 먼저</span>}
         </div>
         {(() => {
           const bar = (label: string, ic: string, used: number, limit: number, col: string) => {
@@ -700,14 +691,30 @@ export default function CrawlCenter({ showToast, theme: extTheme, userId, plan =
               <button onClick={() => setOutreach(null)} style={{ ...btnGhost, padding: "5px 10px" }}>✕</button>
             </div>
             <div style={{ padding: "20px 24px" }}>
-              {/* 이메일: 발신계정 상태 배너 */}
+              {/* 이메일: 발송 계정 선택(로그인된 네이버 계정) + 보내는 사람 이름 */}
               {outreach === "email" && (
-                <div style={{ marginBottom: 14, padding: "10px 13px", borderRadius: 4, background: sender ? "rgba(47,158,94,.08)" : "rgba(217,138,31,.1)", border: `1px solid ${sender ? "rgba(47,158,94,.3)" : "rgba(217,138,31,.35)"}`, display: "flex", alignItems: "center", gap: 8, fontSize: 11.5, fontWeight: 600 }}>
-                  {sender ? <><span style={{ color: "#2f9e5e" }}>✅ 발신 계정: <b>{sender.from_email}</b></span><button onClick={() => { setSForm(f => ({ ...f, from_email: sender.from_email, from_name: sender.from_name || "", smtp_user: sender.smtp_user, smtp_host: sender.smtp_host, smtp_port: String(sender.smtp_port), daily_limit: String(sender.daily_limit) })); setSenderOpen(true); }} style={{ ...btnGhost, marginLeft: "auto", padding: "3px 8px", fontSize: 10.5 }}>변경</button></>
-                    : <><span style={{ color: "#d98a1f" }}>⚠️ 발신 이메일 계정이 없어요 — 등록해야 발송돼요</span><button onClick={() => setSenderOpen(true)} style={{ ...btnSolid, marginLeft: "auto", padding: "4px 10px", fontSize: 10.5 }}>+ 발신계정 등록</button></>}
+                <div style={{ marginBottom: 14, padding: "12px 13px", borderRadius: 6, background: mailAccounts.length ? "rgba(47,158,94,.08)" : "rgba(217,138,31,.1)", border: `1px solid ${mailAccounts.length ? "rgba(47,158,94,.3)" : "rgba(217,138,31,.35)"}`, fontSize: 11.5, fontWeight: 600 }}>
+                  {mailAccounts.length ? (
+                    <>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                        <span style={{ color: "#2f9e5e", whiteSpace: "nowrap" }}>✉️ 이 계정으로 메일 발송:</span>
+                        <select value={mailAcctId} onChange={e => setMailAcctId(e.target.value)} style={{ flex: 1, minWidth: 140, padding: "6px 10px", borderRadius: 6, border: `1px solid ${C.line2}`, background: C.surf, color: C.ink, fontFamily: "inherit", fontSize: 12, fontWeight: 700 }}>
+                          {mailAccounts.map(a => <option key={a.accountId} value={a.accountId}>{a.label} (blog.naver.com/{a.blogId})</option>)}
+                        </select>
+                        <button onClick={loadMailAccounts} title="새로고침" style={{ ...btnGhost, padding: "5px 9px", fontSize: 11 }}>🔄</button>
+                      </div>
+                      <div style={{ marginTop: 8 }}>
+                        <span style={{ color: C.sub, whiteSpace: "nowrap", display: "block", marginBottom: 4 }}>메일 제목:</span>
+                        <input value={emailSubject} onChange={e => setEmailSubject(e.target.value)} placeholder="칸에 제목을 입력하세요 (예: 온종일 체험단)" style={{ width: "100%", boxSizing: "border-box", padding: "8px 11px", borderRadius: 6, border: `1px solid ${C.line2}`, background: C.surf, color: C.ink, fontFamily: "inherit", fontSize: 13 }} />
+                        <div style={{ fontSize: 10.5, color: C.sub, marginTop: 4, lineHeight: 1.5 }}>💬 여기 적은 그대로 메일 제목이 돼요. (예: "온종일 체험단" 적으면 제목이 <b>온종일 체험단</b>)</div>
+                      </div>
+                      <div style={{ fontSize: 10.5, color: C.sub, marginTop: 10, lineHeight: 1.5 }}>💡 서이추처럼 <b>로그인된 네이버 창을 열어</b> 메일을 써요. 앱 비밀번호·SMTP 설정 필요 없어요. 발송 중엔 창을 닫지 마세요.</div>
+                    </>
+                  ) : (
+                    <span style={{ color: "#d98a1f" }}>⚠️ 발송할 네이버 계정이 없어요 — <b>서이추·공감·답방·품앗이</b> 탭에서 네이버 로그인을 먼저 하면 여기 나와요. <button onClick={loadMailAccounts} style={{ ...btnGhost, padding: "3px 8px", fontSize: 10.5, marginLeft: 4 }}>🔄 새로고침</button></span>
+                  )}
                 </div>
               )}
-              {outreach === "email" && <div style={{ marginBottom: 14 }}><div style={label}>제목</div><input value={emailSubject} onChange={e => setEmailSubject(e.target.value)} style={inp} /></div>}
               <div style={{ marginBottom: 14 }}>
                 <div style={label}>메시지 (개인화 변수 사용 가능)</div>
                 <textarea rows={outreach === "email" ? 7 : 4}
@@ -731,64 +738,13 @@ export default function CrawlCenter({ showToast, theme: extTheme, userId, plan =
                 );
               })()}
               <div style={{ fontSize: 11.5, color: C.sub, fontWeight: 600, background: C.surf2, border: `1px solid ${C.line}`, borderRadius: 3, padding: "10px 13px", lineHeight: 1.6, marginBottom: 18 }}>
-                💡 <b>{"{닉네임}"}·{"{관심키워드}"}·{"{관심품목}"}</b>는 블로거마다 자동으로 채워져요. {outreach === "comment" ? "댓글은 계정 연결이 필요해요(서이추·공감댓글처럼)." : `발송은 SMTP로 바로 나가요. 계정 안전을 위해 하루 ${sender?.daily_limit || 50}통까지, 3~6초 간격으로 보내요. (한 계정으로 하루 100통 넘기면 계정이 위험해요 — 많으면 계정을 나눠 쓰세요.)`}
+                💡 <b>{"{닉네임}"}·{"{관심키워드}"}·{"{관심품목}"}</b>는 블로거마다 자동으로 채워져요. {outreach === "comment" ? "댓글은 계정 연결이 필요해요(서이추·공감댓글처럼)." : `발송은 로그인된 네이버 창을 열어 서이추처럼 보내요(앱 비밀번호 불필요). 계정 안전을 위해 하루 ${emailLimit || 50}통까지, 3~6초 간격으로 보내요. 발송 중엔 창을 닫지 마세요.`}
               </div>
               <div style={{ display: "flex", gap: 8 }}>
                 <button onClick={() => setOutreach(null)} disabled={sending} style={{ ...btnGhost, flex: 1 }}>취소</button>
                 {outreach === "email"
                   ? (() => { const pickedN = shown.filter(b => selected.has(b.id) && b.email).length; const pickedSet = new Set(shown.filter(b => selected.has(b.id) && b.email).map(b => (b.email || "").toLowerCase())); const manualN = parseEmails(manualEmails).filter(e => !pickedSet.has(e)).length; const totalN = pickedN + manualN; return <button onClick={sendEmails} disabled={sending || totalN === 0} style={{ ...btnSolid, flex: 2, opacity: (sending || totalN === 0) ? .6 : 1 }}>{sending ? "발송 중..." : `${totalN}명에게 실제 발송 →`}</button>; })()
                   : <button onClick={() => { const now: Record<string, ShipState> = {}; selected.forEach((id) => { now[id] = ships[id] || { status: "proposed" as ShipStatus }; }); setShips((s) => ({ ...s, ...now })); toast("댓글 제안 대상으로 담았어요 — 댓글 실발송은 계정 연결 후 지원돼요", "info"); setOutreach(null); }} style={{ ...btnSolid, flex: 2 }}>{selected.size}명 담기 →</button>}
-              </div>
-            </div>
-          </div>
-        </div>
-      ), document.body)}
-
-      {/* ═══ 발신 이메일 계정 등록 모달 ═══ */}
-      {senderOpen && createPortal((
-        <div onClick={() => setSenderOpen(false)} style={{ position: "fixed", inset: 0, background: "rgba(20,16,12,.55)", backdropFilter: "blur(3px)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 100000, padding: 20 }}>
-          <div onClick={e => e.stopPropagation()} style={{ background: C.surf, border: `1px solid ${C.line2}`, borderRadius: 6, maxWidth: 480, width: "100%", maxHeight: "88vh", overflowY: "auto", boxShadow: "0 30px 80px rgba(0,0,0,.5)" }}>
-            <div style={{ padding: "20px 24px", borderBottom: `1px solid ${C.line}` }}>
-              <div style={{ fontFamily: serif, fontSize: 18, fontWeight: 600 }}>발신 이메일 계정 등록</div>
-              <div style={{ fontSize: 11.5, color: C.sub, marginTop: 3, lineHeight: 1.55 }}>이 계정으로 블로거에게 제안 메일이 나가요. 블로그 로그인과는 <b>별개의 메일 서버 로그인</b>이라, 아래 설정을 먼저 켜야 등록돼요.</div>
-            </div>
-            <div style={{ padding: "20px 24px", display: "flex", flexDirection: "column", gap: 12 }}>
-              <div style={{ fontSize: 11.5, color: "#8a5a00", lineHeight: 1.6, background: "#fff5e0", border: "1px solid #f0c669", borderRadius: 6, padding: "11px 13px" }}>
-                <div style={{ fontWeight: 800, marginBottom: 4, color: "#a8620a" }}>⚠️ 등록 전 네이버 메일에서 꼭 켜세요 (안 켜면 무조건 실패)</div>
-                <div><b>1) IMAP/SMTP 사용 켜기</b> — 네이버 메일 → 좌측 하단 <b>환경설정(⚙)</b> → <b>POP3/IMAP 설정</b> → <b>IMAP/SMTP 설정</b> 탭 → <b>“IMAP/SMTP 사용”을 ‘사용함’</b>으로 → 저장. <span style={{ opacity: .85 }}>(이게 꺼져 있으면 비번이 맞아도 로그인 실패해요)</span></div>
-                <div style={{ marginTop: 3 }}><b>2) 2단계 인증 쓰는 계정만</b> — 앱 비밀번호 16자리를 만들어 아래 비밀번호 칸에 넣기.</div>
-              </div>
-              {[
-                { k: "from_name", l: "보내는 사람 이름 (선택)", ph: "온종일 체험단", hint: "받는 사람 메일에 표시될 이름이에요." },
-                { k: "from_email", l: "발신 이메일 주소 *", ph: "myid@naver.com", hint: "이 주소에서 메일이 나가요." },
-                { k: "smtp_user", l: "로그인 아이디 *", ph: "myid", hint: "네이버는 이메일 앞부분만(예: hong@naver.com → hong). 구글·다음은 전체 이메일을 넣으세요." },
-                { k: "smtp_pass", l: "비밀번호 *", ph: "네이버 로그인 비번 또는 앱 비밀번호", pw: true, hint: "2단계 인증 안 쓰면 네이버 로그인 비번 그대로. 2단계 인증(휴대폰 인증) 쓰면 로그인 비번은 안 되고 '앱 비밀번호 16자리'를 만들어 넣어야 해요." },
-              ].map(f => (
-                <div key={f.k}>
-                  <div style={label}>{f.l}</div>
-                  {(f as any).pw ? (
-                    <div style={{ position: "relative" }}>
-                      <input type={showPass ? "text" : "password"} value={(sForm as any)[f.k]} onChange={e => setSForm(s => ({ ...s, [f.k]: e.target.value }))} placeholder={f.ph} style={{ ...inp, paddingRight: 44 }} />
-                      <button type="button" onClick={() => setShowPass(v => !v)} title={showPass ? "비밀번호 숨기기" : "비밀번호 보기"} style={{ position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)", background: "transparent", border: "none", cursor: "pointer", fontSize: 17, lineHeight: 1, padding: 4 }}>{showPass ? "🙈" : "👁️"}</button>
-                    </div>
-                  ) : (
-                    <input type="text" value={(sForm as any)[f.k]} onChange={e => setSForm(s => ({ ...s, [f.k]: e.target.value }))} placeholder={f.ph} style={inp} />
-                  )}
-                  {(f as any).hint && <div style={{ fontSize: 10.5, color: C.sub, marginTop: 4, lineHeight: 1.5 }}>💬 {(f as any).hint}</div>}
-                </div>
-              ))}
-              <div style={{ display: "flex", gap: 10 }}>
-                <div style={{ flex: 2 }}><div style={label}>SMTP 서버</div><input value={sForm.smtp_host} onChange={e => setSForm(s => ({ ...s, smtp_host: e.target.value }))} style={inp} /></div>
-                <div style={{ flex: 1 }}><div style={label}>포트</div><input value={sForm.smtp_port} onChange={e => setSForm(s => ({ ...s, smtp_port: e.target.value }))} style={inp} /></div>
-                <div style={{ flex: 1 }}><div style={label}>하루 한도</div><input value={sForm.daily_limit} onChange={e => setSForm(s => ({ ...s, daily_limit: e.target.value }))} style={inp} /></div>
-              </div>
-              <div style={{ fontSize: 11, color: C.sub, lineHeight: 1.55, background: C.surf2, borderRadius: 3, padding: "9px 12px" }}>네이버=smtp.naver.com:465 · 구글=smtp.gmail.com:465. 저장 시 실제 로그인 연결을 확인해요(틀리면 저장 안 됨).</div>
-              {/* 진행/에러를 모달 안에 직접 표시(토스트는 모달에 가려 안 보임) */}
-              {sSaving && <div style={{ fontSize: 12, fontWeight: 700, color: C.accent, padding: "10px 12px", borderRadius: 8, background: C.accentSoft }}>🔌 네이버 메일 서버에 로그인 연결을 확인하는 중...</div>}
-              {sErr && <div style={{ fontSize: 12, fontWeight: 700, color: "#fff", background: "#d64545", padding: "10px 12px", borderRadius: 8, lineHeight: 1.5 }}>❌ {sErr}</div>}
-              <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
-                <button onClick={() => { setSenderOpen(false); setSErr(""); }} disabled={sSaving} style={{ ...btnGhost, flex: 1 }}>취소</button>
-                <button onClick={saveSender} disabled={sSaving} style={{ ...btnSolid, flex: 2, opacity: sSaving ? .6 : 1 }}>{sSaving ? "연결 확인 중..." : "연결 확인 후 저장"}</button>
               </div>
             </div>
           </div>

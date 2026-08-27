@@ -2586,6 +2586,169 @@ export async function checkSelectedBlogExposure(params: {
   return { ...progress, totalPostsForExposure: list.totalCount || list.posts.length, lowQualitySuspected: known.length >= 3 ? missing / known.length > 0.5 : null };
 }
 
+/* ── ✉️ 네이버 웹메일로 제안 메일 발송 (SMTP·앱비밀번호 불필요) ──
+   서이추·공감처럼 로그인된 브라우저 창을 열어 사람처럼 메일을 쓴다.
+   네이버가 SMTP를 막았어도(2단계+앱비번 강제) 웹메일 쓰기는 그대로 되므로, 회원은 아무 설정도 안 한다.
+   ★UI가 바뀔 수 있어 받는사람/제목/본문 입력은 다중 셀렉터 폴백으로 견고하게. */
+export type MailTarget = { id?: string; email: string; nick?: string; subject: string; body: string };
+export async function sendWebmail(params: {
+  accountId: string;
+  ownerUserId?: string | null;
+  fromName?: string;
+  targets: MailTarget[];
+  delayMinMs?: number;
+  delayMaxMs?: number;
+  onLog?: (msg: string) => void;
+  onSent?: (id: string | undefined, ok: boolean, error?: string) => Promise<void> | void;
+  stopSignal?: () => boolean;
+}): Promise<{ ok: number; fail: number }> {
+  const { accountId, ownerUserId, targets, delayMinMs = 3000, delayMaxMs = 6000, onLog, onSent, stopSignal } = params;
+  const log = onLog || console.log;
+  const cookies = await ensureLiveSession(accountId, log);   // 세션 만료면 자동 재연결(서이추와 동일)
+  const browser = await launchBrowser(accountId, { headless: false, maximized: true, log, feature: "neighbor", ownerUserId });
+  const context = await browser.newContext({ userAgent: UA, viewport: { width: 1280, height: 900 }, locale: "ko-KR" });
+  await applyAntiDetection(context);
+  await context.addCookies(cookies);
+  const page = await context.newPage();
+  let ok = 0, fail = 0;
+  try {
+    for (let i = 0; i < targets.length; i++) {
+      if (stopSignal?.()) { log("⏹️ 중단 요청 — 발송을 멈춰요"); break; }
+      const t = targets[i];
+      log(`✉️ (${i + 1}/${targets.length}) ${t.nick || t.email} <${t.email}> 에게 쓰는 중…`);
+      try {
+        await sendOneWebmail(page, t);
+        ok++;
+        log(`   → ✅ 발송 완료 (성공 ${ok} · 실패 ${fail})`);
+        await onSent?.(t.id, true);
+      } catch (e: any) {
+        fail++;
+        const msg = (e?.message || String(e)).slice(0, 120);
+        log(`   → ❌ 실패: ${msg}`);
+        await onSent?.(t.id, false, msg);
+      }
+      if (i < targets.length - 1 && !stopSignal?.()) {
+        const wait = delayMinMs + Math.random() * (delayMaxMs - delayMinMs);
+        log(`   ⏳ 다음 발송까지 ${(wait / 1000).toFixed(1)}초 대기(계정 보호)…`);
+        await page.waitForTimeout(wait);
+      }
+    }
+  } finally {
+    await browser.close().catch(() => {});
+  }
+  return { ok, fail };
+}
+
+// 메일 한 통을 네이버 웹메일 쓰기 화면에서 작성·전송. 실패 시 throw.
+async function sendOneWebmail(page: import("playwright").Page, t: MailTarget): Promise<void> {
+  // 새 편지 쓰기 화면으로. (여러 후보 URL — 네이버가 라우팅을 바꿔도 하나는 뜨게)
+  const writeUrls = [
+    "https://mail.naver.com/v2/new",
+    "https://mail.naver.com/write",
+    "https://mail.naver.com/#/write",
+  ];
+  let loaded = false;
+  for (const u of writeUrls) {
+    try {
+      await page.goto(u, { waitUntil: "domcontentloaded", timeout: 20000 });
+      await page.waitForTimeout(1800);
+      // 받는사람 입력칸이 보이면 로드 성공
+      const hasRecipient = await findFirst(page, RECIPIENT_SELECTORS, 4000);
+      if (hasRecipient) { loaded = true; break; }
+    } catch {}
+  }
+  if (!loaded) throw new Error("메일 쓰기 화면을 열지 못했어요(네이버 로그인 만료 또는 화면 변경)");
+
+  // 1) 받는사람
+  const recip = await findFirst(page, RECIPIENT_SELECTORS, 5000);
+  if (!recip) throw new Error("받는사람 입력칸을 찾지 못했어요");
+  await recip.click();
+  await recip.fill("");
+  await recip.type(t.email, { delay: 20 });
+  await page.keyboard.press("Enter");   // 주소 확정(태그화)
+  await page.waitForTimeout(400);
+
+  // 2) 제목
+  const subj = await findFirst(page, SUBJECT_SELECTORS, 4000);
+  if (!subj) throw new Error("제목 입력칸을 찾지 못했어요");
+  await subj.click();
+  await subj.fill("");
+  await subj.type(t.subject, { delay: 10 });
+  await page.waitForTimeout(300);
+
+  // 3) 본문 — 에디터가 iframe(SmartEditor)이거나 contenteditable일 수 있어 둘 다 시도
+  const bodyWritten = await writeMailBody(page, t.body);
+  if (!bodyWritten) throw new Error("본문 입력 영역을 찾지 못했어요");
+  await page.waitForTimeout(400);
+
+  // 4) 보내기 버튼
+  const sendBtn = await findFirst(page, SEND_SELECTORS, 5000);
+  if (!sendBtn) throw new Error("보내기 버튼을 찾지 못했어요");
+  await sendBtn.click();
+  // 전송 완료 대기: '보내기' 버튼이 사라지거나 완료 문구가 뜰 때까지
+  await page.waitForTimeout(2500);
+}
+
+// 여러 셀렉터 후보 중 먼저 보이는 요소를 반환(없으면 null). 프레임 안까지 훑는다.
+async function findFirst(page: import("playwright").Page, selectors: string[], timeoutMs: number) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    for (const sel of selectors) {
+      // 메인 페이지
+      const el = page.locator(sel).first();
+      try { if (await el.isVisible({ timeout: 200 })) return el; } catch {}
+    }
+    // 프레임들도 확인(에디터가 iframe인 경우)
+    for (const fr of page.frames()) {
+      for (const sel of selectors) {
+        try { const el = fr.locator(sel).first(); if (await el.isVisible({ timeout: 150 })) return el; } catch {}
+      }
+    }
+    await page.waitForTimeout(250);
+  }
+  return null;
+}
+
+// 본문 입력: SmartEditor iframe(body[contenteditable]) 우선, 없으면 페이지 내 contenteditable/textarea
+async function writeMailBody(page: import("playwright").Page, body: string): Promise<boolean> {
+  // 1) iframe 에디터
+  for (const fr of page.frames()) {
+    for (const sel of BODY_SELECTORS) {
+      try {
+        const el = fr.locator(sel).first();
+        if (await el.isVisible({ timeout: 200 })) { await el.click(); await el.type(body, { delay: 4 }); return true; }
+      } catch {}
+    }
+  }
+  // 2) 메인 페이지 에디터
+  for (const sel of BODY_SELECTORS) {
+    try {
+      const el = page.locator(sel).first();
+      if (await el.isVisible({ timeout: 200 })) { await el.click(); await el.type(body, { delay: 4 }); return true; }
+    } catch {}
+  }
+  return false;
+}
+
+// 네이버 메일 UI 변화 대비 셀렉터 후보(넓게)
+const RECIPIENT_SELECTORS = [
+  "input[placeholder*='받는사람']", "input[placeholder*='이메일']", "input[name='to']",
+  "input[id*='recipient' i]", "input[class*='recipient' i]", "input[aria-label*='받는사람']",
+  "div[class*='recipient'] input", "input[type='text'][class*='to' i]",
+];
+const SUBJECT_SELECTORS = [
+  "input[placeholder*='제목']", "input[name='subject']", "input[id*='subject' i]",
+  "input[class*='subject' i]", "input[aria-label*='제목']", "input[title*='제목']",
+];
+const BODY_SELECTORS = [
+  "body[contenteditable='true']", "div[contenteditable='true']", ".se-content [contenteditable='true']",
+  "textarea[name='content']", "textarea[class*='body' i]", "[class*='editor'] [contenteditable='true']",
+];
+const SEND_SELECTORS = [
+  "button:has-text('보내기')", "a:has-text('보내기')", "button[class*='send' i]",
+  "button[id*='send' i]", "[role='button']:has-text('보내기')", "button[title*='보내기']",
+];
+
 // 🩺 P4: 글별 조회수 수집 — 네이버 블로그통계 '조회수 순위(PV)' 페이지(blog.stat.naver.com/stat/rank_pv)를
 //   로그인 세션으로 열어 [순위·제목·조회수] 표를 읽는다. (크롬확장과 동일한 DOM 파싱 방식, 회원은 아무것도 안 함)
 export type PostView = { logNo: string | null; title: string; views: number; rank: number | null };
