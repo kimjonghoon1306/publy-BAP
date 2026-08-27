@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import { createPortal } from "react-dom";
 import { BotEventStream, botFetch } from "../lib/botApi";
-import { PLAN_CONFIG, CRAWL_DAILY_LIMIT, EMAIL_DAILY_LIMIT, getCrawlDailyUsage, incrementCrawlQuota, getEmailDailyUsage, incrementEmailQuota } from "../lib/supabase";
+import { PLAN_CONFIG, CRAWL_DAILY_LIMIT, EMAIL_DAILY_LIMIT, COMMENT_DAILY_LIMIT, getCrawlDailyUsage, incrementCrawlQuota, getEmailDailyUsage, incrementEmailQuota } from "../lib/supabase";
 
 const BOT = "http://127.0.0.1:3334";   // neighbor-bot (발굴·발송)
 
@@ -91,6 +91,11 @@ export default function CrawlCenter({ showToast, theme: extTheme, userId, plan =
   const [minNeighbors, setMinNeighbors] = useState(500);
   const [minPosts, setMinPosts] = useState(2);
   const [activeOnly, setActiveOnly] = useState(true);
+  // ✉️ 이메일 발송 속도 조절 — 회원이 직접(간격 초·오늘 보낼 최대 통수). 계정 안전.
+  const [sendGapSec, setSendGapSec] = useState(() => Number(localStorage.getItem("publy_send_gap")) || 4);   // 통당 간격(초)
+  const [sendCapToday, setSendCapToday] = useState(() => Number(localStorage.getItem("publy_send_cap")) || 0); // 오늘 최대(0=등급한도까지)
+  useEffect(() => { localStorage.setItem("publy_send_gap", String(sendGapSec)); }, [sendGapSec]);
+  useEffect(() => { localStorage.setItem("publy_send_cap", String(sendCapToday)); }, [sendCapToday]);
   const [topicMatch, setTopicMatch] = useState(true);
   const [fields, setFields] = useState<Record<string, boolean>>({ email: true, kakao: true, openchat: true, url: true, nick: true, keywords: true, categories: true });
   const toggleField = (k: string) => setFields((f) => ({ ...f, [k]: !f[k] }));
@@ -272,6 +277,7 @@ export default function CrawlCenter({ showToast, theme: extTheme, userId, plan =
   // 📊 등급별 하루 한도(자정 초기화) — 다른 탭과 동일한 에너지바
   const crawlLimit = CRAWL_DAILY_LIMIT[plan] ?? CRAWL_DAILY_LIMIT.free;
   const emailLimit = EMAIL_DAILY_LIMIT[plan] ?? EMAIL_DAILY_LIMIT.free;
+  const commentLimit = COMMENT_DAILY_LIMIT[plan] ?? COMMENT_DAILY_LIMIT.free;
   const unlimitedPlan = plan === "unlimited" || plan === "admin";
   const [crawlUsed, setCrawlUsed] = useState(0);
   const [emailUsed, setEmailUsed] = useState(0);
@@ -426,7 +432,9 @@ export default function CrawlCenter({ showToast, theme: extTheme, userId, plan =
       ...picks.map(b => ({ id: b.id, nick: b.nick, email: b.email, keywords: b.keywords, categories: b.categories })),
       ...manual.map((e, i) => ({ id: `manual-${i}-${e}`, nick: "", email: e, keywords: [] as string[], categories: [] as string[] })),
     ];
-    const url = `${BOT}/api/outreach/send-email?userId=${encodeURIComponent(userId)}&accountId=${encodeURIComponent(mailAcctId)}&brand=${encodeURIComponent(outreachBrand)}&dailyLimit=${encodeURIComponent(String(emailLimit || 50))}&subject=${encodeURIComponent(emailSubject)}&message=${encodeURIComponent(emailBody)}&targets=${encodeURIComponent(JSON.stringify(targets))}`;
+    // 회원이 정한 오늘 상한(0=등급한도까지) + 통당 간격(초) 반영
+    const capLimit = sendCapToday > 0 ? Math.min(emailLimit || 999999, sendCapToday) : (emailLimit || 50);
+    const url = `${BOT}/api/outreach/send-email?userId=${encodeURIComponent(userId)}&accountId=${encodeURIComponent(mailAcctId)}&brand=${encodeURIComponent(outreachBrand)}&dailyLimit=${encodeURIComponent(String(capLimit))}&gapSec=${encodeURIComponent(String(sendGapSec))}&subject=${encodeURIComponent(emailSubject)}&message=${encodeURIComponent(emailBody)}&targets=${encodeURIComponent(JSON.stringify(targets))}`;
     const es = new BotEventStream(url); esOutRef.current = es;
     es.onmessage = (e: MessageEvent) => {
       let d: any; try { d = JSON.parse(e.data); } catch { return; }
@@ -445,11 +453,16 @@ export default function CrawlCenter({ showToast, theme: extTheme, userId, plan =
     if (!commentBody.trim()) { toast("댓글 내용을 적으세요", "info"); return; }
     const picks = shown.filter(b => selected.has(b.id));
     if (!picks.length) { toast("먼저 블로거를 선택하세요", "info"); return; }
-    // ⚠️ 계정 안전 경고 — 확실히 동의받고 진행
-    if (!window.confirm(`⚠️ 계정 안전 주의\n\n모르는 블로거 글에 홍보 댓글을 다는 건 네이버가 스팸·도배로 감지해 계정이 제한될 수 있어요.\n\n안전을 위해:\n· 오늘 최대 5명까지만\n· 40~90초 간격으로 아주 천천히\n· 자연스러운 댓글 권장(홍보 티 최소화)\n\n그래도 ${Math.min(5, picks.length)}명에게 댓글을 달까요?`)) return;
-    setSending(true); pushLog(`💬 댓글 제안 시작 — ${Math.min(5, picks.length)}명 (계정 보호: 천천히)`);
+    // ⚠️ 계정 안전 경고 — 관리자·무제한이라도 경고문은 그대로(위험하니 적당히!). 카운트만 무제한.
+    const unlimitedComment = commentLimit >= 9999;
+    const capN = unlimitedComment ? picks.length : Math.min(commentLimit, picks.length);
+    const limitLine = unlimitedComment
+      ? "· 등급 한도: 무제한 (단, 계정 보호를 위해 하루 20개 이하를 강력히 권해요!)"
+      : `· 오늘 최대 ${commentLimit}명까지(내 등급)`;
+    if (!window.confirm(`⚠️ 계정 안전 주의\n\n모르는 블로거 글에 홍보 댓글을 다는 건 네이버가 스팸·도배로 감지해 계정이 제한될 수 있어요.\n\n안전을 위해:\n${limitLine}\n· 40~90초 간격으로 아주 천천히\n· 자연스러운 댓글 권장(홍보 티 최소화)\n\n그래도 ${capN}명에게 댓글을 달까요?`)) return;
+    setSending(true); pushLog(`💬 댓글 제안 시작 — ${capN}명 (계정 보호: 천천히)`);
     const targets = picks.map(b => ({ id: b.id, blogId: b.id, nick: b.nick, keywords: b.keywords, categories: b.categories }));
-    const url = `${BOT}/api/outreach/send-comment?userId=${encodeURIComponent(userId)}&accountId=${encodeURIComponent(mailAcctId)}&dailyLimit=5&message=${encodeURIComponent(commentBody)}&targets=${encodeURIComponent(JSON.stringify(targets))}`;
+    const url = `${BOT}/api/outreach/send-comment?userId=${encodeURIComponent(userId)}&accountId=${encodeURIComponent(mailAcctId)}&dailyLimit=${commentLimit}&message=${encodeURIComponent(commentBody)}&targets=${encodeURIComponent(JSON.stringify(targets))}`;
     const es = new BotEventStream(url); esOutRef.current = es;
     es.onmessage = (e: MessageEvent) => {
       let d: any; try { d = JSON.parse(e.data); } catch { return; }
@@ -719,21 +732,25 @@ export default function CrawlCenter({ showToast, theme: extTheme, userId, plan =
                         <div style={{ fontSize: 11.5, marginTop: 3 }}>블로거를 발굴해 제안 메일을 보내면 여기서 추적할 수 있어요.</div>
                       </div>
                     ) : pageItems.map((h, i) => {
-                      const st = stageOf(h); const dA = daysAgo(h.sent_at);
+                      const st = stageOf(h); const dA = daysAgo(h.sent_at); const isComment = h.channel === "comment";
                       const needFollow = h.reply_status !== "replied" && h.reply_status !== "no_reply" && !h.followup_at && dA >= followupDays;
                       return (
                         <div key={h.id || i} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", borderRadius: 10, transition: "background .15s", borderBottom: i < pageItems.length - 1 ? `1px solid ${C.line}` : "none" }}
                           onMouseEnter={e => e.currentTarget.style.background = C.surf2} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
                           <span style={{ display: "inline-flex", width: 32, height: 32, borderRadius: 9, background: `${st.c}18`, color: st.c, alignItems: "center", justifyContent: "center", flexShrink: 0 }}><st.Ic s={17} col={st.c} /></span>
                           <div style={{ flex: 1, minWidth: 0 }}>
-                            <div style={{ fontSize: 12.5, fontWeight: 800, color: C.ink, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{h.nickname || h.blog_id || "블로거"} {h.followup_at && <span style={{ fontSize: 9.5, fontWeight: 700, color: "#6d5dd3", marginLeft: 4 }}>· 리마인드함</span>}</div>
-                            <div style={{ fontSize: 10.5, color: C.sub, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{h.to_email} · {fmt(h.sent_at)} 보냄 ({dA === 0 ? "오늘" : `${dA}일 전`})</div>
+                            <div style={{ fontSize: 12.5, fontWeight: 800, color: C.ink, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                              <span style={{ fontSize: 9, fontWeight: 800, color: isComment ? "#d98a1f" : "#6d5dd3", background: isComment ? "rgba(217,138,31,.14)" : "rgba(109,93,211,.14)", padding: "1px 6px", borderRadius: 10, marginRight: 5 }}>{isComment ? "💬 댓글" : "✉️ 이메일"}</span>
+                              {h.nickname || h.blog_id || "블로거"} {h.followup_at && <span style={{ fontSize: 9.5, fontWeight: 700, color: "#6d5dd3", marginLeft: 4 }}>· 리마인드함</span>}
+                            </div>
+                            <div style={{ fontSize: 10.5, color: C.sub, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{isComment ? (h.blog_id ? `blog.naver.com/${h.blog_id}` : "") : h.to_email} · {fmt(h.sent_at)} {isComment ? "댓글" : "보냄"} ({dA === 0 ? "오늘" : `${dA}일 전`})</div>
                           </div>
                           <span style={{ fontSize: 10.5, fontWeight: 800, color: st.c, background: `${st.c}14`, border: `1px solid ${st.c}44`, padding: "3px 9px", borderRadius: 20, whiteSpace: "nowrap", flexShrink: 0 }}>{st.t}{needFollow ? " ·촉진" : ""}</span>
                           <div style={{ display: "flex", gap: 5, flexShrink: 0 }}>
-                            {h.reply_status !== "replied" && <button onClick={() => setReplyStatus(h.id, "replied")} title="이 블로거가 회신했어요" style={{ padding: "5px 9px", borderRadius: 7, border: `1px solid ${C.line2}`, background: C.surf, color: "#0ea5e9", cursor: "pointer", fontSize: 10.5, fontWeight: 800, fontFamily: "inherit", whiteSpace: "nowrap" }}>회신옴</button>}
-                            {needFollow && <button onClick={() => sendFollowup([h.id])} disabled={followSending} title="리마인드 이메일을 보내요" style={{ padding: "5px 9px", borderRadius: 7, border: "none", background: "#d98a1f", color: "#fff", cursor: "pointer", fontSize: 10.5, fontWeight: 800, fontFamily: "inherit", whiteSpace: "nowrap" }}>팔로우업</button>}
-                            {h.blog_id && <a href={`https://blog.naver.com/${h.blog_id}`} target="_blank" rel="noopener noreferrer" title="블로그 열기" style={{ display: "inline-flex", alignItems: "center", padding: "5px 7px", borderRadius: 7, border: `1px solid ${C.line2}`, background: C.surf, color: C.sub, textDecoration: "none" }}><IC_CARD s={14} col={C.sub} /></a>}
+                            {h.reply_status !== "replied" && <button onClick={() => setReplyStatus(h.id, "replied")} title={isComment ? "블로거가 답댓글·회신했어요" : "이 블로거가 회신했어요"} style={{ padding: "5px 9px", borderRadius: 7, border: `1px solid ${C.line2}`, background: C.surf, color: "#0ea5e9", cursor: "pointer", fontSize: 10.5, fontWeight: 800, fontFamily: "inherit", whiteSpace: "nowrap" }}>회신옴</button>}
+                            {needFollow && !isComment && <button onClick={() => sendFollowup([h.id])} disabled={followSending} title="리마인드 이메일을 보내요" style={{ padding: "5px 9px", borderRadius: 7, border: "none", background: "#d98a1f", color: "#fff", cursor: "pointer", fontSize: 10.5, fontWeight: 800, fontFamily: "inherit", whiteSpace: "nowrap" }}>팔로우업</button>}
+                            {/* 댓글=단 글로 바로가기(답댓글 확인) / 이메일=블로그 홈 */}
+                            {(isComment && h.to_email ? h.to_email : h.blog_id ? `https://blog.naver.com/${h.blog_id}` : "") && <a href={isComment && h.to_email ? h.to_email : `https://blog.naver.com/${h.blog_id}`} target="_blank" rel="noopener noreferrer" title={isComment ? "댓글 단 글 보러가기(답댓글 확인)" : "블로그 열기"} style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "5px 8px", borderRadius: 7, border: `1px solid ${isComment ? "#d98a1f" : C.line2}`, background: C.surf, color: isComment ? "#d98a1f" : C.sub, textDecoration: "none", fontSize: 10, fontWeight: 800 }}>{isComment ? "🔗 보러가기" : <IC_CARD s={14} col={C.sub} />}</a>}
                             <button onClick={() => deleteOutreach(h.id)} title="이 기록 삭제" style={{ display: "inline-flex", alignItems: "center", padding: "5px 7px", borderRadius: 7, border: `1px solid ${C.line2}`, background: C.surf, color: "#d64545", cursor: "pointer", fontSize: 12, fontWeight: 800 }}>🗑</button>
                           </div>
                         </div>
@@ -796,19 +813,20 @@ export default function CrawlCenter({ showToast, theme: extTheme, userId, plan =
         {/* 등급별 한도 표 — ★항상 보이게(블로그지수 탭과 동일). 무제한 등급도 자기 등급이 표에 뜸 */}
         <div style={{ marginTop: 14, borderRadius: 10, overflow: "hidden", border: `1px solid ${C.line}` }}>
           <div style={{ padding: "9px 12px", fontSize: 12, fontWeight: 800, color: C.ink, background: C.surf2 }}>📋 등급별 크롤링 한도 <span style={{ fontSize: 10.5, fontWeight: 600, color: C.sub }}>· 내 등급에서 하루에 얼마나 발굴·발송할 수 있는지</span></div>
-          <div style={{ display: "grid", gridTemplateColumns: "1.1fr .8fr 1fr 1fr", background: C.surf2, borderTop: `1px solid ${C.line}` }}>
-            {["등급", "👤 계정", "🔍 발굴/일", "✉️ 발송/일"].map((h, i) => <div key={h} style={{ padding: "8px 12px", fontSize: 11, fontWeight: 800, color: C.sub, borderLeft: i ? `1px solid ${C.line}` : "none" }}>{h}</div>)}
+          <div style={{ display: "grid", gridTemplateColumns: "1fr .7fr .9fr .9fr .9fr", background: C.surf2, borderTop: `1px solid ${C.line}` }}>
+            {["등급", "👤 계정", "🔍 발굴/일", "✉️ 발송/일", "💬 댓글/일"].map((h, i) => <div key={h} style={{ padding: "8px 10px", fontSize: 10.5, fontWeight: 800, color: C.sub, borderLeft: i ? `1px solid ${C.line}` : "none" }}>{h}</div>)}
           </div>
           {/* ★무제한(관리자 권한)은 회원 등급표에서 제외 — 무료/베이직/프로만 */}
           {(["free", "basic", "pro"] as const).map(pl => {
             const cur = plan === pl;
             const c = PLAN_CONFIG[pl];
             return (
-              <div key={pl} style={{ display: "grid", gridTemplateColumns: "1.1fr .8fr 1fr 1fr", borderTop: `1px solid ${C.line}`, background: cur ? C.accentSoft : "transparent" }}>
-                <div style={{ padding: "9px 12px", fontSize: 12, fontWeight: cur ? 900 : 700, color: cur ? C.accent : C.ink }}>{c.label}{cur ? " (내 등급)" : ""}</div>
-                <div style={{ padding: "9px 12px", fontSize: 12, fontWeight: 700, color: C.ink, borderLeft: `1px solid ${C.line}` }}>{c.maxAccounts}개</div>
-                <div style={{ padding: "9px 12px", fontSize: 12, fontWeight: 700, color: C.ink, borderLeft: `1px solid ${C.line}` }}>{c.dailyCrawl}명</div>
-                <div style={{ padding: "9px 12px", fontSize: 12, fontWeight: 700, color: C.ink, borderLeft: `1px solid ${C.line}` }}>{c.dailyEmail}통</div>
+              <div key={pl} style={{ display: "grid", gridTemplateColumns: "1fr .7fr .9fr .9fr .9fr", borderTop: `1px solid ${C.line}`, background: cur ? C.accentSoft : "transparent" }}>
+                <div style={{ padding: "9px 10px", fontSize: 12, fontWeight: cur ? 900 : 700, color: cur ? C.accent : C.ink }}>{c.label}{cur ? " (내 등급)" : ""}</div>
+                <div style={{ padding: "9px 10px", fontSize: 12, fontWeight: 700, color: C.ink, borderLeft: `1px solid ${C.line}` }}>{c.maxAccounts}개</div>
+                <div style={{ padding: "9px 10px", fontSize: 12, fontWeight: 700, color: C.ink, borderLeft: `1px solid ${C.line}` }}>{c.dailyCrawl}명</div>
+                <div style={{ padding: "9px 10px", fontSize: 12, fontWeight: 700, color: C.ink, borderLeft: `1px solid ${C.line}` }}>{c.dailyEmail}통</div>
+                <div style={{ padding: "9px 10px", fontSize: 12, fontWeight: 700, color: "#d98a1f", borderLeft: `1px solid ${C.line}` }}>{c.dailyComment}개</div>
               </div>
             );
           })}
@@ -1069,6 +1087,21 @@ export default function CrawlCenter({ showToast, theme: extTheme, userId, plan =
                   <span style={{ color: C.sub, whiteSpace: "nowrap", display: "block", marginBottom: 4, fontSize: 11.5, fontWeight: 600 }}>메일 제목:</span>
                   <input value={emailSubject} onChange={e => setEmailSubject(e.target.value)} placeholder="제목을 입력하세요" style={{ width: "100%", boxSizing: "border-box", padding: "8px 11px", borderRadius: 6, border: `1px solid ${C.line2}`, background: C.surf, color: C.ink, fontFamily: "inherit", fontSize: 13 }} />
                   <div style={{ fontSize: 10.5, color: C.sub, marginTop: 4, lineHeight: 1.5 }}>💬 여기 적은 그대로 메일 제목이 돼요. 제목·본문에 <b>{"{업체명}"}·{"{닉네임}"}·{"{관심품목}"}</b>을 쓰면 자동으로 채워져요.</div>
+                  {/* ⏱️ 발송 속도 조절 — 계정 안전(천천히 보낼수록 안전) */}
+                  <div style={{ marginTop: 12, padding: "11px 13px", borderRadius: 8, background: C.surf2, border: `1px solid ${C.line2}` }}>
+                    <div style={{ fontSize: 11.5, fontWeight: 800, color: C.ink, marginBottom: 8 }}>⏱️ 발송 속도 · 계정 안전 <span style={{ fontSize: 10, fontWeight: 600, color: C.sub }}>· 천천히 보낼수록 안전해요</span></div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 9 }}>
+                      <span style={{ fontSize: 11, fontWeight: 700, color: C.sub, width: 80, flexShrink: 0 }}>한 통 간격</span>
+                      <input type="range" min={2} max={30} step={1} value={sendGapSec} onChange={e => setSendGapSec(Number(e.target.value))} style={{ flex: 1, accentColor: "#2f9e5e" }} />
+                      <span style={{ fontSize: 12, fontWeight: 800, color: "#2f9e5e", width: 52, textAlign: "right" }}>{sendGapSec}초</span>
+                    </div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                      <span style={{ fontSize: 11, fontWeight: 700, color: C.sub, width: 80, flexShrink: 0 }}>오늘 최대</span>
+                      <input type="range" min={0} max={unlimitedPlan ? 200 : emailLimit} step={unlimitedPlan ? 10 : 1} value={sendCapToday} onChange={e => setSendCapToday(Number(e.target.value))} style={{ flex: 1, accentColor: "#2f9e5e" }} />
+                      <span style={{ fontSize: 12, fontWeight: 800, color: "#2f9e5e", width: 52, textAlign: "right" }}>{sendCapToday === 0 ? "한도껏" : `${sendCapToday}통`}</span>
+                    </div>
+                    <div style={{ fontSize: 10, color: C.sub, marginTop: 7, lineHeight: 1.5 }}>💡 간격 <b>{sendGapSec}초</b>(±3초 랜덤) · 오늘 <b>{sendCapToday === 0 ? (unlimitedPlan ? "무제한" : `${emailLimit}통(등급 한도)`) : `${sendCapToday}통까지만`}</b>. 처음엔 <b>천천히·소량</b>으로 계정을 길들이는 걸 권해요.</div>
+                  </div>
                 </div>
               )}
               <div style={{ marginBottom: 14 }}>

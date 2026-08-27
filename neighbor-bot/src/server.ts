@@ -642,9 +642,10 @@ app.get("/api/outreach/send-comment", async (req, res) => {
     if (withBlog.length > cap) L(`⚠️ 계정 안전을 위해 오늘은 ${cap}명까지만 답니다(나머지는 다음에).`);
     const { ok, fail } = await sendBlogComments({
       accountId, ownerUserId: userId, targets: todo, onLog: L,
-      onSent: async (id, success, error) => {
+      onSent: async (id, success, error, postUrl) => {
         const t = todo.find(x => x.id === id) || todo[0];
-        await addOutreachLog({ user_id: userId, blog_id: t?.blogId || "", nickname: t?.nick, channel: "comment", to_email: "", subject: "블로그 댓글 제안", message: t?.body || "", status: success ? "sent" : "failed", error });
+        // 댓글은 이메일 안 쓰므로 to_email 필드에 '댓글 단 글 URL'을 저장(보러가기용)
+        await addOutreachLog({ user_id: userId, blog_id: t?.blogId || "", nickname: t?.nick, channel: "comment", to_email: postUrl || "", subject: "블로그 댓글 제안", message: t?.body || "", status: success ? "sent" : "failed", error });
         if (success) sseSend(res, { type: "sent", id });
       },
     });
@@ -656,8 +657,10 @@ app.get("/api/outreach/send-comment", async (req, res) => {
 
 app.get("/api/outreach/send-email", async (req, res) => {
   // ✉️ 웹메일 방식: 로그인된 네이버 창을 열어 사람처럼 메일을 쓴다. SMTP·앱비밀번호 불필요(회원 설정 0).
-  const { userId, accountId, subject, message, fromName, targets, dailyLimit, brand } = req.query as Record<string, string>;
+  const { userId, accountId, subject, message, fromName, targets, dailyLimit, brand, gapSec } = req.query as Record<string, string>;
   const brandName = (brand || "").trim();   // 회원 본인 업체명({업체명} 치환). 비면 자연스럽게 제거.
+  // 회원이 정한 통당 간격(초). 계정 안전 위해 최소 2초. 기본 4초. ±1.5초 랜덤 폭으로 사람같이.
+  const gap = Math.max(2, Number(gapSec) || 4) * 1000;
   sseSetup(res);
   const L = (msg: string) => sseSend(res, { type: "log", msg });
   try {
@@ -688,6 +691,7 @@ app.get("/api/outreach/send-email", async (req, res) => {
 
     const { ok, fail } = await sendWebmail({
       accountId, ownerUserId: userId, fromName,
+      delayMinMs: gap, delayMaxMs: gap + 3000,   // 회원이 정한 간격 ~ +3초 랜덤
       targets: todo.map(t => ({ id: t.id, email: t.email, nick: t.nick, subject: t.subject, body: t.body })),
       onLog: L,
       onSent: async (id, success, error) => {

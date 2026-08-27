@@ -2604,7 +2604,7 @@ export type CommentTarget = { id?: string; blogId: string; nick?: string; body: 
 export async function sendBlogComments(params: {
   accountId: string; ownerUserId?: string | null; targets: CommentTarget[];
   delayMinMs?: number; delayMaxMs?: number;
-  onLog?: (m: string) => void; onSent?: (id: string | undefined, ok: boolean, error?: string) => Promise<void> | void; stopSignal?: () => boolean;
+  onLog?: (m: string) => void; onSent?: (id: string | undefined, ok: boolean, error?: string, postUrl?: string) => Promise<void> | void; stopSignal?: () => boolean;
 }): Promise<{ ok: number; fail: number }> {
   const { accountId, ownerUserId, targets, delayMinMs = 40000, delayMaxMs = 90000, onLog, onSent, stopSignal } = params;
   const log = onLog || console.log;
@@ -2623,9 +2623,9 @@ export async function sendBlogComments(params: {
       const t = targets[i];
       log(`💬 (${i + 1}/${targets.length}) ${t.nick || t.blogId} 블로그에 댓글 다는 중…`);
       try {
-        await commentOnLatestPost(page, t.blogId, t.body, log);
+        const postUrl = await commentOnLatestPost(page, t.blogId, t.body, log);
         ok++; log(`   → ✅ 완료 (성공 ${ok} · 실패 ${fail})`);
-        await onSent?.(t.id, true);
+        await onSent?.(t.id, true, undefined, postUrl);
       } catch (e: any) {
         fail++; const msg = (e?.message || String(e)).slice(0, 100);
         log(`   → ❌ 실패: ${msg}`); await onSent?.(t.id, false, msg);
@@ -2640,16 +2640,27 @@ export async function sendBlogComments(params: {
   return { ok, fail };
 }
 // 한 블로거의 최근 글을 열어 댓글 작성. 실패 시 throw.
-async function commentOnLatestPost(page: import("playwright").Page, blogId: string, body: string, log: (m: string) => void) {
-  // 최근 글 logNo 확보(공개 목록 API)
+async function commentOnLatestPost(page: import("playwright").Page, blogId: string, body: string, log: (m: string) => void): Promise<string> {
+  // 최근 글 logNo 확보 — ★블로그 모바일 홈을 실제로 열어 렌더된 글 링크에서 추출(API 파싱보다 견고).
   let logNo = "";
   try {
-    const r = await page.evaluate(async (id: string) => {
-      try { const res = await fetch(`https://m.blog.naver.com/api/blogs/${id}/posts?categoryNo=0&itemCount=1&page=1`, { headers: { Referer: `https://m.blog.naver.com/${id}` } }); const raw = (await res.text()).replace(/^\)\]\}',?\s*/, ""); const j = JSON.parse(raw); const it = (j?.result?.items || j?.items || [])[0]; return it ? String(it.logNo || it.logno || "") : ""; } catch { return ""; }
-    }, blogId);
-    logNo = r || "";
+    await page.goto(`https://m.blog.naver.com/${blogId}`, { waitUntil: "domcontentloaded", timeout: 25000 });
+    await page.waitForTimeout(2200);
+    logNo = await page.evaluate((id: string) => {
+      const links = Array.from(document.querySelectorAll("a[href]")).map(a => (a as HTMLAnchorElement).href);
+      for (const h of links) { const m = h.match(new RegExp(`(?:m\\.)?blog\\.naver\\.com/${id}/(\\d{9,})`)) || h.match(/[?&]logNo=(\d{9,})/); if (m) return m[1]; }
+      return "";
+    }, blogId).catch(() => "");
   } catch {}
-  if (!logNo) throw new Error("최근 글을 찾지 못했어요");
+  // 폴백: 공개 목록 API(구조 여러 형태 대응)
+  if (!logNo) {
+    try {
+      logNo = await page.evaluate(async (id: string) => {
+        try { const res = await fetch(`https://m.blog.naver.com/api/blogs/${id}/posts?categoryNo=0&itemCount=5&page=1`, { headers: { Referer: `https://m.blog.naver.com/${id}` } }); const raw = (await res.text()).replace(/^\)\]\}',?\s*/, ""); const j: any = JSON.parse(raw); const arr = j?.result?.items || j?.result?.postList || j?.items || j?.postList || []; const it = arr[0]; return it ? String(it.logNo || it.logno || it.postId || "") : ""; } catch { return ""; }
+      }, blogId).catch(() => "");
+    } catch {}
+  }
+  if (!logNo) throw new Error("최근 글을 찾지 못했어요(비공개이거나 글이 없을 수 있어요)");
   // 모바일 글 페이지 열기
   await page.goto(`https://m.blog.naver.com/${blogId}/${logNo}`, { waitUntil: "domcontentloaded", timeout: 25000 });
   await page.waitForTimeout(2500);
@@ -2681,6 +2692,7 @@ async function commentOnLatestPost(page: import("playwright").Page, blogId: stri
     try { const b = page.locator(sel).first(); if (await b.count() && await b.isVisible()) { await b.click({ timeout: 3000 }); submitted = true; await page.waitForTimeout(2000); break; } } catch {}
   }
   if (!submitted) throw new Error("댓글 등록 버튼을 찾지 못했어요");
+  return `https://m.blog.naver.com/${blogId}/${logNo}`;   // 댓글 단 글 URL(보러가기용)
 }
 
 /* ── ✉️ 네이버 웹메일로 제안 메일 발송 (SMTP·앱비밀번호 불필요) ──
