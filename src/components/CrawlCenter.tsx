@@ -59,6 +59,7 @@ type Blogger = {
   lastActive: string;      // 마지막 활동
   engageRate: number;      // 참여율(%)
   authenticity?: number;   // 🩺 AI 진정성 점수(0~100) — 봇 로직 역이용, 가짜/품앗이 감별
+  adRatio?: number;        // 📊 상업성(0~1) — 최근 글 제목의 협찬·체험단 표시 비율
   ship?: ShipState;        // 배송 단계(체험단 제품 발송)
 };
 // 체험단 배송 단계: 제안함(내가 연락) → 수락(블로거가 OK 회신 → 운영자가 확인 눌러 확정) → 발송대기 → 배송중 → 배송완료
@@ -112,6 +113,8 @@ export default function CrawlCenter({ showToast, theme: extTheme, userId, plan =
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [sortBy, setSortBy] = useState<"score" | "neighbors" | "posts">("score");
   const [onlyContact, setOnlyContact] = useState(false);
+  const [hideDormant, setHideDormant] = useState(false);   // 활성도: 휴면(최근글 없음) 제외
+  const [commFilter, setCommFilter] = useState<"all" | "pure" | "ad">("all");   // 상업성: 전체/순수후기 위주/협찬 많은
   const [detail, setDetail] = useState<Blogger | null>(null);
   const [outreach, setOutreach] = useState<null | "email" | "comment">(null);
   // ★회사명 하드코딩 금지 — 모든 회원이 쓰므로 중립 템플릿 + {업체명} 변수. 회원이 자기 걸로 쓰면 localStorage에 저장돼 유지.
@@ -390,7 +393,7 @@ export default function CrawlCenter({ showToast, theme: extTheme, userId, plan =
       let d: any; try { d = JSON.parse(e.data); } catch { return; }
       if (d.type === "auth") {
         // 📇 진정성 분석하며 긁어온 공개 연락처(이메일·카톡·오픈채팅)도 카드에 반영
-        setResults(prev => prev.map(b => b.id === d.blogId ? { ...b, neighbors: d.neighbors || b.neighbors, visitors: d.visitors || b.visitors, authenticity: d.authenticity ?? b.authenticity, score: d.authenticity ?? b.score, email: d.email || b.email, kakao: d.kakao || b.kakao, openchat: d.openchat || b.openchat } : b));
+        setResults(prev => prev.map(b => b.id === d.blogId ? { ...b, neighbors: d.neighbors || b.neighbors, visitors: d.visitors || b.visitors, authenticity: d.authenticity ?? b.authenticity, score: d.authenticity ?? b.score, email: d.email || b.email, kakao: d.kakao || b.kakao, openchat: d.openchat || b.openchat, postsPerWeek: d.postsPerWeek ?? b.postsPerWeek, adRatio: d.adRatio ?? b.adRatio, lastActive: (d.lastPostDaysAgo != null ? (d.lastPostDaysAgo === 0 ? "오늘" : `${d.lastPostDaysAgo}일 전`) : b.lastActive) } : b));
       } else if (d.type === "done") {
         setAnalyzing(false); es.close(); esAuthRef.current = null;
         // ★"연락처 있는 것만" 체크했으면 = 분석 끝나고 연락처 없는 사람을 목록에서 실제 제거(수집=체크에 맞게)
@@ -476,6 +479,9 @@ export default function CrawlCenter({ showToast, theme: extTheme, userId, plan =
 
   const shown = results
     .filter((b) => !onlyContact || b.email || b.kakao || b.openchat)
+    .filter((b) => !hideDormant || (b.postsPerWeek ?? 1) > 0)                        // 활성도: 휴면 제외(주간 글 0 = 휴면)
+    .filter((b) => commFilter === "all" || b.adRatio == null                        //  상업성 미분석은 통과(분석 후 적용)
+      || (commFilter === "pure" ? b.adRatio <= 0.3 : b.adRatio >= 0.5))              //  순수후기 위주(≤30%) / 협찬 많은(≥50%)
     .sort((a, b) => sortBy === "score" ? b.score - a.score : sortBy === "neighbors" ? b.neighbors - a.neighbors : b.postsPerWeek - a.postsPerWeek);
   const toggleSel = (id: string) => setSelected((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
 
@@ -922,6 +928,8 @@ export default function CrawlCenter({ showToast, theme: extTheme, userId, plan =
             <div style={{ marginLeft: "auto", display: "flex", gap: 7, alignItems: "center", flexWrap: "wrap" }}>
               <span onClick={() => { loadOutHistory(); setHistoryOpen(true); }} title="지금까지 누구에게 이메일을 보냈는지 기록을 봐요" style={sChip(false)}>📮 보낸 글 이력</span>
               <span onClick={() => setOnlyContact((v) => !v)} title="공개 연락처(이메일·카톡·오픈채팅)가 있는 블로거만 화면에 보여줘요" style={sChip(onlyContact)}>연락처 있는 것만</span>
+              <span onClick={() => setHideDormant((v) => !v)} title="최근 글이 없는 휴면 블로거를 숨겨요(진정성 분석 후 활성도가 채워져요)" style={sChip(hideDormant)}>🔥 활동중만</span>
+              <select value={commFilter} onChange={(e) => setCommFilter(e.target.value as any)} title="상업성(최근 글 제목의 협찬·체험단 표시 비율)으로 걸러요 — 진정성 분석 후 채워져요" style={{ ...inp, width: "auto", padding: "7px 10px", fontSize: 12 }}><option value="all">상업성 전체</option><option value="pure">순수후기 위주(협찬↓)</option><option value="ad">협찬 많은(협찬↑)</option></select>
               <select value={sortBy} onChange={(e) => setSortBy(e.target.value as any)} title="블로거 정렬 기준" style={{ ...inp, width: "auto", padding: "7px 10px", fontSize: 12 }}><option value="score">진정성순</option><option value="neighbors">이웃순</option><option value="posts">글 많은순</option></select>
               <span onClick={() => setSelected(new Set(shown.map((b) => b.id)))} style={sChip(false)}>전체선택</span>
               {selected.size > 0 && <span onClick={() => setSelected(new Set())} style={{ ...sChip(false), color: C.accent, borderColor: C.accent }}>해제 {selected.size}</span>}
@@ -953,6 +961,10 @@ export default function CrawlCenter({ showToast, theme: extTheme, userId, plan =
                   <div style={{ display: "flex", gap: 8, marginBottom: 8, fontSize: 11, color: C.sub, fontWeight: 700, flexWrap: "wrap", alignItems: "center" }}>
                     <span>🕒 {b.lastActive}</span>
                     {b.neighbors > 0 && <span>이웃 {b.neighbors.toLocaleString()}</span>}
+                    {/* 🔥 활성도: 진정성 분석 후 채워지는 주간 포스팅 수(활발할수록 체험단에 좋음) */}
+                    {b.postsPerWeek != null && b.postsPerWeek > 0 && <span title="최근 글 기준 주당 포스팅 수(활동성)" style={{ color: b.postsPerWeek >= 3 ? "#2f9e5e" : C.sub }}>🔥 주 {b.postsPerWeek}글</span>}
+                    {/* 📊 상업성: 최근 글 제목의 협찬·체험단 표시 비율(순수후기↔협찬多) */}
+                    {b.adRatio != null && <span title="최근 글 제목의 협찬·체험단 표시 비율 — 낮을수록 순수후기 위주, 높을수록 협찬글 많음" style={{ fontWeight: 800, color: b.adRatio <= 0.3 ? "#2f9e5e" : b.adRatio >= 0.5 ? "#d64545" : "#d98a1f", background: b.adRatio <= 0.3 ? "rgba(47,158,94,.12)" : b.adRatio >= 0.5 ? "rgba(214,69,69,.12)" : "rgba(217,138,31,.12)", padding: "2px 8px", borderRadius: 20 }}>📊 협찬 {Math.round(b.adRatio * 100)}%</span>}
                     {/* 🩺 진정성 점수: 상세에서 이웃·참여율 정밀 분석 후 채워짐. 색상=신뢰도(초록=진짜/주황=주의/빨강=의심) */}
                     {b.authenticity != null
                       ? <span title="AI 진정성 점수 — 참여율 대비 이웃수로 가짜·품앗이 감별(높을수록 진짜 영향력)" style={{ fontWeight: 800, color: b.authenticity >= 70 ? "#2f9e5e" : b.authenticity >= 45 ? "#d98a1f" : "#d64545", background: b.authenticity >= 70 ? "rgba(47,158,94,.12)" : b.authenticity >= 45 ? "rgba(217,138,31,.12)" : "rgba(214,69,69,.12)", padding: "2px 8px", borderRadius: 20 }}>🩺 진정성 {b.authenticity}</span>

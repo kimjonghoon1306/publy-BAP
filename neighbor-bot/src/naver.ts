@@ -3369,8 +3369,19 @@ export async function replyToComments(params: {
       if (stopSignal?.()) { log("[답방] 중단 신호 수신"); break; }
       try {
         log(`[답방] 글 진입: ${postUrl}`);
-        await page.goto(postUrl, { waitUntil: "domcontentloaded", timeout: 20000 });
+        // ★blog.naver.com은 무거운 iframe SPA — 느린 프록시에선 outer 'domcontentloaded'가 안 떠 매번 타임아웃(실측: 초반 성공 후 연속 실패).
+        //   'commit'(응답 수신 즉시 진행)로 바꾸고, 실패 시 1회 재시도. 이후 스크롤·waitForSelector가 실제 준비를 확인한다.
+        let navOk = false;
+        for (let attempt = 0; attempt < 2 && !navOk; attempt++) {
+          try { await page.goto(postUrl, { waitUntil: "commit", timeout: 30000 }); navOk = true; }
+          catch (navErr: any) {
+            if (attempt === 0) { log(`[답방] 진입 지연 — 재시도`); await page.waitForTimeout(1500); }
+            else throw navErr;
+          }
+        }
         await page.waitForTimeout(1800);
+        // commit 직후엔 iframe(mainFrame)이 아직 안 붙었을 수 있어 잠깐 대기(최대 ~5초)
+        for (let i = 0; i < 10 && !page.frames().some(f => f.name() === "mainFrame" || f.url().includes("blog.naver.com")); i++) await page.waitForTimeout(500);
         const frame = page.frames().find(f => f.name() === "mainFrame") ?? page.frames().find(f => f.url().includes("blog.naver.com")) ?? null;
         const ctx: any = frame ?? page;
         const scrollInto = async (el: any) => { try { await el.evaluate((n: Element) => { const s = document.scrollingElement || document.documentElement; const r = n.getBoundingClientRect(); s.scrollTop = Math.max(0, s.scrollTop + r.top - window.innerHeight * 0.4); }); await page.waitForTimeout(300); } catch {} };
@@ -4295,7 +4306,7 @@ export function engageDonePath(accountId: string): string {
 /* ── 🩺 공개 정보로 남의 블로그 진정성 분석 (세션 불필요) ──
    m.blog.naver.com 공개 API의 이웃수(subscriberCount) + NVisitorgp4Ajax 공개 방문자 XML.
    참여율(방문자/이웃) 대비로 "진짜 영향력 vs 품앗이·봇 부풀림"을 추정한다. */
-export async function analyzeBlogAuthenticity(blogId: string): Promise<{ blogId: string; neighbors: number; visitors: number; authenticity: number | null; email?: string; kakao?: string; openchat?: string }> {
+export async function analyzeBlogAuthenticity(blogId: string): Promise<{ blogId: string; neighbors: number; visitors: number; authenticity: number | null; email?: string; kakao?: string; openchat?: string; postsPerWeek?: number; lastPostDaysAgo?: number; adRatio?: number }> {
   const MUA = "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1";
   let neighbors = 0, visitors = 0;
   let email: string | undefined, kakao: string | undefined, openchat: string | undefined;
@@ -4328,21 +4339,39 @@ export async function analyzeBlogAuthenticity(blogId: string): Promise<{ blogId:
       pickContacts(html.slice(0, 30000));                               // 프로필 상단 HTML 전체에서 한 번 더
     } catch {}
   }
-  // 최근 게시글 본문에서도(협찬·제휴 문의 이메일이 글 하단에 있는 경우가 많음) — 1~2개만
-  if (!email && !kakao && !openchat) {
-    try {
-      const lr = await fetch(`https://m.blog.naver.com/api/blogs/${encodeURIComponent(blogId)}/posts?categoryNo=0&itemCount=2&page=1`, { headers: { "User-Agent": MUA, Referer: `https://m.blog.naver.com/${blogId}` } });
-      const lraw = (await lr.text()).replace(/^\)\]\}',?\s*/, "");
-      const lj: any = JSON.parse(lraw);
-      const items = (lj?.result?.items || lj?.result?.postList || lj?.items || []).slice(0, 2);
-      for (const it of items) {
-        const logNo = String(it.logNo || it.logno || it.postId || "");
-        if (!logNo) continue;
-        try { const pv = await fetch(`https://m.blog.naver.com/${encodeURIComponent(blogId)}/${logNo}`, { headers: { "User-Agent": MUA } }); pickContacts((await pv.text()).slice(0, 50000)); } catch {}
-        if (email || kakao || openchat) break;
+  // 최근 게시글 목록 — ①활성도(포스팅 주기·최근성) ②상업성(제목의 협찬 표시 비율) ③연락처(본문)
+  //   한 번의 목록 호출을 세 용도로 재활용(추가 네트워크 최소화).
+  let postsPerWeek: number | undefined, lastPostDaysAgo: number | undefined, adRatio: number | undefined;
+  try {
+    const lr = await fetch(`https://m.blog.naver.com/api/blogs/${encodeURIComponent(blogId)}/posts?categoryNo=0&itemCount=12&page=1`, { headers: { "User-Agent": MUA, Referer: `https://m.blog.naver.com/${blogId}` } });
+    const lraw = (await lr.text()).replace(/^\)\]\}',?\s*/, "");
+    const lj: any = JSON.parse(lraw);
+    const items: any[] = (lj?.result?.items || lj?.result?.postList || lj?.items || []);
+    if (items.length) {
+      // ① 활성도: 최근 글 날짜(ms)들로 최근성 + 주간 포스팅 수 추정
+      const dates = items.map(it => Number(it.addDate ?? it.addDateMs ?? it.date ?? 0)).filter(n => Number.isFinite(n) && n > 0).sort((a, b) => b - a);
+      if (dates.length) {
+        lastPostDaysAgo = Math.floor((Date.now() - dates[0]) / 86400000);
+        if (dates.length >= 2) {
+          const spanDays = Math.max(1, (dates[0] - dates[dates.length - 1]) / 86400000);
+          postsPerWeek = Math.round((dates.length / spanDays) * 7 * 10) / 10;   // 최근 표본 기준 주당 글 수
+        }
       }
-    } catch {}
-  }
+      // ② 상업성: 최근 글 제목의 협찬·체험단 표시 비율(0~1). 순수후기↔협찬多 감별.
+      const AD = /협찬|체험단|무상\s*제공|제공\s*받아|제공받아|소정의|원고료|유료\s*광고|서포터[즈스]|앰버서더|앰배서더|파트너스|서포터스|sponsored|\bad\b/i;
+      const titles = items.map(it => String(it.title || it.titleWithInspectMessage || "")).filter(Boolean);
+      if (titles.length) adRatio = Math.round((titles.filter(t => AD.test(t)).length / titles.length) * 100) / 100;
+      // ③ 연락처: 아직 못 찾았으면 상위 2개 본문에서(협찬·제휴 문의 이메일이 글 하단에 많음)
+      if (!email && !kakao && !openchat) {
+        for (const it of items.slice(0, 2)) {
+          const logNo = String(it.logNo || it.logno || it.postId || "");
+          if (!logNo) continue;
+          try { const pv = await fetch(`https://m.blog.naver.com/${encodeURIComponent(blogId)}/${logNo}`, { headers: { "User-Agent": MUA } }); pickContacts((await pv.text()).slice(0, 50000)); } catch {}
+          if (email || kakao || openchat) break;
+        }
+      }
+    }
+  } catch {}
   try {
     const vres = await fetch(`https://blog.naver.com/NVisitorgp4Ajax.naver?blogId=${encodeURIComponent(blogId)}`, { headers: { "User-Agent": MUA, Referer: `https://blog.naver.com/${blogId}` } });
     const xml = await vres.text();
@@ -4358,7 +4387,7 @@ export async function analyzeBlogAuthenticity(blogId: string): Promise<{ blogId:
     if (visitors === 0) s = Math.min(s, 30);          // 방문자 0 = 죽은 블로그 의심
     authenticity = Math.max(5, Math.min(99, s));
   }
-  return { blogId, neighbors, visitors, authenticity, email, kakao, openchat };
+  return { blogId, neighbors, visitors, authenticity, email, kakao, openchat, postsPerWeek, lastPostDaysAgo, adRatio };
 }
 
 /* ── 📄 글 본문 읽기 (세션 불필요, 공개) ──
