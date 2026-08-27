@@ -627,7 +627,8 @@ app.post("/api/outreach/sender", async (req, res) => {
 // 이메일 실발송(SSE) — 선택한 블로거들에게 개인화 발송. 블로그 창 안 열고 SMTP로 바로.
 app.get("/api/outreach/send-email", async (req, res) => {
   // ✉️ 웹메일 방식: 로그인된 네이버 창을 열어 사람처럼 메일을 쓴다. SMTP·앱비밀번호 불필요(회원 설정 0).
-  const { userId, accountId, subject, message, fromName, targets, dailyLimit } = req.query as Record<string, string>;
+  const { userId, accountId, subject, message, fromName, targets, dailyLimit, brand } = req.query as Record<string, string>;
+  const brandName = (brand || "").trim();   // 회원 본인 업체명({업체명} 치환). 비면 자연스럽게 제거.
   sseSetup(res);
   const L = (msg: string) => sseSend(res, { type: "log", msg });
   try {
@@ -648,8 +649,9 @@ app.get("/api/outreach/send-email", async (req, res) => {
 
     const todo = withEmail.slice(0, remain).map(t => {
       const nick = t.nick || "블로거";
-      const subj = String(subject || "체험단 제안").replace(/\{닉네임\}/g, t.nick || "").replace(/\{관심키워드\}/g, (t.keywords?.[0] || "")).replace(/\{관심품목\}/g, (t.categories?.[0] || ""));
-      const body = String(message || "").replace(/\{닉네임\}/g, nick).replace(/\{관심키워드\}/g, (t.keywords?.[0] || "관심 있으신 분야")).replace(/\{관심품목\}/g, (t.categories?.[0] || "관심 품목"));
+      // {업체명}=회원 본인 업체명(비면 "저희"로 자연스럽게). {닉네임}·{관심키워드}·{관심품목} 개인화.
+      const subj = String(subject || "체험단 제안").replace(/\{업체명\}/g, brandName || "저희").replace(/\{닉네임\}/g, t.nick || "").replace(/\{관심키워드\}/g, (t.keywords?.[0] || "")).replace(/\{관심품목\}/g, (t.categories?.[0] || ""));
+      const body = String(message || "").replace(/\{업체명\}/g, brandName || "저희").replace(/\{닉네임\}/g, nick).replace(/\{관심키워드\}/g, (t.keywords?.[0] || "관심 있으신 분야")).replace(/\{관심품목\}/g, (t.categories?.[0] || "관심 품목"));
       return { id: t.id, email: t.email, nick: t.nick, subject: subj, body, blogId: t.blogId };
     });
     if (withEmail.length > remain) L(`⚠️ 하루 한도 때문에 ${remain}명만 보냅니다(계정 안전). 나머지는 내일.`);
@@ -681,6 +683,64 @@ app.get("/api/outreach/history/:userId", async (req, res) => {
     if (error) throw new Error(error.message);
     res.json({ ok: true, history: data || [] });
   } catch (e: any) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// ✅ 회신 상태 변경(수동: 회원이 "회신 왔어요"/"거절"을 눌러 기록) — reply_status: waiting|replied|no_reply
+app.post("/api/outreach/reply-status", async (req, res) => {
+  const { id, reply_status } = req.body || {};
+  if (!id || !reply_status) return res.status(400).json({ ok: false, error: "id, reply_status 필요" });
+  try {
+    const { error } = await supabase.from("publy_outreach").update({ reply_status }).eq("id", id);
+    if (error) throw new Error(error.message);
+    res.json({ ok: true });
+  } catch (e: any) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// 📬 팔로우업 대상 조회 — 보낸 지 N일(기본 3) 넘도록 회신(replied) 없는 이메일 건. "할 일" 팝업용.
+app.get("/api/outreach/followup-targets/:userId", async (req, res) => {
+  const days = Math.max(1, Number(req.query.days) || 3);
+  try {
+    const cutoff = new Date(Date.now() - days * 86400000).toISOString();
+    const { data, error } = await supabase.from("publy_outreach").select("*")
+      .eq("user_id", req.params.userId).eq("channel", "email").eq("status", "sent")
+      .neq("reply_status", "replied").neq("reply_status", "no_reply")
+      .is("followup_at", null)                       // 아직 팔로우업 안 보낸 것만
+      .lte("sent_at", cutoff)                        // N일 이상 지난 것
+      .order("sent_at", { ascending: true }).limit(100);
+    if (error) throw new Error(error.message);
+    res.json({ ok: true, targets: (data || []).filter((r: any) => r.to_email) });
+  } catch (e: any) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// 📬 팔로우업 발송(자동/수동 공용) — 선택한 아웃리치 건들에 리마인드 메일을 웹메일로 보낸다.
+app.get("/api/outreach/send-followup", async (req, res) => {
+  const { userId, accountId, ids, message } = req.query as Record<string, string>;
+  sseSetup(res);
+  const L = (msg: string) => sseSend(res, { type: "log", msg });
+  try {
+    if (!userId || !accountId) throw new Error("userId·accountId 필요");
+    let idList: string[] = [];
+    try { idList = JSON.parse(ids || "[]"); } catch {}
+    if (!idList.length) { sseSend(res, { type: "error", msg: "팔로우업할 대상을 선택하세요" }); return res.end(); }
+    const { data: rows } = await supabase.from("publy_outreach").select("*").in("id", idList);
+    const targets = (rows || []).filter((r: any) => r.to_email).map((r: any) => ({
+      id: r.id, email: r.to_email, nick: r.nickname, blogId: r.blog_id,
+      subject: `[리마인드] ${r.subject || "체험단 제안"}`,
+      body: String(message || "").replace(/\{닉네임\}/g, r.nickname || "블로거") ||
+        `${r.nickname || "블로거"}님, 지난번 보내드린 제안 혹시 확인하셨을까요? 관심 있으시면 편하게 회신 주세요 :)`,
+    }));
+    if (!targets.length) { sseSend(res, { type: "error", msg: "보낼 대상이 없어요" }); return res.end(); }
+    L(`📬 팔로우업 ${targets.length}건을 로그인된 네이버 창으로 보냅니다…`);
+    const { ok, fail } = await sendWebmail({
+      accountId, ownerUserId: userId, targets, onLog: L,
+      onSent: async (id, success) => {
+        if (success && id) { await supabase.from("publy_outreach").update({ followup_at: new Date().toISOString() }).eq("id", id); sseSend(res, { type: "sent", id }); }
+      },
+    });
+    L(`🎉 팔로우업 완료 — 성공 ${ok} · 실패 ${fail}`);
+    sseSend(res, { type: "done", ok, fail });
+  } catch (e: any) { sseSend(res, { type: "error", msg: e.message }); }
+  res.end();
 });
 
 // 🩺 진정성 정밀 분석(공개 정보, 세션 불필요) — blogIds 배치. SSE로 하나씩 결과 스트림.
