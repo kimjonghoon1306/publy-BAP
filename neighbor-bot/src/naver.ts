@@ -4459,17 +4459,22 @@ export function engageDonePath(accountId: string): string {
 /* ── 🩺 공개 정보로 남의 블로그 진정성 분석 (세션 불필요) ──
    m.blog.naver.com 공개 API의 이웃수(subscriberCount) + NVisitorgp4Ajax 공개 방문자 XML.
    참여율(방문자/이웃) 대비로 "진짜 영향력 vs 품앗이·봇 부풀림"을 추정한다. */
-export async function analyzeBlogAuthenticity(blogId: string): Promise<{ blogId: string; neighbors: number; visitors: number; authenticity: number | null; email?: string; kakao?: string; openchat?: string; postsPerWeek?: number; lastPostDaysAgo?: number; adRatio?: number }> {
+export async function analyzeBlogAuthenticity(blogId: string): Promise<{ blogId: string; neighbors: number; visitors: number; authenticity: number | null; email?: string; kakao?: string; openchat?: string; instagram?: string; youtube?: string; postsPerWeek?: number; lastPostDaysAgo?: number; adRatio?: number; mainTopic?: string }> {
   const MUA = "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1";
   let neighbors = 0, visitors = 0;
   let email: string | undefined, kakao: string | undefined, openchat: string | undefined;
-  // 📇 공개 연락처 추출 — 블로그 소개글/프로필에 공개한 이메일·카톡·오픈채팅을 정규식으로. (공개정보만)
+  let instagram: string | undefined, youtube: string | undefined;   // 📱 타 SNS(추가 수집) — 연락 채널 확대
+  // 📇 공개 연락처 추출 — 블로그 소개글/프로필에 공개한 이메일·카톡·오픈채팅·SNS를 정규식으로. (공개정보만)
   const pickContacts = (text: string) => {
     if (!text) return;
     const t = text.replace(/&#(\d+);/g, (_, n) => String.fromCharCode(Number(n))).replace(/\[at\]|\(at\)|＠/gi, "@").replace(/\[dot\]|\(dot\)/gi, ".");
     if (!email) { const m = t.match(/[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/); if (m && !/example\.com|naver\.com\/|\.png|\.jpg/i.test(m[0])) email = m[0]; }
     if (!openchat) { const m = t.match(/open\.kakao\.com\/[a-zA-Z0-9/_-]+/); if (m) openchat = "https://" + m[0].replace(/^https?:\/\//, ""); }
     if (!kakao) { const m = t.match(/(?:카톡|카카오톡|kakao\s*id|오픈채팅)\s*[:：]?\s*([a-zA-Z0-9_.\-]{3,20})/i); if (m && !/open\.kakao/i.test(m[0])) kakao = m[1]; }
+    // 📱 인스타그램 핸들(게시물·릴스 링크 제외, 프로필만)
+    if (!instagram) { const m = t.match(/instagram\.com\/([a-zA-Z0-9_.]{2,30})/i); if (m && m[1] && !/^(p|reel|reels|explore|stories|accounts)$/i.test(m[1])) instagram = m[1]; }
+    // 📺 유튜브 채널(@핸들 / channel / c/)
+    if (!youtube) { const m = t.match(/youtube\.com\/(@[a-zA-Z0-9_.\-]{2,40}|channel\/[a-zA-Z0-9_\-]+|c\/[a-zA-Z0-9_.\-]+)/i) || t.match(/youtu\.be\/[a-zA-Z0-9_\-]+/i); if (m) youtube = m[0].replace(/^https?:\/\//, ""); }
   };
   try {
     const r = await fetch(`https://m.blog.naver.com/api/blogs/${encodeURIComponent(blogId)}`, { headers: { "User-Agent": MUA, Referer: `https://m.blog.naver.com/${blogId}` } });
@@ -4480,8 +4485,9 @@ export async function analyzeBlogAuthenticity(blogId: string): Promise<{ blogId:
     const intro = String(j?.result?.blogIntroduction ?? j?.result?.introduction ?? j?.blogIntroduction ?? j?.introduction ?? "");
     pickContacts(intro);
   } catch {}
-  // 프로필 페이지 HTML에서도 한 번 더(소개글 API가 비어있는 경우가 많음 → description 메타·프로필 desc·HTML 전체)
-  if (!email && !kakao && !openchat) {
+  // 프로필 페이지 HTML에서도 한 번 더(소개글 API가 비어있는 경우가 많음 → description 메타·프로필 desc·HTML 전체).
+  //   연락처 또는 SNS가 아직 없으면 실행(SNS 링크는 프로필 상단 위젯에 있는 경우가 많음).
+  if (!email && !kakao && !openchat || !instagram && !youtube) {
     try {
       const pr = await fetch(`https://m.blog.naver.com/${encodeURIComponent(blogId)}`, { headers: { "User-Agent": MUA } });
       const html = await pr.text();
@@ -4489,12 +4495,17 @@ export async function analyzeBlogAuthenticity(blogId: string): Promise<{ blogId:
       if (meta) pickContacts(meta[1]);                                   // 소개 = description 메타(실측: 여기 있음)
       const introM = html.match(/"blogIntroduction"\s*:\s*"([^"]*)"/) || html.match(/class="[^"]*desc[^"]*"[^>]*>([^<]+)</i);
       if (introM) pickContacts(introM[1]);
-      pickContacts(html.slice(0, 30000));                               // 프로필 상단 HTML 전체에서 한 번 더
+      pickContacts(html.slice(0, 40000));                               // 프로필 상단 HTML 전체에서 한 번 더(SNS 위젯 포함)
+    } catch {}
+    // 프로필 인트로(외부채널 위젯 소스) — 인스타·유튜브 등 외부 링크를 여기 걸어두는 블로거가 많음
+    try {
+      const ir = await fetch(`https://blog.naver.com/profile/intro.naver?blogId=${encodeURIComponent(blogId)}`, { headers: { "User-Agent": MUA, Referer: `https://blog.naver.com/${blogId}` } });
+      pickContacts((await ir.text()).slice(0, 40000));
     } catch {}
   }
   // 최근 게시글 목록 — ①활성도(포스팅 주기·최근성) ②상업성(제목의 협찬 표시 비율) ③연락처(본문)
   //   한 번의 목록 호출을 세 용도로 재활용(추가 네트워크 최소화).
-  let postsPerWeek: number | undefined, lastPostDaysAgo: number | undefined, adRatio: number | undefined;
+  let postsPerWeek: number | undefined, lastPostDaysAgo: number | undefined, adRatio: number | undefined, mainTopic: string | undefined;
   try {
     const lr = await fetch(`https://m.blog.naver.com/api/blogs/${encodeURIComponent(blogId)}/posts?categoryNo=0&itemCount=12&page=1`, { headers: { "User-Agent": MUA, Referer: `https://m.blog.naver.com/${blogId}` } });
     const lraw = (await lr.text()).replace(/^\)\]\}',?\s*/, "");
@@ -4514,6 +4525,26 @@ export async function analyzeBlogAuthenticity(blogId: string): Promise<{ blogId:
       const AD = /협찬|체험단|무상\s*제공|제공\s*받아|제공받아|소정의|원고료|유료\s*광고|서포터[즈스]|앰버서더|앰배서더|파트너스|서포터스|sponsored|\bad\b/i;
       const titles = items.map(it => String(it.title || it.titleWithInspectMessage || "")).filter(Boolean);
       if (titles.length) adRatio = Math.round((titles.filter(t => AD.test(t)).length / titles.length) * 100) / 100;
+      // ④ 주제 자동분류(추가수집): 실제 최근 글 제목에서 가장 자주 다루는 분야를 판별(검색 키워드보다 정확).
+      if (titles.length) {
+        const TOPICS: [string, RegExp][] = [
+          ["맛집·음식", /맛집|먹방|음식|점심|저녁|메뉴|식당|국밥|고기|파스타|초밥|디저트\b/],
+          ["카페·디저트", /카페|커피|디저트|베이커리|빵집|브런치|케이크/],
+          ["뷰티·화장품", /뷰티|화장품|스킨케어|메이크업|립스틱|파운데이션|향수|피부/],
+          ["패션", /패션|코디|옷|아우터|원피스|신발|가방|룩북|데일리룩/],
+          ["육아·아이", /육아|아기|아이|유아|기저귀|이유식|장난감|어린이집|출산/],
+          ["여행", /여행|호텔|리조트|펜션|여행지|국내여행|해외여행|관광|숙소/],
+          ["인테리어·집", /인테리어|집꾸미기|셀프인테리어|가구|홈|정리|살림|주방/],
+          ["운동·건강", /운동|헬스|필라테스|요가|다이어트|홈트|근력|러닝|건강/],
+          ["반려동물", /강아지|고양이|반려|펫|멍멍|냥|사료|동물병원/],
+          ["IT·전자", /아이폰|갤럭시|노트북|태블릿|이어폰|가전|전자|앱\b|스마트/],
+          ["자동차", /자동차|차량|시승|suv|전기차|국산차|수입차|타이어/],
+          ["재테크·금융", /재테크|주식|부동산|투자|적금|대출|보험|연금|절세/],
+          ["교육·공부", /공부|교육|학습|입시|자격증|영어|수학|강의|시험/],
+        ];
+        const score = TOPICS.map(([label, re]) => [label, titles.filter(t => re.test(t)).length] as [string, number]).filter(x => x[1] > 0).sort((a, b) => b[1] - a[1]);
+        if (score.length && score[0][1] >= 2) mainTopic = score[0][0];   // 2건 이상 겹칠 때만(오분류 방지)
+      }
       // ③ 연락처: 아직 못 찾았으면 상위 2개 본문에서(협찬·제휴 문의 이메일이 글 하단에 많음)
       if (!email && !kakao && !openchat) {
         for (const it of items.slice(0, 2)) {
@@ -4540,7 +4571,7 @@ export async function analyzeBlogAuthenticity(blogId: string): Promise<{ blogId:
     if (visitors === 0) s = Math.min(s, 30);          // 방문자 0 = 죽은 블로그 의심
     authenticity = Math.max(5, Math.min(99, s));
   }
-  return { blogId, neighbors, visitors, authenticity, email, kakao, openchat, postsPerWeek, lastPostDaysAgo, adRatio };
+  return { blogId, neighbors, visitors, authenticity, email, kakao, openchat, instagram, youtube, postsPerWeek, lastPostDaysAgo, adRatio, mainTopic };
 }
 
 /* ── 📄 글 본문 읽기 (세션 불필요, 공개) ──

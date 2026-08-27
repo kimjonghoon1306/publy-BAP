@@ -54,13 +54,14 @@ type Blogger = {
   id: string; nick: string; url: string; topic: string;
   thumbnail?: string;      // 프로필/썸네일 이미지(네이버 검색 API 제공)
   neighbors: number; postsPerWeek: number; visitors: number; score: number;
-  email?: string; kakao?: string; openchat?: string; proposed?: boolean;
+  email?: string; kakao?: string; openchat?: string; instagram?: string; youtube?: string; proposed?: boolean;
   keywords: string[];      // 자주 쓰는 키워드
   categories: string[];    // 주력 품목/카테고리
   lastActive: string;      // 마지막 활동
   engageRate: number;      // 참여율(%)
   authenticity?: number;   // 🩺 AI 진정성 점수(0~100) — 봇 로직 역이용, 가짜/품앗이 감별
   adRatio?: number;        // 📊 상업성(0~1) — 최근 글 제목의 협찬·체험단 표시 비율
+  mainTopic?: string;      // 🏷️ 실제 주력 주제(최근 글 제목 자동분류)
   ship?: ShipState;        // 배송 단계(체험단 제품 발송)
 };
 // 체험단 배송 단계: 제안함(내가 연락) → 수락(블로거가 OK 회신 → 운영자가 확인 눌러 확정) → 발송대기 → 배송중 → 배송완료
@@ -396,7 +397,7 @@ export default function CrawlCenter({ showToast, theme: extTheme, userId, plan =
       let d: any; try { d = JSON.parse(e.data); } catch { return; }
       if (d.type === "auth") {
         // 📇 진정성 분석하며 긁어온 공개 연락처(이메일·카톡·오픈채팅)도 카드에 반영
-        setResults(prev => prev.map(b => b.id === d.blogId ? { ...b, neighbors: d.neighbors || b.neighbors, visitors: d.visitors || b.visitors, authenticity: d.authenticity ?? b.authenticity, score: d.authenticity ?? b.score, email: d.email || b.email, kakao: d.kakao || b.kakao, openchat: d.openchat || b.openchat, postsPerWeek: d.postsPerWeek ?? b.postsPerWeek, adRatio: d.adRatio ?? b.adRatio, lastActive: (d.lastPostDaysAgo != null ? (d.lastPostDaysAgo === 0 ? "오늘" : `${d.lastPostDaysAgo}일 전`) : b.lastActive) } : b));
+        setResults(prev => prev.map(b => b.id === d.blogId ? { ...b, neighbors: d.neighbors || b.neighbors, visitors: d.visitors || b.visitors, authenticity: d.authenticity ?? b.authenticity, score: d.authenticity ?? b.score, email: d.email || b.email, kakao: d.kakao || b.kakao, openchat: d.openchat || b.openchat, instagram: d.instagram || b.instagram, youtube: d.youtube || b.youtube, mainTopic: d.mainTopic || b.mainTopic, postsPerWeek: d.postsPerWeek ?? b.postsPerWeek, adRatio: d.adRatio ?? b.adRatio, lastActive: (d.lastPostDaysAgo != null ? (d.lastPostDaysAgo === 0 ? "오늘" : `${d.lastPostDaysAgo}일 전`) : b.lastActive) } : b));
       } else if (d.type === "done") {
         setAnalyzing(false); es.close(); esAuthRef.current = null;
         // ★"연락처 있는 것만" 체크했으면 = 분석 끝나고 연락처 없는 사람을 목록에서 실제 제거(수집=체크에 맞게)
@@ -491,9 +492,9 @@ export default function CrawlCenter({ showToast, theme: extTheme, userId, plan =
   const downloadCsv = () => {
     const rows = shown.filter((b) => selected.size === 0 || selected.has(b.id));
     if (!rows.length) { toast("내보낼 블로거가 없어요", "info"); return; }
-    const H = ["닉네임", "블로그", "주제", "이웃수", "주간글수", "방문자", "참여율", "점수", "관심키워드", "주력품목", "이메일", "카톡", "오픈채팅"];
+    const H = ["닉네임", "블로그", "주제", "실제주제", "이웃수", "주간글수", "방문자", "참여율", "점수", "관심키워드", "주력품목", "이메일", "카톡", "오픈채팅", "인스타", "유튜브"];
     const esc = (v: any) => `"${String(v ?? "").replace(/"/g, '""')}"`;
-    const csv = [H.map(esc).join(","), ...rows.map((b) => [b.nick, b.url, TOPIC_KR[b.topic], b.neighbors, b.postsPerWeek, b.visitors, b.engageRate + "%", b.score, b.keywords.join(" "), b.categories.join(" "), b.email || "", b.kakao || "", b.openchat || ""].map(esc).join(","))].join("\r\n");
+    const csv = [H.map(esc).join(","), ...rows.map((b) => [b.nick, b.url, TOPIC_KR[b.topic], b.mainTopic || "", b.neighbors, b.postsPerWeek, b.visitors, b.engageRate + "%", b.score, b.keywords.join(" "), b.categories.join(" "), b.email || "", b.kakao || "", b.openchat || "", b.instagram ? `@${b.instagram}` : "", b.youtube || ""].map(esc).join(","))].join("\r\n");
     const a = document.createElement("a");
     a.href = URL.createObjectURL(new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8" }));
     a.download = `blogger_${topic}_${rows.length}.csv`; a.click();
@@ -973,6 +974,8 @@ export default function CrawlCenter({ showToast, theme: extTheme, userId, plan =
                   <div style={{ display: "flex", gap: 8, marginBottom: 8, fontSize: 11, color: C.sub, fontWeight: 700, flexWrap: "wrap", alignItems: "center" }}>
                     <span>🕒 {b.lastActive}</span>
                     {b.neighbors > 0 && <span>이웃 {b.neighbors.toLocaleString()}</span>}
+                    {/* 🏷️ 실제 주력 주제(최근 글 제목 자동분류) — 검색 키워드보다 정확 */}
+                    {b.mainTopic && <span title="최근 글 제목으로 자동 분류한 실제 주력 주제" style={{ fontWeight: 800, color: C.accent, background: `${C.accent}14`, padding: "2px 8px", borderRadius: 20 }}>🏷️ {b.mainTopic}</span>}
                     {/* 🔥 활성도: 진정성 분석 후 채워지는 주간 포스팅 수(활발할수록 체험단에 좋음) */}
                     {b.postsPerWeek != null && b.postsPerWeek > 0 && <span title="최근 글 기준 주당 포스팅 수(활동성)" style={{ color: b.postsPerWeek >= 3 ? "#2f9e5e" : C.sub }}>🔥 주 {b.postsPerWeek}글</span>}
                     {/* 📊 상업성: 최근 글 제목의 협찬·체험단 표시 비율(순수후기↔협찬多) */}
@@ -989,7 +992,9 @@ export default function CrawlCenter({ showToast, theme: extTheme, userId, plan =
                   <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
                     {b.email && <span style={{ fontSize: 10, fontWeight: 700, color: C.ink, border: `1px solid ${C.line2}`, padding: "2px 7px", borderRadius: 2 }}>이메일</span>}
                     {b.kakao && <span style={{ fontSize: 10, fontWeight: 700, color: C.ink, border: `1px solid ${C.line2}`, padding: "2px 7px", borderRadius: 2 }}>카톡</span>}
-                    {!b.email && !b.kakao && !b.openchat && <span style={{ fontSize: 10, color: C.sub }}>공개 연락처 없음</span>}
+                    {b.instagram && <a href={`https://instagram.com/${b.instagram}`} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()} title={`인스타 @${b.instagram}`} style={{ fontSize: 10, fontWeight: 700, color: "#c13584", border: "1px solid #c1358455", padding: "2px 7px", borderRadius: 2, textDecoration: "none" }}>📷 인스타</a>}
+                    {b.youtube && <a href={`https://${b.youtube}`} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()} title={b.youtube} style={{ fontSize: 10, fontWeight: 700, color: "#ff0000", border: "1px solid #ff000044", padding: "2px 7px", borderRadius: 2, textDecoration: "none" }}>▶ 유튜브</a>}
+                    {!b.email && !b.kakao && !b.openchat && !b.instagram && !b.youtube && <span style={{ fontSize: 10, color: C.sub }}>공개 연락처 없음</span>}
                     {/* 발송 여부는 위쪽 '아웃리치 추적 대시보드'에서 한곳에서 관리 (카드엔 배지 안 둠) */}
                     <button onClick={() => setDetail(b)} style={{ marginLeft: "auto", ...btnGhost, padding: "4px 9px", fontSize: 10.5 }}>상세 →</button>
                   </div>
