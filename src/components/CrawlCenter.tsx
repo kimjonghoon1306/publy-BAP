@@ -95,25 +95,43 @@ export default function CrawlCenter({ showToast, theme: extTheme, userId, plan =
   const [commentBody, setCommentBody] = useState("{닉네임}님 글 잘 봤어요! {관심키워드} 관련해 온종일 체험단 함께하실래요? 문의는 프로필 링크로 :)");
   const [sending, setSending] = useState(false);
   // ✉️ 웹메일 방식: SMTP·앱비밀번호 없이, 로그인된 네이버 계정 창을 열어 메일을 쓴다(서이추처럼).
-  //    회원이 서이추·공감·답방·품앗이 탭에서 이미 연결한 계정을 그대로 재사용 → 회원 추가 설정 0.
-  const [mailAccounts, setMailAccounts] = useState<{ accountId: string; blogId: string; label: string }[]>([]);
-  const [mailAcctId, setMailAcctId] = useState("");   // 선택된 발송 계정
-  const loadMailAccounts = () => {
-    const seen = new Set<string>();
-    const out: { accountId: string; blogId: string; label: string }[] = [];
-    ["neighbor", "engage", "reply", "pumasi"].forEach(k => {
-      try {
-        (JSON.parse(localStorage.getItem(`publy_accounts_${k}`) || "[]") || []).forEach((a: any) => {
-          if (a?.accountId && a?.sessionOk && a?.blogId && !seen.has(a.blogId)) {
-            seen.add(a.blogId); out.push({ accountId: a.accountId, blogId: a.blogId, label: a.blogId });
-          }
-        });
-      } catch {}
-    });
-    setMailAccounts(out);
-    setMailAcctId(prev => (out.some(o => o.accountId === prev) ? prev : (out[0]?.accountId || "")));
+  //    ★크롤링은 다른 탭과 완전 별개(테리 원칙: 탭별 계정 격리). 크롤링 전용으로 로그인한 계정만 쓴다.
+  //    저장소 `publy_accounts_crawl` — 서이추(neighbor)·공감(engage) 등과 절대 안 섞임.
+  const CRAWL_LS_KEY = "publy_accounts_crawl";
+  type CrawlAcct = { accountId: string; id: string; pw: string; blogId: string; sessionOk: boolean; loginLoading?: boolean };
+  const [mailAccounts, setMailAccounts] = useState<CrawlAcct[]>(() => {
+    try { const s = JSON.parse(localStorage.getItem(CRAWL_LS_KEY) || "[]"); if (Array.isArray(s) && s.length) return s.map((a: any) => ({ accountId: a.accountId, id: a.id || "", pw: a.pw || "", blogId: a.blogId || "", sessionOk: !!a.sessionOk })); } catch {}
+    return [{ accountId: "crawl_acc_1", id: "", pw: "", blogId: "", sessionOk: false }];
+  });
+  const [mailAcctId, setMailAcctId] = useState("");   // 선택된 발송 계정(연결된 것 중)
+  const saveCrawlAccts = (list: CrawlAcct[]) => { try { localStorage.setItem(CRAWL_LS_KEY, JSON.stringify(list.map(a => ({ accountId: a.accountId, id: a.id, pw: a.pw, blogId: a.blogId, sessionOk: a.sessionOk })))); } catch {} };
+  const connectedMail = mailAccounts.filter(a => a.sessionOk && a.blogId);   // 실제 로그인된 것만 발송 후보
+  // 크롤링 계정 로그인(서이추와 동일한 /api/login, tabKey=crawl로 격리)
+  const connectCrawlAccount = async (accountId: string) => {
+    const acc = mailAccounts.find(a => a.accountId === accountId);
+    if (!acc || !acc.id || !acc.pw) { toast("아이디와 비밀번호를 입력하세요", "info"); return; }
+    setMailAccounts(list => list.map(a => a.accountId === accountId ? { ...a, loginLoading: true } : a));
+    try {
+      const r = await botFetch(`${BOT}/api/login`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ accountId, id: acc.id, pw: acc.pw }) });
+      const d = await r.json();
+      if (d.ok || d.success) {
+        const blogId = d.blogId || acc.blogId || acc.id;
+        setMailAccounts(list => { const nx = list.map(a => a.accountId === accountId ? { ...a, sessionOk: true, blogId, loginLoading: false } : a); saveCrawlAccts(nx); return nx; });
+        setMailAcctId(accountId);
+        toast(`✅ ${blogId} 연결됨`, "success");
+      } else {
+        setMailAccounts(list => list.map(a => a.accountId === accountId ? { ...a, sessionOk: false, loginLoading: false } : a));
+        toast(d.error || "로그인 실패 — 아이디/비밀번호를 확인하세요", "error");
+      }
+    } catch (e: any) {
+      setMailAccounts(list => list.map(a => a.accountId === accountId ? { ...a, loginLoading: false } : a));
+      toast(/Failed to fetch|봇/i.test(e?.message || "") ? "봇 서버에 연결할 수 없어요(앱을 껐다 켜보세요)" : (e?.message || "연결 실패"), "error");
+    }
   };
-  useEffect(() => { loadMailAccounts(); /* eslint-disable-next-line */ }, [userId]);
+  const addCrawlAccount = () => setMailAccounts(list => [...list, { accountId: `crawl_acc_${Date.now()}`, id: "", pw: "", blogId: "", sessionOk: false }]);
+  const removeCrawlAccount = (accountId: string) => setMailAccounts(list => { const nx = list.filter(a => a.accountId !== accountId); const f = nx.length ? nx : [{ accountId: "crawl_acc_1", id: "", pw: "", blogId: "", sessionOk: false }]; saveCrawlAccts(f); return f; });
+  const changeCrawlAccount = (accountId: string, patch: Partial<CrawlAcct>) => setMailAccounts(list => list.map(a => a.accountId === accountId ? { ...a, ...patch } : a));
+  useEffect(() => { setMailAcctId(prev => (connectedMail.some(o => o.accountId === prev) ? prev : (connectedMail[0]?.accountId || ""))); /* eslint-disable-next-line */ }, [mailAccounts]);
   // 보낸글 이력
   const [historyOpen, setHistoryOpen] = useState(false);
   const [outHistory, setOutHistory] = useState<any[]>([]);
@@ -242,7 +260,7 @@ export default function CrawlCenter({ showToast, theme: extTheme, userId, plan =
   // 📧 이메일 실발송(SSE) — 웹메일 방식: 로그인된 네이버 창을 열어 사람처럼 메일을 쓴다(SMTP·앱비번 불필요).
   const sendEmails = () => {
     if (!userId) { toast("로그인 정보가 없어요", "error"); return; }
-    if (!mailAcctId) { toast("발송할 네이버 계정을 먼저 연결하세요 — 서이추·공감 탭에서 로그인한 계정이 여기 나와요", "info"); loadMailAccounts(); return; }
+    if (!mailAcctId || !connectedMail.some(a => a.accountId === mailAcctId)) { toast("발송할 네이버 계정을 먼저 연결하세요(아래에서 아이디·비밀번호로 로그인)", "info"); return; }
     // ① 발굴 결과에서 고른 사람 + ② 직접 입력/붙여넣은 이메일 = 합쳐서 발송(중복 제거)
     const picks = shown.filter(b => selected.has(b.id) && b.email);
     const pickedEmails = new Set(picks.map(b => (b.email || "").toLowerCase()));
@@ -417,10 +435,10 @@ export default function CrawlCenter({ showToast, theme: extTheme, userId, plan =
       <div className="ob-sec ob-card" style={{ ...card, padding: 20, marginBottom: 16 }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap", marginBottom: 14 }}>
           <div style={{ fontFamily: serif, fontSize: 16, fontWeight: 600, color: C.ink }}>📊 오늘의 사용량 <span style={{ fontSize: 11, fontWeight: 700, color: C.sub, fontFamily: "'Noto Sans KR'" }}>· 자정에 초기화</span></div>
-          {/* ✉️ 발송 계정 — 서이추처럼 로그인된 네이버 계정으로 메일을 씀(SMTP·앱비밀번호 불필요) */}
-          {mailAccounts.length > 0
-            ? <span style={{ fontSize: 12, fontWeight: 800, padding: "8px 14px", borderRadius: 10, border: "1.5px solid #2f9e5e", background: "rgba(47,158,94,.1)", color: "#2f9e5e", whiteSpace: "nowrap" }}>✅ 발송 계정 {mailAccounts.length}개 연결됨</span>
-            : <span style={{ fontSize: 12, fontWeight: 800, padding: "8px 14px", borderRadius: 10, border: `1.5px solid ${C.accent}`, background: C.accent, color: C.surf, whiteSpace: "nowrap" }}>⚠️ 서이추·공감 탭에서 네이버 로그인 먼저</span>}
+          {/* ✉️ 발송 계정 — 크롤링 전용으로 로그인한 네이버 계정(다른 탭과 별개). 실제 로그인된 것만 셈. */}
+          {connectedMail.length > 0
+            ? <span style={{ fontSize: 12, fontWeight: 800, padding: "8px 14px", borderRadius: 10, border: "1.5px solid #2f9e5e", background: "rgba(47,158,94,.1)", color: "#2f9e5e", whiteSpace: "nowrap" }}>✅ 발송 계정 {connectedMail.length}개 로그인됨</span>
+            : <span style={{ fontSize: 12, fontWeight: 800, padding: "8px 14px", borderRadius: 10, border: `1.5px solid ${C.accent}`, background: C.accent, color: C.surf, whiteSpace: "nowrap" }}>✉️ 발송할 네이버 계정을 연결하세요</span>}
         </div>
         {(() => {
           const bar = (label: string, ic: string, used: number, limit: number, col: string) => {
@@ -443,25 +461,27 @@ export default function CrawlCenter({ showToast, theme: extTheme, userId, plan =
             {bar("이메일 발송", "✉️", emailUsed, emailLimit, "#2f9e5e")}
           </>;
         })()}
-        {/* 등급별 한도 표(무제한 제외 = 무료/베이직/프로) */}
-        {!unlimitedPlan && (
-          <div style={{ marginTop: 14, borderRadius: 10, overflow: "hidden", border: `1px solid ${C.line}` }}>
-            <div style={{ display: "grid", gridTemplateColumns: "1.2fr 1fr 1fr", background: C.surf2 }}>
-              {["등급", "🔍 크롤링/일", "✉️ 이메일/일"].map((h, i) => <div key={h} style={{ padding: "8px 12px", fontSize: 11, fontWeight: 800, color: C.sub, borderLeft: i ? `1px solid ${C.line}` : "none" }}>{h}</div>)}
-            </div>
-            {(["free", "basic", "pro"] as const).map(pl => {
-              const cur = plan === pl;
-              return (
-                <div key={pl} style={{ display: "grid", gridTemplateColumns: "1.2fr 1fr 1fr", borderTop: `1px solid ${C.line}`, background: cur ? C.accentSoft : "transparent" }}>
-                  <div style={{ padding: "9px 12px", fontSize: 12, fontWeight: cur ? 900 : 700, color: cur ? C.accent : C.ink }}>{PLAN_CONFIG[pl].label}{cur ? " (내 등급)" : ""}</div>
-                  <div style={{ padding: "9px 12px", fontSize: 12, fontWeight: 700, color: C.ink, borderLeft: `1px solid ${C.line}` }}>{PLAN_CONFIG[pl].dailyCrawl}명</div>
-                  <div style={{ padding: "9px 12px", fontSize: 12, fontWeight: 700, color: C.ink, borderLeft: `1px solid ${C.line}` }}>{PLAN_CONFIG[pl].dailyEmail}통</div>
-                </div>
-              );
-            })}
-            <div style={{ padding: "8px 12px", fontSize: 10.5, color: C.sub, background: C.surf2, borderTop: `1px solid ${C.line}` }}>💜 무제한 등급은 크롤링·이메일 모두 <b style={{ color: "#8b5cf6" }}>제한 없음</b>이에요. 더 필요하면 등급을 올려보세요.</div>
+        {/* 등급별 한도 표 — ★항상 보이게(블로그지수 탭과 동일). 무제한 등급도 자기 등급이 표에 뜸 */}
+        <div style={{ marginTop: 14, borderRadius: 10, overflow: "hidden", border: `1px solid ${C.line}` }}>
+          <div style={{ padding: "9px 12px", fontSize: 12, fontWeight: 800, color: C.ink, background: C.surf2 }}>📋 등급별 크롤링 한도 <span style={{ fontSize: 10.5, fontWeight: 600, color: C.sub }}>· 내 등급에서 하루에 얼마나 발굴·발송할 수 있는지</span></div>
+          <div style={{ display: "grid", gridTemplateColumns: "1.2fr 1fr 1fr", background: C.surf2, borderTop: `1px solid ${C.line}` }}>
+            {["등급", "🔍 크롤링 발굴/일", "✉️ 이메일 발송/일"].map((h, i) => <div key={h} style={{ padding: "8px 12px", fontSize: 11, fontWeight: 800, color: C.sub, borderLeft: i ? `1px solid ${C.line}` : "none" }}>{h}</div>)}
           </div>
-        )}
+          {(["free", "basic", "pro", "unlimited"] as const).map(pl => {
+            const cur = plan === pl;
+            const c = PLAN_CONFIG[pl];
+            const crawlTxt = c.dailyCrawl >= 999999 ? "무제한 ∞" : `${c.dailyCrawl}명`;
+            const emailTxt = c.dailyEmail >= 999999 ? "무제한 ∞" : `${c.dailyEmail}통`;
+            return (
+              <div key={pl} style={{ display: "grid", gridTemplateColumns: "1.2fr 1fr 1fr", borderTop: `1px solid ${C.line}`, background: cur ? C.accentSoft : "transparent" }}>
+                <div style={{ padding: "9px 12px", fontSize: 12, fontWeight: cur ? 900 : 700, color: cur ? C.accent : C.ink }}>{c.label}{cur ? " (내 등급)" : ""}</div>
+                <div style={{ padding: "9px 12px", fontSize: 12, fontWeight: 700, color: pl === "unlimited" ? "#8b5cf6" : C.ink, borderLeft: `1px solid ${C.line}` }}>{crawlTxt}</div>
+                <div style={{ padding: "9px 12px", fontSize: 12, fontWeight: 700, color: pl === "unlimited" ? "#8b5cf6" : C.ink, borderLeft: `1px solid ${C.line}` }}>{emailTxt}</div>
+              </div>
+            );
+          })}
+          <div style={{ padding: "8px 12px", fontSize: 10.5, color: C.sub, background: C.surf2, borderTop: `1px solid ${C.line}` }}>💡 크롤링=하루 발굴 인원, 이메일=하루 발송 통수예요. 모두 자정에 초기화돼요. 이메일은 계정 안전상 하루 100통 이하 권장.</div>
+        </div>
       </div>
 
       {/* ── 검색 설정 ── */}
@@ -691,28 +711,40 @@ export default function CrawlCenter({ showToast, theme: extTheme, userId, plan =
               <button onClick={() => setOutreach(null)} style={{ ...btnGhost, padding: "5px 10px" }}>✕</button>
             </div>
             <div style={{ padding: "20px 24px" }}>
-              {/* 이메일: 발송 계정 선택(로그인된 네이버 계정) + 보내는 사람 이름 */}
+              {/* 이메일: 크롤링 전용 발송 계정 연결(다른 탭과 별개) + 선택 + 제목 */}
               {outreach === "email" && (
-                <div style={{ marginBottom: 14, padding: "12px 13px", borderRadius: 6, background: mailAccounts.length ? "rgba(47,158,94,.08)" : "rgba(217,138,31,.1)", border: `1px solid ${mailAccounts.length ? "rgba(47,158,94,.3)" : "rgba(217,138,31,.35)"}`, fontSize: 11.5, fontWeight: 600 }}>
-                  {mailAccounts.length ? (
-                    <>
-                      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                        <span style={{ color: "#2f9e5e", whiteSpace: "nowrap" }}>✉️ 이 계정으로 메일 발송:</span>
-                        <select value={mailAcctId} onChange={e => setMailAcctId(e.target.value)} style={{ flex: 1, minWidth: 140, padding: "6px 10px", borderRadius: 6, border: `1px solid ${C.line2}`, background: C.surf, color: C.ink, fontFamily: "inherit", fontSize: 12, fontWeight: 700 }}>
-                          {mailAccounts.map(a => <option key={a.accountId} value={a.accountId}>{a.label} (blog.naver.com/{a.blogId})</option>)}
-                        </select>
-                        <button onClick={loadMailAccounts} title="새로고침" style={{ ...btnGhost, padding: "5px 9px", fontSize: 11 }}>🔄</button>
+                <div style={{ marginBottom: 14, padding: "12px 13px", borderRadius: 6, background: "rgba(47,158,94,.06)", border: `1px solid ${C.line2}`, fontSize: 11.5, fontWeight: 600 }}>
+                  <div style={{ fontSize: 11.5, fontWeight: 800, color: C.ink, marginBottom: 8 }}>✉️ 발송 네이버 계정 <span style={{ fontSize: 10, fontWeight: 700, color: C.sub }}>· 크롤링 전용(다른 탭과 안 섞여요)</span></div>
+                  {/* 계정 목록: 로그인 폼(미연결) 또는 연결됨 표시 */}
+                  <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
+                    {mailAccounts.map(a => (
+                      <div key={a.accountId} style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", padding: "7px 9px", borderRadius: 6, background: a.sessionOk ? "rgba(47,158,94,.1)" : C.surf, border: `1px solid ${a.sessionOk ? "rgba(47,158,94,.35)" : C.line2}` }}>
+                        {a.sessionOk ? (
+                          <>
+                            <input type="radio" name="mailAcct" checked={mailAcctId === a.accountId} onChange={() => setMailAcctId(a.accountId)} style={{ accentColor: "#2f9e5e" }} />
+                            <span style={{ color: "#2f9e5e", fontWeight: 800 }}>✅ {a.blogId}</span>
+                            <span style={{ fontSize: 10, color: C.sub }}>연결됨 (이 계정으로 발송)</span>
+                            <button onClick={() => removeCrawlAccount(a.accountId)} style={{ ...btnGhost, marginLeft: "auto", padding: "2px 8px", fontSize: 10.5 }}>삭제</button>
+                          </>
+                        ) : (
+                          <>
+                            <input value={a.id} onChange={e => changeCrawlAccount(a.accountId, { id: e.target.value })} placeholder="네이버 아이디" style={{ flex: 1, minWidth: 90, padding: "6px 9px", borderRadius: 6, border: `1px solid ${C.line2}`, background: C.surf, color: C.ink, fontFamily: "inherit", fontSize: 12 }} />
+                            <input type="password" value={a.pw} onChange={e => changeCrawlAccount(a.accountId, { pw: e.target.value })} placeholder="비밀번호" style={{ flex: 1, minWidth: 90, padding: "6px 9px", borderRadius: 6, border: `1px solid ${C.line2}`, background: C.surf, color: C.ink, fontFamily: "inherit", fontSize: 12 }} />
+                            <button onClick={() => connectCrawlAccount(a.accountId)} disabled={a.loginLoading || !a.id || !a.pw} style={{ ...btnSolid, padding: "6px 12px", fontSize: 11, opacity: (a.loginLoading || !a.id || !a.pw) ? .6 : 1 }}>{a.loginLoading ? "연결 중..." : "🔗 연결"}</button>
+                            {mailAccounts.length > 1 && <button onClick={() => removeCrawlAccount(a.accountId)} style={{ ...btnGhost, padding: "6px 8px", fontSize: 10.5 }}>✕</button>}
+                          </>
+                        )}
                       </div>
-                      <div style={{ marginTop: 8 }}>
-                        <span style={{ color: C.sub, whiteSpace: "nowrap", display: "block", marginBottom: 4 }}>메일 제목:</span>
-                        <input value={emailSubject} onChange={e => setEmailSubject(e.target.value)} placeholder="칸에 제목을 입력하세요 (예: 온종일 체험단)" style={{ width: "100%", boxSizing: "border-box", padding: "8px 11px", borderRadius: 6, border: `1px solid ${C.line2}`, background: C.surf, color: C.ink, fontFamily: "inherit", fontSize: 13 }} />
-                        <div style={{ fontSize: 10.5, color: C.sub, marginTop: 4, lineHeight: 1.5 }}>💬 여기 적은 그대로 메일 제목이 돼요. (예: "온종일 체험단" 적으면 제목이 <b>온종일 체험단</b>)</div>
-                      </div>
-                      <div style={{ fontSize: 10.5, color: C.sub, marginTop: 10, lineHeight: 1.5 }}>💡 서이추처럼 <b>로그인된 네이버 창을 열어</b> 메일을 써요. 앱 비밀번호·SMTP 설정 필요 없어요. 발송 중엔 창을 닫지 마세요.</div>
-                    </>
-                  ) : (
-                    <span style={{ color: "#d98a1f" }}>⚠️ 발송할 네이버 계정이 없어요 — <b>서이추·공감·답방·품앗이</b> 탭에서 네이버 로그인을 먼저 하면 여기 나와요. <button onClick={loadMailAccounts} style={{ ...btnGhost, padding: "3px 8px", fontSize: 10.5, marginLeft: 4 }}>🔄 새로고침</button></span>
-                  )}
+                    ))}
+                    <button onClick={addCrawlAccount} style={{ ...btnGhost, padding: "6px 10px", fontSize: 11, alignSelf: "flex-start" }}>+ 계정 추가</button>
+                  </div>
+                  {/* 메일 제목 */}
+                  <div style={{ marginTop: 10 }}>
+                    <span style={{ color: C.sub, whiteSpace: "nowrap", display: "block", marginBottom: 4 }}>메일 제목:</span>
+                    <input value={emailSubject} onChange={e => setEmailSubject(e.target.value)} placeholder="칸에 제목을 입력하세요 (예: 온종일 체험단)" style={{ width: "100%", boxSizing: "border-box", padding: "8px 11px", borderRadius: 6, border: `1px solid ${C.line2}`, background: C.surf, color: C.ink, fontFamily: "inherit", fontSize: 13 }} />
+                    <div style={{ fontSize: 10.5, color: C.sub, marginTop: 4, lineHeight: 1.5 }}>💬 여기 적은 그대로 메일 제목이 돼요. (예: "온종일 체험단" 적으면 제목이 <b>온종일 체험단</b>)</div>
+                  </div>
+                  <div style={{ fontSize: 10.5, color: C.sub, marginTop: 10, lineHeight: 1.5 }}>💡 서이추처럼 <b>로그인된 네이버 창을 열어</b> 메일을 써요. 앱 비밀번호·SMTP 설정 필요 없어요. 발송 중엔 창을 닫지 마세요.</div>
                 </div>
               )}
               <div style={{ marginBottom: 14 }}>

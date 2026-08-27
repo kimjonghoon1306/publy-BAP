@@ -2749,7 +2749,7 @@ const SEND_SELECTORS = [
   "button[id*='send' i]", "[role='button']:has-text('보내기')", "button[title*='보내기']",
 ];
 
-// 🩺 P4: 글별 조회수 수집 — 네이버 블로그통계 '조회수 순위(PV)' 페이지(blog.stat.naver.com/stat/rank_pv)를
+// 🩺 P4: 글별 조회수 수집 — 네이버 블로그통계 '조회수 순위(PV)' 페이지(admin.blog.naver.com/{blogId}/stat/rank_pv)를
 //   로그인 세션으로 열어 [순위·제목·조회수] 표를 읽는다. (크롬확장과 동일한 DOM 파싱 방식, 회원은 아무것도 안 함)
 export type PostView = { logNo: string | null; title: string; views: number; rank: number | null };
 export async function crawlPostViews(params: { accountId: string; onLog?: (m: string) => void }): Promise<PostView[]> {
@@ -2767,15 +2767,17 @@ export async function crawlPostViews(params: { accountId: string; onLog?: (m: st
   let rows: PostView[] = [];
   try {
     log(`[조회수] 통계(조회수 순위) 수집 중... blogId=${blogId}`);
+    // ★실제 통계 조회수 순위 페이지 = admin.blog.naver.com/{blogId}/stat/rank_pv (blog.stat.naver.com은 내부 iframe 도메인).
+    //   유입검색어 수집에서 쓰던 admin 도메인과 동일 → 로그인 세션 그대로 통함.
     const urls = [
+      `https://admin.blog.naver.com/${encodeURIComponent(blogId)}/stat/rank_pv`,
+      `https://admin.blog.naver.com/${encodeURIComponent(blogId)}/stat/rank_pv.naver`,
       `https://blog.stat.naver.com/stat/rank_pv?blogId=${encodeURIComponent(blogId)}`,
-      `https://blog.stat.naver.com/stat/rank_pv.naver?blogId=${encodeURIComponent(blogId)}`,
-      `https://blog.stat.naver.com/stat/rank_pv`,
     ];
     for (const u of urls) {
       try {
         await page.goto(u, { waitUntil: "domcontentloaded", timeout: 20000 }).catch(() => {});
-        await page.waitForTimeout(1500);
+        await page.waitForTimeout(3000);   // SPA(통계 위젯) 렌더 대기 — 표가 늦게 그려짐
         // 페이지의 모든 프레임에서 [순위/제목/조회수] 헤더를 가진 표를 찾아 파싱
         for (const fr of page.frames()) {
           const parsed: PostView[] = await fr.evaluate(() => {
@@ -2814,8 +2816,11 @@ export async function crawlPostViews(params: { accountId: string; onLog?: (m: st
           }).catch(() => [] as PostView[]);
           if (Array.isArray(parsed) && parsed.length) { rows = parsed; break; }
         }
-        if (rows.length) break;
-      } catch {}
+        if (rows.length) { log(`[조회수] ✅ ${u.split("?")[0]} 에서 ${rows.length}개 표 발견`); break; }
+        // 이 URL에선 표를 못 찾음 — 진단: 현재 URL·표 개수·본문 앞부분을 남긴다(다음에 0개면 원인 바로 파악)
+        const diag = await page.evaluate(() => ({ url: location.href, tables: document.querySelectorAll("table").length, frames: window.frames.length, snippet: (document.body?.innerText || "").replace(/\s+/g, " ").slice(0, 120) })).catch(() => null);
+        if (diag) log(`[조회수] ⚠️ ${u.split("?")[0]} 표 못 찾음 → 실제URL=${diag.url} 표${diag.tables}개 프레임${diag.frames}개 · "${diag.snippet}"`);
+      } catch (e: any) { log(`[조회수] ⚠️ ${u.split("?")[0]} 접근 오류: ${String(e?.message || e).slice(0, 80)}`); }
     }
     log(`[조회수] ${rows.length}개 글 조회수 수집 완료`);
   } finally {
