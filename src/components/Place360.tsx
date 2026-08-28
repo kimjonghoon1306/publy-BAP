@@ -263,7 +263,7 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
     </main>}
 
     <div style={{ display: tab === "discovery" ? "block" : "none" }} aria-hidden={tab !== "discovery"}>
-      <PlaceCenter showToast={showToast} theme={theme} userId={userId} plan={plan} initialRegion={profile.region} onPlacesCollected={onPlacesCollected} onOpenCrawl={onOpenCrawl} />
+      <PlaceCenter showToast={showToast} theme={theme} userId={userId} plan={plan} initialRegion={profile.region} ownStoreName={profile.name} onPlacesCollected={onPlacesCollected} onOpenCrawl={onOpenCrawl} />
     </div>
   </div>;
 }

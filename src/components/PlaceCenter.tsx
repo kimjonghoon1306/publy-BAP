@@ -15,7 +15,7 @@ type Place = { placeId: string; name: string; category?: string; address?: strin
 type Blogger = { blogId: string; nick?: string; title?: string; fromPlace?: string; fromPlaces: string[] };
 type PlaceAcct = { accountId: string; id: string; pw: string; blogId: string; sessionOk: boolean; loginLoading?: boolean };
 type PlaceCollectionMeta = { query: string; domain: string; measuredAt: string; surface: "네이버 지도 PC" };
-type Props = { showToast?: (m: string, t?: any) => void; theme?: "dark" | "light"; userId?: string; plan?: string; onOpenCrawl?: () => void; initialRegion?: string; onPlacesCollected?: (places: Place[], meta: PlaceCollectionMeta) => void };
+type Props = { showToast?: (m: string, t?: any) => void; theme?: "dark" | "light"; userId?: string; plan?: string; onOpenCrawl?: () => void; initialRegion?: string; ownStoreName?: string; onPlacesCollected?: (places: Place[], meta: PlaceCollectionMeta) => void };
 
 const PLACE_LS_KEY = "publy_accounts_place";
 const CATEGORIES = [
@@ -36,7 +36,7 @@ function needsMarketing(p: Place): boolean {
   return visitors >= 30 && blogs <= Math.max(10, Math.round(visitors * .08));
 }
 
-export default function PlaceCenter({ showToast, theme: extTheme, userId, plan = "free", onOpenCrawl, initialRegion = "", onPlacesCollected }: Props) {
+export default function PlaceCenter({ showToast, theme: extTheme, userId, plan = "free", onOpenCrawl, initialRegion = "", ownStoreName = "", onPlacesCollected }: Props) {
   const toast = (m: string, t?: string) => showToast?.(m, t);
   const theme: "dark" | "light" = extTheme === "dark" ? "dark" : "light";
   const C = THEMES[theme];
@@ -58,8 +58,14 @@ export default function PlaceCenter({ showToast, theme: extTheme, userId, plan =
   const [bloggerRunning, setBloggerRunning] = useState(false);
   const [logs, setLogs] = useState<string[]>([]);
   const [quota, setQuota] = useState<{ used: number; limit: number; remaining: number } | null>(null);
+  const [detailPlace, setDetailPlace] = useState<Place | null>(null);
   const searchRef = useRef<BotEventStream | null>(null);
   const bloggersRef = useRef<BotEventStream | null>(null);
+  const isOwnStore = (name: string) => {
+    const own = ownStoreName.replace(/\s+/g, "").toLowerCase();
+    const target = name.replace(/\s+/g, "").toLowerCase();
+    return Boolean(own && (own.includes(target) || target.includes(own)));
+  };
 
   const [mailAccounts, setMailAccounts] = useState<PlaceAcct[]>(() => {
     try {
@@ -270,11 +276,11 @@ export default function PlaceCenter({ showToast, theme: extTheme, userId, plan =
           <select className="pc-filter-select" value={placeSort} onChange={e => setPlaceSort(e.target.value as typeof placeSort)} aria-label="업체 정렬 기준" style={{ ...inp, width: "auto", minWidth: 150, padding: "8px 10px", marginLeft: "auto" }}><option value="recommended">추천 순서</option><option value="visitors">방문자리뷰 많은 순</option><option value="blogs">블로그리뷰 많은 순</option></select>
         </div>}
         {!places.length ? <div style={{ textAlign: "center", padding: 35, color: C.sub, fontSize: 13 }}>아직 찾은 업체가 없어요. 위에서 지역과 업종을 정해 시작하세요.</div> : !shownPlaces.length ? <div style={{ textAlign: "center", padding: 35, color: C.sub, fontSize: 13 }}>이 조건에 맞는 업체가 없어요. ‘전체 업체’를 눌러 다시 확인하세요.</div> : <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(min(100%,245px),1fr))", gap: 11 }}>{shownPlaces.map(p => <article className="pc-card" key={p.placeId} onClick={() => setSelectedPlaces(s => { const n = new Set(s); n.has(p.placeId) ? n.delete(p.placeId) : n.add(p.placeId); return n; })} style={{ minWidth: 0, padding: 15, borderRadius: 16, border: `1.5px solid ${selectedPlaces.has(p.placeId) ? C.accent : C.line}`, background: selectedPlaces.has(p.placeId) ? `${C.accent}0e` : C.surf2, cursor: "pointer", transition: "all .18s" }}>
-          <div style={{ display: "flex", gap: 9, alignItems: "flex-start" }}><input type="checkbox" checked={selectedPlaces.has(p.placeId)} onChange={() => {}} style={{ accentColor: C.accent, marginTop: 4 }} /><div style={{ minWidth: 0, flex: 1 }}><div style={{ fontSize: 14.5, fontWeight: 900, overflowWrap: "anywhere" }}>{p.name}</div>{p.category && <span style={{ display: "inline-block", fontSize: 10, color: C.accent, background: C.accentSoft, borderRadius: 99, padding: "3px 8px", marginTop: 6, fontWeight: 800 }}>{p.category}</span>}</div></div>
+          <div style={{ display: "flex", gap: 9, alignItems: "flex-start" }}><input type="checkbox" checked={selectedPlaces.has(p.placeId)} onChange={() => {}} style={{ accentColor: C.accent, marginTop: 4 }} /><div style={{ minWidth: 0, flex: 1 }}><div style={{ fontSize: 14.5, fontWeight: 900, overflowWrap: "anywhere" }}>{p.name}</div><div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>{isOwnStore(p.name) && <span style={{ display: "inline-block", fontSize: 10, color: "#fff", background: "#d94f8a", borderRadius: 99, padding: "3px 8px", marginTop: 6, fontWeight: 900 }}>내 가게</span>}{p.category && <span style={{ display: "inline-block", fontSize: 10, color: C.accent, background: C.accentSoft, borderRadius: 99, padding: "3px 8px", marginTop: 6, fontWeight: 800 }}>{p.category}</span>}</div></div></div>
           <div style={{ color: C.sub, fontSize: 11.5, margin: "10px 0", minHeight: 34, lineHeight: 1.5 }}>📌 {p.address || "주소 정보 없음"}</div>
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap", fontSize: 11, color: C.ink, fontWeight: 700 }}><span>👥 방문자리뷰 {(p.visitorReviewCount || 0).toLocaleString()}</span><span>✍️ 블로그리뷰 {(p.blogReviewCount || 0).toLocaleString()}</span></div>
           {needsMarketing(p) && <div style={{ marginTop: 9, padding: "7px 9px", borderRadius: 9, color: "#b35b00", background: "rgba(255,170,0,.13)", fontSize: 10.5, fontWeight: 900, lineHeight: 1.45 }}>🔥 홍보 제안 후보<br/><span style={{ fontWeight: 600 }}>방문자리뷰에 비해 블로그리뷰가 적어요.</span></div>}
-          <a href={p.placeUrl} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()} style={{ display: "inline-block", marginTop: 12, color: C.accent, fontSize: 11.5, fontWeight: 900 }}>지도에서 보기 ↗</a>
+          <div style={{ display: "flex", gap: 7, marginTop: 12, flexWrap: "wrap" }}><button type="button" className="pc-action" onClick={e => { e.stopPropagation(); setDetailPlace(p); }} style={{ ...ghost, padding: "7px 10px", fontSize: 11.5 }}>👀 매장 보기</button><a href={p.placeUrl} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()} style={{ display: "inline-flex", alignItems: "center", color: C.accent, fontSize: 11.5, fontWeight: 900 }}>실제 플레이스 ↗</a></div>
         </article>)}</div>}
         <div style={{ marginTop: 14 }}>
           <Help><b style={{ color: C.accent }}>이 업체 리뷰 쓴 블로거 찾기</b>는 체크한 업체의 리뷰 작성자를 이어서 찾아요. 업체를 먼저 골라야 해요.</Help>
@@ -292,6 +298,17 @@ export default function PlaceCenter({ showToast, theme: extTheme, userId, plan =
         <a href={`https://blog.naver.com/${b.blogId}`} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()} style={{ display: "inline-block", marginTop: 11, color: C.accent, fontSize: 11.5, fontWeight: 900 }}>블로그 열기 ↗</a>
       </article>)}</div>}
     </section>}
+
+    {detailPlace && <div role="dialog" aria-modal="true" aria-label={`${detailPlace.name} 매장 미리보기`} onClick={() => setDetailPlace(null)} style={{ position: "fixed", inset: 0, zIndex: 10020, display: "grid", placeItems: "center", padding: 14, background: "rgba(22,18,14,.72)", backdropFilter: "blur(7px)" }}><div onClick={e => e.stopPropagation()} style={{ width: "min(760px,100%)", maxHeight: "90vh", overflowY: "auto", borderRadius: 24, border: `1px solid ${C.line2}`, background: C.surf, boxShadow: "0 28px 90px rgba(0,0,0,.45)" }}>
+      <div style={{ minHeight: 180, position: "relative", display: "grid", placeItems: "center", background: `linear-gradient(145deg,${C.accentSoft},${C.surf2})`, borderRadius: "24px 24px 0 0" }}><span style={{ fontSize: 62 }}>🏪</span><span style={{ position: "absolute", left: 16, bottom: 14, padding: "5px 10px", borderRadius: 99, background: "rgba(0,0,0,.58)", color: "#fff", fontSize: 10.5, fontWeight: 800 }}>대표 사진 · 아직 확인하지 않음</span><button type="button" onClick={() => setDetailPlace(null)} aria-label="닫기" style={{ position: "absolute", right: 13, top: 12, width: 40, height: 40, border: 0, borderRadius: "50%", background: "rgba(0,0,0,.55)", color: "#fff", cursor: "pointer", fontSize: 20 }}>×</button></div>
+      <div style={{ padding: "20px clamp(15px,4vw,26px) 26px" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 7, flexWrap: "wrap" }}>{isOwnStore(detailPlace.name) && <span style={{ padding: "4px 9px", borderRadius: 99, background: "#d94f8a", color: "#fff", fontSize: 10.5, fontWeight: 900 }}>내 가게</span>}<span style={{ color: C.sub, fontSize: 11 }}>{detailPlace.category || "업종 확인 필요"}</span></div>
+        <h2 style={{ margin: "7px 0 6px", fontSize: 25 }}>{detailPlace.name}</h2><p style={{ margin: 0, color: C.sub, fontSize: 12.5 }}>📌 {detailPlace.address || "공개 화면에서 주소를 확인하지 못했습니다."}</p>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(2,minmax(0,1fr))", gap: 9, marginTop: 15 }}><div style={{ padding: 14, borderRadius: 14, background: C.surf2 }}><span style={{ color: C.sub, fontSize: 10.5 }}>방문자 리뷰</span><b style={{ display: "block", marginTop: 4, fontSize: 19 }}>{(detailPlace.visitorReviewCount || 0).toLocaleString()}개</b></div><div style={{ padding: 14, borderRadius: 14, background: C.surf2 }}><span style={{ color: C.sub, fontSize: 10.5 }}>블로그 리뷰</span><b style={{ display: "block", marginTop: 4, fontSize: 19 }}>{(detailPlace.blogReviewCount || 0).toLocaleString()}개</b></div></div>
+        <div style={{ marginTop: 16, padding: 15, borderRadius: 15, border: `1px solid ${C.line}`, background: C.logBg }}><b style={{ fontSize: 14 }}>🩺 고객 화면 정보 완성도</b><div style={{ display: "grid", gap: 7, marginTop: 11 }}>{[{t:"상호·업종",ok:Boolean(detailPlace.name&&detailPlace.category)},{t:"주소",ok:Boolean(detailPlace.address)},{t:"리뷰 현황",ok:true},{t:"대표 사진",ok:false},{t:"영업시간",ok:false},{t:"메뉴·가격",ok:false},{t:"예약·전화·주차",ok:false}].map(item => <div key={item.t} style={{ display: "flex", justifyContent: "space-between", gap: 10, fontSize: 12 }}><span>{item.t}</span><b style={{ color: item.ok ? C.accent : "#b47b13" }}>{item.ok ? "현재 확인" : "아직 확인하지 않음"}</b></div>)}</div><p style={{ margin: "11px 0 0", color: C.sub, fontSize: 10.5, lineHeight: 1.6 }}>확인하지 않은 정보를 없다고 단정하지 않아요. 다음 상세 수집 단계에서 실제 공개 화면을 확인한 뒤 진단합니다.</p></div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(2,minmax(0,1fr))", gap: 8, marginTop: 14 }}><a href={detailPlace.placeUrl} target="_blank" rel="noopener noreferrer" className="pc-action" style={{ ...btn, textAlign: "center", textDecoration: "none" }}>네이버에서 실제 화면 보기 ↗</a><button type="button" className="pc-action" onClick={() => { setDetailPlace(null); if (!selectedPlaces.has(detailPlace.placeId)) setSelectedPlaces(s => new Set(s).add(detailPlace.placeId)); }} style={{ ...ghost }}>이 업체 분석 대상으로 선택</button></div>
+      </div>
+    </div></div>}
 
     <section style={{ ...card, padding: 18, marginBottom: 15 }}><div style={{ fontSize: 15, fontWeight: 900, marginBottom: 5 }}>📟 진행 안내</div><Help>찾는 동안 봇이 무엇을 하고 있는지 보여줘요. 문제가 생기면 마지막 빨간 안내를 확인하세요.</Help>{quota && <div style={{ fontSize: 12, color: quota.remaining <= 0 ? "#d45b50" : C.accent, fontWeight: 900, marginBottom: 8 }}>{plan === "admin" || plan === "unlimited" ? "관리자 무제한 ∞" : `오늘 발굴 ${quota.used} / ${quota.limit} · ${quota.remaining} 남음`}</div>}<div style={{ background: C.logBg, color: C.logInk, borderRadius: 13, padding: 13, maxHeight: 150, overflowY: "auto", fontFamily: "monospace", fontSize: 11, lineHeight: 1.7, whiteSpace: "pre-wrap" }}>{logs.length ? logs.join("\n") : "작업을 시작하면 진행 내용이 여기에 나와요."}</div></section>
 
