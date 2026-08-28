@@ -216,7 +216,9 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
     if (plan !== "admin") {
       try {
         await savePlace360Rank({ store_key: storeKey, keyword: meta.query, rank: rankIndex >= 0 ? rankIndex + 1 : null, checked_count: rows.length, surface: meta.surface, device: "PC" });
-        setRankHistory(await getPlace360Ranks(storeKey));
+        const nextRankHistory = await getPlace360Ranks(storeKey);
+        setRankHistory(nextRankHistory);
+        if (nextRankHistory.length >= 2) void completeMissionAutomatically("remeasure");
       } catch (error: any) {
         if (String(error?.message || "").includes("PLACE360_RANK_DAILY_LIMIT")) showToast?.("오늘 사용할 수 있는 순위 측정 횟수를 모두 사용했어요", "info");
       }
@@ -292,6 +294,15 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
       catch { showToast?.("완료 표시는 저장했지만 서버 동기화는 잠시 후 다시 시도해 주세요", "info"); }
     }
   };
+  const completeMissionAutomatically = async (id: string) => {
+    if (completedMissions.includes(id)) return;
+    const next = [...completedMissions, id];
+    setCompletedMissions(next);
+    if (storeKey) localStorage.setItem(missionKey(userId, storeKey), JSON.stringify(next));
+    if (storeKey && plan !== "admin") {
+      try { await savePlace360MissionProgress(storeKey, next); } catch {}
+    }
+  };
   const onReviewerHandoff = async (count: number) => {
     if (!storeKey) return;
     const next = reviewerHandoffCount + count;
@@ -303,6 +314,7 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
         if (row) setReviewerHandoffCount(row.reviewer_handoff_count);
       } catch { showToast?.("협업 후보는 전달했지만 완료 기록 동기화는 잠시 후 다시 시도해 주세요", "info"); }
     }
+    await completeMissionAutomatically("blogger");
   };
   const updateBusinessMetric = (key: keyof BusinessMetricDraft, raw: string) => {
     const value = Math.min(1000000000, Math.max(0, Math.round(Number(raw) || 0)));
@@ -364,6 +376,7 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
         const saved = await savePlace360BusinessMetrics(input);
         setMetricsSavedAt(saved?.updated_at || new Date().toISOString());
       }
+      await completeMissionAutomatically("owner-data");
       showToast?.("최근 30일 운영자료를 안전하게 저장하고 진단했어요", "success");
     } catch (error: any) {
       const message = String(error?.message || "");
@@ -681,7 +694,7 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
     </main>}
 
     <div style={{ display: tab === "discovery" ? "block" : "none" }} aria-hidden={tab !== "discovery"}>
-      <PlaceCenter showToast={showToast} theme={theme} userId={userId} plan={plan} initialRegion={profile.region} ownStoreName={profile.name} onPlacesCollected={onPlacesCollected} onReviewerHandoff={onReviewerHandoff} onOpenCrawl={onOpenCrawl} />
+      <PlaceCenter showToast={showToast} theme={theme} userId={userId} plan={plan} initialRegion={profile.region} ownStoreName={profile.name} onPlacesCollected={onPlacesCollected} onReviewerHandoff={onReviewerHandoff} onOwnStoreDetailViewed={() => completeMissionAutomatically("customer")} onOpenCrawl={onOpenCrawl} />
     </div>
   </div>;
 }

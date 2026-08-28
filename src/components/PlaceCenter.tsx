@@ -16,7 +16,7 @@ type PlaceDetail = Place & { imageUrls: string[]; businessHours?: string; phone?
 type Blogger = { blogId: string; nick?: string; title?: string; fromPlace?: string; fromPlaces: string[] };
 type PlaceAcct = { accountId: string; id: string; pw: string; blogId: string; sessionOk: boolean; loginLoading?: boolean };
 type PlaceCollectionMeta = { query: string; domain: string; measuredAt: string; surface: "네이버 지도 PC" };
-type Props = { showToast?: (m: string, t?: any) => void; theme?: "dark" | "light"; userId?: string; plan?: string; onOpenCrawl?: () => void; initialRegion?: string; ownStoreName?: string; onPlacesCollected?: (places: Place[], meta: PlaceCollectionMeta) => void; onReviewerHandoff?: (count: number) => void | Promise<void> };
+type Props = { showToast?: (m: string, t?: any) => void; theme?: "dark" | "light"; userId?: string; plan?: string; onOpenCrawl?: () => void; initialRegion?: string; ownStoreName?: string; onPlacesCollected?: (places: Place[], meta: PlaceCollectionMeta) => void; onReviewerHandoff?: (count: number) => void | Promise<void>; onOwnStoreDetailViewed?: () => void | Promise<void> };
 
 const PLACE_LS_KEY = "publy_accounts_place";
 const PLACE_DETAIL_CACHE_TTL = 6 * 60 * 60 * 1000;
@@ -39,7 +39,7 @@ function needsMarketing(p: Place): boolean {
   return visitors >= 30 && blogs <= Math.max(10, Math.round(visitors * .08));
 }
 
-export default function PlaceCenter({ showToast, theme: extTheme, userId, plan = "free", onOpenCrawl, initialRegion = "", ownStoreName = "", onPlacesCollected, onReviewerHandoff }: Props) {
+export default function PlaceCenter({ showToast, theme: extTheme, userId, plan = "free", onOpenCrawl, initialRegion = "", ownStoreName = "", onPlacesCollected, onReviewerHandoff, onOwnStoreDetailViewed }: Props) {
   const toast = (m: string, t?: string) => showToast?.(m, t);
   const theme: "dark" | "light" = extTheme === "dark" ? "dark" : "light";
   const C = THEMES[theme];
@@ -190,6 +190,7 @@ export default function PlaceCenter({ showToast, theme: extTheme, userId, plan =
         return next;
       });
       if (data.quota) setDetailQuota(data.quota);
+      if (isOwnStore(place.name)) await onOwnStoreDetailViewed?.();
       toast("고객이 보는 매장 정보를 확인했어요", "success");
     } catch (e: any) { toast(e?.message || "매장 상세정보를 확인하지 못했어요", "error"); }
     finally { setDetailLoading(false); }
