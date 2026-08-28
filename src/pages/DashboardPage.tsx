@@ -4,7 +4,7 @@ import { PublyUser, getQuota, getHistory, getAccounts, PublyQuota, PublyHistory,
 import { supabase, submitBugReportRow, getMyResolvedBugAlerts, markBugNotified, PublyBugReport } from "../lib/supabase";
 import NeighborPage from "./NeighborPage";
 import CrawlCenter from "../components/CrawlCenter";
-import PlaceCenter from "../components/PlaceCenter";
+import Place360 from "../components/Place360";
 import { botFetch, BotEventStream } from "../lib/botApi";
 import WebInstallNotice from "../WebInstallNotice";
 import UsageGuide from "../components/UsageGuide";
@@ -155,7 +155,7 @@ const NAV_GROUPS = [
     {k:"keyword",i:"🔍",l:"키워드/제목"},{k:"write",i:"✍️",l:"글 생성"},{k:"image",i:"🖼️",l:"이미지 생성"},{k:"photo",i:"📷",l:"사진 글쓰기"},{k:"publish",i:"🚀",l:"발행하기"},
   ]},
   {label:"블로그 운영",tabs:[
-    {k:"calendar",i:"📅",l:"콘텐츠 캘린더",shine:true},{k:"manage",i:"📋",l:"발행 관리"},{k:"blogscore",i:"📈",l:"블로그 지수"},{k:"crawl",i:"🔍",l:"크롤링"},{k:"place",i:"🗺️",l:"플레이스"},
+    {k:"calendar",i:"📅",l:"콘텐츠 캘린더",shine:true},{k:"manage",i:"📋",l:"발행 관리"},{k:"blogscore",i:"📈",l:"블로그 지수"},{k:"crawl",i:"🔍",l:"크롤링"},{k:"place",i:"🏪",l:"플레이스 360"},
   ]},
   {label:"관계·소통 자동화",tabs:[
     {k:"neighbor",i:"🤝",l:"서이추"},{k:"engage",i:"❤️",l:"공감·댓글"},{k:"reply",i:"💬",l:"답방"},{k:"pumasi",i:"💞",l:"품앗이"},{k:"insta_dm",i:"📱",l:"인스타 DM"},
@@ -6903,7 +6903,7 @@ POST3: (제목)|(이유)
               <div style={{animation:"fadeUp .25s ease both"}}><CrawlCenter showToast={showToast} theme={theme==="dark"?"dark":"light"} userId={user.id} plan={user.plan} /></div>
             )}
             {tab==="place" && crawlEnabled && (
-              <div style={{animation:"fadeUp .25s ease both"}}><PlaceCenter showToast={showToast} theme={theme==="dark"?"dark":"light"} userId={user.id} plan={user.plan} onOpenCrawl={()=>setTab("crawl")} /></div>
+              <div style={{animation:"fadeUp .25s ease both"}}><Place360 showToast={showToast} theme={theme==="dark"?"dark":"light"} userId={user.id} plan={user.plan} onOpenCrawl={()=>setTab("crawl")} /></div>
             )}
             {visitedAutoTabs.has("pumasi") && (
               <div className="tab-pumasi" style={{ display: tab==="pumasi" ? "block" : "none" }}>

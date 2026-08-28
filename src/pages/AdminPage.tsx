@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import GoogleFlowCard from "../GoogleFlowCard";
 import CrawlCenter from "../components/CrawlCenter";
-import PlaceCenter from "../components/PlaceCenter";
+import Place360 from "../components/Place360";
 import UsageGuide from "../components/UsageGuide";
 import { supabase, getAccounts, upsertAccount, PublyAccount, getHistory, getHistoryContent, PublyHistory, addHistory, deleteHistory, deleteAllHistory, setAdminPassword, saveAdminNaverApiKeys, getNaverApiKeys, NaverApiKeys, getNaverDailyUsage, NAVER_DAILY_LIMIT, checkNaverQuota, incrementNaverQuota, getUserNaverApiKeys, getReferrals, getErrorLogs, getUnreadErrorCount, markErrorsAsRead, logError, PLAN_CONFIG, getAllNeighborHistory, NeighborHistory, getAllEngageHistory, EngageHistory, InstaDmTarget, InstaDmHistory, InstaDmQuota, getInstaDmTargets, addInstaDmTarget, updateInstaDmTargetStatus, deleteInstaDmTarget, getInstaDmHistory, addInstaDmHistory, getAllInstaDmHistory, getInstaDmQuota, upsertInstaDmQuota, getAllInstaDmQuotas, INSTA_DM_DAILY_LIMIT, PublyBugReport, getBugReports, updateBugReportStatus, deleteBugReport, resetDailyPublish, getAllDailyUsageToday, DailyUsageRow, getAllReplyHistory, ReplyHistory, getAllBlogscoreHistory, BlogscoreHistory, NEIGHBOR_DAILY_LIMIT, ENGAGE_DAILY_LIMIT, REPLY_DAILY_LIMIT, BLOGSCORE_DAILY_LIMIT, PUMASI_ACCOUNT_LIMIT, PUMASI_POSTS_LIMIT, CRAWL_DAILY_LIMIT, EMAIL_DAILY_LIMIT, COMMENT_DAILY_LIMIT, PLACE_BLOGGER_LIMIT, PublyProxy, getProxies, addProxy, updateProxy, deleteProxy, getProxyAssignments, assignAccountToProxy, unassignAccount, setAccountFeatures, ProxyAssign, PROXY_FEATURES, checkProxyHealth, getLiveLog, getRunningLiveLogs, LiveLogRow } from "../lib/supabase";
 import NeighborPage from "./NeighborPage";
@@ -611,7 +611,7 @@ const TABS = [
   {k:"manage",          i:"📋", l:"발행 관리"},
   {k:"blogscore",       i:"📈", l:"블로그 지수"},
   {k:"crawl",           i:"🔍", l:"크롤링"},
-  {k:"place",           i:"🗺️", l:"플레이스"},
+  {k:"place",           i:"🏪", l:"플레이스 360"},
   {k:"accounts",        i:"🔗", l:"계정관리"},
   {k:"calendar",        i:"📅", l:"콘텐츠 캘린더"},
   {k:"crawl_manage",    i:"🔎", l:"크롤링 관리"},
@@ -2864,17 +2864,17 @@ POST3: (제목)|(이유)
               <div style={{animation:"fadeUp .25s ease both"}}><CrawlCenter showToast={showToast} theme={theme==="dark"?"dark":"light"} userId={ADM_HISTORY_UID} plan="unlimited" /></div>
             )}
 
-            {/* ───── 🗺️ 플레이스 (회원과 동일 · 관리자는 무제한) ───── */}
+            {/* ───── 🏪 플레이스 360 (회원과 동일 · 관리자는 무제한) ───── */}
             {tab === "place" && (
-              <div style={{animation:"fadeUp .25s ease both"}}><PlaceCenter showToast={showToast} theme={theme==="dark"?"dark":"light"} userId={ADM_UID} plan="admin" onOpenCrawl={()=>setTab("crawl")} /></div>
+              <div style={{animation:"fadeUp .25s ease both"}}><Place360 showToast={showToast} theme={theme==="dark"?"dark":"light"} userId={ADM_UID} plan="admin" onOpenCrawl={()=>setTab("crawl")} /></div>
             )}
 
-            {/* ───── 🔎 크롤링·플레이스 관리 (관리자 전용 · 공용 권한 승인) ───── */}
+            {/* ───── 🔎 크롤링·플레이스 360 관리 (관리자 전용 · 공용 권한 승인) ───── */}
             {tab === "crawl_manage" && (
               <div style={{animation:"fadeUp .25s ease both"}}>
                 <div className="card">
                   <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap",marginBottom:6}}>
-                    <div className="card-title" style={{margin:0}}>🔎 크롤링·플레이스 관리</div>
+                    <div className="card-title" style={{margin:0}}>🔎 크롤링·플레이스 360 관리</div>
                     <span style={{fontSize:11,fontWeight:800,color:"#ff6fa5",background:"rgba(255,111,165,.12)",padding:"2px 9px",borderRadius:99}}>회원 공용 권한</span>
                     <button onClick={loadUsers} style={{marginLeft:"auto",padding:"7px 13px",borderRadius:8,border:"1px solid var(--border)",background:"var(--bg)",color:"var(--text2)",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:"inherit"}}>↻ 새로고침</button>
                   </div>
