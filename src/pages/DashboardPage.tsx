@@ -711,6 +711,16 @@ textarea.inp{resize:vertical;line-height:1.75;min-height:80px;}
 .app.dark .tab-calendar{--accent:#6fca8f;--accent-text:#8ad9a5;--accent-bg:rgba(111,202,143,.14);--accent-border:rgba(111,202,143,.32);--accent-30:rgba(111,202,143,.32);--accent-dim:rgba(111,202,143,.1);}
 .app.light .tab-insta{--accent:#c13584;--accent-text:#a12c6f;--accent-bg:rgba(193,53,132,.09);--accent-border:rgba(193,53,132,.28);--accent-30:rgba(193,53,132,.3);--accent-dim:rgba(193,53,132,.07);}
 .app.dark .tab-insta{--accent:#e884b8;--accent-text:#f0a5cd;--accent-bg:rgba(232,132,184,.14);--accent-border:rgba(232,132,184,.32);--accent-30:rgba(232,132,184,.32);--accent-dim:rgba(232,132,184,.1);}
+.app.light .tab-neighbor{--accent:#0891b2;--accent-text:#0b7a96;--accent-bg:rgba(8,145,178,.09);--accent-border:rgba(8,145,178,.28);--accent-30:rgba(8,145,178,.3);--accent-dim:rgba(8,145,178,.07);}
+.app.dark .tab-neighbor{--accent:#4fd0e0;--accent-text:#79dced;--accent-bg:rgba(79,208,224,.14);--accent-border:rgba(79,208,224,.32);--accent-30:rgba(79,208,224,.32);--accent-dim:rgba(79,208,224,.1);}
+.app.light .tab-engage{--accent:#e5397f;--accent-text:#c62c68;--accent-bg:rgba(229,57,127,.09);--accent-border:rgba(229,57,127,.28);--accent-30:rgba(229,57,127,.3);--accent-dim:rgba(229,57,127,.07);}
+.app.dark .tab-engage{--accent:#ff7aa8;--accent-text:#ff9cbf;--accent-bg:rgba(255,122,168,.14);--accent-border:rgba(255,122,168,.32);--accent-30:rgba(255,122,168,.32);--accent-dim:rgba(255,122,168,.1);}
+.app.light .tab-reply{--accent:#8b5cf6;--accent-text:#7444e0;--accent-bg:rgba(139,92,246,.09);--accent-border:rgba(139,92,246,.28);--accent-30:rgba(139,92,246,.3);--accent-dim:rgba(139,92,246,.07);}
+.app.dark .tab-reply{--accent:#b39dff;--accent-text:#c7b6ff;--accent-bg:rgba(179,157,255,.14);--accent-border:rgba(179,157,255,.32);--accent-30:rgba(179,157,255,.32);--accent-dim:rgba(179,157,255,.1);}
+.app.light .tab-pumasi{--accent:#ec4899;--accent-text:#cd2f7f;--accent-bg:rgba(236,72,153,.09);--accent-border:rgba(236,72,153,.28);--accent-30:rgba(236,72,153,.3);--accent-dim:rgba(236,72,153,.07);}
+.app.dark .tab-pumasi{--accent:#ff8fc0;--accent-text:#ffaad2;--accent-bg:rgba(255,143,192,.14);--accent-border:rgba(255,143,192,.32);--accent-30:rgba(255,143,192,.32);--accent-dim:rgba(255,143,192,.1);}
+.app.light .tab-blogscore{--accent:#12a594;--accent-text:#0e897b;--accent-bg:rgba(18,165,148,.09);--accent-border:rgba(18,165,148,.28);--accent-30:rgba(18,165,148,.3);--accent-dim:rgba(18,165,148,.07);}
+.app.dark .tab-blogscore{--accent:#4fd6bf;--accent-text:#79e0ce;--accent-bg:rgba(79,214,191,.14);--accent-border:rgba(79,214,191,.32);--accent-30:rgba(79,214,191,.32);--accent-dim:rgba(79,214,191,.1);}
 .photo-drop{border:2.5px dashed #FF6B9D55;border-radius:20px;padding:32px 20px;text-align:center;cursor:pointer;transition:all .2s;background:var(--bg);margin-bottom:16px;}
 .photo-drop.drag-over,.photo-drop:hover{border-color:#FF6B9D;background:linear-gradient(135deg,#FF6B9D11,#C77DFF11);}
 .photo-drop-ico{font-size:48px;margin-bottom:12px;}
@@ -6866,17 +6876,17 @@ POST3: (제목)|(이유)
 
             {/* ★자동화 탭 keep-alive: 방문한 탭은 언마운트하지 않고 display로만 숨김 → 탭 이동해도 작업·데이터 유지 */}
             {visitedAutoTabs.has("neighbor") && (
-              <div style={{ display: tab==="neighbor" ? "block" : "none" }}>
+              <div className="tab-neighbor" style={{ display: tab==="neighbor" ? "block" : "none" }}>
                 <NeighborPage theme={theme as "dark"|"light"} userId={user.id} plan={user.plan} singleTab initialNeighborUsed={neighborUsed} onBusyChange={setNeighborBusy} />
               </div>
             )}
             {visitedAutoTabs.has("engage") && (
-              <div style={{ display: tab==="engage" ? "block" : "none" }}>
+              <div className="tab-engage" style={{ display: tab==="engage" ? "block" : "none" }}>
                 <NeighborPage theme={theme as "dark"|"light"} userId={user.id} plan={user.plan} initialTab="engage" singleTab onEngageUsageChange={setEngageUsed} initialEngageUsed={engageUsed} onBusyChange={setNeighborBusy} />
               </div>
             )}
             {visitedAutoTabs.has("reply") && (
-              <div style={{ display: tab==="reply" ? "block" : "none" }}>
+              <div className="tab-reply" style={{ display: tab==="reply" ? "block" : "none" }}>
                 <NeighborPage theme={theme as "dark"|"light"} userId={user.id} plan={user.plan} initialTab="reply" singleTab onBusyChange={setNeighborBusy} />
               </div>
             )}
@@ -6887,12 +6897,12 @@ POST3: (제목)|(이유)
               <div style={{animation:"fadeUp .25s ease both"}}><PlaceCenter showToast={showToast} theme={theme==="dark"?"dark":"light"} userId={user.id} plan={user.plan} onOpenCrawl={()=>setTab("crawl")} /></div>
             )}
             {visitedAutoTabs.has("pumasi") && (
-              <div style={{ display: tab==="pumasi" ? "block" : "none" }}>
+              <div className="tab-pumasi" style={{ display: tab==="pumasi" ? "block" : "none" }}>
                 <NeighborPage theme={theme as "dark"|"light"} userId={user.id} plan={user.plan} initialTab="pumasi" singleTab onBusyChange={setNeighborBusy} />
               </div>
             )}
             {visitedAutoTabs.has("blogscore") && (
-              <div style={{ display: tab==="blogscore" ? "block" : "none" }}>
+              <div className="tab-blogscore" style={{ display: tab==="blogscore" ? "block" : "none" }}>
                 <NeighborPage theme={theme as "dark"|"light"} userId={user.id} plan={user.plan} initialTab="score" singleTab onBusyChange={setNeighborBusy} />
               </div>
             )}
