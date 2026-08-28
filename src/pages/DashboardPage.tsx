@@ -206,32 +206,34 @@ const CSS = `
 @keyframes guideIn{from{opacity:0;transform:scale(.92) translateY(20px)}to{opacity:1;transform:scale(1) translateY(0)}}
 @keyframes imgIn{from{opacity:0;transform:scale(.88)}to{opacity:1;transform:scale(1)}}
 .app.dark{
-  --bg:#080c10;--bg2:#0d1117;--card:#111820;--card2:#161d27;--card-hover:#1a2230;
-  --border:#1e2836;--border2:#2a3a4f;--border-focus:#4da6ff;
-  --text:#e8f4ff;--text2:#b0c4d8;--text3:#ff9ec4;
-  --accent:#00ff9d;--accent-dim:rgba(0,255,157,.08);--accent-30:rgba(0,255,157,.3);
-  --accent-text:#00ff9d;--accent-bg:rgba(0,255,157,.08);--accent-border:rgba(0,255,157,.25);
-  --pink:#FF6B9D;--pink-bg:rgba(255,107,157,.08);--pink-border:rgba(255,107,157,.25);
+  /* 웜 에스프레소 다크(너무 어둡지 않게) + 로즈 포인트 — 2026-08-28 리디자인 */
+  --bg:#241e17;--bg2:#2b2419;--card:#2e271e;--card2:#352d22;--card-hover:#3b3227;
+  --border:#43392e;--border2:#52463a;--border-focus:#ff6fa1;
+  --text:#f6eddd;--text2:#c6b7a1;--text3:#a99d8b;
+  --accent:#ff6fa1;--accent-dim:rgba(255,111,161,.1);--accent-30:rgba(255,111,161,.3);
+  --accent-text:#ff8fb4;--accent-bg:rgba(255,111,161,.1);--accent-border:rgba(255,111,161,.28);
+  --pink:#FF6B9D;--pink-bg:rgba(255,107,157,.1);--pink-border:rgba(255,107,157,.28);
   --yellow:#FFD93D;--yellow-bg:rgba(255,217,61,.08);--yellow-border:rgba(255,217,61,.25);
-  --purple:#9B7DFF;--purple-bg:rgba(155,125,255,.08);
+  --purple:#c3a6ff;--purple-bg:rgba(195,166,255,.1);
   --naver:#03C75A;--tistory:#FF6B35;
-  --danger:#ff5363;--warn:#ff9f3f;--info:#4da6ff;--success:#00d68f;
-  --header-bg:rgba(8,12,16,.94);--shadow:0 4px 24px rgba(0,0,0,.4);
-  --g-fg:#eef7ff;--g-fg2:rgba(232,244,255,.72);--g-green:#00ff9d;--g-yellow:#FFD93D;--g-pink:#FF6B9D;--g-surface:#0d1a0d;--g-surface2:#132414;--g-line:rgba(255,255,255,.08);
+  --danger:#ff7a6b;--warn:#ffb454;--info:#f0b657;--success:#5fd39b;
+  --header-bg:rgba(36,30,23,.94);--shadow:0 4px 24px rgba(0,0,0,.4);
+  --g-fg:#f6eddd;--g-fg2:rgba(246,237,221,.72);--g-green:#ff6fa1;--g-yellow:#FFD93D;--g-pink:#FF6B9D;--g-surface:#2a2318;--g-surface2:#322a1e;--g-line:rgba(255,255,255,.08);
 }
 .app.light{
-  --bg:#f0f4f8;--bg2:#ffffff;--card:#ffffff;--card2:#f8fafc;--card-hover:#f0f4f8;
-  --border:#d4e0ec;--border2:#b8cfe0;--border-focus:#0969da;
-  --text:#0d1f2d;--text2:#4a6478;--text3:#8a9fb5;
-  --accent:#0066cc;--accent-dim:rgba(0,102,204,.08);--accent-30:rgba(0,102,204,.3);
-  --accent-text:#0066cc;--accent-bg:rgba(0,102,204,.08);--accent-border:rgba(0,102,204,.25);
+  /* 웜 페이퍼 라이트 + 로즈 포인트 — 2026-08-28 리디자인 */
+  --bg:#f3efe6;--bg2:#fffdf8;--card:#fffdf8;--card2:#f8f3ea;--card-hover:#f1ebe0;
+  --border:#e9e1d3;--border2:#dccfba;--border-focus:#f0417a;
+  --text:#241d16;--text2:#6d6353;--text3:#a99d89;
+  --accent:#f0417a;--accent-dim:rgba(240,65,122,.08);--accent-30:rgba(240,65,122,.3);
+  --accent-text:#c62c62;--accent-bg:rgba(240,65,122,.08);--accent-border:rgba(240,65,122,.25);
   --pink:#e0396d;--pink-bg:rgba(224,57,109,.07);--pink-border:rgba(224,57,109,.25);
-  --yellow:#cc8800;--yellow-bg:rgba(204,136,0,.08);--yellow-border:rgba(204,136,0,.25);
+  --yellow:#b57e12;--yellow-bg:rgba(181,126,18,.08);--yellow-border:rgba(181,126,18,.25);
   --purple:#6d4fcc;--purple-bg:rgba(109,79,204,.07);
   --naver:#03C75A;--tistory:#FF6B35;
-  --danger:#cf222e;--warn:#9a6700;--info:#0969da;--success:#1a7f37;
-  --header-bg:rgba(240,244,248,.95);--shadow:0 2px 12px rgba(0,0,0,.08);
-  --g-fg:#0d1f2d;--g-fg2:#42607a;--g-green:#0a8f57;--g-yellow:#956e00;--g-pink:#d6336c;--g-surface:#ffffff;--g-surface2:#eef3f8;--g-line:#dbe4ec;
+  --danger:#cf222e;--warn:#9a6700;--info:#c62c62;--success:#1a7f37;
+  --header-bg:rgba(243,239,230,.95);--shadow:0 2px 12px rgba(60,45,30,.07);
+  --g-fg:#241d16;--g-fg2:#6d6353;--g-green:#0a8f57;--g-yellow:#956e00;--g-pink:#d6336c;--g-surface:#fffdf8;--g-surface2:#f5efe4;--g-line:#e9e1d3;
 }
 .app{width:100vw;height:100dvh;font-family:'Noto Sans KR',sans-serif;color:var(--text);background:var(--bg);display:flex;flex-direction:column;overflow:hidden;transition:background .2s,color .2s;}
 *::-webkit-scrollbar{width:5px;}*::-webkit-scrollbar-thumb{background:var(--border2);border-radius:99px;}
