@@ -2857,19 +2857,20 @@ POST3: (제목)|(이유)
 
             {/* ───── 🗺️ 플레이스 (회원과 동일 · 관리자는 무제한) ───── */}
             {tab === "place" && (
-              <div style={{animation:"fadeUp .25s ease both"}}><PlaceCenter showToast={showToast} theme={theme==="dark"?"dark":"light"} userId={ADM_UID} plan="admin" /></div>
+              <div style={{animation:"fadeUp .25s ease both"}}><PlaceCenter showToast={showToast} theme={theme==="dark"?"dark":"light"} userId={ADM_UID} plan="admin" onOpenCrawl={()=>setTab("crawl")} /></div>
             )}
 
-            {/* ───── 🔎 크롤링 관리 (관리자 전용 · 회원 크롤링 잠금해제 승인) ───── */}
+            {/* ───── 🔎 크롤링·플레이스 관리 (관리자 전용 · 공용 권한 승인) ───── */}
             {tab === "crawl_manage" && (
               <div style={{animation:"fadeUp .25s ease both"}}>
                 <div className="card">
                   <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap",marginBottom:6}}>
-                    <div className="card-title" style={{margin:0}}>🔎 크롤링 관리</div>
-                    <span style={{fontSize:11,fontWeight:800,color:"#ff6fa5",background:"rgba(255,111,165,.12)",padding:"2px 9px",borderRadius:99}}>회원 잠금해제</span>
+                    <div className="card-title" style={{margin:0}}>🔎 크롤링·플레이스 관리</div>
+                    <span style={{fontSize:11,fontWeight:800,color:"#ff6fa5",background:"rgba(255,111,165,.12)",padding:"2px 9px",borderRadius:99}}>회원 공용 권한</span>
                     <button onClick={loadUsers} style={{marginLeft:"auto",padding:"7px 13px",borderRadius:8,border:"1px solid var(--border)",background:"var(--bg)",color:"var(--text2)",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:"inherit"}}>↻ 새로고침</button>
                   </div>
-                  <div style={{fontSize:12.5,color:"var(--text2)",lineHeight:1.6,marginBottom:14}}>회원에게 <b style={{color:"var(--text)"}}>크롤링(블로거 발굴)</b> 사용 권한을 켜고 끕니다. 켜면 그 회원의 대시보드에서 🔍크롤링 잠금이 풀립니다. (관리자 본인은 항상 열려 있음)</div>
+                  <div style={{fontSize:12.5,color:"var(--text2)",lineHeight:1.7,marginBottom:10}}>회원에게 <b style={{color:"var(--text)"}}>크롤링(협력 블로거 발굴)</b>과 <b style={{color:"var(--text)"}}>플레이스(업체 수집·리뷰어 역추적)</b> 사용 권한을 함께 켜고 끕니다. 켜면 두 메뉴와 업체 추천·중복 정리·협업 제안 연결까지 사용할 수 있어요. 관리자는 항상 열려 있고 모든 횟수가 무제한입니다.</div>
+                  <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:14}}>{["업체 크롤링","홍보 후보 추천","리뷰어 역추적","중복 블로거 정리","크롤링 제안 연결"].map(label=><span key={label} style={{fontSize:11,fontWeight:750,color:"#16856b",background:"rgba(22,133,107,.1)",border:"1px solid rgba(22,133,107,.2)",padding:"5px 9px",borderRadius:99}}>✓ {label}</span>)}</div>
                   <input className="inp" placeholder="🔍 이름·이메일 검색" value={search} onChange={e=>setSearch(e.target.value)} style={{marginBottom:12}} />
                   {(() => {
                     const q = search.trim().toLowerCase();
@@ -2878,7 +2879,7 @@ POST3: (제목)|(이유)
                     return (<>
                       <div style={{display:"flex",gap:8,marginBottom:12,flexWrap:"wrap"}}>
                         <span style={{fontSize:12,fontWeight:800,color:"var(--text2)",background:"var(--bg)",border:"1px solid var(--border)",padding:"6px 12px",borderRadius:99}}>전체 {users.length}명</span>
-                        <span style={{fontSize:12,fontWeight:800,color:"#2f9e5e",background:"rgba(47,158,94,.1)",border:"1px solid rgba(47,158,94,.25)",padding:"6px 12px",borderRadius:99}}>🔓 크롤링 켜짐 {onCount}명</span>
+                        <span style={{fontSize:12,fontWeight:800,color:"#2f9e5e",background:"rgba(47,158,94,.1)",border:"1px solid rgba(47,158,94,.25)",padding:"6px 12px",borderRadius:99}}>🔓 크롤링·플레이스 켜짐 {onCount}명</span>
                       </div>
                       {loading ? <div style={{padding:"30px 0",textAlign:"center",color:"var(--text3)"}}><span className="spinner"/> 회원 불러오는 중…</div>
                        : list.length===0 ? <div style={{padding:"30px 0",textAlign:"center",color:"var(--text3)"}}>회원이 없습니다.</div>

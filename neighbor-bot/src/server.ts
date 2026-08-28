@@ -225,9 +225,11 @@ app.get("/api/place/bloggers", async (req, res) => {
     for (const p of list) {
       const hits = await crawlPlaceBloggers({ accountId: accountId || "", placeId: p.placeId, domain: domain || "place", maxPerPlace, ownerUserId: userId || null, onLog: (msg) => sseSend(res, { type: "log", msg }) });
       for (const h of hits) {
-        if (seen.has(h.blogId)) continue;
-        seen.add(h.blogId);
-        sseSend(res, { type: "blogger", ...h, fromPlace: p.name || p.placeId });
+        const duplicate = seen.has(h.blogId);
+        if (!duplicate) seen.add(h.blogId);
+        // 최종 명단은 기존처럼 blogId 기준 한 명으로 유지하되,
+        // 다른 업체에서도 발견됐다는 정보는 UI가 합칠 수 있도록 전달한다.
+        sseSend(res, { type: "blogger", ...h, fromPlace: p.name || p.placeId, duplicate });
       }
       await new Promise(rs => setTimeout(rs, 300));
     }

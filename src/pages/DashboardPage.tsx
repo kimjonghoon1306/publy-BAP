@@ -6867,7 +6867,7 @@ POST3: (제목)|(이유)
               <div style={{animation:"fadeUp .25s ease both"}}><CrawlCenter showToast={showToast} theme={theme==="dark"?"dark":"light"} userId={user.id} plan={user.plan} /></div>
             )}
             {tab==="place" && crawlEnabled && (
-              <div style={{animation:"fadeUp .25s ease both"}}><PlaceCenter showToast={showToast} theme={theme==="dark"?"dark":"light"} userId={user.id} plan={user.plan} /></div>
+              <div style={{animation:"fadeUp .25s ease both"}}><PlaceCenter showToast={showToast} theme={theme==="dark"?"dark":"light"} userId={user.id} plan={user.plan} onOpenCrawl={()=>setTab("crawl")} /></div>
             )}
             {visitedAutoTabs.has("pumasi") && (
               <div style={{ display: tab==="pumasi" ? "block" : "none" }}>

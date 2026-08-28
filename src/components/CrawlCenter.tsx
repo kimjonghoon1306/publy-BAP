@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from "react";
 import { createPortal } from "react-dom";
 import { BotEventStream, botFetch } from "../lib/botApi";
 import { PLAN_CONFIG, CRAWL_DAILY_LIMIT, EMAIL_DAILY_LIMIT, COMMENT_DAILY_LIMIT, getCrawlDailyUsage, incrementCrawlQuota, getEmailDailyUsage, incrementEmailQuota } from "../lib/supabase";
+import { takePlaceBloggerCandidates } from "../lib/discoveryBridge";
 import UsageGuide from "./UsageGuide";
 
 const BOT = "http://127.0.0.1:3334";   // neighbor-bot (발굴·발송)
@@ -64,6 +65,8 @@ type Blogger = {
   mainTopic?: string;      // 🏷️ 실제 주력 주제(최근 글 제목 자동분류)
   avgComments?: number;    // 💬 글당 평균 댓글 수(진짜 독자 반응)
   avgSympathy?: number;    // ❤️ 글당 평균 공감 수(최근 3개 표본)
+  source?: "place";       // 플레이스 역추적에서 전달된 후보
+  sourcePlaces?: string[];
   ship?: ShipState;        // 배송 단계(체험단 제품 발송)
 };
 // 체험단 배송 단계: 제안함(내가 연락) → 수락(블로거가 OK 회신 → 운영자가 확인 눌러 확정) → 발송대기 → 배송중 → 배송완료
@@ -293,6 +296,36 @@ export default function CrawlCenter({ showToast, theme: extTheme, userId, plan =
     try { setCrawlUsed(await getCrawlDailyUsage(userId)); setEmailUsed(await getEmailDailyUsage(userId)); } catch {}
   };
   useEffect(() => { loadUsage(); const iv = setInterval(loadUsage, 20000); return () => clearInterval(iv); /* eslint-disable-next-line */ }, [userId]);
+  useEffect(() => {
+    const imported = takePlaceBloggerCandidates(userId);
+    if (!imported.length) return;
+    const mapped: Blogger[] = imported.map((item) => ({
+      id: item.blogId,
+      nick: item.nick || item.blogId,
+      url: `https://blog.naver.com/${item.blogId}`,
+      topic: "ALL",
+      neighbors: 0,
+      postsPerWeek: 0,
+      visitors: 0,
+      score: 50,
+      keywords: item.fromPlaces,
+      categories: ["플레이스 리뷰어"],
+      lastActive: "플레이스에서 가져옴",
+      engageRate: 0,
+      source: "place",
+      sourcePlaces: item.fromPlaces,
+    }));
+    setResults(current => {
+      const byId = new Map(current.map(blogger => [blogger.id, blogger]));
+      mapped.forEach(blogger => { if (!byId.has(blogger.id)) byId.set(blogger.id, blogger); });
+      return [...byId.values()];
+    });
+    setSelected(new Set(mapped.map(blogger => blogger.id)));
+    toast(`플레이스에서 찾은 블로거 ${mapped.length}명을 가져왔어요`, "success");
+    pushLog(`🗺️ 플레이스 리뷰 블로거 ${mapped.length}명 가져오기 완료`);
+    // 플레이스 전달 목록은 한 번만 소비한다.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   // 이메일 텍스트에서 주소만 추출(쉼표·공백·줄바꿈·세미콜론 구분, 형식 검증, 중복 제거)
   const parseEmails = (raw: string): string[] => {
     const found = (raw.match(/[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/g) || []);
@@ -556,7 +589,7 @@ export default function CrawlCenter({ showToast, theme: extTheme, userId, plan =
   );
 
   return (
-    <div style={{ position: "relative", borderRadius: 6, padding: "26px 26px", overflow: "hidden", fontFamily: "'Noto Sans KR',sans-serif", color: C.ink, background: C.bg, minHeight: 420, transition: "background .3s,color .3s" }}>
+    <div className="ob-root" style={{ position: "relative", borderRadius: 6, padding: "26px 26px", overflow: "hidden", fontFamily: "'Noto Sans KR',sans-serif", color: C.ink, background: C.bg, minHeight: 420, transition: "background .3s,color .3s" }}>
       <style>{`
         @keyframes obBob{0%,100%{transform:translateY(0)}50%{transform:translateY(-6px)}}
         @keyframes obUp{0%{opacity:0;transform:translateY(12px)}100%{opacity:1;transform:translateY(0)}}
@@ -568,6 +601,16 @@ export default function CrawlCenter({ showToast, theme: extTheme, userId, plan =
         .ob-card:hover{box-shadow:0 14px 30px -20px rgba(0,0,0,.4)!important;transition:all .25s}
         .ob-stat:hover{transform:translateY(-3px);box-shadow:0 12px 24px -14px rgba(0,0,0,.35)}
         .ob-scroll::-webkit-scrollbar{height:6px;width:6px}.ob-scroll::-webkit-scrollbar-thumb{background:${C.line2};border-radius:0}
+        @media(max-width:700px){
+          .ob-root{padding:14px 8px 120px!important}
+          .ob-card{padding:16px 12px!important}
+          .ob-stats-grid{grid-template-columns:repeat(2,minmax(0,1fr))!important}
+          .ob-search-grid,.ob-filter-grid,.ob-detail-grid{grid-template-columns:1fr!important}
+          .ob-plan-table{overflow-x:auto!important;-webkit-overflow-scrolling:touch}
+          .ob-plan-table>div{min-width:620px}
+          .ob-root button{min-height:44px}
+          .ob-root input,.ob-root textarea,.ob-root select{max-width:100%;box-sizing:border-box;font-size:16px!important}
+        }
       `}</style>
 
       <UsageGuide theme={theme} accent={C.accent}
@@ -674,7 +717,7 @@ export default function CrawlCenter({ showToast, theme: extTheme, userId, plan =
           { lab: "회신", en: "Replied", val: repliedCnt, Ic: IC_REPLY, col: "#0ea5e9" },
         ];
         return (
-          <div className="ob-sec" style={{ display: "grid", gridTemplateColumns: "repeat(5,1fr)", gap: 10, marginBottom: 14 }}>
+          <div className="ob-sec ob-stats-grid" style={{ display: "grid", gridTemplateColumns: "repeat(5,1fr)", gap: 10, marginBottom: 14 }}>
             {stages.map((k, i) => (
               <div key={i} className="ob-stat" onMouseEnter={e => { e.currentTarget.style.transform = "translateY(-4px)"; e.currentTarget.style.boxShadow = `0 14px 28px -12px ${k.col}88`; }} onMouseLeave={e => { e.currentTarget.style.transform = "translateY(0)"; e.currentTarget.style.boxShadow = `0 4px 10px -6px ${C.ink}22`; }}
                 style={{ padding: "15px 14px 14px", background: C.surf, border: `1px solid ${C.line2}`, borderRadius: 14, position: "relative", overflow: "hidden", transition: "transform .2s cubic-bezier(.22,1,.36,1), box-shadow .2s", boxShadow: `0 4px 10px -6px ${C.ink}22`, cursor: "default" }}>
@@ -834,8 +877,8 @@ export default function CrawlCenter({ showToast, theme: extTheme, userId, plan =
             {bar("이메일 발송", "✉️", emailUsed, emailLimit, "#2f9e5e")}
           </>;
         })()}
-        {/* 등급별 한도 표 — ★항상 보이게(블로그지수 탭과 동일). 무제한 등급도 자기 등급이 표에 뜸 */}
-        <div style={{ marginTop: 14, borderRadius: 10, overflow: "hidden", border: `1px solid ${C.line}` }}>
+        {/* 회원에게만 무료·베이직·프로 한도 표시. 관리자·무제한 내부 등급은 표를 보이지 않는다. */}
+        {!unlimitedPlan && <div className="ob-plan-table" style={{ marginTop: 14, borderRadius: 10, overflow: "hidden", border: `1px solid ${C.line}` }}>
           <div style={{ padding: "9px 12px", fontSize: 12, fontWeight: 800, color: C.ink, background: C.surf2 }}>📋 등급별 크롤링 한도 <span style={{ fontSize: 10.5, fontWeight: 600, color: C.sub }}>· 내 등급에서 하루에 얼마나 발굴·발송할 수 있는지</span></div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr .7fr .9fr .9fr .9fr", background: C.surf2, borderTop: `1px solid ${C.line}` }}>
             {["등급", "👤 계정", "🔍 발굴/일", "✉️ 발송/일", "💬 댓글/일"].map((h, i) => <div key={h} style={{ padding: "8px 10px", fontSize: 10.5, fontWeight: 800, color: C.sub, borderLeft: i ? `1px solid ${C.line}` : "none" }}>{h}</div>)}
@@ -855,7 +898,7 @@ export default function CrawlCenter({ showToast, theme: extTheme, userId, plan =
             );
           })}
           <div style={{ padding: "8px 12px", fontSize: 10.5, color: C.sub, background: C.surf2, borderTop: `1px solid ${C.line}` }}>💡 계정=연결 가능한 네이버 계정 수, 크롤링=하루 발굴 인원(<b style={{ color: "#2f9e5e" }}>연락처 있는 사람만 차감</b>), 이메일=하루 발송 통수. 발굴·발송은 자정에 초기화돼요. 이메일은 계정 안전상 하루 100통 이하 권장.</div>
-        </div>
+        </div>}
       </div>
 
       {/* ── 검색 설정 ── */}
@@ -869,7 +912,7 @@ export default function CrawlCenter({ showToast, theme: extTheme, userId, plan =
             : <span key={t} onClick={() => setTopic(t)} style={chip(topic === t)}>{t} <span style={{ opacity: .6, fontSize: 11 }}>{TOPIC_KR[t]}</span></span>)}</div>
           {topic === "ALL" && <div style={{ fontSize: 11, color: C.sub, marginTop: 6, lineHeight: 1.5 }}>🌐 <b>전체</b>: 맛집·뷰티·육아·카페·패션·여행·펫·인테리어·운동·건강 등 <b>모든 주제를 골고루</b> 발굴해요(협찬 친화 주제 우선 = 이메일 공개율 높음).</div>}
         </div>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1.4fr 110px", gap: 14, alignItems: "end" }}>
+        <div className="ob-search-grid" style={{ display: "grid", gridTemplateColumns: "1fr 1.4fr 110px", gap: 14, alignItems: "end" }}>
           <div><div style={label}>Region · 지역</div><select value={region} onChange={(e) => setRegion(e.target.value)} style={inp}>{REGIONS.map((r) => <option key={r}>{r}</option>)}</select></div>
           <div><div style={label}>Keyword · 세부 검색어(선택)</div><input value={keyword} onChange={e => setKeyword(e.target.value)} placeholder="예: 감성카페, 아이랑 갈만한곳" style={inp} /></div>
           <div><div style={label}>Count · 인원</div><select value={count} onChange={(e) => setCount(Number(e.target.value))} style={inp}>{[10, 20, 30, 50, 100].map((n) => <option key={n} value={n}>{n}명</option>)}</select></div>
@@ -890,7 +933,7 @@ export default function CrawlCenter({ showToast, theme: extTheme, userId, plan =
       </div>
 
       {/* ── 필터 · 수집항목 ── */}
-      <div className="ob-sec" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 16 }}>
+      <div className="ob-sec ob-filter-grid" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 16 }}>
         <div className="ob-card" style={{ ...card, padding: 22 }}>
           <div style={{ fontFamily: serif, fontSize: 16, fontWeight: 600, marginBottom: 6 }}>Activity Filter · 활동성 거르기</div>
           <Help>죽은 블로그(이웃 적고 글 안 씀)를 <b style={{ color: C.ink }}>걸러내는</b> 조건이에요. 활발한 블로거만 남겨야 체험단 효과가 좋아요.</Help>
@@ -978,6 +1021,7 @@ export default function CrawlCenter({ showToast, theme: extTheme, userId, plan =
                   </div>
                   <div style={{ display: "flex", gap: 8, marginBottom: 8, fontSize: 11, color: C.sub, fontWeight: 700, flexWrap: "wrap", alignItems: "center" }}>
                     <span>🕒 {b.lastActive}</span>
+                    {b.source === "place" && <span title="플레이스에서 업체 리뷰를 확인해 가져온 블로거예요" style={{ color: "#16856b", background: "rgba(22,133,107,.12)", padding: "2px 8px", borderRadius: 20, fontWeight: 900 }}>🗺️ 플레이스 리뷰어{b.sourcePlaces?.length ? ` · ${b.sourcePlaces.length}곳` : ""}</span>}
                     {b.neighbors > 0 && <span>이웃 {b.neighbors.toLocaleString()}</span>}
                     {/* 🏷️ 실제 주력 주제(최근 글 제목 자동분류) — 검색 키워드보다 정확 */}
                     {b.mainTopic && <span title="최근 글 제목으로 자동 분류한 실제 주력 주제" style={{ fontWeight: 800, color: C.accent, background: `${C.accent}14`, padding: "2px 8px", borderRadius: 20 }}>🏷️ {b.mainTopic}</span>}
@@ -1031,7 +1075,7 @@ export default function CrawlCenter({ showToast, theme: extTheme, userId, plan =
         </div>
         {advOpen && (<>
           <Help><b style={{ color: C.ink }}>수집 속도</b>=천천히 모을수록 계정이 안전해요(빠르면 네이버가 의심할 수 있어요). <b style={{ color: C.ink }}>하루 최대</b>=하루에 몇 명까지 모을지 한도. <b style={{ color: C.ink }}>제외 키워드</b>=이 말이 프로필에 있으면 건너뛰어요(예: "협찬거부").</Help>
-          <div style={{ display: "grid", gridTemplateColumns: "1.2fr 1fr 1.5fr", gap: 16 }}>
+          <div className="ob-detail-grid" style={{ display: "grid", gridTemplateColumns: "1.2fr 1fr 1.5fr", gap: 16 }}>
             <div><div style={label}>수집 속도 (계정 안전)</div><div style={{ display: "flex", gap: 7 }}>{["느림", "보통", "빠름"].map((s) => <span key={s} onClick={() => setSpeed(s)} style={{ ...sChip(speed === s), flex: 1, textAlign: "center" }}>{s}</span>)}</div></div>
             <div><div style={label}>하루 최대</div><select value={dailyLimit} onChange={(e) => setDailyLimit(Number(e.target.value))} style={inp}>{[100, 200, 500, 1000].map((n) => <option key={n} value={n}>{n}명</option>)}</select></div>
             <div><div style={label}>제외 키워드</div><input value={excludeKw} onChange={(e) => setExcludeKw(e.target.value)} placeholder="예: 협찬거부, 홍보사절" style={inp} /></div>
