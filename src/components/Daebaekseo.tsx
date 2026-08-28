@@ -1,11 +1,12 @@
 /* 📖 퍼블리 대백서 — "어떤 순서로, 어떨 때 쓰면 좋은지" 상황별 사용 레시피.
    ★기능 나열이 아니라 목표/상황 → 단계 순서 → 팁. 어르신도 이해되게 큰 글씨·쉬운 말.
    ★새 기능이 생기면 아래 RECIPES 배열에 한 항목만 추가하면 대백서에 자동 반영된다.
-   ★회원=관리자 공용. 다크/라이트 양쪽에서 글자 또렷하게(테마별 명시색). 마스코트 '펄리' 사용. */
+   ★회원=관리자 공용. 다크/라이트 양쪽에서 글자 또렷하게(테마별 명시색). 마스코트 '펄리' 실사 이미지 사용.
+   ★Safari(WebKit) 주의: 접이 헤더를 <button>+flex로 하면 자식이 뭉개진다 → <div role="button">로 구현. */
 import React, { useState } from "react";
-import { Pearly } from "./UsageGuide";
+import pearlyImg from "../assets/pearly.png";
 
-export const DAEBAEKSEO_VERSION = 1;   // 내용 크게 바뀌면 +1 → 로그인 자동팝업 다시 노출
+export const DAEBAEKSEO_VERSION = 2;   // 내용 크게 바뀌면 +1 → 로그인 자동팝업 다시 노출
 
 type Step = { tab?: string; title: string; desc: string };
 type Recipe = {
@@ -20,89 +21,89 @@ type Recipe = {
 /* ── 상황별 레시피(순서가 핵심) ── 새 기능은 여기에 항목 추가 ── */
 const RECIPES: Recipe[] = [
   {
-    ico: "🌱", goal: "블로그를 이제 막 시작할 때", when: "계정만 있고 뭐부터 할지 막막하다면 이 순서대로!",
+    ico: "🌱", goal: "블로그를 이제 막 시작할 때", when: "계정만 있고 뭐부터 할지 막막하다면, 이 순서 그대로 따라 해요",
     accent: "#ff7eb6",
     steps: [
-      { tab: "계정 관리", title: "① 네이버/티스토리 연결", desc: "먼저 내 블로그 계정을 연결해요. 사진 글쓰기·발행에 쓰여요." },
-      { tab: "키워드/제목", title: "② 쓸 주제 정하기", desc: "인기 키워드와 잘 눌리는 제목 후보를 추천받아 고릅니다." },
-      { tab: "글 생성", title: "③ 본문 자동 작성", desc: "고른 제목으로 본문을 자동으로 써줘요. 말투·유형 선택." },
-      { tab: "이미지 생성", title: "④ 어울리는 그림", desc: "무료(Google Flow)로 글에 맞는 이미지를 만들어 넣어요." },
-      { tab: "발행하기", title: "⑤ 블로그에 올리기", desc: "🚀 누르면 자동 발행. 처음엔 '전체'로 올려보세요." },
+      { tab: "계정 관리", title: "① 내 블로그 계정 연결", desc: "네이버·티스토리를 먼저 연결해요. 봇이 대신 로그인해 글을 올릴 수 있게 되는 첫 단계예요. (무료 이미지를 쓰려면 구글도 연결)" },
+      { tab: "키워드/제목", title: "② 쓸 주제·제목 정하기", desc: "검색이 잘 되는 인기 키워드와, 사람들이 눌러보는 제목 후보를 추천받아 하나 골라요." },
+      { tab: "글 생성", title: "③ 본문 자동 작성", desc: "고른 제목으로 본문을 자동으로 써줘요. 말투와 글 유형(정보형·후기형)을 골라 내 색깔을 넣어요." },
+      { tab: "이미지 생성", title: "④ 어울리는 사진 넣기", desc: "무료(Google Flow)로 글에 맞는 이미지를 만들어 넣어요. 글자 없는 순수 사진으로 나와요." },
+      { tab: "발행하기", title: "⑤ 블로그에 올리기", desc: "올릴 계정·플랫폼을 고르고 🚀 발행. 처음엔 '전체 공개'로 올려보세요." },
     ],
-    tip: "처음 3~4일은 하루 1개씩만! 자리 잡히면 서이추·공감으로 이웃을 늘려요.",
+    tip: "처음 일주일은 하루 1개면 충분해요. 매일 비슷한 시간대에 꾸준히 올리면 방문자가 붙기 시작해요. 자리가 잡히면 그때 서이추로 이웃을 늘리세요.",
   },
   {
-    ico: "📅", goal: "매일 꾸준히 글 하나 올리고 싶을 때", when: "무엇을 쓸지 고민 없이 매일 돌리는 루틴",
+    ico: "📅", goal: "매일 꾸준히 글 하나 올리고 싶을 때", when: "무엇을 쓸지 고민 없이 매일 돌리는 '루틴'을 만들고 싶을 때",
     accent: "#22a35d",
     steps: [
-      { tab: "콘텐츠 캘린더", title: "① 오늘의 글감 받기", desc: "날짜별 추천 주제·핫이슈를 보고 오늘 쓸 걸 고릅니다." },
-      { tab: "글 생성", title: "② 바로 작성", desc: "캘린더의 '글쓰기'로 이어서 본문을 자동 생성." },
-      { tab: "발행하기", title: "③ 예약 발행", desc: "바쁘면 예약 시간을 걸어두면 PC를 꺼도 그 시간에 올라가요." },
-      { tab: "콘텐츠 캘린더", title: "④ 완료 체크 🔥", desc: "쓴 날은 체크! 며칠 연속 썼는지 스트릭이 쌓여 동기부여." },
+      { tab: "콘텐츠 캘린더", title: "① 오늘의 글감 받기", desc: "날짜별 추천 주제와 요즘 핫이슈가 떠요. 그중 오늘 쓸 걸 하나 고르면 돼요." },
+      { tab: "글 생성", title: "② 바로 작성", desc: "캘린더의 '글쓰기' 버튼으로 이어서 본문을 자동 생성해요." },
+      { tab: "발행하기", title: "③ 예약 발행 걸기", desc: "아침에 예약 시간만 걸어두면, PC를 꺼도 그 시간에 네이버가 알아서 올려줘요." },
+      { tab: "콘텐츠 캘린더", title: "④ 완료 체크 🔥", desc: "쓴 날은 체크! 며칠 연속 썼는지 스트릭이 쌓여서 계속 하게 돼요." },
     ],
-    tip: "예약 발행을 활용하면 하루 한 번만 세팅하고 계속 올라가게 만들 수 있어요.",
+    tip: "예약 발행은 네이버 예약 화면에 시간을 심어두는 방식이라, 하루 한 번만 세팅해두면 PC를 꺼도 계속 올라가요.",
   },
   {
-    ico: "📈", goal: "검색 상위노출을 올리고 싶을 때", when: "쓴 글이 검색에 안 잡힐 때 진단부터",
+    ico: "📈", goal: "검색 상위노출을 올리고 싶을 때", when: "글은 쓰는데 검색에 안 잡힐 때 — 무작정 고치지 말고 '진단'부터",
     accent: "#3b82f6",
     steps: [
-      { tab: "블로그 지수", title: "① 건강검진", desc: "내 블로그 지수·저품질 여부·검색 노출을 먼저 진단해요." },
-      { tab: "블로그 지수", title: "② 글별 진료차트(주치의)", desc: "글마다 순위를 기억하고 완치까지 관찰. 오늘의 회진 확인." },
-      { tab: "키워드/제목", title: "③ 제목·키워드 최적화", desc: "노출 잘 되는 키워드로 제목을 다듬어요." },
-      { tab: "발행 관리", title: "④ 재발행·성과 추적", desc: "30일 누적으로 순위 ▲▼ 변화를 보고 다음 글에 반영." },
+      { tab: "블로그 지수", title: "① 건강검진 먼저", desc: "내 블로그 지수·저품질 여부·검색 노출 상태를 진단해요. 원인을 알아야 고쳐요." },
+      { tab: "블로그 지수", title: "② 글별 진료차트(주치의)", desc: "글마다 순위를 기억하고 완치(상위노출)까지 관찰해줘요. '오늘의 회진'으로 챙길 글을 알려줘요." },
+      { tab: "키워드/제목", title: "③ 제목·키워드 다듬기", desc: "노출이 잘 되는 키워드로 제목을 최적화해요." },
+      { tab: "발행 관리", title: "④ 재발행·성과 추적", desc: "순위 ▲▼ 변화를 30일 누적으로 보고, 잘 된 글을 다음 글에 참고해요." },
     ],
-    tip: "제목을 바꾼 뒤에는 30일 관찰! 자꾸 바꾸면 오히려 순위가 흔들려요.",
+    tip: "제목을 바꾼 글은 30일은 지켜보세요. 자꾸 바꾸면 오히려 순위가 흔들려요. 주치의가 무한 제목변경을 막아줘요.",
   },
   {
-    ico: "🤝", goal: "이웃·방문자를 늘리고 싶을 때", when: "글은 쌓이는데 방문자가 적을 때",
+    ico: "🤝", goal: "이웃·방문자를 늘리고 싶을 때", when: "글은 쌓이는데 방문자가 적을 때 (자동·수동 둘 다 있어요)",
     accent: "#00b8d4",
     steps: [
-      { tab: "서이추", title: "① 서로이웃 신청", desc: "내 주제와 맞는 블로거에게 서이추를 보내요(등급별 하루 한도)." },
-      { tab: "공감·댓글", title: "② 공감·댓글로 인사", desc: "이웃 글에 공감·댓글로 관계를 쌓아요." },
-      { tab: "답방", title: "③ 답방하기", desc: "내 글에 댓글 단 사람에게 답방으로 보답." },
-      { tab: "품앗이", title: "④ 내 계정끼리 품앗이", desc: "여러 계정이 있으면 서로 공감·댓글로 초반 온기를 만들어요." },
+      { tab: "서이추", title: "① 서로이웃 신청", desc: "내 주제와 맞는 블로거에게 서이추를 보내요. 등급별로 하루 한도가 있어요." },
+      { tab: "공감·댓글", title: "② 공감·댓글로 인사", desc: "이웃 글에 진심 담긴 댓글로 관계를 쌓아요. 영혼 없는 복붙보다 한 줄이라도 진심이 낫대요." },
+      { tab: "답방", title: "③ 답방하기", desc: "내 글에 댓글 단 사람에게 답방으로 보답해요. 관계가 이어져요." },
+      { tab: "품앗이", title: "④ 내 계정끼리 품앗이", desc: "여러 계정이 있으면 서로 공감·댓글로 초반의 온기를 만들어요." },
     ],
-    tip: "모든 소통 기능은 ⚙️자동(봇이 알아서)/수동(내가 버튼) 둘 다 있어요. 처음엔 수동으로 감을 잡고 익숙해지면 자동으로!",
+    tip: "네이버가 과하다 싶으면 제한을 걸어요. 하루 한도 안에서 천천히! 처음엔 수동으로 감을 잡고, 익숙해지면 자동으로 돌리세요.",
   },
   {
-    ico: "📷", goal: "사진만 있고 글쓰기는 귀찮을 때", when: "여행·맛집 사진으로 후기 글 뚝딱",
+    ico: "📷", goal: "사진만 있고 글쓰기는 귀찮을 때", when: "여행·맛집 사진으로 후기 글을 뚝딱 만들고 싶을 때",
     accent: "#f59e0b",
     steps: [
-      { tab: "사진 글쓰기", title: "① 발행 계정 고르기", desc: "◉ 로 올릴 네이버 계정을 먼저 선택(계정 섞임 방지)." },
-      { tab: "사진 글쓰기", title: "② 사진 올리기", desc: "글에 넣을 사진을 업로드해요(최대 20장)." },
-      { tab: "사진 글쓰기", title: "③ 핵심만 적고 생성", desc: "간단한 포인트만 적으면 사진에 맞춘 글이 만들어져요." },
+      { tab: "사진 글쓰기", title: "① 발행 계정 먼저 고르기", desc: "◉ 로 올릴 네이버 계정을 먼저 선택해요(계정이 섞여 엉뚱한 곳에 올라가는 것 방지)." },
+      { tab: "사진 글쓰기", title: "② 사진 올리기", desc: "글에 넣을 사진을 업로드해요(최대 20장). 이야기 순서대로 올리면 좋아요." },
+      { tab: "사진 글쓰기", title: "③ 핵심만 적고 생성", desc: "간단한 포인트만 적으면 사진에 딱 맞춘 글과 캡션이 만들어져요. 그대로 발행!" },
     ],
-    tip: "사진 순서대로 이야기가 이어지게 올리면 글 흐름이 훨씬 자연스러워요.",
+    tip: "사진을 시간·동선 순서대로 올리면 글 흐름이 훨씬 자연스러워요. 캡션도 사진 내용과 어긋나지 않게 나와요.",
   },
   {
-    ico: "🔍", goal: "협업 블로거·체험단을 찾을 때", when: "내 주제 블로거를 발굴해 연락하고 싶을 때",
+    ico: "🔍", goal: "협업 블로거·체험단을 찾을 때", when: "내 업종에 맞는 블로거를 발굴해 직접 연락하고 싶을 때 (크롤링)",
     accent: "#8b5cf6",
     steps: [
-      { tab: "크롤링", title: "① 블로거 발굴", desc: "키워드로 블로거를 찾아요. 활성도🔥·상업성📊·주제🏷️도 함께 봐요." },
+      { tab: "크롤링", title: "① 블로거 발굴", desc: "키워드로 블로거를 찾아요. 활성도🔥·협찬비율📊·주제🏷️·인게이지먼트(💬댓글·❤️공감)까지 한눈에 봐요." },
       { tab: "크롤링", title: "② 연락처 수집", desc: "이메일·카톡·오픈챗 등 연락 수단을 모아요." },
-      { tab: "크롤링", title: "③ 아웃리치", desc: "웹메일 자동발송 또는 블로그 댓글로 연락(도배 방지 딜레이)." },
+      { tab: "크롤링", title: "③ 아웃리치(연락)", desc: "웹메일 자동발송 또는 블로그 댓글로 연락해요. 도배로 막히지 않게 딜레이가 들어가요." },
     ],
-    tip: "협찬% 낮은 '순수 후기' 블로거가 반응이 더 좋아요. 필터로 걸러서 접근하세요.",
+    tip: "협찬% 낮고 댓글·공감이 많은 '진짜 독자가 있는' 블로거가 반응이 좋아요. 필터로 걸러서 접근하면 성공률이 올라가요.",
   },
   {
-    ico: "🗺️", goal: "내 지역 업체·블로거를 찾을 때", when: "플레이스 기반으로 업체 발굴 & 블로거 역추적",
+    ico: "🗺️", goal: "내 지역 업체·블로거를 찾을 때", when: "네이버 플레이스 기반으로 업체를 발굴하고 블로거를 역추적할 때",
     accent: "#16856b",
     steps: [
-      { tab: "플레이스", title: "① 업체 발굴", desc: "지역+업종으로 업체 목록(리뷰 수 등)을 모아요." },
-      { tab: "플레이스", title: "② 블로거 역추적", desc: "그 업체를 리뷰한 블로거를 거꾸로 찾아요(등급별 상한)." },
-      { tab: "크롤링", title: "③ 연락·아웃리치로 연결", desc: "찾은 블로거를 크롤링 아웃리치로 이어서 접촉." },
+      { tab: "플레이스", title: "① 업체 발굴", desc: "지역+업종으로 업체 목록을 모아요(리뷰 수 등도 같이 봐요)." },
+      { tab: "플레이스", title: "② 블로거 역추적", desc: "그 업체를 리뷰한 블로거를 거꾸로 찾아요. 등급별 상한 안에서 모아요." },
+      { tab: "크롤링", title: "③ 크롤링으로 연결", desc: "찾은 블로거를 크롤링 아웃리치로 이어서 접촉해요." },
     ],
-    tip: "역추적은 업체 하나당 인원이 적으니 여러 업체를 합쳐 명단을 키우면 좋아요.",
+    tip: "역추적은 업체 하나당 인원이 적어요. 여러 업체를 돌려서 명단을 합치면 후보가 훨씬 많아져요.",
   },
   {
-    ico: "📱", goal: "인스타로 고객을 모으고 싶을 때", when: "블로그 밖에서도 관심 고객에게 다가가기",
+    ico: "📱", goal: "인스타로 고객을 모으고 싶을 때", when: "블로그 밖에서도 관심 고객에게 다가가고 싶을 때",
     accent: "#e5397f",
     steps: [
       { tab: "인스타 DM", title: "① 인스타 로그인", desc: "인스타 계정으로 로그인해요." },
-      { tab: "인스타 DM", title: "② 대상 수집", desc: "키워드로 보낼 대상을 모아요." },
+      { tab: "인스타 DM", title: "② 대상 수집", desc: "키워드로 메시지 보낼 대상을 모아요." },
       { tab: "인스타 DM", title: "③ 천천히 발송", desc: "메시지를 적고 안전한 간격으로 보내요(계정 보호)." },
     ],
-    tip: "한 번에 많이 보내면 제한될 수 있어요. 매일 조금씩 꾸준히가 안전해요.",
+    tip: "한 번에 많이 보내면 계정이 막힐 수 있어요. 매일 조금씩 꾸준히가 가장 안전해요.",
   },
 ];
 
@@ -121,53 +122,59 @@ export default function Daebaekseo({ theme = "light", onClose }: { theme?: "dark
     ? { overlay: "rgba(3,7,12,.72)", card: "#241f1b", panel: "#2e2823", line: "#463f37", head: "#fdf3ea", sub: "#b3a898" }
     : { overlay: "rgba(40,25,35,.42)", card: "#fffdfb", panel: "#fff7fb", line: "#f0dce7", head: "#241f1b", sub: "#7a7266" };
   const bodyColor = dark ? "#d8cdbd" : "#4a4540";
+  const box: React.CSSProperties = { boxSizing: "border-box" };   // 전역 리셋/사파리 대비 명시
 
   return (
     <div onMouseDown={e => { if (e.target === e.currentTarget) onClose(); }}
-      style={{ position: "fixed", inset: 0, zIndex: 10000, background: C.overlay, display: "flex", alignItems: "center", justifyContent: "center", padding: "clamp(8px,3vw,28px)", backdropFilter: "blur(3px)" }}>
+      style={{ ...box, position: "fixed", inset: 0, zIndex: 10000, background: C.overlay, display: "flex", alignItems: "center", justifyContent: "center", padding: "clamp(8px,3vw,28px)", backdropFilter: "blur(3px)" }}>
       <section role="dialog" aria-modal="true" aria-label="퍼블리 대백서"
-        style={{ width: "min(760px,100%)", maxHeight: "92vh", display: "flex", flexDirection: "column", background: C.card, border: `1px solid ${C.line}`, borderRadius: 20, boxShadow: "0 24px 60px rgba(0,0,0,.4)", overflow: "hidden", animation: "fadeUp .22s ease both" }}>
-        {/* 헤더 */}
-        <div style={{ display: "flex", alignItems: "center", gap: 13, padding: "18px clamp(16px,3vw,24px)", borderBottom: `1px solid ${C.line}`, background: dark ? "#2a231e" : "#fff0f7", position: "relative" }}>
-          <Pearly size={54} accent="#ff7eb6" />
-          <div style={{ minWidth: 0, flex: 1 }}>
-            <div style={{ fontSize: "clamp(18px,4vw,22px)", fontWeight: 900, color: C.head, letterSpacing: "-.02em" }}>📖 퍼블리 대백서</div>
-            <div style={{ fontSize: 13, fontWeight: 600, color: C.sub, marginTop: 3, lineHeight: 1.5 }}>펄리예요! 기능 설명이 아니라 <b>“이럴 때 이 순서로 쓰면 좋아요”</b>를 모았어요.</div>
+        style={{ ...box, width: "min(760px,100%)", maxHeight: "92vh", display: "flex", flexDirection: "column", background: C.card, border: `1px solid ${C.line}`, borderRadius: 20, boxShadow: "0 24px 60px rgba(0,0,0,.4)", overflow: "hidden" }}>
+        {/* 헤더 — 실사 펄리 캐릭터 */}
+        <div style={{ ...box, display: "flex", alignItems: "center", gap: 14, padding: "16px clamp(16px,3vw,24px)", borderBottom: `1px solid ${C.line}`, background: dark ? "#2a231e" : "#fff0f7" }}>
+          <img src={pearlyImg} alt="펄리" width={62} height={62} style={{ width: 62, height: 62, objectFit: "contain", flexShrink: 0, filter: "drop-shadow(0 3px 6px rgba(255,126,182,.35))" }} />
+          <div style={{ ...box, minWidth: 0, flex: 1 }}>
+            <div style={{ fontSize: "clamp(18px,4vw,22px)", fontWeight: 900, color: C.head, letterSpacing: "-.02em", lineHeight: 1.2 }}>📖 퍼블리 대백서</div>
+            <div style={{ fontSize: 13, fontWeight: 600, color: C.sub, marginTop: 4, lineHeight: 1.5 }}>펄리예요! 기능 설명이 아니라 <b>“이럴 때 이 순서로 쓰면 좋아요”</b>를 모았어요.</div>
           </div>
-          <button onClick={onClose} aria-label="닫기"
-            style={{ flexShrink: 0, width: 34, height: 34, borderRadius: "50%", border: `1px solid ${C.line}`, background: C.card, color: C.head, fontSize: 19, cursor: "pointer", lineHeight: 1 }}>×</button>
+          <div role="button" tabIndex={0} onClick={onClose} onKeyDown={e => { if (e.key === "Enter" || e.key === " ") onClose(); }} aria-label="닫기"
+            style={{ ...box, flexShrink: 0, width: 34, height: 34, borderRadius: "50%", border: `1px solid ${C.line}`, background: C.card, color: C.head, fontSize: 19, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", lineHeight: 1 }}>×</div>
         </div>
 
         {/* 본문 스크롤 */}
-        <div style={{ overflowY: "auto", padding: "clamp(12px,3vw,20px)", display: "flex", flexDirection: "column", gap: 12 }}>
+        <div style={{ ...box, overflowY: "auto", padding: "clamp(12px,3vw,20px)", display: "flex", flexDirection: "column", gap: 12 }}>
           {RECIPES.map((r, i) => {
             const open = openIdx === i;
             return (
-              <div key={i} style={{ border: `1px solid ${open ? r.accent + "88" : C.line}`, borderRadius: 15, background: C.panel, overflow: "hidden", transition: "border-color .15s" }}>
-                <button onClick={() => setOpenIdx(open ? -1 : i)}
-                  style={{ width: "100%", display: "flex", alignItems: "center", gap: 12, padding: "14px 15px", background: "transparent", border: "none", cursor: "pointer", textAlign: "left", fontFamily: "inherit" }}>
-                  <span style={{ flexShrink: 0, width: 42, height: 42, borderRadius: 12, background: r.accent + (dark ? "2e" : "1c"), display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22 }}>{r.ico}</span>
-                  <span style={{ minWidth: 0, flex: 1 }}>
-                    <span style={{ display: "block", fontSize: "clamp(15px,3.4vw,16.5px)", fontWeight: 900, color: C.head, letterSpacing: "-.01em" }}>{r.goal}</span>
-                    <span style={{ display: "block", fontSize: 12.5, fontWeight: 600, color: C.sub, marginTop: 2 }}>{r.when}</span>
-                  </span>
-                  <span style={{ flexShrink: 0, color: r.accent, fontSize: 15, fontWeight: 900, transform: open ? "rotate(90deg)" : "none", transition: "transform .18s" }}>▸</span>
-                </button>
+              <div key={i} style={{ ...box, flexShrink: 0, border: `1px solid ${open ? r.accent + "88" : C.line}`, borderRadius: 15, background: C.panel, overflow: "hidden", transition: "border-color .15s" }}>
+                {/* 접이 헤더 — Safari flex 버그 피하려고 button 대신 div role=button */}
+                <div role="button" tabIndex={0}
+                  onClick={() => setOpenIdx(open ? -1 : i)}
+                  onKeyDown={e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setOpenIdx(open ? -1 : i); } }}
+                  style={{ ...box, width: "100%", display: "flex", alignItems: "center", gap: 12, padding: "14px 15px", cursor: "pointer", userSelect: "none" }}>
+                  <div style={{ ...box, flexShrink: 0, width: 44, height: 44, borderRadius: 12, background: r.accent + (dark ? "2e" : "1c"), display: "flex", alignItems: "center", justifyContent: "center", fontSize: 23 }}>{r.ico}</div>
+                  <div style={{ ...box, minWidth: 0, flex: 1 }}>
+                    <div style={{ fontSize: "clamp(15px,3.4vw,16.5px)", fontWeight: 900, color: C.head, letterSpacing: "-.01em", lineHeight: 1.3 }}>{r.goal}</div>
+                    <div style={{ fontSize: 12.5, fontWeight: 600, color: C.sub, marginTop: 3, lineHeight: 1.45 }}>{r.when}</div>
+                  </div>
+                  <div style={{ ...box, flexShrink: 0, color: r.accent, fontSize: 15, fontWeight: 900, transform: open ? "rotate(90deg)" : "none", transition: "transform .18s" }}>▸</div>
+                </div>
                 {open && (
-                  <div style={{ padding: "0 15px 15px", display: "flex", flexDirection: "column", gap: 9 }}>
+                  <div style={{ ...box, padding: "0 15px 15px", display: "flex", flexDirection: "column", gap: 9 }}>
                     {r.steps.map((s, j) => (
-                      <div key={j} style={{ display: "flex", gap: 11, alignItems: "flex-start", background: C.card, borderRadius: 12, padding: "11px 12px", border: `1px solid ${C.line}` }}>
-                        <span style={{ flexShrink: 0, width: 26, height: 26, borderRadius: "50%", background: r.accent, color: "#fff", fontWeight: 900, fontSize: 13, display: "flex", alignItems: "center", justifyContent: "center" }}>{j + 1}</span>
-                        <span style={{ minWidth: 0 }}>
-                          <span style={{ fontSize: 14.5, fontWeight: 800, color: C.head }}>{s.title}</span>
-                          {s.tab && <span style={{ marginLeft: 7, fontSize: 11, fontWeight: 800, color: r.accent, background: r.accent + (dark ? "26" : "18"), padding: "2px 8px", borderRadius: 20, whiteSpace: "nowrap" }}>{s.tab}</span>}
-                          <span style={{ display: "block", fontSize: 13, fontWeight: 500, color: bodyColor, marginTop: 3, lineHeight: 1.55 }}>{s.desc}</span>
-                        </span>
+                      <div key={j} style={{ ...box, display: "flex", gap: 11, alignItems: "flex-start", background: C.card, borderRadius: 12, padding: "11px 12px", border: `1px solid ${C.line}` }}>
+                        <div style={{ ...box, flexShrink: 0, width: 26, height: 26, borderRadius: "50%", background: r.accent, color: "#fff", fontWeight: 900, fontSize: 13, display: "flex", alignItems: "center", justifyContent: "center" }}>{j + 1}</div>
+                        <div style={{ ...box, minWidth: 0, flex: 1 }}>
+                          <div style={{ lineHeight: 1.4 }}>
+                            <span style={{ fontSize: 14.5, fontWeight: 800, color: C.head }}>{s.title}</span>
+                            {s.tab && <span style={{ marginLeft: 7, fontSize: 11, fontWeight: 800, color: r.accent, background: r.accent + (dark ? "26" : "18"), padding: "2px 8px", borderRadius: 20, whiteSpace: "nowrap", display: "inline-block" }}>{s.tab}</span>}
+                          </div>
+                          <div style={{ fontSize: 13, fontWeight: 500, color: bodyColor, marginTop: 4, lineHeight: 1.55 }}>{s.desc}</div>
+                        </div>
                       </div>
                     ))}
                     {r.tip && (
-                      <div style={{ display: "flex", gap: 8, alignItems: "flex-start", marginTop: 2, padding: "10px 12px", borderRadius: 12, background: r.accent + (dark ? "1e" : "12"), border: `1px dashed ${r.accent}66` }}>
-                        <span style={{ fontSize: 15 }}>💡</span>
+                      <div style={{ ...box, display: "flex", gap: 8, alignItems: "flex-start", marginTop: 2, padding: "10px 12px", borderRadius: 12, background: r.accent + (dark ? "1e" : "12"), border: `1px dashed ${r.accent}66` }}>
+                        <span style={{ fontSize: 15, flexShrink: 0 }}>💡</span>
                         <span style={{ fontSize: 12.8, fontWeight: 700, color: dark ? "#f0e6da" : "#5a4636", lineHeight: 1.55 }}>{r.tip}</span>
                       </div>
                     )}
@@ -178,16 +185,16 @@ export default function Daebaekseo({ theme = "light", onClose }: { theme?: "dark
           })}
 
           {/* 알아두면 좋은 팁 */}
-          <div style={{ marginTop: 6, padding: "14px 15px", borderRadius: 15, border: `1px solid ${C.line}`, background: C.panel }}>
+          <div style={{ ...box, flexShrink: 0, marginTop: 6, padding: "14px 15px", borderRadius: 15, border: `1px solid ${C.line}`, background: C.panel }}>
             <div style={{ fontSize: 15, fontWeight: 900, color: C.head, marginBottom: 10 }}>🧭 알아두면 좋아요</div>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(min(100%,240px),1fr))", gap: 9 }}>
+            <div style={{ ...box, display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(min(100%,240px),1fr))", gap: 9 }}>
               {TIPS.map((t, i) => (
-                <div key={i} style={{ display: "flex", gap: 10, alignItems: "flex-start", background: C.card, borderRadius: 12, padding: "11px 12px", border: `1px solid ${C.line}` }}>
+                <div key={i} style={{ ...box, display: "flex", gap: 10, alignItems: "flex-start", background: C.card, borderRadius: 12, padding: "11px 12px", border: `1px solid ${C.line}` }}>
                   <span style={{ fontSize: 19, flexShrink: 0 }}>{t.ico}</span>
-                  <span style={{ minWidth: 0 }}>
-                    <span style={{ fontSize: 13.5, fontWeight: 800, color: C.head }}>{t.title}</span>
-                    <span style={{ display: "block", fontSize: 12.5, fontWeight: 500, color: bodyColor, marginTop: 2, lineHeight: 1.5 }}>{t.desc}</span>
-                  </span>
+                  <div style={{ ...box, minWidth: 0, flex: 1 }}>
+                    <div style={{ fontSize: 13.5, fontWeight: 800, color: C.head }}>{t.title}</div>
+                    <div style={{ fontSize: 12.5, fontWeight: 500, color: bodyColor, marginTop: 2, lineHeight: 1.5 }}>{t.desc}</div>
+                  </div>
                 </div>
               ))}
             </div>
@@ -199,15 +206,15 @@ export default function Daebaekseo({ theme = "light", onClose }: { theme?: "dark
         </div>
 
         {/* 푸터 */}
-        <div style={{ flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, padding: "12px clamp(16px,3vw,24px)", borderTop: `1px solid ${C.line}`, background: dark ? "#2a231e" : "#fff7fb" }}>
+        <div style={{ ...box, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, padding: "12px clamp(16px,3vw,24px)", borderTop: `1px solid ${C.line}`, background: dark ? "#2a231e" : "#fff7fb" }}>
           <label style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 12.5, fontWeight: 700, color: C.sub, cursor: "pointer" }}>
             <input type="checkbox" onChange={e => { try { localStorage.setItem("publy_daebaekseo_seen", e.target.checked ? String(DAEBAEKSEO_VERSION) : ""); } catch {} }} style={{ width: 16, height: 16, accentColor: "#ff7eb6", cursor: "pointer" }} />
             로그인할 때 다시 띄우지 않기
           </label>
-          <button onClick={onClose}
-            style={{ padding: "10px 22px", borderRadius: 12, border: "none", background: "#ff7eb6", color: "#fff", fontSize: 14.5, fontWeight: 900, fontFamily: "inherit", cursor: "pointer", boxShadow: "0 4px 14px rgba(255,126,182,.4)" }}>
+          <div role="button" tabIndex={0} onClick={onClose} onKeyDown={e => { if (e.key === "Enter" || e.key === " ") onClose(); }}
+            style={{ ...box, padding: "10px 22px", borderRadius: 12, background: "#ff7eb6", color: "#fff", fontSize: 14.5, fontWeight: 900, cursor: "pointer", boxShadow: "0 4px 14px rgba(255,126,182,.4)", whiteSpace: "nowrap" }}>
             시작하기 →
-          </button>
+          </div>
         </div>
       </section>
     </div>
