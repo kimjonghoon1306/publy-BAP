@@ -189,6 +189,10 @@ const CSS = `
   font-size:14px; font-family:'Noto Sans KR',sans-serif;
   outline:none; transition:all .22s;
 }
+.recent-email-item{ transition:background .13s; }
+.dark .recent-email-item:hover{ background:rgba(255,255,255,.08); }
+.light .recent-email-item:hover{ background:rgba(0,180,80,.09); }
+.recent-email-item:active{ transform:scale(.99); }
 .dark .field-input {
   background:rgba(255,255,255,.06);
   border:1.5px solid rgba(255,255,255,.08);
@@ -354,6 +358,12 @@ export default function LoginPage({ onLogin, onAdminLogin, theme, onThemeToggle 
   };
   const [mode, setMode] = useState<"login" | "register">("login");
   const [email, setEmail] = useState("");
+  // 📇 최근 로그인 아이디 — 브라우저 자동완성 대신 우리가 직접 저장/표시(웹·PC앱 공통 localStorage). 스크롤 드롭다운으로 골라 채운다.
+  const RECENT_EMAILS_KEY = "publy_recent_emails";
+  const [recentEmails, setRecentEmails] = useState<string[]>(() => { try { const a = JSON.parse(localStorage.getItem(RECENT_EMAILS_KEY) || "[]"); return Array.isArray(a) ? a.filter((x: any) => typeof x === "string") : []; } catch { return []; } });
+  const [showRecent, setShowRecent] = useState(false);
+  const rememberEmail = (addr: string) => { const e = addr.trim().toLowerCase(); if (!e) return; try { const next = [e, ...recentEmails.filter(x => x !== e)].slice(0, 6); setRecentEmails(next); localStorage.setItem(RECENT_EMAILS_KEY, JSON.stringify(next)); } catch {} };
+  const forgetEmail = (addr: string) => { const next = recentEmails.filter(x => x !== addr); setRecentEmails(next); try { localStorage.setItem(RECENT_EMAILS_KEY, JSON.stringify(next)); } catch {} };
   const [pw, setPw] = useState("");
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
@@ -427,6 +437,7 @@ export default function LoginPage({ onLogin, onAdminLogin, theme, onThemeToggle 
     try {
       if (mode === "login") {
         const user = await signIn(email, pw);
+        rememberEmail(email);
         onLogin(user);
       } else {
         // 초대 코드 8자리 → userId 조회
@@ -440,6 +451,7 @@ export default function LoginPage({ onLogin, onAdminLogin, theme, onThemeToggle 
           if (refUser?.id) referredBy = refUser.id;
         }
         const user = await signUp(email, pw, name, phone.trim(), referredBy);
+        rememberEmail(email);
         onLogin(user);
       }
     } catch (e: any) { setError(e.message); }
@@ -534,9 +546,33 @@ export default function LoginPage({ onLogin, onAdminLogin, theme, onThemeToggle 
           )}
           <div className="field">
             <div className="field-label">✉️ 이메일</div>
-            <input className="field-input" type="email" placeholder="email@example.com"
-              value={email} onChange={e => setEmail(e.target.value)}
-              onKeyDown={e => e.key === "Enter" && handleSubmit()} />
+            <div style={{ position: "relative" }}>
+              <input className="field-input" type="email" placeholder="email@example.com" autoComplete="off"
+                value={email} onChange={e => { setEmail(e.target.value); setShowRecent(true); }}
+                onFocus={() => setShowRecent(true)}
+                onBlur={() => setTimeout(() => setShowRecent(false), 180)}
+                onKeyDown={e => e.key === "Enter" && handleSubmit()} />
+              {/* 📇 최근 로그인 아이디 — 스크롤 드롭다운(웹·PC앱 공통). 타이핑 중이면 일치하는 것만. */}
+              {showRecent && (() => {
+                const list = recentEmails.filter(x => !email.trim() || (x.includes(email.trim().toLowerCase()) && x !== email.trim().toLowerCase()));
+                if (!list.length) return null;
+                return (
+                  <div className="recent-email-pop" style={{ position: "absolute", top: "calc(100% + 4px)", left: 0, right: 0, zIndex: 30, maxHeight: 176, overflowY: "auto", background: theme === "dark" ? "#1b2432" : "#ffffff", border: `1px solid ${theme === "dark" ? "#31405a" : "#e2e6ee"}`, borderRadius: 12, boxShadow: "0 12px 30px rgba(0,0,0,.28)", padding: 5 }}>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: theme === "dark" ? "#7f8ea8" : "#9aa2b1", padding: "5px 9px 3px" }}>최근 로그인 아이디</div>
+                    {list.map(addr => (
+                      <div key={addr} className="recent-email-item"
+                        onMouseDown={e => { e.preventDefault(); setEmail(addr); setShowRecent(false); }}
+                        style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 10px", borderRadius: 9, cursor: "pointer", color: theme === "dark" ? "#e6ecf7" : "#2b3140" }}>
+                        <span style={{ fontSize: 15, opacity: .7 }}>👤</span>
+                        <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 14, fontWeight: 600 }}>{addr}</span>
+                        <button type="button" title="목록에서 지우기" onMouseDown={e => { e.preventDefault(); e.stopPropagation(); forgetEmail(addr); }}
+                          style={{ flexShrink: 0, width: 22, height: 22, borderRadius: "50%", border: "none", background: "transparent", color: theme === "dark" ? "#6b7890" : "#b3bac7", fontSize: 15, cursor: "pointer", lineHeight: 1 }}>×</button>
+                      </div>
+                    ))}
+                  </div>
+                );
+              })()}
+            </div>
           </div>
           <div className="field">
             <div className="field-label">🔒 비밀번호</div>
