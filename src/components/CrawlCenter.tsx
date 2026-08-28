@@ -881,8 +881,9 @@ export default function CrawlCenter({ showToast, theme: extTheme, userId, plan =
             {bar("이메일 발송", "✉️", emailUsed, emailLimit, "#2f9e5e")}
           </>;
         })()}
-        {/* 회원에게만 무료·베이직·프로 한도 표시. 관리자·무제한 내부 등급은 표를 보이지 않는다. */}
-        {!unlimitedPlan && <div className="ob-plan-table" style={{ marginTop: 14, borderRadius: 10, overflow: "hidden", border: `1px solid ${C.line}` }}>
+        {/* 회원 대시보드에는 무료·베이직·프로 비교표를 항상 표시한다.
+            무제한 회원도 비교표는 볼 수 있지만 무제한 행은 노출하지 않고, 관리자 화면에서만 표를 숨긴다. */}
+        {plan !== "admin" && <div className="ob-plan-table" style={{ marginTop: 14, borderRadius: 10, overflow: "hidden", border: `1px solid ${C.line}` }}>
           <div style={{ padding: "9px 12px", fontSize: 12, fontWeight: 800, color: C.ink, background: C.surf2 }}>📋 등급별 크롤링 한도 <span style={{ fontSize: 10.5, fontWeight: 600, color: C.sub }}>· 내 등급에서 하루에 얼마나 발굴·발송할 수 있는지</span></div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr .7fr .9fr .9fr .9fr", background: C.surf2, borderTop: `1px solid ${C.line}` }}>
             {["등급", "👤 계정", "🔍 발굴/일", "✉️ 발송/일", "💬 댓글/일"].map((h, i) => <div key={h} style={{ padding: "8px 10px", fontSize: 10.5, fontWeight: 800, color: C.sub, borderLeft: i ? `1px solid ${C.line}` : "none" }}>{h}</div>)}
