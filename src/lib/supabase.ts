@@ -102,6 +102,49 @@ export interface Place360StoreProfile {
   id: string; user_id: string; store_key: string; store_name: string; place_url: string; category: string; region: string;
   goal: "visitors" | "reviews" | "exposure" | "repeat"; created_at: string; updated_at: string;
 }
+export interface Place360Progress {
+  id: string; user_id: string; store_key: string; completed_missions: string[];
+  reviewer_handoff_count: number; reviewer_handoff_at: string | null; updated_at: string;
+}
+export interface Place360ProgressAdminRow extends Place360Progress { member_name: string; email: string; plan: string; store_name: string }
+
+export async function getPlace360Progress(storeKey: string): Promise<Place360Progress | null> {
+  const token = getMemberSessionToken();
+  if (!token || !storeKey) return null;
+  const { data, error } = await supabase.rpc("publy_place360_get_progress", { p_token: token, p_store_key: storeKey });
+  if (error) throw new Error(error.message);
+  return ((data || [])[0] as Place360Progress) || null;
+}
+
+export async function savePlace360MissionProgress(storeKey: string, missions: string[]): Promise<Place360Progress | null> {
+  const token = getMemberSessionToken();
+  if (!token || !storeKey) return null;
+  const { data, error } = await supabase.rpc("publy_place360_save_missions", { p_token: token, p_store_key: storeKey, p_completed_missions: missions });
+  if (error) throw new Error(error.message);
+  return (data as Place360Progress) || null;
+}
+
+export async function recordPlace360ReviewerHandoff(storeKey: string, count: number): Promise<Place360Progress | null> {
+  const token = getMemberSessionToken();
+  if (!token || !storeKey) return null;
+  const { data, error } = await supabase.rpc("publy_place360_record_reviewer_handoff", { p_token: token, p_store_key: storeKey, p_count: count });
+  if (error) throw new Error(error.message);
+  return (data as Place360Progress) || null;
+}
+
+export async function getAdminPlace360Progress(): Promise<Place360ProgressAdminRow[]> {
+  const token = sessionStorage.getItem(ADMIN_SESSION_KEY) || "";
+  if (!token) return [];
+  const { data, error } = await supabase.rpc("publy_place360_admin_progress", { p_token: token });
+  if (error) throw new Error(error.message);
+  return (data || []) as Place360ProgressAdminRow[];
+}
+
+export async function resetAdminPlace360Progress(userId: string, storeKey: string): Promise<void> {
+  const token = sessionStorage.getItem(ADMIN_SESSION_KEY) || "";
+  const { data, error } = await supabase.rpc("publy_place360_admin_reset_progress", { p_token: token, p_user_id: userId, p_store_key: storeKey });
+  if (error || data !== true) throw new Error(error?.message || "성장 진행 초기화에 실패했습니다");
+}
 
 export async function savePlace360StoreProfile(input: Omit<Place360StoreProfile, "id" | "user_id" | "created_at" | "updated_at">): Promise<Place360StoreProfile | null> {
   const token = getMemberSessionToken();

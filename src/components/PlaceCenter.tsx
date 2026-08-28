@@ -16,7 +16,7 @@ type PlaceDetail = Place & { imageUrls: string[]; businessHours?: string; phone?
 type Blogger = { blogId: string; nick?: string; title?: string; fromPlace?: string; fromPlaces: string[] };
 type PlaceAcct = { accountId: string; id: string; pw: string; blogId: string; sessionOk: boolean; loginLoading?: boolean };
 type PlaceCollectionMeta = { query: string; domain: string; measuredAt: string; surface: "네이버 지도 PC" };
-type Props = { showToast?: (m: string, t?: any) => void; theme?: "dark" | "light"; userId?: string; plan?: string; onOpenCrawl?: () => void; initialRegion?: string; ownStoreName?: string; onPlacesCollected?: (places: Place[], meta: PlaceCollectionMeta) => void };
+type Props = { showToast?: (m: string, t?: any) => void; theme?: "dark" | "light"; userId?: string; plan?: string; onOpenCrawl?: () => void; initialRegion?: string; ownStoreName?: string; onPlacesCollected?: (places: Place[], meta: PlaceCollectionMeta) => void; onReviewerHandoff?: (count: number) => void | Promise<void> };
 
 const PLACE_LS_KEY = "publy_accounts_place";
 const PLACE_DETAIL_CACHE_TTL = 6 * 60 * 60 * 1000;
@@ -39,7 +39,7 @@ function needsMarketing(p: Place): boolean {
   return visitors >= 30 && blogs <= Math.max(10, Math.round(visitors * .08));
 }
 
-export default function PlaceCenter({ showToast, theme: extTheme, userId, plan = "free", onOpenCrawl, initialRegion = "", ownStoreName = "", onPlacesCollected }: Props) {
+export default function PlaceCenter({ showToast, theme: extTheme, userId, plan = "free", onOpenCrawl, initialRegion = "", ownStoreName = "", onPlacesCollected, onReviewerHandoff }: Props) {
   const toast = (m: string, t?: string) => showToast?.(m, t);
   const theme: "dark" | "light" = extTheme === "dark" ? "dark" : "light";
   const C = THEMES[theme];
@@ -215,10 +215,11 @@ export default function PlaceCenter({ showToast, theme: extTheme, userId, plan =
         ? (b.blogReviewCount || 0) - (a.blogReviewCount || 0)
         : placeScore(b) - placeScore(a)), [places, placeFilter, placeSort]);
   const multiPlaceBloggers = bloggers.filter(b => b.fromPlaces.length >= 2).length;
-  const sendToCrawl = () => {
+  const sendToCrawl = async () => {
     const rows = bloggers.filter(b => !selectedBloggers.size || selectedBloggers.has(b.blogId));
     if (!rows.length) { toast("크롤링으로 보낼 블로거를 먼저 선택하세요", "info"); return; }
     savePlaceBloggerCandidates(rows.map(b => ({ blogId: b.blogId, nick: b.nick, title: b.title, fromPlaces: b.fromPlaces })), userId);
+    await onReviewerHandoff?.(rows.length);
     toast(`${rows.length}명을 크롤링 협업 제안으로 보냈어요`, "success");
     onOpenCrawl?.();
   };
@@ -333,7 +334,7 @@ export default function PlaceCenter({ showToast, theme: extTheme, userId, plan =
     </> : <section style={{ ...card, padding: 19, marginBottom: 15 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 9, flexWrap: "wrap" }}><b style={{ fontSize: 17 }}>🧭 블로거 역추적 · 중복 제거 후 {bloggers.length}명</b><span style={{ color: C.accent, fontSize: 12, fontWeight: 800 }}>여러 업체를 리뷰한 지역형 블로거 {multiPlaceBloggers}명 · 선택 {selectedBloggers.size}명</span></div>
       <Help>같은 블로거가 여러 업체에서 발견되면 한 명으로 합쳐요. <b style={{ color: C.accent }}>여러 업체 리뷰</b> 표시는 선택한 지역이나 업종을 자주 다룬 후보라는 뜻이에요. 필요한 사람을 선택한 뒤 크롤링으로 보내면 협업 제안을 이어서 준비할 수 있어요.</Help>
-      <div className="pc-toolbar" style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 14 }}>{bloggerRunning ? <ActionButton onClick={() => stop("bloggers")} style={{ background: "#d45b50" }}>■ 역추적 중단</ActionButton> : <ActionButton onClick={startBloggers} disabled={!selectedPlaces.size}>다시 역추적</ActionButton>}<button className="pc-action" onClick={sendToCrawl} title="선택한 블로거를 크롤링의 협업 제안 목록으로 보내요" style={{ ...btn, background: "#d94f8a" }}>✉ 선택한 블로거 협업 제안 준비</button><button className="pc-action" onClick={() => exportCsv("bloggers")} title="체크한 블로거만, 체크가 없으면 전체 블로거를 저장해요" style={ghost}>CSV 내보내기</button><button className="pc-action" onClick={() => setSelectedBloggers(selectedBloggers.size === bloggers.length ? new Set() : new Set(bloggers.map(b => b.blogId)))} title="블로거를 모두 선택하거나 해제해요" style={ghost}>전체 선택/해제</button></div>
+      <div className="pc-toolbar" style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 14 }}>{bloggerRunning ? <ActionButton onClick={() => stop("bloggers")} style={{ background: "#d45b50" }}>■ 역추적 중단</ActionButton> : <ActionButton onClick={startBloggers} disabled={!selectedPlaces.size}>다시 역추적</ActionButton>}<button className="pc-action" onClick={() => void sendToCrawl()} title="선택한 블로거를 크롤링의 협업 제안 목록으로 보내요" style={{ ...btn, background: "#d94f8a" }}>✉ 선택한 블로거 협업 제안 준비</button><button className="pc-action" onClick={() => exportCsv("bloggers")} title="체크한 블로거만, 체크가 없으면 전체 블로거를 저장해요" style={ghost}>CSV 내보내기</button><button className="pc-action" onClick={() => setSelectedBloggers(selectedBloggers.size === bloggers.length ? new Set() : new Set(bloggers.map(b => b.blogId)))} title="블로거를 모두 선택하거나 해제해요" style={ghost}>전체 선택/해제</button></div>
       {!bloggers.length ? <div style={{ textAlign: "center", padding: 40, color: C.sub }}>① 업체 발굴에서 업체를 체크한 뒤 역추적 버튼을 눌러주세요.</div> : <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(min(100%,235px),1fr))", gap: 11 }}>{bloggers.map(b => <article className="pc-card" key={b.blogId} onClick={() => setSelectedBloggers(s => { const n = new Set(s); n.has(b.blogId) ? n.delete(b.blogId) : n.add(b.blogId); return n; })} style={{ minWidth: 0, padding: 15, borderRadius: "16px 16px 16px 4px", border: `1.5px solid ${selectedBloggers.has(b.blogId) ? C.accent : C.line}`, background: selectedBloggers.has(b.blogId) ? `${C.accent}0e` : C.surf2, cursor: "pointer", transition: "all .18s" }}>
         <div style={{ display: "flex", gap: 8 }}><input type="checkbox" checked={selectedBloggers.has(b.blogId)} onChange={() => {}} style={{ accentColor: C.accent }} /><div style={{ minWidth: 0 }}><b style={{ fontSize: 14 }}>{b.nick || b.blogId}</b><div style={{ color: C.sub, fontSize: 10.5, marginTop: 2 }}>@{b.blogId}</div></div></div>
         <div style={{ fontSize: 11.5, lineHeight: 1.55, marginTop: 11, overflowWrap: "anywhere" }}>{b.title || "리뷰 제목 없음"}</div><div style={{ marginTop: 9, fontSize: 10.5, color: C.accent, fontWeight: 800 }}>📍 {b.fromPlaces.join(" · ")}에서 발견</div>{b.fromPlaces.length >= 2 && <div style={{ marginTop: 7, padding: "5px 8px", borderRadius: 8, color: "#745400", background: "rgba(255,200,0,.15)", fontSize: 10.5, fontWeight: 900 }}>⭐ 여러 업체 리뷰 · 지역형 후보</div>}

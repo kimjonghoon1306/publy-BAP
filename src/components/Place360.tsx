@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import PlaceCenter from "./PlaceCenter";
-import { deletePlace360Store, getPlace360BusinessMetrics, getPlace360Ranks, getPlace360Snapshots, getPlace360StoreProfiles, PLACE360_DAILY_DIAGNOSIS_LIMIT, PLACE360_HISTORY_DAYS, PLACE360_RANK_DAILY_LIMIT, PLACE360_STORE_LIMIT, place360StoreKey, Place360BusinessMetrics, Place360RankMeasurement, Place360Snapshot, renamePlace360Store, savePlace360BusinessMetrics, savePlace360Rank, savePlace360Snapshot, savePlace360StoreProfile } from "../lib/supabase";
+import { deletePlace360Store, getPlace360BusinessMetrics, getPlace360Progress, getPlace360Ranks, getPlace360Snapshots, getPlace360StoreProfiles, PLACE360_DAILY_DIAGNOSIS_LIMIT, PLACE360_HISTORY_DAYS, PLACE360_RANK_DAILY_LIMIT, PLACE360_STORE_LIMIT, place360StoreKey, Place360BusinessMetrics, Place360RankMeasurement, Place360Snapshot, recordPlace360ReviewerHandoff, renamePlace360Store, savePlace360BusinessMetrics, savePlace360MissionProgress, savePlace360Rank, savePlace360Snapshot, savePlace360StoreProfile } from "../lib/supabase";
 
 type Props = {
   showToast?: (message: string, type?: any) => void;
@@ -156,11 +156,30 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
   }, [collectedPlaces, ownPlace?.placeId]);
   const storeKey = place360StoreKey(profile.name, profile.region);
   const [completedMissions, setCompletedMissions] = useState<string[]>(() => loadCompletedMissions(userId, storeKey));
+  const [reviewerHandoffCount, setReviewerHandoffCount] = useState(0);
   const [businessMetrics, setBusinessMetrics] = useState<BusinessMetricDraft>(EMPTY_BUSINESS_METRICS);
   const [metricsSavedAt, setMetricsSavedAt] = useState("");
   const [metricsLoading, setMetricsLoading] = useState(false);
   const csvInputRef = useRef<HTMLInputElement | null>(null);
-  useEffect(() => setCompletedMissions(loadCompletedMissions(userId, storeKey)), [storeKey, userId]);
+  useEffect(() => {
+    const localMissions = loadCompletedMissions(userId, storeKey);
+    setCompletedMissions(localMissions);
+    setReviewerHandoffCount(Number(localStorage.getItem(`${missionKey(userId, storeKey)}:reviewers`) || 0));
+    if (!storeKey || plan === "admin") return;
+    let active = true;
+    getPlace360Progress(storeKey).then(async row => {
+      if (!active) return;
+      if (row) {
+        setCompletedMissions(row.completed_missions || []);
+        setReviewerHandoffCount(row.reviewer_handoff_count || 0);
+        localStorage.setItem(missionKey(userId, storeKey), JSON.stringify(row.completed_missions || []));
+        localStorage.setItem(`${missionKey(userId, storeKey)}:reviewers`, String(row.reviewer_handoff_count || 0));
+      } else if (localMissions.length) {
+        await savePlace360MissionProgress(storeKey, localMissions);
+      }
+    }).catch(() => {});
+    return () => { active = false; };
+  }, [plan, storeKey, userId]);
   useEffect(() => {
     if (!storeKey) { setBusinessMetrics(EMPTY_BUSINESS_METRICS); setMetricsSavedAt(""); return; }
     let active = true;
@@ -264,11 +283,27 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
     missions.push({ id: "remeasure", icon: "📈", title: "같은 조건으로 다시 측정하기", why: "위치와 검색어가 달라지면 순위를 정확히 비교할 수 없어요.", how: "오늘 작업을 마친 뒤 다음 측정일에 같은 지역·업종·계정으로 다시 확인하세요.", action: "순위 기록 보기", go: "rank" });
     return missions.slice(0, 4);
   }, [businessMetrics, comparison, hasStore, metricsSavedAt, ownPlace]);
-  const toggleMission = (id: string) => setCompletedMissions(current => {
-    const next = current.includes(id) ? current.filter(item => item !== id) : [...current, id];
+  const toggleMission = async (id: string) => {
+    const next = completedMissions.includes(id) ? completedMissions.filter(item => item !== id) : [...completedMissions, id];
+    setCompletedMissions(next);
     if (storeKey) localStorage.setItem(missionKey(userId, storeKey), JSON.stringify(next));
-    return next;
-  });
+    if (storeKey && plan !== "admin") {
+      try { await savePlace360MissionProgress(storeKey, next); }
+      catch { showToast?.("완료 표시는 저장했지만 서버 동기화는 잠시 후 다시 시도해 주세요", "info"); }
+    }
+  };
+  const onReviewerHandoff = async (count: number) => {
+    if (!storeKey) return;
+    const next = reviewerHandoffCount + count;
+    setReviewerHandoffCount(next);
+    localStorage.setItem(`${missionKey(userId, storeKey)}:reviewers`, String(next));
+    if (plan !== "admin") {
+      try {
+        const row = await recordPlace360ReviewerHandoff(storeKey, count);
+        if (row) setReviewerHandoffCount(row.reviewer_handoff_count);
+      } catch { showToast?.("협업 후보는 전달했지만 완료 기록 동기화는 잠시 후 다시 시도해 주세요", "info"); }
+    }
+  };
   const updateBusinessMetric = (key: keyof BusinessMetricDraft, raw: string) => {
     const value = Math.min(1000000000, Math.max(0, Math.round(Number(raw) || 0)));
     setBusinessMetrics(current => ({ ...current, [key]: value }));
@@ -445,7 +480,7 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
     { id: "diagnosis", label: "원인 진단", done: Boolean(comparison || snapshots.length) },
     { id: "data", label: "운영자료", done: Boolean(metricsSavedAt) },
     { id: "mission", label: "오늘 미션", done: growthMissions.length > 0 && growthMissions.every(item => completedMissions.includes(item.id)) },
-    { id: "discovery", label: "리뷰어 제안", done: completedMissions.includes("blogger") },
+    { id: "discovery", label: "리뷰어 제안", done: reviewerHandoffCount > 0 },
   ];
 
   const growthGuide: Record<Place360Tab, { step: number; title: string; instruction: string; nextLabel: string; nextTab?: Place360Tab; openCrawl?: boolean; scrollToStore?: boolean }> = {
@@ -609,7 +644,7 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
       <section className="p360-card" style={{ ...cardStyle, padding: 22, marginBottom: 12 }}>
         <div style={{ color: colors.green, fontSize: 11, fontWeight: 950 }}>TODAY'S PLACE GROWTH MISSION</div>
         <h2 style={{ margin: "6px 0", fontSize: 23 }}>✅ 오늘은 이것만 순서대로 하세요</h2>
-        <p style={{ color: colors.sub, fontSize: 12.5, lineHeight: 1.75, margin: 0 }}>어려운 분석표를 읽지 않아도 돼요. 위에서부터 하나씩 실행하고 끝났으면 <b style={{ color: colors.text }}>완료 체크</b>를 누르세요. 체크는 오늘 하루 동안 이 기기에 기억됩니다.</p>
+        <p style={{ color: colors.sub, fontSize: 12.5, lineHeight: 1.75, margin: 0 }}>어려운 분석표를 읽지 않아도 돼요. 위에서부터 하나씩 실행하고 끝났으면 <b style={{ color: colors.text }}>완료 체크</b>를 누르세요. 체크는 매장별로 안전하게 저장되어 다른 PC에서도 이어집니다.</p>
         <div style={{ marginTop: 14, height: 11, borderRadius: 99, overflow: "hidden", background: colors.soft }}><div style={{ width: `${growthMissions.length ? Math.round(growthMissions.filter(item => completedMissions.includes(item.id)).length / growthMissions.length * 100) : 0}%`, height: "100%", background: `linear-gradient(90deg,${colors.green},${colors.rose})`, transition: "width .25s" }} /></div>
         <div style={{ marginTop: 7, color: colors.sub, fontSize: 11.5, fontWeight: 800 }}>{growthMissions.filter(item => completedMissions.includes(item.id)).length}개 완료 · 전체 {growthMissions.length}개</div>
       </section>
@@ -619,7 +654,7 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
           return <article key={item.id} className="p360-card p360-prescription" style={{ ...cardStyle, display: "grid", gridTemplateColumns: "54px minmax(0,1fr) auto", alignItems: "center", gap: 13, padding: 18, opacity: done ? .72 : 1, borderLeft: `5px solid ${done ? colors.green : colors.rose}` }}>
             <div aria-hidden="true" style={{ width: 50, height: 50, display: "grid", placeItems: "center", borderRadius: 15, background: done ? `${colors.green}18` : `${colors.rose}14`, fontSize: 26 }}>{done ? "✓" : item.icon}</div>
             <div><div style={{ color: done ? colors.green : colors.rose, fontSize: 10.5, fontWeight: 950 }}>STEP {index + 1}{done ? " · 완료" : ""}</div><h3 style={{ margin: "4px 0 7px", fontSize: 16, textDecoration: done ? "line-through" : "none" }}>{item.title}</h3><p style={{ margin: 0, color: colors.sub, fontSize: 11.5, lineHeight: 1.65 }}><b style={{ color: colors.text }}>왜 하나요?</b> {item.why}<br/><b style={{ color: colors.text }}>어떻게 하나요?</b> {item.how}</p></div>
-            <div style={{ display: "grid", gap: 7, minWidth: 138 }}><button type="button" className="p360-button" onClick={() => setTab(item.go)} style={{ background: done ? colors.soft : colors.rose, color: done ? colors.text : "#fff", border: done ? `1px solid ${colors.line}` : 0 }}>{item.action} →</button><button type="button" className="p360-button" aria-pressed={done} onClick={() => toggleMission(item.id)} style={{ minHeight: 42, background: done ? colors.green : "transparent", color: done ? "#fff" : colors.green, border: `1px solid ${colors.green}` }}>{done ? "✓ 완료했어요" : "끝나면 완료 체크"}</button></div>
+            <div style={{ display: "grid", gap: 7, minWidth: 138 }}><button type="button" className="p360-button" onClick={() => setTab(item.go)} style={{ background: done ? colors.soft : colors.rose, color: done ? colors.text : "#fff", border: done ? `1px solid ${colors.line}` : 0 }}>{item.action} →</button><button type="button" className="p360-button" aria-pressed={done} onClick={() => void toggleMission(item.id)} style={{ minHeight: 42, background: done ? colors.green : "transparent", color: done ? "#fff" : colors.green, border: `1px solid ${colors.green}` }}>{done ? "✓ 완료했어요" : "끝나면 완료 체크"}</button></div>
           </article>;
         })}
       </div>
@@ -646,7 +681,7 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
     </main>}
 
     <div style={{ display: tab === "discovery" ? "block" : "none" }} aria-hidden={tab !== "discovery"}>
-      <PlaceCenter showToast={showToast} theme={theme} userId={userId} plan={plan} initialRegion={profile.region} ownStoreName={profile.name} onPlacesCollected={onPlacesCollected} onOpenCrawl={onOpenCrawl} />
+      <PlaceCenter showToast={showToast} theme={theme} userId={userId} plan={plan} initialRegion={profile.region} ownStoreName={profile.name} onPlacesCollected={onPlacesCollected} onReviewerHandoff={onReviewerHandoff} onOpenCrawl={onOpenCrawl} />
     </div>
   </div>;
 }
