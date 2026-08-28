@@ -78,7 +78,7 @@ export interface Place360Snapshot {
   created_at: string;
 }
 
-export const PLACE360_STORE_LIMIT: Record<string, number> = { free: 1, basic: 3, pro: 10, unlimited: 999999, admin: 999999 };
+export const PLACE360_STORE_LIMIT: Record<string, number> = { free: 1, basic: 2, pro: 5, unlimited: 999999, admin: 999999 };
 export const PLACE360_DAILY_DIAGNOSIS_LIMIT: Record<string, number> = { free: 1, basic: 3, pro: 10, unlimited: 999999, admin: 999999 };
 export const PLACE360_HISTORY_DAYS: Record<string, number> = { free: 30, basic: 90, pro: 365, unlimited: 3650, admin: 3650 };
 

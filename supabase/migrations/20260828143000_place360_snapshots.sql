@@ -50,7 +50,7 @@ begin
 
   select plan into v_plan from public.publy_users where id = v_user_id and is_active is true and place360_enabled is true;
   if v_plan is null then raise exception using errcode = 'P0001', message = 'PLACE360_DISABLED'; end if;
-  v_store_limit := case v_plan when 'basic' then 3 when 'pro' then 10 when 'unlimited' then 999999 else 1 end;
+  v_store_limit := case v_plan when 'basic' then 2 when 'pro' then 5 when 'unlimited' then 999999 else 1 end;
   v_daily_limit := case v_plan when 'basic' then 3 when 'pro' then 10 when 'unlimited' then 999999 else 1 end;
   v_history_days := case v_plan when 'basic' then 90 when 'pro' then 365 when 'unlimited' then 3650 else 30 end;
   select count(distinct store_key) into v_store_count from public.publy_place360_snapshots where user_id = v_user_id;
