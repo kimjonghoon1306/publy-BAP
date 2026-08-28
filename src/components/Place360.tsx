@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import PlaceCenter from "./PlaceCenter";
-import { getPlace360Snapshots, place360StoreKey, Place360Snapshot, savePlace360Snapshot } from "../lib/supabase";
+import { getPlace360Snapshots, PLACE360_DAILY_DIAGNOSIS_LIMIT, PLACE360_HISTORY_DAYS, PLACE360_STORE_LIMIT, place360StoreKey, Place360Snapshot, savePlace360Snapshot } from "../lib/supabase";
 
 type Props = {
   showToast?: (message: string, type?: any) => void;
@@ -83,17 +83,24 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
       const name = place.name.replace(/\s+/g, "").toLowerCase();
       return name.includes(needle) || needle.includes(name);
     }) : undefined;
-    if (!own || plan === "admin") return;
+    if (!own) return;
     const competitors = rows.filter(place => place.placeId !== own.placeId);
     if (!competitors.length) return;
     const avgVisitor = Math.round(competitors.reduce((sum, place) => sum + (place.visitorReviewCount || 0), 0) / competitors.length);
     const avgBlog = Math.round(competitors.reduce((sum, place) => sum + (place.blogReviewCount || 0), 0) / competitors.length);
+    if (plan === "admin") {
+      const now = new Date().toISOString();
+      setSnapshots(current => [{ id: `admin-${Date.now()}`, user_id: "admin", store_key: storeKey, store_name: own.name, region: profile.region, category: profile.category, visitor_reviews: own.visitorReviewCount || 0, blog_reviews: own.blogReviewCount || 0, competitor_count: competitors.length, competitor_avg_visitor: avgVisitor, competitor_avg_blog: avgBlog, collected_count: rows.length, measured_on: now.slice(0, 10), created_at: now }, ...current].slice(0, 120));
+      showToast?.("관리자 무제한 진단이 완료됐어요", "success");
+      return;
+    }
     try {
       await savePlace360Snapshot({ store_key: storeKey, store_name: own.name, region: profile.region, category: profile.category, visitor_reviews: own.visitorReviewCount || 0, blog_reviews: own.blogReviewCount || 0, competitor_count: competitors.length, competitor_avg_visitor: avgVisitor, competitor_avg_blog: avgBlog, collected_count: rows.length });
       setSnapshots(await getPlace360Snapshots(storeKey));
       showToast?.("오늘의 플레이스 360 측정 기록을 안전하게 저장했어요", "success");
-    } catch {
-      showToast?.("비교는 완료됐지만 측정 기록 서버가 아직 준비되지 않았어요", "info");
+    } catch (error: any) {
+      const message = String(error?.message || "");
+      showToast?.(message.includes("PLACE360_STORE_LIMIT") ? "내 등급에서 등록할 수 있는 매장 수를 모두 사용했어요" : message.includes("PLACE360_DAILY_LIMIT") ? "오늘 사용할 수 있는 매장 진단 횟수를 모두 사용했어요" : "비교는 완료됐지만 측정 기록 서버가 아직 준비되지 않았어요", "info");
     }
   };
 
@@ -216,6 +223,12 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
         return <article key={item.title} className="p360-card" style={{ ...cardStyle, padding: 18 }}><div style={{ display: "flex", gap: 9, alignItems: "center" }}><span style={{ fontSize: 23 }}>{item.icon}</span><b style={{ fontSize: 14.5 }}>{item.title}</b></div><span style={{ display: "inline-block", margin: "10px 0 7px", borderRadius: 99, padding: "4px 9px", background: state === "자료 필요" ? `${colors.amber}18` : `${colors.green}16`, color: state === "자료 필요" ? colors.amber : colors.green, fontSize: 10.5, fontWeight: 900 }}>{state}</span><p style={{ color: colors.sub, fontSize: 11.5, lineHeight: 1.65 }}>{desc}</p></article>;
       })}</div>
       <section className="p360-card" style={{ ...cardStyle, padding: 20, marginTop: 12 }}><b>진단 프로세스</b><p style={{ color: colors.sub, fontSize: 12, lineHeight: 1.75, margin: "7px 0 14px" }}>내 매장 확인 → 주변 경쟁업체 수집 → 리뷰·노출 변화 비교 → 원인과 근거 표시 → 해결할 작업 추천 순서로 이어집니다.</p><button type="button" className="p360-button" disabled={!hasStore} onClick={() => setTab(hasStore ? "discovery" : "overview")} style={{ width: "100%", opacity: hasStore ? 1 : .6, background: colors.green, color: "#fff" }}>{hasStore ? "경쟁업체와 리뷰어 찾으러 가기 →" : "먼저 내 매장 등록하기 →"}</button></section>
+      <section className="p360-card" style={{ ...cardStyle, padding: 20, marginTop: 12, overflow: "hidden" }}>
+        <b>📋 플레이스 360 등급별 사용 한도</b>
+        <p style={{ color: colors.sub, fontSize: 11.5, lineHeight: 1.65, margin: "6px 0 12px" }}>새 진단 기능만의 한도예요. 기존 업체 발굴과 리뷰어 역추적 횟수는 아래 업체·리뷰어 찾기의 기존 등급표를 그대로 사용해요.</p>
+        {plan === "admin" ? <div style={{ padding: 12, borderRadius: 12, background: `${colors.green}15`, color: colors.green, fontWeight: 900 }}>👑 관리자 — 매장 등록·진단·기록 모두 무제한</div> : <div style={{ overflowX: "auto", WebkitOverflowScrolling: "touch" }}><div style={{ minWidth: 560, border: `1px solid ${colors.line}`, borderRadius: 13, overflow: "hidden" }}><div style={{ display: "grid", gridTemplateColumns: "1fr repeat(3,1.1fr)", background: colors.soft }}>{["등급", "등록 매장", "진단/일", "기록 보관"].map(title => <b key={title} style={{ padding: 10, fontSize: 11 }}>{title}</b>)}</div>{(["free", "basic", "pro"] as const).map(level => <div key={level} style={{ display: "grid", gridTemplateColumns: "1fr repeat(3,1.1fr)", borderTop: `1px solid ${colors.line}`, background: plan === level ? `${colors.rose}10` : colors.card }}><b style={{ padding: 10, color: plan === level ? colors.rose : colors.text }}>{level.toUpperCase()}{plan === level ? " · 내 등급" : ""}</b><span style={{ padding: 10 }}>{PLACE360_STORE_LIMIT[level]}개</span><span style={{ padding: 10 }}>{PLACE360_DAILY_DIAGNOSIS_LIMIT[level]}회</span><span style={{ padding: 10 }}>{PLACE360_HISTORY_DAYS[level]}일</span></div>)}</div></div>}
+        <p style={{ color: colors.sub, fontSize: 10.5, marginTop: 9 }}>같은 매장을 같은 날 다시 측정하면 새 횟수를 차감하지 않고 오늘 기록만 갱신해요.</p>
+      </section>
     </main>}
 
     <div style={{ display: tab === "discovery" ? "block" : "none" }} aria-hidden={tab !== "discovery"}>

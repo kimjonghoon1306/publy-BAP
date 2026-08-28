@@ -77,6 +77,10 @@ export interface Place360Snapshot {
   created_at: string;
 }
 
+export const PLACE360_STORE_LIMIT: Record<string, number> = { free: 1, basic: 3, pro: 10, unlimited: 999999, admin: 999999 };
+export const PLACE360_DAILY_DIAGNOSIS_LIMIT: Record<string, number> = { free: 1, basic: 3, pro: 10, unlimited: 999999, admin: 999999 };
+export const PLACE360_HISTORY_DAYS: Record<string, number> = { free: 30, basic: 90, pro: 365, unlimited: 3650, admin: 3650 };
+
 export function place360StoreKey(name: string, region = ""): string {
   return `${region.trim()}::${name.trim()}`.toLocaleLowerCase("ko-KR").replace(/\s+/g, " ").slice(0, 180);
 }
@@ -101,6 +105,20 @@ export async function getPlace360Snapshots(storeKey: string): Promise<Place360Sn
   const { data, error } = await supabase.rpc("publy_place360_get_snapshots", { p_token: token, p_store_key: storeKey });
   if (error) throw new Error(error.message);
   return (data || []) as Place360Snapshot[];
+}
+
+export async function getAdminPlace360Snapshots(search = ""): Promise<Place360Snapshot[]> {
+  const token = sessionStorage.getItem(ADMIN_SESSION_KEY) || "";
+  if (!token) return [];
+  const { data, error } = await supabase.rpc("publy_place360_admin_list", { p_token: token, p_search: search });
+  if (error) throw new Error(error.message);
+  return (data || []) as Place360Snapshot[];
+}
+
+export async function deleteAdminPlace360Snapshot(id: string): Promise<void> {
+  const token = sessionStorage.getItem(ADMIN_SESSION_KEY) || "";
+  const { data, error } = await supabase.rpc("publy_place360_admin_delete", { p_token: token, p_id: id });
+  if (error || data !== true) throw new Error(error?.message || "측정 기록 삭제에 실패했습니다");
 }
 
 // ── 인증 ─────────────────────────────────────────────────

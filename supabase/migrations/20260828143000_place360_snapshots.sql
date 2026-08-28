@@ -32,6 +32,12 @@ create or replace function public.publy_place360_save_snapshot(
 language plpgsql security definer set search_path = '' as $$
 declare
   v_user_id uuid;
+  v_plan text;
+  v_store_limit integer;
+  v_daily_limit integer;
+  v_history_days integer;
+  v_store_count integer;
+  v_today_count integer;
   v_row public.publy_place360_snapshots;
 begin
   select user_id into v_user_id from public.publy_sessions
@@ -39,6 +45,19 @@ begin
     and is_admin is false and expires_at > now() limit 1;
   if v_user_id is null then raise exception using errcode = 'P0001', message = 'INVALID_SESSION'; end if;
   if length(trim(coalesce(p_store_key, ''))) < 2 then raise exception using errcode = 'P0001', message = 'INVALID_STORE'; end if;
+
+  select plan into v_plan from public.publy_users where id = v_user_id and is_active is true;
+  v_store_limit := case v_plan when 'basic' then 3 when 'pro' then 10 when 'unlimited' then 999999 else 1 end;
+  v_daily_limit := case v_plan when 'basic' then 3 when 'pro' then 10 when 'unlimited' then 999999 else 1 end;
+  v_history_days := case v_plan when 'basic' then 90 when 'pro' then 365 when 'unlimited' then 3650 else 30 end;
+  select count(distinct store_key) into v_store_count from public.publy_place360_snapshots where user_id = v_user_id;
+  if not exists(select 1 from public.publy_place360_snapshots where user_id = v_user_id and store_key = p_store_key) and v_store_count >= v_store_limit then
+    raise exception using errcode = 'P0001', message = 'PLACE360_STORE_LIMIT';
+  end if;
+  select count(*) into v_today_count from public.publy_place360_snapshots where user_id = v_user_id and measured_on = (timezone('Asia/Seoul', now()))::date;
+  if not exists(select 1 from public.publy_place360_snapshots where user_id = v_user_id and store_key = p_store_key and measured_on = (timezone('Asia/Seoul', now()))::date) and v_today_count >= v_daily_limit then
+    raise exception using errcode = 'P0001', message = 'PLACE360_DAILY_LIMIT';
+  end if;
 
   insert into public.publy_place360_snapshots(
     user_id, store_key, store_name, region, category, visitor_reviews, blog_reviews,
@@ -54,6 +73,7 @@ begin
     competitor_avg_blog = excluded.competitor_avg_blog, collected_count = excluded.collected_count,
     created_at = now()
   returning * into v_row;
+  delete from public.publy_place360_snapshots where user_id = v_user_id and measured_on < (timezone('Asia/Seoul', now()))::date - v_history_days;
   return v_row;
 end;
 $$;
@@ -73,9 +93,38 @@ begin
 end;
 $$;
 
+create or replace function public.publy_place360_admin_list(p_token text, p_search text default '')
+returns setof public.publy_place360_snapshots
+language plpgsql security definer set search_path = '' as $$
+begin
+  if not exists(select 1 from public.publy_sessions where token_hash = encode(extensions.digest(coalesce(p_token, ''), 'sha256'), 'hex') and is_admin is true and expires_at > now()) then
+    raise exception using errcode = 'P0001', message = 'INVALID_ADMIN_SESSION';
+  end if;
+  return query select s.* from public.publy_place360_snapshots s
+    join public.publy_users u on u.id = s.user_id
+    where coalesce(p_search, '') = '' or s.store_name ilike '%' || p_search || '%' or u.name ilike '%' || p_search || '%' or u.email ilike '%' || p_search || '%'
+    order by s.created_at desc limit 500;
+end;
+$$;
+
+create or replace function public.publy_place360_admin_delete(p_token text, p_id uuid)
+returns boolean language plpgsql security definer set search_path = '' as $$
+begin
+  if not exists(select 1 from public.publy_sessions where token_hash = encode(extensions.digest(coalesce(p_token, ''), 'sha256'), 'hex') and is_admin is true and expires_at > now()) then
+    raise exception using errcode = 'P0001', message = 'INVALID_ADMIN_SESSION';
+  end if;
+  delete from public.publy_place360_snapshots where id = p_id;
+  return found;
+end;
+$$;
+
 revoke all on function public.publy_place360_save_snapshot(text,text,text,text,text,integer,integer,integer,integer,integer,integer) from public;
 revoke all on function public.publy_place360_get_snapshots(text,text) from public;
 grant execute on function public.publy_place360_save_snapshot(text,text,text,text,text,integer,integer,integer,integer,integer,integer) to anon, authenticated;
 grant execute on function public.publy_place360_get_snapshots(text,text) to anon, authenticated;
+revoke all on function public.publy_place360_admin_list(text,text) from public;
+revoke all on function public.publy_place360_admin_delete(text,uuid) from public;
+grant execute on function public.publy_place360_admin_list(text,text) to anon, authenticated;
+grant execute on function public.publy_place360_admin_delete(text,uuid) to anon, authenticated;
 
 commit;
