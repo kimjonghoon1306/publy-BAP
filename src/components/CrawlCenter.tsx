@@ -4,6 +4,10 @@ import { BotEventStream, botFetch } from "../lib/botApi";
 import { PLAN_CONFIG, CRAWL_DAILY_LIMIT, EMAIL_DAILY_LIMIT, COMMENT_DAILY_LIMIT, getCrawlDailyUsage, incrementCrawlQuota, getEmailDailyUsage, incrementEmailQuota } from "../lib/supabase";
 import { takePlaceBloggerCandidates } from "../lib/discoveryBridge";
 import UsageGuide from "./UsageGuide";
+import boriImg from "../assets/bori.png";
+import dodoImg from "../assets/dodo.png";
+import monggeulImg from "../assets/monggeul.png";
+import pumiImg from "../assets/pumi.png";
 
 const BOT = "http://127.0.0.1:3334";   // neighbor-bot (발굴·발송)
 
@@ -32,10 +36,10 @@ const IC_HAND  = ({ s = 16, col = "currentColor" }) => <span style={{ color: col
 // ★ Electron 설치앱(file://)에서는 절대경로 "/characters/..."가 파일시스템 루트를 가리켜 404 → 이미지 깨짐.
 //   vite base:"./" + SPA(경로 안 바뀜)라 상대경로 "characters/..."가 dist/characters/ 로 정상 로드됨.
 const CH = {
-  bori: "characters/bori-cheer.png",
-  dodo: "characters/dodo-checker.png",
-  monggeul: "characters/monggeul-explorer.png",
-  pumi: "characters/pumi-guide.png",
+  bori: boriImg,
+  dodo: dodoImg,
+  monggeul: monggeulImg,
+  pumi: pumiImg,
 };
 // 혹시라도 로드 실패 시 마스코트별 이모지로 대체(깨진 아이콘 노출 방지)
 const chErr = (emoji: string) => (e: any) => {
@@ -653,7 +657,7 @@ export default function CrawlCenter({ showToast, theme: extTheme, userId, plan =
                 ))}
                 <div style={{ position: "absolute", left: "50%", bottom: 6, transform: "translateX(-50%)", width: 90, height: 15, borderRadius: "50%", background: "rgba(0,0,0,.22)", filter: "blur(6px)", animation: "cwShadow 2.4s ease-in-out infinite" }} />
                 <div style={{ position: "absolute", left: "50%", top: "44%", transform: "translate(-50%,-50%)", animation: "cwHeroPop .9s cubic-bezier(.18,1.5,.5,1) both" }}>
-                  <img src="characters/monggeul-explorer.png" alt="탐험가 몽글" onError={e => { const s = document.createElement("div"); s.textContent = "🧭"; s.style.cssText = "font-size:124px;line-height:1"; e.currentTarget.replaceWith(s); }} style={{ display: "block", width: 156, height: 156, objectFit: "contain", animation: "cwBob 2.4s ease-in-out .9s infinite", filter: `drop-shadow(0 14px 26px ${C.accent}66)` }} />
+                  <img src={CH.monggeul} alt="탐험가 몽글" onError={e => { const s = document.createElement("div"); s.textContent = "🧭"; s.style.cssText = "font-size:124px;line-height:1"; e.currentTarget.replaceWith(s); }} style={{ display: "block", width: 156, height: 156, objectFit: "contain", animation: "cwBob 2.4s ease-in-out .9s infinite", filter: `drop-shadow(0 14px 26px ${C.accent}66)` }} />
                 </div>
               </div>
               <div style={{ fontFamily: serif, fontSize: 24, fontWeight: 600, color: C.ink, marginTop: 4 }}>탐험 준비 완료! 🧭</div>

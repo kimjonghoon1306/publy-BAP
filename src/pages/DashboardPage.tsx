@@ -9,6 +9,7 @@ import { botFetch, BotEventStream } from "../lib/botApi";
 import WebInstallNotice from "../WebInstallNotice";
 import UsageGuide from "../components/UsageGuide";
 import Daebaekseo, { DAEBAEKSEO_VERSION } from "../components/Daebaekseo";
+import dodoImg from "../assets/dodo.png";
 
 type MainTab = "control" | "keyword" | "write" | "image" | "photo" | "publish" | "manage" | "accounts" | "rank" | "blogscore" | "calendar" | "settings" | "neighbor" | "engage" | "reply" | "pumasi" | "insta_dm" | "crawl" | "place";
 type OnPartnerProduct = {id:string|null;name:string;image:string;price:number|null;available:boolean;partnerUrl:string;shopUrl:string};
@@ -6505,7 +6506,7 @@ POST3: (제목)|(이유)
             {showCrawlLock&&(
               <div onClick={()=>setShowCrawlLock(false)} style={{position:"fixed",inset:0,background:"rgba(12,8,20,.62)",backdropFilter:"blur(4px)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:99999,padding:20}}>
                 <div onClick={e=>e.stopPropagation()} style={{background:"#fff",borderRadius:26,padding:"30px 26px 26px",maxWidth:360,width:"100%",textAlign:"center",boxShadow:"0 26px 70px rgba(255,111,165,.4)",border:"2px solid #ffe0ec",animation:"crawlPop .32s cubic-bezier(.34,1.56,.64,1)"}}>
-                  <img src="characters/dodo-checker.png" alt="도도" onError={(e)=>{const d=document.createElement("div");d.textContent="🔒";d.style.cssText="font-size:74px;line-height:1;margin:8px 0";e.currentTarget.replaceWith(d);}} style={{width:118,height:118,objectFit:"contain",filter:"drop-shadow(0 10px 16px rgba(255,111,165,.32))",animation:"crawlBob 1.6s ease-in-out infinite"}}/>
+                  <img src={dodoImg} alt="도도" onError={(e)=>{const d=document.createElement("div");d.textContent="🔒";d.style.cssText="font-size:74px;line-height:1;margin:8px 0";e.currentTarget.replaceWith(d);}} style={{width:118,height:118,objectFit:"contain",filter:"drop-shadow(0 10px 16px rgba(255,111,165,.32))",animation:"crawlBob 1.6s ease-in-out infinite"}}/>
                   <div style={{fontSize:20,fontWeight:900,color:"#20242b",margin:"6px 0 8px"}}>🔒 관리자 승인이 필요해요</div>
                   <div style={{fontSize:13.5,color:"#6b7280",lineHeight:1.65,marginBottom:22}}>크롤링은 <b style={{color:"#ff6fa5"}}>관리자 승인</b>을 받은 회원만 쓸 수 있어요.<br/>승인을 요청하면 도도가 열어드릴게요! ✨</div>
                   <button onClick={()=>setShowCrawlLock(false)} style={{width:"100%",padding:"14px",borderRadius:15,border:"none",background:"linear-gradient(135deg,#ff6fa5,#ff9ec4)",color:"#fff",fontSize:15,fontWeight:800,cursor:"pointer",boxShadow:"0 10px 24px rgba(255,111,165,.42)"}}>알겠어요</button>

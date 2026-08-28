@@ -152,7 +152,7 @@ const CSS = `
   -webkit-background-clip:text; -webkit-text-fill-color:transparent;
 }
 .logo-tagline { font-size:10px; letter-spacing:.3em; text-transform:uppercase; margin-top:4px; }
-.dark .logo-tagline  { color:rgba(255,255,255,.35); }
+.dark .logo-tagline  { color:rgba(255,220,235,.62); }
 .light .logo-tagline { color:rgba(0,0,0,.4); }
 
 /* 탭 */
@@ -172,7 +172,7 @@ const CSS = `
   color:#000; box-shadow:0 4px 16px rgba(240,65,122,.35);
   transform:translateY(-1px);
 }
-.dark .tab-btn.inactive  { background:transparent; color:rgba(255,255,255,.4); }
+.dark .tab-btn.inactive  { background:transparent; color:rgba(255,235,244,.68); }
 .light .tab-btn.inactive { background:transparent; color:rgba(0,0,0,.45); }
 
 /* 인풋 그룹 */
@@ -194,8 +194,8 @@ const CSS = `
 .light .recent-email-item:hover{ background:rgba(240,65,122,.09); }
 .recent-email-item:active{ transform:scale(.99); }
 .dark .field-input {
-  background:rgba(255,255,255,.06);
-  border:1.5px solid rgba(255,255,255,.08);
+  background:rgba(255,255,255,.09);
+  border:1.5px solid rgba(255,140,180,.28);
   color:white;
 }
 .light .field-input {
@@ -203,9 +203,9 @@ const CSS = `
   border:1.5px solid rgba(240,65,122,.15);
   color:#09090b;
 }
-.field-input::placeholder { opacity:.4; }
-.dark .field-input::placeholder  { color:white; }
-.light .field-input::placeholder { color:#09090b; }
+.field-input::placeholder { opacity:.75; }
+.dark .field-input::placeholder  { color:rgba(255,255,255,.5); }
+.light .field-input::placeholder { color:#8a8072; }
 .field-input:focus {
   border-color:rgba(240,65,122,.5) !important;
   box-shadow:0 0 0 4px rgba(240,65,122,.08) !important;
@@ -264,7 +264,7 @@ const CSS = `
 .find-links { display:flex; justify-content:center; gap:16px; margin-top:16px; }
 .find-link { background:none; border:none; cursor:pointer; font-size:12px; font-family:'Noto Sans KR',sans-serif; font-weight:600; letter-spacing:.03em; opacity:.55; transition:opacity .2s; text-decoration:underline; }
 .find-link:hover { opacity:1; }
-.dark .find-link  { color:rgba(255,255,255,.7); }
+.dark .find-link  { color:rgba(255,180,205,.85); }
 .light .find-link { color:rgba(0,0,0,.6); }
 
 /* 찾기 모달 오버레이 */

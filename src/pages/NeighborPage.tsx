@@ -4,6 +4,7 @@ import { botFetch, BotEventStream } from "../lib/botApi";
 import { getReplyDailyUsage, REPLY_DAILY_LIMIT, getBlogscoreDailyUsage, incrementBlogscoreQuota, BLOGSCORE_DAILY_LIMIT, PUMASI_ACCOUNT_LIMIT, PUMASI_POSTS_LIMIT, TAB_ACCOUNT_LIMIT, getPumasiDailyUsage, savePostCareChecks, markPrescribed, markTitleChanged, getPostCare, computeCareStatus, PostCare, OBSERVE_DAYS, savePostViews, latestViews, reportError } from "../lib/supabase";
 import UsageGuide from "../components/UsageGuide";
 import dodoImg from "../assets/dodo.png";   // 🩺 블로그 주치의 캐릭터(검수자 도도)
+import boriImg from "../assets/bori.png";   // 🌱 응원단 보리
 
 const BOT = "http://127.0.0.1:3334";
 
@@ -2886,7 +2887,7 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
                     return (
                       <div style={{ marginBottom: 20, borderRadius: 16, background: "linear-gradient(135deg, rgba(0,200,150,.07), rgba(139,92,246,.05))", border: "1.5px solid rgba(0,200,150,.28)", overflow: "hidden" }}>
                         <div style={{ padding: "16px 18px", display: "flex", alignItems: "center", gap: 12 }}>
-                          <img src="characters/bori-cheer.png" alt="응원단 보리" onError={e => { const s = document.createElement("div"); s.textContent = "🌱"; s.style.cssText = "font-size:34px;line-height:1"; e.currentTarget.replaceWith(s); }} style={{ width: 44, height: 44, objectFit: "contain", flexShrink: 0, filter: "drop-shadow(0 4px 8px rgba(139,92,246,.3))" }} />
+                          <img src={boriImg} alt="응원단 보리" onError={e => { const s = document.createElement("div"); s.textContent = "🌱"; s.style.cssText = "font-size:34px;line-height:1"; e.currentTarget.replaceWith(s); }} style={{ width: 44, height: 44, objectFit: "contain", flexShrink: 0, filter: "drop-shadow(0 4px 8px rgba(139,92,246,.3))" }} />
                           <div style={{ flex: 1, minWidth: 0 }}>
                             <div style={{ fontSize: 14.5, fontWeight: 850, color: "var(--text)" }}>🌱 수정 추적 <span style={{ fontSize: 11.5, fontWeight: 800, color: "#00c896", background: "rgba(0,200,150,.14)", padding: "2px 9px", borderRadius: 20, marginLeft: 4 }}>{tracked.length}개 관리 중</span>{autoTrackLoading && <span style={{ fontSize: 11, fontWeight: 800, color: "#8b5cf6", background: "rgba(139,92,246,.12)", padding: "2px 9px", borderRadius: 20, marginLeft: 6 }}>🔄 순위 자동 확인 중…</span>}</div>
                             <div style={{ fontSize: 11.5, color: "var(--text2)", marginTop: 3, lineHeight: 1.5 }}>제목을 바꾼 글이에요. 주치의가 <b style={{ color: "#8b5cf6" }}>완치(검색 노출)될 때까지</b> 함께 지켜봐요. <b style={{ color: "#00c896" }}>순위는 자동으로 채워져요</b> — 직접 안 눌러도 돼요.</div>
@@ -4042,7 +4043,7 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
           <div style={{ position: "relative", width: 150, height: 150, margin: "0 auto 4px" }}>
             <div style={{ position: "absolute", inset: 0, borderRadius: "50%", background: "radial-gradient(circle at 50% 42%, rgba(0,200,150,.32), rgba(255,210,63,.12) 55%, transparent 72%)", animation: "wcGlow 2s ease-in-out infinite" }} />
             <div style={{ position: "absolute", left: "50%", top: 4, fontSize: 30, animation: "bdBob 1.2s ease-in-out infinite" }}>🎉</div>
-            <img src="characters/dodo-checker.png" alt="주치의 도도" onError={e => { const s = document.createElement("div"); s.textContent = "🩺"; s.style.cssText = "font-size:104px;line-height:150px"; e.currentTarget.replaceWith(s); }} style={{ position: "relative", width: 130, height: 130, marginTop: 12, objectFit: "contain", animation: "bdBob 1.4s ease-in-out infinite", filter: "drop-shadow(0 12px 22px rgba(0,200,150,.4))" }} />
+            <img src={dodoImg} alt="주치의 도도" onError={e => { const s = document.createElement("div"); s.textContent = "🩺"; s.style.cssText = "font-size:104px;line-height:150px"; e.currentTarget.replaceWith(s); }} style={{ position: "relative", width: 130, height: 130, marginTop: 12, objectFit: "contain", animation: "bdBob 1.4s ease-in-out infinite", filter: "drop-shadow(0 12px 22px rgba(0,200,150,.4))" }} />
           </div>
           <div style={{ fontSize: 25, fontWeight: 900, color: "var(--text)", marginBottom: 8, letterSpacing: "-.02em" }}>노출 축하드립니다!</div>
           <div style={{ fontSize: 14, color: "var(--text2)", lineHeight: 1.65, marginBottom: 22 }}>
