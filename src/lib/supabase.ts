@@ -60,6 +60,49 @@ export interface PublyHistory {
   content?: any;  // 재발행용: 발행 당시 payload(title/blocks/thumbnail/tags/visibility 등) 전체 저장
 }
 
+export interface Place360Snapshot {
+  id: string;
+  user_id: string;
+  store_key: string;
+  store_name: string;
+  region: string;
+  category: string;
+  visitor_reviews: number;
+  blog_reviews: number;
+  competitor_count: number;
+  competitor_avg_visitor: number;
+  competitor_avg_blog: number;
+  collected_count: number;
+  measured_on: string;
+  created_at: string;
+}
+
+export function place360StoreKey(name: string, region = ""): string {
+  return `${region.trim()}::${name.trim()}`.toLocaleLowerCase("ko-KR").replace(/\s+/g, " ").slice(0, 180);
+}
+
+export async function savePlace360Snapshot(input: Omit<Place360Snapshot, "id" | "user_id" | "measured_on" | "created_at">): Promise<Place360Snapshot | null> {
+  const token = getMemberSessionToken();
+  if (!token) return null;
+  const { data, error } = await supabase.rpc("publy_place360_save_snapshot", {
+    p_token: token, p_store_key: input.store_key, p_store_name: input.store_name,
+    p_region: input.region, p_category: input.category,
+    p_visitor_reviews: input.visitor_reviews, p_blog_reviews: input.blog_reviews,
+    p_competitor_count: input.competitor_count, p_competitor_avg_visitor: input.competitor_avg_visitor,
+    p_competitor_avg_blog: input.competitor_avg_blog, p_collected_count: input.collected_count,
+  });
+  if (error) throw new Error(error.message);
+  return (data as Place360Snapshot) || null;
+}
+
+export async function getPlace360Snapshots(storeKey: string): Promise<Place360Snapshot[]> {
+  const token = getMemberSessionToken();
+  if (!token || !storeKey) return [];
+  const { data, error } = await supabase.rpc("publy_place360_get_snapshots", { p_token: token, p_store_key: storeKey });
+  if (error) throw new Error(error.message);
+  return (data || []) as Place360Snapshot[];
+}
+
 // ── 인증 ─────────────────────────────────────────────────
 const MEMBER_SESSION_KEY = "publy_session_token";
 const ADMIN_SESSION_KEY = "publy_admin_token";

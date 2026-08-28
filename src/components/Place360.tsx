@@ -1,5 +1,6 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import PlaceCenter from "./PlaceCenter";
+import { getPlace360Snapshots, place360StoreKey, Place360Snapshot, savePlace360Snapshot } from "../lib/supabase";
 
 type Props = {
   showToast?: (message: string, type?: any) => void;
@@ -48,6 +49,8 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
   const [profile, setProfile] = useState<StoreProfile>(() => loadProfile(userId));
   const [draft, setDraft] = useState<StoreProfile>(() => loadProfile(userId));
   const [collectedPlaces, setCollectedPlaces] = useState<CollectedPlace[]>([]);
+  const [snapshots, setSnapshots] = useState<Place360Snapshot[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
   const hasStore = Boolean(profile.name.trim());
   const ownPlace = useMemo(() => {
     const needle = profile.name.replace(/\s+/g, "").toLowerCase();
@@ -64,6 +67,55 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
     const avgBlog = Math.round(competitors.reduce((sum, place) => sum + (place.blogReviewCount || 0), 0) / competitors.length);
     return { count: competitors.length, avgVisitor, avgBlog };
   }, [collectedPlaces, ownPlace?.placeId]);
+  const storeKey = place360StoreKey(profile.name, profile.region);
+  useEffect(() => {
+    if (!storeKey || plan === "admin") { setSnapshots([]); return; }
+    let active = true;
+    setHistoryLoading(true);
+    getPlace360Snapshots(storeKey).then(rows => { if (active) setSnapshots(rows); }).catch(() => { if (active) setSnapshots([]); }).finally(() => { if (active) setHistoryLoading(false); });
+    return () => { active = false; };
+  }, [plan, storeKey]);
+
+  const onPlacesCollected = async (rows: CollectedPlace[]) => {
+    setCollectedPlaces(rows);
+    const needle = profile.name.replace(/\s+/g, "").toLowerCase();
+    const own = needle ? rows.find(place => {
+      const name = place.name.replace(/\s+/g, "").toLowerCase();
+      return name.includes(needle) || needle.includes(name);
+    }) : undefined;
+    if (!own || plan === "admin") return;
+    const competitors = rows.filter(place => place.placeId !== own.placeId);
+    if (!competitors.length) return;
+    const avgVisitor = Math.round(competitors.reduce((sum, place) => sum + (place.visitorReviewCount || 0), 0) / competitors.length);
+    const avgBlog = Math.round(competitors.reduce((sum, place) => sum + (place.blogReviewCount || 0), 0) / competitors.length);
+    try {
+      await savePlace360Snapshot({ store_key: storeKey, store_name: own.name, region: profile.region, category: profile.category, visitor_reviews: own.visitorReviewCount || 0, blog_reviews: own.blogReviewCount || 0, competitor_count: competitors.length, competitor_avg_visitor: avgVisitor, competitor_avg_blog: avgBlog, collected_count: rows.length });
+      setSnapshots(await getPlace360Snapshots(storeKey));
+      showToast?.("오늘의 플레이스 360 측정 기록을 안전하게 저장했어요", "success");
+    } catch {
+      showToast?.("비교는 완료됐지만 측정 기록 서버가 아직 준비되지 않았어요", "info");
+    }
+  };
+
+  const trend = useMemo(() => {
+    if (snapshots.length < 2) return null;
+    const latest = snapshots[0];
+    const latestTime = new Date(latest.measured_on).getTime();
+    const prior = snapshots.find(row => latestTime - new Date(row.measured_on).getTime() >= 6 * 86400000) || snapshots[snapshots.length - 1];
+    return { days: Math.max(1, Math.round((latestTime - new Date(prior.measured_on).getTime()) / 86400000)), visitor: latest.visitor_reviews - prior.visitor_reviews, blog: latest.blog_reviews - prior.blog_reviews };
+  }, [snapshots]);
+  const prescriptions = useMemo(() => {
+    const items: Array<{ level: "danger" | "warning" | "ready"; title: string; reason: string; action: string; go: Place360Tab }> = [];
+    if (!ownPlace || !comparison) {
+      items.push({ level: "ready", title: "먼저 내 매장과 주변 업체를 찾아주세요", reason: "첫 수집 결과가 앞으로 변화를 판단하는 기준선이 됩니다.", action: "업체 찾기 시작", go: "discovery" });
+      return items;
+    }
+    if ((ownPlace.blogReviewCount || 0) < comparison.avgBlog) items.push({ level: "danger", title: "블로그 리뷰 보강이 먼저예요", reason: `내 매장은 ${(ownPlace.blogReviewCount || 0).toLocaleString()}개, 주변 평균은 ${comparison.avgBlog.toLocaleString()}개로 차이가 있어요.`, action: "경쟁업체 리뷰어 찾기", go: "discovery" });
+    if ((ownPlace.visitorReviewCount || 0) < comparison.avgVisitor) items.push({ level: "warning", title: "방문 고객의 리뷰 참여를 점검하세요", reason: `방문자 리뷰가 주변 평균보다 ${(comparison.avgVisitor - (ownPlace.visitorReviewCount || 0)).toLocaleString()}개 적어요.`, action: "업체 비교 근거 보기", go: "diagnosis" });
+    if (trend && trend.blog <= 0) items.push({ level: "warning", title: `최근 ${trend.days}일 블로그 리뷰가 정체됐어요`, reason: "새로운 지역형 리뷰어를 찾고 협업 후보로 보내는 작업을 추천해요.", action: "리뷰어 역추적", go: "discovery" });
+    if (!items.length) items.push({ level: "ready", title: "현재 리뷰 기준은 주변 평균 이상이에요", reason: "지금 상태를 유지하면서 다음 측정에서 증가 속도를 비교해 보세요.", action: "다음 측정 준비", go: "discovery" });
+    return items.slice(0, 3);
+  }, [comparison, ownPlace, trend]);
   const dark = theme === "dark";
 
   const colors = useMemo(() => dark ? {
@@ -97,7 +149,7 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
     <style>{`
       .p360 *{box-sizing:border-box}.p360-button{min-height:48px;border:0;border-radius:13px;padding:11px 16px;font-family:inherit;font-weight:900;cursor:pointer;transition:transform .15s,filter .15s}.p360-button:hover{filter:brightness(1.04);transform:translateY(-1px)}
       .p360-tabs{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}.p360-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:11px}.p360-two{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
-      @media(max-width:760px){.p360{padding:8px 6px 120px!important}.p360-tabs{grid-template-columns:1fr}.p360-grid,.p360-two{grid-template-columns:1fr}.p360-tab{text-align:left!important;display:grid!important;grid-template-columns:42px 1fr!important;align-items:center}.p360-hero{padding:20px 16px!important}.p360-title{font-size:25px!important}.p360-card{padding:16px!important}}
+      @media(max-width:760px){.p360{padding:8px 6px 120px!important}.p360-tabs{grid-template-columns:1fr}.p360-grid,.p360-two{grid-template-columns:1fr}.p360-tab{text-align:left!important;display:grid!important;grid-template-columns:42px 1fr!important;align-items:center}.p360-hero{padding:20px 16px!important}.p360-title{font-size:25px!important}.p360-card{padding:16px!important}.p360-prescription{grid-template-columns:1fr!important}.p360-prescription .p360-button{width:100%}}
     `}</style>
 
     <header className="p360-hero" style={{ ...cardStyle, position: "relative", overflow: "hidden", padding: "26px 28px", marginBottom: 12 }}>
@@ -146,6 +198,15 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
         <b>📊 방금 수집한 {collectedPlaces.length}개 업체 비교 결과</b>
         {ownPlace && comparison ? <div className="p360-two" style={{ marginTop: 12 }}><div style={{ padding: 14, borderRadius: 14, background: colors.soft }}><span style={{ color: colors.sub, fontSize: 11 }}>내 매장</span><b style={{ display: "block", marginTop: 5 }}>{ownPlace.name}</b><p style={{ margin: "7px 0 0", fontSize: 12 }}>방문자 리뷰 {(ownPlace.visitorReviewCount || 0).toLocaleString()} · 블로그 리뷰 {(ownPlace.blogReviewCount || 0).toLocaleString()}</p></div><div style={{ padding: 14, borderRadius: 14, background: colors.soft }}><span style={{ color: colors.sub, fontSize: 11 }}>주변 {comparison.count}곳 평균</span><b style={{ display: "block", marginTop: 5 }}>경쟁업체 기준선</b><p style={{ margin: "7px 0 0", fontSize: 12 }}>방문자 리뷰 {comparison.avgVisitor.toLocaleString()} · 블로그 리뷰 {comparison.avgBlog.toLocaleString()}</p></div></div> : <p style={{ margin: "8px 0 0", color: colors.sub, fontSize: 12, lineHeight: 1.7 }}>수집은 완료됐지만 등록한 매장 이름과 정확히 일치하는 업체를 찾지 못했어요. 업체·리뷰어 찾기에서 상호명이 보이도록 지역과 업종을 조정해 주세요.</p>}
       </section>}
+      <section className="p360-card" style={{ ...cardStyle, padding: 20, marginBottom: 12 }}>
+        <b>📈 7일·30일 변화 기록</b>
+        {historyLoading ? <p style={{ color: colors.sub, fontSize: 12, marginTop: 8 }}>지난 측정 기록을 불러오고 있어요…</p> : trend ? <div className="p360-two" style={{ marginTop: 12 }}><div style={{ padding: 14, borderRadius: 14, background: colors.soft }}><span style={{ color: colors.sub, fontSize: 11 }}>최근 {trend.days}일</span><b style={{ display: "block", marginTop: 5, color: trend.visitor >= 0 ? colors.green : colors.rose }}>방문자 리뷰 {trend.visitor >= 0 ? "+" : ""}{trend.visitor}</b></div><div style={{ padding: 14, borderRadius: 14, background: colors.soft }}><span style={{ color: colors.sub, fontSize: 11 }}>최근 {trend.days}일</span><b style={{ display: "block", marginTop: 5, color: trend.blog >= 0 ? colors.green : colors.rose }}>블로그 리뷰 {trend.blog >= 0 ? "+" : ""}{trend.blog}</b></div></div> : <p style={{ color: colors.sub, fontSize: 12, lineHeight: 1.7, marginTop: 8 }}>첫 측정은 비교 기준을 만드는 날이에요. 다른 날짜에 다시 측정하면 증가·감소와 개선 효과를 보여드려요.</p>}
+      </section>
+      <section className="p360-card" style={{ ...cardStyle, padding: 20, marginBottom: 12 }}>
+        <b>✅ 오늘의 매장 처방전</b>
+        <p style={{ color: colors.sub, fontSize: 11.5, lineHeight: 1.65, margin: "6px 0 13px" }}>확인된 자료만으로 우선순위를 정했어요. 광고와 재방문은 자료가 연결되기 전까지 원인으로 단정하지 않아요.</p>
+        <div style={{ display: "grid", gap: 8 }}>{prescriptions.map((item, index) => <div className="p360-prescription" key={`${item.title}-${index}`} style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) auto", gap: 12, alignItems: "center", padding: 14, borderRadius: 14, background: colors.soft, borderLeft: `4px solid ${item.level === "danger" ? colors.rose : item.level === "warning" ? colors.amber : colors.green}` }}><div><b style={{ display: "block", fontSize: 13.5 }}>{index + 1}. {item.title}</b><span style={{ display: "block", marginTop: 4, color: colors.sub, fontSize: 11.5, lineHeight: 1.55 }}>{item.reason}</span></div><button type="button" className="p360-button" onClick={() => setTab(item.go)} style={{ background: item.level === "danger" ? colors.rose : colors.green, color: "#fff", whiteSpace: "nowrap" }}>{item.action}</button></div>)}</div>
+      </section>
       <div className="p360-grid">{DIAGNOSIS_ITEMS.map(item => {
         const reviewItem = item.title === "리뷰 활동";
         const state = reviewItem && ownPlace && comparison ? "확인됨" : item.state;
@@ -158,7 +219,7 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
     </main>}
 
     <div style={{ display: tab === "discovery" ? "block" : "none" }} aria-hidden={tab !== "discovery"}>
-      <PlaceCenter showToast={showToast} theme={theme} userId={userId} plan={plan} initialRegion={profile.region} onPlacesCollected={setCollectedPlaces} onOpenCrawl={onOpenCrawl} />
+      <PlaceCenter showToast={showToast} theme={theme} userId={userId} plan={plan} initialRegion={profile.region} onPlacesCollected={onPlacesCollected} onOpenCrawl={onOpenCrawl} />
     </div>
   </div>;
 }
