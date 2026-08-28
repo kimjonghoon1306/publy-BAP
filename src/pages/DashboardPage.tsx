@@ -701,6 +701,16 @@ textarea.inp{resize:vertical;line-height:1.75;min-height:80px;}
 .app.dark .tab-write{--accent:#e7a53d;--accent-text:#f0b657;--accent-bg:rgba(231,165,61,.14);--accent-border:rgba(231,165,61,.32);--accent-30:rgba(231,165,61,.32);--accent-dim:rgba(231,165,61,.1);}
 .app.light .tab-image{--accent:#6b46e8;--accent-text:#5a37cf;--accent-bg:rgba(107,70,232,.09);--accent-border:rgba(107,70,232,.28);--accent-30:rgba(107,70,232,.3);--accent-dim:rgba(107,70,232,.07);}
 .app.dark .tab-image{--accent:#a992ff;--accent-text:#bda6ff;--accent-bg:rgba(169,146,255,.14);--accent-border:rgba(169,146,255,.32);--accent-30:rgba(169,146,255,.32);--accent-dim:rgba(169,146,255,.1);}
+.app.light .tab-keyword{--accent:#2563eb;--accent-text:#1d4ed8;--accent-bg:rgba(37,99,235,.09);--accent-border:rgba(37,99,235,.28);--accent-30:rgba(37,99,235,.3);--accent-dim:rgba(37,99,235,.07);}
+.app.dark .tab-keyword{--accent:#7aa2ff;--accent-text:#9cbcff;--accent-bg:rgba(122,162,255,.14);--accent-border:rgba(122,162,255,.32);--accent-30:rgba(122,162,255,.32);--accent-dim:rgba(122,162,255,.1);}
+.app.light .tab-publish{--accent:#e0562f;--accent-text:#c0421f;--accent-bg:rgba(224,86,47,.09);--accent-border:rgba(224,86,47,.28);--accent-30:rgba(224,86,47,.3);--accent-dim:rgba(224,86,47,.07);}
+.app.dark .tab-publish{--accent:#ff8a6b;--accent-text:#ffa588;--accent-bg:rgba(255,138,107,.14);--accent-border:rgba(255,138,107,.32);--accent-30:rgba(255,138,107,.32);--accent-dim:rgba(255,138,107,.1);}
+.app.light .tab-manage{--accent:#4f46e5;--accent-text:#4338ca;--accent-bg:rgba(79,70,229,.09);--accent-border:rgba(79,70,229,.28);--accent-30:rgba(79,70,229,.3);--accent-dim:rgba(79,70,229,.07);}
+.app.dark .tab-manage{--accent:#a5b4ff;--accent-text:#bcc6ff;--accent-bg:rgba(165,180,255,.14);--accent-border:rgba(165,180,255,.32);--accent-30:rgba(165,180,255,.32);--accent-dim:rgba(165,180,255,.1);}
+.app.light .tab-calendar{--accent:#3f8f5f;--accent-text:#2f7a4c;--accent-bg:rgba(63,143,95,.1);--accent-border:rgba(63,143,95,.28);--accent-30:rgba(63,143,95,.3);--accent-dim:rgba(63,143,95,.07);}
+.app.dark .tab-calendar{--accent:#6fca8f;--accent-text:#8ad9a5;--accent-bg:rgba(111,202,143,.14);--accent-border:rgba(111,202,143,.32);--accent-30:rgba(111,202,143,.32);--accent-dim:rgba(111,202,143,.1);}
+.app.light .tab-insta{--accent:#c13584;--accent-text:#a12c6f;--accent-bg:rgba(193,53,132,.09);--accent-border:rgba(193,53,132,.28);--accent-30:rgba(193,53,132,.3);--accent-dim:rgba(193,53,132,.07);}
+.app.dark .tab-insta{--accent:#e884b8;--accent-text:#f0a5cd;--accent-bg:rgba(232,132,184,.14);--accent-border:rgba(232,132,184,.32);--accent-30:rgba(232,132,184,.32);--accent-dim:rgba(232,132,184,.1);}
 .photo-drop{border:2.5px dashed #FF6B9D55;border-radius:20px;padding:32px 20px;text-align:center;cursor:pointer;transition:all .2s;background:var(--bg);margin-bottom:16px;}
 .photo-drop.drag-over,.photo-drop:hover{border-color:#FF6B9D;background:linear-gradient(135deg,#FF6B9D11,#C77DFF11);}
 .photo-drop-ico{font-size:48px;margin-bottom:12px;}
@@ -4425,8 +4435,8 @@ POST3: (제목)|(이유)
 
             {/* ═══ 🔍 키워드/제목 탭 ═══ */}
             {tab==="keyword"&&(
-              <div style={{animation:"fadeUp .25s ease both"}}>
-                <UsageGuide theme={theme==="dark"?"dark":"light"} subtitle="펄리예요! 쓸 주제부터 정해봐요. 인기 키워드와 제목을 추천해줄게요." steps={[{ico:"✏️",title:"주제·키워드 입력",desc:"쓰고 싶은 주제나 키워드를 적어요(예: 강남 맛집)."},{ico:"💡",title:"추천 받기",desc:"버튼을 누르면 인기 키워드와 제목 후보를 보여줘요."},{ico:"➡️",title:"제목 고르기",desc:"마음에 드는 제목을 고르면 ‘글 생성’으로 이어가요."}]} />
+              <div className="tab-keyword" style={{animation:"fadeUp .25s ease both"}}>
+                <UsageGuide theme={theme==="dark"?"dark":"light"} accent={theme==="dark"?"#7aa2ff":"#2563eb"} subtitle="펄리예요! 쓸 주제부터 정해봐요. 인기 키워드와 제목을 추천해줄게요." steps={[{ico:"✏️",title:"주제·키워드 입력",desc:"쓰고 싶은 주제나 키워드를 적어요(예: 강남 맛집)."},{ico:"💡",title:"추천 받기",desc:"버튼을 누르면 인기 키워드와 제목 후보를 보여줘요."},{ico:"➡️",title:"제목 고르기",desc:"마음에 드는 제목을 고르면 ‘글 생성’으로 이어가요."}]} />
                 <div className="steps">
                   {[{n:"1",t:"키워드 입력"},{n:"2",t:"제목 추천"},{n:"3",t:"제목 선택"}].map((s,i)=>{
                     const done=(i===0&&keywords.length>0)||(i===1&&titles.length>0)||(i===2&&!!selectedTitle);
@@ -5640,8 +5650,8 @@ POST3: (제목)|(이유)
 
 
             {tab==="publish"&&(
-              <div style={{animation:"fadeUp .25s ease both"}}>
-                <UsageGuide theme={theme==="dark"?"dark":"light"} subtitle="다 된 글을 블로그에 자동으로 올려줄게요." steps={[{ico:"👤",title:"계정·플랫폼 선택",desc:"네이버/티스토리와 올릴 계정을 골라요."},{ico:"🧩",title:"발행 방식",desc:"전체/본문+FAQ/본문만 중 골라요. 예약 발행도 돼요."},{ico:"🚀",title:"발행",desc:"🚀 발행 버튼을 누르면 블로그에 자동으로 올라가요."}]} />
+              <div className="tab-publish" style={{animation:"fadeUp .25s ease both"}}>
+                <UsageGuide theme={theme==="dark"?"dark":"light"} accent={theme==="dark"?"#ff8a6b":"#e0562f"} subtitle="다 된 글을 블로그에 자동으로 올려줄게요." steps={[{ico:"👤",title:"계정·플랫폼 선택",desc:"네이버/티스토리와 올릴 계정을 골라요."},{ico:"🧩",title:"발행 방식",desc:"전체/본문+FAQ/본문만 중 골라요. 예약 발행도 돼요."},{ico:"🚀",title:"발행",desc:"🚀 발행 버튼을 누르면 블로그에 자동으로 올라가요."}]} />
                 {!botOnline&&<div className="alert-box alert-warn" style={{margin:"12px 16px 0"}}>⚠️ 봇 오프라인 — PC에서 Publy 앱 실행 시 즉시 발행, 아니면 대기열 저장돼요.</div>}
                 {quota&&quota.remaining_quota<=0&&!(["unlimited","admin"] as string[]).includes(user.plan)&&<div className="alert-box alert-danger" style={{margin:"12px 16px 0"}}>⚠️ 발행 건수 초과. 플랜을 업그레이드해주세요.</div>}
 
@@ -5950,8 +5960,8 @@ POST3: (제목)|(이유)
 
             {/* ===== 발행 기록 ===== */}
             {tab==="manage"&&(
-              <div style={{animation:"fadeUp .25s ease both"}}>
-                <UsageGuide theme={theme==="dark"?"dark":"light"} subtitle="지금까지 올린 글을 모아서 관리해요." steps={[{ico:"📋",title:"목록 확인",desc:"발행한 글이 모두 여기 모여요."},{ico:"✅",title:"상태 보기",desc:"성공/실패와 올라간 주소를 확인해요."},{ico:"📈",title:"성과 추적",desc:"순위·조회 변화를 보고 다음 글에 참고해요."}]} />
+              <div className="tab-manage" style={{animation:"fadeUp .25s ease both"}}>
+                <UsageGuide theme={theme==="dark"?"dark":"light"} accent={theme==="dark"?"#a5b4ff":"#4f46e5"} subtitle="지금까지 올린 글을 모아서 관리해요." steps={[{ico:"📋",title:"목록 확인",desc:"발행한 글이 모두 여기 모여요."},{ico:"✅",title:"상태 보기",desc:"성공/실패와 올라간 주소를 확인해요."},{ico:"📈",title:"성과 추적",desc:"순위·조회 변화를 보고 다음 글에 참고해요."}]} />
 
                 {/* ── 발행 통계 + 수익 예측 ── */}
                 {(()=>{
@@ -6221,8 +6231,8 @@ POST3: (제목)|(이유)
             {/* ===== 설정 ===== */}
             {/* ===== 📅 콘텐츠 캘린더 ===== */}
             {tab==="calendar"&&(
-              <div style={{animation:"fadeUp .25s ease both"}}>
-                <UsageGuide theme={theme==="dark"?"dark":"light"} subtitle="매일 뭘 쓸지 정해주고, 꾸준함도 챙겨줄게요." steps={[{ico:"🗓️",title:"글감 보기",desc:"날짜별 추천 주제와 핫이슈를 봐요."},{ico:"✍️",title:"글쓰기",desc:"글쓰기 버튼으로 바로 작성을 시작해요."},{ico:"🔥",title:"완료 체크",desc:"쓴 날은 체크! 며칠 연속 썼는지 스트릭도 쌓여요."}]} />
+              <div className="tab-calendar" style={{animation:"fadeUp .25s ease both"}}>
+                <UsageGuide theme={theme==="dark"?"dark":"light"} accent={theme==="dark"?"#6fca8f":"#3f8f5f"} subtitle="매일 뭘 쓸지 정해주고, 꾸준함도 챙겨줄게요." steps={[{ico:"🗓️",title:"글감 보기",desc:"날짜별 추천 주제와 핫이슈를 봐요."},{ico:"✍️",title:"글쓰기",desc:"글쓰기 버튼으로 바로 작성을 시작해요."},{ico:"🔥",title:"완료 체크",desc:"쓴 날은 체크! 며칠 연속 썼는지 스트릭도 쌓여요."}]} />
 
                 {/* 🔥 핫이슈 추천 (무료·누구나) */}
                 <div className="card" style={{marginBottom:14,border:"1.5px solid rgba(255,180,0,.35)",background:"linear-gradient(135deg,rgba(255,196,0,.06),rgba(255,146,10,.03))"}}>
@@ -6531,8 +6541,8 @@ POST3: (제목)|(이유)
             )}
 
             {tab==="insta_dm"&&(
-              <div style={{animation:"fadeUp .25s ease both"}}>
-                <UsageGuide theme={theme==="dark"?"dark":"light"} subtitle="인스타에서 관심 고객을 찾아 DM을 보내요." steps={[{ico:"📱",title:"인스타 로그인",desc:"인스타 계정으로 로그인해요."},{ico:"🔍",title:"대상 수집",desc:"키워드로 보낼 대상을 모아요."},{ico:"✉️",title:"메시지 발송",desc:"메시지를 적고 천천히 안전하게 보내요."}]} />
+              <div className="tab-insta" style={{animation:"fadeUp .25s ease both"}}>
+                <UsageGuide theme={theme==="dark"?"dark":"light"} accent={theme==="dark"?"#e884b8":"#c13584"} subtitle="인스타에서 관심 고객을 찾아 DM을 보내요." steps={[{ico:"📱",title:"인스타 로그인",desc:"인스타 계정으로 로그인해요."},{ico:"🔍",title:"대상 수집",desc:"키워드로 보낼 대상을 모아요."},{ico:"✉️",title:"메시지 발송",desc:"메시지를 적고 천천히 안전하게 보내요."}]} />
 
                 {/* 헤더 */}
                 <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:20}}>
