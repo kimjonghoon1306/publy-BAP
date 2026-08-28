@@ -89,6 +89,87 @@ export interface Place360RankMeasurement {
   checked_count: number; surface: string; device: string; measured_at: string;
 }
 
+export interface Place360BusinessMetrics {
+  id: string; user_id: string; store_key: string; store_name: string;
+  current_new_customers: number; previous_new_customers: number;
+  current_repeat_customers: number; previous_repeat_customers: number;
+  current_ad_spend: number; previous_ad_spend: number;
+  current_ad_actions: number; previous_ad_actions: number;
+  current_sales: number; previous_sales: number; measured_on: string; updated_at: string;
+}
+export interface Place360BusinessAdminRow extends Place360BusinessMetrics { member_name: string; email: string; plan: string }
+export interface Place360StoreProfile {
+  id: string; user_id: string; store_key: string; store_name: string; place_url: string; category: string; region: string;
+  goal: "visitors" | "reviews" | "exposure" | "repeat"; created_at: string; updated_at: string;
+}
+
+export async function savePlace360StoreProfile(input: Omit<Place360StoreProfile, "id" | "user_id" | "created_at" | "updated_at">): Promise<Place360StoreProfile | null> {
+  const token = getMemberSessionToken();
+  if (!token) return null;
+  const { data, error } = await supabase.rpc("publy_place360_save_store", { p_token: token, p_store_key: input.store_key, p_store_name: input.store_name, p_place_url: input.place_url, p_category: input.category, p_region: input.region, p_goal: input.goal });
+  if (error) throw new Error(error.message);
+  return (data as Place360StoreProfile) || null;
+}
+
+export async function getPlace360StoreProfiles(): Promise<Place360StoreProfile[]> {
+  const token = getMemberSessionToken();
+  if (!token) return [];
+  const { data, error } = await supabase.rpc("publy_place360_get_stores", { p_token: token });
+  if (error) throw new Error(error.message);
+  return (data || []) as Place360StoreProfile[];
+}
+
+export async function savePlace360BusinessMetrics(input: Omit<Place360BusinessMetrics, "id" | "user_id" | "measured_on" | "updated_at">): Promise<Place360BusinessMetrics | null> {
+  const token = getMemberSessionToken();
+  if (!token) return null;
+  const { data, error } = await supabase.rpc("publy_place360_save_business_metrics", {
+    p_token: token, p_store_key: input.store_key, p_store_name: input.store_name,
+    p_current_new_customers: input.current_new_customers, p_previous_new_customers: input.previous_new_customers,
+    p_current_repeat_customers: input.current_repeat_customers, p_previous_repeat_customers: input.previous_repeat_customers,
+    p_current_ad_spend: input.current_ad_spend, p_previous_ad_spend: input.previous_ad_spend,
+    p_current_ad_actions: input.current_ad_actions, p_previous_ad_actions: input.previous_ad_actions,
+    p_current_sales: input.current_sales, p_previous_sales: input.previous_sales,
+  });
+  if (error) throw new Error(error.message);
+  return (data as Place360BusinessMetrics) || null;
+}
+
+export async function getPlace360BusinessMetrics(storeKey: string): Promise<Place360BusinessMetrics | null> {
+  const token = getMemberSessionToken();
+  if (!token || !storeKey) return null;
+  const { data, error } = await supabase.rpc("publy_place360_get_business_metrics", { p_token: token, p_store_key: storeKey });
+  if (error) throw new Error(error.message);
+  return ((data || [])[0] as Place360BusinessMetrics) || null;
+}
+
+export async function getAdminPlace360BusinessMetrics(): Promise<Place360BusinessAdminRow[]> {
+  const token = sessionStorage.getItem(ADMIN_SESSION_KEY) || "";
+  if (!token) return [];
+  const { data, error } = await supabase.rpc("publy_place360_admin_business_metrics", { p_token: token });
+  if (error) throw new Error(error.message);
+  return (data || []) as Place360BusinessAdminRow[];
+}
+
+export async function deleteAdminPlace360BusinessMetrics(id: string): Promise<void> {
+  const token = sessionStorage.getItem(ADMIN_SESSION_KEY) || "";
+  const { data, error } = await supabase.rpc("publy_place360_admin_delete_business_metrics", { p_token: token, p_id: id });
+  if (error || data !== true) throw new Error(error?.message || "운영자료 삭제에 실패했습니다");
+}
+
+export async function deletePlace360Store(storeKey: string): Promise<void> {
+  const token = getMemberSessionToken();
+  if (!token || !storeKey) throw new Error("로그인 정보나 매장 정보가 없습니다");
+  const { data, error } = await supabase.rpc("publy_place360_delete_store", { p_token: token, p_store_key: storeKey });
+  if (error || data !== true) throw new Error(error?.message || "매장 삭제에 실패했습니다");
+}
+
+export async function renamePlace360Store(oldStoreKey: string, newStoreKey: string, storeName: string, region: string): Promise<void> {
+  const token = getMemberSessionToken();
+  if (!token) throw new Error("로그인 정보가 없습니다");
+  const { data, error } = await supabase.rpc("publy_place360_rename_store", { p_token: token, p_old_store_key: oldStoreKey, p_new_store_key: newStoreKey, p_store_name: storeName, p_region: region });
+  if (error || data !== true) throw new Error(error?.message || "매장 정보 변경에 실패했습니다");
+}
+
 export async function savePlace360Rank(input: Omit<Place360RankMeasurement, "id" | "user_id" | "measured_at">): Promise<Place360RankMeasurement | null> {
   const token = getMemberSessionToken();
   if (!token) return null;

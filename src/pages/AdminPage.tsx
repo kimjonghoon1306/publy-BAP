@@ -2706,7 +2706,7 @@ POST3: (제목)|(이유)
               <div className="g-step" style={{borderColor:"rgba(22,133,107,.45)",background:"rgba(22,133,107,.09)"}}>
                 <div className="g-step-num" style={{color:"#4ade80"}}>🏪 회원과 같은 플레이스 360</div>
                 <div className="g-step-title" style={{color:"#fff"}}>관리자도 실제 회원 화면과 같은 순서로 직접 시험해요</div>
-                <div className="g-step-desc">왼쪽 <b>플레이스 360</b>에서 매장 등록 → 현재 순위 → 원인 진단 → 고객 화면 상세 확인 → 업체·리뷰어 역추적을 그대로 사용할 수 있어요. 관리자는 모든 횟수가 무제한이에요.</div>
+                <div className="g-step-desc">왼쪽 <b>플레이스 360</b>에서 여러 매장 등록·전환 → 현재 순위 → 공개자료 진단 → 신규·재방문·광고 운영자료 직접 입력·CSV 진단 → 오늘 할 일 → 고객 화면 확인 → 리뷰어 역추적을 그대로 사용할 수 있어요. 관리자는 모든 횟수가 무제한이에요.</div>
               </div>
               {[
                 {ico:"🔐",title:"회원 사용 권한",desc:"크롤링 관리에서 회원별 ‘🏪 360 ON/OFF’를 눌러 사용을 허용하거나 잠가요.",color:PINK},
