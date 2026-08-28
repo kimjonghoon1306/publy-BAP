@@ -82,6 +82,7 @@ export const PLACE360_STORE_LIMIT: Record<string, number> = { free: 1, basic: 2,
 export const PLACE360_DAILY_DIAGNOSIS_LIMIT: Record<string, number> = { free: 1, basic: 3, pro: 10, unlimited: 999999, admin: 999999 };
 export const PLACE360_HISTORY_DAYS: Record<string, number> = { free: 30, basic: 90, pro: 365, unlimited: 3650, admin: 3650 };
 export const PLACE360_RANK_DAILY_LIMIT: Record<string, number> = { free: 3, basic: 10, pro: 30, unlimited: 999999, admin: 999999 };
+export const PLACE_DETAIL_DAILY_LIMIT: Record<string, number> = { free: 2, basic: 5, pro: 20, unlimited: 999999, admin: 999999 };
 
 export interface Place360RankMeasurement {
   id: string; user_id: string; store_key: string; keyword: string; rank: number | null;
@@ -150,6 +151,20 @@ export async function deleteAdminPlace360Snapshot(id: string): Promise<void> {
   const token = sessionStorage.getItem(ADMIN_SESSION_KEY) || "";
   const { data, error } = await supabase.rpc("publy_place360_admin_delete", { p_token: token, p_id: id });
   if (error || data !== true) throw new Error(error?.message || "측정 기록 삭제에 실패했습니다");
+}
+
+export interface Place360DetailUsage { user_id: string; member_name: string; email: string; plan: string; used: number; daily_limit: number }
+export async function getAdminPlace360DetailUsage(): Promise<Place360DetailUsage[]> {
+  const token = sessionStorage.getItem(ADMIN_SESSION_KEY) || "";
+  if (!token) return [];
+  const { data, error } = await supabase.rpc("publy_place360_admin_detail_usage", { p_token: token });
+  if (error) throw new Error(error.message);
+  return (data || []) as Place360DetailUsage[];
+}
+export async function resetAdminPlace360DetailUsage(userId: string): Promise<void> {
+  const token = sessionStorage.getItem(ADMIN_SESSION_KEY) || "";
+  const { data, error } = await supabase.rpc("publy_place360_admin_reset_detail_usage", { p_token: token, p_user_id: userId });
+  if (error || data !== true) throw new Error(error?.message || "사용량 초기화에 실패했습니다");
 }
 
 // ── 인증 ─────────────────────────────────────────────────

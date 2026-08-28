@@ -1,7 +1,7 @@
 import express from "express";
 import cors from "cors";
-import { saveSession, sessionExists, removeSession, crawlBlogIds, crawlBuddyPosts, analyzeBuddyKeywords, addNeighbors, NeighborResult, donePath, engageBlogs, EngageResult, engageDonePath, crawlMyPosts, replyToComments, crawlBlogStats, checkSelectedBlogExposure, pumasiEngage, crawlPumasiReport, pumasiPreview, updatePostTitle, checkProxy, analyzeBlogAuthenticity, fetchPostBody, crawlPostViews, sendWebmail, sendBlogComments, crawlPlaces, crawlPlaceBloggers } from "./naver";
-import { checkNeighborQuota, incrementNeighborQuota, getNeighborDailyUsage, incrementEngageQuota, getEngageDailyUsage, getUserPlan, checkMembershipAccess, NEIGHBOR_DAILY_LIMIT, ENGAGE_DAILY_LIMIT, REPLY_DAILY_LIMIT, getReplyDailyUsage, incrementReplyQuota, addNeighborHistory, addReplyHistory, addBlogscoreHistory, incrementPumasiQuota, TITLE_EDIT_DAILY_LIMIT, getTitleEditDailyUsage, incrementTitleEditQuota, getProxyForAccount, supabase, getOutreachSender, getOutreachSentToday, addOutreachLog } from "./supabase";
+import { saveSession, sessionExists, removeSession, crawlBlogIds, crawlBuddyPosts, analyzeBuddyKeywords, addNeighbors, NeighborResult, donePath, engageBlogs, EngageResult, engageDonePath, crawlMyPosts, replyToComments, crawlBlogStats, checkSelectedBlogExposure, pumasiEngage, crawlPumasiReport, pumasiPreview, updatePostTitle, checkProxy, analyzeBlogAuthenticity, fetchPostBody, crawlPostViews, sendWebmail, sendBlogComments, crawlPlaces, crawlPlaceBloggers, crawlPlaceDetail } from "./naver";
+import { checkNeighborQuota, incrementNeighborQuota, getNeighborDailyUsage, incrementEngageQuota, getEngageDailyUsage, getUserPlan, checkMembershipAccess, NEIGHBOR_DAILY_LIMIT, ENGAGE_DAILY_LIMIT, REPLY_DAILY_LIMIT, getReplyDailyUsage, incrementReplyQuota, addNeighborHistory, addReplyHistory, addBlogscoreHistory, incrementPumasiQuota, TITLE_EDIT_DAILY_LIMIT, getTitleEditDailyUsage, incrementTitleEditQuota, getProxyForAccount, supabase, getOutreachSender, getOutreachSentToday, addOutreachLog, checkPlaceDetailQuota, incrementPlaceDetailQuota } from "./supabase";
 import nodemailer from "nodemailer";
 import fs from "fs";
 import { acquireAccountLock } from "./account-lock";
@@ -84,9 +84,9 @@ function sseSend(res: express.Response, data: object) {
   res.write(`data: ${JSON.stringify(data)}\n\n`);
 }
 
-async function ensureActiveMember(userId: string | undefined, res: express.Response): Promise<boolean> {
+async function ensureActiveMember(userId: string | undefined, res: express.Response, feature?: "crawl" | "place360"): Promise<boolean> {
   if (!userId) return true;
-  const access = await checkMembershipAccess(userId);
+  const access = await checkMembershipAccess(userId, feature);
   if (access.ok) return true;
   sseSend(res, { type: "error", msg: access.reason || "회원 이용권을 확인해주세요", membershipBlocked: true });
   res.end();
@@ -149,7 +149,7 @@ app.get("/api/crawl", async (req, res) => {
   sseSetup(res);
 
   try {
-    if (!await ensureActiveMember(userId, res)) return;
+    if (!await ensureActiveMember(userId, res, "crawl")) return;
     // 쿼타 체크 (userId 있을 때만)
     if (userId) {
       const plan = await getUserPlan(userId);
@@ -188,8 +188,12 @@ app.get("/api/place/search", async (req, res) => {
   const { userId, accountId, query, domain, count } = req.query as Record<string, string>;
   if (!query) return res.status(400).json({ error: "query 필요" });
   sseSetup(res);
+  let releaseAccount = () => {};
   try {
-    if (!await ensureActiveMember(userId, res)) return;
+    if (!await ensureActiveMember(userId, res, "place360")) return;
+    const release = acquireAccountsOrReport([accountId || ""], "플레이스 업체 발굴", res);
+    if (!release) return;
+    releaseAccount = release;
     // 크롤링과 같은 발굴 쿼타 사용(플레이스도 발굴이므로)
     if (userId) {
       const plan = await getUserPlan(userId);
@@ -208,15 +212,46 @@ app.get("/api/place/search", async (req, res) => {
     sseSend(res, { type: "place_done", results });
   } catch (e: any) {
     sseSend(res, { type: "error", msg: e.message });
+  } finally {
+    releaseAccount();
   }
   res.end();
+});
+
+/* ── 🏪 플레이스 고객화면 상세정보 (기존 발굴 쿼타와 별도, 계정 동시사용 방지) ── */
+app.get("/api/place/detail", async (req, res) => {
+  const { userId, accountId, placeId, domain } = req.query as Record<string, string>;
+  if (!placeId || !accountId) return res.status(400).json({ ok: false, error: "매장과 작업 계정을 먼저 선택하세요" });
+  if (userId) {
+    const access = await checkMembershipAccess(userId, "place360");
+    if (!access.ok) return res.status(403).json({ ok: false, error: access.reason || "플레이스 360 이용권을 확인해주세요", membershipBlocked: true });
+  }
+  const plan = userId ? await getUserPlan(userId) : "free";
+  const quota = userId ? await checkPlaceDetailQuota(userId, plan) : { ok: true, used: 0, limit: 999999 };
+  if (!quota.ok) return res.status(429).json({ ok: false, error: `오늘 고객 화면 확인 ${quota.limit}회를 모두 사용했어요`, quota });
+  const release = acquireAccountsOrReport([accountId], "플레이스 상세 확인", res);
+  if (!release) return;
+  try {
+    const detail = await crawlPlaceDetail({ accountId, placeId, domain: domain || "place", ownerUserId: userId || null });
+    if (userId) await incrementPlaceDetailQuota(userId);
+    res.json({ ok: true, detail, quota: { used: quota.used + 1, limit: quota.limit, remaining: Math.max(0, quota.limit - quota.used - 1) } });
+  } catch (e: any) {
+    res.status(500).json({ ok: false, error: e.message || "매장 상세정보를 확인하지 못했어요" });
+  } finally {
+    release();
+  }
 });
 
 /* ── 🗺️ 플레이스 업체 → 블로그 리뷰어 역추적 (SSE) ── */
 app.get("/api/place/bloggers", async (req, res) => {
   const { userId, accountId, places, domain, perPlace } = req.query as Record<string, string>;
   sseSetup(res);
+  let releaseAccount = () => {};
   try {
+    if (!await ensureActiveMember(userId, res, "place360")) return;
+    const release = acquireAccountsOrReport([accountId || ""], "플레이스 리뷰어 역추적", res);
+    if (!release) return;
+    releaseAccount = release;
     let list: { placeId: string; name?: string }[] = [];
     try { list = JSON.parse(places || "[]"); } catch {}
     list = list.filter(p => p && p.placeId).slice(0, 40);   // 과부하 방지
@@ -236,6 +271,8 @@ app.get("/api/place/bloggers", async (req, res) => {
     sseSend(res, { type: "bloggers_done", count: seen.size });
   } catch (e: any) {
     sseSend(res, { type: "error", msg: e.message });
+  } finally {
+    releaseAccount();
   }
   res.end();
 });

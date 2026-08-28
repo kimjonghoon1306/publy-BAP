@@ -7,7 +7,7 @@ import UsageGuide from "../components/UsageGuide";
 import { supabase, getAccounts, upsertAccount, PublyAccount, getHistory, getHistoryContent, PublyHistory, addHistory, deleteHistory, deleteAllHistory, setAdminPassword, saveAdminNaverApiKeys, getNaverApiKeys, NaverApiKeys, getNaverDailyUsage, NAVER_DAILY_LIMIT, checkNaverQuota, incrementNaverQuota, getUserNaverApiKeys, getReferrals, getErrorLogs, getUnreadErrorCount, markErrorsAsRead, logError, PLAN_CONFIG, getAllNeighborHistory, NeighborHistory, getAllEngageHistory, EngageHistory, InstaDmTarget, InstaDmHistory, InstaDmQuota, getInstaDmTargets, addInstaDmTarget, updateInstaDmTargetStatus, deleteInstaDmTarget, getInstaDmHistory, addInstaDmHistory, getAllInstaDmHistory, getInstaDmQuota, upsertInstaDmQuota, getAllInstaDmQuotas, INSTA_DM_DAILY_LIMIT, PublyBugReport, getBugReports, updateBugReportStatus, deleteBugReport, resetDailyPublish, getAllDailyUsageToday, DailyUsageRow, getAllReplyHistory, ReplyHistory, getAllBlogscoreHistory, BlogscoreHistory, NEIGHBOR_DAILY_LIMIT, ENGAGE_DAILY_LIMIT, REPLY_DAILY_LIMIT, BLOGSCORE_DAILY_LIMIT, PUMASI_ACCOUNT_LIMIT, PUMASI_POSTS_LIMIT, CRAWL_DAILY_LIMIT, EMAIL_DAILY_LIMIT, COMMENT_DAILY_LIMIT, PLACE_BLOGGER_LIMIT, PLACE360_STORE_LIMIT, PLACE360_DAILY_DIAGNOSIS_LIMIT, PLACE360_HISTORY_DAYS, PublyProxy, getProxies, addProxy, updateProxy, deleteProxy, getProxyAssignments, assignAccountToProxy, unassignAccount, setAccountFeatures, ProxyAssign, PROXY_FEATURES, checkProxyHealth, getLiveLog, getRunningLiveLogs, LiveLogRow } from "../lib/supabase";
 import NeighborPage from "./NeighborPage";
 import { botFetch, BotEventStream } from "../lib/botApi";
-import { PLACE360_RANK_DAILY_LIMIT } from "../lib/supabase";
+import { PLACE360_RANK_DAILY_LIMIT, PLACE_DETAIL_DAILY_LIMIT } from "../lib/supabase";
 
 interface Props {
   onBack: () => void;
@@ -2608,7 +2608,7 @@ POST3: (제목)|(이유)
         {/* ── 관리자 사용설명서 모달 ── */}
         {showGuide && (() => {
           const PINK = "#FF6B9D"; const YELLOW = "#FFD93D"; const GREEN = "#00C875"; const RED = "#f85149";
-          const tabs = ["📋 개요","✍️ 글 생성","🖼️ 이미지","👥 회원관리","📊 통계/설정","❓ FAQ"];
+          const tabs = ["📋 개요","✍️ 글 생성","🖼️ 이미지","👥 회원관리","🏪 360 관리","📊 통계/설정","❓ FAQ"];
           const pages = [
             // 0 - 개요
             <div key="0">
@@ -2688,6 +2688,8 @@ POST3: (제목)|(이유)
                 {ico:"📅",title:"만료일 연장",desc:"일수 입력 → 현재 만료일에서 자동 연장.",color:"#8B5CF6"},
                 {ico:"💰",title:"결제 등록",desc:"금액 + 플랜 선택 → 결제 내역 기록 + 플랜 자동 업그레이드.",color:GREEN},
                 {ico:"📝",title:"메모",desc:"회원별 관리 메모. 상담 내역, 요청 사항 기록.",color:RED},
+                {ico:"🔍",title:"크롤링 ON/OFF",desc:"회원마다 블로거 크롤링 사용 권한을 따로 켜거나 잠글 수 있어요.",color:"#2f9e5e"},
+                {ico:"🏪",title:"플레이스 360 ON/OFF",desc:"회원마다 순위·진단·업체 수집·고객 화면 확인 권한을 따로 관리해요.",color:"#d53d73"},
               ].map((item,i) => (
                 <div key={i} className="g-step" style={{borderColor:`${item.color}35`,background:`${item.color}07`,padding:"12px 14px"}}>
                   <div style={{display:"flex",alignItems:"center",gap:10}}>
@@ -2699,8 +2701,25 @@ POST3: (제목)|(이유)
               <div className="g-tip">⚠️ <b>저장 버튼</b>을 꼭 눌러야 변경사항이 반영돼요!</div>
             </div>,
 
-            // 4 - 통계/설정
+            // 4 - 플레이스 360 관리
             <div key="4">
+              <div className="g-step" style={{borderColor:"rgba(22,133,107,.45)",background:"rgba(22,133,107,.09)"}}>
+                <div className="g-step-num" style={{color:"#4ade80"}}>🏪 회원과 같은 플레이스 360</div>
+                <div className="g-step-title" style={{color:"#fff"}}>관리자도 실제 회원 화면과 같은 순서로 직접 시험해요</div>
+                <div className="g-step-desc">왼쪽 <b>플레이스 360</b>에서 매장 등록 → 현재 순위 → 원인 진단 → 고객 화면 상세 확인 → 업체·리뷰어 역추적을 그대로 사용할 수 있어요. 관리자는 모든 횟수가 무제한이에요.</div>
+              </div>
+              {[
+                {ico:"🔐",title:"회원 사용 권한",desc:"크롤링 관리에서 회원별 ‘🏪 360 ON/OFF’를 눌러 사용을 허용하거나 잠가요.",color:PINK},
+                {ico:"📋",title:"매장 진단 기록",desc:"회원이 저장한 매장·날짜·방문자 리뷰·블로그 리뷰·주변 평균을 확인하고 잘못된 기록은 삭제해요.",color:GREEN},
+                {ico:"👀",title:"고객 화면 사용량",desc:"회원별 오늘 사용량을 확인해요. 고객 지원이 필요한 경우에만 ‘초기화’를 눌러 0회로 돌려요.",color:YELLOW},
+                {ico:"📊",title:"등급 한도 확인",desc:"회원관리 상세의 ‘모든 기능 한도’에서 등록 매장·진단·순위·고객 화면 확인 횟수를 한꺼번에 확인해요.",color:"#3b82f6"},
+              ].map((item,i)=><div key={i} className="g-step" style={{borderColor:`${item.color}35`,background:`${item.color}08`,padding:"12px 14px"}}><div style={{display:"flex",gap:10,alignItems:"flex-start"}}><span style={{fontSize:21}}>{item.ico}</span><div><div style={{fontSize:14,fontWeight:850,color:item.color}}>{item.title}</div><div style={{fontSize:13,color:"rgba(255,255,255,.72)",lineHeight:1.7,marginTop:3}}>{item.desc}</div></div></div></div>)}
+              <div className="g-tip">⚠️ 플레이스는 외부 공개 화면을 확인하는 민감한 작업이에요. 같은 네이버 계정에서 다른 자동화가 실행 중이면 완료 후 다시 시도하고, 무리하게 반복 실행하지 마세요.</div>
+              <button className="g-btn" style={{background:"linear-gradient(135deg,#16856b,#22a880)",color:"#fff"}} onClick={()=>{setShowGuide(false);setTab("crawl_manage");}}>🏪 플레이스 회원 관리 열기</button>
+            </div>,
+
+            // 5 - 통계/설정
+            <div key="5">
               <div className="g-step" style={{borderColor:`${YELLOW}40`,background:`${YELLOW}08`}}>
                 <div className="g-step-num" style={{color:YELLOW}}>📊 통계 탭</div>
                 <div className="g-step-title" style={{color:"#fff"}}>한눈에 보는 서비스 현황</div>
@@ -2724,8 +2743,8 @@ POST3: (제목)|(이유)
               </div>
             </div>,
 
-            // 5 - FAQ
-            <div key="5">
+            // 6 - FAQ
+            <div key="6">
               {[
                 {q:"회원이 오류가 났다고 연락했어요",a:"회원관리 탭 → 해당 회원의 오류확인 버튼을 누르면 언제/어디서/어떤 오류인지 바로 확인할 수 있어요. 오류는 자동으로 저장돼요.",c:RED},
                 {q:"설치할 때 'Publy cannot be closed' 문구가 떠요",a:"이전에 실행 중인 Publy가 완전히 꺼지지 않은 거예요.\nCtrl+Shift+Esc → 프로세스 탭 → Publy 찾기 → 마우스 우클릭 → 작업 끝내기 → 다시 시도 클릭하면 돼요.",c:PINK},
@@ -2733,6 +2752,8 @@ POST3: (제목)|(이유)
                 {q:"회원이 발행이 안 된다고 해요",a:"1) 봇 온라인 상태 확인 2) 계정 연결 상태 확인 3) 발행 건수 초과 여부 확인 4) 회원의 오류확인 버튼으로 구체적인 오류 메시지 확인",c:GREEN},
                 {q:"새 오류 배지가 안 사라져요",a:"오류 팝업을 열고 '모두 읽음' 버튼을 누르면 배지가 사라져요.",c:"#8B5CF6"},
                 {q:"회원을 비활성화하면 어떻게 되나요?",a:"비활성화된 회원은 로그인이 차단돼요. 발행 기록과 데이터는 그대로 보존되고, 다시 활성화하면 정상 사용 가능해요.",c:"#4ECDC4"},
+                {q:"회원이 플레이스 360을 열 수 없어요",a:"1) 회원이 활성 상태인지 확인 2) 이용기간이 남았는지 확인 3) 크롤링·플레이스 관리에서 해당 회원의 ‘🏪 360’이 ON인지 확인하세요.",c:"#d53d73"},
+                {q:"고객 화면 확인 횟수를 모두 썼대요",a:"크롤링·플레이스 관리 아래 ‘오늘 고객 화면 확인 사용량’에서 해당 회원을 찾고, 상담상 필요할 때만 초기화하세요. 등급 자체 한도는 회원관리 기능표에서 확인할 수 있어요.",c:"#16856b"},
               ].map((item,i)=>(
                 <div key={i} className="g-step" style={{borderColor:`${item.c}55`,background:`${item.c}15`,marginBottom:10,padding:"14px 16px"}}>
                   <div style={{fontSize:13,fontWeight:900,color:item.c,marginBottom:6}}>Q. {item.q}</div>
@@ -2882,7 +2903,7 @@ POST3: (제목)|(이유)
                     <button onClick={loadUsers} style={{marginLeft:"auto",padding:"7px 13px",borderRadius:8,border:"1px solid var(--border)",background:"var(--bg)",color:"var(--text2)",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:"inherit"}}>↻ 새로고침</button>
                   </div>
                   <div style={{fontSize:12.5,color:"var(--text2)",lineHeight:1.7,marginBottom:10}}>회원마다 <b style={{color:"var(--text)"}}>크롤링</b>과 <b style={{color:"var(--text)"}}>플레이스 360</b> 권한을 각각 켜고 끕니다. 플레이스 360을 켜야 매장 진단·측정 기록·업체 수집·리뷰어 역추적을 사용할 수 있어요. 관리자는 항상 열려 있고 모든 횟수가 무제한입니다.</div>
-                  <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:14}}>{["업체 크롤링","홍보 후보 추천","리뷰어 역추적","중복 블로거 정리","크롤링 제안 연결"].map(label=><span key={label} style={{fontSize:11,fontWeight:750,color:"#16856b",background:"rgba(22,133,107,.1)",border:"1px solid rgba(22,133,107,.2)",padding:"5px 9px",borderRadius:99}}>✓ {label}</span>)}</div>
+                  <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:14}}>{["현재 순위 측정","매장 원인 진단","고객 화면 상세 확인","정보 완성도·개선 순서","업체 크롤링","리뷰어 역추적","크롤링 제안 연결"].map(label=><span key={label} style={{fontSize:11,fontWeight:750,color:"#16856b",background:"rgba(22,133,107,.1)",border:"1px solid rgba(22,133,107,.2)",padding:"5px 9px",borderRadius:99}}>✓ {label}</span>)}</div>
                   <input className="inp" placeholder="🔍 이름·이메일 검색" value={search} onChange={e=>setSearch(e.target.value)} style={{marginBottom:12}} />
                   {(() => {
                     const q = search.trim().toLowerCase();
@@ -4278,6 +4299,7 @@ POST3: (제목)|(이유)
                                   {label:"🏪 360 등록 매장",val:`${fmt(PLACE360_STORE_LIMIT[pl]??1)}개`},
                                   {label:"🩺 360 매장 진단",val:`${fmt(PLACE360_DAILY_DIAGNOSIS_LIMIT[pl]??1)}회/일`},
                                   {label:"📍 360 순위 측정",val:`${fmt(PLACE360_RANK_DAILY_LIMIT[pl]??3)}회/일`},
+                                  {label:"👀 360 고객 화면 확인",val:`${fmt(PLACE_DETAIL_DAILY_LIMIT[pl]??2)}회/일`},
                                   {label:"📈 360 기록 보관",val:`${fmt(PLACE360_HISTORY_DAYS[pl]??30)}일`},
                                   {label:"💞 품앗이 계정",val:`${fmt(PUMASI_ACCOUNT_LIMIT[pl]??2)}개`},
                                   {label:"💞 품앗이 계정당 글",val:`${fmt(PUMASI_POSTS_LIMIT[pl]??3)}개`},

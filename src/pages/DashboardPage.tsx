@@ -903,7 +903,12 @@ export default function DashboardPage({user, onLogout, onAdminLogin, onThemeTogg
   const [showCrawlLock, setShowCrawlLock] = useState(false);
   // 📖 퍼블리 대백서 — 로그인하면 자동 팝업(‘다시 안 보기’ 체크 전까지). 헤더 📚 버튼으로 언제든 다시.
   const [showDaebaekseo, setShowDaebaekseo] = useState(false);
-  useEffect(()=>{ if(!user?.id) return; try{ if(localStorage.getItem("publy_daebaekseo_seen")!==String(DAEBAEKSEO_VERSION)) setShowDaebaekseo(true); }catch{} }, [user?.id]);
+  useEffect(()=>{ if(!user?.id) return; try{ if(localStorage.getItem("publy_guide_seen")&&localStorage.getItem("publy_daebaekseo_seen")!==String(DAEBAEKSEO_VERSION)) setShowDaebaekseo(true); }catch{} }, [user?.id]);
+  const closeGuideAndOpenBook = () => {
+    try { localStorage.setItem("publy_guide_seen", "1"); } catch {}
+    setShowGuide(false);
+    try { if (localStorage.getItem("publy_daebaekseo_seen") !== String(DAEBAEKSEO_VERSION)) setTimeout(() => setShowDaebaekseo(true), 250); } catch {}
+  };
   const [neighborUsed, setNeighborUsed] = useState(0);
   const [replyUsed, setReplyUsed] = useState(0);
   const [engageUsed, setEngageUsed] = useState(0);
@@ -3785,14 +3790,20 @@ POST3: (제목)|(이유)
   useEffect(()=>{if(genTitle)setPubTitle(genTitle);},[genTitle]);
   useEffect(()=>{if(genTags)setPubTags(genTags);},[genTags]);
   const P="#FF6B9D",Y="#FFD93D",G="#00ff9d";
-  const guideTabs=["🏠 시작","🔑 API 키","✍️ 글 생성","🖼️ 이미지","🚀 발행","❓ FAQ"];
+  const guideTabs=["🏠 시작","🔑 API 키","✍️ 글 생성","🖼️ 이미지","🚀 발행","🏪 플레이스","❓ FAQ"];
   const guidePages=[
     /* ── 0: 시작 ── */
     <div key="0">
       <div className="g-step" style={{borderColor:`${G}40`,background:`${G}08`}}>
         <div className="g-step-num" style={{color:"var(--g-green)"}}>🎉 PUBLY에 오신 걸 환영해요!</div>
-        <div className="g-step-title" style={{color:"var(--g-fg)"}}>AI가 블로그 글을 대신 써줘요</div>
-        <div className="g-step-desc">키워드 하나만 입력하면 <b>제목 → 글 → 이미지 → 자동 발행</b>까지 전부 자동이에요!</div>
+        <div className="g-step-title" style={{color:"var(--g-fg)"}}>글쓰기부터 매장 성장까지 한곳에서 해요</div>
+        <div className="g-step-desc">블로그는 <b>제목 → 글 → 이미지 → 자동 발행</b>, 매장은 <b>순위 확인 → 진단 → 고객 화면 점검 → 리뷰어 찾기</b> 순서로 따라가면 돼요.</div>
+      </div>
+      <div className="g-step" style={{borderColor:"rgba(22,133,107,.35)",background:"rgba(22,133,107,.08)"}}>
+        <div className="g-step-num" style={{color:"#16856b"}}>🏪 매장을 운영하시나요?</div>
+        <div className="g-step-title" style={{color:"var(--g-fg)"}}>플레이스 360부터 눌러보세요</div>
+        <div className="g-step-desc">왼쪽의 <b>🏪 플레이스 360</b>에서 내 매장을 등록하면 현재 순위, 주변 업체 비교, 고객에게 보이는 정보를 한눈에 확인할 수 있어요.</div>
+        <button className="g-btn" style={{background:"linear-gradient(135deg,#16856b,#22a880)",color:"#fff"}} onClick={()=>{setShowGuide(false);setTab("place");}}>🏪 내 매장 진단 시작하기</button>
       </div>
       <div className="g-step" style={{borderColor:`${Y}40`,background:`${Y}08`}}>
         <div className="g-step-num" style={{color:"var(--g-yellow)"}}>📋 5단계 전체 흐름</div>
@@ -3908,8 +3919,25 @@ POST3: (제목)|(이유)
       </div>
     </div>,
 
-    /* ── 5: FAQ ── */
+    /* ── 5: 플레이스 360 ── */
     <div key="5">
+      <div className="g-step" style={{borderColor:"rgba(22,133,107,.4)",background:"rgba(22,133,107,.08)"}}>
+        <div className="g-step-num" style={{color:"#16856b"}}>🏪 플레이스 360이 뭐예요?</div>
+        <div className="g-step-title" style={{color:"var(--g-fg)"}}>내 가게를 찾고, 비교하고, 키우는 매장 성장센터예요</div>
+        <div className="g-step-desc">단순 순위 조회가 아니에요. 고객에게 내 매장이 어떻게 보이는지 확인하고, 주변 업체보다 부족한 점과 다음 행동을 알려줘요.</div>
+      </div>
+      {[
+        {n:"STEP 1",i:"🏷️",t:"내 매장 등록",c:"#16856b",d:"상호명·지역·업종을 입력해요. 플레이스 주소를 알면 함께 넣어주세요."},
+        {n:"STEP 2",i:"📍",t:"지금 내 순위 측정",c:"#e34f86",d:"고객이 검색할 지역·업종 키워드로 업체를 찾으면 내 매장 순위가 자동 기록돼요."},
+        {n:"STEP 3",i:"🩺",t:"주변 업체와 비교 진단",c:"#f59e0b",d:"내 방문자·블로그 리뷰를 주변 평균과 비교해 신규 고객, 노출, 리뷰 문제를 구분해요."},
+        {n:"STEP 4",i:"👀",t:"고객 화면 상세 확인",c:"#3b82f6",d:"업체 카드의 ‘고객 화면 보기’를 눌러 사진·영업시간·전화·메뉴·가격·예약·주차와 완성도 점수를 확인해요."},
+        {n:"STEP 5",i:"🧭",t:"리뷰 블로거 역추적",c:"#8b5cf6",d:"경쟁업체를 체크하고 리뷰어 찾기를 누르면 실제 리뷰 블로거를 모아 크롤링 협업 제안으로 보낼 수 있어요."},
+      ].map((s,i)=><div key={i} className="g-step" style={{borderColor:`${s.c}40`,background:`${s.c}08`}}><div className="g-step-num" style={{color:s.c}}>{s.i} {s.n}</div><div className="g-step-title" style={{color:"var(--g-fg)"}}>{s.t}</div><div className="g-step-desc">{s.d}</div></div>)}
+      <div className="g-step" style={{borderColor:`${Y}55`,background:`${Y}08`}}><div className="g-step-num" style={{color:"var(--g-yellow)"}}>⚠️ 꼭 알아두세요</div><div className="g-step-desc">순위는 위치·시간·기기·개인화에 따라 달라질 수 있어요. 같은 조건으로 반복 확인하세요. 같은 네이버 계정은 한 번에 한 작업만 가능하고, 다른 계정은 동시에 사용할 수 있어요.</div><button className="g-btn" style={{background:"linear-gradient(135deg,#16856b,#22a880)",color:"#fff"}} onClick={()=>{setShowGuide(false);setTab("place");}}>플레이스 360 열기 →</button></div>
+    </div>,
+
+    /* ── 6: FAQ ── */
+    <div key="6">
       {[
         {q:"API 키가 뭐예요?",a:"AI 서비스 비밀번호예요. 처음 한 번만 설정하면 돼요! Gemini는 구글 계정만 있으면 무료 발급!",c:G},
         {q:"글이 얼마나 걸려요?",a:"보통 30초~1분이요. AI가 글을 쓰는 중이라 잠깐 기다려주세요 ☕",c:Y},
@@ -3922,6 +3950,8 @@ POST3: (제목)|(이유)
         {q:"설치할 때 'Publy cannot be closed' 문구가 떠요",a:"이전에 실행 중인 Publy가 완전히 종료되지 않은 거예요.\n방법: 키보드 Ctrl+Shift+Esc 누르기 → 프로세스 탭에서 Publy 찾기 → 마우스 우클릭 → 작업 끝내기 → 다시 시도 클릭",c:"#f85149"},
         {q:"봇이 오프라인으로 계속 뜨면요?",a:"PC에서 Publy 앱이 실행 중인지 확인하세요. 앱을 껐다 켜면 봇이 자동으로 켜져요.",c:"#ff8c00"},
         {q:"오류가 났는데 어떻게 해요?",a:"걱정 마세요! 오류가 생기면 관리자에게 자동으로 전달돼요. 잠깐 기다렸다가 다시 시도해 보세요.",c:"#4ECDC4"},
+        {q:"플레이스 순위가 네이버에서 본 것과 달라요",a:"검색 위치·시간·기기·로그인 개인화에 따라 결과가 달라질 수 있어요. 퍼블리에서는 같은 조건으로 꾸준히 측정해 상승·하락 흐름을 보는 것이 중요해요.",c:"#16856b"},
+        {q:"고객 화면 확인은 왜 횟수를 쓰나요?",a:"사진·영업시간·메뉴처럼 공개 상세정보를 새로 읽는 작업이라 하루 한도가 있어요. 한 번 확인한 매장은 6시간 동안 다시 열어도 차감하지 않아요.",c:"#3b82f6"},
       ].map((item,i)=>(
         <div key={i} className="g-step" style={{borderColor:`${item.c}55`,background:`${item.c}15`,marginBottom:10,padding:"14px 16px"}}>
           <div style={{fontSize:13,fontWeight:900,color:item.c,marginBottom:6}}>Q. {item.q}</div>
@@ -4068,18 +4098,18 @@ POST3: (제목)|(이유)
 
         {/* 가이드 모달 */}
         {showGuide&&(
-          <div className="guide-overlay" onClick={()=>{localStorage.setItem("publy_guide_seen","1");setShowGuide(false);}}>
+          <div className="guide-overlay" onClick={closeGuideAndOpenBook}>
             <div className="guide-modal" onClick={e=>e.stopPropagation()}>
               <div className="guide-header" style={{position:"relative"}}>
                 <div className="guide-logo-row"><div className="guide-logo-ico">📖</div><div><div className="guide-title">PUBLY 사용설명서</div><div className="guide-subtitle">처음이세요? 이것만 읽으면 바로 시작!</div></div></div>
-                <button className="guide-close" onClick={()=>{localStorage.setItem("publy_guide_seen","1");setShowGuide(false);}}>✕</button>
+                <button className="guide-close" onClick={closeGuideAndOpenBook}>✕</button>
                 <div className="guide-tabs">{guideTabs.map((t,i)=><button key={i} className={`guide-tab ${guideTab===i?"active":""}`} onClick={()=>setGuideTab(i)}>{t}</button>)}</div>
               </div>
               <div className="guide-body">{guidePages[guideTab]}</div>
               <div className="guide-footer">
                 <button className="guide-nav-btn" style={{borderColor:"var(--g-line)",background:"transparent",color:"var(--g-fg2)"}} onClick={()=>setGuideTab(Math.max(0,guideTab-1))} disabled={guideTab===0}>← 이전</button>
                 <span className="guide-page">{guideTab+1} / {guideTabs.length}</span>
-                {guideTab<guideTabs.length-1?<button className="guide-nav-btn" style={{borderColor:Y,background:`${Y}15`,color:"var(--g-yellow)"}} onClick={()=>setGuideTab(guideTab+1)}>다음 →</button>:<button className="guide-nav-btn" style={{borderColor:G,background:`${G}15`,color:"var(--g-green)"}} onClick={()=>{localStorage.setItem("publy_guide_seen","1");setShowGuide(false);}}>✅ 시작하기!</button>}
+                {guideTab<guideTabs.length-1?<button className="guide-nav-btn" style={{borderColor:Y,background:`${Y}15`,color:"var(--g-yellow)"}} onClick={()=>setGuideTab(guideTab+1)}>다음 →</button>:<button className="guide-nav-btn" style={{borderColor:G,background:`${G}15`,color:"var(--g-green)"}} onClick={closeGuideAndOpenBook}>✅ 시작하기!</button>}
               </div>
             </div>
           </div>

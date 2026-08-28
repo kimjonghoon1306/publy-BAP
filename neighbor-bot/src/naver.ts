@@ -1359,6 +1359,88 @@ export interface PlaceTarget {
   blogReviewCount?: number;
   placeUrl: string;
 }
+
+export interface PlaceDetail extends PlaceTarget {
+  imageUrls: string[];
+  businessHours?: string;
+  phone?: string;
+  menus: { name: string; price?: string }[];
+  conveniences: string[];
+  bookingAvailable?: boolean;
+  collectedAt: string;
+}
+
+/** 공개 플레이스 홈에서 고객에게 실제로 보이는 상세정보만 읽는다.
+ * 필드가 확인되지 않으면 추측하거나 "없음"으로 바꾸지 않고 비워 둔다. */
+export async function crawlPlaceDetail(params: {
+  accountId: string;
+  placeId: string;
+  domain?: string;
+  ownerUserId?: string | null;
+  onLog?: (msg: string) => void;
+}): Promise<PlaceDetail> {
+  const domain = params.domain || "place";
+  const log = params.onLog || console.log;
+  const browser = await launchBrowser(params.accountId, { headless: true, log, feature: "crawl", ownerUserId: params.ownerUserId });
+  const context = await browser.newContext({ userAgent: UA, locale: "ko-KR", viewport: { width: 1280, height: 900 } });
+  await applyAntiDetection(context);
+  const page = await context.newPage();
+  try {
+    const url = `https://pcmap.place.naver.com/${domain}/${params.placeId}/home`;
+    log(`[플레이스 360] 매장 상세정보 확인 중...`);
+    await page.goto(url, { waitUntil: "domcontentloaded", timeout: 25000 });
+    await page.waitForTimeout(2200);
+    const detail = await page.evaluate(({ placeId, domain }) => {
+      const st: Record<string, any> = (window as any).__APOLLO_STATE__ || {};
+      const values = Object.values(st).filter(v => v && typeof v === "object");
+      const root = values.find((v: any) => String(v.id || "") === placeId && v.name) || values.find((v: any) => v.name && (v.roadAddress || v.address));
+      if (!root) throw new Error("공개 매장 정보를 찾지 못했어요");
+      const clean = (value: unknown) => typeof value === "string" ? value.trim() : "";
+      const images = new Set<string>();
+      const menus = new Map<string, string>();
+      const conveniences = new Set<string>();
+      let hours = clean(root.businessHours || root.openingHours || root.businessHoursInfo);
+      let phone = clean(root.phone || root.virtualPhone || root.phoneNumber);
+      let booking: boolean | undefined = typeof root.bookingBusinessId === "string" || root.bookingAvailable === true ? true : undefined;
+      for (const value of values) {
+        for (const key of ["imageUrl", "image", "thumbnail", "photoUrl", "originalUrl"]) {
+          const candidate = clean((value as any)[key]);
+          if (/^https?:\/\//.test(candidate) && /naver|pstatic/.test(candidate)) images.add(candidate);
+        }
+        const menuName = clean((value as any).name || (value as any).menuName);
+        const price = clean((value as any).price || (value as any).priceText);
+        if (menuName && price && (/menu/i.test(String((value as any).__typename || "")) || (value as any).menuName)) menus.set(menuName, price);
+        const facility = clean((value as any).name || (value as any).label);
+        if (facility && /주차|예약|포장|배달|무선 인터넷|반려동물|남녀 화장실|유아/.test(facility)) conveniences.add(facility);
+        if (!hours) hours = clean((value as any).businessHours || (value as any).openingHours);
+        if (!phone) phone = clean((value as any).phone || (value as any).virtualPhone);
+        if (booking === undefined && ((value as any).bookingAvailable === true || (value as any).bookingUrl)) booking = true;
+      }
+      const text = document.body?.innerText || "";
+      if (!hours) hours = text.match(/(?:영업 중|영업 종료|오늘 휴무)[^\n]{0,80}/)?.[0]?.trim() || "";
+      return {
+        placeId,
+        name: clean(root.name),
+        category: clean(root.category || root.businessCategory) || undefined,
+        address: clean(root.roadAddress || root.address || root.fullAddress) || undefined,
+        visitorReviewCount: Number(root.visitorReviewCount ?? root.visitorReviewsTotal ?? 0) || undefined,
+        blogReviewCount: Number(root.blogCafeReviewCount ?? root.blogReviewCount ?? 0) || undefined,
+        placeUrl: `https://m.place.naver.com/${domain}/${placeId}/home`,
+        imageUrls: Array.from(images).slice(0, 12),
+        businessHours: hours || undefined,
+        phone: phone || undefined,
+        menus: Array.from(menus, ([name, price]) => ({ name, price })).slice(0, 20),
+        conveniences: Array.from(conveniences).slice(0, 20),
+        bookingAvailable: booking,
+        collectedAt: new Date().toISOString(),
+      };
+    }, { placeId: params.placeId, domain });
+    log(`[플레이스 360] 상세정보 확인 완료`);
+    return detail;
+  } finally {
+    await browser.close().catch(() => {});
+  }
+}
 export async function crawlPlaces(params: {
   accountId: string;
   query: string;                    // "강남 맛집" 처럼 지역+업종을 이미 합친 검색어
