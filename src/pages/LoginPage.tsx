@@ -21,7 +21,7 @@ const CSS = `
 }
 @keyframes star-twinkle { 0%,100%{opacity:.3;transform:scale(1)} 50%{opacity:1;transform:scale(1.4)} }
 @keyframes card-float { 0%,100%{transform:translateY(0) rotateX(0)} 50%{transform:translateY(-8px) rotateX(.5deg)} }
-@keyframes glow-breathe { 0%,100%{box-shadow:0 0 40px rgba(0,255,136,.15),0 0 80px rgba(0,255,136,.05)} 50%{box-shadow:0 0 60px rgba(0,255,136,.3),0 0 120px rgba(0,255,136,.1)} }
+@keyframes glow-breathe { 0%,100%{box-shadow:0 0 40px rgba(240,65,122,.15),0 0 80px rgba(240,65,122,.05)} 50%{box-shadow:0 0 60px rgba(240,65,122,.3),0 0 120px rgba(240,65,122,.1)} }
 @keyframes line-scan { 0%{transform:translateY(-100%)} 100%{transform:translateY(100vh)} }
 @keyframes logo-emerge { 0%{opacity:0;transform:scale(.6) rotateY(-90deg)} 100%{opacity:1;transform:scale(1) rotateY(0deg)} }
 @keyframes form-rise { 0%{opacity:0;transform:translateY(40px)} 100%{opacity:1;transform:translateY(0)} }
@@ -39,8 +39,8 @@ const CSS = `
   position:relative; font-family:'Noto Sans KR',sans-serif;
   perspective:1000px;
 }
-.login-root.dark  { background:#02040a; }
-.login-root.light { background:#f0f8ff; }
+.login-root.dark  { background:#241e17; }
+.login-root.light { background:#f3efe6; }
 
 /* 우주 배경 */
 .cosmos-bg {
@@ -53,25 +53,25 @@ const CSS = `
 .cosmos-orb-1 { width:600px; height:600px; top:-200px; left:-200px; animation:cosmos-drift 20s linear infinite; }
 .cosmos-orb-2 { width:400px; height:400px; bottom:-100px; right:-100px; animation:cosmos-drift 25s linear infinite reverse; }
 .cosmos-orb-3 { width:300px; height:300px; top:50%; left:50%; animation:cosmos-drift 15s linear infinite; }
-.dark .cosmos-orb-1  { background:radial-gradient(circle,rgba(0,255,136,.12) 0%,transparent 70%); }
-.dark .cosmos-orb-2  { background:radial-gradient(circle,rgba(0,100,255,.08) 0%,transparent 70%); }
-.dark .cosmos-orb-3  { background:radial-gradient(circle,rgba(180,0,255,.06) 0%,transparent 70%); }
-.light .cosmos-orb-1 { background:radial-gradient(circle,rgba(0,200,100,.08) 0%,transparent 70%); }
-.light .cosmos-orb-2 { background:radial-gradient(circle,rgba(0,100,255,.06) 0%,transparent 70%); }
-.light .cosmos-orb-3 { background:radial-gradient(circle,rgba(0,180,80,.04) 0%,transparent 70%); }
+.dark .cosmos-orb-1  { background:radial-gradient(circle,rgba(240,65,122,.12) 0%,transparent 70%); }
+.dark .cosmos-orb-2  { background:radial-gradient(circle,rgba(255,180,120,.08) 0%,transparent 70%); }
+.dark .cosmos-orb-3  { background:radial-gradient(circle,rgba(255,120,170,.06) 0%,transparent 70%); }
+.light .cosmos-orb-1 { background:radial-gradient(circle,rgba(240,65,122,.08) 0%,transparent 70%); }
+.light .cosmos-orb-2 { background:radial-gradient(circle,rgba(255,180,120,.06) 0%,transparent 70%); }
+.light .cosmos-orb-3 { background:radial-gradient(circle,rgba(240,65,122,.04) 0%,transparent 70%); }
 
 /* 별 */
 .star { position:absolute; border-radius:50%; animation:star-twinkle var(--dur,3s) var(--del,0s) ease-in-out infinite; }
 .dark .star  { background:white; }
-.light .star { background:rgba(0,150,80,.4); }
+.light .star { background:rgba(240,65,122,.4); }
 
 /* 스캔라인 */
 .scan-line {
   position:absolute; left:0; right:0; height:1px; pointer-events:none;
   animation:line-scan 8s linear infinite;
 }
-.dark .scan-line  { background:linear-gradient(90deg,transparent,rgba(0,255,136,.3),transparent); }
-.light .scan-line { background:linear-gradient(90deg,transparent,rgba(0,180,80,.2),transparent); }
+.dark .scan-line  { background:linear-gradient(90deg,transparent,rgba(240,65,122,.3),transparent); }
+.light .scan-line { background:linear-gradient(90deg,transparent,rgba(240,65,122,.2),transparent); }
 
 /* 상단 버튼 */
 .top-bar { position:fixed; top:0; left:0; right:0; display:flex; justify-content:space-between; align-items:center; padding:16px 24px; z-index:100; }
@@ -80,13 +80,13 @@ const CSS = `
   display:flex; align-items:center; justify-content:center; border:1px solid;
   transition:all .25s; backdrop-filter:blur(12px);
 }
-.dark .top-btn  { background:rgba(255,255,255,.05); border-color:rgba(0,255,136,.2); color:white; }
-.light .top-btn { background:rgba(255,255,255,.8); border-color:rgba(0,180,80,.2); color:#09090b; box-shadow:0 2px 12px rgba(0,0,0,.08); }
+.dark .top-btn  { background:rgba(255,255,255,.05); border-color:rgba(240,65,122,.2); color:white; }
+.light .top-btn { background:rgba(255,255,255,.8); border-color:rgba(240,65,122,.2); color:#09090b; box-shadow:0 2px 12px rgba(0,0,0,.08); }
 .top-btn:hover { transform:scale(1.08) rotate(5deg); }
 .admin-btn:hover { transform:scale(1.08) rotate(45deg) !important; }
 .top-brand {
   font-family:'Bebas Neue',sans-serif; font-size:22px; letter-spacing:.2em;
-  background:linear-gradient(135deg,#00ff88,#00cc66);
+  background:linear-gradient(135deg,#f0417a,#e0356e);
   -webkit-background-clip:text; -webkit-text-fill-color:transparent;
 }
 
@@ -98,14 +98,14 @@ const CSS = `
 }
 .dark .login-card {
   background:rgba(255,255,255,.03);
-  border:1px solid rgba(0,255,136,.15);
-  box-shadow:0 0 0 1px rgba(0,255,136,.05), inset 0 1px 0 rgba(0,255,136,.1);
+  border:1px solid rgba(240,65,122,.15);
+  box-shadow:0 0 0 1px rgba(240,65,122,.05), inset 0 1px 0 rgba(240,65,122,.1);
   backdrop-filter:blur(40px);
 }
 .light .login-card {
   background:rgba(255,255,255,.92);
-  border:1px solid rgba(0,180,80,.15);
-  box-shadow:0 32px 80px rgba(0,0,0,.08), 0 0 0 1px rgba(0,180,80,.08);
+  border:1px solid rgba(240,65,122,.15);
+  box-shadow:0 32px 80px rgba(0,0,0,.08), 0 0 0 1px rgba(240,65,122,.08);
   backdrop-filter:blur(40px);
 }
 
@@ -113,8 +113,8 @@ const CSS = `
 .card-glow-line {
   position:absolute; top:0; left:20%; right:20%; height:1px; border-radius:99px;
 }
-.dark .card-glow-line  { background:linear-gradient(90deg,transparent,rgba(0,255,136,.6),transparent); }
-.light .card-glow-line { background:linear-gradient(90deg,transparent,rgba(0,180,80,.4),transparent); }
+.dark .card-glow-line  { background:linear-gradient(90deg,transparent,rgba(240,65,122,.6),transparent); }
+.light .card-glow-line { background:linear-gradient(90deg,transparent,rgba(240,65,122,.4),transparent); }
 
 /* 로고 */
 .logo-section { text-align:center; margin-bottom:26px; }
@@ -133,22 +133,22 @@ const CSS = `
   inset:8px; animation:spin-rev 5s linear infinite;
   border-style:dotted;
 }
-.dark .logo-ring  { border-color:rgba(0,255,136,.3); }
-.light .logo-ring { border-color:rgba(0,180,80,.3); }
+.dark .logo-ring  { border-color:rgba(240,65,122,.3); }
+.light .logo-ring { border-color:rgba(240,65,122,.3); }
 .logo-core {
   position:absolute; inset:16px; border-radius:50%;
-  background:linear-gradient(135deg,#00ff88,#00cc66);
+  background:linear-gradient(135deg,#f0417a,#e0356e);
   display:flex; align-items:center; justify-content:center;
-  box-shadow:0 0 30px rgba(0,255,136,.5);
+  box-shadow:0 0 30px rgba(240,65,122,.5);
 }
 .logo-pulse {
   position:absolute; inset:16px; border-radius:50%;
-  border:2px solid rgba(0,255,136,.4);
+  border:2px solid rgba(240,65,122,.4);
   animation:pulse-ring 2s ease-out infinite;
 }
 .logo-name {
   font-family:'Bebas Neue',sans-serif; font-size:36px; letter-spacing:.25em;
-  background:linear-gradient(135deg,#00ff88,#00cc66,#ffffff);
+  background:linear-gradient(135deg,#f0417a,#e0356e,#ffffff);
   -webkit-background-clip:text; -webkit-text-fill-color:transparent;
 }
 .logo-tagline { font-size:10px; letter-spacing:.3em; text-transform:uppercase; margin-top:4px; }
@@ -168,8 +168,8 @@ const CSS = `
   transition:all .22s; font-family:'Noto Sans KR',sans-serif;
 }
 .tab-btn.active {
-  background:linear-gradient(135deg,#00ff88,#00cc66);
-  color:#000; box-shadow:0 4px 16px rgba(0,255,136,.35);
+  background:linear-gradient(135deg,#f0417a,#e0356e);
+  color:#000; box-shadow:0 4px 16px rgba(240,65,122,.35);
   transform:translateY(-1px);
 }
 .dark .tab-btn.inactive  { background:transparent; color:rgba(255,255,255,.4); }
@@ -191,7 +191,7 @@ const CSS = `
 }
 .recent-email-item{ transition:background .13s; }
 .dark .recent-email-item:hover{ background:rgba(255,255,255,.08); }
-.light .recent-email-item:hover{ background:rgba(0,180,80,.09); }
+.light .recent-email-item:hover{ background:rgba(240,65,122,.09); }
 .recent-email-item:active{ transform:scale(.99); }
 .dark .field-input {
   background:rgba(255,255,255,.06);
@@ -199,17 +199,17 @@ const CSS = `
   color:white;
 }
 .light .field-input {
-  background:#f8fffe;
-  border:1.5px solid rgba(0,180,80,.15);
+  background:#faf8f3;
+  border:1.5px solid rgba(240,65,122,.15);
   color:#09090b;
 }
 .field-input::placeholder { opacity:.4; }
 .dark .field-input::placeholder  { color:white; }
 .light .field-input::placeholder { color:#09090b; }
 .field-input:focus {
-  border-color:rgba(0,255,136,.5) !important;
-  box-shadow:0 0 0 4px rgba(0,255,136,.08) !important;
-  background:rgba(0,255,136,.03) !important;
+  border-color:rgba(240,65,122,.5) !important;
+  box-shadow:0 0 0 4px rgba(240,65,122,.08) !important;
+  background:rgba(240,65,122,.03) !important;
 }
 
 /* 제출 버튼 */
@@ -218,7 +218,7 @@ const CSS = `
   border:none; border-radius:14px; cursor:pointer;
   font-family:'Noto Sans KR',sans-serif;
   font-size:15px; font-weight:800; letter-spacing:.03em;
-  background:linear-gradient(135deg,#00ff88,#00cc66,#00aa55);
+  background:linear-gradient(135deg,#f0417a,#e0356e,#c62c62);
   background-size:200% 100%;
   color:#000; position:relative; overflow:hidden;
   transition:all .25s;
@@ -229,7 +229,7 @@ const CSS = `
   transform:translateX(-100%); transition:transform .5s;
 }
 .submit-btn:hover::before { transform:translateX(100%); }
-.submit-btn:hover { transform:translateY(-2px); box-shadow:0 12px 32px rgba(0,255,136,.45); }
+.submit-btn:hover { transform:translateY(-2px); box-shadow:0 12px 32px rgba(240,65,122,.45); }
 .submit-btn:disabled { opacity:.45; cursor:not-allowed; transform:none; }
 
 /* 에러 */
@@ -243,9 +243,9 @@ const CSS = `
 /* 하단 장식 */
 .card-footer { display:flex; justify-content:center; align-items:center; gap:8px; margin-top:28px; }
 .footer-dot { width:5px; height:5px; border-radius:50%; }
-.dark .footer-dot  { background:rgba(0,255,136,.25); }
-.light .footer-dot { background:rgba(0,180,80,.2); }
-.footer-dot.active { background:#00ff88 !important; box-shadow:0 0 8px rgba(0,255,136,.6); }
+.dark .footer-dot  { background:rgba(240,65,122,.25); }
+.light .footer-dot { background:rgba(240,65,122,.2); }
+.footer-dot.active { background:#f0417a !important; box-shadow:0 0 8px rgba(240,65,122,.6); }
 
 /* 로더 */
 .btn-spin {
@@ -272,8 +272,8 @@ const CSS = `
 .dark .find-overlay  { background:rgba(0,0,0,.75); }
 .light .find-overlay { background:rgba(0,0,0,.45); }
 .find-modal { width:100%; max-width:400px; border-radius:24px; padding:32px 28px; animation:form-rise .3s ease both; }
-.dark .find-modal  { background:#0d1117; border:1px solid rgba(0,255,136,.15); }
-.light .find-modal { background:#fff; border:1px solid rgba(0,180,80,.2); box-shadow:0 24px 60px rgba(0,0,0,.15); }
+.dark .find-modal  { background:#0d1117; border:1px solid rgba(240,65,122,.15); }
+.light .find-modal { background:#fff; border:1px solid rgba(240,65,122,.2); box-shadow:0 24px 60px rgba(0,0,0,.15); }
 .find-title { font-size:18px; font-weight:900; margin-bottom:20px; display:flex; align-items:center; justify-content:space-between; }
 .dark .find-title  { color:#fff; }
 .light .find-title { color:#09090b; }
@@ -281,12 +281,12 @@ const CSS = `
 .dark .find-tabs  { background:rgba(255,255,255,.06); }
 .light .find-tabs { background:rgba(0,0,0,.06); }
 .find-tab { padding:9px; border:none; border-radius:9px; cursor:pointer; font-size:12px; font-weight:700; font-family:'Noto Sans KR',sans-serif; transition:all .2s; }
-.find-tab.active { background:linear-gradient(135deg,#00ff88,#00cc66); color:#000; }
+.find-tab.active { background:linear-gradient(135deg,#f0417a,#e0356e); color:#000; }
 .dark .find-tab.inactive  { background:transparent; color:rgba(255,255,255,.4); }
 .light .find-tab.inactive { background:transparent; color:rgba(0,0,0,.4); }
 .find-result { margin-top:16px; padding:16px; border-radius:12px; font-size:14px; font-weight:700; text-align:center; line-height:1.6; }
-.dark .find-result  { background:rgba(0,255,136,.08); border:1px solid rgba(0,255,136,.2); color:#00ff88; }
-.light .find-result { background:rgba(0,180,80,.06); border:1px solid rgba(0,180,80,.2); color:#00a050; }
+.dark .find-result  { background:rgba(240,65,122,.08); border:1px solid rgba(240,65,122,.2); color:#f0417a; }
+.light .find-result { background:rgba(240,65,122,.06); border:1px solid rgba(240,65,122,.2); color:#c62c62; }
 `;
 
 // 별 생성
@@ -329,11 +329,11 @@ function PWAInstallBtn({ theme }: { theme: "dark" | "light" }) {
         position: "fixed", bottom: 24, left: "50%", transform: "translateX(-50%)",
         display: "flex", alignItems: "center", gap: 8,
         padding: "12px 24px", borderRadius: 99,
-        background: "linear-gradient(135deg,#00ff88,#00cc66)",
+        background: "linear-gradient(135deg,#f0417a,#e0356e)",
         color: "#000", fontWeight: 800, fontSize: 13,
         border: "none", cursor: "pointer", zIndex: 999,
         fontFamily: "'Noto Sans KR', sans-serif",
-        boxShadow: "0 8px 24px rgba(0,255,136,.45)",
+        boxShadow: "0 8px 24px rgba(240,65,122,.45)",
         animation: "pwa-bounce 2s ease-in-out infinite",
         whiteSpace: "nowrap",
       }}>
@@ -500,8 +500,8 @@ export default function LoginPage({ onLogin, onAdminLogin, theme, onThemeToggle 
                       <stop offset="100%" stopColor="#050a12"/>
                     </linearGradient>
                     <linearGradient id="g1" x1="0%" y1="0%" x2="100%" y2="100%">
-                      <stop offset="0%" stopColor="#00ff88"/>
-                      <stop offset="100%" stopColor="#00cc66"/>
+                      <stop offset="0%" stopColor="#f0417a"/>
+                      <stop offset="100%" stopColor="#e0356e"/>
                     </linearGradient>
                     <filter id="glow">
                       <feGaussianBlur stdDeviation="3" result="blur"/>
@@ -509,11 +509,11 @@ export default function LoginPage({ onLogin, onAdminLogin, theme, onThemeToggle 
                     </filter>
                   </defs>
                   <rect width="192" height="192" rx="36" fill="url(#bg)"/>
-                  <circle cx="96" cy="96" r="72" fill="none" stroke="#00ff88" strokeWidth="1" opacity="0.12"/>
-                  <circle cx="96" cy="96" r="55" fill="none" stroke="#00ff88" strokeWidth="1" opacity="0.08"/>
+                  <circle cx="96" cy="96" r="72" fill="none" stroke="#f0417a" strokeWidth="1" opacity="0.12"/>
+                  <circle cx="96" cy="96" r="55" fill="none" stroke="#f0417a" strokeWidth="1" opacity="0.08"/>
                   <text x="96" y="126" fontFamily="Arial Black, sans-serif" fontSize="108" fontWeight="900" fill="url(#g1)" textAnchor="middle" filter="url(#glow)" letterSpacing="-4">P</text>
-                  <rect x="44" y="148" width="104" height="20" rx="10" fill="#00ff88" opacity="0.12"/>
-                  <text x="96" y="163" fontFamily="Arial, sans-serif" fontSize="11" fontWeight="700" fill="#00ff88" textAnchor="middle" letterSpacing="4">PUBLY</text>
+                  <rect x="44" y="148" width="104" height="20" rx="10" fill="#f0417a" opacity="0.12"/>
+                  <text x="96" y="163" fontFamily="Arial, sans-serif" fontSize="11" fontWeight="700" fill="#f0417a" textAnchor="middle" letterSpacing="4">PUBLY</text>
                 </svg>
               </div>
             </div>
@@ -523,7 +523,7 @@ export default function LoginPage({ onLogin, onAdminLogin, theme, onThemeToggle 
 
           {/* 초대 링크 배지 */}
           {refCode&&(
-            <div style={{marginBottom:16,padding:"8px 14px",borderRadius:10,background:"rgba(0,255,136,.08)",border:"1px solid rgba(0,255,136,.2)",fontSize:12,color:"#00ff88",fontWeight:700,textAlign:"center"}}>
+            <div style={{marginBottom:16,padding:"8px 14px",borderRadius:10,background:"rgba(240,65,122,.08)",border:"1px solid rgba(240,65,122,.2)",fontSize:12,color:"#f0417a",fontWeight:700,textAlign:"center"}}>
               🎉 초대 링크로 접속했어요! 가입하면 쿼터 보너스가 지급돼요
             </div>
           )}
@@ -589,8 +589,8 @@ export default function LoginPage({ onLogin, onAdminLogin, theme, onThemeToggle 
                 value={phone} onChange={e => setPhone(e.target.value)}
                 onKeyDown={e => e.key === "Enter" && handleSubmit()} />
               <div style={{marginTop:6,padding:"8px 12px",borderRadius:9,fontSize:11,lineHeight:1.6,
-                background:"rgba(0,255,136,.06)",border:"1px solid rgba(0,255,136,.15)",
-                color:theme==="dark"?"rgba(0,255,136,.8)":"rgba(0,150,80,.9)"}}>
+                background:"rgba(240,65,122,.06)",border:"1px solid rgba(240,65,122,.15)",
+                color:theme==="dark"?"rgba(240,65,122,.8)":"rgba(240,65,122,.9)"}}>
                 💡 연락처는 이메일 찾기 · 비밀번호 찾기에 꼭 필요해요
               </div>
             </div>

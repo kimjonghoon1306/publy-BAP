@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { botFetch, BotEventStream } from "../lib/botApi";
 import { getReplyDailyUsage, REPLY_DAILY_LIMIT, getBlogscoreDailyUsage, incrementBlogscoreQuota, BLOGSCORE_DAILY_LIMIT, PUMASI_ACCOUNT_LIMIT, PUMASI_POSTS_LIMIT, TAB_ACCOUNT_LIMIT, getPumasiDailyUsage, savePostCareChecks, markPrescribed, markTitleChanged, getPostCare, computeCareStatus, PostCare, OBSERVE_DAYS, savePostViews, latestViews, reportError } from "../lib/supabase";
 import UsageGuide from "../components/UsageGuide";
+import dodoImg from "../assets/dodo.png";   // 🩺 블로그 주치의 캐릭터(검수자 도도)
 
 const BOT = "http://127.0.0.1:3334";
 
@@ -3073,7 +3074,7 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
                       <div style={{ marginBottom: 14, padding: "16px 18px", borderRadius: 14, background: "linear-gradient(135deg, rgba(0,200,150,.08), rgba(139,92,246,.05))", border: "1px solid rgba(0,200,150,.25)" }}>
                         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
                           {/* ★ 상대경로 + onError 폴백(Electron file://에서 절대경로면 깨짐 — 크롤링서 겪은 이슈 반복 방지) */}
-                          <img src="characters/dodo-checker.png" alt="주치의 도도" onError={e => { const s = document.createElement("div"); s.textContent = "🩺"; s.style.cssText = "font-size:38px;line-height:1"; e.currentTarget.replaceWith(s); }} style={{ width: 46, height: 46, objectFit: "contain", flexShrink: 0, filter: "drop-shadow(0 4px 8px rgba(0,200,150,.3))" }} />
+                          <img src={dodoImg} alt="주치의 도도" onError={e => { const s = document.createElement("div"); s.textContent = "🩺"; s.style.cssText = "font-size:38px;line-height:1"; e.currentTarget.replaceWith(s); }} style={{ width: 46, height: 46, objectFit: "contain", flexShrink: 0, filter: "drop-shadow(0 4px 8px rgba(0,200,150,.3))" }} />
                           <div style={{ flex: 1, minWidth: 0 }}>
                             <div style={{ fontSize: 14, fontWeight: 850, color: "var(--text)", marginBottom: 3 }}>🩺 오늘의 회진</div>
                             <div style={{ fontSize: 12.5, color: "var(--text2)", lineHeight: 1.55 }}>
@@ -3995,7 +3996,7 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
               <div style={{ position: "absolute", left: "50%", bottom: 6, transform: "translateX(-50%)", width: 88, height: 15, borderRadius: "50%", background: "rgba(0,0,0,.2)", filter: "blur(6px)", animation: "wcShadow 2.2s ease-in-out infinite" }} />
               {/* 캐릭터 본체 — 크게 + 팡 등장 + bob */}
               <div style={{ position: "absolute", left: "50%", top: "44%", transform: "translate(-50%,-50%)", animation: "wcHeroPop .9s cubic-bezier(.18,1.5,.5,1) both" }}>
-                <img src="characters/pumi-guide.png" alt="가이드 푸미" onError={e => { const s = document.createElement("div"); s.textContent = "🧑‍⚕️"; s.style.cssText = "font-size:120px;line-height:1"; e.currentTarget.replaceWith(s); }} style={{ display: "block", width: 150, height: 150, objectFit: "contain", animation: "wcBob 2.2s ease-in-out .9s infinite", filter: "drop-shadow(0 14px 26px rgba(0,200,150,.4))" }} />
+                <img src={dodoImg} alt="주치의 도도" onError={e => { const s = document.createElement("div"); s.textContent = "🧑‍⚕️"; s.style.cssText = "font-size:120px;line-height:1"; e.currentTarget.replaceWith(s); }} style={{ display: "block", width: 150, height: 150, objectFit: "contain", animation: "wcBob 2.2s ease-in-out .9s infinite", filter: "drop-shadow(0 14px 26px rgba(0,200,150,.4))" }} />
               </div>
             </div>
             <div style={{ fontSize: 22, fontWeight: 900, color: "var(--text)", marginTop: 4, letterSpacing: "-.02em" }}>블로그 주치의에 오신 걸 환영해요! 🩺</div>
