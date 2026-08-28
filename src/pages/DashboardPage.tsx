@@ -696,6 +696,11 @@ textarea.inp{resize:vertical;line-height:1.75;min-height:80px;}
 .photo-story-title{font-size:14px;font-weight:800;color:var(--text);margin-bottom:4px;}
 .photo-story-desc{font-size:11.5px;color:var(--text3);line-height:1.5;}
 .photo-story-arrow{position:absolute;right:-12px;top:50%;transform:translateY(-50%);font-size:18px;color:var(--accent);z-index:2;font-weight:900;}
+/* 2026-08-28 탭별 개성: 컨테이너 로컬 --accent 오버라이드(사이드바·로고는 로즈 유지). 글생성=앰버 매거진 */
+.app.light .tab-write{--accent:#c07d16;--accent-text:#a1670f;--accent-bg:rgba(192,125,22,.1);--accent-border:rgba(192,125,22,.3);--accent-30:rgba(192,125,22,.3);--accent-dim:rgba(192,125,22,.08);}
+.app.dark .tab-write{--accent:#e7a53d;--accent-text:#f0b657;--accent-bg:rgba(231,165,61,.14);--accent-border:rgba(231,165,61,.32);--accent-30:rgba(231,165,61,.32);--accent-dim:rgba(231,165,61,.1);}
+.app.light .tab-image{--accent:#6b46e8;--accent-text:#5a37cf;--accent-bg:rgba(107,70,232,.09);--accent-border:rgba(107,70,232,.28);--accent-30:rgba(107,70,232,.3);--accent-dim:rgba(107,70,232,.07);}
+.app.dark .tab-image{--accent:#a992ff;--accent-text:#bda6ff;--accent-bg:rgba(169,146,255,.14);--accent-border:rgba(169,146,255,.32);--accent-30:rgba(169,146,255,.32);--accent-dim:rgba(169,146,255,.1);}
 .photo-drop{border:2.5px dashed #FF6B9D55;border-radius:20px;padding:32px 20px;text-align:center;cursor:pointer;transition:all .2s;background:var(--bg);margin-bottom:16px;}
 .photo-drop.drag-over,.photo-drop:hover{border-color:#FF6B9D;background:linear-gradient(135deg,#FF6B9D11,#C77DFF11);}
 .photo-drop-ico{font-size:48px;margin-bottom:12px;}
@@ -4669,8 +4674,8 @@ POST3: (제목)|(이유)
 
             {/* ═══ ✍️ 글 생성 탭 ═══ */}
             {tab==="write"&&(
-              <div style={{animation:"fadeUp .25s ease both"}}>
-                <UsageGuide theme={theme==="dark"?"dark":"light"} subtitle="고른 제목으로 본문을 자동으로 써줄게요." steps={[{ico:"📝",title:"제목·키워드 확인",desc:"위에서 고른 제목과 키워드가 맞는지 봐요."},{ico:"🎨",title:"스타일 고르기",desc:"말투·글 유형(정보/후기 등)을 골라요."},{ico:"✨",title:"글 생성",desc:"‘글 생성’을 누르면 본문이 자동으로 써져요. 이미지·발행으로 이어가요."}]} />
+              <div className="tab-write" style={{animation:"fadeUp .25s ease both"}}>
+                <UsageGuide theme={theme==="dark"?"dark":"light"} accent={theme==="dark"?"#e7a53d":"#c07d16"} subtitle="고른 제목으로 본문을 자동으로 써줄게요." steps={[{ico:"📝",title:"제목·키워드 확인",desc:"위에서 고른 제목과 키워드가 맞는지 봐요."},{ico:"🎨",title:"스타일 고르기",desc:"말투·글 유형(정보/후기 등)을 골라요."},{ico:"✨",title:"글 생성",desc:"‘글 생성’을 누르면 본문이 자동으로 써져요. 이미지·발행으로 이어가요."}]} />
 
                 {/* 임시저장 불러오기 배너 */}
                 {draftAvailable&&draftData&&!genContent&&(
@@ -4867,8 +4872,8 @@ POST3: (제목)|(이유)
 
             {/* ===== 이미지 생성 ===== */}
             {tab==="image"&&(
-              <div style={{animation:"fadeUp .25s ease both"}}>
-                <UsageGuide theme={theme==="dark"?"dark":"light"} subtitle="글과 어울리는 이미지를 만들어줄게요." steps={[{ico:"🖼️",title:"이미지 키워드 입력",desc:"글과 어울리는 이미지 키워드를 적어요."},{ico:"🆓",title:"방식 고르기",desc:"무료(Google Flow) 또는 유료 방식 중 골라요."},{ico:"➡️",title:"생성·확인",desc:"이미지를 만들고 캡션을 확인한 뒤 발행에 넣어요."}]} />
+              <div className="tab-image" style={{animation:"fadeUp .25s ease both"}}>
+                <UsageGuide theme={theme==="dark"?"dark":"light"} accent={theme==="dark"?"#a992ff":"#6b46e8"} subtitle="글과 어울리는 이미지를 만들어줄게요." steps={[{ico:"🖼️",title:"이미지 키워드 입력",desc:"글과 어울리는 이미지 키워드를 적어요."},{ico:"🆓",title:"방식 고르기",desc:"무료(Google Flow) 또는 유료 방식 중 골라요."},{ico:"➡️",title:"생성·확인",desc:"이미지를 만들고 캡션을 확인한 뒤 발행에 넣어요."}]} />
                 {!genContent&&(<div className="alert-box alert-warn">⚠️ 먼저 글 생성 탭에서 글을 생성해주세요!<button className="btn btn-sm btn-secondary" style={{marginLeft:"auto",flexShrink:0}} onClick={()=>setTab("write")}>글 생성하러 가기</button></div>)}
 
                 {/* ── 이미지 생성 방식 스위치 ── */}
