@@ -439,6 +439,20 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
     { id: "discovery", icon: "🕵️", label: "업체·리뷰어 찾기", desc: "업체 발굴과 리뷰어 역추적" },
   ];
 
+  const growthGuide: Record<Place360Tab, { step: number; title: string; instruction: string; nextLabel: string; nextTab?: Place360Tab; openCrawl?: boolean; scrollToStore?: boolean }> = {
+    overview: hasStore
+      ? { step: 1, title: "내 매장 등록 완료", instruction: "이제 고객이 검색할 때 내 매장이 어디에 보이는지 확인하세요.", nextLabel: "2단계 · 내 순위 확인", nextTab: "rank" }
+      : { step: 1, title: "먼저 내 매장을 등록하세요", instruction: "매장 이름을 입력하고 저장하면 나머지 진단이 내 가게 기준으로 연결돼요.", nextLabel: "아래에서 매장 등록하기", scrollToStore: true },
+    rank: currentRank
+      ? { step: 2, title: `현재 ${currentRank.rank ? `${currentRank.rank}위` : "확인 범위 밖"}`, instruction: "순위를 확인했어요. 다음은 경쟁업체와 비교해 이유를 찾을 차례예요.", nextLabel: "3단계 · 원인 진단", nextTab: "diagnosis" }
+      : { step: 2, title: "내 순위를 먼저 측정하세요", instruction: "업체 찾기에서 지역과 업종을 검색하면 내 매장의 현재 순위가 함께 기록돼요.", nextLabel: "업체 찾기에서 측정", nextTab: "discovery" },
+    diagnosis: { step: 3, title: "공개자료로 원인을 좁히는 단계", instruction: "리뷰·노출·정보 완성도를 확인한 뒤 실제 매출 자료와 함께 비교하세요.", nextLabel: "4단계 · 운영자료 입력", nextTab: "data" },
+    data: { step: 4, title: "신규·재방문·광고를 나눠보는 단계", instruction: "최근 30일과 이전 30일을 입력하면 무엇이 줄었는지 구분해 드려요.", nextLabel: "5단계 · 오늘 할 일 받기", nextTab: "mission" },
+    mission: { step: 5, title: "오늘 할 일을 실행하는 단계", instruction: "위에서부터 하나씩 실행하고 완료 체크를 누르면 오늘 진행률을 기억해요.", nextLabel: "6단계 · 리뷰어 찾기", nextTab: "discovery" },
+    discovery: { step: 6, title: "업체와 리뷰어를 찾아 제안하는 단계", instruction: "업체 선택 → 리뷰어 역추적 → 분홍색 협업 제안 준비 버튼 순서로 진행하세요.", nextLabel: "선택을 보냈다면 크롤링 열기", openCrawl: true },
+  };
+  const activeGuide = growthGuide[tab];
+
   const fieldStyle: React.CSSProperties = { width: "100%", minHeight: 48, borderRadius: 12, border: `1px solid ${colors.line}`, background: dark ? colors.soft : "#fff", color: colors.text, padding: "11px 13px", fontFamily: "inherit", fontSize: 16, outline: "none" };
   const cardStyle: React.CSSProperties = { border: `1px solid ${colors.line}`, borderRadius: 20, background: colors.card };
 
@@ -446,7 +460,7 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
     <style>{`
       .p360 *{box-sizing:border-box}.p360-button{min-height:48px;border:0;border-radius:13px;padding:11px 16px;font-family:inherit;font-weight:900;cursor:pointer;transition:transform .15s,filter .15s}.p360-button:hover{filter:brightness(1.04);transform:translateY(-1px)}
       .p360-tabs{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:8px}.p360-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:11px}.p360-two{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
-      @media(max-width:760px){.p360{padding:8px 6px 120px!important}.p360-tabs{grid-template-columns:1fr}.p360-grid,.p360-two{grid-template-columns:1fr}.p360-tab{text-align:left!important;display:grid!important;grid-template-columns:42px 1fr!important;align-items:center}.p360-hero{padding:20px 16px!important}.p360-title{font-size:25px!important}.p360-card{padding:16px!important}.p360-prescription{grid-template-columns:1fr!important}.p360-prescription .p360-button{width:100%}}
+      @media(max-width:760px){.p360{padding:8px 6px 120px!important}.p360-tabs{grid-template-columns:1fr}.p360-grid,.p360-two{grid-template-columns:1fr}.p360-tab{text-align:left!important;display:grid!important;grid-template-columns:42px 1fr!important;align-items:center}.p360-hero{padding:20px 16px!important}.p360-title{font-size:25px!important}.p360-card{padding:16px!important}.p360-prescription,.p360-guide{grid-template-columns:1fr!important}.p360-prescription .p360-button,.p360-guide .p360-button{width:100%}}
     `}</style>
 
     <header className="p360-hero" style={{ ...cardStyle, position: "relative", overflow: "hidden", padding: "26px 28px", marginBottom: 12 }}>
@@ -470,10 +484,20 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
       <p style={{ color: colors.sub, fontSize: 10.5, lineHeight: 1.6, margin: "9px 0 0" }}>같은 매장 진단은 같은 날 추가 차감 없이 갱신해요. 순위 측정은 별도 한도로 무료 {PLACE360_RANK_DAILY_LIMIT.free}회·베이직 {PLACE360_RANK_DAILY_LIMIT.basic}회·프로 {PLACE360_RANK_DAILY_LIMIT.pro}회/일이에요.</p>
     </section>}
 
+    <section className="p360-card p360-guide" aria-label="플레이스 순위 상승 프로젝트 안내" style={{ ...cardStyle, display: "grid", gridTemplateColumns: "minmax(0,1fr) auto", alignItems: "center", gap: 14, padding: 18, marginBottom: 12, borderLeft: `6px solid ${colors.green}` }}>
+      <div>
+        <div style={{ color: colors.green, fontSize: 10.5, fontWeight: 950 }}>나를 따라와라 · STEP {activeGuide.step}/6</div>
+        <b style={{ display: "block", marginTop: 4, fontSize: 16 }}>{activeGuide.title}</b>
+        <p style={{ margin: "5px 0 10px", color: colors.sub, fontSize: 11.5, lineHeight: 1.65 }}>{activeGuide.instruction}</p>
+        <div aria-label={`전체 6단계 중 ${activeGuide.step}단계`} style={{ height: 8, borderRadius: 99, overflow: "hidden", background: colors.soft }}><div style={{ width: `${activeGuide.step / 6 * 100}%`, height: "100%", background: `linear-gradient(90deg,${colors.green},${colors.rose})` }} /></div>
+      </div>
+      <button type="button" className="p360-button" onClick={() => activeGuide.scrollToStore ? document.getElementById("p360-store-form")?.scrollIntoView({ behavior: "smooth", block: "start" }) : activeGuide.openCrawl ? onOpenCrawl?.() : activeGuide.nextTab && setTab(activeGuide.nextTab)} style={{ minWidth: 210, background: colors.green, color: "#fff" }}>{activeGuide.nextLabel} →</button>
+    </section>
+
     {profiles.length > 0 && <section className="p360-card" aria-label="내 매장 선택" style={{ ...cardStyle, padding: 14, marginBottom: 12 }}><div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 9, flexWrap: "wrap" }}><div><b style={{ fontSize: 13 }}>🏪 어느 매장을 볼까요?</b><div style={{ marginTop: 3, color: colors.sub, fontSize: 10.5 }}>매장을 누르면 순위·진단·운영자료가 그 매장으로 바뀌어요.</div></div><span style={{ color: colors.sub, fontSize: 11, fontWeight: 800 }}>{plan === "admin" || plan === "unlimited" ? `${profiles.length}개 등록` : `${profiles.length}/${PLACE360_STORE_LIMIT[plan] ?? PLACE360_STORE_LIMIT.free}개 등록`}</span></div><div style={{ display: "flex", gap: 7, flexWrap: "wrap", marginTop: 10 }}>{profiles.map(item => { const key = place360StoreKey(item.name, item.region); const active = key === storeKey && hasStore; return <button key={key} type="button" aria-pressed={active} className="p360-button" onClick={() => selectStore(item)} style={{ minHeight: 43, background: active ? colors.green : colors.soft, color: active ? "#fff" : colors.text, border: `1px solid ${active ? colors.green : colors.line}` }}>🏷️ {item.name}{item.region ? ` · ${item.region}` : ""}</button>; })}<button type="button" className="p360-button" onClick={startAddingStore} style={{ minHeight: 43, background: "transparent", color: colors.rose, border: `1px dashed ${colors.rose}` }}>＋ 다른 매장 등록</button></div></section>}
 
     {tab === "overview" && <main>
-      {!hasStore || storeFormOpen ? <section className="p360-card" style={{ ...cardStyle, padding: 22, marginBottom: 12 }}>
+      {!hasStore || storeFormOpen ? <section id="p360-store-form" className="p360-card" style={{ ...cardStyle, padding: 22, marginBottom: 12, scrollMarginTop: 12 }}>
         <div style={{ fontSize: 19, fontWeight: 950 }}>먼저 내 매장을 알려주세요</div>
         <p style={{ color: colors.sub, fontSize: 12.5, lineHeight: 1.7, margin: "6px 0 16px" }}>매장 이름만 입력해도 시작할 수 있어요. 플레이스 주소를 함께 넣으면 이후 자동 진단 연결이 더 정확해져요.</p>
         <div className="p360-two">

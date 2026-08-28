@@ -28,6 +28,10 @@ requireText(screen, "매출 감소만으로 유동인구 감소라고 단정할 
 requireText(screen, 'plan !== "admin" && <section className="p360-card" aria-label="플레이스 360 등급별 사용 한도"', "member-only global plan table");
 if (screen.indexOf('aria-label="플레이스 360 등급별 사용 한도"') > screen.indexOf('{profiles.length > 0 && <section')) throw new Error("place360 contract missing: plan table must stay above store-specific content");
 if ((screen.match(/aria-label="플레이스 360 등급별 사용 한도"/g) || []).length !== 1) throw new Error("place360 contract missing: exactly one global plan table");
+requireText(screen, 'aria-label="플레이스 순위 상승 프로젝트 안내"', "always-visible guided growth flow");
+requireText(screen, '나를 따라와라 · STEP', "plain-language current step");
+requireText(screen, '업체 선택 → 리뷰어 역추적 → 분홍색 협업 제안 준비 버튼', "place-to-crawl handoff instruction");
+requireText(screen, 'id="p360-store-form"', "first-step store form anchor");
 requireText(crawlScreen, '{plan !== "admin" && <div className="ob-plan-table"', "crawl plan table remains visible to every member plan");
 requireText(crawlScreen, '(["free", "basic", "pro"] as const)', "crawl plan table excludes internal unlimited row");
 
