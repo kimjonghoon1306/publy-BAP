@@ -778,6 +778,48 @@ export async function logError(params: {
   } catch {}
 }
 
+/* ══════════ 📡 실시간 라이브 로그 — 회원이 신고 안 해도 관리자가 회원 검색해 현재 진행 로그를 봄 ══════════
+   회원당 1행(user_id PK)에 '현재 진행 중인 작업 로그' 스냅샷을 담는다(누적 아님, 최신). 새 작업이 이전을 덮음.
+   회원 앱은 로그가 바뀔 때 throttle로 upsert(과도한 쓰기 방지). 관리자는 폴링으로 실시간 조회. */
+export interface LiveLogRow { user_id: string; user_name?: string; user_email?: string; context: string; log_text: string; is_running: boolean; updated_at: string; }
+
+const _liveLogState: { userId?: string; name?: string; email?: string; context?: string; text?: string; running?: boolean; timer?: any; pending?: boolean; last?: number } = {};
+// 회원 앱에서 호출: 현재 로그 스냅샷을 서버로(2초 throttle). 마지막 상태는 반드시 반영(trailing).
+export function pushLiveLog(userId: string, opts: { name?: string; email?: string; context: string; text: string; running: boolean }) {
+  if (!userId) return;
+  _liveLogState.userId = userId; _liveLogState.name = opts.name; _liveLogState.email = opts.email;
+  _liveLogState.context = opts.context; _liveLogState.text = opts.text; _liveLogState.running = opts.running;
+  const flush = async () => {
+    _liveLogState.pending = false; _liveLogState.last = Date.now();
+    try {
+      await supabase.from("publy_live_logs").upsert({
+        user_id: _liveLogState.userId, user_name: _liveLogState.name || "", user_email: _liveLogState.email || "",
+        context: _liveLogState.context || "", log_text: (_liveLogState.text || "").slice(-8000),   // 최근 8KB만
+        is_running: !!_liveLogState.running, updated_at: new Date().toISOString(),
+      }, { onConflict: "user_id" });
+    } catch {}
+  };
+  const since = Date.now() - (_liveLogState.last || 0);
+  if (since >= 2000) { void flush(); }              // 2초 지났으면 즉시
+  else if (!_liveLogState.pending) {                // 아니면 trailing 1회 예약
+    _liveLogState.pending = true;
+    clearTimeout(_liveLogState.timer);
+    _liveLogState.timer = setTimeout(flush, 2000 - since);
+  }
+}
+
+// 관리자: 특정 회원의 현재 라이브 로그 1건 조회.
+export async function getLiveLog(userId: string): Promise<LiveLogRow | null> {
+  const { data } = await supabase.from("publy_live_logs").select("*").eq("user_id", userId).maybeSingle();
+  return (data as LiveLogRow) || null;
+}
+
+// 관리자: 지금 작업 중인(is_running) 회원들의 로그 목록(최근 갱신순).
+export async function getRunningLiveLogs(): Promise<LiveLogRow[]> {
+  const { data } = await supabase.from("publy_live_logs").select("*").order("updated_at", { ascending: false }).limit(200);
+  return (data || []) as LiveLogRow[];
+}
+
 export async function getErrorLogs(userId?: string) {
   let query = supabase.from("publy_error_logs").select("*").order("created_at", { ascending: false }).limit(100);
   if (userId) query = query.eq("user_id", userId);

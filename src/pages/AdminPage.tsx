@@ -3,7 +3,7 @@ import GoogleFlowCard from "../GoogleFlowCard";
 import CrawlCenter from "../components/CrawlCenter";
 import PlaceCenter from "../components/PlaceCenter";
 import UsageGuide from "../components/UsageGuide";
-import { supabase, getAccounts, upsertAccount, PublyAccount, getHistory, getHistoryContent, PublyHistory, addHistory, deleteHistory, deleteAllHistory, setAdminPassword, saveAdminNaverApiKeys, getNaverApiKeys, NaverApiKeys, getNaverDailyUsage, NAVER_DAILY_LIMIT, checkNaverQuota, incrementNaverQuota, getUserNaverApiKeys, getReferrals, getErrorLogs, getUnreadErrorCount, markErrorsAsRead, logError, PLAN_CONFIG, getAllNeighborHistory, NeighborHistory, getAllEngageHistory, EngageHistory, InstaDmTarget, InstaDmHistory, InstaDmQuota, getInstaDmTargets, addInstaDmTarget, updateInstaDmTargetStatus, deleteInstaDmTarget, getInstaDmHistory, addInstaDmHistory, getAllInstaDmHistory, getInstaDmQuota, upsertInstaDmQuota, getAllInstaDmQuotas, INSTA_DM_DAILY_LIMIT, PublyBugReport, getBugReports, updateBugReportStatus, deleteBugReport, resetDailyPublish, getAllDailyUsageToday, DailyUsageRow, getAllReplyHistory, ReplyHistory, getAllBlogscoreHistory, BlogscoreHistory, NEIGHBOR_DAILY_LIMIT, ENGAGE_DAILY_LIMIT, REPLY_DAILY_LIMIT, BLOGSCORE_DAILY_LIMIT, PUMASI_ACCOUNT_LIMIT, PUMASI_POSTS_LIMIT, CRAWL_DAILY_LIMIT, EMAIL_DAILY_LIMIT, COMMENT_DAILY_LIMIT, PLACE_BLOGGER_LIMIT, PublyProxy, getProxies, addProxy, updateProxy, deleteProxy, getProxyAssignments, assignAccountToProxy, unassignAccount, setAccountFeatures, ProxyAssign, PROXY_FEATURES, checkProxyHealth } from "../lib/supabase";
+import { supabase, getAccounts, upsertAccount, PublyAccount, getHistory, getHistoryContent, PublyHistory, addHistory, deleteHistory, deleteAllHistory, setAdminPassword, saveAdminNaverApiKeys, getNaverApiKeys, NaverApiKeys, getNaverDailyUsage, NAVER_DAILY_LIMIT, checkNaverQuota, incrementNaverQuota, getUserNaverApiKeys, getReferrals, getErrorLogs, getUnreadErrorCount, markErrorsAsRead, logError, PLAN_CONFIG, getAllNeighborHistory, NeighborHistory, getAllEngageHistory, EngageHistory, InstaDmTarget, InstaDmHistory, InstaDmQuota, getInstaDmTargets, addInstaDmTarget, updateInstaDmTargetStatus, deleteInstaDmTarget, getInstaDmHistory, addInstaDmHistory, getAllInstaDmHistory, getInstaDmQuota, upsertInstaDmQuota, getAllInstaDmQuotas, INSTA_DM_DAILY_LIMIT, PublyBugReport, getBugReports, updateBugReportStatus, deleteBugReport, resetDailyPublish, getAllDailyUsageToday, DailyUsageRow, getAllReplyHistory, ReplyHistory, getAllBlogscoreHistory, BlogscoreHistory, NEIGHBOR_DAILY_LIMIT, ENGAGE_DAILY_LIMIT, REPLY_DAILY_LIMIT, BLOGSCORE_DAILY_LIMIT, PUMASI_ACCOUNT_LIMIT, PUMASI_POSTS_LIMIT, CRAWL_DAILY_LIMIT, EMAIL_DAILY_LIMIT, COMMENT_DAILY_LIMIT, PLACE_BLOGGER_LIMIT, PublyProxy, getProxies, addProxy, updateProxy, deleteProxy, getProxyAssignments, assignAccountToProxy, unassignAccount, setAccountFeatures, ProxyAssign, PROXY_FEATURES, checkProxyHealth, getLiveLog, getRunningLiveLogs, LiveLogRow } from "../lib/supabase";
 import NeighborPage from "./NeighborPage";
 import { botFetch, BotEventStream } from "../lib/botApi";
 
@@ -826,6 +826,11 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
   const [liveLoading, setLiveLoading] = useState(false);
   const [liveUpdatedAt, setLiveUpdatedAt] = useState<Date|null>(null);
   const [liveAuto, setLiveAuto] = useState(true);
+  // 📡 회원 로그 뷰어(회원 검색 → 현재 진행 로그 실시간)
+  const [logSearch, setLogSearch] = useState("");
+  const [logUserId, setLogUserId] = useState<string|null>(null);
+  const [logRow, setLogRow] = useState<LiveLogRow|null>(null);
+  const [logRunning, setLogRunning] = useState<LiveLogRow[]>([]);
   const [neighborHistory, setNeighborHistory] = useState<(NeighborHistory & {user_name?:string;user_email?:string})[]>([]);
   const [neighborLoading, setNeighborLoading] = useState(false);
   const [neighborFilter, setNeighborFilter] = useState<"all"|"success"|"fail"|"skip">("all");
@@ -1606,10 +1611,14 @@ Output format (JSON array only, no other text):
     if(tab==="users"){ loadLiveUsage(); const t=setInterval(loadLiveUsage,5000); return ()=>clearInterval(t); }
     if(tab!=="live") return;
     loadLiveUsage();
+    // 📡 회원 로그 뷰어 폴링: 진행중 목록 + (선택 회원)그 회원 현재 로그를 3초마다 갱신
+    const loadLogs = ()=>{ getRunningLiveLogs().then(rows=>setLogRunning(rows.filter(r=>r.is_running || (Date.now()-new Date(r.updated_at).getTime()<10*60000)))).catch(()=>{}); if(logUserId) getLiveLog(logUserId).then(setLogRow).catch(()=>{}); };
+    loadLogs();
     if(!liveAuto) return;
     const t = setInterval(loadLiveUsage, 5000); // 실시간성 강화: 30초→5초
-    return ()=>clearInterval(t);
-  },[tab, liveAuto, loadLiveUsage]);
+    const tl = setInterval(loadLogs, 3000);
+    return ()=>{clearInterval(t);clearInterval(tl);};
+  },[tab, liveAuto, loadLiveUsage, logUserId]);
 
   // ★관리 탭(서이추·공감·답방·지수)이 열려있는 동안 30초마다 최신 이력 자동 재로드(실시간 연동).
   //   회원이 서이추/공감/답방을 돌리면 관리자 화면이 새로고침 없이도 갱신된다.
@@ -4771,6 +4780,44 @@ POST3: (제목)|(이유)
                       </table>
                     </div>
                   )}
+                </div>
+
+                {/* 📡 회원 로그 뷰어 — 회원 검색 → 현재 진행 로그 실시간(회원이 신고 안 해도) */}
+                <div className="card" style={{marginTop:16}}>
+                  <div className="card-title" style={{marginBottom:6}}>📡 회원 로그 실시간 보기</div>
+                  <div style={{fontSize:12,color:"var(--text3)",marginBottom:12}}>회원을 검색해 고르면, 그 회원이 지금 돌리고 있는 작업 로그를 실시간으로 봐요. (회원이 따로 보내지 않아도 자동으로 올라와요)</div>
+                  <input className="inp" placeholder="🔍 회원 이름·이메일로 검색" value={logSearch} onChange={e=>setLogSearch(e.target.value)} style={{marginBottom:10}} />
+                  {(()=>{ const q=logSearch.trim().toLowerCase();
+                    const runningIds = new Set(logRunning.map(r=>r.user_id));
+                    const list = users.filter(u=>!q || (u.name||"").toLowerCase().includes(q) || (u.email||"").toLowerCase().includes(q))
+                      .sort((a,b)=>Number(runningIds.has(b.id))-Number(runningIds.has(a.id))).slice(0,12);
+                    return (
+                    <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:14}}>
+                      {list.length===0? <span style={{fontSize:13,color:"var(--text3)",padding:"8px 0"}}>검색 결과가 없어요.</span> :
+                       list.map(u=>{ const run=runningIds.has(u.id); const sel=logUserId===u.id; return (
+                        <button key={u.id} onClick={()=>{setLogUserId(u.id);getLiveLog(u.id).then(setLogRow);}}
+                          style={{padding:"8px 13px",borderRadius:99,border:`1.5px solid ${sel?"var(--accent)":"var(--border)"}`,background:sel?"var(--accent-bg)":"var(--bg)",color:sel?"var(--accent-text)":"var(--text)",cursor:"pointer",fontSize:12.5,fontWeight:700,fontFamily:"inherit",display:"flex",alignItems:"center",gap:6}}>
+                          {run&&<span style={{width:7,height:7,borderRadius:"50%",background:"var(--success)",boxShadow:"0 0 0 3px rgba(0,214,143,.2)"}}/>}
+                          {u.name||u.email}{run&&<span style={{fontSize:10,color:"var(--success)",fontWeight:800}}>작업중</span>}
+                        </button>
+                      );})}
+                    </div>
+                    );
+                  })()}
+                  {logUserId && (()=>{ const u=users.find(x=>x.id===logUserId); const running=logRow?.is_running; const ago=logRow?Math.round((Date.now()-new Date(logRow.updated_at).getTime())/1000):0;
+                    return (
+                    <div>
+                      <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap",marginBottom:8}}>
+                        <span style={{fontSize:14,fontWeight:800,color:"var(--text)"}}>{u?.name||u?.email}</span>
+                        {logRow?.context&&<span style={{fontSize:11,fontWeight:800,padding:"3px 9px",borderRadius:99,background:"var(--accent-bg)",color:"var(--accent-text)"}}>{logRow.context}</span>}
+                        <span style={{fontSize:11,fontWeight:800,color:running?"var(--success)":"var(--text3)"}}>{running?"🟢 지금 작업 중":`⚪ 대기 · ${ago}초 전 갱신`}</span>
+                        <button onClick={()=>getLiveLog(logUserId).then(setLogRow)} style={{marginLeft:"auto",padding:"6px 12px",borderRadius:8,border:"1px solid var(--border)",background:"var(--bg)",color:"var(--text2)",cursor:"pointer",fontSize:11.5,fontWeight:700,fontFamily:"inherit"}}>🔄 새로고침</button>
+                        <button onClick={async()=>{try{await navigator.clipboard.writeText(logRow?.log_text||"");showToast("📋 로그 복사됨","success");}catch{}}} style={{padding:"6px 12px",borderRadius:8,border:"1px solid var(--border)",background:"var(--bg)",color:"var(--text2)",cursor:"pointer",fontSize:11.5,fontWeight:700,fontFamily:"inherit"}}>📋 복사</button>
+                      </div>
+                      <pre style={{margin:0,padding:"14px",borderRadius:12,background:theme==="dark"?"#0d1117":"#0d1117",color:"#b1bac4",border:"1px solid var(--border)",fontSize:11.5,lineHeight:1.6,maxHeight:420,overflow:"auto",whiteSpace:"pre-wrap",wordBreak:"break-all",fontFamily:"ui-monospace,SFMono-Regular,Menlo,monospace"}}>{logRow?.log_text?logRow.log_text.split(/\r?\n/).map((l,i)=><div key={i} style={{color:/❌|실패|오류|error/i.test(l)?"#f85149":/✅|완료|성공/i.test(l)?"#3fb950":undefined}}>{l||" "}</div>):"아직 이 회원의 로그가 없어요. 회원이 작업(발행·이미지 등)을 시작하면 여기 실시간으로 떠요."}</pre>
+                    </div>
+                    );
+                  })()}
                 </div>
               </div>
               );

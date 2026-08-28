@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import { createPortal } from "react-dom";
 import { BotEventStream, botFetch } from "../lib/botApi";
-import { PLAN_CONFIG, CRAWL_DAILY_LIMIT, EMAIL_DAILY_LIMIT, COMMENT_DAILY_LIMIT, getCrawlDailyUsage, incrementCrawlQuota, getEmailDailyUsage, incrementEmailQuota } from "../lib/supabase";
+import { PLAN_CONFIG, CRAWL_DAILY_LIMIT, EMAIL_DAILY_LIMIT, COMMENT_DAILY_LIMIT, getCrawlDailyUsage, incrementCrawlQuota, getEmailDailyUsage, incrementEmailQuota, pushLiveLog } from "../lib/supabase";
 import { takePlaceBloggerCandidates } from "../lib/discoveryBridge";
 import UsageGuide from "./UsageGuide";
 import boriImg from "../assets/bori.png";
@@ -342,7 +342,7 @@ export default function CrawlCenter({ showToast, theme: extTheme, userId, plan =
   const esRef = useRef<BotEventStream | null>(null);
   const [scanned, setScanned] = useState(0);   // 지금까지 스캔(수집)한 블로거 수 — 실시간 표시
 
-  const pushLog = (m: string) => setLogs((l) => [...l, `${new Date().toLocaleTimeString("ko-KR")}  ${m}`]);
+  const pushLog = (m: string) => setLogs((l) => { const next = [...l, `${new Date().toLocaleTimeString("ko-KR")}  ${m}`]; if (userId) pushLiveLog(userId, { context: "크롤링", text: next.slice(-80).join("\n"), running: true }); return next; });
 
   // 🩺 AI 진정성 점수(0~100): 봇 로직 역이용 — 참여율 대비 이웃수로 "진짜 영향력 vs 품앗이·봇 부풀림" 감별.
   // 이웃만 많고 참여율 낮으면(도배·품앗이 의심) 낮게, 참여율이 이웃 규모 대비 건강하면 높게.

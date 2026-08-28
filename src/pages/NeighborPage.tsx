@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { createPortal } from "react-dom";
 import { botFetch, BotEventStream } from "../lib/botApi";
-import { getReplyDailyUsage, REPLY_DAILY_LIMIT, getBlogscoreDailyUsage, incrementBlogscoreQuota, BLOGSCORE_DAILY_LIMIT, PUMASI_ACCOUNT_LIMIT, PUMASI_POSTS_LIMIT, TAB_ACCOUNT_LIMIT, getPumasiDailyUsage, savePostCareChecks, markPrescribed, markTitleChanged, getPostCare, computeCareStatus, PostCare, OBSERVE_DAYS, savePostViews, latestViews, reportError } from "../lib/supabase";
+import { getReplyDailyUsage, REPLY_DAILY_LIMIT, getBlogscoreDailyUsage, incrementBlogscoreQuota, BLOGSCORE_DAILY_LIMIT, PUMASI_ACCOUNT_LIMIT, PUMASI_POSTS_LIMIT, TAB_ACCOUNT_LIMIT, getPumasiDailyUsage, savePostCareChecks, markPrescribed, markTitleChanged, getPostCare, computeCareStatus, PostCare, OBSERVE_DAYS, savePostViews, latestViews, reportError, pushLiveLog } from "../lib/supabase";
 import UsageGuide from "../components/UsageGuide";
 import dodoImg from "../assets/dodo.png";   // 🩺 블로그 주치의 캐릭터(검수자 도도)
 import boriImg from "../assets/bori.png";   // 🌱 응원단 보리
@@ -1035,8 +1035,8 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
 
   const addLog = useCallback((msg: string) => {
     const t = new Date().toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
-    setLogs(p => [...p.slice(-200), `${t} :: ${msg}`]);
-  }, []);
+    setLogs(p => { const next = [...p.slice(-200), `${t} :: ${msg}`]; if (userId) pushLiveLog(userId, { context: tabName, text: next.slice(-80).join("\n"), running: true }); return next; });
+  }, [userId, tabName]);
 
   const addELog = useCallback((msg: string) => {
     const t = new Date().toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
