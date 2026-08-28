@@ -8,6 +8,7 @@ import PlaceCenter from "../components/PlaceCenter";
 import { botFetch, BotEventStream } from "../lib/botApi";
 import WebInstallNotice from "../WebInstallNotice";
 import UsageGuide from "../components/UsageGuide";
+import Daebaekseo, { DAEBAEKSEO_VERSION } from "../components/Daebaekseo";
 
 type MainTab = "control" | "keyword" | "write" | "image" | "photo" | "publish" | "manage" | "accounts" | "rank" | "blogscore" | "calendar" | "settings" | "neighbor" | "engage" | "reply" | "pumasi" | "insta_dm" | "crawl" | "place";
 type OnPartnerProduct = {id:string|null;name:string;image:string;price:number|null;available:boolean;partnerUrl:string;shopUrl:string};
@@ -870,6 +871,9 @@ export default function DashboardPage({user, onLogout, onAdminLogin, onThemeTogg
   //   미설정(null/undefined)·true = 사용 가능. false만 잠김. (관리자 표시·토글도 동일 규칙으로 맞춤)
   const crawlEnabled = (user as any)?.crawl_enabled !== false;
   const [showCrawlLock, setShowCrawlLock] = useState(false);
+  // 📖 퍼블리 대백서 — 로그인하면 자동 팝업(‘다시 안 보기’ 체크 전까지). 헤더 📚 버튼으로 언제든 다시.
+  const [showDaebaekseo, setShowDaebaekseo] = useState(false);
+  useEffect(()=>{ if(!user?.id) return; try{ if(localStorage.getItem("publy_daebaekseo_seen")!==String(DAEBAEKSEO_VERSION)) setShowDaebaekseo(true); }catch{} }, [user?.id]);
   const [neighborUsed, setNeighborUsed] = useState(0);
   const [replyUsed, setReplyUsed] = useState(0);
   const [engageUsed, setEngageUsed] = useState(0);
@@ -4055,6 +4059,7 @@ POST3: (제목)|(이유)
           <div className="header-right">
             <button className="video-open-btn" onClick={()=>setShowVideo(true)} title="소개 영상 보기">🎬 <span className="guide-btn-text">영상</span></button>
             <button className="guide-open-btn" onClick={()=>{setShowGuide(true);setGuideTab(0);}}>📖 <span className="guide-btn-text">사용설명서</span></button>
+            <button className="guide-open-btn" onClick={()=>setShowDaebaekseo(true)} title="어떤 순서로 어떨 때 쓰면 좋은지 모아둔 퍼블리 대백서" style={{background:"linear-gradient(135deg,#ff7eb6,#ff5a98)",color:"#fff",border:0}}>📚 <span className="guide-btn-text">대백서</span></button>
             <button className="icon-btn" onClick={onThemeToggle}>{theme==="dark"?"☀️":"🌙"}</button>
             <button className="icon-btn" onClick={checkBot}>🔄</button>
 
@@ -7037,6 +7042,7 @@ POST3: (제목)|(이유)
         </div>
       </div>
 
+      {showDaebaekseo&&<Daebaekseo theme={theme==="dark"?"dark":"light"} onClose={()=>setShowDaebaekseo(false)} />}
       {serviceInfo&&(()=>{const s=PUBLY_SERVICE_INFO[serviceInfo];return <div className={`service-info-overlay ${theme==="dark"?"service-info-dark":"service-info-light"}`} onMouseDown={e=>{if(e.target===e.currentTarget)setServiceInfo(null)}}><section className="service-info-dialog" role="dialog" aria-modal="true" aria-label={`${s.name} 알아보기`}><button className="service-info-close" type="button" onClick={()=>setServiceInfo(null)} aria-label="닫기">×</button><div className="service-info-kicker">MORE WITH ONJONGIL</div><h2>{s.name} 알아보기</h2><p className="service-info-hook">{s.hook}</p><div className="service-info-benefits">{s.benefits.map(([title,desc])=><div className="service-info-benefit" key={title}><b>✓ {title}</b><span>{desc}</span></div>)}</div><div className="service-info-flow">{s.flow}</div><div className="service-info-footer">{s.coming?<><button className="service-info-cta" disabled>신청하기</button><span className="service-info-coming">곧 출시됩니다</span></>:<a className="service-info-cta" href={s.url} target="_blank" rel="noopener noreferrer">{s.cta} →</a>}</div></section></div>})()}
 
       {/* 블로그 순위 키 안내 팝업 */}
