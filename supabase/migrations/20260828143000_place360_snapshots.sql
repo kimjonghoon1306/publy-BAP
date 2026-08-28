@@ -1,5 +1,7 @@
 begin;
 
+alter table public.publy_users add column if not exists place360_enabled boolean not null default true;
+
 create table if not exists public.publy_place360_snapshots (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null,
@@ -46,7 +48,8 @@ begin
   if v_user_id is null then raise exception using errcode = 'P0001', message = 'INVALID_SESSION'; end if;
   if length(trim(coalesce(p_store_key, ''))) < 2 then raise exception using errcode = 'P0001', message = 'INVALID_STORE'; end if;
 
-  select plan into v_plan from public.publy_users where id = v_user_id and is_active is true;
+  select plan into v_plan from public.publy_users where id = v_user_id and is_active is true and place360_enabled is true;
+  if v_plan is null then raise exception using errcode = 'P0001', message = 'PLACE360_DISABLED'; end if;
   v_store_limit := case v_plan when 'basic' then 3 when 'pro' then 10 when 'unlimited' then 999999 else 1 end;
   v_daily_limit := case v_plan when 'basic' then 3 when 'pro' then 10 when 'unlimited' then 999999 else 1 end;
   v_history_days := case v_plan when 'basic' then 90 when 'pro' then 365 when 'unlimited' then 3650 else 30 end;

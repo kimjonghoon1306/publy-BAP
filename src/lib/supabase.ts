@@ -27,6 +27,7 @@ export interface PublyUser {
   created_at: string;
   referred_by?: string;
   last_seen?: string;   // 마지막 접속(앱 켜짐/사용) 시각
+  place360_enabled?: boolean;
 }
 
 export interface PublyQuota {
@@ -80,6 +81,14 @@ export interface Place360Snapshot {
 export const PLACE360_STORE_LIMIT: Record<string, number> = { free: 1, basic: 3, pro: 10, unlimited: 999999, admin: 999999 };
 export const PLACE360_DAILY_DIAGNOSIS_LIMIT: Record<string, number> = { free: 1, basic: 3, pro: 10, unlimited: 999999, admin: 999999 };
 export const PLACE360_HISTORY_DAYS: Record<string, number> = { free: 30, basic: 90, pro: 365, unlimited: 3650, admin: 3650 };
+
+export async function getPlace360Access(userId: string): Promise<boolean> {
+  try {
+    const { data, error } = await supabase.from("publy_users").select("place360_enabled").eq("id", userId).maybeSingle();
+    if (error) return false;
+    return data?.place360_enabled !== false;
+  } catch { return false; }
+}
 
 export function place360StoreKey(name: string, region = ""): string {
   return `${region.trim()}::${name.trim()}`.toLocaleLowerCase("ko-KR").replace(/\s+/g, " ").slice(0, 180);

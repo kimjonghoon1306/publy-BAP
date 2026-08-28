@@ -4,7 +4,7 @@ import CrawlCenter from "../components/CrawlCenter";
 import Place360 from "../components/Place360";
 import Place360AdminManager from "../components/Place360AdminManager";
 import UsageGuide from "../components/UsageGuide";
-import { supabase, getAccounts, upsertAccount, PublyAccount, getHistory, getHistoryContent, PublyHistory, addHistory, deleteHistory, deleteAllHistory, setAdminPassword, saveAdminNaverApiKeys, getNaverApiKeys, NaverApiKeys, getNaverDailyUsage, NAVER_DAILY_LIMIT, checkNaverQuota, incrementNaverQuota, getUserNaverApiKeys, getReferrals, getErrorLogs, getUnreadErrorCount, markErrorsAsRead, logError, PLAN_CONFIG, getAllNeighborHistory, NeighborHistory, getAllEngageHistory, EngageHistory, InstaDmTarget, InstaDmHistory, InstaDmQuota, getInstaDmTargets, addInstaDmTarget, updateInstaDmTargetStatus, deleteInstaDmTarget, getInstaDmHistory, addInstaDmHistory, getAllInstaDmHistory, getInstaDmQuota, upsertInstaDmQuota, getAllInstaDmQuotas, INSTA_DM_DAILY_LIMIT, PublyBugReport, getBugReports, updateBugReportStatus, deleteBugReport, resetDailyPublish, getAllDailyUsageToday, DailyUsageRow, getAllReplyHistory, ReplyHistory, getAllBlogscoreHistory, BlogscoreHistory, NEIGHBOR_DAILY_LIMIT, ENGAGE_DAILY_LIMIT, REPLY_DAILY_LIMIT, BLOGSCORE_DAILY_LIMIT, PUMASI_ACCOUNT_LIMIT, PUMASI_POSTS_LIMIT, CRAWL_DAILY_LIMIT, EMAIL_DAILY_LIMIT, COMMENT_DAILY_LIMIT, PLACE_BLOGGER_LIMIT, PublyProxy, getProxies, addProxy, updateProxy, deleteProxy, getProxyAssignments, assignAccountToProxy, unassignAccount, setAccountFeatures, ProxyAssign, PROXY_FEATURES, checkProxyHealth, getLiveLog, getRunningLiveLogs, LiveLogRow } from "../lib/supabase";
+import { supabase, getAccounts, upsertAccount, PublyAccount, getHistory, getHistoryContent, PublyHistory, addHistory, deleteHistory, deleteAllHistory, setAdminPassword, saveAdminNaverApiKeys, getNaverApiKeys, NaverApiKeys, getNaverDailyUsage, NAVER_DAILY_LIMIT, checkNaverQuota, incrementNaverQuota, getUserNaverApiKeys, getReferrals, getErrorLogs, getUnreadErrorCount, markErrorsAsRead, logError, PLAN_CONFIG, getAllNeighborHistory, NeighborHistory, getAllEngageHistory, EngageHistory, InstaDmTarget, InstaDmHistory, InstaDmQuota, getInstaDmTargets, addInstaDmTarget, updateInstaDmTargetStatus, deleteInstaDmTarget, getInstaDmHistory, addInstaDmHistory, getAllInstaDmHistory, getInstaDmQuota, upsertInstaDmQuota, getAllInstaDmQuotas, INSTA_DM_DAILY_LIMIT, PublyBugReport, getBugReports, updateBugReportStatus, deleteBugReport, resetDailyPublish, getAllDailyUsageToday, DailyUsageRow, getAllReplyHistory, ReplyHistory, getAllBlogscoreHistory, BlogscoreHistory, NEIGHBOR_DAILY_LIMIT, ENGAGE_DAILY_LIMIT, REPLY_DAILY_LIMIT, BLOGSCORE_DAILY_LIMIT, PUMASI_ACCOUNT_LIMIT, PUMASI_POSTS_LIMIT, CRAWL_DAILY_LIMIT, EMAIL_DAILY_LIMIT, COMMENT_DAILY_LIMIT, PLACE_BLOGGER_LIMIT, PLACE360_STORE_LIMIT, PLACE360_DAILY_DIAGNOSIS_LIMIT, PLACE360_HISTORY_DAYS, PublyProxy, getProxies, addProxy, updateProxy, deleteProxy, getProxyAssignments, assignAccountToProxy, unassignAccount, setAccountFeatures, ProxyAssign, PROXY_FEATURES, checkProxyHealth, getLiveLog, getRunningLiveLogs, LiveLogRow } from "../lib/supabase";
 import NeighborPage from "./NeighborPage";
 import { botFetch, BotEventStream } from "../lib/botApi";
 
@@ -16,7 +16,7 @@ interface Props {
 }
 
 interface UserFull {
-  id:string; email:string; name:string; plan:string; is_active:boolean; crawl_enabled?:boolean; created_at:string; phone?:string; memo?:string; last_seen?:string;
+  id:string; email:string; name:string; plan:string; is_active:boolean; crawl_enabled?:boolean; place360_enabled?:boolean; created_at:string; phone?:string; memo?:string; last_seen?:string;
   quota?: { total_quota:number; used_quota:number; remaining_quota:number; reset_date:string; };
   payments?: any[]; notes?: any[]; history_count?: number;
 }
@@ -2563,6 +2563,7 @@ POST3: (제목)|(이유)
   async function toggleActive(u: UserFull) { if (!confirm(`${u.name||u.email} ${u.is_active?"비활성화":"활성화"}?`)) return; try { const next=!u.is_active; const {data,error}=await supabase.from("publy_users").update({is_active:next}).eq("id",u.id).select("id,is_active"); if(error)throw new Error(error.message); if(!data?.[0]||data[0].is_active!==next)throw new Error("권한/RLS로 반영된 행이 없습니다"); await loadUsers(); } catch(e:any){alert("활성 상태 저장 실패 — "+e.message);} }
   // 🔎 크롤링 잠금해제 토글 — 회원 publy_users.crawl_enabled. 반영 검증(.select) 후 목록 갱신.
   async function toggleCrawl(u: UserFull) { try { const cur=u.crawl_enabled!==false; const next=!cur; const {data,error}=await supabase.from("publy_users").update({crawl_enabled:next}).eq("id",u.id).select("id,crawl_enabled"); if(error)throw new Error(error.message); if(!data?.[0]||data[0].crawl_enabled!==next)throw new Error("권한/RLS로 반영된 행이 없습니다"); await loadUsers(); showToast(next?`🔓 ${u.name||u.email} 크롤링 잠금해제`:`🔒 ${u.name||u.email} 크롤링 잠금`, "success"); } catch(e:any){ showToast("크롤링 권한 저장 실패 — "+e.message, "error"); } }
+  async function togglePlace360(u: UserFull) { try { const cur=u.place360_enabled!==false; const next=!cur; const {data,error}=await supabase.from("publy_users").update({place360_enabled:next}).eq("id",u.id).select("id,place360_enabled"); if(error)throw new Error(error.message); if(!data?.[0]||data[0].place360_enabled!==next)throw new Error("권한/RLS로 반영된 행이 없습니다"); await loadUsers(); showToast(next?`🏪 ${u.name||u.email} 플레이스 360 사용 허용`:`🔒 ${u.name||u.email} 플레이스 360 잠금`, "success"); } catch(e:any){ showToast("플레이스 360 권한 저장 실패 — "+e.message, "error"); } }
   async function addNote(uid: string) { if (!newNote.trim()) return; try { const content=newNote.trim(); const {data,error}=await supabase.from("publy_notes").insert({user_id:uid,content}).select("id,user_id,content"); if(error)throw new Error(error.message); if(!data?.[0]||data[0].user_id!==uid||data[0].content!==content)throw new Error("권한/RLS로 반영된 행이 없습니다"); setNewNote(""); await loadUsers(); } catch(e:any){alert("메모 추가 실패 — "+e.message);} }
   async function addPayment(uid: string, plan: string) {
     if (!newPayAmt) return; setAddingPay(true);
@@ -2879,17 +2880,19 @@ POST3: (제목)|(이유)
                     <span style={{fontSize:11,fontWeight:800,color:"#ff6fa5",background:"rgba(255,111,165,.12)",padding:"2px 9px",borderRadius:99}}>회원 공용 권한</span>
                     <button onClick={loadUsers} style={{marginLeft:"auto",padding:"7px 13px",borderRadius:8,border:"1px solid var(--border)",background:"var(--bg)",color:"var(--text2)",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:"inherit"}}>↻ 새로고침</button>
                   </div>
-                  <div style={{fontSize:12.5,color:"var(--text2)",lineHeight:1.7,marginBottom:10}}>회원에게 <b style={{color:"var(--text)"}}>크롤링(협력 블로거 발굴)</b>과 <b style={{color:"var(--text)"}}>플레이스(업체 수집·리뷰어 역추적)</b> 사용 권한을 함께 켜고 끕니다. 켜면 두 메뉴와 업체 추천·중복 정리·협업 제안 연결까지 사용할 수 있어요. 관리자는 항상 열려 있고 모든 횟수가 무제한입니다.</div>
+                  <div style={{fontSize:12.5,color:"var(--text2)",lineHeight:1.7,marginBottom:10}}>회원마다 <b style={{color:"var(--text)"}}>크롤링</b>과 <b style={{color:"var(--text)"}}>플레이스 360</b> 권한을 각각 켜고 끕니다. 플레이스 360을 켜야 매장 진단·측정 기록·업체 수집·리뷰어 역추적을 사용할 수 있어요. 관리자는 항상 열려 있고 모든 횟수가 무제한입니다.</div>
                   <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:14}}>{["업체 크롤링","홍보 후보 추천","리뷰어 역추적","중복 블로거 정리","크롤링 제안 연결"].map(label=><span key={label} style={{fontSize:11,fontWeight:750,color:"#16856b",background:"rgba(22,133,107,.1)",border:"1px solid rgba(22,133,107,.2)",padding:"5px 9px",borderRadius:99}}>✓ {label}</span>)}</div>
                   <input className="inp" placeholder="🔍 이름·이메일 검색" value={search} onChange={e=>setSearch(e.target.value)} style={{marginBottom:12}} />
                   {(() => {
                     const q = search.trim().toLowerCase();
                     const list = users.filter(u => !q || (u.name||"").toLowerCase().includes(q) || (u.email||"").toLowerCase().includes(q));
-                    const onCount = users.filter(u=>u.crawl_enabled!==false).length;   // 기본 오픈: false만 잠김
+                    const onCount = users.filter(u=>u.crawl_enabled!==false).length;
+                    const placeOnCount = users.filter(u=>u.place360_enabled!==false).length;
                     return (<>
                       <div style={{display:"flex",gap:8,marginBottom:12,flexWrap:"wrap"}}>
                         <span style={{fontSize:12,fontWeight:800,color:"var(--text2)",background:"var(--bg)",border:"1px solid var(--border)",padding:"6px 12px",borderRadius:99}}>전체 {users.length}명</span>
-                        <span style={{fontSize:12,fontWeight:800,color:"#2f9e5e",background:"rgba(47,158,94,.1)",border:"1px solid rgba(47,158,94,.25)",padding:"6px 12px",borderRadius:99}}>🔓 크롤링·플레이스 켜짐 {onCount}명</span>
+                        <span style={{fontSize:12,fontWeight:800,color:"#2f9e5e",background:"rgba(47,158,94,.1)",border:"1px solid rgba(47,158,94,.25)",padding:"6px 12px",borderRadius:99}}>🔍 크롤링 켜짐 {onCount}명</span>
+                        <span style={{fontSize:12,fontWeight:800,color:"#d53d73",background:"rgba(213,61,115,.1)",border:"1px solid rgba(213,61,115,.25)",padding:"6px 12px",borderRadius:99}}>🏪 플레이스 360 켜짐 {placeOnCount}명</span>
                       </div>
                       {loading ? <div style={{padding:"30px 0",textAlign:"center",color:"var(--text3)"}}><span className="spinner"/> 회원 불러오는 중…</div>
                        : list.length===0 ? <div style={{padding:"30px 0",textAlign:"center",color:"var(--text3)"}}>회원이 없습니다.</div>
@@ -2900,11 +2903,7 @@ POST3: (제목)|(이유)
                                 <div style={{fontSize:14,fontWeight:700,color:"var(--text)",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{u.name||"(이름 없음)"} <span style={{fontSize:11,fontWeight:600,color:"var(--text3)"}}>{u.plan}</span></div>
                                 <div style={{fontSize:11.5,color:"var(--text3)",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{u.email}</div>
                               </div>
-                              {(()=>{ const en=u.crawl_enabled!==false; return (
-                              <button onClick={()=>toggleCrawl(u)} style={{padding:"8px 16px",borderRadius:99,border:`1.5px solid ${en?"#2f9e5e":"var(--border)"}`,background:en?"rgba(47,158,94,.12)":"var(--card)",color:en?"#2f9e5e":"var(--text3)",cursor:"pointer",fontSize:12.5,fontWeight:800,fontFamily:"inherit",whiteSpace:"nowrap",transition:"all .15s"}}>
-                                {en?"🔓 사용 중":"🔒 잠김"}
-                              </button>
-                              ); })()}
+                              {(()=>{ const crawlOn=u.crawl_enabled!==false; const placeOn=u.place360_enabled!==false; return <div style={{display:"flex",gap:6,flexWrap:"wrap",justifyContent:"flex-end"}}><button onClick={()=>toggleCrawl(u)} style={{padding:"8px 12px",borderRadius:99,border:`1.5px solid ${crawlOn?"#2f9e5e":"var(--border)"}`,background:crawlOn?"rgba(47,158,94,.12)":"var(--card)",color:crawlOn?"#2f9e5e":"var(--text3)",cursor:"pointer",fontSize:11.5,fontWeight:800,fontFamily:"inherit",whiteSpace:"nowrap"}}>🔍 크롤링 {crawlOn?"ON":"OFF"}</button><button onClick={()=>togglePlace360(u)} style={{padding:"8px 12px",borderRadius:99,border:`1.5px solid ${placeOn?"#d53d73":"var(--border)"}`,background:placeOn?"rgba(213,61,115,.12)":"var(--card)",color:placeOn?"#d53d73":"var(--text3)",cursor:"pointer",fontSize:11.5,fontWeight:800,fontFamily:"inherit",whiteSpace:"nowrap"}}>🏪 360 {placeOn?"ON":"OFF"}</button></div>; })()}
                             </div>
                           ))}
                          </div>}
@@ -4237,6 +4236,8 @@ POST3: (제목)|(이유)
                                 <div style={{fontSize:12,color:"var(--text2)",fontFamily:"monospace"}}>{u.email}</div>
                               </div>
                               <div style={{marginLeft:"auto",display:"flex",gap:8,flexWrap:"wrap"}}>
+                                <button className="btn btn-secondary btn-sm" onClick={()=>toggleCrawl(u)}>🔍 크롤링 {u.crawl_enabled!==false?"ON":"OFF"}</button>
+                                <button className="btn btn-secondary btn-sm" onClick={()=>togglePlace360(u)}>🏪 플레이스 360 {u.place360_enabled!==false?"ON":"OFF"}</button>
                                 <button className="btn btn-secondary btn-sm" onClick={()=>toggleActive(u)}>{u.is_active?"비활성화":"활성화"}</button>
                                 <button className="btn btn-secondary btn-sm" onClick={()=>resetQuota(u.id)}>건수 초기화</button>
                                 <button onClick={()=>{setErrorFilter(u.id);loadErrorLogs(u.id);setShowAllErrors(true);}} style={{padding:"4px 10px",borderRadius:6,background:"var(--danger)",color:"#fff",border:"none",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:"inherit"}}>🚨 오류확인</button>
@@ -4273,6 +4274,9 @@ POST3: (제목)|(이유)
                                   {label:"✉️ 크롤링 이메일",val:`${fmt(EMAIL_DAILY_LIMIT[pl]??5)}통/일`},
                                   {label:"💬 크롤링 댓글",val:`${fmt(COMMENT_DAILY_LIMIT[pl]??3)}개/일`},
                                   {label:"🗺️ 플레이스 역추적",val:`${(PLACE_BLOGGER_LIMIT[pl]??0)>=9999?"무제한":`${PLACE_BLOGGER_LIMIT[pl]??10}명`}/업체`},
+                                  {label:"🏪 360 등록 매장",val:`${fmt(PLACE360_STORE_LIMIT[pl]??1)}개`},
+                                  {label:"🩺 360 매장 진단",val:`${fmt(PLACE360_DAILY_DIAGNOSIS_LIMIT[pl]??1)}회/일`},
+                                  {label:"📈 360 기록 보관",val:`${fmt(PLACE360_HISTORY_DAYS[pl]??30)}일`},
                                   {label:"💞 품앗이 계정",val:`${fmt(PUMASI_ACCOUNT_LIMIT[pl]??2)}개`},
                                   {label:"💞 품앗이 계정당 글",val:`${fmt(PUMASI_POSTS_LIMIT[pl]??3)}개`},
                                 ];

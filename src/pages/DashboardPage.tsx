@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import GoogleFlowCard from "../GoogleFlowCard";
 import { PublyUser, getQuota, getHistory, getAccounts, PublyQuota, PublyHistory, PublyAccount, upsertAccount, useQuota, refundQuota, addHistory, getHistoryContent, deleteHistory, deleteAllHistory, deleteFailedHistory, changeUserPassword, getNaverApiKeys, saveNaverApiKeys, NaverApiKeys, checkNaverQuota, incrementNaverQuota, getNaverDailyUsage, NAVER_DAILY_LIMIT, getUserNaverApiKeys, logError, PLAN_CONFIG, checkDailyPublishQuota, incrementDailyPublish, getDailyPublishUsage, getNeighborDailyUsage, NEIGHBOR_DAILY_LIMIT, getEngageDailyUsage, ENGAGE_DAILY_LIMIT, InstaDmTarget, InstaDmHistory, InstaDmQuota, getInstaDmTargets, addInstaDmTarget, deleteInstaDmTarget, getInstaDmHistory, addInstaDmHistory, getInstaDmQuota, upsertInstaDmQuota, incrementInstaDmUsage, INSTA_DM_DAILY_LIMIT, getReplyDailyUsage, REPLY_DAILY_LIMIT, pushLiveLog } from "../lib/supabase";
-import { supabase, submitBugReportRow, getMyResolvedBugAlerts, markBugNotified, PublyBugReport } from "../lib/supabase";
+import { supabase, submitBugReportRow, getMyResolvedBugAlerts, markBugNotified, PublyBugReport, getPlace360Access } from "../lib/supabase";
 import NeighborPage from "./NeighborPage";
 import CrawlCenter from "../components/CrawlCenter";
 import Place360 from "../components/Place360";
@@ -898,6 +898,8 @@ export default function DashboardPage({user, onLogout, onAdminLogin, onThemeTogg
   // 🔍 크롤링 = 기본 오픈(등급별 한도로 이미 제한됨). 관리자가 crawl_enabled=false로 명시 잠금할 때만 잠긴다.
   //   미설정(null/undefined)·true = 사용 가능. false만 잠김. (관리자 표시·토글도 동일 규칙으로 맞춤)
   const crawlEnabled = (user as any)?.crawl_enabled !== false;
+  const [place360Enabled, setPlace360Enabled] = useState(false);
+  useEffect(() => { let active = true; getPlace360Access(user.id).then(enabled => { if (active) setPlace360Enabled(enabled); }); return () => { active = false; }; }, [user.id]);
   const [showCrawlLock, setShowCrawlLock] = useState(false);
   // 📖 퍼블리 대백서 — 로그인하면 자동 팝업(‘다시 안 보기’ 체크 전까지). 헤더 📚 버튼으로 언제든 다시.
   const [showDaebaekseo, setShowDaebaekseo] = useState(false);
@@ -4230,14 +4232,14 @@ POST3: (제목)|(이유)
             {NAV_GROUPS.map(group=>(
               <div key={group.label}>
                 {group.label&&<div className="nav-lbl">{group.label}</div>}
-                {group.tabs.map(t=> (t.k==="crawl" || t.k==="place") ? (
-                  <button key={t.k} className={`nav-item nav-crawl nav-shine ${tab===t.k&&crawlEnabled?"active":""} ${crawlEnabled?"":"nav-crawl-locked"}`} onClick={()=>{ if(!crawlEnabled){ setShowCrawlLock(true); return; } setTab(t.k); }}>
+                {group.tabs.map(t=> (t.k==="crawl" || t.k==="place") ? (() => { const enabled = t.k === "place" ? place360Enabled : crawlEnabled; return (
+                  <button key={t.k} className={`nav-item nav-crawl nav-shine ${tab===t.k&&enabled?"active":""} ${enabled?"":"nav-crawl-locked"}`} onClick={()=>{ if(!enabled){ setShowCrawlLock(true); return; } setTab(t.k); }}>
                     <span className="nav-ico">{t.i}</span><span className="nav-crawl-label">{t.l}</span>
                     <span className="nav-hot">HOT</span>
-                    {!crawlEnabled && <span className="nav-crawl-lock">🔒</span>}
-                    {!crawlEnabled && <span className="crawl-tip">🔒 <b>관리자 승인</b>이 필요한 기능이에요</span>}
+                    {!enabled && <span className="nav-crawl-lock">🔒</span>}
+                    {!enabled && <span className="crawl-tip">🔒 <b>관리자 승인</b>이 필요한 기능이에요</span>}
                   </button>
-                ) : (
+                ); })() : (
                   <button key={t.k} className={`nav-item ${tab===t.k?"active":""} ${t.k==="control"?"nav-control":""} ${t.k==="insta_dm"?"nav-soon":""} ${(t as any).shine?"nav-shine":""}`} onClick={()=>{if(t.k==="insta_dm"){showToast("📱 인스타 DM은 곧 출시됩니다!","info");return;}setTab(t.k);}}>
                     <span className="nav-ico">{t.i}</span>{t.l}
                     {(t as any).shine&&<span className="nav-hot">HOT</span>}
@@ -6902,7 +6904,7 @@ POST3: (제목)|(이유)
             {tab==="crawl" && crawlEnabled && (
               <div style={{animation:"fadeUp .25s ease both"}}><CrawlCenter showToast={showToast} theme={theme==="dark"?"dark":"light"} userId={user.id} plan={user.plan} /></div>
             )}
-            {tab==="place" && crawlEnabled && (
+            {tab==="place" && place360Enabled && (
               <div style={{animation:"fadeUp .25s ease both"}}><Place360 showToast={showToast} theme={theme==="dark"?"dark":"light"} userId={user.id} plan={user.plan} onOpenCrawl={()=>setTab("crawl")} /></div>
             )}
             {visitedAutoTabs.has("pumasi") && (
