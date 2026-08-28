@@ -6,6 +6,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.naverSessionExists = naverSessionExists;
 exports.deleteNaverSession = deleteNaverSession;
 exports.deleteGoogleSession = deleteGoogleSession;
+exports.activateNaverAccount = activateNaverAccount;
 exports.saveNaverSession = saveNaverSession;
 exports.reloginNaverSilent = reloginNaverSilent;
 exports.ensureLiveSessionNaver = ensureLiveSessionNaver;
@@ -24,12 +25,26 @@ const path_1 = __importDefault(require("path"));
 const session_store_1 = require("./session-store");
 const LEGACY_SESSION_DIRS = [path_1.default.join(__dirname, "../sessions")];
 const naverSessionName = (userId) => `naver_${userId}`;
+const naverAcctSessionName = (userId, naverId) => `naver_${userId}__${String(naverId).replace(/[^a-zA-Z0-9_-]/g, "")}`;
 const googleSessionName = (userId) => `google_${userId}`;
 function naverSessionExists(userId) {
     return (0, session_store_1.hasSession)(naverSessionName(userId), LEGACY_SESSION_DIRS);
 }
 function deleteNaverSession(userId) { (0, session_store_1.deleteSession)(naverSessionName(userId), LEGACY_SESSION_DIRS); }
 function deleteGoogleSession(userId) { (0, session_store_1.deleteSession)(googleSessionName(userId), LEGACY_SESSION_DIRS); }
+function activateNaverAccount(userId, naverId) {
+    try {
+        const accountSessionName = naverAcctSessionName(userId, naverId);
+        if (!(0, session_store_1.hasSession)(accountSessionName, LEGACY_SESSION_DIRS))
+            return false;
+        const session = (0, session_store_1.readSession)(accountSessionName, LEGACY_SESSION_DIRS);
+        (0, session_store_1.writeSession)(naverSessionName(userId), session);
+        return true;
+    }
+    catch {
+        return false;
+    }
+}
 /* ── 봇 탐지 우회 ── */
 const ANTI_DETECTION_SCRIPT = `
   Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
@@ -197,12 +212,14 @@ async function saveNaverSession(userId, id, pw) {
         console.log(`[naver] ✅ blogId: ${blogId}`);
         const cookies = await context.cookies();
         // ★비번 저장(자동 재로그인용, base64) — 재진입 시 세션 만료돼도 저장된 정보로 원터치 재연결.
-        (0, session_store_1.writeSession)(naverSessionName(userId), {
+        const session = {
             loginId: id,
             blogId,
             cookies,
             pw: Buffer.from(pw, "utf-8").toString("base64"),
-        });
+        };
+        (0, session_store_1.writeSession)(naverAcctSessionName(userId, id), session);
+        (0, session_store_1.writeSession)(naverSessionName(userId), session);
         await browser.close();
         return { blogId };
     }
@@ -2171,6 +2188,38 @@ async function generateFlowImagesCDP(params) {
         }
         await page.bringToFront();
         await page.waitForTimeout(1500);
+        // ★ Flow 첫 진입 안내 팝업 닫기 — 안 닫으면 '새 세션' 클릭·프롬프트 입력이 막힌다.
+        //   2026-08-28: 'Gemini Omni Flash 360p 추가' 변경사항 모달이 새로 생겨(버튼 '시작하기') 입력창을 가림.
+        //   Flow는 이런 What's-new 다이얼로그를 수시로 띄우므로, 모달 안의 닫기/시작 계열 버튼을 눌러 없앤다.
+        //   '모든 변경 로그 보기'(외부 이동) 같은 버튼은 피하고 닫기·시작 계열만 클릭 → 실패 시 Esc.
+        const closeIntroPopup = async () => {
+            for (let tries = 0; tries < 3; tries++) {
+                const clicked = await page.evaluate(() => {
+                    const visible = (el) => {
+                        const r = el.getBoundingClientRect();
+                        return r.width > 0 && r.height > 0 && getComputedStyle(el).visibility !== "hidden";
+                    };
+                    const dialogs = [...document.querySelectorAll("[role=dialog],[role=alertdialog],[data-state=open]")].filter(visible);
+                    const btnRe = /^\s*(시작하기|시작|닫기|건너뛰기|나중에|확인|알겠|다음|Get started|Got it|Dismiss|Continue|Skip|Close|Next)\s*$/i;
+                    for (const dlg of dialogs) {
+                        const btns = [...dlg.querySelectorAll("button,[role=button]")].filter(visible);
+                        const hit = btns.find(b => btnRe.test(b.textContent || ""));
+                        if (hit) {
+                            hit.click();
+                            return true;
+                        }
+                    }
+                    return false;
+                }).catch(() => false);
+                if (!clicked)
+                    await page.keyboard.press("Escape").catch(() => { });
+                await page.waitForTimeout(700);
+                const still = await page.$("[role=dialog],[role=alertdialog]").catch(() => null);
+                if (!still)
+                    break;
+            }
+        };
+        await closeIntroPopup();
         // 3) 로그인 상태 확인
         const loggedIn = await page.evaluate(() => {
             const t = document.body.innerText;
@@ -2342,6 +2391,8 @@ async function generateFlowImagesCDP(params) {
                 prompt += ", (photo only, absolutely no text, no letters, no words, no watermark, no logo)";
             }
             log(`[Flow] 🎨 ${i + 1}번째 그림 그리는 중이에요 (${prompts.length}장 중 ${i + 1}번째)`);
+            // 안내 팝업이 세션 전환/새로고침 뒤 다시 뜰 수 있으므로 입력 전 한 번 더 닫는다.
+            await closeIntroPopup();
             // 첫 화면에서 설정 UI가 늦게 로드되는 경우를 위해 실패했던 경우만 제출 직전 한 번 더 확인한다.
             if (!outputCountIsOne)
                 outputCountIsOne = await setOutputCountToOne();

@@ -1910,6 +1910,34 @@ export async function generateFlowImagesCDP(params: {
     await page.bringToFront();
     await page.waitForTimeout(1500);
 
+    // ★ Flow 첫 진입 안내 팝업 닫기 — 안 닫으면 '새 세션' 클릭·프롬프트 입력이 막힌다.
+    //   2026-08-28: 'Gemini Omni Flash 360p 추가' 변경사항 모달이 새로 생겨(버튼 '시작하기') 입력창을 가림.
+    //   Flow는 이런 What's-new 다이얼로그를 수시로 띄우므로, 모달 안의 닫기/시작 계열 버튼을 눌러 없앤다.
+    //   '모든 변경 로그 보기'(외부 이동) 같은 버튼은 피하고 닫기·시작 계열만 클릭 → 실패 시 Esc.
+    const closeIntroPopup = async () => {
+      for (let tries = 0; tries < 3; tries++) {
+        const clicked = await page.evaluate(() => {
+          const visible = (el: Element) => {
+            const r = el.getBoundingClientRect();
+            return r.width > 0 && r.height > 0 && getComputedStyle(el).visibility !== "hidden";
+          };
+          const dialogs = [...document.querySelectorAll("[role=dialog],[role=alertdialog],[data-state=open]")].filter(visible);
+          const btnRe = /^\s*(시작하기|시작|닫기|건너뛰기|나중에|확인|알겠|다음|Get started|Got it|Dismiss|Continue|Skip|Close|Next)\s*$/i;
+          for (const dlg of dialogs) {
+            const btns = [...dlg.querySelectorAll("button,[role=button]")].filter(visible);
+            const hit = btns.find(b => btnRe.test(b.textContent || ""));
+            if (hit) { (hit as HTMLElement).click(); return true; }
+          }
+          return false;
+        }).catch(() => false);
+        if (!clicked) await page.keyboard.press("Escape").catch(() => {});
+        await page.waitForTimeout(700);
+        const still = await page.$("[role=dialog],[role=alertdialog]").catch(() => null);
+        if (!still) break;
+      }
+    };
+    await closeIntroPopup();
+
     // 3) 로그인 상태 확인
     const loggedIn = await page.evaluate(() => {
       const t = document.body.innerText;
@@ -2064,6 +2092,9 @@ export async function generateFlowImagesCDP(params: {
         prompt += ", (photo only, absolutely no text, no letters, no words, no watermark, no logo)";
       }
       log(`[Flow] 🎨 ${i + 1}번째 그림 그리는 중이에요 (${prompts.length}장 중 ${i + 1}번째)`);
+
+      // 안내 팝업이 세션 전환/새로고침 뒤 다시 뜰 수 있으므로 입력 전 한 번 더 닫는다.
+      await closeIntroPopup();
 
       // 첫 화면에서 설정 UI가 늦게 로드되는 경우를 위해 실패했던 경우만 제출 직전 한 번 더 확인한다.
       if (!outputCountIsOne) outputCountIsOne = await setOutputCountToOne();

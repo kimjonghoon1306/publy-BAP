@@ -40,6 +40,7 @@ export interface PublyJobPayload {
   visibility?: "public" | "neighbor" | "private";
   videoUrl?: string;
   videoPosition?: "top" | "middle" | "bottom";
+  naverId?: string;   // v2.1.79: 계정별 세션 선택(사진글쓰기 오발송 방지). 발행 직전 이 계정을 활성 슬롯으로 복사.
   blocks?: Array<{ type: string; content?: string; src?: string; alt?: string; link?: string; images?: {src:string;alt:string}[] }>;
 }
 
