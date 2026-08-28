@@ -439,6 +439,15 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
     { id: "discovery", icon: "🕵️", label: "업체·리뷰어 찾기", desc: "업체 발굴과 리뷰어 역추적" },
   ];
 
+  const guideStepStates: Array<{ id: Place360Tab; label: string; done: boolean }> = [
+    { id: "overview", label: "매장 등록", done: hasStore },
+    { id: "rank", label: "순위 확인", done: Boolean(currentRank) },
+    { id: "diagnosis", label: "원인 진단", done: Boolean(comparison || snapshots.length) },
+    { id: "data", label: "운영자료", done: Boolean(metricsSavedAt) },
+    { id: "mission", label: "오늘 미션", done: growthMissions.length > 0 && growthMissions.every(item => completedMissions.includes(item.id)) },
+    { id: "discovery", label: "리뷰어 제안", done: completedMissions.includes("blogger") },
+  ];
+
   const growthGuide: Record<Place360Tab, { step: number; title: string; instruction: string; nextLabel: string; nextTab?: Place360Tab; openCrawl?: boolean; scrollToStore?: boolean }> = {
     overview: hasStore
       ? { step: 1, title: "내 매장 등록 완료", instruction: "이제 고객이 검색할 때 내 매장이 어디에 보이는지 확인하세요.", nextLabel: "2단계 · 내 순위 확인", nextTab: "rank" }
@@ -490,6 +499,7 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
         <b style={{ display: "block", marginTop: 4, fontSize: 16 }}>{activeGuide.title}</b>
         <p style={{ margin: "5px 0 10px", color: colors.sub, fontSize: 11.5, lineHeight: 1.65 }}>{activeGuide.instruction}</p>
         <div aria-label={`전체 6단계 중 ${activeGuide.step}단계`} style={{ height: 8, borderRadius: 99, overflow: "hidden", background: colors.soft }}><div style={{ width: `${activeGuide.step / 6 * 100}%`, height: "100%", background: `linear-gradient(90deg,${colors.green},${colors.rose})` }} /></div>
+        <div aria-label="플레이스 성장 단계별 완료 상태" style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 11 }}>{guideStepStates.map((item, index) => <button key={item.id} type="button" onClick={() => setTab(item.id)} aria-current={tab === item.id ? "step" : undefined} aria-label={`${index + 1}단계 ${item.label} ${item.done ? "완료" : "진행 전"}`} style={{ minHeight: 36, padding: "7px 10px", borderRadius: 99, border: `1px solid ${tab === item.id ? colors.rose : item.done ? colors.green : colors.line}`, background: tab === item.id ? `${colors.rose}13` : item.done ? `${colors.green}13` : colors.soft, color: tab === item.id ? colors.rose : item.done ? colors.green : colors.sub, fontFamily: "inherit", fontSize: 10.5, fontWeight: 900, cursor: "pointer" }}>{item.done ? "✓" : index + 1} {item.label}</button>)}</div>
       </div>
       <button type="button" className="p360-button" onClick={() => activeGuide.scrollToStore ? document.getElementById("p360-store-form")?.scrollIntoView({ behavior: "smooth", block: "start" }) : activeGuide.openCrawl ? onOpenCrawl?.() : activeGuide.nextTab && setTab(activeGuide.nextTab)} style={{ minWidth: 210, background: colors.green, color: "#fff" }}>{activeGuide.nextLabel} →</button>
     </section>

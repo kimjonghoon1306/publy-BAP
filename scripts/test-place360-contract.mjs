@@ -32,6 +32,8 @@ requireText(screen, 'aria-label="플레이스 순위 상승 프로젝트 안내"
 requireText(screen, '나를 따라와라 · STEP', "plain-language current step");
 requireText(screen, '업체 선택 → 리뷰어 역추적 → 분홍색 협업 제안 준비 버튼', "place-to-crawl handoff instruction");
 requireText(screen, 'id="p360-store-form"', "first-step store form anchor");
+requireText(screen, 'aria-label="플레이스 성장 단계별 완료 상태"', "guided progress checklist");
+requireText(screen, 'growthMissions.every(item => completedMissions.includes(item.id))', "mission completion state");
 requireText(crawlScreen, '{plan !== "admin" && <div className="ob-plan-table"', "crawl plan table remains visible to every member plan");
 requireText(crawlScreen, '(["free", "basic", "pro"] as const)', "crawl plan table excludes internal unlimited row");
 
