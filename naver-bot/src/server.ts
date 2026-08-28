@@ -4,7 +4,8 @@ import fs from "fs";
 import path from "path";
 import { saveNaverSession, publishNaver, activateNaverAccount, naverSessionExists, generateFlowImages, generateFlowImagesCDP, getNaverCategories, saveGoogleSession, googleSessionExists, deleteNaverSession, deleteGoogleSession } from "./naver";
 import { saveTistorySession, publishTistory, tistorySessionExists, deleteTistorySession } from "./tistory";
-import { fetchPendingJobs, updateJob, addHistory, useQuota } from "./supabase";
+import { fetchPendingJobs, updateJob, claimPendingJob, finishQueuedHistory, useQuota, refundQuota, checkPublishEntitlement, incrementDailyPublish } from "./supabase";
+import { acquireAccountLock } from "./account-lock";
 
 /* ── 봇 자체 로그 파일 (버그 신고용) ──
    메인 프로세스가 아니라 "봇 프로세스가 자기 로그를 직접" 쓴다. 봇은 별도 프로세스라
@@ -166,6 +167,11 @@ app.post("/api/publish-full", async (req, res) => {
   }
 
   await acquireSlot();
+  const accountLock = platform === "naver" ? acquireAccountLock(String(naverId || userId), "글 발행") : null;
+  if (accountLock && !accountLock.ok) {
+    releaseSlot();
+    return res.status(409).json({ error: `같은 네이버 계정에서 '${accountLock.owner}' 작업이 진행 중이에요. 완료 후 다시 시도해주세요.`, code: "ACCOUNT_BUSY" });
+  }
   try {
     let finalBlocks = blocks || [];
 
@@ -239,6 +245,7 @@ app.post("/api/publish-full", async (req, res) => {
     }
     res.status(500).json({ error: e.message });
   } finally {
+    if (accountLock?.ok) accountLock.release();
     releaseSlot();
   }
 });
@@ -260,19 +267,33 @@ async function processJobs() {
     const jobs = await fetchPendingJobs(currentUserId);
     for (const job of jobs) {
       console.log(`\n━━━━━ [발행 작업 시작] ${job.platform} · "${job.title}" ${(job as any).schedule_time?`· 예약 ${(job as any).schedule_time}`:"· 즉시"} ━━━━━`);
-      await updateJob(job.id, { status: "running" });
+      if (!await claimPendingJob(job.id)) continue;
 
+      let quotaReserved = false;
       await acquireSlot();
+      const p = job.payload || null;
+      const accountLock = job.platform === "naver" ? acquireAccountLock(String(p?.naverId || job.user_id), "예약 글 발행") : null;
       try {
+        if (accountLock && !accountLock.ok) {
+          await updateJob(job.id, { status: "pending", error: `계정 사용 중: ${accountLock.owner}` });
+          continue;
+        }
+        const entitlement = await checkPublishEntitlement(job.user_id);
+        if (!entitlement.ok) {
+          await updateJob(job.id, { status: "fail", error: entitlement.reason || "회원 정책 제한" });
+          await finishQueuedHistory({ user_id: job.user_id, platform: job.platform, title: job.title, status: "fail", error_message: entitlement.reason });
+          continue;
+        }
         const ok = await useQuota(job.user_id);
         if (!ok) {
           await updateJob(job.id, { status: "fail", error: "쿼터 초과" });
+          await finishQueuedHistory({ user_id: job.user_id, platform: job.platform, title: job.title, status: "fail", error_message: "쿼터 초과" });
           continue;
         }
+        quotaReserved = true;
 
         let postUrl = "";
         // ★ payload가 있으면(예약/큐 발행) 이미지 블록까지 그대로 발행. 없으면 옛 방식(텍스트만) 폴백.
-        const p = job.payload || null;
         // 예약시간이 미래면 네이버 예약발행으로, 이미 지났으면 즉시 발행.
         const sched = (job as any).schedule_time as string | undefined;
         const schedFuture = sched && new Date(sched).getTime() > Date.now() ? sched : undefined;
@@ -291,13 +312,16 @@ async function processJobs() {
         }
 
         await updateJob(job.id, { status: "success", result_url: postUrl });
-        await addHistory({ user_id: job.user_id, platform: job.platform, title: job.title, post_url: postUrl, status: "success" });
+        await incrementDailyPublish(job.user_id);
+        await finishQueuedHistory({ user_id: job.user_id, platform: job.platform, title: job.title, post_url: postUrl, status: "success" });
         console.log(`✅━━━ [발행 완료] "${job.title}" → ${postUrl} ━━━✅\n`);
       } catch (e: any) {
+        if (quotaReserved) await refundQuota(job.user_id);
         await updateJob(job.id, { status: "fail", error: e.message });
-        await addHistory({ user_id: job.user_id, platform: job.platform, title: job.title, status: "fail", error_message: e.message });
+        await finishQueuedHistory({ user_id: job.user_id, platform: job.platform, title: job.title, status: "fail", error_message: e.message });
         console.error(`❌━━━ [발행 실패] "${job.title}" — ${e.message} ━━━❌\n`);
       } finally {
+        if (accountLock?.ok) accountLock.release();
         releaseSlot();
       }
     }

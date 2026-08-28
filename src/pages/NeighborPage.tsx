@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { createPortal } from "react-dom";
 import { botFetch, BotEventStream } from "../lib/botApi";
-import { getReplyDailyUsage, incrementReplyQuota, REPLY_DAILY_LIMIT, getBlogscoreDailyUsage, incrementBlogscoreQuota, BLOGSCORE_DAILY_LIMIT, PUMASI_ACCOUNT_LIMIT, PUMASI_POSTS_LIMIT, TAB_ACCOUNT_LIMIT, getPumasiDailyUsage, savePostCareChecks, markPrescribed, markTitleChanged, getPostCare, computeCareStatus, PostCare, OBSERVE_DAYS, savePostViews, latestViews, reportError } from "../lib/supabase";
+import { getReplyDailyUsage, REPLY_DAILY_LIMIT, getBlogscoreDailyUsage, incrementBlogscoreQuota, BLOGSCORE_DAILY_LIMIT, PUMASI_ACCOUNT_LIMIT, PUMASI_POSTS_LIMIT, TAB_ACCOUNT_LIMIT, getPumasiDailyUsage, savePostCareChecks, markPrescribed, markTitleChanged, getPostCare, computeCareStatus, PostCare, OBSERVE_DAYS, savePostViews, latestViews, reportError } from "../lib/supabase";
 import UsageGuide from "../components/UsageGuide";
 
 const BOT = "http://127.0.0.1:3334";
@@ -1383,7 +1383,7 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
       if (d.type === "log") addRLog(d.msg);
       if (d.type === "result") {
         addRLog(`${d.status === "success" ? "✅" : d.status === "skip" ? "⏭️" : "❌"} ${d.postTitle || d.blogId || ""} ${d.message || ""}`);
-        if (d.status === "success" && userId) { incrementReplyQuota(userId).catch(() => {}); setReplyUsed(u => u + 1); }
+        if (d.status === "success" && userId) setReplyUsed(u => u + 1);
       }
       if (d.type === "progress") { setRDoneCnt(d.done); setRFailCnt(d.fail); }
       if (d.type === "done") { addRLog("🎉 답방 완료!"); setRWorking(false); es.close(); }

@@ -1,24 +1,25 @@
 {
   "name": "publy",
-  "version": "2.1.91",
+  "version": "2.1.92",
   "description": "Publy - 네이버/티스토리 자동발행 앱",
   "main": "dist-electron/main.js",
   "scripts": {
     "dev": "vite",
-    "build": "tsc --noEmit && vite build",
+    "build:web": "tsc --noEmit && vite build",
+    "build:bots": "npm --prefix naver-bot run build && npm --prefix neighbor-bot run build && npm --prefix insta-bot run build",
+    "build": "npm run build:web && npm run build:bots",
+    "test:safety": "npm run build:bots && node scripts/test-account-lock.mjs",
     "electron:dev": "concurrently \"vite\" \"wait-on http://localhost:5173 && electron .\" \"cd naver-bot && npm start\" \"cd neighbor-bot && npm start\" \"cd insta-bot && npm start\"",
-    "electron:build:win": "vite build && electron-builder --win",
-    "electron:build:mac": "vite build && electron-builder --mac",
+    "electron:build:win": "npm run build && electron-builder --win",
+    "electron:build:mac": "npm run build && electron-builder --mac",
     "preview": "vite preview"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.39.0",
-    "bcryptjs": "^2.4.3",
     "react": "^18.2.0",
     "react-dom": "^18.2.0"
   },
   "devDependencies": {
-    "@types/bcryptjs": "^2.4.6",
     "@types/node": "^20.12.5",
     "@types/react": "^18.2.66",
     "@types/react-dom": "^18.2.22",

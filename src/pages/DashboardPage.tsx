@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import GoogleFlowCard from "../GoogleFlowCard";
-import { PublyUser, getQuota, getHistory, getAccounts, PublyQuota, PublyHistory, PublyAccount, upsertAccount, useQuota, addHistory, getHistoryContent, deleteHistory, deleteAllHistory, deleteFailedHistory, changeUserPassword, getNaverApiKeys, saveNaverApiKeys, NaverApiKeys, checkNaverQuota, incrementNaverQuota, getNaverDailyUsage, NAVER_DAILY_LIMIT, getUserNaverApiKeys, logError, PLAN_CONFIG, checkDailyPublishQuota, incrementDailyPublish, getDailyPublishUsage, getNeighborDailyUsage, NEIGHBOR_DAILY_LIMIT, getEngageDailyUsage, ENGAGE_DAILY_LIMIT, InstaDmTarget, InstaDmHistory, InstaDmQuota, getInstaDmTargets, addInstaDmTarget, deleteInstaDmTarget, getInstaDmHistory, addInstaDmHistory, getInstaDmQuota, upsertInstaDmQuota, incrementInstaDmUsage, INSTA_DM_DAILY_LIMIT, getReplyDailyUsage, REPLY_DAILY_LIMIT } from "../lib/supabase";
+import { PublyUser, getQuota, getHistory, getAccounts, PublyQuota, PublyHistory, PublyAccount, upsertAccount, useQuota, refundQuota, addHistory, getHistoryContent, deleteHistory, deleteAllHistory, deleteFailedHistory, changeUserPassword, getNaverApiKeys, saveNaverApiKeys, NaverApiKeys, checkNaverQuota, incrementNaverQuota, getNaverDailyUsage, NAVER_DAILY_LIMIT, getUserNaverApiKeys, logError, PLAN_CONFIG, checkDailyPublishQuota, incrementDailyPublish, getDailyPublishUsage, getNeighborDailyUsage, NEIGHBOR_DAILY_LIMIT, getEngageDailyUsage, ENGAGE_DAILY_LIMIT, InstaDmTarget, InstaDmHistory, InstaDmQuota, getInstaDmTargets, addInstaDmTarget, deleteInstaDmTarget, getInstaDmHistory, addInstaDmHistory, getInstaDmQuota, upsertInstaDmQuota, incrementInstaDmUsage, INSTA_DM_DAILY_LIMIT, getReplyDailyUsage, REPLY_DAILY_LIMIT } from "../lib/supabase";
 import { supabase, submitBugReportRow, getMyResolvedBugAlerts, markBugNotified, PublyBugReport } from "../lib/supabase";
 import NeighborPage from "./NeighborPage";
 import CrawlCenter from "../components/CrawlCenter";
@@ -1868,7 +1868,11 @@ Output format (JSON array only, no other text):
   useEffect(()=>{
     let alive=true;
     const sync=()=>{
-      getQuota(user.id).then((q:PublyQuota|null)=>{ if(alive&&q) setQuota(q); });
+      getQuota(user.id).then((q:PublyQuota|null)=>{
+        if (!alive || !q) return;
+        setQuota(q);
+        setLocked((daysUntil(q.reset_date) ?? 0) <= 0);
+      });
       getDailyPublishUsage(user.id).then(u=>{ if(alive) setDailyPublishUsed(u); });
       // 서이추·공감·답방 게이지도 함께 갱신 → 관리자가 '건수 초기화'하면 회원 화면도 20초 내 0으로 반영
       getNeighborDailyUsage(user.id).then(u=>{ if(alive) setNeighborUsed(u); });
@@ -1896,8 +1900,8 @@ Output format (JSON array only, no other text):
       const now = new Date();
       const daysLeft = daysUntil(q.reset_date) ?? 0;
 
-      // 🔒 무료체험(7일) 만료 → 전체 잠금(무료 회원만). 결제 전까지 대시보드는 보이되 기능 사용 불가.
-      if (user.plan === "free" && daysLeft <= 0) setLocked(true);
+      // 🔒 모든 회원등급은 관리자가 설정한 이용기간을 동일하게 적용한다.
+      setLocked(daysLeft <= 0);
 
       // 만료 알림 (3일 이하 또는 만료됨)
       if (daysLeft <= 3) {
@@ -3202,10 +3206,16 @@ ${segList}`;
       }else{
         // PC 봇이 오프라인인 작업은 봇이 실제 처리할 때 한 번만 차감한다.
         const ok=await useQuota(user.id);if(!ok){showToast("❌ 발행 건수 초과","error");setPublishing(false);return;}
-        const r=await botFetch(`${BOT}/api/publish-full`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(publishBody)});
+        let r: Response;
+        try {
+          r=await botFetch(`${BOT}/api/publish-full`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(publishBody)});
+        } catch (error) {
+          await refundQuota(user.id);
+          throw error;
+        }
         const d=await r.json();
-        if(r.status===401){showToast("❌ 세션 만료 — 계정 관리 탭에서 재연결해주세요","error");setPublishing(false);return;}
-        if(!r.ok)throw new Error(d.error);
+        if(r.status===401){await refundQuota(user.id);showToast("❌ 세션 만료 — 계정 관리 탭에서 재연결해주세요","error");setPublishing(false);return;}
+        if(!r.ok){await refundQuota(user.id);throw new Error(d.error);}
         await addHistory({user_id:user.id,platform,title:effTitle,post_url:d.postUrl,status:"success",
           content:{title:effTitle,content,pubScope,tags,imageUrl:thumbnail||getActiveImages()[0]||undefined,categoryId:category||undefined,visibility,blocks:publishBody.blocks,platform}})
           .catch(async()=>{ await addHistory({user_id:user.id,platform,title:effTitle,post_url:d.postUrl,status:"success"}).catch(()=>{}); });

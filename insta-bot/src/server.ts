@@ -5,7 +5,7 @@ import {
   CrawlTarget, SendResult,
 } from "./instagram";
 import {
-  getUserPlan, checkInstaDmQuota, getInstaDmUsage, incrementInstaDmUsage,
+  getUserPlan, checkMembershipAccess, checkInstaDmQuota, getInstaDmUsage, incrementInstaDmUsage,
   addInstaDmHistory, updateInstaTargetStatus, INSTA_DM_DAILY_LIMIT,
 } from "./supabase";
 
@@ -130,7 +130,12 @@ app.get("/api/send", async (req, res) => {
     // 쿼타: 오늘 남은 한도만큼만 발송
     let dailyLimit = 9999;
     if (userId) {
-      const plan = await getUserPlan(userId);
+      const access = await checkMembershipAccess(userId);
+      if (!access.ok) {
+        sseSend(res, { type: "error", msg: access.reason || "회원 이용권을 확인해주세요", membershipBlocked: true });
+        return res.end();
+      }
+      const plan = access.plan;
       const quota = await checkInstaDmQuota(userId, plan);
       dailyLimit = quota.limit - quota.used;
       if (dailyLimit <= 0) {

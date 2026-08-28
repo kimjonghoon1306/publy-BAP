@@ -75,6 +75,17 @@ export async function updateJob(id: string, update: Partial<PublyJob>) {
   await supabase.from("publy_jobs").update(update).eq("id", id);
 }
 
+/** 여러 앱이 같은 대기 작업을 보더라도 한 프로세스만 running으로 선점한다. */
+export async function claimPendingJob(id: string): Promise<boolean> {
+  const { data, error } = await supabase
+    .from("publy_jobs")
+    .update({ status: "running" })
+    .eq("id", id)
+    .eq("status", "pending")
+    .select("id");
+  return !error && !!data?.length;
+}
+
 export async function addHistory(params: {
   user_id: string;
   platform: string;
@@ -87,6 +98,65 @@ export async function addHistory(params: {
     ...params,
     published_at: new Date().toISOString(),
   });
+}
+
+export async function finishQueuedHistory(params: {
+  user_id: string;
+  platform: string;
+  title: string;
+  post_url?: string;
+  status: "success" | "fail";
+  error_message?: string;
+}) {
+  const { data: pending } = await supabase
+    .from("publy_history")
+    .select("id")
+    .eq("user_id", params.user_id)
+    .eq("platform", params.platform)
+    .eq("title", params.title)
+    .eq("status", "pending")
+    .order("published_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (pending?.id) {
+    const { error } = await supabase.from("publy_history").update({
+      status: params.status,
+      post_url: params.post_url,
+      error_message: params.error_message,
+      published_at: new Date().toISOString(),
+    }).eq("id", pending.id);
+    if (!error) return;
+  }
+  await addHistory(params);
+}
+
+const koreaDateKey = () => new Intl.DateTimeFormat("en-CA", {
+  timeZone: "Asia/Seoul", year: "numeric", month: "2-digit", day: "2-digit",
+}).format(new Date());
+
+const PUBLISH_DAILY_LIMIT: Record<string, number> = {
+  free: 2, basic: 6, pro: 15, unlimited: 999999, admin: 9999,
+};
+
+export async function checkPublishEntitlement(userId: string): Promise<{ ok: boolean; reason?: string }> {
+  const [{ data: user }, { data: quota }] = await Promise.all([
+    supabase.from("publy_users").select("plan,is_active").eq("id", userId).maybeSingle(),
+    supabase.from("publy_quotas").select("reset_date").eq("user_id", userId).maybeSingle(),
+  ]);
+  if (!user || user.is_active === false) return { ok: false, reason: "비활성 회원" };
+  if (!quota?.reset_date || new Date(quota.reset_date).getTime() <= Date.now()) return { ok: false, reason: "이용기간 만료" };
+  const limit = PUBLISH_DAILY_LIMIT[user.plan] ?? PUBLISH_DAILY_LIMIT.free;
+  const key = `publish_daily_${userId}_${koreaDateKey()}`;
+  const { data: row } = await supabase.from("publy_settings").select("value").eq("key", key).maybeSingle();
+  const used = Number.parseInt(row?.value || "0", 10) || 0;
+  return used < limit ? { ok: true } : { ok: false, reason: `오늘 발행 한도(${limit}건) 초과` };
+}
+
+export async function incrementDailyPublish(userId: string): Promise<void> {
+  const key = `publish_daily_${userId}_${koreaDateKey()}`;
+  const { data } = await supabase.from("publy_settings").select("value").eq("key", key).maybeSingle();
+  const used = Number.parseInt(data?.value || "0", 10) || 0;
+  await supabase.from("publy_settings").upsert({ key, value: String(used + 1) }, { onConflict: "key" });
 }
 
 export async function useQuota(userId: string): Promise<boolean> {
@@ -105,4 +175,15 @@ export async function useQuota(userId: string): Promise<boolean> {
     .select("id");
 
   return !!(updated && updated.length > 0);
+}
+
+export async function refundQuota(userId: string): Promise<void> {
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const { data } = await supabase.from("publy_quotas").select("used_quota").eq("user_id", userId).maybeSingle();
+    const used = data?.used_quota || 0;
+    if (used <= 0) return;
+    const { data: updated, error } = await supabase.from("publy_quotas")
+      .update({ used_quota: used - 1 }).eq("user_id", userId).eq("used_quota", used).select("id");
+    if (!error && updated?.length) return;
+  }
 }

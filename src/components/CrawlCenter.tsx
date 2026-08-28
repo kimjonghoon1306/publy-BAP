@@ -362,6 +362,9 @@ export default function CrawlCenter({ showToast, theme: extTheme, userId, plan =
           return {
             id: r.blogId, nick: r.nickName || r.blogName || r.blogId, url: `blog.naver.com/${r.blogId}`,
             topic, thumbnail: r.thumbnail || undefined,
+            email: r.email || undefined, kakao: r.kakao || undefined,
+            openchat: r.openchat || undefined, instagram: r.instagram || undefined,
+            youtube: r.youtube || undefined,
             neighbors, postsPerWeek, visitors: 0, score: 0,
             keywords: r.keyword ? [String(r.keyword)] : [], categories: [],
             lastActive, engageRate, authenticity: undefined,

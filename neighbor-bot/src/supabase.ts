@@ -11,6 +11,10 @@ const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZ
 
 export const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
+export const koreaDateKey = () => new Intl.DateTimeFormat("en-CA", {
+  timeZone: "Asia/Seoul", year: "numeric", month: "2-digit", day: "2-digit",
+}).format(new Date());
+
 /* ── 등급별 서이추 일일 한도 (프론트 src/lib/supabase.ts와 동일하게 유지!) ── */
 //  ★unlimited 누락 주의: 이 키가 없으면 무제한 회원이 free(10)로 폴백돼 "오늘 한도(10명) 모두 사용"으로 막힌다(실측 버그).
 export const NEIGHBOR_DAILY_LIMIT: Record<string, number> = {
@@ -20,9 +24,11 @@ export const NEIGHBOR_DAILY_LIMIT: Record<string, number> = {
   unlimited: 999999,
   admin: 9999,
 };
+export const ENGAGE_DAILY_LIMIT: Record<string, number> = { ...NEIGHBOR_DAILY_LIMIT };
+export const REPLY_DAILY_LIMIT: Record<string, number> = { ...NEIGHBOR_DAILY_LIMIT };
 
 function neighborQuotaKey(userId: string): string {
-  const today = new Date().toISOString().slice(0, 10);
+  const today = koreaDateKey();
   return `neighbor_daily_${userId}_${today}`;
 }
 
@@ -105,6 +111,22 @@ export async function checkNeighborQuota(userId: string, plan: string): Promise<
   return { ok: used < limit, used, limit };
 }
 
+export async function checkMembershipAccess(userId: string): Promise<{ ok: boolean; plan: string; reason?: string }> {
+  if (userId === "admin-publy") return { ok: true, plan: "admin" };
+  try {
+    const [{ data: user }, { data: quota }] = await Promise.all([
+      supabase.from("publy_users").select("plan,is_active").eq("id", userId).maybeSingle(),
+      supabase.from("publy_quotas").select("reset_date").eq("user_id", userId).maybeSingle(),
+    ]);
+    const plan = user?.plan || "free";
+    if (!user || user.is_active === false) return { ok: false, plan, reason: "비활성 회원" };
+    if (!quota?.reset_date || new Date(quota.reset_date).getTime() <= Date.now()) return { ok: false, plan, reason: "이용기간 만료" };
+    return { ok: true, plan };
+  } catch {
+    return { ok: false, plan: "free", reason: "회원정보 확인 실패" };
+  }
+}
+
 /* ── 쿼타 증가 (신청 성공 시) ── */
 export async function incrementNeighborQuota(userId: string): Promise<void> {
   const key = neighborQuotaKey(userId);
@@ -116,7 +138,7 @@ export async function incrementNeighborQuota(userId: string): Promise<void> {
 
 /* ── 공감·댓글 일일 한도(서이추와 동일 등급 한도) + 사용량/증가 ── */
 function engageQuotaKey(userId: string): string {
-  const today = new Date().toISOString().slice(0, 10);
+  const today = koreaDateKey();
   return `engage_daily_${userId}_${today}`;
 }
 export async function getEngageDailyUsage(userId: string): Promise<number> {
@@ -131,9 +153,22 @@ export async function incrementEngageQuota(userId: string): Promise<void> {
   await supabase.from("publy_settings").upsert({ key, value: String(used + 1) }, { onConflict: "key" });
 }
 
+function replyQuotaKey(userId: string): string {
+  return `reply_daily_${userId}_${koreaDateKey()}`;
+}
+export async function getReplyDailyUsage(userId: string): Promise<number> {
+  const { data } = await supabase.from("publy_settings").select("value").eq("key", replyQuotaKey(userId)).maybeSingle();
+  return Number.parseInt(data?.value || "0", 10) || 0;
+}
+export async function incrementReplyQuota(userId: string): Promise<void> {
+  const key = replyQuotaKey(userId);
+  const used = await getReplyDailyUsage(userId);
+  await supabase.from("publy_settings").upsert({ key, value: String(used + 1) }, { onConflict: "key" });
+}
+
 // 품앗이 하루 사용량(공감·댓글 총건수) — 자정 자동 리셋
 function pumasiQuotaKey(userId: string): string {
-  const today = new Date().toISOString().slice(0, 10);
+  const today = koreaDateKey();
   return `pumasi_daily_${userId}_${today}`;
 }
 export async function getPumasiDailyUsage(userId: string): Promise<number> {
@@ -153,7 +188,7 @@ export const TITLE_EDIT_DAILY_LIMIT: Record<string, number> = {
   free: 3, basic: 10, pro: 30, unlimited: 999999, admin: 999999,
 };
 function titleEditQuotaKey(userId: string): string {
-  const today = new Date().toISOString().slice(0, 10);
+  const today = koreaDateKey();
   return `titleedit_daily_${userId}_${today}`;
 }
 export async function getTitleEditDailyUsage(userId: string): Promise<number> {
@@ -170,14 +205,7 @@ export async function incrementTitleEditQuota(userId: string): Promise<void> {
 
 /* ── 회원 플랜 조회 ── */
 export async function getUserPlan(userId: string): Promise<string> {
-  try {
-    const { data } = await supabase
-      .from("publy_users")
-      .select("plan")
-      .eq("id", userId)
-      .maybeSingle();
-    return data?.plan || "free";
-  } catch { return "free"; }
+  return (await checkMembershipAccess(userId)).plan;
 }
 
 /* ── 관리자 블로그 검색 API 키 조회 ── */

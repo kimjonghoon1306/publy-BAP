@@ -44,6 +44,7 @@ const path_1 = __importDefault(require("path"));
 const naver_1 = require("./naver");
 const tistory_1 = require("./tistory");
 const supabase_1 = require("./supabase");
+const account_lock_1 = require("./account-lock");
 /* ── 봇 자체 로그 파일 (버그 신고용) ──
    메인 프로세스가 아니라 "봇 프로세스가 자기 로그를 직접" 쓴다. 봇은 별도 프로세스라
    파일 I/O로 잠깐 바빠도 앱 화면(메인/렌더러)은 절대 안 멈춘다.
@@ -213,6 +214,11 @@ app.post("/api/publish-full", async (req, res) => {
         return res.status(400).json({ error: "userId, platform, title, content 필요" });
     }
     await acquireSlot();
+    const accountLock = platform === "naver" ? (0, account_lock_1.acquireAccountLock)(String(naverId || userId), "글 발행") : null;
+    if (accountLock && !accountLock.ok) {
+        releaseSlot();
+        return res.status(409).json({ error: `같은 네이버 계정에서 '${accountLock.owner}' 작업이 진행 중이에요. 완료 후 다시 시도해주세요.`, code: "ACCOUNT_BUSY" });
+    }
     try {
         let finalBlocks = blocks || [];
         // ── Flow 이미지 생성 ──
@@ -295,6 +301,8 @@ app.post("/api/publish-full", async (req, res) => {
         res.status(500).json({ error: e.message });
     }
     finally {
+        if (accountLock?.ok)
+            accountLock.release();
         releaseSlot();
     }
 });
@@ -313,17 +321,32 @@ async function processJobs() {
         const jobs = await (0, supabase_1.fetchPendingJobs)(currentUserId);
         for (const job of jobs) {
             console.log(`\n━━━━━ [발행 작업 시작] ${job.platform} · "${job.title}" ${job.schedule_time ? `· 예약 ${job.schedule_time}` : "· 즉시"} ━━━━━`);
-            await (0, supabase_1.updateJob)(job.id, { status: "running" });
+            if (!await (0, supabase_1.claimPendingJob)(job.id))
+                continue;
+            let quotaReserved = false;
             await acquireSlot();
+            const p = job.payload || null;
+            const accountLock = job.platform === "naver" ? (0, account_lock_1.acquireAccountLock)(String(p?.naverId || job.user_id), "예약 글 발행") : null;
             try {
+                if (accountLock && !accountLock.ok) {
+                    await (0, supabase_1.updateJob)(job.id, { status: "pending", error: `계정 사용 중: ${accountLock.owner}` });
+                    continue;
+                }
+                const entitlement = await (0, supabase_1.checkPublishEntitlement)(job.user_id);
+                if (!entitlement.ok) {
+                    await (0, supabase_1.updateJob)(job.id, { status: "fail", error: entitlement.reason || "회원 정책 제한" });
+                    await (0, supabase_1.finishQueuedHistory)({ user_id: job.user_id, platform: job.platform, title: job.title, status: "fail", error_message: entitlement.reason });
+                    continue;
+                }
                 const ok = await (0, supabase_1.useQuota)(job.user_id);
                 if (!ok) {
                     await (0, supabase_1.updateJob)(job.id, { status: "fail", error: "쿼터 초과" });
+                    await (0, supabase_1.finishQueuedHistory)({ user_id: job.user_id, platform: job.platform, title: job.title, status: "fail", error_message: "쿼터 초과" });
                     continue;
                 }
+                quotaReserved = true;
                 let postUrl = "";
                 // ★ payload가 있으면(예약/큐 발행) 이미지 블록까지 그대로 발행. 없으면 옛 방식(텍스트만) 폴백.
-                const p = job.payload || null;
                 // 예약시간이 미래면 네이버 예약발행으로, 이미 지났으면 즉시 발행.
                 const sched = job.schedule_time;
                 const schedFuture = sched && new Date(sched).getTime() > Date.now() ? sched : undefined;
@@ -343,15 +366,20 @@ async function processJobs() {
                         : await (0, tistory_1.publishTistory)({ userId: job.user_id, title: job.title, content: job.content, tags: job.tags, categoryId: job.category_id, visibility: job.visibility });
                 }
                 await (0, supabase_1.updateJob)(job.id, { status: "success", result_url: postUrl });
-                await (0, supabase_1.addHistory)({ user_id: job.user_id, platform: job.platform, title: job.title, post_url: postUrl, status: "success" });
+                await (0, supabase_1.incrementDailyPublish)(job.user_id);
+                await (0, supabase_1.finishQueuedHistory)({ user_id: job.user_id, platform: job.platform, title: job.title, post_url: postUrl, status: "success" });
                 console.log(`✅━━━ [발행 완료] "${job.title}" → ${postUrl} ━━━✅\n`);
             }
             catch (e) {
+                if (quotaReserved)
+                    await (0, supabase_1.refundQuota)(job.user_id);
                 await (0, supabase_1.updateJob)(job.id, { status: "fail", error: e.message });
-                await (0, supabase_1.addHistory)({ user_id: job.user_id, platform: job.platform, title: job.title, status: "fail", error_message: e.message });
+                await (0, supabase_1.finishQueuedHistory)({ user_id: job.user_id, platform: job.platform, title: job.title, status: "fail", error_message: e.message });
                 console.error(`❌━━━ [발행 실패] "${job.title}" — ${e.message} ━━━❌\n`);
             }
             finally {
+                if (accountLock?.ok)
+                    accountLock.release();
                 releaseSlot();
             }
         }

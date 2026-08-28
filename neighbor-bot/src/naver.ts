@@ -4091,8 +4091,8 @@ export async function engageBlogs(params: {
         // iframe 처리 (네이버 블로그는 mainFrame 안에 있음)
         const getFrame = () => {
           const frames = page.frames();
-          return frames.find(f => f.name() === "mainFrame")
-            ?? frames.find(f => f.url().includes("blog.naver.com"))
+          return frames.find((f: any) => f.name() === "mainFrame")
+            ?? frames.find((f: any) => f.url().includes("blog.naver.com"))
             ?? null;
         };
         let frame = getFrame();
@@ -4285,7 +4285,7 @@ export async function engageBlogs(params: {
             let commentDone = false;
 
             // 댓글은 보통 mainFrame(ctx) 안에 있음. iframe도 대비.
-            const commentFrame = page.frames().find(f =>
+            const commentFrame = page.frames().find((f: any) =>
               f.url().includes("comment") || f.name().includes("comment")
             );
             const commentCtx = commentFrame ?? ctx;

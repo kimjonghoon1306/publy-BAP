@@ -1,6 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
-import bcrypt from "bcryptjs";
 import { botFetch } from "./botApi";
+import { koreaDateKey } from "./date";
 
 const SUPABASE_URL = "https://qhhoyxexxlimbjrbwrgq.supabase.co";
 const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFoaG95eGV4eGxpbWJqcmJ3cmdxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzczMTMzOTQsImV4cCI6MjA5Mjg4OTM5NH0.pw_qUR0oOxgt82S_DA6GTka3WP0JBu2vmWuKZ9VvTKM";
@@ -61,48 +61,41 @@ export interface PublyHistory {
 }
 
 // ── 인증 ─────────────────────────────────────────────────
+const MEMBER_SESSION_KEY = "publy_session_token";
+const ADMIN_SESSION_KEY = "publy_admin_token";
+
+export function getMemberSessionToken(): string {
+  return localStorage.getItem(MEMBER_SESSION_KEY) || "";
+}
+
 export async function signUp(email: string, password: string, name: string, phone?: string, referredBy?: string) {
-  const hash = await bcrypt.hash(password, 10);
-  const insertData: any = { email, password_hash: hash, name };
-  if (phone) insertData.phone = phone;
-  if (referredBy) insertData.referred_by = referredBy;
-
-  const { data: user, error } = await supabase
-    .from("publy_users")
-    .insert(insertData)
-    .select()
-    .single();
-
-  if (error) throw new Error(error.message);
-
-  // 기본 쿼터 생성 (FREE 7일 체험)
-  const trialEnd = new Date();
-  trialEnd.setDate(trialEnd.getDate() + PLAN_CONFIG.free.trialDays);
-  await supabase.from("publy_quotas").insert({
-    user_id: user.id,
-    total_quota: PLAN_CONFIG.free.dailyPublish,
-    used_quota: 0,
-    reset_date: trialEnd.toISOString(),
+  const { data, error } = await supabase.rpc("publy_signup", {
+    p_email: email, p_password: password, p_name: name, p_phone: phone || null,
   });
-
-  return user;
+  if (error || !data?.token || !data?.user) {
+    if (error?.message?.includes("EMAIL_EXISTS")) throw new Error("이미 가입된 이메일입니다");
+    if (error?.message?.includes("WEAK_PASSWORD")) throw new Error("비밀번호는 8자 이상이어야 합니다");
+    throw new Error(error?.message || "회원가입에 실패했습니다");
+  }
+  localStorage.setItem(MEMBER_SESSION_KEY, data.token);
+  // 추천인 컬럼이 없는 기존 운영 스키마에서는 가입 자체를 막지 않고 추후 추천 테이블로 처리한다.
+  void referredBy;
+  return data.user as PublyUser;
 }
 
 export async function signIn(email: string, password: string) {
+  const { data, error } = await supabase.rpc("publy_login", { p_email: email, p_password: password });
+  if (error || !data?.token || !data?.user) throw new Error("이메일 또는 비밀번호가 올바르지 않습니다");
+  localStorage.setItem(MEMBER_SESSION_KEY, data.token);
+  return data.user as PublyUser;
+}
 
-  const { data: user } = await supabase
-    .from("publy_users")
-    .select("*")
-    .eq("email", email)
-    .eq("is_active", true)
-    .maybeSingle();
-
-  if (!user) throw new Error("이메일 또는 비밀번호가 올바르지 않습니다");
-
-  const match = await bcrypt.compare(password, user.password_hash);
-  if (!match) throw new Error("이메일 또는 비밀번호가 올바르지 않습니다");
-
-  return user as PublyUser;
+export async function logoutServerSession(): Promise<void> {
+  const token = getMemberSessionToken();
+  localStorage.removeItem(MEMBER_SESSION_KEY);
+  if (token) {
+    try { await supabase.rpc("publy_logout", { p_token: token }); } catch {}
+  }
 }
 
 // 마지막 접속 시각 기록(앱 켜짐/사용 중). 관리자가 "누가 언제 마지막에 썼는지" 확인용.
@@ -113,6 +106,12 @@ export async function touchLastSeen(userId: string): Promise<void> {
 
 // 최신 회원정보(등급/활성 등)를 id로 다시 읽는다. 관리자가 등급을 바꾸면 회원 앱이 실시간으로 반영하기 위함.
 export async function refreshUserById(userId: string): Promise<PublyUser | null> {
+  const token = getMemberSessionToken();
+  if (token) {
+    const { data, error } = await supabase.rpc("publy_session_get", { p_token: token });
+    if (error || !data?.user || data.user.id !== userId) return null;
+    return data.user as PublyUser;
+  }
   const { data } = await supabase
     .from("publy_users")
     .select("*")
@@ -140,12 +139,29 @@ export async function useQuota(userId: string): Promise<boolean> {
   const quota = await getQuota(userId);
   if (!quota || quota.remaining_quota <= 0) return false;
 
-  await supabase
+  const { data: updated, error } = await supabase
     .from("publy_quotas")
     .update({ used_quota: quota.used_quota + 1 })
-    .eq("user_id", userId);
+    .eq("user_id", userId)
+    .eq("used_quota", quota.used_quota)
+    .select("id");
 
-  return true;
+  return !error && !!updated?.length;
+}
+
+/** 발행이 실제로 실패했을 때만 호출한다. */
+export async function refundQuota(userId: string): Promise<void> {
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const quota = await getQuota(userId);
+    if (!quota || quota.used_quota <= 0) return;
+    const { data, error } = await supabase
+      .from("publy_quotas")
+      .update({ used_quota: quota.used_quota - 1 })
+      .eq("user_id", userId)
+      .eq("used_quota", quota.used_quota)
+      .select("id");
+    if (!error && data?.length) return;
+  }
 }
 
 // ── 히스토리 ─────────────────────────────────────────────
@@ -252,40 +268,38 @@ export async function upsertAccount(account: Partial<PublyAccount> & { password_
 
 // ── 관리자 비밀번호 (publy_settings 테이블) ──────────────
 export async function verifyAdminPassword(pw: string): Promise<boolean> {
-  const { data, error } = await supabase
-      .from("publy_settings")
-      .select("value")
-      .eq("key", "admin_pw_hash")
-      .maybeSingle();
-  if (error) throw new Error("관리자 인증 설정을 확인할 수 없습니다");
-  if (!data?.value) throw new Error("초기 비밀번호 설정 필요");
-  return await bcrypt.compare(pw, data.value);
+  const { data, error } = await supabase.rpc("publy_admin_login", { p_password: pw });
+  if (error || !data) return false;
+  sessionStorage.setItem(ADMIN_SESSION_KEY, data);
+  return true;
+}
+
+export async function verifyAdminSession(): Promise<boolean> {
+  const token = sessionStorage.getItem(ADMIN_SESSION_KEY) || "";
+  if (!token) return false;
+  const { data, error } = await supabase.rpc("publy_admin_session_get", { p_token: token });
+  return !error && data === true;
+}
+
+export function clearAdminSession(): void {
+  sessionStorage.removeItem(ADMIN_SESSION_KEY);
 }
 
 export async function setAdminPassword(newPw: string): Promise<void> {
-  const hash = await bcrypt.hash(newPw, 10);
-  const { error } = await supabase
-    .from("publy_settings")
-    .upsert({ key: "admin_pw_hash", value: hash }, { onConflict: "key" });
+  const token = sessionStorage.getItem(ADMIN_SESSION_KEY) || "";
+  const { error } = await supabase.rpc("publy_admin_change_password", { p_token: token, p_new_password: newPw });
   if (error) throw new Error(error.message);
+  clearAdminSession();
   localStorage.removeItem("publy_admin_pw");
 }
 
 // ── 일반 회원 비밀번호 변경 ───────────────────────────────
 export async function changeUserPassword(userId: string, currentPw: string, newPw: string): Promise<void> {
-  const { data: user } = await supabase
-    .from("publy_users")
-    .select("password_hash")
-    .eq("id", userId)
-    .maybeSingle();
-  if (!user) throw new Error("사용자를 찾을 수 없습니다");
-  const match = await bcrypt.compare(currentPw, user.password_hash);
-  if (!match) throw new Error("현재 비밀번호가 올바르지 않습니다");
-  const newHash = await bcrypt.hash(newPw, 10);
-  const { error } = await supabase
-    .from("publy_users")
-    .update({ password_hash: newHash })
-    .eq("id", userId);
+  void userId;
+  const { error } = await supabase.rpc("publy_change_password", {
+    p_token: getMemberSessionToken(), p_current_password: currentPw, p_new_password: newPw,
+  });
+  if (error?.message?.includes("INVALID_CURRENT_PASSWORD")) throw new Error("현재 비밀번호가 올바르지 않습니다");
   if (error) throw new Error(error.message);
 }
 
@@ -349,7 +363,7 @@ export const PLAN_CONFIG: Record<string, {
 };
 
 function publishQuotaKey(userId: string): string {
-  const today = new Date().toISOString().slice(0, 10);
+  const today = koreaDateKey();
   return `publish_daily_${userId}_${today}`;
 }
 
@@ -397,6 +411,7 @@ export async function resetDailyPublish(userId: string): Promise<void> {
 
 export const NAVER_DAILY_LIMIT: Record<string, number> = {
   free: 5,
+  basic: 10,
   pro: 20,
   business: 100,
   unlimited: 999999,
@@ -465,7 +480,7 @@ export const ENGAGE_DAILY_LIMIT: Record<string, number> = {
 };
 
 function engageQuotaKey(userId: string): string {
-  const today = new Date().toISOString().slice(0, 10);
+  const today = koreaDateKey();
   return `engage_daily_${userId}_${today}`;
 }
 
@@ -474,7 +489,7 @@ export const REPLY_DAILY_LIMIT: Record<string, number> = {
   free: 10, basic: 50, pro: 100, unlimited: 999999, admin: 9999,
 };
 function replyQuotaKey(userId: string): string {
-  return `reply_daily_${userId}_${new Date().toISOString().slice(0, 10)}`;
+  return `reply_daily_${userId}_${koreaDateKey()}`;
 }
 export async function getReplyDailyUsage(userId: string): Promise<number> {
   try {
@@ -493,7 +508,7 @@ export const CRAWL_DAILY_LIMIT: Record<string, number> = {
   free: PLAN_CONFIG.free.dailyCrawl, basic: PLAN_CONFIG.basic.dailyCrawl, pro: PLAN_CONFIG.pro.dailyCrawl, unlimited: PLAN_CONFIG.unlimited.dailyCrawl, admin: PLAN_CONFIG.admin.dailyCrawl,
 };
 function crawlQuotaKey(userId: string): string {
-  return `crawl_daily_${userId}_${new Date().toISOString().slice(0, 10)}`;
+  return `crawl_daily_${userId}_${koreaDateKey()}`;
 }
 export async function getCrawlDailyUsage(userId: string): Promise<number> {
   try {
@@ -521,7 +536,7 @@ export const PLACE_BLOGGER_LIMIT: Record<string, number> = {
   free: 5, basic: 15, pro: 30, unlimited: 999999, admin: 999999,
 };
 function emailQuotaKey(userId: string): string {
-  return `email_daily_${userId}_${new Date().toISOString().slice(0, 10)}`;
+  return `email_daily_${userId}_${koreaDateKey()}`;
 }
 export async function getEmailDailyUsage(userId: string): Promise<number> {
   try {
@@ -540,7 +555,7 @@ export const BLOGSCORE_DAILY_LIMIT: Record<string, number> = {
   free: 1, basic: 5, pro: 20, unlimited: 999999, admin: 9999,
 };
 function blogscoreQuotaKey(userId: string): string {
-  return `blogscore_daily_${userId}_${new Date().toISOString().slice(0, 10)}`;
+  return `blogscore_daily_${userId}_${koreaDateKey()}`;
 }
 export async function getBlogscoreDailyUsage(userId: string): Promise<number> {
   try {
@@ -569,7 +584,7 @@ export const TAB_ACCOUNT_LIMIT: Record<string, number> = {
 };
 // 하루 품앗이로 남긴 공감·댓글 총 건수(사용량 게이지용) — 자정 자동 리셋
 function pumasiQuotaKey(userId: string): string {
-  return `pumasi_daily_${userId}_${new Date().toISOString().slice(0, 10)}`;
+  return `pumasi_daily_${userId}_${koreaDateKey()}`;
 }
 export async function getPumasiDailyUsage(userId: string): Promise<number> {
   try {
@@ -587,7 +602,7 @@ export async function incrementPumasiQuota(userId: string, by = 1): Promise<void
 //    모든 사용량이 publy_settings의 `{기능}_daily_{userId}_{날짜}` 키로 저장되므로 오늘 날짜로 끝나는 키를 통째로 조회해 집계.
 export interface DailyUsageRow { userId: string; publish: number; neighbor: number; engage: number; reply: number; blogscore: number; total: number; }
 export async function getAllDailyUsageToday(): Promise<DailyUsageRow[]> {
-  const today = new Date().toISOString().slice(0, 10);
+  const today = koreaDateKey();
   const map: Record<string, DailyUsageRow> = {};
   const ensure = (uid: string) => (map[uid] ||= { userId: uid, publish: 0, neighbor: 0, engage: 0, reply: 0, blogscore: 0, total: 0 });
   try {
@@ -631,12 +646,12 @@ export async function incrementEngageQuota(userId: string): Promise<void> {
 }
 
 function naverQuotaKey(userId: string): string {
-  const today = new Date().toISOString().slice(0, 10);
+  const today = koreaDateKey();
   return `naver_daily_${userId}_${today}`;
 }
 
 function neighborQuotaKey(userId: string): string {
-  const today = new Date().toISOString().slice(0, 10);
+  const today = koreaDateKey();
   return `neighbor_daily_${userId}_${today}`;
 }
 
@@ -706,20 +721,13 @@ export async function findEmailByNamePhone(name: string, phone: string): Promise
 }
 
 // ── 임시 비밀번호 발급 ────────────────────────────────────
-export async function resetPasswordTemp(email: string): Promise<string> {
-  const { data: user } = await supabase
-    .from("publy_users")
-    .select("id")
-    .eq("email", email.trim())
-    .maybeSingle();
-  if (!user) throw new Error("가입된 이메일이 없습니다");
-  // 임시 비번: 영문+숫자 8자
-  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789";
-  const tempPw = Array.from({length: 8}, () => chars[Math.floor(Math.random() * chars.length)]).join("");
-  const hash = await bcrypt.hash(tempPw, 10);
-  const { error } = await supabase.from("publy_users").update({ password_hash: hash }).eq("id", user.id);
-  if (error) throw new Error(error.message);
-  return tempPw;
+export async function resetPasswordTemp(email: string, name: string, phone: string): Promise<string> {
+  const { data, error } = await supabase.rpc("publy_recover_password", {
+    p_email: email.trim(), p_name: name.trim(), p_phone: phone.trim(),
+  });
+  if (error?.message?.includes("TRY_LATER")) throw new Error("시도가 너무 많습니다. 15분 후 다시 시도해주세요");
+  if (error || !data) throw new Error("입력한 회원 정보가 일치하지 않습니다");
+  return data as string;
 }
 
 // ── 회원 개인키만 조회 (관리자 폴백 없음, UI 표시용) ──────
@@ -985,7 +993,7 @@ export async function getAllInstaDmHistory(): Promise<(InstaDmHistory & { user_n
 
 export async function getInstaDmQuota(userId: string): Promise<InstaDmQuota | null> {
   try {
-    const today = new Date().toISOString().slice(0, 10);
+    const today = koreaDateKey();
     const { data } = await supabase
       .from("insta_dm_quota")
       .select("*")
@@ -1002,7 +1010,7 @@ export async function getInstaDmQuota(userId: string): Promise<InstaDmQuota | nu
 
 export async function upsertInstaDmQuota(userId: string, params: Partial<InstaDmQuota>) {
   try {
-    const today = new Date().toISOString().slice(0, 10);
+    const today = koreaDateKey();
     await supabase.from("insta_dm_quota").upsert([{ user_id: userId, reset_date: today, ...params }], { onConflict: "user_id" });
   } catch {}
 }
@@ -1240,7 +1248,7 @@ export async function savePostCareChecks(
   account: string,
   checks: { logNo?: string; title: string; rank: number | null; exposed: boolean | null; date?: string }[],
 ): Promise<{ newlyCured: PostCare[] }> {
-  const today = new Date().toISOString().slice(0, 10);
+  const today = koreaDateKey();
   const items = checks.filter(c => c.logNo);   // 번호 있는 글만(제목만으론 식별 불안정)
   if (!items.length) return { newlyCured: [] };
   const keys = items.map(c => c.logNo!) as string[];
@@ -1281,7 +1289,7 @@ export async function savePostViews(
   userId: string, account: string,
   views: { logNo?: string | null; views: number }[],
 ): Promise<void> {
-  const today = new Date().toISOString().slice(0, 10);
+  const today = koreaDateKey();
   const items = views.filter(v => v.logNo);
   if (!items.length) return;
   const keys = items.map(v => v.logNo!) as string[];

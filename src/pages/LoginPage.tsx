@@ -415,10 +415,10 @@ export default function LoginPage({ onLogin, onAdminLogin, theme, onThemeToggle 
   }
 
   async function handleResetPw() {
-    if(!findEmail.trim()){setFindError("이메일을 입력하세요");return;}
+    if(!findEmail.trim()||!findName.trim()||!findPhone.trim()){setFindError("이메일·이름·연락처를 모두 입력하세요");return;}
     setFindLoading(true); setFindResult(""); setFindError("");
     try {
-      const tempPw = await resetPasswordTemp(findEmail);
+      const tempPw = await resetPasswordTemp(findEmail, findName, findPhone);
       setFindResult(`임시 비밀번호: ${tempPw}\n\n로그인 후 설정탭에서 꼭 변경해주세요!`);
     } catch(e:any) { setFindError(e.message); }
     finally { setFindLoading(false); }
@@ -667,13 +667,21 @@ export default function LoginPage({ onLogin, onAdminLogin, theme, onThemeToggle 
                 <div style={{padding:"10px 14px",borderRadius:10,fontSize:12,lineHeight:1.7,marginBottom:16,
                   background:theme==="dark"?"rgba(255,255,255,.04)":"rgba(0,0,0,.04)",
                   color:theme==="dark"?"rgba(255,255,255,.5)":"rgba(0,0,0,.5)"}}>
-                  📌 가입한 이메일 주소를 입력하면<br/>
+                  📌 가입한 이메일·이름·연락처가 모두 일치하면<br/>
                   <b>임시 비밀번호</b>를 발급해 드려요<br/>
                   로그인 후 설정탭에서 꼭 변경해주세요!
                 </div>
                 <div className="field">
                   <div className="field-label">✉️ 가입한 이메일</div>
                   <input className="field-input" type="email" placeholder="email@example.com" value={findEmail} onChange={e=>setFindEmail(e.target.value)} onKeyDown={e=>e.key==="Enter"&&handleResetPw()}/>
+                </div>
+                <div className="field">
+                  <div className="field-label">👤 가입자 이름</div>
+                  <input className="field-input" placeholder="이름" value={findName} onChange={e=>setFindName(e.target.value)}/>
+                </div>
+                <div className="field">
+                  <div className="field-label">📱 가입한 연락처</div>
+                  <input className="field-input" inputMode="tel" placeholder="010-1234-5678" value={findPhone} onChange={e=>setFindPhone(e.target.value)} onKeyDown={e=>e.key==="Enter"&&handleResetPw()}/>
                 </div>
                 <button className="submit-btn" onClick={handleResetPw} disabled={findLoading}>
                   {findLoading&&<span className="btn-spin"/>}🔑 임시 비밀번호 발급

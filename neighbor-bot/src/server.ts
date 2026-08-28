@@ -1,9 +1,10 @@
 import express from "express";
 import cors from "cors";
 import { saveSession, sessionExists, removeSession, crawlBlogIds, crawlBuddyPosts, analyzeBuddyKeywords, addNeighbors, NeighborResult, donePath, engageBlogs, EngageResult, engageDonePath, crawlMyPosts, replyToComments, crawlBlogStats, checkSelectedBlogExposure, pumasiEngage, crawlPumasiReport, pumasiPreview, updatePostTitle, checkProxy, analyzeBlogAuthenticity, fetchPostBody, crawlPostViews, sendWebmail, sendBlogComments, crawlPlaces, crawlPlaceBloggers } from "./naver";
-import { checkNeighborQuota, incrementNeighborQuota, getNeighborDailyUsage, incrementEngageQuota, getEngageDailyUsage, getUserPlan, NEIGHBOR_DAILY_LIMIT, addNeighborHistory, addReplyHistory, addBlogscoreHistory, incrementPumasiQuota, TITLE_EDIT_DAILY_LIMIT, getTitleEditDailyUsage, incrementTitleEditQuota, getProxyForAccount, supabase, getOutreachSender, getOutreachSentToday, addOutreachLog } from "./supabase";
+import { checkNeighborQuota, incrementNeighborQuota, getNeighborDailyUsage, incrementEngageQuota, getEngageDailyUsage, getUserPlan, checkMembershipAccess, NEIGHBOR_DAILY_LIMIT, ENGAGE_DAILY_LIMIT, REPLY_DAILY_LIMIT, getReplyDailyUsage, incrementReplyQuota, addNeighborHistory, addReplyHistory, addBlogscoreHistory, incrementPumasiQuota, TITLE_EDIT_DAILY_LIMIT, getTitleEditDailyUsage, incrementTitleEditQuota, getProxyForAccount, supabase, getOutreachSender, getOutreachSentToday, addOutreachLog } from "./supabase";
 import nodemailer from "nodemailer";
 import fs from "fs";
+import { acquireAccountLock } from "./account-lock";
 
 const app = express();
 const PORT = 3334;
@@ -83,24 +84,50 @@ function sseSend(res: express.Response, data: object) {
   res.write(`data: ${JSON.stringify(data)}\n\n`);
 }
 
+async function ensureActiveMember(userId: string | undefined, res: express.Response): Promise<boolean> {
+  if (!userId) return true;
+  const access = await checkMembershipAccess(userId);
+  if (access.ok) return true;
+  sseSend(res, { type: "error", msg: access.reason || "회원 이용권을 확인해주세요", membershipBlocked: true });
+  res.end();
+  return false;
+}
+
+function acquireAccountsOrReport(accountIds: string[], owner: string, res: express.Response): (() => void) | null {
+  const releases: Array<() => void> = [];
+  for (const accountId of [...new Set(accountIds.filter(Boolean))].sort()) {
+    const lock = acquireAccountLock(accountId, owner);
+    if (!lock.ok) {
+      releases.reverse().forEach(release => release());
+      sseSend(res, { type: "error", msg: `같은 네이버 계정에서 '${lock.owner}' 작업이 진행 중이에요. 완료 후 다시 시도해주세요.`, accountBusy: true });
+      res.end();
+      return null;
+    }
+    releases.push(lock.release);
+  }
+  return () => releases.reverse().forEach(release => release());
+}
+
 /* ── 작업 중단 신호 맵 ── */
 const stopMap = new Map<string, boolean>();
 
-/* ── 자동 정리: 한 번에 작업 하나만. 새 작업 시작 시 이전 작업 전부 중단(브라우저는 각 job의 finally에서 닫힘) ── */
-const activeJobs = new Set<string>();
-function stopAllActiveJobs(exceptJid?: string) {
-  for (const j of activeJobs) {
-    if (j !== exceptJid) stopMap.set(j, true);
+/* ── 기능별 작업 정리: 같은 탭의 이전 작업만 중단하고 다른 탭 작업은 보존한다. ── */
+const activeJobs = new Map<string, string>();
+function stopActiveLane(lane: string, exceptJid?: string) {
+  for (const [j, activeLane] of activeJobs) {
+    if (activeLane === lane && j !== exceptJid) {
+      stopMap.set(j, true);
+      activeJobs.delete(j);
+    }
   }
-  activeJobs.clear();
 }
 // SSE 작업 시작 등록: 이전 작업 자동 중단 + 클라이언트 연결 끊기면 자동 중단(기능 전환/탭이동에도 안전)
 //   ★ req.on("close")는 POST body 수신 완료 시점에도 발동 → 자기 작업을 즉시 중단시키는 버그.
 //     실제 "연결 끊김"은 res.on("close")로 감지해야 함.
-function beginJob(jid: string, res: express.Response) {
-  stopAllActiveJobs();          // 서이추→공감댓글 등 전환 시 이전 작업 클린 종료
+function beginJob(jid: string, lane: string, res: express.Response) {
+  stopActiveLane(lane);
   stopMap.set(jid, false);
-  activeJobs.add(jid);
+  activeJobs.set(jid, lane);
   res.on("close", () => { stopMap.set(jid, true); activeJobs.delete(jid); }); // 화면 벗어남/전환 시 자동 중단
 }
 function endJob(jid: string) {
@@ -119,10 +146,10 @@ app.get("/api/crawl", async (req, res) => {
   if (!keywords)
     return res.status(400).json({ error: "keywords 필요" });
 
-  stopAllActiveJobs();   // 새 수집 시작 → 이전 작업(서이추/공감댓글) 자동 중단
   sseSetup(res);
 
   try {
+    if (!await ensureActiveMember(userId, res)) return;
     // 쿼타 체크 (userId 있을 때만)
     if (userId) {
       const plan = await getUserPlan(userId);
@@ -160,9 +187,9 @@ app.get("/api/crawl", async (req, res) => {
 app.get("/api/place/search", async (req, res) => {
   const { userId, accountId, query, domain, count } = req.query as Record<string, string>;
   if (!query) return res.status(400).json({ error: "query 필요" });
-  stopAllActiveJobs();
   sseSetup(res);
   try {
+    if (!await ensureActiveMember(userId, res)) return;
     // 크롤링과 같은 발굴 쿼타 사용(플레이스도 발굴이므로)
     if (userId) {
       const plan = await getUserPlan(userId);
@@ -224,9 +251,11 @@ app.post("/api/add-neighbor", async (req, res) => {
   sseSetup(res);
 
   const jid = jobId || Date.now().toString();
-  beginJob(jid, res);   // 이전 작업 자동 중단 + 연결 끊기면 자동 정리
+  beginJob(jid, "neighbor", res);
+  let releaseAccounts = () => {};
 
   try {
+    if (!await ensureActiveMember(userId, res)) { endJob(jid); return; }
     // targets는 이제 body로 배열째 옴 (문자열이면 파싱 폴백)
     const targets = Array.isArray(targetsRaw) ? targetsRaw : JSON.parse(decodeURIComponent(targetsRaw));
 
@@ -243,6 +272,10 @@ app.post("/api/add-neighbor", async (req, res) => {
       }
       sseSend(res, { type: "quota_info", used: quota.used, limit: quota.limit, remaining: dailyLimit });
     }
+
+    const release = acquireAccountsOrReport([accountId], "서이추", res);
+    if (!release) { endJob(jid); return; }
+    releaseAccounts = release;
 
     await addNeighbors({
       accountId,
@@ -277,6 +310,7 @@ app.post("/api/add-neighbor", async (req, res) => {
   } catch (e: any) {
     sseSend(res, { type: "error", msg: e.message });
   }
+  releaseAccounts();
   endJob(jid);
   res.end();
 });
@@ -307,7 +341,6 @@ app.get("/api/engage-crawl", async (req, res) => {
   if (!isBuddy && !keywords) return res.status(400).json({ error: "keywords 필요" });
   if (isBuddy && !accountId) return res.status(400).json({ error: "accountId 필요(이웃새글)" });
 
-  stopAllActiveJobs();   // 새 수집 시작 → 이전 작업(서이추/공감댓글) 자동 중단
   sseSetup(res);
   try {
     const count = parseInt(countPerKeyword || "20", 10);
@@ -380,7 +413,6 @@ app.post("/api/exposure-check", async (req, res) => {
 app.get("/api/my-posts", async (req, res) => {
   const { accountId, selectMode, count, period } = req.query as Record<string, string>;
   if (!accountId) return res.status(400).json({ error: "accountId 필요" });
-  stopAllActiveJobs();
   sseSetup(res);
   try {
     const posts = await crawlMyPosts({
@@ -412,10 +444,24 @@ app.post("/api/engage", async (req, res) => {
 
   sseSetup(res);
   const jid = jobId || Date.now().toString();
-  beginJob(jid, res);   // 이전 작업(서이추 등) 자동 중단 + 연결 끊기면 자동 정리
+  beginJob(jid, "engage", res);
+  let releaseAccounts = () => {};
 
   try {
+    if (!await ensureActiveMember(userId, res)) { endJob(jid); return; }
     const targets = Array.isArray(targetsRaw) ? targetsRaw : JSON.parse(decodeURIComponent(targetsRaw));
+    let serverDailyLimit = Math.max(1, parseInt(String(dailyLimit ?? "50"), 10));
+    if (userId) {
+      const plan = await getUserPlan(userId);
+      const used = await getEngageDailyUsage(userId);
+      const limit = ENGAGE_DAILY_LIMIT[plan] ?? ENGAGE_DAILY_LIMIT.free;
+      serverDailyLimit = Math.max(0, Math.min(serverDailyLimit, limit - used));
+      if (serverDailyLimit <= 0) { sseSend(res, { type: "quota_exceeded", used, limit }); endJob(jid); return res.end(); }
+      sseSend(res, { type: "quota_info", used, limit, remaining: serverDailyLimit });
+    }
+    const release = acquireAccountsOrReport([accountId], "공감·댓글", res);
+    if (!release) { endJob(jid); return; }
+    releaseAccounts = release;
     sseSend(res, { type: "start", total: targets.length });
 
     await engageBlogs({
@@ -432,7 +478,7 @@ app.post("/api/engage", async (req, res) => {
       postsPerBlog: parseInt(String(postsPerBlog ?? "1"), 10),
       delayMin: parseFloat(String(delayMin ?? "5")),
       delayMax: parseFloat(String(delayMax ?? "10")),
-      dailyLimit: parseInt(String(dailyLimit ?? "50"), 10),
+      dailyLimit: serverDailyLimit,
       skipDone: skipDone === true || skipDone === "true",
       commentRate: commentRate === undefined ? 100 : parseInt(String(commentRate), 10),
       likeRate: likeRate === undefined ? 100 : parseInt(String(likeRate), 10),
@@ -457,6 +503,7 @@ app.post("/api/engage", async (req, res) => {
   } catch (e: any) {
     sseSend(res, { type: "error", msg: e.message });
   }
+  releaseAccounts();
   endJob(jid);
   res.end();
 });
@@ -468,8 +515,22 @@ app.post("/api/reply", async (req, res) => {
     return res.status(400).json({ error: "accountId, posts 필요" });
   sseSetup(res);
   const jid = jobId || Date.now().toString();
-  beginJob(jid, res);
+  beginJob(jid, "reply", res);
+  let releaseAccounts = () => {};
   try {
+    if (!await ensureActiveMember(userId, res)) { endJob(jid); return; }
+    let replyRemaining = Number.MAX_SAFE_INTEGER;
+    if (userId) {
+      const plan = await getUserPlan(userId);
+      const used = await getReplyDailyUsage(userId);
+      const limit = REPLY_DAILY_LIMIT[plan] ?? REPLY_DAILY_LIMIT.free;
+      replyRemaining = Math.max(0, limit - used);
+      if (!replyRemaining) { sseSend(res, { type: "quota_exceeded", used, limit }); endJob(jid); return res.end(); }
+      sseSend(res, { type: "quota_info", used, limit, remaining: replyRemaining });
+    }
+    const release = acquireAccountsOrReport([accountId], "답방", res);
+    if (!release) { endJob(jid); return; }
+    releaseAccounts = release;
     sseSend(res, { type: "start", total: posts.length });
     await replyToComments({
       accountId,
@@ -485,15 +546,19 @@ app.post("/api/reply", async (req, res) => {
       onLog: (msg) => sseSend(res, { type: "log", msg }),
       onResult: async (r) => {
         sseSend(res, { type: "result", ...r });
-        if (userId) await addReplyHistory({ user_id: userId, post_title: r.postTitle || "", status: r.status, message: r.message || "" });
+        if (userId) {
+          if (r.status === "success" && replyRemaining > 0) { await incrementReplyQuota(userId); replyRemaining -= 1; }
+          await addReplyHistory({ user_id: userId, post_title: r.postTitle || "", status: r.status, message: r.message || "" });
+        }
       },
       onProgress: (done, fail) => sseSend(res, { type: "progress", done, fail }),
-      stopSignal: () => stopMap.get(jid) === true,
+      stopSignal: () => stopMap.get(jid) === true || replyRemaining <= 0,
     });
     sseSend(res, { type: "done" });
   } catch (e: any) {
     sseSend(res, { type: "error", msg: e.message });
   }
+  releaseAccounts();
   endJob(jid);
   res.end();
 });
@@ -505,8 +570,13 @@ app.post("/api/pumasi", async (req, res) => {
     return res.status(400).json({ error: "품앗이는 계정 2개 이상 필요" });
   sseSetup(res);
   const jid = jobId || Date.now().toString();
-  beginJob(jid, res);
+  beginJob(jid, "pumasi", res);
+  let releaseAccounts = () => {};
   try {
+    if (!await ensureActiveMember(userId, res)) { endJob(jid); return; }
+    const release = acquireAccountsOrReport(accounts.map((a: any) => String(a.accountId || "")), "품앗이", res);
+    if (!release) { endJob(jid); return; }
+    releaseAccounts = release;
     sseSend(res, { type: "start", total: accounts.length });
     await pumasiEngage({
       ownerUserId: userId,
@@ -535,6 +605,7 @@ app.post("/api/pumasi", async (req, res) => {
   } catch (e: any) {
     sseSend(res, { type: "error", msg: e.message });
   }
+  releaseAccounts();
   endJob(jid);
   res.end();
 });
@@ -575,6 +646,7 @@ app.post("/api/update-title", async (req, res) => {
   if (!accountId || !logNo || !newTitle) return res.status(400).json({ error: "accountId, logNo, newTitle 필요" });
   sseSetup(res);
   try {
+    if (!await ensureActiveMember(userId, res)) return;
     sseSend(res, { type: "log", msg: `✏️ 제목 수정 시작 — 글 ${logNo}` });
     // 등급 한도 체크
     if (userId) {
@@ -587,9 +659,15 @@ app.post("/api/update-title", async (req, res) => {
         return res.end();
       }
     }
-    const result = await updatePostTitle({ accountId: String(accountId), logNo: String(logNo), newTitle: String(newTitle), onLog: (m) => sseSend(res, { type: "log", msg: m }) });
-    if (result.ok && userId) await incrementTitleEditQuota(userId);
-    sseSend(res, { type: "done", ok: result.ok, message: result.message });
+    const release = acquireAccountsOrReport([String(accountId)], "글 제목 수정", res);
+    if (!release) return;
+    try {
+      const result = await updatePostTitle({ accountId: String(accountId), logNo: String(logNo), newTitle: String(newTitle), onLog: (m) => sseSend(res, { type: "log", msg: m }) });
+      if (result.ok && userId) await incrementTitleEditQuota(userId);
+      sseSend(res, { type: "done", ok: result.ok, message: result.message });
+    } finally {
+      release();
+    }
   } catch (e: any) {
     sseSend(res, { type: "log", msg: `❌ 제목 수정 오류: ${e.message}` });
     sseSend(res, { type: "done", ok: false, message: e.message });

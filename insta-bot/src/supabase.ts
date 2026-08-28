@@ -18,10 +18,13 @@ export const INSTA_DM_DAILY_LIMIT: Record<string, number> = {
   free: 5,
   basic: 10,
   pro: 30,
+  unlimited: 999999,
   admin: 9999,
 };
 
-const todayStr = () => new Date().toISOString().slice(0, 10);
+const todayStr = () => new Intl.DateTimeFormat("en-CA", {
+  timeZone: "Asia/Seoul", year: "numeric", month: "2-digit", day: "2-digit",
+}).format(new Date());
 
 export async function getUserPlan(userId: string): Promise<string> {
   if (userId === "admin-publy") return "admin";
@@ -34,6 +37,22 @@ export async function getUserPlan(userId: string): Promise<string> {
     return data?.plan || "free";
   } catch {
     return "free";
+  }
+}
+
+export async function checkMembershipAccess(userId: string): Promise<{ ok: boolean; plan: string; reason?: string }> {
+  if (userId === "admin-publy") return { ok: true, plan: "admin" };
+  try {
+    const [{ data: user }, { data: quota }] = await Promise.all([
+      supabase.from("publy_users").select("plan,is_active").eq("id", userId).maybeSingle(),
+      supabase.from("publy_quotas").select("reset_date").eq("user_id", userId).maybeSingle(),
+    ]);
+    const plan = user?.plan || "free";
+    if (!user || user.is_active === false) return { ok: false, plan, reason: "비활성 회원" };
+    if (!quota?.reset_date || new Date(quota.reset_date).getTime() <= Date.now()) return { ok: false, plan, reason: "이용기간 만료" };
+    return { ok: true, plan };
+  } catch {
+    return { ok: false, plan: "free", reason: "회원정보 확인 실패" };
   }
 }
 

@@ -43,6 +43,7 @@ function botEnvironment(extra: NodeJS.ProcessEnv = {}): Record<string, string> {
     ...process.env,
     ...extra,
     PUBLY_SESSION_DIR: path.join(app.getPath("userData"), "publy-sessions"),
+    PUBLY_LOCK_DIR: path.join(app.getPath("userData"), "account-locks"),
     // 봇이 "자기 로그를 스스로" 이 폴더에 쓴다(메인은 봇 출력을 안 받음 → 화면 안 멈춤).
     // 버그 신고 시 이 폴더의 로그를 회원이 보내주면 아이디로 확인 가능.
     PUBLY_LOG_DIR: path.join(app.getPath("userData"), "logs"),

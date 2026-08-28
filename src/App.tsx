@@ -5,7 +5,7 @@ import AdminPageRaw from "./pages/AdminPage";
 const AdminPage = AdminPageRaw as React.ComponentType<any>;
 import DashboardPage from "./pages/DashboardPage";
 import IntroSplash from "./pages/IntroSplash";
-import { PublyUser, refreshUserById, touchLastSeen } from "./lib/supabase";
+import { PublyUser, refreshUserById, touchLastSeen, logoutServerSession, verifyAdminSession, clearAdminSession, getMemberSessionToken } from "./lib/supabase";
 
 type View = "login" | "admin-login" | "admin" | "dashboard";
 
@@ -42,27 +42,33 @@ export default function App() {
   const [showIntro, setShowIntro] = useState(() => !localStorage.getItem("publy_intro_seen"));
 
   useEffect(() => {
-    // 초기화: localStorage에서 세션 복원 후 한 번에 state 업데이트
-    let nextView: View = "login";
-    let nextUser: PublyUser | null = null;
-
-    const saved = localStorage.getItem("publy_user");
-    if (saved) {
-      try {
-        const u = JSON.parse(saved);
-        nextUser = u;
-        nextView = "dashboard";
-        window.electron?.registerUser(u.id);
-      } catch { localStorage.removeItem("publy_user"); }
-    }
-    if (sessionStorage.getItem("publy_admin_auth")) {
-      nextView = "admin";
-    }
-
-    // 한 번에 업데이트 → view 전환 플리커 방지
-    setUser(nextUser);
-    setView(nextView);
-    setLoading(false);
+    let alive = true;
+    const restore = async () => {
+      let nextView: View = "login";
+      let nextUser: PublyUser | null = null;
+      const saved = localStorage.getItem("publy_user");
+      if (saved) {
+        try {
+          const cached = JSON.parse(saved) as PublyUser;
+          const hasServerSession = !!getMemberSessionToken();
+          const fresh = await refreshUserById(cached.id);
+          nextUser = fresh || (hasServerSession ? null : cached);
+          if (nextUser) {
+            nextView = "dashboard";
+            localStorage.setItem("publy_user", JSON.stringify(nextUser));
+            window.electron?.registerUser(nextUser.id);
+          } else {
+            localStorage.removeItem("publy_user");
+          }
+        } catch { localStorage.removeItem("publy_user"); }
+      }
+      if (await verifyAdminSession()) nextView = "admin";
+      else sessionStorage.removeItem("publy_admin_auth");
+      if (!alive) return;
+      setUser(nextUser); setView(nextView); setLoading(false);
+    };
+    void restore();
+    return () => { alive = false; };
   }, []);
 
   // ★회원 등급/활성 실시간 반영(테리 요청): 관리자가 등급을 바꾸면(무제한 등) 회원 앱이
@@ -75,7 +81,8 @@ export default function App() {
       try {
         void touchLastSeen(user.id);   // 마지막 접속 시각 갱신(관리자 확인용)
         const fresh = await refreshUserById(user.id);
-        if (!alive || !fresh) return;
+        if (!alive) return;
+        if (!fresh) { if (getMemberSessionToken()) handleLogout(); return; }
         // 비활성 처리되면 로그아웃
         if ((fresh as any).is_active === false) { handleLogout(); return; }
         // ★관리자가 바꾼 회원 값(등급·활성·크롤링 권한 등)이 회원 앱에 반영되게 — crawl_enabled도 확인해야 잠금해제가 실제로 풀린다.
@@ -107,6 +114,8 @@ export default function App() {
   }
 
   function handleLogout() {
+    if (user?.id) void window.electron?.unregisterUser(user.id);
+    void logoutServerSession();
     localStorage.removeItem("publy_user");
     setUser(null);
     setView("login");
@@ -119,6 +128,7 @@ export default function App() {
 
   function handleAdminLogout() {
     sessionStorage.removeItem("publy_admin_auth");
+    clearAdminSession();
     setView("login");
   }
 
