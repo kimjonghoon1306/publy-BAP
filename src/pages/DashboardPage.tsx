@@ -866,8 +866,9 @@ export default function DashboardPage({user, onLogout, onAdminLogin, onThemeTogg
   const stopDm = ()=>{ try{esDmRef.current?.close();}catch{} setDmRunning(false); dmLog("⏹️ 중단됨"); };
   const [quota, setQuota] = useState<PublyQuota|null>(null);
   const [dailyPublishUsed, setDailyPublishUsed] = useState(0);
-  // 🔍 크롤링 = 관리자 승인 필요 기능. user.crawl_enabled(publy_users)로 잠금/해제.
-  const crawlEnabled = !!(user as any)?.crawl_enabled;
+  // 🔍 크롤링 = 기본 오픈(등급별 한도로 이미 제한됨). 관리자가 crawl_enabled=false로 명시 잠금할 때만 잠긴다.
+  //   미설정(null/undefined)·true = 사용 가능. false만 잠김. (관리자 표시·토글도 동일 규칙으로 맞춤)
+  const crawlEnabled = (user as any)?.crawl_enabled !== false;
   const [showCrawlLock, setShowCrawlLock] = useState(false);
   const [neighborUsed, setNeighborUsed] = useState(0);
   const [replyUsed, setReplyUsed] = useState(0);

@@ -2552,7 +2552,7 @@ POST3: (제목)|(이유)
   }
   async function toggleActive(u: UserFull) { if (!confirm(`${u.name||u.email} ${u.is_active?"비활성화":"활성화"}?`)) return; try { const next=!u.is_active; const {data,error}=await supabase.from("publy_users").update({is_active:next}).eq("id",u.id).select("id,is_active"); if(error)throw new Error(error.message); if(!data?.[0]||data[0].is_active!==next)throw new Error("권한/RLS로 반영된 행이 없습니다"); await loadUsers(); } catch(e:any){alert("활성 상태 저장 실패 — "+e.message);} }
   // 🔎 크롤링 잠금해제 토글 — 회원 publy_users.crawl_enabled. 반영 검증(.select) 후 목록 갱신.
-  async function toggleCrawl(u: UserFull) { try { const next=!u.crawl_enabled; const {data,error}=await supabase.from("publy_users").update({crawl_enabled:next}).eq("id",u.id).select("id,crawl_enabled"); if(error)throw new Error(error.message); if(!data?.[0]||data[0].crawl_enabled!==next)throw new Error("권한/RLS로 반영된 행이 없습니다"); await loadUsers(); showToast(next?`🔓 ${u.name||u.email} 크롤링 잠금해제`:`🔒 ${u.name||u.email} 크롤링 잠금`, "success"); } catch(e:any){ showToast("크롤링 권한 저장 실패 — "+e.message, "error"); } }
+  async function toggleCrawl(u: UserFull) { try { const cur=u.crawl_enabled!==false; const next=!cur; const {data,error}=await supabase.from("publy_users").update({crawl_enabled:next}).eq("id",u.id).select("id,crawl_enabled"); if(error)throw new Error(error.message); if(!data?.[0]||data[0].crawl_enabled!==next)throw new Error("권한/RLS로 반영된 행이 없습니다"); await loadUsers(); showToast(next?`🔓 ${u.name||u.email} 크롤링 잠금해제`:`🔒 ${u.name||u.email} 크롤링 잠금`, "success"); } catch(e:any){ showToast("크롤링 권한 저장 실패 — "+e.message, "error"); } }
   async function addNote(uid: string) { if (!newNote.trim()) return; try { const content=newNote.trim(); const {data,error}=await supabase.from("publy_notes").insert({user_id:uid,content}).select("id,user_id,content"); if(error)throw new Error(error.message); if(!data?.[0]||data[0].user_id!==uid||data[0].content!==content)throw new Error("권한/RLS로 반영된 행이 없습니다"); setNewNote(""); await loadUsers(); } catch(e:any){alert("메모 추가 실패 — "+e.message);} }
   async function addPayment(uid: string, plan: string) {
     if (!newPayAmt) return; setAddingPay(true);
@@ -2874,7 +2874,7 @@ POST3: (제목)|(이유)
                   {(() => {
                     const q = search.trim().toLowerCase();
                     const list = users.filter(u => !q || (u.name||"").toLowerCase().includes(q) || (u.email||"").toLowerCase().includes(q));
-                    const onCount = users.filter(u=>u.crawl_enabled).length;
+                    const onCount = users.filter(u=>u.crawl_enabled!==false).length;   // 기본 오픈: false만 잠김
                     return (<>
                       <div style={{display:"flex",gap:8,marginBottom:12,flexWrap:"wrap"}}>
                         <span style={{fontSize:12,fontWeight:800,color:"var(--text2)",background:"var(--bg)",border:"1px solid var(--border)",padding:"6px 12px",borderRadius:99}}>전체 {users.length}명</span>
@@ -2889,9 +2889,11 @@ POST3: (제목)|(이유)
                                 <div style={{fontSize:14,fontWeight:700,color:"var(--text)",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{u.name||"(이름 없음)"} <span style={{fontSize:11,fontWeight:600,color:"var(--text3)"}}>{u.plan}</span></div>
                                 <div style={{fontSize:11.5,color:"var(--text3)",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{u.email}</div>
                               </div>
-                              <button onClick={()=>toggleCrawl(u)} style={{padding:"8px 16px",borderRadius:99,border:`1.5px solid ${u.crawl_enabled?"#2f9e5e":"var(--border)"}`,background:u.crawl_enabled?"rgba(47,158,94,.12)":"var(--card)",color:u.crawl_enabled?"#2f9e5e":"var(--text3)",cursor:"pointer",fontSize:12.5,fontWeight:800,fontFamily:"inherit",whiteSpace:"nowrap",transition:"all .15s"}}>
-                                {u.crawl_enabled?"🔓 사용 중":"🔒 잠김"}
+                              {(()=>{ const en=u.crawl_enabled!==false; return (
+                              <button onClick={()=>toggleCrawl(u)} style={{padding:"8px 16px",borderRadius:99,border:`1.5px solid ${en?"#2f9e5e":"var(--border)"}`,background:en?"rgba(47,158,94,.12)":"var(--card)",color:en?"#2f9e5e":"var(--text3)",cursor:"pointer",fontSize:12.5,fontWeight:800,fontFamily:"inherit",whiteSpace:"nowrap",transition:"all .15s"}}>
+                                {en?"🔓 사용 중":"🔒 잠김"}
                               </button>
+                              ); })()}
                             </div>
                           ))}
                          </div>}
