@@ -81,6 +81,28 @@ export interface Place360Snapshot {
 export const PLACE360_STORE_LIMIT: Record<string, number> = { free: 1, basic: 2, pro: 5, unlimited: 999999, admin: 999999 };
 export const PLACE360_DAILY_DIAGNOSIS_LIMIT: Record<string, number> = { free: 1, basic: 3, pro: 10, unlimited: 999999, admin: 999999 };
 export const PLACE360_HISTORY_DAYS: Record<string, number> = { free: 30, basic: 90, pro: 365, unlimited: 3650, admin: 3650 };
+export const PLACE360_RANK_DAILY_LIMIT: Record<string, number> = { free: 3, basic: 10, pro: 30, unlimited: 999999, admin: 999999 };
+
+export interface Place360RankMeasurement {
+  id: string; user_id: string; store_key: string; keyword: string; rank: number | null;
+  checked_count: number; surface: string; device: string; measured_at: string;
+}
+
+export async function savePlace360Rank(input: Omit<Place360RankMeasurement, "id" | "user_id" | "measured_at">): Promise<Place360RankMeasurement | null> {
+  const token = getMemberSessionToken();
+  if (!token) return null;
+  const { data, error } = await supabase.rpc("publy_place360_save_rank", { p_token: token, p_store_key: input.store_key, p_keyword: input.keyword, p_rank: input.rank, p_checked_count: input.checked_count, p_surface: input.surface, p_device: input.device });
+  if (error) throw new Error(error.message);
+  return (data as Place360RankMeasurement) || null;
+}
+
+export async function getPlace360Ranks(storeKey: string): Promise<Place360RankMeasurement[]> {
+  const token = getMemberSessionToken();
+  if (!token || !storeKey) return [];
+  const { data, error } = await supabase.rpc("publy_place360_get_ranks", { p_token: token, p_store_key: storeKey });
+  if (error) throw new Error(error.message);
+  return (data || []) as Place360RankMeasurement[];
+}
 
 export async function getPlace360Access(userId: string): Promise<boolean> {
   try {

@@ -26,6 +26,15 @@ create index if not exists publy_place360_snapshots_lookup_idx
 alter table public.publy_place360_snapshots enable row level security;
 revoke all on public.publy_place360_snapshots from anon, authenticated;
 
+create table if not exists public.publy_place360_ranks (
+  id uuid primary key default gen_random_uuid(), user_id uuid not null, store_key text not null,
+  keyword text not null, rank integer check (rank is null or rank > 0), checked_count integer not null default 0,
+  surface text not null default '네이버 지도 PC', device text not null default 'PC', measured_at timestamptz not null default now()
+);
+create index if not exists publy_place360_ranks_lookup_idx on public.publy_place360_ranks(user_id, store_key, keyword, measured_at desc);
+alter table public.publy_place360_ranks enable row level security;
+revoke all on public.publy_place360_ranks from anon, authenticated;
+
 create or replace function public.publy_place360_save_snapshot(
   p_token text, p_store_key text, p_store_name text, p_region text, p_category text,
   p_visitor_reviews integer, p_blog_reviews integer, p_competitor_count integer,
@@ -96,6 +105,30 @@ begin
 end;
 $$;
 
+create or replace function public.publy_place360_save_rank(p_token text, p_store_key text, p_keyword text, p_rank integer, p_checked_count integer, p_surface text, p_device text)
+returns public.publy_place360_ranks language plpgsql security definer set search_path = '' as $$
+declare v_user_id uuid; v_plan text; v_limit integer; v_used integer; v_row public.publy_place360_ranks;
+begin
+  select s.user_id into v_user_id from public.publy_sessions s where s.token_hash = encode(extensions.digest(coalesce(p_token, ''), 'sha256'), 'hex') and s.is_admin is false and s.expires_at > now() limit 1;
+  if v_user_id is null then raise exception using errcode='P0001', message='INVALID_SESSION'; end if;
+  select plan into v_plan from public.publy_users where id=v_user_id and is_active is true and place360_enabled is true;
+  if v_plan is null then raise exception using errcode='P0001', message='PLACE360_DISABLED'; end if;
+  v_limit := case v_plan when 'basic' then 10 when 'pro' then 30 when 'unlimited' then 999999 else 3 end;
+  select count(*) into v_used from public.publy_place360_ranks where user_id=v_user_id and measured_at >= timezone('Asia/Seoul', now())::date;
+  if v_used >= v_limit then raise exception using errcode='P0001', message='PLACE360_RANK_DAILY_LIMIT'; end if;
+  insert into public.publy_place360_ranks(user_id,store_key,keyword,rank,checked_count,surface,device) values(v_user_id,left(p_store_key,180),left(trim(p_keyword),180),p_rank,greatest(p_checked_count,0),left(p_surface,80),left(p_device,30)) returning * into v_row;
+  return v_row;
+end; $$;
+
+create or replace function public.publy_place360_get_ranks(p_token text, p_store_key text)
+returns setof public.publy_place360_ranks language plpgsql security definer set search_path = '' as $$
+declare v_user_id uuid;
+begin
+  select s.user_id into v_user_id from public.publy_sessions s where s.token_hash=encode(extensions.digest(coalesce(p_token,''),'sha256'),'hex') and s.is_admin is false and s.expires_at>now() limit 1;
+  if v_user_id is null then raise exception using errcode='P0001', message='INVALID_SESSION'; end if;
+  return query select * from public.publy_place360_ranks where user_id=v_user_id and store_key=p_store_key order by measured_at desc limit 300;
+end; $$;
+
 create or replace function public.publy_place360_admin_list(p_token text, p_search text default '')
 returns setof public.publy_place360_snapshots
 language plpgsql security definer set search_path = '' as $$
@@ -125,6 +158,10 @@ revoke all on function public.publy_place360_save_snapshot(text,text,text,text,t
 revoke all on function public.publy_place360_get_snapshots(text,text) from public;
 grant execute on function public.publy_place360_save_snapshot(text,text,text,text,text,integer,integer,integer,integer,integer,integer) to anon, authenticated;
 grant execute on function public.publy_place360_get_snapshots(text,text) to anon, authenticated;
+revoke all on function public.publy_place360_save_rank(text,text,text,integer,integer,text,text) from public;
+revoke all on function public.publy_place360_get_ranks(text,text) from public;
+grant execute on function public.publy_place360_save_rank(text,text,text,integer,integer,text,text) to anon, authenticated;
+grant execute on function public.publy_place360_get_ranks(text,text) to anon, authenticated;
 revoke all on function public.publy_place360_admin_list(text,text) from public;
 revoke all on function public.publy_place360_admin_delete(text,uuid) from public;
 grant execute on function public.publy_place360_admin_list(text,text) to anon, authenticated;

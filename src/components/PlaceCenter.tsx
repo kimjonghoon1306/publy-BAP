@@ -14,7 +14,8 @@ const THEMES = {
 type Place = { placeId: string; name: string; category?: string; address?: string; visitorReviewCount?: number; blogReviewCount?: number; placeUrl: string };
 type Blogger = { blogId: string; nick?: string; title?: string; fromPlace?: string; fromPlaces: string[] };
 type PlaceAcct = { accountId: string; id: string; pw: string; blogId: string; sessionOk: boolean; loginLoading?: boolean };
-type Props = { showToast?: (m: string, t?: any) => void; theme?: "dark" | "light"; userId?: string; plan?: string; onOpenCrawl?: () => void; initialRegion?: string; onPlacesCollected?: (places: Place[]) => void };
+type PlaceCollectionMeta = { query: string; domain: string; measuredAt: string; surface: "네이버 지도 PC" };
+type Props = { showToast?: (m: string, t?: any) => void; theme?: "dark" | "light"; userId?: string; plan?: string; onOpenCrawl?: () => void; initialRegion?: string; onPlacesCollected?: (places: Place[], meta: PlaceCollectionMeta) => void };
 
 const PLACE_LS_KEY = "publy_accounts_place";
 const CATEGORIES = [
@@ -127,7 +128,7 @@ export default function PlaceCenter({ showToast, theme: extTheme, userId, plan =
       let d: any; try { d = JSON.parse(event.data); } catch { return; }
       if (d.type === "log") pushLog(d.msg);
       else if (d.type === "quota_info" || d.type === "quota_exceeded") { handleQuota(d); if (d.type === "quota_exceeded") { setRunning(false); es.close(); searchRef.current = null; } }
-      else if (d.type === "place_done") { const result = (d.results || []) as Place[]; setPlaces(result); onPlacesCollected?.(result); setRunning(false); pushLog(`✅ 업체 ${result.length}곳을 찾았어요`); toast(`업체 ${result.length}곳 발굴 완료`, "success"); es.close(); searchRef.current = null; }
+      else if (d.type === "place_done") { const result = (d.results || []) as Place[]; setPlaces(result); onPlacesCollected?.(result, { query, domain, measuredAt: new Date().toISOString(), surface: "네이버 지도 PC" }); setRunning(false); pushLog(`✅ 업체 ${result.length}곳을 찾았어요`); toast(`업체 ${result.length}곳 발굴 완료`, "success"); es.close(); searchRef.current = null; }
       else if (d.type === "error") { pushLog(`❌ ${d.msg || "검색 실패"}`); toast(d.msg || "검색 실패", "error"); setRunning(false); es.close(); searchRef.current = null; }
     };
     es.onerror = () => { pushLog("❌ 봇 연결 오류 — 앱을 껐다 켜보세요"); toast("봇 연결 오류", "error"); setRunning(false); es.close(); searchRef.current = null; };

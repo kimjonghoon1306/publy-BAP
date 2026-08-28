@@ -7,6 +7,7 @@ import UsageGuide from "../components/UsageGuide";
 import { supabase, getAccounts, upsertAccount, PublyAccount, getHistory, getHistoryContent, PublyHistory, addHistory, deleteHistory, deleteAllHistory, setAdminPassword, saveAdminNaverApiKeys, getNaverApiKeys, NaverApiKeys, getNaverDailyUsage, NAVER_DAILY_LIMIT, checkNaverQuota, incrementNaverQuota, getUserNaverApiKeys, getReferrals, getErrorLogs, getUnreadErrorCount, markErrorsAsRead, logError, PLAN_CONFIG, getAllNeighborHistory, NeighborHistory, getAllEngageHistory, EngageHistory, InstaDmTarget, InstaDmHistory, InstaDmQuota, getInstaDmTargets, addInstaDmTarget, updateInstaDmTargetStatus, deleteInstaDmTarget, getInstaDmHistory, addInstaDmHistory, getAllInstaDmHistory, getInstaDmQuota, upsertInstaDmQuota, getAllInstaDmQuotas, INSTA_DM_DAILY_LIMIT, PublyBugReport, getBugReports, updateBugReportStatus, deleteBugReport, resetDailyPublish, getAllDailyUsageToday, DailyUsageRow, getAllReplyHistory, ReplyHistory, getAllBlogscoreHistory, BlogscoreHistory, NEIGHBOR_DAILY_LIMIT, ENGAGE_DAILY_LIMIT, REPLY_DAILY_LIMIT, BLOGSCORE_DAILY_LIMIT, PUMASI_ACCOUNT_LIMIT, PUMASI_POSTS_LIMIT, CRAWL_DAILY_LIMIT, EMAIL_DAILY_LIMIT, COMMENT_DAILY_LIMIT, PLACE_BLOGGER_LIMIT, PLACE360_STORE_LIMIT, PLACE360_DAILY_DIAGNOSIS_LIMIT, PLACE360_HISTORY_DAYS, PublyProxy, getProxies, addProxy, updateProxy, deleteProxy, getProxyAssignments, assignAccountToProxy, unassignAccount, setAccountFeatures, ProxyAssign, PROXY_FEATURES, checkProxyHealth, getLiveLog, getRunningLiveLogs, LiveLogRow } from "../lib/supabase";
 import NeighborPage from "./NeighborPage";
 import { botFetch, BotEventStream } from "../lib/botApi";
+import { PLACE360_RANK_DAILY_LIMIT } from "../lib/supabase";
 
 interface Props {
   onBack: () => void;
@@ -4276,6 +4277,7 @@ POST3: (제목)|(이유)
                                   {label:"🗺️ 플레이스 역추적",val:`${(PLACE_BLOGGER_LIMIT[pl]??0)>=9999?"무제한":`${PLACE_BLOGGER_LIMIT[pl]??10}명`}/업체`},
                                   {label:"🏪 360 등록 매장",val:`${fmt(PLACE360_STORE_LIMIT[pl]??1)}개`},
                                   {label:"🩺 360 매장 진단",val:`${fmt(PLACE360_DAILY_DIAGNOSIS_LIMIT[pl]??1)}회/일`},
+                                  {label:"📍 360 순위 측정",val:`${fmt(PLACE360_RANK_DAILY_LIMIT[pl]??3)}회/일`},
                                   {label:"📈 360 기록 보관",val:`${fmt(PLACE360_HISTORY_DAYS[pl]??30)}일`},
                                   {label:"💞 품앗이 계정",val:`${fmt(PUMASI_ACCOUNT_LIMIT[pl]??2)}개`},
                                   {label:"💞 품앗이 계정당 글",val:`${fmt(PUMASI_POSTS_LIMIT[pl]??3)}개`},
