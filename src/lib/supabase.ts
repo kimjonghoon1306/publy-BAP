@@ -104,7 +104,7 @@ export interface Place360StoreProfile {
 }
 export interface Place360Progress {
   id: string; user_id: string; store_key: string; completed_missions: string[];
-  reviewer_handoff_count: number; reviewer_handoff_at: string | null; updated_at: string;
+  reviewer_handoff_count: number; reviewer_handoff_at: string | null; mission_date: string; updated_at: string;
 }
 export interface Place360ProgressAdminRow extends Place360Progress { member_name: string; email: string; plan: string; store_name: string }
 

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import PlaceCenter from "./PlaceCenter";
 import { deletePlace360Store, getPlace360BusinessMetrics, getPlace360Progress, getPlace360Ranks, getPlace360Snapshots, getPlace360StoreProfiles, PLACE360_DAILY_DIAGNOSIS_LIMIT, PLACE360_HISTORY_DAYS, PLACE360_RANK_DAILY_LIMIT, PLACE360_STORE_LIMIT, place360StoreKey, Place360BusinessMetrics, Place360RankMeasurement, Place360Snapshot, recordPlace360ReviewerHandoff, renamePlace360Store, savePlace360BusinessMetrics, savePlace360MissionProgress, savePlace360Rank, savePlace360Snapshot, savePlace360StoreProfile } from "../lib/supabase";
+import { koreaDateKey } from "../lib/date";
 
 type Props = {
   showToast?: (message: string, type?: any) => void;
@@ -43,7 +44,7 @@ function profilesKey(userId?: string) {
 }
 
 function missionKey(userId: string | undefined, storeKey: string) {
-  return `publy_place360_missions_v1:${userId || "guest"}:${storeKey}:${new Date().toISOString().slice(0, 10)}`;
+  return `publy_place360_missions_v1:${userId || "guest"}:${storeKey}:${koreaDateKey()}`;
 }
 
 function adminMetricsKey(storeKey: string) {
@@ -170,9 +171,10 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
     getPlace360Progress(storeKey).then(async row => {
       if (!active) return;
       if (row) {
-        setCompletedMissions(row.completed_missions || []);
+        const todayMissions = row.mission_date === koreaDateKey() ? (row.completed_missions || []) : [];
+        setCompletedMissions(todayMissions);
         setReviewerHandoffCount(row.reviewer_handoff_count || 0);
-        localStorage.setItem(missionKey(userId, storeKey), JSON.stringify(row.completed_missions || []));
+        localStorage.setItem(missionKey(userId, storeKey), JSON.stringify(todayMissions));
         localStorage.setItem(`${missionKey(userId, storeKey)}:reviewers`, String(row.reviewer_handoff_count || 0));
       } else if (localMissions.length) {
         await savePlace360MissionProgress(storeKey, localMissions);
