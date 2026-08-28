@@ -62,6 +62,8 @@ type Blogger = {
   authenticity?: number;   // 🩺 AI 진정성 점수(0~100) — 봇 로직 역이용, 가짜/품앗이 감별
   adRatio?: number;        // 📊 상업성(0~1) — 최근 글 제목의 협찬·체험단 표시 비율
   mainTopic?: string;      // 🏷️ 실제 주력 주제(최근 글 제목 자동분류)
+  avgComments?: number;    // 💬 글당 평균 댓글 수(진짜 독자 반응)
+  avgSympathy?: number;    // ❤️ 글당 평균 공감 수(최근 3개 표본)
   ship?: ShipState;        // 배송 단계(체험단 제품 발송)
 };
 // 체험단 배송 단계: 제안함(내가 연락) → 수락(블로거가 OK 회신 → 운영자가 확인 눌러 확정) → 발송대기 → 배송중 → 배송완료
@@ -397,7 +399,7 @@ export default function CrawlCenter({ showToast, theme: extTheme, userId, plan =
       let d: any; try { d = JSON.parse(e.data); } catch { return; }
       if (d.type === "auth") {
         // 📇 진정성 분석하며 긁어온 공개 연락처(이메일·카톡·오픈채팅)도 카드에 반영
-        setResults(prev => prev.map(b => b.id === d.blogId ? { ...b, neighbors: d.neighbors || b.neighbors, visitors: d.visitors || b.visitors, authenticity: d.authenticity ?? b.authenticity, score: d.authenticity ?? b.score, email: d.email || b.email, kakao: d.kakao || b.kakao, openchat: d.openchat || b.openchat, instagram: d.instagram || b.instagram, youtube: d.youtube || b.youtube, mainTopic: d.mainTopic || b.mainTopic, postsPerWeek: d.postsPerWeek ?? b.postsPerWeek, adRatio: d.adRatio ?? b.adRatio, lastActive: (d.lastPostDaysAgo != null ? (d.lastPostDaysAgo === 0 ? "오늘" : `${d.lastPostDaysAgo}일 전`) : b.lastActive) } : b));
+        setResults(prev => prev.map(b => b.id === d.blogId ? { ...b, neighbors: d.neighbors || b.neighbors, visitors: d.visitors || b.visitors, authenticity: d.authenticity ?? b.authenticity, score: d.authenticity ?? b.score, email: d.email || b.email, kakao: d.kakao || b.kakao, openchat: d.openchat || b.openchat, instagram: d.instagram || b.instagram, youtube: d.youtube || b.youtube, mainTopic: d.mainTopic || b.mainTopic, postsPerWeek: d.postsPerWeek ?? b.postsPerWeek, adRatio: d.adRatio ?? b.adRatio, avgComments: d.avgComments ?? b.avgComments, avgSympathy: d.avgSympathy ?? b.avgSympathy, lastActive: (d.lastPostDaysAgo != null ? (d.lastPostDaysAgo === 0 ? "오늘" : `${d.lastPostDaysAgo}일 전`) : b.lastActive) } : b));
       } else if (d.type === "done") {
         setAnalyzing(false); es.close(); esAuthRef.current = null;
         // ★"연락처 있는 것만" 체크했으면 = 분석 끝나고 연락처 없는 사람을 목록에서 실제 제거(수집=체크에 맞게)
@@ -492,9 +494,9 @@ export default function CrawlCenter({ showToast, theme: extTheme, userId, plan =
   const downloadCsv = () => {
     const rows = shown.filter((b) => selected.size === 0 || selected.has(b.id));
     if (!rows.length) { toast("내보낼 블로거가 없어요", "info"); return; }
-    const H = ["닉네임", "블로그", "주제", "실제주제", "이웃수", "주간글수", "방문자", "참여율", "점수", "관심키워드", "주력품목", "이메일", "카톡", "오픈채팅", "인스타", "유튜브"];
+    const H = ["닉네임", "블로그", "주제", "실제주제", "이웃수", "주간글수", "평균댓글", "평균공감", "방문자", "참여율", "점수", "관심키워드", "주력품목", "이메일", "카톡", "오픈채팅", "인스타", "유튜브"];
     const esc = (v: any) => `"${String(v ?? "").replace(/"/g, '""')}"`;
-    const csv = [H.map(esc).join(","), ...rows.map((b) => [b.nick, b.url, TOPIC_KR[b.topic], b.mainTopic || "", b.neighbors, b.postsPerWeek, b.visitors, b.engageRate + "%", b.score, b.keywords.join(" "), b.categories.join(" "), b.email || "", b.kakao || "", b.openchat || "", b.instagram ? `@${b.instagram}` : "", b.youtube || ""].map(esc).join(","))].join("\r\n");
+    const csv = [H.map(esc).join(","), ...rows.map((b) => [b.nick, b.url, TOPIC_KR[b.topic], b.mainTopic || "", b.neighbors, b.postsPerWeek, b.avgComments ?? "", b.avgSympathy ?? "", b.visitors, b.engageRate + "%", b.score, b.keywords.join(" "), b.categories.join(" "), b.email || "", b.kakao || "", b.openchat || "", b.instagram ? `@${b.instagram}` : "", b.youtube || ""].map(esc).join(","))].join("\r\n");
     const a = document.createElement("a");
     a.href = URL.createObjectURL(new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8" }));
     a.download = `blogger_${topic}_${rows.length}.csv`; a.click();
@@ -980,6 +982,8 @@ export default function CrawlCenter({ showToast, theme: extTheme, userId, plan =
                     {b.postsPerWeek != null && b.postsPerWeek > 0 && <span title="최근 글 기준 주당 포스팅 수(활동성)" style={{ color: b.postsPerWeek >= 3 ? "#2f9e5e" : C.sub }}>🔥 주 {b.postsPerWeek}글</span>}
                     {/* 📊 상업성: 최근 글 제목의 협찬·체험단 표시 비율(순수후기↔협찬多) */}
                     {b.adRatio != null && <span title="최근 글 제목의 협찬·체험단 표시 비율 — 낮을수록 순수후기 위주, 높을수록 협찬글 많음" style={{ fontWeight: 800, color: b.adRatio <= 0.3 ? "#2f9e5e" : b.adRatio >= 0.5 ? "#d64545" : "#d98a1f", background: b.adRatio <= 0.3 ? "rgba(47,158,94,.12)" : b.adRatio >= 0.5 ? "rgba(214,69,69,.12)" : "rgba(217,138,31,.12)", padding: "2px 8px", borderRadius: 20 }}>📊 협찬 {Math.round(b.adRatio * 100)}%</span>}
+                    {/* 💬❤️ 인게이지먼트: 글당 평균 댓글·공감(진짜 독자 반응). 이웃 수는 많은데 반응이 적으면 '껍데기 이웃' 의심 */}
+                    {(b.avgComments != null || b.avgSympathy != null) && <span title="글당 평균 댓글·공감 수 — 진짜 독자가 반응하는지 보는 지표(이웃 수 대비 반응이 적으면 품앗이·죽은 이웃 의심). 댓글=최근 글, 공감=최근 3개 표본" style={{ fontWeight: 800, color: "#7b5cff", background: "rgba(123,92,255,.12)", padding: "2px 8px", borderRadius: 20 }}>💬 댓글 {b.avgComments ?? "–"}{b.avgSympathy != null ? ` · ❤️ 공감 ${b.avgSympathy}` : ""}</span>}
                     {/* 🩺 진정성 점수: 상세에서 이웃·참여율 정밀 분석 후 채워짐. 색상=신뢰도(초록=진짜/주황=주의/빨강=의심) */}
                     {b.authenticity != null
                       ? <span title="AI 진정성 점수 — 참여율 대비 이웃수로 가짜·품앗이 감별(높을수록 진짜 영향력)" style={{ fontWeight: 800, color: b.authenticity >= 70 ? "#2f9e5e" : b.authenticity >= 45 ? "#d98a1f" : "#d64545", background: b.authenticity >= 70 ? "rgba(47,158,94,.12)" : b.authenticity >= 45 ? "rgba(217,138,31,.12)" : "rgba(214,69,69,.12)", padding: "2px 8px", borderRadius: 20 }}>🩺 진정성 {b.authenticity}</span>

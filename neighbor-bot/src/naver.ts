@@ -4459,8 +4459,9 @@ export function engageDonePath(accountId: string): string {
 /* ── 🩺 공개 정보로 남의 블로그 진정성 분석 (세션 불필요) ──
    m.blog.naver.com 공개 API의 이웃수(subscriberCount) + NVisitorgp4Ajax 공개 방문자 XML.
    참여율(방문자/이웃) 대비로 "진짜 영향력 vs 품앗이·봇 부풀림"을 추정한다. */
-export async function analyzeBlogAuthenticity(blogId: string): Promise<{ blogId: string; neighbors: number; visitors: number; authenticity: number | null; email?: string; kakao?: string; openchat?: string; instagram?: string; youtube?: string; postsPerWeek?: number; lastPostDaysAgo?: number; adRatio?: number; mainTopic?: string }> {
+export async function analyzeBlogAuthenticity(blogId: string): Promise<{ blogId: string; neighbors: number; visitors: number; authenticity: number | null; email?: string; kakao?: string; openchat?: string; instagram?: string; youtube?: string; postsPerWeek?: number; lastPostDaysAgo?: number; adRatio?: number; mainTopic?: string; avgComments?: number; avgSympathy?: number; engSampleN?: number }> {
   const MUA = "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1";
+  const WUA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36";
   let neighbors = 0, visitors = 0;
   let email: string | undefined, kakao: string | undefined, openchat: string | undefined;
   let instagram: string | undefined, youtube: string | undefined;   // 📱 타 SNS(추가 수집) — 연락 채널 확대
@@ -4562,6 +4563,31 @@ export async function analyzeBlogAuthenticity(blogId: string): Promise<{ blogId:
     const nums = Array.from(xml.matchAll(/cnt="(\d+)"/g)).map((m) => Number(m[1])).filter((n) => Number.isFinite(n));
     if (nums.length) visitors = Math.max(...nums);   // 최근 며칠 중 대표값
   } catch {}
+  // ⑤ 인게이지먼트(진짜 독자 반응) — 글당 평균 댓글·공감. '껍데기 이웃 많은 블로그' vs '진짜 독자가 반응하는 블로그' 감별.
+  //   댓글=PostTitleListAsync(공개·쿠키불필요·IP제약 적음)가 글별 commentCount를 한 번에 준다 → 최근 글 평균.
+  //   공감(좋아요)=likeIt API가 글당 1콜이라 최근 3개만 표본 조회(크롤링 과부하·차단 회피). 실패는 조용히 건너뜀.
+  let avgComments: number | undefined, avgSympathy: number | undefined, engSampleN: number | undefined;
+  try {
+    const pr = await fetch(`https://blog.naver.com/PostTitleListAsync.naver?blogId=${encodeURIComponent(blogId)}&currentPage=1&countPerPage=10`, { headers: { "User-Agent": WUA, Referer: `https://blog.naver.com/${blogId}` } });
+    const praw = (await pr.text()).replace(/\\'/g, "'");   // 네이버 응답의 잘못된 \' 이스케이프 교정(필수)
+    const pj: any = JSON.parse(praw);
+    const posts: any[] = Array.isArray(pj?.postList) ? pj.postList : [];
+    const cc = posts.map(p => Number(p.commentCount)).filter(n => Number.isFinite(n));
+    if (cc.length) { avgComments = Math.round((cc.reduce((a, b) => a + b, 0) / cc.length) * 10) / 10; engSampleN = cc.length; }
+    // 공감: 최근 최대 3개 글 표본 평균(글당 1콜 → 표본만)
+    const logs = posts.map(p => String(p.logNo || "")).filter(Boolean).slice(0, 3);
+    let symSum = 0, symN = 0;
+    for (const lg of logs) {
+      try {
+        const lr = await fetch(`https://blog.like.naver.com/v1/search/contents?suffix=&q=${encodeURIComponent(`BLOG[${blogId}_${lg}]`)}`, { headers: { "User-Agent": WUA, Referer: `https://blog.naver.com/${blogId}/${lg}` } });
+        const lj: any = await lr.json();
+        const c0 = lj?.contents?.[0];
+        if (c0 && Array.isArray(c0.reactions)) { symSum += c0.reactions.reduce((a: number, r: any) => a + (Number(r.count) || 0), 0); symN++; }
+      } catch {}
+    }
+    if (symN) avgSympathy = Math.round((symSum / symN) * 10) / 10;
+  } catch {}
+
   let authenticity: number | null = null;
   if (neighbors > 0) {
     // 이웃 대비 일방문자 비율(방문/이웃). 건강한 블로그는 이웃 규모 대비 방문이 어느 정도 나온다.
@@ -4571,7 +4597,7 @@ export async function analyzeBlogAuthenticity(blogId: string): Promise<{ blogId:
     if (visitors === 0) s = Math.min(s, 30);          // 방문자 0 = 죽은 블로그 의심
     authenticity = Math.max(5, Math.min(99, s));
   }
-  return { blogId, neighbors, visitors, authenticity, email, kakao, openchat, instagram, youtube, postsPerWeek, lastPostDaysAgo, adRatio, mainTopic };
+  return { blogId, neighbors, visitors, authenticity, email, kakao, openchat, instagram, youtube, postsPerWeek, lastPostDaysAgo, adRatio, mainTopic, avgComments, avgSympathy, engSampleN };
 }
 
 /* ── 📄 글 본문 읽기 (세션 불필요, 공개) ──
