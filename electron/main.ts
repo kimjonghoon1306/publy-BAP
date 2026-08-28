@@ -8,6 +8,19 @@ let mainWindow: BrowserWindow | null = null;
 let botProcess: ChildProcess | null = null;
 let neighborBotProcess: ChildProcess | null = null;
 let instaBotProcess: ChildProcess | null = null;
+
+// ── 봇 서버 워치독 등록부 ──
+// 각 봇 서버가 자신을 여기 등록한다. 주기적 health 체크가 "죽었거나 응답 없는(hung)"
+// 서버를 발견하면 restart()를 불러 스스로 되살린다(회원이 손대지 않아도 복구).
+type BotState = "idle" | "restarting" | "grace";
+type BotEntry = {
+  name: string;
+  port: number;
+  state: BotState;
+  restart: () => Promise<boolean>;
+  cancelScheduledRestart: () => void;
+};
+const botRegistry: BotEntry[] = [];
 const isDev = !app.isPackaged;
 const botAuthToken = randomBytes(32).toString("hex");
 
@@ -18,15 +31,78 @@ const botAuthToken = randomBytes(32).toString("hex");
 //   봇이 시작 못하고 3초마다 재시작 루프를 돌면, 매번 이 동기 netstat(윈도우선 특히 느림)이
 //   메인 스레드를 막아 커서가 계속 깜빡이고 창이 버벅였다. → exec(비동기)로 바꿔 메인 스레드를
 //   절대 막지 않는다. 완료를 기다려야 하는 곳은 await(이벤트 루프는 안 막힘).
-function killPort(port: number): Promise<void> {
+function execAsync(cmd: string): Promise<string> {
   return new Promise(resolve => {
-    const cmd = process.platform === "win32"
-      ? `for /f "tokens=5" %a in ('netstat -ano -p tcp ^| findstr :${port}') do taskkill /PID %a /F`
-      : `lsof -ti tcp:${port} | xargs -r kill -9`;
-    try {
-      _exec(cmd, { windowsHide: true, timeout: 8000 }, () => resolve()); // 결과 무관, 논블로킹
-    } catch { resolve(); }
+    try { _exec(cmd, { windowsHide: true, timeout: 8000 }, (_e, stdout) => resolve(stdout || "")); }
+    catch { resolve(""); }
   });
+}
+
+async function listeningPids(port: number): Promise<number[]> {
+  const output = process.platform === "win32"
+    ? await execAsync(`netstat -ano -p tcp | findstr LISTENING | findstr :${port}`)
+    : await execAsync(`lsof -nP -tiTCP:${port} -sTCP:LISTEN`);
+  const pids = process.platform === "win32"
+    ? output.split(/\r?\n/).map(line => line.trim().split(/\s+/)).filter(parts =>
+        (parts[1] || "").endsWith(`:${port}`)
+      ).map(parts => Number(parts.at(-1)))
+    : output.split(/\s+/).map(Number);
+  return [...new Set(pids.filter(pid => Number.isInteger(pid) && pid > 0))];
+}
+
+async function waitForExit(pid: number, timeoutMs: number): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    try { process.kill(pid, 0); } catch { return true; }
+    await new Promise(resolve => setTimeout(resolve, 100));
+  }
+  return false;
+}
+
+async function terminateTrackedChild(child: ChildProcess | null): Promise<void> {
+  const pid = child?.pid;
+  if (!pid) return;
+  try { child.kill("SIGTERM"); } catch {}
+  if (await waitForExit(pid, 2500)) return;
+  if (process.platform === "win32") await execAsync(`taskkill /PID ${pid} /T /F`);
+  else { try { process.kill(pid, "SIGKILL"); } catch {} }
+  await waitForExit(pid, 1000);
+}
+
+type HealthState = "online" | "unauthorized" | "offline";
+async function botHealth(port: number, timeoutMs = 2500): Promise<HealthState> {
+  try {
+    const res = await fetch(`http://127.0.0.1:${port}/health`, {
+      headers: { Authorization: `Bearer ${botAuthToken}` },
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    if (res.ok) return "online";
+    if (res.status === 401) {
+      // 세 봇 서버의 인증 미들웨어가 내는 고정 응답까지 일치해야 이전 Publy 봇으로 본다.
+      // 단순히 401을 냈다는 이유만으로 같은 포트의 타 프로그램을 종료하지 않는다.
+      try {
+        const body = await res.json() as { error?: unknown };
+        if (body?.error === "Unauthorized") return "unauthorized";
+      } catch {}
+    }
+    return "offline";
+  } catch { return "offline"; }
+}
+
+// 등록된 자식만 우선 종료한다. PID를 모르는 LISTEN 프로세스는 401을 반환하는 이전
+// Publy 봇으로 확인된 경우에만 정리하며, 그 외 포트 소유자는 충돌로 남겨 둔다.
+async function killPort(port: number, child: ChildProcess | null): Promise<"clear" | "collision"> {
+  await terminateTrackedChild(child);
+  let pids = await listeningPids(port);
+  if (pids.length === 0) return "clear";
+  if (await botHealth(port, 1200) !== "unauthorized") return "collision";
+  for (const pid of pids) {
+    if (process.platform === "win32") await execAsync(`taskkill /PID ${pid} /T /F`);
+    else { try { process.kill(pid, "SIGKILL"); } catch {} }
+  }
+  await new Promise(resolve => setTimeout(resolve, 200));
+  pids = await listeningPids(port);
+  return pids.length === 0 ? "clear" : "collision";
 }
 
 /* ── 봇 로그 파이핑을 완전히 제거함 (v2.0.26) ──
@@ -64,6 +140,7 @@ async function forkBotServer(opts: {
   chromiumPath: string;
   port: number;
   extraEnv?: NodeJS.ProcessEnv;
+  getProc: () => ChildProcess | null;
   setProc: (p: ChildProcess | null) => void;
 }) {
   const fs = await import("fs");
@@ -77,36 +154,141 @@ async function forkBotServer(opts: {
 
   // 짧게 뜬 뒤 죽는 프로세스는 성공 기동이 아니다. 일정 시간 생존해야 백오프를 리셋한다.
   let restartAttempts = 0;
+  let generation = 0;
+  let restartInFlight: Promise<boolean> | null = null;
+  let scheduledRestart: NodeJS.Timeout | null = null;
+  let graceTimer: NodeJS.Timeout | null = null;
+  let lastRestartAt = 0;
+  const expectedExits = new WeakSet<ChildProcess>();
+  const cancelScheduledRestart = () => {
+    if (scheduledRestart) clearTimeout(scheduledRestart);
+    scheduledRestart = null;
+  };
+  const setState = (state: BotState, entry?: BotEntry) => { if (entry) entry.state = state; };
   const scheduleRestart = () => {
     if (app.isQuitting) return;
+    cancelScheduledRestart();
     restartAttempts++;
     const delay = Math.min(60000, 3000 * restartAttempts); // 3s,6s,9s…최대 60s
-    setTimeout(() => { void start(); }, delay);
+    scheduledRestart = setTimeout(() => {
+      scheduledRestart = null;
+      void restart("scheduled");
+    }, delay);
   };
 
-  const start = async () => {
+  const start = async (myGeneration: number): Promise<boolean> => {
+    const current = opts.getProc();
+    if (current && current.exitCode === null && !current.killed) return true;
     console.log(`[${opts.name}] 서버 시작...`);
-    await killPort(opts.port); // 비동기 → 메인 스레드 안 막힘
-    if (app.isQuitting) return;
+    const portResult = await killPort(opts.port, current);
+    if (portResult === "collision") {
+      console.error(`[${opts.name}] :${opts.port} 포트를 다른 프로그램이 사용 중이라 시작하지 않음`);
+      return false;
+    }
+    if (app.isQuitting) return false;
     const child = spawn(process.execPath, [serverJs], {
       cwd: opts.botPath,
       stdio: "ignore",
       windowsHide: true,
       env: { ...env, ELECTRON_RUN_AS_NODE: "1" },
     });
+    if (myGeneration !== generation || app.isQuitting) {
+      expectedExits.add(child);
+      await terminateTrackedChild(child);
+      return false;
+    }
     opts.setProc(child);
     const stableTimer = setTimeout(() => { restartAttempts = 0; }, 30000);
     child.on("spawn", () => console.log(`[${opts.name}] 실행됨 pid=${child.pid}`));
     child.on("error", (error) => console.error(`[${opts.name}] 실행 실패:`, error.message));
     child.on("close", (code) => {
       clearTimeout(stableTimer);
+      if (opts.getProc() === child) opts.setProc(null);
+      if (expectedExits.has(child) || myGeneration !== generation || app.isQuitting) return;
       console.warn(`[${opts.name}] 종료 (code: ${code}). 재시작 예약...`);
-      opts.setProc(null);
       scheduleRestart();
     });
+    return true;
   };
 
-  await start();
+  let entry: BotEntry;
+  const restart = (reason: "initial" | "scheduled" | "watchdog" | "manual"): Promise<boolean> => {
+    if (restartInFlight) return restartInFlight;
+    cancelScheduledRestart();
+    if (graceTimer) clearTimeout(graceTimer);
+    const waitMs = reason === "manual" ? Math.max(0, 2000 - (Date.now() - lastRestartAt)) : 0;
+    setState("restarting", entry);
+    restartInFlight = (async () => {
+      if (waitMs) await new Promise(resolve => setTimeout(resolve, waitMs));
+      const oldChild = opts.getProc();
+      generation++;
+      if (oldChild) expectedExits.add(oldChild);
+      await terminateTrackedChild(oldChild);
+      if (opts.getProc() === oldChild) opts.setProc(null);
+      if (reason !== "scheduled") restartAttempts = 0;
+      lastRestartAt = Date.now();
+      return await start(generation);
+    })().finally(() => {
+      restartInFlight = null;
+      if (app.isQuitting) return;
+      setState("grace", entry);
+      const graceGeneration = generation;
+      graceTimer = setTimeout(() => {
+        if (generation === graceGeneration) setState("idle", entry);
+        graceTimer = null;
+      }, 15000);
+    });
+    return restartInFlight;
+  };
+
+  entry = {
+    name: opts.name,
+    port: opts.port,
+    state: "idle",
+    restart: () => restart("manual"),
+    cancelScheduledRestart,
+  };
+  botRegistry.push(entry);
+
+  await restart("initial");
+}
+
+// ── 봇 서버 워치독 ──
+// 30초마다 각 봇의 /health를 확인. 응답이 없으면(프로세스는 살아도 hung 포함)
+// 해당 서버만 조용히 재시작한다. crash는 forkBotServer의 close 핸들러가 이미 처리하지만,
+// "포트는 물고 있는데 응답 없는 좀비"는 close가 안 떠서 이 워치독이 잡아낸다.
+async function pingBot(port: number): Promise<boolean> {
+  return await botHealth(port) === "online";
+}
+
+async function waitForBotHealth(port: number, timeoutMs = 8000): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  do {
+    if (await pingBot(port)) return true;
+    await new Promise(resolve => setTimeout(resolve, 500));
+  } while (Date.now() < deadline && !app.isQuitting);
+  return false;
+}
+
+function startBotWatchdog() {
+  const scan = async () => {
+    try {
+      if (app.isQuitting) return;
+      for (const bot of botRegistry) {
+        if (bot.state !== "idle") continue;
+        if (await pingBot(bot.port)) continue;
+        await new Promise((r) => setTimeout(r, 1500));
+        if (await pingBot(bot.port)) continue;
+        console.warn(`[watchdog] ${bot.name}(:${bot.port}) 인증 health 실패 → 자동 재시작`);
+        try { await bot.restart(); } catch (e: any) { console.error(`[watchdog] ${bot.name} 재시작 실패:`, e?.message); }
+      }
+    } catch (e: any) {
+      console.error("[watchdog] 검사 실패:", e?.message);
+    } finally {
+      if (!app.isQuitting) setTimeout(() => { void scan(); }, 30000);
+    }
+  };
+  setTimeout(() => { void scan(); }, 30000);
 }
 
 const resourceDir = (rel: string) =>
@@ -118,6 +300,7 @@ async function startBotServer() {
     botPath: resourceDir("naver-bot"),
     chromiumPath: resourceDir("chromium"),
     port: 3333,
+    getProc: () => botProcess,
     setProc: p => { botProcess = p; },
   });
 }
@@ -130,6 +313,7 @@ async function startNeighborBotServer() {
     port: 3334,
     // playwright는 naver-bot node_modules 공유
     extraEnv: { NODE_PATH: path.join(resourceDir("naver-bot"), "node_modules") },
+    getProc: () => neighborBotProcess,
     setProc: p => { neighborBotProcess = p; },
   });
 }
@@ -142,6 +326,7 @@ async function startInstaBotServer() {
     port: 3335,
     // playwright는 naver-bot node_modules 공유
     extraEnv: { NODE_PATH: path.join(resourceDir("naver-bot"), "node_modules") },
+    getProc: () => instaBotProcess,
     setProc: p => { instaBotProcess = p; },
   });
 }
@@ -193,30 +378,77 @@ app.whenReady().then(async () => {
   await startBotServer();
   await startNeighborBotServer();
   await startInstaBotServer();
+  startBotWatchdog();            // ★ 봇 서버 자동 감시·복구 시작
   createWindow();
   app.on("activate", () => { if (!mainWindow) createWindow(); });
 });
 
-function shutdownBots() {
+let shutdownPromise: Promise<void> | null = null;
+let shutdownComplete = false;
+function shutdownBots(): Promise<void> {
+  if (shutdownPromise) return shutdownPromise;
   app.isQuitting = true;
-  botProcess?.kill();
-  neighborBotProcess?.kill();
-  instaBotProcess?.kill();
-  // .kill()이 놓친 프로세스가 있어도 포트를 확실히 비워 다음 실행이 깨끗하게 시작되도록.
-  killPort(3333); killPort(3334); killPort(3335);
+  for (const bot of botRegistry) bot.cancelScheduledRestart();
+  shutdownPromise = Promise.all([
+    killPort(3333, botProcess),
+    killPort(3334, neighborBotProcess),
+    killPort(3335, instaBotProcess),
+  ]).then(() => undefined);
+  return shutdownPromise;
 }
 
 app.on("window-all-closed", () => {
-  shutdownBots();
-  if (process.platform !== "darwin") app.quit();
+  void shutdownBots().finally(() => {
+    shutdownComplete = true;
+    if (process.platform !== "darwin") app.quit();
+  });
 });
-app.on("before-quit", shutdownBots);
+app.on("before-quit", event => {
+  if (shutdownComplete) return;
+  event.preventDefault();
+  void shutdownBots().finally(() => {
+    shutdownComplete = true;
+    app.quit();
+  });
+});
 
 ipcMain.handle("get-bot-status", async () => {
   try {
     const res = await fetch("http://127.0.0.1:3333/health", { headers: { Authorization: `Bearer ${botAuthToken}` }, signal: AbortSignal.timeout(2000) });
     return res.ok ? "online" : "offline";
   } catch { return "offline"; }
+});
+
+// 봇 3종 개별 상태(발행/이웃/인스타). 탭별로 정확한 온·오프라인 표시용.
+ipcMain.handle("get-all-bot-status", async () => {
+  const ports = { publish: 3333, neighbor: 3334, insta: 3335 };
+  const out: Record<string, "online" | "offline"> = {};
+  await Promise.all(Object.entries(ports).map(async ([k, p]) => {
+    out[k] = (await pingBot(p)) ? "online" : "offline";
+  }));
+  return out;
+});
+
+// 회원이 직접 누르는 "봇 다시 시작"(터미널 없이 스스로 복구). name 없으면 전부.
+ipcMain.handle("restart-bots", async (event, name?: string) => {
+  if (!mainWindow || event.sender !== mainWindow.webContents || event.senderFrame !== mainWindow.webContents.mainFrame) {
+    throw new Error("Unauthorized IPC sender");
+  }
+  const allowedNames = new Set(botRegistry.map(bot => bot.name));
+  if (name !== undefined && (typeof name !== "string" || !allowedNames.has(name))) {
+    throw new Error("Invalid bot name");
+  }
+  const targets = name ? botRegistry.filter(b => b.name === name) : botRegistry;
+  const results: Record<string, boolean> = {};
+  for (const bot of targets) {
+    try {
+      const started = await bot.restart();
+      if (!started) { results[bot.name] = false; continue; }
+      results[bot.name] = await waitForBotHealth(bot.port);
+    }
+    catch { results[bot.name] = false; }
+  }
+  return results;
 });
 
 ipcMain.handle("get-bot-secret", async () => botAuthToken);
