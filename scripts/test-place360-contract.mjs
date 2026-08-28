@@ -25,6 +25,9 @@ requireText(screen, "최근30일,0,0,0,0,0", "CSV current-period template");
 requireText(screen, "이전30일,0,0,0,0,0", "CSV previous-period template");
 requireText(screen, 'new TextDecoder("euc-kr"', "Windows Korean CSV fallback");
 requireText(screen, "매출 감소만으로 유동인구 감소라고 단정할 수 없어요", "traffic inference warning");
+requireText(screen, 'plan !== "admin" && <section className="p360-card" aria-label="플레이스 360 등급별 사용 한도"', "member-only global plan table");
+if (screen.indexOf('aria-label="플레이스 360 등급별 사용 한도"') > screen.indexOf('{profiles.length > 0 && <section')) throw new Error("place360 contract missing: plan table must stay above store-specific content");
+if ((screen.match(/aria-label="플레이스 360 등급별 사용 한도"/g) || []).length !== 1) throw new Error("place360 contract missing: exactly one global plan table");
 requireText(crawlScreen, '{plan !== "admin" && <div className="ob-plan-table"', "crawl plan table remains visible to every member plan");
 requireText(crawlScreen, '(["free", "basic", "pro"] as const)', "crawl plan table excludes internal unlimited row");
 
