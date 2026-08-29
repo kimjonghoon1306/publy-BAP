@@ -1441,6 +1441,52 @@ export async function crawlPlaceDetail(params: {
     await browser.close().catch(() => {});
   }
 }
+
+/* ── 붙여넣은 플레이스 주소에서 domain·placeId 뽑기 ──
+   지원 형태: pcmap.place / m.place / place.naver.com/{domain}/{id},
+   map.naver.com/p/entry/place/{id}, 순수 숫자 ID. 단축주소(naver.me)는 못 뽑으므로 null. */
+export function parsePlaceUrl(input: string): { domain: string; placeId: string } | null {
+  const s = String(input || "");
+  let m = s.match(/(?:pcmap\.place|m\.place|place)\.naver\.com\/([a-z]+)\/(\d{5,})/i);
+  if (m) return { domain: m[1], placeId: m[2] };
+  m = s.match(/entry\/place\/(\d{5,})/i);
+  if (m) return { domain: "place", placeId: m[1] };
+  m = s.match(/[?&]placeId=(\d{5,})/i) || s.match(/\/(\d{6,})(?:[/?#]|$)/) || s.match(/^\s*(\d{6,})\s*$/);
+  if (m) return { domain: "place", placeId: m[1] };
+  return null;
+}
+
+/* ── 🔎 주소만 붙여넣어도 내 매장 정보를 바로 당겨오기(플레이스 360 매장 등록용) ──
+   어떤 형태의 링크든 최종 placeId·domain을 찾아 공개 상세정보를 가져온다.
+   공개 페이지만 읽으므로 로그인 계정 불필요. naver.me 단축주소는 실제로 열어 리다이렉트된 최종 URL로 판별. */
+export async function crawlPlaceByUrl(params: {
+  placeUrl: string;
+  ownerUserId?: string | null;
+  onLog?: (msg: string) => void;
+}): Promise<PlaceDetail> {
+  const log = params.onLog || console.log;
+  const raw = (params.placeUrl || "").trim();
+  if (!raw) throw new Error("플레이스 주소를 입력하세요");
+  let parsed = parsePlaceUrl(raw);
+  // 문자열에서 못 뽑으면(naver.me 단축주소 등) 실제로 열어 리다이렉트된 최종 URL로 판별
+  if (!parsed) {
+    log(`[플레이스 360] 단축주소 확인 중...`);
+    const browser = await launchBrowser(null, { headless: true, log, feature: "crawl", ownerUserId: params.ownerUserId });
+    try {
+      const context = await browser.newContext({ userAgent: UA, locale: "ko-KR" });
+      const page = await context.newPage();
+      await page.goto(raw, { waitUntil: "domcontentloaded", timeout: 25000 });
+      await page.waitForTimeout(1500);
+      parsed = parsePlaceUrl(page.url());
+      if (!parsed) { try { parsed = parsePlaceUrl(await page.content()); } catch {} }
+    } finally {
+      await browser.close().catch(() => {});
+    }
+  }
+  if (!parsed) throw new Error("주소에서 매장 번호를 찾지 못했어요. 네이버 플레이스의 '공유' 주소를 붙여넣어 주세요");
+  return crawlPlaceDetail({ accountId: "", placeId: parsed.placeId, domain: parsed.domain, ownerUserId: params.ownerUserId, onLog: log });
+}
+
 export async function crawlPlaces(params: {
   accountId: string;
   query: string;                    // "강남 맛집" 처럼 지역+업종을 이미 합친 검색어

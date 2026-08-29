@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import PlaceCenter from "./PlaceCenter";
+import { botFetch } from "../lib/botApi";
 import { deletePlace360Store, getPlace360BusinessMetrics, getPlace360Progress, getPlace360Ranks, getPlace360Snapshots, getPlace360StoreProfiles, PLACE360_DAILY_DIAGNOSIS_LIMIT, PLACE360_HISTORY_DAYS, PLACE360_RANK_DAILY_LIMIT, PLACE360_STORE_LIMIT, place360StoreKey, Place360BusinessMetrics, Place360RankMeasurement, Place360Snapshot, recordPlace360ReviewerHandoff, renamePlace360Store, savePlace360BusinessMetrics, savePlace360MissionProgress, savePlace360Rank, savePlace360Snapshot, savePlace360StoreProfile } from "../lib/supabase";
 import { koreaDateKey } from "../lib/date";
 
@@ -34,6 +35,19 @@ const DIAGNOSIS_ITEMS = [
   { icon: "📣", title: "광고 효율", state: "자료 필요", desc: "광고 보고서를 연결하면 비용 대비 클릭·전화·예약을 진단해요." },
   { icon: "🏙️", title: "상권 관심도", state: "추정 진단", desc: "주변 업체와 지역 검색 변화를 이용해 상권 흐름을 추정해요." },
 ] as const;
+
+const BOT = "http://127.0.0.1:3334";
+
+/* 붙여넣은 플레이스 주소에서 매장 번호(placeId)만 뽑아낸다.
+   pcmap.place / m.place / place.naver.com/{domain}/{id}, map.naver.com/p/entry/place/{id}, 순수 숫자 지원.
+   naver.me 단축주소는 여기선 못 뽑으므로(""), '주소로 불러오기'가 봇을 통해 최종 URL로 판별한다. */
+function placeIdFromUrl(url?: string): string {
+  const s = String(url || "");
+  let m = s.match(/(?:pcmap\.place|m\.place|place)\.naver\.com\/[a-z]+\/(\d{5,})/i);
+  if (m) return m[1];
+  m = s.match(/entry\/place\/(\d{5,})/i) || s.match(/[?&]placeId=(\d{5,})/i) || s.match(/\/(\d{6,})(?:[/?#]|$)/) || s.match(/^\s*(\d{6,})\s*$/);
+  return m ? m[1] : "";
+}
 
 function profileKey(userId?: string) {
   return `publy_place360_profile_v1:${userId || "guest"}`;
@@ -121,6 +135,7 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
     return selected.name ? place360StoreKey(selected.name, selected.region) : null;
   });
   const [storeFormOpen, setStoreFormOpen] = useState(() => loadProfiles(userId).length === 0);
+  const [resolving, setResolving] = useState(false);
   useEffect(() => {
     if (plan === "admin") return;
     let active = true;
@@ -141,13 +156,21 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
   const [rankHistory, setRankHistory] = useState<Place360RankMeasurement[]>([]);
   const hasStore = Boolean(profile.name.trim());
   const ownPlace = useMemo(() => {
-    const needle = profile.name.replace(/\s+/g, "").toLowerCase();
+    // 1순위: 등록한 플레이스 주소의 매장 번호로 정확히 매칭(상호명 띄어쓰기·지점명 달라도 100% 일치)
+    const myId = placeIdFromUrl(profile.placeUrl);
+    if (myId) {
+      const byId = collectedPlaces.find(place => place.placeId === myId);
+      if (byId) return byId;
+    }
+    // 2순위: 이름 정규화(공백·괄호·지점표기 제거) 후 포함 매칭
+    const norm = (s: string) => s.replace(/\(.*?\)/g, "").replace(/[\s·・,]/g, "").toLowerCase();
+    const needle = norm(profile.name);
     if (!needle) return undefined;
     return collectedPlaces.find(place => {
-      const name = place.name.replace(/\s+/g, "").toLowerCase();
+      const name = norm(place.name);
       return name.includes(needle) || needle.includes(name);
     });
-  }, [collectedPlaces, profile.name]);
+  }, [collectedPlaces, profile.name, profile.placeUrl]);
   const comparison = useMemo(() => {
     const competitors = collectedPlaces.filter(place => place.placeId !== ownPlace?.placeId);
     if (!competitors.length) return null;
@@ -208,11 +231,14 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
 
   const onPlacesCollected = async (rows: CollectedPlace[], meta: { query: string; measuredAt: string; surface: string }) => {
     setCollectedPlaces(rows);
-    const needle = profile.name.replace(/\s+/g, "").toLowerCase();
-    const own = needle ? rows.find(place => {
-      const name = place.name.replace(/\s+/g, "").toLowerCase();
-      return name.includes(needle) || needle.includes(name);
-    }) : undefined;
+    const myId = placeIdFromUrl(profile.placeUrl);
+    const norm = (s: string) => s.replace(/\(.*?\)/g, "").replace(/[\s·・,]/g, "").toLowerCase();
+    const needle = norm(profile.name);
+    const own = (myId ? rows.find(place => place.placeId === myId) : undefined)
+      || (needle ? rows.find(place => {
+        const name = norm(place.name);
+        return name.includes(needle) || needle.includes(name);
+      }) : undefined);
     const rankIndex = own ? rows.findIndex(place => place.placeId === own.placeId) : -1;
     setLatestRank({ query: meta.query, rank: rankIndex >= 0 ? rankIndex + 1 : null, checkedCount: rows.length, measuredAt: meta.measuredAt, surface: meta.surface });
     if (plan !== "admin") {
@@ -427,6 +453,36 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
     bg: "#eee9df", card: "#fffdf8", soft: "#f5efe4", line: "#e0d7c9", text: "#2b2620", sub: "#756b5e", rose: "#e93f79", green: "#16856b", amber: "#aa7100",
   }, [dark]);
 
+  // 🔎 플레이스 주소만 붙여넣으면 이름·업종·지역을 봇이 공개 페이지에서 바로 당겨온다(로그인 불필요).
+  const resolveFromUrl = async () => {
+    const url = draft.placeUrl.trim();
+    if (!url) { showToast?.("먼저 네이버 플레이스 주소를 붙여넣어 주세요", "info"); return; }
+    setResolving(true);
+    try {
+      const res = await botFetch(`${BOT}/api/place/resolve?userId=${encodeURIComponent(userId || "")}&placeUrl=${encodeURIComponent(url)}`);
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data?.ok || !data?.detail) {
+        showToast?.(data?.error || "매장 정보를 불러오지 못했어요. 주소를 확인해 주세요", "error");
+        return;
+      }
+      const d = data.detail as { name?: string; category?: string; address?: string; placeUrl?: string };
+      // 주소에서 '동/구' 같은 지역 힌트를 추출(있으면 지역칸 자동 채움)
+      const regionHint = String(d.address || "").match(/([가-힣]+(?:동|읍|면|리|가|로|구|시))/)?.[1] || "";
+      setDraft(v => ({
+        ...v,
+        name: d.name?.trim() || v.name,
+        category: d.category?.trim() || v.category,
+        region: v.region.trim() || regionHint,
+        placeUrl: d.placeUrl?.trim() || url,
+      }));
+      showToast?.(`'${d.name || "매장"}' 정보를 불러왔어요`, "success");
+    } catch {
+      showToast?.("봇 서버에 연결하지 못했어요. 퍼블리 앱이 실행 중인지 확인해 주세요", "error");
+    } finally {
+      setResolving(false);
+    }
+  };
+
   const saveStore = async () => {
     if (!draft.name.trim()) {
       showToast?.("먼저 내 매장 이름을 입력해 주세요", "info");
@@ -570,12 +626,19 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
     {tab === "overview" && <main>
       {!hasStore || storeFormOpen ? <section id="p360-store-form" className="p360-card" style={{ ...cardStyle, padding: 22, marginBottom: 12, scrollMarginTop: 12 }}>
         <div style={{ fontSize: 19, fontWeight: 950 }}>먼저 내 매장을 알려주세요</div>
-        <p style={{ color: colors.sub, fontSize: 12.5, lineHeight: 1.7, margin: "6px 0 16px" }}>매장 이름만 입력해도 시작할 수 있어요. 플레이스 주소를 함께 넣으면 이후 자동 진단 연결이 더 정확해져요.</p>
+        <p style={{ color: colors.sub, fontSize: 12.5, lineHeight: 1.7, margin: "6px 0 16px" }}>네이버 플레이스 <b style={{ color: colors.text }}>주소만 붙여넣고 ‘불러오기’</b>를 누르면 매장 이름·업종·지역을 자동으로 채워드려요. 순위 측정도 이 주소를 기준으로 정확히 잡아요.</p>
+        <div style={{ marginBottom: 12 }}>
+          <b style={{ display: "block", marginBottom: 7, fontSize: 12 }}>네이버 플레이스 주소 · 추천</b>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 8 }}>
+            <input value={draft.placeUrl} onChange={e => setDraft(v => ({ ...v, placeUrl: e.target.value }))} onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); void resolveFromUrl(); } }} placeholder="예: https://naver.me/xxxx 또는 플레이스 공유 주소" style={fieldStyle} />
+            <button type="button" className="p360-button" disabled={resolving} onClick={() => void resolveFromUrl()} style={{ background: colors.green, color: "#fff", whiteSpace: "nowrap", opacity: resolving ? 0.7 : 1 }}>{resolving ? "불러오는 중…" : "🔎 주소로 불러오기"}</button>
+          </div>
+          <p style={{ color: colors.sub, fontSize: 11, lineHeight: 1.6, margin: "6px 2px 0" }}>네이버 지도에서 내 매장 → ‘공유’ 버튼의 주소를 붙여넣으면 가장 정확해요.</p>
+        </div>
         <div className="p360-two">
           <label><b style={{ display: "block", marginBottom: 7, fontSize: 12 }}>매장 이름 · 필수</b><input value={draft.name} onChange={e => setDraft(v => ({ ...v, name: e.target.value }))} placeholder="예: 퍼블리 식당 성수점" style={fieldStyle} /></label>
-          <label><b style={{ display: "block", marginBottom: 7, fontSize: 12 }}>네이버 플레이스 주소 · 선택</b><input value={draft.placeUrl} onChange={e => setDraft(v => ({ ...v, placeUrl: e.target.value }))} placeholder="플레이스 주소를 붙여 넣으세요" style={fieldStyle} /></label>
-          <label><b style={{ display: "block", marginBottom: 7, fontSize: 12 }}>지역</b><input value={draft.region} onChange={e => setDraft(v => ({ ...v, region: e.target.value }))} placeholder="예: 성수동" style={fieldStyle} /></label>
           <label><b style={{ display: "block", marginBottom: 7, fontSize: 12 }}>업종</b><input value={draft.category} onChange={e => setDraft(v => ({ ...v, category: e.target.value }))} placeholder="예: 한식, 카페, 미용실" style={fieldStyle} /></label>
+          <label><b style={{ display: "block", marginBottom: 7, fontSize: 12 }}>지역</b><input value={draft.region} onChange={e => setDraft(v => ({ ...v, region: e.target.value }))} placeholder="예: 성수동" style={fieldStyle} /></label>
         </div>
         <div style={{ display: "grid", gridTemplateColumns: profiles.length ? "1fr auto" : "1fr", gap: 8, marginTop: 14 }}><button type="button" className="p360-button" onClick={() => void saveStore()} style={{ width: "100%", background: colors.rose, color: "#fff" }}>내 매장 저장하고 진단 시작하기 →</button>{profiles.length > 0 && <button type="button" className="p360-button" onClick={() => { const selected = profiles.find(item => place360StoreKey(item.name, item.region) === editingStoreKey) || profiles[0]; selectStore(selected); }} style={{ background: colors.soft, color: colors.text, border: `1px solid ${colors.line}` }}>취소</button>}</div>
       </section> : <>

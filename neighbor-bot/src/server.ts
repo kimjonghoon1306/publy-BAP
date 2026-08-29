@@ -1,6 +1,6 @@
 import express from "express";
 import cors from "cors";
-import { saveSession, sessionExists, removeSession, crawlBlogIds, crawlBuddyPosts, analyzeBuddyKeywords, addNeighbors, NeighborResult, donePath, engageBlogs, EngageResult, engageDonePath, crawlMyPosts, replyToComments, crawlBlogStats, checkSelectedBlogExposure, pumasiEngage, crawlPumasiReport, pumasiPreview, updatePostTitle, checkProxy, analyzeBlogAuthenticity, fetchPostBody, crawlPostViews, sendWebmail, sendBlogComments, crawlPlaces, crawlPlaceBloggers, crawlPlaceDetail } from "./naver";
+import { saveSession, sessionExists, removeSession, crawlBlogIds, crawlBuddyPosts, analyzeBuddyKeywords, addNeighbors, NeighborResult, donePath, engageBlogs, EngageResult, engageDonePath, crawlMyPosts, replyToComments, crawlBlogStats, checkSelectedBlogExposure, pumasiEngage, crawlPumasiReport, pumasiPreview, updatePostTitle, checkProxy, analyzeBlogAuthenticity, fetchPostBody, crawlPostViews, sendWebmail, sendBlogComments, crawlPlaces, crawlPlaceBloggers, crawlPlaceDetail, crawlPlaceByUrl } from "./naver";
 import { checkNeighborQuota, incrementNeighborQuota, getNeighborDailyUsage, incrementEngageQuota, getEngageDailyUsage, getUserPlan, checkMembershipAccess, NEIGHBOR_DAILY_LIMIT, ENGAGE_DAILY_LIMIT, REPLY_DAILY_LIMIT, getReplyDailyUsage, incrementReplyQuota, addNeighborHistory, addReplyHistory, addBlogscoreHistory, incrementPumasiQuota, TITLE_EDIT_DAILY_LIMIT, getTitleEditDailyUsage, incrementTitleEditQuota, getProxyForAccount, supabase, getOutreachSender, getOutreachSentToday, addOutreachLog, checkPlaceDetailQuota, incrementPlaceDetailQuota } from "./supabase";
 import nodemailer from "nodemailer";
 import fs from "fs";
@@ -239,6 +239,24 @@ app.get("/api/place/detail", async (req, res) => {
     res.status(500).json({ ok: false, error: e.message || "매장 상세정보를 확인하지 못했어요" });
   } finally {
     release();
+  }
+});
+
+/* ── 🔎 주소만 붙여넣어도 내 매장 바로 불러오기(플레이스 360 매장 등록용) ──
+   공개 페이지만 읽으므로 로그인 계정·상세확인 쿼타·계정 잠금 불필요.
+   주소 → 이름·업종·주소를 자동으로 당겨와 매장 등록칸을 채운다. */
+app.get("/api/place/resolve", async (req, res) => {
+  const { userId, placeUrl } = req.query as Record<string, string>;
+  if (!placeUrl) return res.status(400).json({ ok: false, error: "플레이스 주소를 입력하세요" });
+  try {
+    if (userId) {
+      const access = await checkMembershipAccess(userId, "place360");
+      if (!access.ok) return res.status(403).json({ ok: false, error: access.reason || "플레이스 360 이용권을 확인해주세요", membershipBlocked: true });
+    }
+    const detail = await crawlPlaceByUrl({ placeUrl, ownerUserId: userId || null });
+    res.json({ ok: true, detail });
+  } catch (e: any) {
+    res.status(500).json({ ok: false, error: e.message || "매장 정보를 불러오지 못했어요" });
   }
 });
 
