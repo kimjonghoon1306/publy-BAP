@@ -921,6 +921,9 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
     }
     // 📊 기간 리포트 요약(선택 기간)
     const rangeLabel = reportRange === 1 ? "일간" : reportRange === 7 ? "주간" : reportRange === 30 ? "월간" : `최근 ${reportDays}일`;
+    // 🎯 다음 액션 — 시급/보완 항목 상위 3개를 '이렇게 하세요'로
+    const todo = placeReport.groups.flatMap(g => g.items).filter(it => it.status === "bad" || it.status === "warn").slice(0, 3);
+    const todoBlock = todo.length ? `<h2>🎯 지금 해야 할 3가지</h2><ol class="todo">${todo.map(it => `<li><b>${esc(it.icon + " " + it.label)}</b> — ${esc(it.how)}</li>`).join("")}</ol>` : "";
     let reportBlock = "";
     if (report.hasData) {
       const kwr = report.kwRows.slice(0, 8).map(k => `<tr><td>${esc(k.keyword)}</td><td>${k.last != null ? k.last + "위" : "상위밖"}</td><td class="${k.change == null ? "" : k.change > 0 ? "up" : k.change < 0 ? "dn" : ""}">${k.change == null ? "기준" : k.change > 0 ? "▲ " + k.change : k.change < 0 ? "▼ " + Math.abs(k.change) : "— 유지"}</td></tr>`).join("");
@@ -947,16 +950,21 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
     .rgrid{display:flex;gap:10px;margin:10px 0}.rc{flex:1;border:1px solid #d6ede3;border-radius:10px;padding:11px;text-align:center}.rc span{font-size:11px;color:#5c8478;display:block}.rc b{font-size:20px}
     .rtbl{width:100%;border-collapse:collapse;margin:8px 0;font-size:12.5px}.rtbl th,.rtbl td{border:1px solid #d6ede3;padding:7px 9px;text-align:left}.rtbl th{background:#effaf4}.rtbl tr.me{background:#eafff5;font-weight:700}
     .up{color:#00a884;font-weight:700}.dn{color:#e5397f;font-weight:700}
+    .brand{display:flex;align-items:center;gap:10px;padding-bottom:12px;border-bottom:3px solid #00c896;margin-bottom:4px}
+    .logo{width:34px;height:34px;border-radius:9px;background:linear-gradient(135deg,#00c896,#ff5fa2);color:#fff;font-weight:900;font-size:18px;display:flex;align-items:center;justify-content:center}
+    .btag{font-size:11px;font-weight:900;letter-spacing:.12em;color:#00a884}.bttl{font-size:20px;font-weight:900}
+    .todo{margin:8px 0;padding-left:20px}.todo li{margin:6px 0;font-size:13px}
     @media print{body{margin:0}}</style></head><body>
-    <h1>🏪 ${esc(profile.name || "내 매장")} · 네이버 상위노출 성과·진단 보고서</h1>
+    <div class="brand"><div class="logo">P</div><div><div class="btag">PUBLY PLACE 365 · 상위노출 성과·진단 보고서</div><div class="bttl">🏪 ${esc(profile.name || "내 매장")}</div></div><div style="margin-left:auto;text-align:right;font-size:11px;color:#5c8478">발행일<br/><b style="color:#0f2b23;font-size:13px">${new Date().toLocaleDateString("ko-KR")}</b></div></div>
     <div class="top"><div class="stars">${"★".repeat(Math.round(placeReport.overallStars))}${"☆".repeat(5 - Math.round(placeReport.overallStars))} ${placeReport.overallStars} / 5.0</div>
-    <div>${esc([profile.region, profile.category].filter(Boolean).join(" · "))} · ${placeReport.totalCount}개 항목 중 ${placeReport.goodCount}개 양호 · ${new Date().toLocaleDateString("ko-KR")}</div></div>
+    <div>${esc([profile.region, profile.category].filter(Boolean).join(" · "))} · ${placeReport.totalCount}개 항목 중 ${placeReport.goodCount}개 양호${currentRank ? ` · 대표 키워드 “${esc(currentRank.query)}” ${currentRank.rank ? currentRank.rank + "위" : "상위 밖"}` : ""}</div></div>
+    ${todoBlock}
     ${chartSvg}
     ${reportBlock}
     ${compBlock}
     <h2>🔎 항목별 진단</h2>
     ${rows}
-    <div class="foot">본 보고서는 네이버 플레이스 공개 데이터와 상위노출 알고리즘(저장·리뷰·행동 신호) 기준으로 퍼블리 플레이스 360이 자동 생성했습니다. 부족 항목은 퍼블리 블로그 글쓰기·리뷰어 섭외로 채울 수 있습니다.</div>
+    <div class="foot">본 보고서는 네이버 플레이스 공개 데이터와 상위노출 알고리즘(저장·리뷰·행동 신호) 기준으로 <b>퍼블리 플레이스 365</b>가 자동 생성했습니다. 부족 항목은 퍼블리 블로그 글쓰기·리뷰어 섭외로 채울 수 있습니다. · publy.blogautopro.com</div>
     <script>window.onload=()=>{setTimeout(()=>window.print(),400)}</script></body></html>`;
     const w = window.open("", "_blank"); if (!w) { showToast?.("팝업이 차단됐어요. 팝업 허용 후 다시 시도해 주세요", "error"); return; }
     w.document.write(html); w.document.close();
