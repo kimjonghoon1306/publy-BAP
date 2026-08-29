@@ -90,6 +90,8 @@ function missionKey(userId: string | undefined, storeKey: string) {
   return `publy_place360_missions_v1:${userId || "guest"}:${storeKey}:${koreaDateKey()}`;
 }
 
+function adminSnapKey(storeKey: string) { return `publy_place360_admin_snap_v1:${storeKey}`; }
+function adminRankKey(storeKey: string) { return `publy_place360_admin_rank_v1:${storeKey}`; }
 function adminMetricsKey(storeKey: string) {
   return `publy_place360_admin_metrics_v1:${storeKey}`;
 }
@@ -308,14 +310,17 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
     return () => { active = false; };
   }, [plan, storeKey]);
   useEffect(() => {
-    if (!storeKey || plan === "admin") { setSnapshots([]); return; }
+    if (!storeKey) { setSnapshots([]); return; }
+    // 관리자는 회원과 동일 기능을 쓰되 기록은 서버 대신 로컬에 유지(회원 데이터와 안 섞이게)
+    if (plan === "admin") { try { setSnapshots(JSON.parse(localStorage.getItem(adminSnapKey(storeKey)) || "[]")); } catch { setSnapshots([]); } return; }
     let active = true;
     setHistoryLoading(true);
     getPlace360Snapshots(storeKey).then(rows => { if (active) setSnapshots(rows); }).catch(() => { if (active) setSnapshots([]); }).finally(() => { if (active) setHistoryLoading(false); });
     return () => { active = false; };
   }, [plan, storeKey]);
   useEffect(() => {
-    if (!storeKey || plan === "admin") { setRankHistory([]); return; }
+    if (!storeKey) { setRankHistory([]); return; }
+    if (plan === "admin") { try { setRankHistory(JSON.parse(localStorage.getItem(adminRankKey(storeKey)) || "[]")); } catch { setRankHistory([]); } return; }
     let active = true;
     getPlace360Ranks(storeKey).then(rows => { if (active) setRankHistory(rows); }).catch(() => { if (active) setRankHistory([]); });
     return () => { active = false; };
@@ -344,7 +349,11 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
       }) : undefined);
     const rankIndex = own ? rows.findIndex(place => place.placeId === own.placeId) : -1;
     setLatestRank({ query: meta.query, rank: rankIndex >= 0 ? rankIndex + 1 : null, checkedCount: rows.length, measuredAt: meta.measuredAt, surface: meta.surface });
-    if (plan !== "admin") {
+    if (plan === "admin") {
+      // 관리자: 회원과 동일하게 순위 히스토리를 쌓되 로컬에 저장(서버 미저장)
+      const row: Place360RankMeasurement = { id: `admin-${Date.now()}`, user_id: "admin", store_key: storeKey, keyword: meta.query, rank: rankIndex >= 0 ? rankIndex + 1 : null, checked_count: rows.length, surface: meta.surface, device: "PC", measured_at: meta.measuredAt } as Place360RankMeasurement;
+      setRankHistory(cur => { const next = [row, ...cur].slice(0, 200); try { localStorage.setItem(adminRankKey(storeKey), JSON.stringify(next)); } catch {} return next; });
+    } else if (plan !== "admin") {
       try {
         await savePlace360Rank({ store_key: storeKey, keyword: meta.query, rank: rankIndex >= 0 ? rankIndex + 1 : null, checked_count: rows.length, surface: meta.surface, device: "PC" });
         const nextRankHistory = await getPlace360Ranks(storeKey);
@@ -361,7 +370,7 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
     const avgBlog = Math.round(competitors.reduce((sum, place) => sum + (place.blogReviewCount || 0), 0) / competitors.length);
     if (plan === "admin") {
       const now = new Date().toISOString();
-      setSnapshots(current => [{ id: `admin-${Date.now()}`, user_id: "admin", store_key: storeKey, store_name: own.name, region: profile.region, category: profile.category, visitor_reviews: own.visitorReviewCount || 0, blog_reviews: own.blogReviewCount || 0, competitor_count: competitors.length, competitor_avg_visitor: avgVisitor, competitor_avg_blog: avgBlog, collected_count: rows.length, measured_on: now.slice(0, 10), created_at: now }, ...current].slice(0, 120));
+      setSnapshots(current => { const next = [{ id: `admin-${Date.now()}`, user_id: "admin", store_key: storeKey, store_name: own.name, region: profile.region, category: profile.category, visitor_reviews: own.visitorReviewCount || 0, blog_reviews: own.blogReviewCount || 0, competitor_count: competitors.length, competitor_avg_visitor: avgVisitor, competitor_avg_blog: avgBlog, collected_count: rows.length, measured_on: now.slice(0, 10), created_at: now }, ...current].slice(0, 120); try { localStorage.setItem(adminSnapKey(storeKey), JSON.stringify(next)); } catch {} return next; });
       showToast?.("관리자 무제한 진단이 완료됐어요", "success");
       return;
     }
