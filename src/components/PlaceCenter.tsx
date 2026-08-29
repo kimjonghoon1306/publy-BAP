@@ -46,6 +46,7 @@ export default function PlaceCenter({ showToast, theme: extTheme, userId, plan =
   const [mode, setMode] = useState<"places" | "bloggers">("places");
   const [region, setRegion] = useState(initialRegion);
   const [domain, setDomain] = useState("restaurant");
+  const [keyword, setKeyword] = useState("");
   const [count, setCount] = useState(20);
   // 🗺️ 역추적 업체당 인원 상한(등급별). 무제한이면 클램프 없음.
   const bloggerLimit = PLACE_BLOGGER_LIMIT[plan] ?? PLACE_BLOGGER_LIMIT.free;
@@ -133,11 +134,14 @@ export default function PlaceCenter({ showToast, theme: extTheme, userId, plan =
     if (d.type === "quota_exceeded") toast("오늘 플레이스 발굴 한도를 다 썼어요", "error");
   };
   const startSearch = () => {
-    if (!region.trim()) { toast("찾을 지역을 입력하세요. 예: 강남", "info"); return; }
+    const kw = keyword.trim();
+    if (!kw && !region.trim()) { toast("검색 키워드나 지역 중 하나는 입력하세요. 예: 강남 맛집", "info"); return; }
     if (!requireAccount()) return;
     searchRef.current?.close(); setRunning(true); setLogs([]); setPlaces([]); setSelectedPlaces(new Set());
     const category = CATEGORIES.find(c => c.value === domain)?.label || "";
-    const query = `${region.trim()}${domain === "place" ? "" : ` ${category}`}`.trim();
+    // 키워드를 직접 넣었으면 그대로 검색(내가 노리는 정확한 검색어의 순위 확인용).
+    // 비어 있으면 기존처럼 지역+업종을 합쳐 검색.
+    const query = kw || `${region.trim()}${domain === "place" ? "" : ` ${category}`}`.trim();
     pushLog(`📍 “${query}” 업체 ${count}곳을 찾기 시작해요`);
     const url = `${BOT}/api/place/search?userId=${encodeURIComponent(userId || "")}&accountId=${encodeURIComponent(mailAcctId)}&query=${encodeURIComponent(query)}&domain=${encodeURIComponent(domain)}&count=${count}`;
     const es = new BotEventStream(url); searchRef.current = es;
@@ -303,8 +307,12 @@ export default function PlaceCenter({ showToast, theme: extTheme, userId, plan =
     {mode === "places" ? <>
       <section style={{ ...card, padding: 19, marginBottom: 15 }}>
         <div style={{ fontSize: 17, fontWeight: 900, marginBottom: 5 }}>📍 업체 발굴</div>
-        <Help>찾을 <b style={{ color: C.ink }}>지역</b>과 <b style={{ color: C.ink }}>업종</b>을 고른 뒤 START를 누르세요. 예: 지역에 “강남”, 업종에 “맛집”을 고르면 “강남 맛집”을 찾아요.</Help>
-        <div className="pc-search-grid" style={{ display: "grid", gridTemplateColumns: "minmax(0,1.5fr) minmax(110px,.7fr)", gap: 10, alignItems: "end" }}>
+        <Help><b style={{ color: C.accent }}>검색 키워드</b>에 노리는 검색어를 직접 넣으면 그 키워드로 검색해 <b style={{ color: C.ink }}>내 매장 순위</b>를 확인해요(예: “성수 브런치”, “강남역 파스타”). 비워 두면 아래 <b style={{ color: C.ink }}>지역+업종</b>을 합쳐 찾아요.</Help>
+        <div style={{ marginBottom: 12 }}>
+          <div style={label}>🔎 검색 키워드 · 직접 입력 <span style={{ textTransform: "none", letterSpacing: 0, fontWeight: 600 }}>(순위 확인용, 선택)</span></div>
+          <input value={keyword} onChange={e => setKeyword(e.target.value)} onKeyDown={e => { if (e.key === "Enter") startSearch(); }} placeholder="예: 성수 브런치, 강남역 파스타, 부산 서면 미용실" style={{ ...inp, borderColor: keyword.trim() ? C.accent : (inp as any).borderColor }} />
+        </div>
+        <div className="pc-search-grid" style={{ display: "grid", gridTemplateColumns: "minmax(0,1.5fr) minmax(110px,.7fr)", gap: 10, alignItems: "end", opacity: keyword.trim() ? 0.55 : 1 }}>
           <div className="pc-wide"><div style={label}>지역</div><input value={region} onChange={e => setRegion(e.target.value)} onKeyDown={e => { if (e.key === "Enter") startSearch(); }} placeholder="예: 강남, 성수, 부산 해운대" style={inp} /></div>
           <div><div style={label}>업종</div><select value={domain} onChange={e => setDomain(e.target.value)} style={inp}>{CATEGORIES.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}</select></div>
         </div>

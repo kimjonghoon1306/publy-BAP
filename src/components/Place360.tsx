@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import PlaceCenter from "./PlaceCenter";
-import { botFetch } from "../lib/botApi";
+import { botFetch, BotEventStream } from "../lib/botApi";
 import { deletePlace360Store, getPlace360BusinessMetrics, getPlace360Progress, getPlace360Ranks, getPlace360Snapshots, getPlace360StoreProfiles, PLACE360_DAILY_DIAGNOSIS_LIMIT, PLACE360_HISTORY_DAYS, PLACE360_RANK_DAILY_LIMIT, PLACE360_STORE_LIMIT, place360StoreKey, Place360BusinessMetrics, Place360RankMeasurement, Place360Snapshot, recordPlace360ReviewerHandoff, renamePlace360Store, savePlace360BusinessMetrics, savePlace360MissionProgress, savePlace360Rank, savePlace360Snapshot, savePlace360StoreProfile } from "../lib/supabase";
 import { koreaDateKey } from "../lib/date";
 
@@ -47,6 +47,30 @@ function placeIdFromUrl(url?: string): string {
   if (m) return m[1];
   m = s.match(/entry\/place\/(\d{5,})/i) || s.match(/[?&]placeId=(\d{5,})/i) || s.match(/\/(\d{6,})(?:[/?#]|$)/) || s.match(/^\s*(\d{6,})\s*$/);
   return m ? m[1] : "";
+}
+
+/* 🎯 대행사 키워드 리서치: 매장 이름·업종·지역으로 '노려야 할 검색 키워드' 후보를 만든다.
+   예) 이름="꽃피는 산골", 업종="한식", 지역="횡성" → [횡성 맛집, 횡성 한식, 횡성 한우, 횡성 꽃피는산골, 꽃피는산골 …] */
+function suggestKeywords(name: string, category: string, region: string): string[] {
+  const reg = String(region || "").trim().split(/\s+/)[0] || "";
+  const nm = String(name || "").trim();
+  const nmTight = nm.replace(/\s+/g, "");
+  const cats = String(category || "").split(/[,·/]/).map(s => s.trim()).filter(Boolean).slice(0, 3);
+  const foodish = /식|맛집|카페|음식|고기|한우|횟집|족발|치킨|국밥|분식|베이커리|디저트|술집|포차|호프|바|dining/i.test(category + nm);
+  const out: string[] = [];
+  const push = (v: string) => { const t = v.trim().replace(/\s+/g, " "); if (t && !out.includes(t)) out.push(t); };
+  if (reg) {
+    if (foodish || !cats.length) push(`${reg} 맛집`);
+    for (const c of cats) push(`${reg} ${c}`);
+    if (nmTight) push(`${reg} ${nm}`);
+  }
+  if (nmTight) push(nm);
+  for (const c of cats) if (!reg) push(c);
+  return out.slice(0, 8);
+}
+
+function trackedKwKey(userId: string | undefined, storeKey: string) {
+  return `publy_place360_keywords_v1:${userId || "guest"}:${storeKey}`;
 }
 
 function profileKey(userId?: string) {
@@ -154,6 +178,10 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
   const [historyLoading, setHistoryLoading] = useState(false);
   const [latestRank, setLatestRank] = useState<RankMeasurement | null>(null);
   const [rankHistory, setRankHistory] = useState<Place360RankMeasurement[]>([]);
+  const [trackedKeywords, setTrackedKeywords] = useState<string[]>([]);
+  const [newKeyword, setNewKeyword] = useState("");
+  const [checkingKeyword, setCheckingKeyword] = useState("");
+  const kwStreamRef = useRef<BotEventStream | null>(null);
   const hasStore = Boolean(profile.name.trim());
   const ownPlace = useMemo(() => {
     // 1순위: 등록한 플레이스 주소의 매장 번호로 정확히 매칭(상호명 띄어쓰기·지점명 달라도 100% 일치)
@@ -228,6 +256,17 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
     getPlace360Ranks(storeKey).then(rows => { if (active) setRankHistory(rows); }).catch(() => { if (active) setRankHistory([]); });
     return () => { active = false; };
   }, [plan, storeKey]);
+  // 매장이 바뀌면 저장된 추적 키워드를 불러오고, 없으면 이름·업종·지역으로 추천 키워드를 채워 시작한다.
+  useEffect(() => {
+    if (!hasStore) { setTrackedKeywords([]); return; }
+    let saved: string[] = [];
+    try { const raw = JSON.parse(localStorage.getItem(trackedKwKey(userId, storeKey)) || "[]"); if (Array.isArray(raw)) saved = raw.filter(x => typeof x === "string" && x.trim()); } catch {}
+    setTrackedKeywords(saved.length ? saved : suggestKeywords(profile.name, profile.category, profile.region));
+  }, [userId, storeKey, hasStore, profile.name, profile.category, profile.region]);
+  const persistKeywords = (list: string[]) => {
+    setTrackedKeywords(list);
+    if (storeKey) { try { localStorage.setItem(trackedKwKey(userId, storeKey), JSON.stringify(list)); } catch {} }
+  };
 
   const onPlacesCollected = async (rows: CollectedPlace[], meta: { query: string; measuredAt: string; surface: string }) => {
     setCollectedPlaces(rows);
@@ -271,6 +310,35 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
       showToast?.(message.includes("PLACE360_STORE_LIMIT") ? "내 등급에서 등록할 수 있는 매장 수를 모두 사용했어요" : message.includes("PLACE360_DAILY_LIMIT") ? "오늘 사용할 수 있는 매장 진단 횟수를 모두 사용했어요" : "비교는 완료됐지만 측정 기록 서버가 아직 준비되지 않았어요", "info");
     }
   };
+
+  // 🎯 키워드 하나로 공개 지도 검색을 돌려 '내 매장이 몇 위인지' 바로 확인한다(로그인 계정 불필요).
+  //    결과를 기존 onPlacesCollected에 그대로 물려 순위 저장·경쟁사 비교·진단 미션까지 한 번에 갱신한다.
+  const checkKeywordRank = (kw: string) => {
+    const query = kw.trim();
+    if (!query) return;
+    if (checkingKeyword) { showToast?.("이전 키워드 확인이 끝난 뒤 다시 눌러 주세요", "info"); return; }
+    if (!placeIdFromUrl(profile.placeUrl)) showToast?.("플레이스 주소를 등록하면 상호명이 달라도 순위를 정확히 잡아요", "info");
+    kwStreamRef.current?.close();
+    setCheckingKeyword(query);
+    setTab("rank");
+    const url = `${BOT}/api/place/search?userId=${encodeURIComponent(userId || "")}&accountId=&query=${encodeURIComponent(query)}&domain=place&count=30`;
+    const es = new BotEventStream(url);
+    kwStreamRef.current = es;
+    let done = false;
+    const finish = () => { done = true; setCheckingKeyword(""); es.close(); kwStreamRef.current = null; };
+    es.onmessage = (event: MessageEvent) => {
+      let d: any; try { d = JSON.parse(event.data); } catch { return; }
+      if (d.type === "quota_exceeded") { showToast?.("오늘 플레이스 검색 한도를 모두 사용했어요", "error"); finish(); }
+      else if (d.type === "place_done") {
+        const rows = (d.results || []) as CollectedPlace[];
+        void onPlacesCollected(rows, { query, measuredAt: new Date().toISOString(), surface: "네이버 지도 PC" });
+        if (!trackedKeywords.includes(query)) persistKeywords([...trackedKeywords, query]);
+        finish();
+      } else if (d.type === "error") { showToast?.(d.msg || "순위 확인 중 문제가 생겼어요", "error"); finish(); }
+    };
+    es.onerror = () => { if (!done) { showToast?.("봇 서버에 연결하지 못했어요. 퍼블리 앱이 켜져 있는지 확인해 주세요", "error"); finish(); } };
+  };
+  useEffect(() => () => { kwStreamRef.current?.close(); }, []);
 
   const trend = useMemo(() => {
     if (snapshots.length < 2) return null;
@@ -757,7 +825,40 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
         <h2 style={{ margin: "6px 0", fontSize: 23 }}>📍 지금 고객 검색에서 내 매장은 몇 번째일까요?</h2>
         <p style={{ color: colors.sub, fontSize: 12.5, lineHeight: 1.7 }}>업체·리뷰어 찾기에서 지역과 업종을 입력해 측정하면, 그 검색 결과 안에서 내 매장의 관찰 순위를 바로 보여드려요. 같은 결과를 다시 사용하므로 불필요한 중복 수집을 하지 않아요.</p>
       </section>
+      {hasStore && <section className="p360-card" style={{ ...cardStyle, padding: 22, marginBottom: 12 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}><b style={{ fontSize: 16 }}>🎯 노릴 키워드 & 순위</b><span style={{ color: colors.sub, fontSize: 11.5 }}>{profile.name} 기준 · 대행사 방식 키워드 순위판</span></div>
+        <p style={{ color: colors.sub, fontSize: 12, lineHeight: 1.7, margin: "8px 0 14px" }}>매장 정보로 <b style={{ color: colors.text }}>노려야 할 키워드</b>를 추천했어요. 키워드마다 <b style={{ color: colors.rose }}>‘순위 확인’</b>을 누르면 그 검색어에서 내 매장이 몇 위인지 바로 재고, <b style={{ color: colors.text }}>왜 낮은지·뭘 하면 되는지</b>가 아래에 이어져요. 고치고 → 다시 확인 → 다음 키워드, 이렇게 순위를 올려요.</p>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 8, marginBottom: 12 }}>
+          <input value={newKeyword} onChange={e => setNewKeyword(e.target.value)} onKeyDown={e => { if (e.key === "Enter" && newKeyword.trim()) { const v = newKeyword.trim(); if (!trackedKeywords.includes(v)) persistKeywords([...trackedKeywords, v]); setNewKeyword(""); checkKeywordRank(v); } }} placeholder="예: 횡성시장 맛집, 횡성 한우 — 노리는 검색어 직접 추가" style={fieldStyle} />
+          <button type="button" className="p360-button" onClick={() => { const v = newKeyword.trim(); if (!v) return; if (!trackedKeywords.includes(v)) persistKeywords([...trackedKeywords, v]); setNewKeyword(""); checkKeywordRank(v); }} style={{ background: colors.soft, color: colors.text, border: `1px solid ${colors.line}`, whiteSpace: "nowrap" }}>+ 추가</button>
+        </div>
+        <div style={{ display: "grid", gap: 8 }}>{trackedKeywords.length === 0 ? <p style={{ color: colors.sub, fontSize: 12 }}>추천 키워드가 없어요. 위에 노리는 검색어를 직접 추가해 순위를 확인해 보세요.</p> : trackedKeywords.map(kw => {
+          const last = rankHistory.find(row => row.keyword === kw);
+          const isChecking = checkingKeyword === kw;
+          const isFocus = currentRank?.query === kw;
+          return <div key={kw} style={{ display: "grid", gridTemplateColumns: "1fr auto auto", alignItems: "center", gap: 9, padding: "11px 13px", borderRadius: 13, background: isFocus ? `${colors.rose}0e` : colors.soft, border: `1px solid ${isFocus ? `${colors.rose}45` : colors.line}` }}>
+            <div style={{ minWidth: 0 }}><b style={{ fontSize: 13.5, overflowWrap: "anywhere" }}>{kw}</b>{last ? <span style={{ marginLeft: 8, fontSize: 11.5, fontWeight: 900, color: last.rank ? colors.green : colors.amber }}>{last.rank ? `${last.rank}위` : `상위 밖`}</span> : <span style={{ marginLeft: 8, fontSize: 11, color: colors.sub }}>미확인</span>}</div>
+            <button type="button" className="p360-button" disabled={Boolean(checkingKeyword)} onClick={() => checkKeywordRank(kw)} style={{ padding: "7px 12px", fontSize: 12, background: isChecking ? colors.soft : colors.rose, color: isChecking ? colors.sub : "#fff", border: isChecking ? `1px solid ${colors.line}` : "none", opacity: checkingKeyword && !isChecking ? 0.5 : 1 }}>{isChecking ? "확인 중…" : "순위 확인"}</button>
+            <button type="button" onClick={() => persistKeywords(trackedKeywords.filter(x => x !== kw))} title="이 키워드 삭제" style={{ border: "none", background: "transparent", color: colors.sub, cursor: "pointer", fontSize: 15, lineHeight: 1 }}>×</button>
+          </div>;
+        })}</div>
+      </section>}
       {currentRank ? <section className="p360-card" style={{ ...cardStyle, padding: 22, marginBottom: 12 }}><span style={{ color: colors.sub, fontSize: 11 }}>검색어 · {currentRank.query}</span><div style={{ display: "flex", alignItems: "baseline", gap: 10, margin: "10px 0", flexWrap: "wrap" }}><strong style={{ color: currentRank.rank ? colors.rose : colors.amber, fontSize: 46, lineHeight: 1 }}>{currentRank.rank ? `${currentRank.rank}위` : `상위 ${currentRank.checkedCount}곳 밖`}</strong>{previousRank?.rank && currentRank.rank ? <b style={{ color: previousRank.rank > currentRank.rank ? colors.green : previousRank.rank < currentRank.rank ? colors.rose : colors.sub }}>{previousRank.rank > currentRank.rank ? `▲ ${previousRank.rank - currentRank.rank}단계 상승` : previousRank.rank < currentRank.rank ? `▼ ${currentRank.rank - previousRank.rank}단계 하락` : "— 순위 유지"}</b> : <b style={{ color: colors.sub }}>첫 기준 순위</b>}</div><p style={{ color: colors.sub, fontSize: 11.5, lineHeight: 1.65 }}>{currentRank.surface} · 비로그인 검색 화면 기준 · {new Date(currentRank.measuredAt).toLocaleString("ko-KR")} 측정<br/>위치·시간·기기·개인화에 따라 실제 고객 화면과 차이가 날 수 있어요.</p><button type="button" className="p360-button" onClick={() => setTab("diagnosis")} style={{ marginTop: 12, background: colors.rose, color: "#fff" }}>왜 이 순위인지 진단하기 →</button></section> : <section className="p360-card" style={{ ...cardStyle, padding: 22, marginBottom: 12, textAlign: "center" }}><div style={{ fontSize: 38 }}>🚀</div><b style={{ display: "block", marginTop: 7 }}>아직 측정한 순위가 없어요</b><p style={{ color: colors.sub, fontSize: 12, lineHeight: 1.65, margin: "7px 0 14px" }}>내 매장을 먼저 등록한 뒤 지역·업종으로 업체를 찾으면 순위가 자동 측정돼요.</p><button type="button" className="p360-button" onClick={() => setTab(hasStore ? "discovery" : "overview")} style={{ background: colors.green, color: "#fff" }}>{hasStore ? "지금 내 순위 측정하기" : "먼저 내 매장 등록하기"}</button></section>}
+      {currentRank && growthMissions.length > 0 && (() => {
+        const next = growthMissions.find(m => !completedMissions.includes(m.id)) || growthMissions[0];
+        return <section className="p360-card" style={{ ...cardStyle, padding: 20, marginBottom: 12, border: `1.5px solid ${colors.rose}45` }}>
+          <div style={{ color: colors.rose, fontSize: 11, fontWeight: 950 }}>이 키워드 순위를 올리려면 · 다음 한 가지</div>
+          <div style={{ display: "flex", alignItems: "flex-start", gap: 11, margin: "9px 0 0" }}>
+            <div style={{ fontSize: 26, lineHeight: 1 }}>{next.icon}</div>
+            <div style={{ minWidth: 0 }}><b style={{ fontSize: 15 }}>{next.title}</b><p style={{ color: colors.sub, fontSize: 12, lineHeight: 1.65, margin: "5px 0 0" }}>{next.why}</p><p style={{ color: colors.text, fontSize: 12, lineHeight: 1.65, margin: "6px 0 0" }}>👉 {next.how}</p></div>
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginTop: 13 }}>
+            <button type="button" className="p360-button" onClick={() => setTab(next.go)} style={{ background: colors.rose, color: "#fff" }}>{next.action} →</button>
+            <button type="button" className="p360-button" disabled={Boolean(checkingKeyword)} onClick={() => checkKeywordRank(currentRank.query)} style={{ background: colors.soft, color: colors.text, border: `1px solid ${colors.line}`, opacity: checkingKeyword ? 0.6 : 1 }}>{checkingKeyword ? "확인 중…" : "🔄 다시 순위 확인"}</button>
+          </div>
+          <p style={{ color: colors.sub, fontSize: 11, lineHeight: 1.6, margin: "10px 2px 0" }}>행동을 마친 뒤 <b style={{ color: colors.text }}>다시 순위 확인</b>을 누르면 오른 순위와 <b style={{ color: colors.text }}>그다음 할 일</b>이 이어서 나와요.</p>
+        </section>;
+      })()}
       {rankTimeline.length > 0 && <section className="p360-card" style={{ ...cardStyle, padding: 20, marginBottom: 12 }}>
         <b>🕒 같은 검색어 순위 기록</b>
         <p style={{ color: colors.sub, fontSize: 11.5, lineHeight: 1.65, margin: "6px 0 13px" }}><b style={{ color: colors.text }}>{currentRank?.query}</b>를 같은 조건으로 측정한 최근 기록이에요. 숫자가 작아질수록 고객 화면 위쪽으로 올라간 거예요.</p>
