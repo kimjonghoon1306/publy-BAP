@@ -7,8 +7,9 @@ import UsageGuide from "./UsageGuide";
 const BOT = "http://127.0.0.1:3334";
 
 const THEMES = {
-  light: { bg: "#eee9df", surf: "#faf7f1", surf2: "#f3eee4", ink: "#2b2620", sub: "#8c8377", line: "#e0d7c9", line2: "#d5c9b7", accent: "#16856b", accentSoft: "#dcece5", logBg: "#fbf9f4", logInk: "#5c554a" },
-  dark: { bg: "#221f1b", surf: "#2e2b26", surf2: "#39352f", ink: "#f7f3ec", sub: "#cabeae", line: "#4a443c", line2: "#5a5349", accent: "#67d5b5", accentSoft: "#29443b", logBg: "#1c1a16", logInk: "#d6ccbc" },
+  // 플레이스365(민트)와 배색 통일
+  light: { bg: "#eefbf6", surf: "#ffffff", surf2: "#effaf4", ink: "#0f2b23", sub: "#5c8478", line: "#d6ede3", line2: "#c3e3d6", accent: "#00c896", accentSoft: "#d6f5ec", logBg: "#050a0f", logInk: "#8fb3c9" },
+  dark: { bg: "#161b1a", surf: "#1e2624", surf2: "#26302d", ink: "#eafff7", sub: "#9fc4b7", line: "#33403c", line2: "#435049", accent: "#00d6a4", accentSoft: "#123a30", logBg: "#050a0f", logInk: "#8fb3c9" },
 };
 
 type Place = { placeId: string; name: string; category?: string; address?: string; visitorReviewCount?: number; blogReviewCount?: number; placeUrl: string };
