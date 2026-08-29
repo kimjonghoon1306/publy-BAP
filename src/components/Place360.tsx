@@ -268,6 +268,14 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
     const reviewDelta = sf && sl ? { blog: sl.blog_reviews - sf.blog_reviews, visitor: sl.visitor_reviews - sf.visitor_reviews } : null;
     return { days: reportDays, measures: ranks.length, kwRows, reviewDelta, hasData: ranks.length > 0 || snaps.length > 1 };
   }, [rankHistory, snapshots, reportDays]);
+  // 📅 측정 기록 보관함 — 보관 기간 내 전체 순위 측정 이력을 날짜별로(기간 필터 없이 전부)
+  const archive = useMemo(() => {
+    const rows = [...rankHistory].sort((a, b) => new Date(b.measured_at).getTime() - new Date(a.measured_at).getTime());
+    const days = new Set(rows.map(r => new Date(r.measured_at).toLocaleDateString("ko-KR")));
+    const kws = new Set(rows.map(r => r.keyword));
+    const oldest = rows.length ? rows[rows.length - 1].measured_at : null;
+    return { rows, dayCount: days.size, kwCount: kws.size, total: rows.length, oldest };
+  }, [rankHistory]);
   const storeKey = place360StoreKey(profile.name, profile.region);
   const [completedMissions, setCompletedMissions] = useState<string[]>(() => loadCompletedMissions(userId, storeKey));
   const [reviewerHandoffCount, setReviewerHandoffCount] = useState(0);
@@ -1016,6 +1024,7 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
       .p360-card{animation:p360fade .4s ease both}
       .p360-btn:active{transform:scale(.96)}
       .p360-live{display:inline-block;width:7px;height:7px;border-radius:50%;background:#34e0b8;animation:p360blink 1s ease-in-out infinite;margin-right:5px}
+      .p360-help{font-size:11px;color:${M.sub};line-height:1.6;margin:5px 0 11px;display:flex;gap:6px;align-items:flex-start}.p360-help>span:first-child{flex-shrink:0}.p360-help b{color:${M.text}}
       @media(max-width:1000px){.p360-2col{grid-template-columns:1fr}}
       @media(max-width:640px){.p360-tiles{grid-template-columns:repeat(2,minmax(0,1fr))}.p360-steps{grid-template-columns:1fr}}
     `}</style>
@@ -1074,6 +1083,7 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
               <b style={{ fontSize: 14 }}>🏪 매장 콘솔</b>
               <span style={{ fontSize: 11, fontWeight: 800, color: M.sub }}>{plan === "admin" || plan === "unlimited" ? `${profiles.length}개` : `${profiles.length}/${PLACE360_STORE_LIMIT[plan] ?? PLACE360_STORE_LIMIT.free}개`}</span>
             </div>
+            <div className="p360-help"><span>💬</span><span>진단할 매장을 <b>등록·선택·수정·삭제</b>하는 곳이에요. 네이버 플레이스 주소를 붙여넣고 <b>불러오기·검사</b>를 누르면 매장 정보를 통째로 가져와 진단해요.</span></div>
             {profiles.length > 0 && <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 12 }}>
               {profiles.map(item => { const k = place360StoreKey(item.name, item.region); const on = k === storeKey && hasStore; return <button key={k} className="p360-btn" onClick={() => selectStore(item)} style={{ minHeight: 38, padding: "7px 12px", fontSize: 12, background: on ? M.rose : M.soft, color: on ? "#fff" : M.text, border: `1px solid ${on ? M.rose : M.line}` }}>🏷️ {item.name}{item.region ? `·${item.region}` : ""}</button>; })}
               <button className="p360-btn" onClick={startAddingStore} style={{ minHeight: 38, padding: "7px 12px", fontSize: 12, background: "transparent", color: M.rose, border: `1px dashed ${M.rose}` }}>＋ 매장 추가</button>
@@ -1101,6 +1111,7 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
           {/* 등급 사용 한도표 */}
           {plan !== "admin" && <section className="p360-card" style={{ padding: 16 }}>
             <b style={{ fontSize: 13 }}>📋 등급별 사용 한도</b>
+            <div className="p360-help"><span>💬</span><span>등급마다 등록 매장 수·하루 진단 횟수·<b>기록 보관 기간</b>이 달라요. 아래 표에서 내 등급을 확인하세요.</span></div>
             <div style={{ marginTop: 9, border: `1px solid ${M.line}`, borderRadius: 11, overflow: "hidden" }}>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", background: M.soft }}>{["등급", "매장", "진단/일", "보관"].map(t => <b key={t} style={{ padding: 8, fontSize: 10.5 }}>{t}</b>)}</div>
               {(["free", "basic", "pro"] as const).map(lv => <div key={lv} style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", borderTop: `1px solid ${M.line}`, background: plan === lv ? `${M.rose}10` : M.card }}><b style={{ padding: 8, fontSize: 11, color: plan === lv ? M.rose : M.text }}>{lv.toUpperCase()}</b><span style={{ padding: 8, fontSize: 11 }}>{PLACE360_STORE_LIMIT[lv]}개</span><span style={{ padding: 8, fontSize: 11 }}>{PLACE360_DAILY_DIAGNOSIS_LIMIT[lv]}회</span><span style={{ padding: 8, fontSize: 11 }}>{PLACE360_HISTORY_DAYS[lv]}일</span></div>)}
@@ -1110,6 +1121,7 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
           {/* 검은 작업 로그 */}
           <section className="p360-card" style={{ overflow: "hidden" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "9px 13px", background: M.soft }}><b style={{ fontSize: 12.5 }}>{resolving && <span className="p360-live" />}📟 작업 로그</b><span style={{ fontSize: 11, fontWeight: 900, color: M.rose }}>{resolving ? "진행 중" : `${scanPct}%`}</span></div>
+            <div className="p360-help" style={{ margin: "8px 13px 0" }}><span>💬</span><span>매장 검사·순위 측정·업체 발굴이 <b>지금 어디까지 됐는지</b> 실시간으로 보여줘요. 문제가 생기면 여기 마지막 줄을 확인하세요.</span></div>
             <div style={{ height: 5, background: "#0b1220" }}><div style={{ width: `${scanPct}%`, height: "100%", background: `linear-gradient(90deg,${M.rose},${M.amber})`, transition: "width .3s" }} /></div>
             <div style={{ minHeight: 150, maxHeight: 300, overflowY: "auto", padding: "12px 14px", background: "#050a0f", fontFamily: "'JetBrains Mono',monospace", fontSize: 11.5, lineHeight: 1.85 }}>
               {scanLog.length === 0 ? <span style={{ color: "#3a5a7a" }}>대기 중... 링크를 넣고 불러오기를 누르면 진행 상황이 여기 나와요.</span> : scanLog.map((l, i) => <div key={i} style={{ color: i === scanLog.length - 1 ? "#34e0b8" : "#8fb3c9" }}>{l}</div>)}
@@ -1243,6 +1255,31 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
                 {/* 키워드별 순위 변화 */}
                 {report.kwRows.length > 0 && <div style={{ display: "grid", gap: 6 }}>{report.kwRows.slice(0, 8).map(k => <div key={k.keyword} style={{ display: "grid", gridTemplateColumns: "1fr auto auto", alignItems: "center", gap: 8, padding: "8px 11px", borderRadius: 10, background: M.soft }}><b style={{ fontSize: 12, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{k.keyword}</b><span style={{ fontSize: 12, fontWeight: 800, color: k.last != null ? M.text : M.amber }}>{k.last != null ? `${k.last}위` : "상위밖"}</span><span style={{ fontSize: 11, fontWeight: 900, minWidth: 60, textAlign: "right", color: k.change == null ? M.sub : k.change > 0 ? M.green : k.change < 0 ? M.pink : M.sub }}>{k.change == null ? "기준" : k.change > 0 ? `▲ ${k.change}` : k.change < 0 ? `▼ ${Math.abs(k.change)}` : "— 유지"}</span></div>)}</div>}
                 <button className="p360-btn" onClick={downloadReport} style={{ width: "100%", marginTop: 12, background: M.text, color: M.bg }}>📄 이 리포트 PDF로 저장</button>
+              </>}
+            </section>
+
+            {/* 📅 측정 기록 보관함 — 보관 기간 내 전체 순위 이력 */}
+            <section className="p360-card" style={{ padding: 16 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                <b style={{ fontSize: 13.5 }}>📅 측정 기록 보관함</b>
+                <span style={{ marginLeft: "auto", fontSize: 10.5, fontWeight: 900, color: M.purple, background: `${M.purple}14`, borderRadius: 99, padding: "3px 9px" }}>보관 {PLACE360_HISTORY_DAYS[plan] >= 3650 ? "무제한" : `${PLACE360_HISTORY_DAYS[plan] ?? 30}일`}</span>
+              </div>
+              <div style={{ fontSize: 11, color: M.sub, lineHeight: 1.6, margin: "5px 0 11px", display: "flex", gap: 6 }}><span>💬</span><span>여기서 <b style={{ color: M.text }}>지금까지 잰 순위를 전부</b> 날짜별로 다시 볼 수 있어요. 등급 보관 기간(무료 30·베이직 90·<b style={{ color: M.text }}>프로 180</b>일)이 지난 기록은 자동으로 정리돼요.</span></div>
+              {archive.total === 0 ? <p style={{ color: M.sub, fontSize: 11.5, padding: "8px 0" }}>아직 저장된 측정 기록이 없어요. 키워드 순위를 재면 여기에 날짜별로 쌓여요.</p> : <>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 8, marginBottom: 11 }}>
+                  <div style={{ padding: "9px 11px", borderRadius: 10, background: M.soft, textAlign: "center" }}><div style={{ fontSize: 10, color: M.sub }}>측정한 날</div><b style={{ fontSize: 16, color: M.rose }}>{archive.dayCount}일</b></div>
+                  <div style={{ padding: "9px 11px", borderRadius: 10, background: M.soft, textAlign: "center" }}><div style={{ fontSize: 10, color: M.sub }}>추적 키워드</div><b style={{ fontSize: 16, color: M.green }}>{archive.kwCount}개</b></div>
+                  <div style={{ padding: "9px 11px", borderRadius: 10, background: M.soft, textAlign: "center" }}><div style={{ fontSize: 10, color: M.sub }}>총 측정</div><b style={{ fontSize: 16, color: M.purple }}>{archive.total}회</b></div>
+                </div>
+                <div style={{ maxHeight: 280, overflowY: "auto", border: `1px solid ${M.line}`, borderRadius: 11 }}>
+                  <div style={{ display: "grid", gridTemplateColumns: "1.4fr auto 1fr", gap: 8, padding: "8px 12px", background: M.soft, position: "sticky", top: 0, fontSize: 10, fontWeight: 900, color: M.sub }}><span>날짜·키워드</span><span>순위</span><span>확인 범위</span></div>
+                  {archive.rows.slice(0, 100).map((r, i) => <div key={r.id || i} style={{ display: "grid", gridTemplateColumns: "1.4fr auto 1fr", gap: 8, alignItems: "center", padding: "8px 12px", borderTop: `1px solid ${M.line}`, fontSize: 11.5 }}>
+                    <span style={{ minWidth: 0 }}><b style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", display: "block" }}>{r.keyword}</b><small style={{ color: M.sub }}>{new Date(r.measured_at).toLocaleString("ko-KR", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })}</small></span>
+                    <b style={{ color: r.rank ? (r.rank <= 10 ? M.green : M.text) : M.amber }}>{r.rank ? `${r.rank}위` : "상위 밖"}</b>
+                    <small style={{ color: M.sub }}>상위 {r.checked_count}곳</small>
+                  </div>)}
+                  {archive.rows.length > 100 && <div style={{ padding: 8, textAlign: "center", fontSize: 10.5, color: M.sub }}>+ {archive.rows.length - 100}건 더 (PDF로 전체 저장)</div>}
+                </div>
               </>}
             </section>
 
