@@ -1152,19 +1152,25 @@ Output format (JSON array only, no other text):
     setCalRegenIdx(idx);
     try{
       const existTitles=calSchedule.filter((_,i)=>i!==idx).map(s=>s.title);
-      const prompt=`너는 네이버 블로그 SEO 제목 전문가야. 아래 조건으로 블로그 글감 1개를 새로 만들어 순수 JSON만 반환해(설명·마크다운 금지).
-주제 키워드: "${cur.keyword}" (주제는 유지, 아래 기존 제목과 겹치지 않는 새 각도)
+      const prompt=`You are a JSON generator. Return ONLY a valid JSON object, no explanation, no markdown, no code blocks.
+주제 키워드: "${cur.keyword}" (주제는 유지, 아래 기존 제목과 겹치지 않는 새 각도로 블로그 글감 1개)
 기존 제목(중복 금지): ${existTitles.slice(0,20).join(" / ")}
 ★제목 규칙: 검색어 앞 8글자 배치, 25~32자, 숫자·대상·상황 1~2개, 과장·낚시 감탄사 금지, 물음표·느낌표 최대 1개.
-출력: {"keyword":"핵심키워드","title":"새 제목","style":"감성일기 또는 정보글 또는 맛집후기 또는 여행기","adType":"adpost 또는 adsense"}`;
+Output (JSON object only): {"keyword":"핵심키워드","title":"새 제목","style":"감성일기 또는 정보글 또는 맛집후기 또는 여행기","adType":"adpost 또는 adsense"}`;
+      // ★2.5-flash-lite는 thinkingBudget:0을 안 주면 thinking에 토큰 다 써서 빈 응답 → 재추천 실패의 원인.
+      //   토큰도 넉넉히(2048) + thinkingBudget:0 + 45초 타임아웃.
       const r=await fetch("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key="+encodeURIComponent(key),
-        {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({contents:[{parts:[{text:prompt}]}],generationConfig:{temperature:0.7,maxOutputTokens:512,responseMimeType:"application/json"}})});
+        {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({contents:[{parts:[{text:prompt}]}],generationConfig:{temperature:0.7,maxOutputTokens:2048,responseMimeType:"application/json",thinkingConfig:{thinkingBudget:0}}}),signal:AbortSignal.timeout(45000)});
+      if(!r.ok){const j=await r.json().catch(()=>null);const em=(j?.error?.message||"").toLowerCase();throw new Error(em.includes("quota")||em.includes("429")||r.status===429?"Gemini 하루 무료 한도를 다 썼어요. 잠시 후 다시 시도해주세요":`AI 오류(${r.status})`);}
       const d=await r.json(); const raw=d.candidates?.[0]?.content?.parts?.[0]?.text||"";
-      const clean=raw.replace(/```json|```/g,"").trim(); const s=clean.indexOf("{"),e=clean.lastIndexOf("}");
-      const obj=JSON.parse(clean.slice(s,e+1));
+      const clean=raw.replace(/```json|```/g,"").trim();
+      if(!clean)throw new Error("AI가 빈 응답을 보냈어요. 잠시 후 다시 시도해주세요");
+      const s=clean.indexOf("{"),e=clean.lastIndexOf("}");
+      if(s<0||e<=s)throw new Error("AI 응답 형식 오류(잠시 후 다시)");
+      let obj:any; try{ obj=JSON.parse(clean.slice(s,e+1)); }catch{ throw new Error("AI 응답을 읽지 못했어요(형식 오류). 다시 시도해주세요"); }
       setCalSchedule(prev=>{const next=[...prev];next[idx]={...next[idx],keyword:String(obj.keyword||cur.keyword),title:String(obj.title||cur.title),style:String(obj.style||cur.style),adType:String(obj.adType||cur.adType)};localStorage.setItem("publy_adm_cal_schedule",JSON.stringify(next));return next;});
       showToast("🔄 새 제목으로 다시 추천했어요!");
-    }catch(e:any){showToast("❌ 재추천 실패: "+e.message,"error");}
+    }catch(e:any){ const msg=e?.name==="AbortError"?"시간이 초과됐어요. 다시 눌러주세요":(e?.message||"알 수 없는 오류"); showToast("❌ 재추천 실패: "+msg,"error"); }
     finally{setCalRegenIdx(-1);}
   }
   function toggleCalDone(date:string){

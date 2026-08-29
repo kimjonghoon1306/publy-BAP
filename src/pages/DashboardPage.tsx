@@ -1066,7 +1066,7 @@ Today: ${today.toISOString().slice(0,10)}
 Output format (JSON array only, no other text):
 [{"date":"YYYY-MM-DD","keyword":"키워드","title":"SEO제목","style":"글스타일","adType":"adpost or adsense"}]`;
 
-      const raw=await callAI(prompt);
+      const raw=await callAI(prompt,undefined,true);
       if(!raw){throw new Error("AI 응답이 비어있어요. API 키를 확인해주세요.");}
       const clean=raw.replace(/```json|```/g,"").trim();
       const parsed=JSON.parse(clean);
@@ -1101,17 +1101,18 @@ Output format (JSON array only, no other text):
     setCalRegenIdx(idx);
     try{
       const existTitles=calSchedule.filter((_,i)=>i!==idx).map(s=>s.title);
-      const prompt=`너는 네이버 블로그 SEO 제목 전문가야. 아래 조건으로 블로그 글감 1개를 새로 만들어 순수 JSON만 반환해(설명·마크다운 금지).
-주제 키워드: "${cur.keyword}" (이 주제는 유지하되, 아래 기존 제목들과 겹치지 않는 새 각도로)
+      const prompt=`You are a JSON generator. Return ONLY a valid JSON object, no explanation, no markdown, no code blocks.
+주제 키워드: "${cur.keyword}" (이 주제는 유지하되, 아래 기존 제목들과 겹치지 않는 새 각도로 블로그 글감 1개)
 기존 제목들(중복 금지): ${existTitles.slice(0,20).join(" / ")}
 ★제목 규칙(클릭률·검색노출 최적화): 검색어를 앞 8글자 안에 배치, 25~32자, 숫자·대상·상황 중 1~2개 포함, 과장·낚시 감탄사(대박·충격·완벽·진짜) 금지, 물음표·느낌표 최대 1개.
-출력: {"keyword":"핵심키워드","title":"새 SEO 제목","style":"감성일기 또는 정보글 또는 맛집후기 또는 여행기","adType":"adpost 또는 adsense"}`;
-      // ★제목 1개라 30초면 충분 — 무한 로딩(🔄...) 방지 타임아웃
-      const raw=await callAI(prompt,AbortSignal.timeout(30000));
+Output (JSON object only): {"keyword":"핵심키워드","title":"새 SEO 제목","style":"감성일기 또는 정보글 또는 맛집후기 또는 여행기","adType":"adpost 또는 adsense"}`;
+      // ★JSON 모드로 강제 + 45초 타임아웃(thinking 지연 대비). 빈 응답/파싱실패 원인을 메시지에 노출.
+      const raw=await callAI(prompt,AbortSignal.timeout(45000),true);
       const clean=(raw||"").replace(/```json|```/g,"").trim();
+      if(!clean)throw new Error("AI가 빈 응답을 보냈어요. 잠시 후 다시 시도해주세요");
       const s=clean.indexOf("{"),e=clean.lastIndexOf("}");
       if(s<0||e<=s)throw new Error("AI 응답 형식 오류(잠시 후 다시)");
-      const obj=JSON.parse(clean.slice(s,e+1));
+      let obj:any; try{ obj=JSON.parse(clean.slice(s,e+1)); }catch{ throw new Error("AI 응답을 읽지 못했어요(형식 오류). 다시 시도해주세요"); }
       setCalSchedule(prev=>{
         const next=[...prev];
         // 홍보(promo) 항목은 서비스 링크 유지 위해 promo 보존, 일반 항목은 새로 교체
@@ -1120,7 +1121,7 @@ Output format (JSON array only, no other text):
         return next;
       });
       showToast("🔄 새 제목으로 다시 추천했어요!");
-    }catch(e:any){showToast("❌ 재추천 실패: "+e.message,"error");}
+    }catch(e:any){ const msg=e?.name==="AbortError"?"시간이 초과됐어요. 다시 눌러주세요(네트워크가 느릴 수 있어요)":(e?.message||"알 수 없는 오류"); showToast("❌ 재추천 실패: "+msg,"error"); }
     finally{setCalRegenIdx(-1);}
   }
   // 스케줄 항목 완료 토글(날짜 기준) + localStorage 저장
@@ -2397,7 +2398,7 @@ Output format (JSON array only, no other text):
     return fetch(url, init);
   }
 
-  async function callAI(prompt:string,signal?:AbortSignal):Promise<string>{
+  async function callAI(prompt:string,signal?:AbortSignal,jsonMode?:boolean):Promise<string>{
     const ai=localStorage.getItem("publy_write_ai")||"gemini";
     if(ai==="gemini"){
       const key=localStorage.getItem("publy_gemini_key")||"";
@@ -2408,6 +2409,7 @@ Output format (JSON array only, no other text):
           // ★2.5계열은 thinking에 토큰 다 써서 빈 답 → thinkingBudget:0. 실패 원인(429한도 등)을 lastErr에 담아 표면화.
           const gc:any={maxOutputTokens:8000};
           if(model.startsWith("gemini-2.5"))gc.thinkingConfig={thinkingBudget:0};
+          if(jsonMode)gc.responseMimeType="application/json";   // JSON만 반환 강제(설명·마크다운 섞임 방지)
           const r=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({contents:[{parts:[{text:prompt}]}],generationConfig:gc}),signal:signal||AbortSignal.timeout(90000)});
           if(!r.ok){ const j=await r.json().catch(()=>null); lastErr=`${r.status} ${j?.error?.message||""}`.slice(0,120); continue; }
           const d=await r.json();const t=d.candidates?.[0]?.content?.parts?.[0]?.text||"";if(t)return t;
