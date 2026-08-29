@@ -311,14 +311,18 @@ export async function signUp(email: string, password: string, name: string, phon
   localStorage.setItem(MEMBER_SESSION_KEY, data.token);
   // 추천인 컬럼이 없는 기존 운영 스키마에서는 가입 자체를 막지 않고 추후 추천 테이블로 처리한다.
   void referredBy;
-  return data.user as PublyUser;
+  const u = data.user as PublyUser;
+  await claimActiveDevice(u.id, (u as any).email);   // 이 기기를 활성 기기로 등록
+  return u;
 }
 
 export async function signIn(email: string, password: string) {
   const { data, error } = await supabase.rpc("publy_login", { p_email: email, p_password: password });
   if (error || !data?.token || !data?.user) throw new Error("이메일 또는 비밀번호가 올바르지 않습니다");
   localStorage.setItem(MEMBER_SESSION_KEY, data.token);
-  return data.user as PublyUser;
+  const u = data.user as PublyUser;
+  await claimActiveDevice(u.id, (u as any).email);   // 이 기기를 활성 기기로 등록(다른 기기는 튕김)
+  return u;
 }
 
 export async function logoutServerSession(): Promise<void> {
@@ -333,6 +337,44 @@ export async function logoutServerSession(): Promise<void> {
 //   컬럼이 아직 없으면 조용히 무시(마이그레이션 전에도 앱이 죽지 않게).
 export async function touchLastSeen(userId: string): Promise<void> {
   try { await supabase.from("publy_users").update({ last_seen: new Date().toISOString() }).eq("id", userId); } catch {}
+}
+
+// ── 🔒 기기 잠금(단일 세션): 한 컴퓨터에서 로그인하면 다른 컴퓨터는 하트비트에서 자동 로그아웃 ──
+const DEVICE_ID_KEY = "publy_device_id";
+// 이 이메일들은 여러 기기 동시 로그인 항상 허용(관리자). 튕기지 않음.
+const ALWAYS_MULTI_DEVICE = ["s9653@naver.com"];
+function isAlwaysMulti(email?: string) { return !!email && ALWAYS_MULTI_DEVICE.includes(email.trim().toLowerCase()); }
+// 이 컴퓨터(브라우저)의 고유 ID — localStorage에 1회 생성해 유지.
+export function getDeviceId(): string {
+  let id = localStorage.getItem(DEVICE_ID_KEY);
+  if (!id) { id = (globalThis.crypto?.randomUUID?.() || `d_${Date.now()}_${Math.random().toString(36).slice(2)}`); localStorage.setItem(DEVICE_ID_KEY, id); }
+  return id;
+}
+// 로그인 시 이 기기를 '활성 기기'로 등록 → 다른 기기는 하트비트에서 튕긴다. 관리자·멀티허용이면 등록 안 함(안 뺏음).
+export async function claimActiveDevice(userId: string, email?: string): Promise<void> {
+  if (isAlwaysMulti(email)) return;
+  try {
+    const { data } = await supabase.from("publy_users").select("allow_multi_device").eq("id", userId).maybeSingle();
+    if ((data as any)?.allow_multi_device) return;   // 멀티 허용 회원은 뺏지 않음
+    await supabase.from("publy_users").update({ active_device_id: getDeviceId() }).eq("id", userId);
+  } catch { /* 컬럼 없거나 오류 시 무시(잠금 미적용, 앱은 정상) */ }
+}
+// 하트비트: 내 기기가 아직 활성인지 확인. false면 다른 기기에서 로그인돼 로그아웃해야 함.
+export async function isThisDeviceActive(userId: string, email?: string): Promise<boolean> {
+  if (isAlwaysMulti(email)) return true;
+  try {
+    const { data } = await supabase.from("publy_users").select("active_device_id, allow_multi_device").eq("id", userId).maybeSingle();
+    if (!data) return true;                                   // 조회 실패 → 튕기지 않음(안전)
+    if ((data as any).allow_multi_device) return true;        // 관리자가 열어준 회원
+    const active = (data as any).active_device_id;
+    if (!active) return true;                                 // 아직 아무도 클레임 안 함
+    return active === getDeviceId();
+  } catch { return true; }                                    // 컬럼 없음/오류 → 튕기지 않음
+}
+// 관리자: 특정 회원의 멀티 기기 허용 on/off (회원관리에서 "열어두기")
+export async function setAllowMultiDevice(userId: string, allow: boolean): Promise<void> {
+  const { error } = await supabase.from("publy_users").update({ allow_multi_device: allow }).eq("id", userId);
+  if (error) throw new Error(error.message || "설정 저장 실패");
 }
 
 // 최신 회원정보(등급/활성 등)를 id로 다시 읽는다. 관리자가 등급을 바꾸면 회원 앱이 실시간으로 반영하기 위함.

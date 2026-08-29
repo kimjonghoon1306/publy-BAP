@@ -5,7 +5,7 @@ import AdminPageRaw from "./pages/AdminPage";
 const AdminPage = AdminPageRaw as React.ComponentType<any>;
 import DashboardPage from "./pages/DashboardPage";
 import IntroSplash from "./pages/IntroSplash";
-import { PublyUser, refreshUserById, touchLastSeen, logoutServerSession, verifyAdminSession, clearAdminSession, getMemberSessionToken } from "./lib/supabase";
+import { PublyUser, refreshUserById, touchLastSeen, logoutServerSession, verifyAdminSession, clearAdminSession, getMemberSessionToken, isThisDeviceActive } from "./lib/supabase";
 
 type View = "login" | "admin-login" | "admin" | "dashboard";
 
@@ -85,6 +85,10 @@ export default function App() {
         if (!fresh) { if (getMemberSessionToken()) handleLogout(); return; }
         // 비활성 처리되면 로그아웃
         if ((fresh as any).is_active === false) { handleLogout(); return; }
+        // 🔒 다른 컴퓨터에서 로그인되면 이 기기는 자동 로그아웃(관리자·멀티허용 회원 제외)
+        const deviceOk = await isThisDeviceActive(user.id, (fresh as any).email || (user as any).email);
+        if (!alive) return;
+        if (!deviceOk) { alert("다른 컴퓨터에서 로그인되어 이 기기는 로그아웃됩니다."); handleLogout(); return; }
         // ★관리자가 바꾼 회원 값(등급·활성·크롤링 권한 등)이 회원 앱에 반영되게 — crawl_enabled도 확인해야 잠금해제가 실제로 풀린다.
         //   (예전엔 plan/is_active만 봐서, 관리자가 크롤링 풀어줘도 회원 앱은 캐시된 잠김 상태 그대로였음)
         const changed = fresh.plan !== user.plan
