@@ -1428,6 +1428,8 @@ Output format (JSON array only, no other text):
   const [blocks, setBlocks] = useState<ContentBlock[]>([{type:"text",id:uid(),content:""}]);
   const [thumbnail, setThumbnail] = useState("");
   const [greeting, setGreeting] = useState(()=>localStorage.getItem("publy_greeting")||"");
+  const [savedGreeting, setSavedGreeting] = useState(()=>localStorage.getItem("publy_greeting")||"");   // 저장된(계속 쓰는) 인사말
+  const saveGreeting = ()=>{ const g=greeting.trim(); localStorage.setItem("publy_greeting",g); setSavedGreeting(g); showToast(g?"글쓴이 인사말을 저장했어요. 앞으로 모든 글에 자동으로 들어가요":"저장된 인사말을 비웠어요","success"); };
   const [hashtags, setHashtags] = useState<string[]>([]);
   const [newTag, setNewTag] = useState("");
   const [imageMode, setImageMode] = useState<"auto"|"manual">("auto");
@@ -5834,10 +5836,22 @@ POST3: (제목)|(이유)
                             )}
                             <input ref={thumbnailRef} type="file" accept="image/*" style={{display:"none"}} onChange={e=>{const f=e.target.files?.[0];if(!f)return;const r=new FileReader();r.onload=ev=>setThumbnail(ev.target?.result as string);r.readAsDataURL(f);}}/>
                           </div>
-                          {/* 인사말 */}
+                          {/* 인사말 — 한 번 저장하면 모든 글에 계속 자동 삽입. 바꾸려면 고치고 다시 저장. */}
                           <div>
-                            <label className="inp-label">💬 글쓴이 인사말 <span style={{fontWeight:400,color:"var(--text3)"}}>(선택)</span></label>
-                            <textarea className="inp" rows={2} placeholder="안녕하세요! 오늘도 유용한 정보를 가지고 왔어요 😊" value={greeting} onChange={e=>setGreeting(e.target.value)} style={{resize:"none",fontSize:13}}/>
+                            <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+                              <label className="inp-label" style={{marginBottom:0}}>💬 글쓴이 인사말 <span style={{fontWeight:400,color:"var(--text3)"}}>(한 번 저장하면 계속 사용)</span></label>
+                              {savedGreeting && greeting.trim()===savedGreeting
+                                ? <span style={{fontSize:11,fontWeight:800,color:"#2f9e5e",background:"rgba(47,158,94,.12)",borderRadius:99,padding:"2px 9px"}}>✓ 저장됨</span>
+                                : savedGreeting
+                                  ? <span style={{fontSize:11,fontWeight:800,color:"#e0952f",background:"rgba(224,149,47,.12)",borderRadius:99,padding:"2px 9px"}}>● 저장 안 된 변경</span>
+                                  : null}
+                            </div>
+                            <textarea className="inp" rows={2} placeholder="안녕하세요! 오늘도 유용한 정보를 가지고 왔어요 😊" value={greeting} onChange={e=>setGreeting(e.target.value)} style={{resize:"none",fontSize:13,marginTop:6}}/>
+                            <div style={{display:"flex",gap:6,marginTop:6}}>
+                              <button type="button" onClick={saveGreeting} disabled={greeting.trim()===savedGreeting} style={{flex:1,padding:"9px",borderRadius:10,border:"none",cursor:greeting.trim()===savedGreeting?"default":"pointer",fontSize:12.5,fontWeight:800,fontFamily:"inherit",background:greeting.trim()===savedGreeting?"var(--card2)":"var(--accent)",color:greeting.trim()===savedGreeting?"var(--text3)":"#fff",opacity:greeting.trim()===savedGreeting?.7:1}}>💾 인사말 저장하기</button>
+                              {savedGreeting && <button type="button" onClick={()=>{setGreeting("");localStorage.removeItem("publy_greeting");setSavedGreeting("");showToast("저장된 인사말을 비웠어요","success");}} title="저장된 인사말 지우기" style={{padding:"9px 12px",borderRadius:10,border:"1px solid var(--border)",background:"var(--card)",color:"var(--text3)",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:"inherit"}}>비우기</button>}
+                            </div>
+                            <p style={{margin:"6px 2px 0",fontSize:11,color:"var(--text3)",lineHeight:1.55}}>저장하면 앞으로 <b style={{color:"var(--text2)"}}>모든 글의 썸네일 다음</b>에 자동으로 들어가요. 바꾸려면 고치고 다시 저장하면 돼요.</p>
                           </div>
                         </div>
                       )}
