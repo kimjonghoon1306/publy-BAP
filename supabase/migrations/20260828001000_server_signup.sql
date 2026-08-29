@@ -19,7 +19,7 @@ begin
   if length(trim(coalesce(p_email, ''))) < 5 or position('@' in p_email) = 0 then
     raise exception using errcode = 'P0001', message = 'INVALID_EMAIL';
   end if;
-  if length(coalesce(p_password, '')) < 8 then
+  if length(coalesce(p_password, '')) < 6 then
     raise exception using errcode = 'P0001', message = 'WEAK_PASSWORD';
   end if;
   if exists (select 1 from public.publy_users where lower(email) = lower(trim(p_email))) then

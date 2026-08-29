@@ -93,9 +93,12 @@ const CSS = `
 /* 메인 카드 */
 .login-card {
   position:relative; width:460px; z-index:10;
-  border-radius:28px; padding:36px 44px;
-  animation:card-float 7s ease-in-out infinite, form-rise .7s ease both, glow-breathe 4s ease-in-out infinite;
+  border-radius:28px; padding:26px 34px;
+  /* 가입 폼이 화면보다 커도 잘리지 않게 카드 안에서 스크롤(위아래 붙음 방지). card-float 제거(떠다니다 잘림) */
+  max-height:calc(100vh - 24px); overflow-y:auto; overflow-x:hidden;
+  animation:form-rise .7s ease both, glow-breathe 4s ease-in-out infinite;
 }
+.login-card::-webkit-scrollbar { width:0; height:0; }
 .dark .login-card {
   background:rgba(255,255,255,.03);
   border:1px solid rgba(240,65,122,.15);
@@ -117,9 +120,9 @@ const CSS = `
 .light .card-glow-line { background:linear-gradient(90deg,transparent,rgba(240,65,122,.4),transparent); }
 
 /* 로고 */
-.logo-section { text-align:center; margin-bottom:26px; }
+.logo-section { text-align:center; margin-bottom:14px; }
 .logo-ring-wrap {
-  position:relative; width:88px; height:88px; margin:0 auto 16px;
+  position:relative; width:58px; height:58px; margin:0 auto 10px;
   animation:logo-emerge .8s cubic-bezier(.34,1.56,.64,1) both;
 }
 .logo-ring {
@@ -147,7 +150,7 @@ const CSS = `
   animation:pulse-ring 2s ease-out infinite;
 }
 .logo-name {
-  font-family:'Bebas Neue',sans-serif; font-size:36px; letter-spacing:.25em;
+  font-family:'Bebas Neue',sans-serif; font-size:27px; letter-spacing:.22em;
   background:linear-gradient(135deg,#f0417a,#e0356e,#ffffff);
   -webkit-background-clip:text; -webkit-text-fill-color:transparent;
 }
@@ -158,12 +161,12 @@ const CSS = `
 /* 탭 */
 .tab-group {
   display:grid; grid-template-columns:1fr 1fr;
-  gap:3px; border-radius:16px; padding:4px; margin-bottom:28px;
+  gap:3px; border-radius:16px; padding:4px; margin-bottom:14px;
 }
 .dark .tab-group  { background:rgba(255,255,255,.06); }
 .light .tab-group { background:rgba(0,0,0,.06); }
 .tab-btn {
-  padding:11px; border:none; border-radius:13px; cursor:pointer;
+  padding:9px; border:none; border-radius:12px; cursor:pointer;
   font-size:13px; font-weight:600; letter-spacing:.02em;
   transition:all .22s; font-family:'Noto Sans KR',sans-serif;
 }
@@ -176,16 +179,16 @@ const CSS = `
 .light .tab-btn.inactive { background:transparent; color:rgba(0,0,0,.45); }
 
 /* 인풋 그룹 */
-.field { margin-bottom:14px; }
+.field { margin-bottom:10px; }
 .field-label {
   display:flex; align-items:center; gap:6px;
   font-size:10px; font-weight:700; letter-spacing:.12em;
-  text-transform:uppercase; margin-bottom:7px;
+  text-transform:uppercase; margin-bottom:5px;
 }
 .dark .field-label  { color:rgba(255,255,255,.4); }
 .light .field-label { color:rgba(0,0,0,.45); }
 .field-input {
-  width:100%; padding:13px 16px; border-radius:13px;
+  width:100%; padding:10px 14px; border-radius:12px;
   font-size:14px; font-family:'Noto Sans KR',sans-serif;
   outline:none; transition:all .22s;
 }
@@ -214,7 +217,7 @@ const CSS = `
 
 /* 제출 버튼 */
 .submit-btn {
-  width:100%; padding:15px; margin-top:6px;
+  width:100%; padding:12px; margin-top:6px;
   border:none; border-radius:14px; cursor:pointer;
   font-family:'Noto Sans KR',sans-serif;
   font-size:15px; font-weight:800; letter-spacing:.03em;
@@ -450,6 +453,8 @@ export default function LoginPage({ onLogin, onAdminLogin, theme, onThemeToggle 
       if (!/^01[0-9]\d{7,8}$/.test(digits)) {
         setError("연락처를 010-1234-5678 형식으로 입력해주세요"); return;
       }
+      // 비밀번호 6자 이상(서버 규칙과 동일)
+      if (pwV.length < 6) { setError("비밀번호는 6자 이상으로 입력해주세요 🔒"); return; }
     }
     setLoading(true); setError("");
     try {
@@ -606,10 +611,9 @@ export default function LoginPage({ onLogin, onAdminLogin, theme, onThemeToggle 
               <input ref={phoneRef} className="field-input" type="tel" placeholder="010-1234-5678"
                 value={phone} onChange={e => setPhone(e.target.value)}
                 onKeyDown={e => e.key === "Enter" && handleSubmit()} />
-              <div style={{marginTop:6,padding:"8px 12px",borderRadius:9,fontSize:11,lineHeight:1.6,
-                background:"rgba(240,65,122,.06)",border:"1px solid rgba(240,65,122,.15)",
-                color:theme==="dark"?"rgba(240,65,122,.8)":"rgba(240,65,122,.9)"}}>
-                💡 연락처는 이메일 찾기 · 비밀번호 찾기에 꼭 필요해요
+              <div style={{marginTop:4,fontSize:10.5,lineHeight:1.5,paddingLeft:2,
+                color:theme==="dark"?"rgba(240,65,122,.7)":"rgba(240,65,122,.85)"}}>
+                💡 이메일·비밀번호 찾기에 필요해요
               </div>
             </div>
           )}

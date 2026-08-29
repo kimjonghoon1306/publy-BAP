@@ -19,7 +19,7 @@ begin
   if extensions.crypt(p_current_password, v_user.password_hash) <> v_user.password_hash then
     raise exception using errcode = 'P0001', message = 'INVALID_CURRENT_PASSWORD';
   end if;
-  if length(coalesce(p_new_password, '')) < 8 then
+  if length(coalesce(p_new_password, '')) < 6 then
     raise exception using errcode = 'P0001', message = 'WEAK_PASSWORD';
   end if;
   update public.publy_users
@@ -40,7 +40,7 @@ begin
   if not public.publy_admin_session_get(p_token) then
     raise exception using errcode = 'P0001', message = 'INVALID_ADMIN_SESSION';
   end if;
-  if length(coalesce(p_new_password, '')) < 8 then
+  if length(coalesce(p_new_password, '')) < 6 then
     raise exception using errcode = 'P0001', message = 'WEAK_PASSWORD';
   end if;
   insert into public.publy_settings(key, value)

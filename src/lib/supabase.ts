@@ -305,7 +305,7 @@ export async function signUp(email: string, password: string, name: string, phon
   });
   if (error || !data?.token || !data?.user) {
     if (error?.message?.includes("EMAIL_EXISTS")) throw new Error("이미 가입된 이메일입니다");
-    if (error?.message?.includes("WEAK_PASSWORD")) throw new Error("비밀번호는 8자 이상이어야 합니다");
+    if (error?.message?.includes("WEAK_PASSWORD")) throw new Error("비밀번호는 6자 이상이어야 합니다");
     throw new Error(error?.message || "회원가입에 실패했습니다");
   }
   localStorage.setItem(MEMBER_SESSION_KEY, data.token);
