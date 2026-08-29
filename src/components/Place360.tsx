@@ -175,6 +175,7 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
   const [scanPct, setScanPct] = useState(0);
   const [scanLog, setScanLog] = useState<string[]>([]);
   const [posOpen, setPosOpen] = useState(false);   // 포스 자료 입력 접이식
+  const [discoveryOpen, setDiscoveryOpen] = useState(false);   // 역추적·업체찾기 탭(기본 닫힘)
   const [autoRankKw, setAutoRankKw] = useState("");   // 링크 등록 직후 자동 순위측정할 키워드(프로필 반영 후 실행)
   useEffect(() => {
     if (plan === "admin") return;
@@ -816,191 +817,219 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
     { i: "🧭", l: "길찾기", v: behaviorInput.directions || "입력", c: colors.sub, d: "공개 화면에 없어 통계에서 직접 입력. 실방문 신호." },
   ] : [];
 
-  return <div className="p360" style={{ position: "relative", minHeight: 600, padding: "clamp(10px,2vw,22px)", borderRadius: 10, background: colors.bg, color: colors.text, overflow: "hidden" }}>
-    {/* ── 본바탕 오브제(크롤링식 장식 도형) — 콘텐츠 뒤에 은은하게 ── */}
-    <div aria-hidden style={{ position: "absolute", inset: 0, overflow: "hidden", pointerEvents: "none", zIndex: 0 }}>
-      <div style={{ position: "absolute", right: -120, top: -140, width: 420, height: 420, borderRadius: "50%", background: `conic-gradient(from 0deg, transparent 0 18deg, ${colors.rose}14 18deg 30deg, transparent 30deg 44deg, ${colors.pink}10 44deg 56deg)`, animation: "p360rays 24s linear infinite" }} />
-      <div style={{ position: "absolute", left: -100, bottom: -120, width: 320, height: 320, borderRadius: "50%", background: `radial-gradient(circle, ${colors.green}14, transparent 66%)` }} />
-      <div style={{ position: "absolute", left: "42%", top: -60, width: 200, height: 200, borderRadius: "50%", background: `radial-gradient(circle, ${colors.purple}0e, transparent 68%)` }} />
-    </div>
-    <div style={{ position: "relative", zIndex: 1 }}>
+  // 자동 키워드 제안(실데이터 기반): 손님이 남긴 대표키워드 + 지역·업종 조합
+  const kwSuggestions = Array.from(new Set([
+    ...(livePlace?.keywords || []),
+    ...(profile.region && profile.category ? [`${profile.region} ${profile.category}`, `${profile.region} 맛집`, `${profile.region} ${profile.name}`] : []),
+  ].filter(Boolean))).filter(k => !trackedKeywords.includes(k)).slice(0, 8);
+
+  const M = colors;   // mint 팔레트 별칭
+  return <div className="p360" style={{ position: "relative", minHeight: 600, padding: "clamp(12px,2vw,22px)", borderRadius: 14, background: M.bg, color: M.text, overflow: "hidden", fontFamily: "'Noto Sans KR',sans-serif" }}>
     <style>{`
-      .p360 *{box-sizing:border-box}.p360-button{min-height:48px;border:0;border-radius:13px;padding:11px 16px;font-family:inherit;font-weight:900;cursor:pointer;transition:transform .15s,filter .15s}.p360-button:hover{filter:brightness(1.04);transform:translateY(-1px)}
-      @keyframes p360rays{0%{transform:rotate(0)}100%{transform:rotate(360deg)}}
-      .p360-two{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.p360-tiles{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:9px}
-      /* 블로그지수식 2단: 왼쪽 조작(고정폭) · 오른쪽 결과·로그(가변) */
-      .p360-2col{display:grid;grid-template-columns:380px 1fr;gap:16px;align-items:start}
-      .p360-col{display:flex;flex-direction:column;gap:12px;min-width:0}
-      @keyframes p360bob{0%,100%{transform:translateY(0)}50%{transform:translateY(-5px)}}
-      @media(max-width:900px){.p360-2col{grid-template-columns:1fr}}
-      @media(max-width:760px){.p360{padding:8px 6px 120px!important}.p360-two{grid-template-columns:1fr}.p360-tiles{grid-template-columns:repeat(2,minmax(0,1fr))}.p360-title{font-size:24px!important}.p360-card{padding:16px!important}}
+      .p360 *{box-sizing:border-box}
+      .p360-btn{border:0;border-radius:12px;padding:11px 16px;font-family:inherit;font-weight:800;cursor:pointer;transition:transform .12s,filter .12s;min-height:44px}
+      .p360-btn:hover{filter:brightness(1.05);transform:translateY(-1px)}
+      .p360-card{background:${M.card};border:1px solid ${M.line};border-radius:18px}
+      .p360-2col{display:grid;grid-template-columns:360px 1fr;gap:16px;align-items:start}
+      .p360-col{display:flex;flex-direction:column;gap:14px;min-width:0}
+      .p360-tiles{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:9px}
+      .p360-steps{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+      .p360-in{width:100%;min-height:46px;border-radius:12px;border:1px solid ${M.line};background:${dark ? M.soft : "#fff"};color:${M.text};padding:11px 13px;font-family:inherit;font-size:15px;outline:none}
+      @keyframes p360rays{to{transform:rotate(360deg)}}
+      @keyframes p360bob{0%,100%{transform:translateY(0)}50%{transform:translateY(-6px)}}
+      @media(max-width:1000px){.p360-2col{grid-template-columns:1fr}}
+      @media(max-width:640px){.p360-tiles{grid-template-columns:repeat(2,minmax(0,1fr))}.p360-steps{grid-template-columns:1fr}}
     `}</style>
 
-    {/* ── 온보딩(블로그지수와 동일 카드 + 캐릭터 + 가로 3스텝) ── */}
-    <UsageGuide theme={dark ? "dark" : "light"} accent={colors.rose} subtitle="안녕하세요! 플레이스 365예요. 이제부터 상위노출 플랜을 함께 짜볼까요? 🩺"
-      steps={[
-        { ico: "🔗", title: "① 링크 넣기", desc: "네이버 플레이스 주소를 붙여넣고 불러오기를 누르면 매장을 통째로 가져와요." },
-        { ico: "🔎", title: "② 검사하기", desc: "저장·리뷰·별점·사진·키워드까지 실시간으로 진단해 점수를 매겨요." },
-        { ico: "🚀", title: "③ 진단·솔루션", desc: "순위 올리는 길을 하나씩 짚어주고, 부족한 건 퍼블리로 채워요." },
-      ]} />
-
-    {/* ── 블로그지수식 2단: 왼쪽=조작 / 오른쪽=결과 ── */}
-    <div className="p360-2col">
-    <div className="p360-col">
-    {/* ── 매장 선택 칩 ── */}
-    {profiles.length > 0 && <section className="p360-card" style={{ ...cardStyle, padding: 13, marginBottom: 12 }}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}><b style={{ fontSize: 12.5 }}>🏪 어느 매장을 볼까요?</b><span style={{ color: colors.sub, fontSize: 11, fontWeight: 800 }}>{plan === "admin" || plan === "unlimited" ? `${profiles.length}개` : `${profiles.length}/${PLACE360_STORE_LIMIT[plan] ?? PLACE360_STORE_LIMIT.free}개`} 등록</span></div>
-      <div style={{ display: "flex", gap: 7, flexWrap: "wrap", marginTop: 9 }}>{profiles.map(item => { const key = place360StoreKey(item.name, item.region); const active = key === storeKey && hasStore; return <button key={key} type="button" className="p360-button" onClick={() => selectStore(item)} style={{ minHeight: 40, fontSize: 12.5, background: active ? colors.rose : colors.soft, color: active ? "#fff" : colors.text, border: `1px solid ${active ? colors.rose : colors.line}` }}>🏷️ {item.name}{item.region ? ` · ${item.region}` : ""}</button>; })}<button type="button" className="p360-button" onClick={startAddingStore} style={{ minHeight: 40, fontSize: 12.5, background: "transparent", color: colors.rose, border: `1px dashed ${colors.rose}` }}>＋ 다른 매장</button></div>
-    </section>}
-
-    {/* ── ① 링크 입력 + 진행 로그(1→100) ── */}
-    {(!hasStore || storeFormOpen) && <section className="p360-card" style={{ ...cardStyle, padding: 20, marginBottom: 12 }}>
-      <b style={{ fontSize: 15 }}>🔗 네이버 플레이스 주소 붙여넣고 엔터</b>
-      <p style={{ color: colors.sub, fontSize: 12, lineHeight: 1.6, margin: "6px 0 12px" }}>네이버 지도에서 내 매장 → ‘공유’ 주소를 붙여넣으면 이름·업종·사진·리뷰·저장수·메뉴까지 <b style={{ color: colors.text }}>한 번에</b> 가져와요.</p>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 8 }}>
-        <input value={draft.placeUrl} onChange={e => setDraft(v => ({ ...v, placeUrl: e.target.value }))} onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); void resolveFromUrl(); } }} placeholder="https://naver.me/xxxx" style={fieldStyle} />
-        <button type="button" className="p360-button" disabled={resolving} onClick={() => void resolveFromUrl()} style={{ background: colors.rose, color: "#fff", whiteSpace: "nowrap", opacity: resolving ? 0.7 : 1 }}>{resolving ? "분석 중…" : "🔎 통째로 분석"}</button>
-      </div>
-      {/* 📟 검은 작업 로그 터미널(블로그지수와 동일 톤) */}
-      <div style={{ marginTop: 13, borderRadius: 12, overflow: "hidden", border: `1px solid ${colors.line}` }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 12px", background: colors.soft }}>
-          <b style={{ fontSize: 12 }}>📟 작업 로그</b>
-          <span style={{ fontSize: 11, fontWeight: 900, color: colors.rose }}>{scanPct}%</span>
-        </div>
-        <div style={{ height: 6, background: "#0b1220" }}><div style={{ width: `${scanPct}%`, height: "100%", background: `linear-gradient(90deg,${colors.rose},${colors.amber})`, transition: "width .3s" }} /></div>
-        <div style={{ minHeight: 120, maxHeight: 260, overflowY: "auto", padding: "12px 14px", background: "#050a0f", fontFamily: "'JetBrains Mono', monospace", fontSize: 12, lineHeight: 1.8 }}>
-          {scanLog.length === 0 ? <span style={{ color: "#3a5a7a" }}>대기 중... 링크를 넣고 불러오기를 누르면 진행 상황이 여기 나와요.</span> : scanLog.map((l, i) => <div key={i} style={{ color: i === scanLog.length - 1 ? "#34e0b8" : "#8fb3c9" }}>{l}</div>)}
-        </div>
-      </div>
-      <div className="p360-two" style={{ marginTop: 12 }}>
-        <label><b style={{ display: "block", marginBottom: 6, fontSize: 12 }}>매장 이름 · 필수</b><input value={draft.name} onChange={e => setDraft(v => ({ ...v, name: e.target.value }))} placeholder="예: 꽃피는산골 횡성점" style={fieldStyle} /></label>
-        <label><b style={{ display: "block", marginBottom: 6, fontSize: 12 }}>업종</b><input value={draft.category} onChange={e => setDraft(v => ({ ...v, category: e.target.value }))} placeholder="예: 한식" style={fieldStyle} /></label>
-        <label><b style={{ display: "block", marginBottom: 6, fontSize: 12 }}>지역</b><input value={draft.region} onChange={e => setDraft(v => ({ ...v, region: e.target.value }))} placeholder="예: 횡성" style={fieldStyle} /></label>
-      </div>
-      <div style={{ display: "grid", gridTemplateColumns: profiles.length ? "1fr auto" : "1fr", gap: 8, marginTop: 12 }}><button type="button" className="p360-button" onClick={() => void saveStore()} style={{ background: colors.green, color: "#fff" }}>내 매장 저장하고 진단 시작 →</button>{profiles.length > 0 && <button type="button" className="p360-button" onClick={() => { const s = profiles.find(item => place360StoreKey(item.name, item.region) === editingStoreKey) || profiles[0]; selectStore(s); }} style={{ background: colors.soft, color: colors.text, border: `1px solid ${colors.line}` }}>취소</button>}</div>
-    </section>}
-
+    {/* ── 본바탕 오브제 ── */}
+    <div aria-hidden style={{ position: "absolute", inset: 0, pointerEvents: "none", zIndex: 0, overflow: "hidden" }}>
+      <div style={{ position: "absolute", right: -140, top: -160, width: 460, height: 460, borderRadius: "50%", background: `conic-gradient(from 0deg, transparent 0 20deg, ${M.rose}12 20deg 32deg, transparent 32deg 46deg, ${M.pink}0e 46deg 58deg)`, animation: "p360rays 30s linear infinite" }} />
+      <div style={{ position: "absolute", left: -110, bottom: -130, width: 340, height: 340, borderRadius: "50%", background: `radial-gradient(circle, ${M.green}16, transparent 66%)` }} />
+      <div style={{ position: "absolute", left: "46%", top: -70, width: 220, height: 220, borderRadius: "50%", background: `radial-gradient(circle, ${M.purple}0e, transparent 68%)` }} />
     </div>
-    <div className="p360-col">
-    {/* ── ② 컨트롤 대시보드(별점·사진·수치·PDF) ── */}
-    {placeReport && <section className="p360-card" style={{ ...cardStyle, padding: 0, marginBottom: 12, overflow: "hidden", border: `2px solid ${colors.rose}45` }}>
-      <div style={{ padding: "18px 20px", background: `linear-gradient(120deg,${colors.rose}14,${colors.amber}10)` }}>
-        <div style={{ color: colors.rose, fontSize: 10.5, fontWeight: 950, letterSpacing: ".08em" }}>상위노출 종합 건강검진표</div>
-        <b style={{ display: "block", fontSize: 17, margin: "4px 0 8px" }}>{profile.name || "내 매장"}</b>
-        <div style={{ display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap" }}>
-          <span style={{ fontSize: 26, color: colors.amber, letterSpacing: 2 }}>{starStr(placeReport.overallStars)}</span>
-          <b style={{ fontSize: 20, color: colors.rose }}>{placeReport.overallStars} / 5.0</b>
-          <span style={{ fontSize: 11.5, color: colors.sub, fontWeight: 800 }}>{placeReport.totalCount}개 중 {placeReport.goodCount}개 양호</span>
-          {currentRank && <span style={{ marginLeft: "auto", fontSize: 13, fontWeight: 900, color: colors.rose }}>“{currentRank.query}” {currentRank.rank ? `${currentRank.rank}위` : "상위 밖"}</span>}
+
+    <div style={{ position: "relative", zIndex: 1, display: "flex", flexDirection: "column", gap: 14 }}>
+      {/* ── 온보딩 히어로: 캐릭터 + 인사 + 가로 3스텝 ── */}
+      <section className="p360-card" style={{ padding: "20px 22px", background: `linear-gradient(135deg, ${M.rose}12, ${M.pink}0c)`, borderColor: `${M.rose}30` }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 14 }}>
+          <img src={pearlyImg} alt="펄리" onError={e => { const s = document.createElement("div"); s.textContent = "🐤"; s.style.cssText = "font-size:44px"; e.currentTarget.replaceWith(s); }} style={{ width: 58, height: 58, objectFit: "contain", flexShrink: 0, animation: "p360bob 2.6s ease-in-out infinite", filter: `drop-shadow(0 6px 12px ${M.rose}44)` }} />
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontSize: 11, fontWeight: 950, color: M.rose, letterSpacing: ".14em" }}>PUBLY PLACE 365</div>
+            <h1 style={{ margin: "3px 0 3px", fontSize: 22, fontWeight: 900, letterSpacing: "-.03em" }}>안녕하세요! 상위노출 플랜을 함께 짜볼까요? 🩺</h1>
+            <p style={{ margin: 0, fontSize: 12.5, color: M.sub, lineHeight: 1.55 }}>플레이스 <b style={{ color: M.text }}>주소만 붙여넣으면</b> 매장을 통째로 진단하고, 순위 올리는 길을 하나씩 짚어드려요.</p>
+          </div>
         </div>
-        {/* 매장 관리: 수정 · 삭제 · 전체 재조회 */}
-        <div style={{ display: "flex", gap: 7, marginTop: 12, flexWrap: "wrap" }}>
-          <button type="button" className="p360-button" onClick={() => { setDraft(profile); setEditingStoreKey(storeKey); setStoreFormOpen(true); }} style={{ minHeight: 38, padding: "7px 13px", fontSize: 12, background: colors.soft, color: colors.text, border: `1px solid ${colors.line}` }}>✏️ 매장 정보 수정</button>
-          <button type="button" className="p360-button" disabled={resolving || !draft.placeUrl} onClick={() => void resolveFromUrl()} style={{ minHeight: 38, padding: "7px 13px", fontSize: 12, background: colors.rose, color: "#fff", opacity: (resolving || !draft.placeUrl) ? .6 : 1 }}>{resolving ? "재조회 중…" : "🔄 전체 재조회"}</button>
-          <button type="button" className="p360-button" onClick={() => void removeCurrentStore()} style={{ minHeight: 38, padding: "7px 13px", fontSize: 12, background: "transparent", color: colors.pink, border: `1px solid ${colors.pink}` }}>🗑️ 매장·기록 삭제</button>
+        <div className="p360-steps">
+          {[["🔗", "① 링크 넣기", "주소 붙여넣고 불러오기 → 매장 통째로 수집"], ["🔎", "② 검사하기", "저장·리뷰·별점·사진·키워드 실시간 진단"], ["🚀", "③ 진단·솔루션", "부족한 건 퍼블리로 채워 순위 UP"]].map(([ic, t, d], i) => (
+            <div key={i} style={{ display: "flex", gap: 10, padding: "12px 13px", borderRadius: 13, background: M.card, border: `1px solid ${M.line}` }}>
+              <div style={{ width: 30, height: 30, borderRadius: 9, flexShrink: 0, display: "grid", placeItems: "center", background: `${M.rose}18`, fontSize: 16 }}>{ic}</div>
+              <div style={{ minWidth: 0 }}><b style={{ fontSize: 13 }}>{t}</b><div style={{ fontSize: 10.5, color: M.sub, lineHeight: 1.45, marginTop: 2 }}>{d}</div></div>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      {/* ── 메인 2단: 왼쪽 콘솔 / 오른쪽 대시보드 ── */}
+      <div className="p360-2col">
+        {/* ===== 왼쪽 콘솔 ===== */}
+        <div className="p360-col">
+          {/* 매장 콘솔 */}
+          <section className="p360-card" style={{ padding: 18 }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+              <b style={{ fontSize: 14 }}>🏪 매장 콘솔</b>
+              <span style={{ fontSize: 11, fontWeight: 800, color: M.sub }}>{plan === "admin" || plan === "unlimited" ? `${profiles.length}개` : `${profiles.length}/${PLACE360_STORE_LIMIT[plan] ?? PLACE360_STORE_LIMIT.free}개`}</span>
+            </div>
+            {profiles.length > 0 && <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 12 }}>
+              {profiles.map(item => { const k = place360StoreKey(item.name, item.region); const on = k === storeKey && hasStore; return <button key={k} className="p360-btn" onClick={() => selectStore(item)} style={{ minHeight: 38, padding: "7px 12px", fontSize: 12, background: on ? M.rose : M.soft, color: on ? "#fff" : M.text, border: `1px solid ${on ? M.rose : M.line}` }}>🏷️ {item.name}{item.region ? `·${item.region}` : ""}</button>; })}
+              <button className="p360-btn" onClick={startAddingStore} style={{ minHeight: 38, padding: "7px 12px", fontSize: 12, background: "transparent", color: M.rose, border: `1px dashed ${M.rose}` }}>＋ 매장 추가</button>
+            </div>}
+            <label style={{ display: "block", fontSize: 11.5, fontWeight: 800, marginBottom: 6, color: M.sub }}>네이버 플레이스 주소</label>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 7, marginBottom: 8 }}>
+              <input value={draft.placeUrl} onChange={e => setDraft(v => ({ ...v, placeUrl: e.target.value }))} onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); void resolveFromUrl(); } }} placeholder="https://naver.me/xxxx" className="p360-in" />
+              <button className="p360-btn" disabled={resolving} onClick={() => void resolveFromUrl()} style={{ background: M.rose, color: "#fff", whiteSpace: "nowrap", opacity: resolving ? .6 : 1 }}>{resolving ? "검사 중…" : "🔎 불러오기·검사"}</button>
+            </div>
+            {(!hasStore || storeFormOpen) && <div style={{ display: "grid", gap: 7, marginBottom: 8 }}>
+              <input value={draft.name} onChange={e => setDraft(v => ({ ...v, name: e.target.value }))} placeholder="매장 이름(필수)" className="p360-in" />
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 7 }}>
+                <input value={draft.category} onChange={e => setDraft(v => ({ ...v, category: e.target.value }))} placeholder="업종" className="p360-in" />
+                <input value={draft.region} onChange={e => setDraft(v => ({ ...v, region: e.target.value }))} placeholder="지역" className="p360-in" />
+              </div>
+              <button className="p360-btn" onClick={() => void saveStore()} style={{ background: M.green, color: "#fff" }}>💾 매장 저장</button>
+            </div>}
+            {hasStore && !storeFormOpen && <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+              <button className="p360-btn" onClick={() => { setDraft(profile); setEditingStoreKey(storeKey); setStoreFormOpen(true); }} style={{ minHeight: 36, padding: "6px 11px", fontSize: 11.5, background: M.soft, color: M.text, border: `1px solid ${M.line}` }}>✏️ 수정</button>
+              <button className="p360-btn" disabled={resolving || !draft.placeUrl} onClick={() => void resolveFromUrl()} style={{ minHeight: 36, padding: "6px 11px", fontSize: 11.5, background: M.rose, color: "#fff", opacity: (resolving || !draft.placeUrl) ? .5 : 1 }}>🔄 전체 재조회</button>
+              <button className="p360-btn" onClick={() => void removeCurrentStore()} style={{ minHeight: 36, padding: "6px 11px", fontSize: 11.5, background: "transparent", color: M.pink, border: `1px solid ${M.pink}` }}>🗑️ 삭제</button>
+            </div>}
+          </section>
+
+          {/* 등급 사용 한도표 */}
+          {plan !== "admin" && <section className="p360-card" style={{ padding: 16 }}>
+            <b style={{ fontSize: 13 }}>📋 등급별 사용 한도</b>
+            <div style={{ marginTop: 9, border: `1px solid ${M.line}`, borderRadius: 11, overflow: "hidden" }}>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", background: M.soft }}>{["등급", "매장", "진단/일", "보관"].map(t => <b key={t} style={{ padding: 8, fontSize: 10.5 }}>{t}</b>)}</div>
+              {(["free", "basic", "pro"] as const).map(lv => <div key={lv} style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", borderTop: `1px solid ${M.line}`, background: plan === lv ? `${M.rose}10` : M.card }}><b style={{ padding: 8, fontSize: 11, color: plan === lv ? M.rose : M.text }}>{lv.toUpperCase()}</b><span style={{ padding: 8, fontSize: 11 }}>{PLACE360_STORE_LIMIT[lv]}개</span><span style={{ padding: 8, fontSize: 11 }}>{PLACE360_DAILY_DIAGNOSIS_LIMIT[lv]}회</span><span style={{ padding: 8, fontSize: 11 }}>{PLACE360_HISTORY_DAYS[lv]}일</span></div>)}
+            </div>
+          </section>}
+
+          {/* 검은 작업 로그 */}
+          <section className="p360-card" style={{ overflow: "hidden" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "9px 13px", background: M.soft }}><b style={{ fontSize: 12.5 }}>📟 작업 로그</b><span style={{ fontSize: 11, fontWeight: 900, color: M.rose }}>{scanPct}%</span></div>
+            <div style={{ height: 5, background: "#0b1220" }}><div style={{ width: `${scanPct}%`, height: "100%", background: `linear-gradient(90deg,${M.rose},${M.amber})`, transition: "width .3s" }} /></div>
+            <div style={{ minHeight: 150, maxHeight: 300, overflowY: "auto", padding: "12px 14px", background: "#050a0f", fontFamily: "'JetBrains Mono',monospace", fontSize: 11.5, lineHeight: 1.85 }}>
+              {scanLog.length === 0 ? <span style={{ color: "#3a5a7a" }}>대기 중... 링크를 넣고 불러오기를 누르면 진행 상황이 여기 나와요.</span> : scanLog.map((l, i) => <div key={i} style={{ color: i === scanLog.length - 1 ? "#34e0b8" : "#8fb3c9" }}>{l}</div>)}
+            </div>
+          </section>
+        </div>
+
+        {/* ===== 오른쪽 대시보드 ===== */}
+        <div className="p360-col">
+          {!placeReport ? (
+            <section className="p360-card" style={{ padding: "60px 24px", textAlign: "center" }}>
+              <img src={pearlyImg} alt="" onError={e => { const s = document.createElement("div"); s.textContent = "🏪"; s.style.cssText = "font-size:56px"; e.currentTarget.replaceWith(s); }} style={{ width: 72, height: 72, objectFit: "contain", opacity: .6, margin: "0 auto 14px", display: "block" }} />
+              <b style={{ fontSize: 15 }}>왼쪽에서 플레이스 주소를 넣고 불러오기를 누르면</b>
+              <p style={{ color: M.sub, fontSize: 12.5, marginTop: 6 }}>매장 건강검진표가 여기에 나타나요.</p>
+            </section>
+          ) : <>
+            {/* 컨트롤타워 헤더: 점수 + 순위 */}
+            <section className="p360-card" style={{ padding: 0, overflow: "hidden", borderColor: `${M.rose}40`, borderWidth: 2 }}>
+              <div style={{ padding: "18px 20px", background: `linear-gradient(120deg,${M.rose}14,${M.amber}0e)` }}>
+                <div style={{ fontSize: 10.5, fontWeight: 950, color: M.rose, letterSpacing: ".08em" }}>상위노출 종합 건강검진표</div>
+                <b style={{ display: "block", fontSize: 18, margin: "4px 0 8px" }}>{profile.name || "내 매장"}</b>
+                <div style={{ display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap" }}>
+                  <span style={{ fontSize: 24, color: M.amber, letterSpacing: 2 }}>{starStr(placeReport.overallStars)}</span>
+                  <b style={{ fontSize: 20, color: M.rose }}>{placeReport.overallStars} / 5.0</b>
+                  <span style={{ fontSize: 11.5, color: M.sub, fontWeight: 800 }}>{placeReport.totalCount}개 중 {placeReport.goodCount}개 양호</span>
+                  {currentRank && <span style={{ marginLeft: "auto", fontSize: 13, fontWeight: 900, color: M.rose }}>“{currentRank.query}” {currentRank.rank ? `${currentRank.rank}위` : "상위 밖"}</span>}
+                </div>
+              </div>
+              {(() => {
+                const series = rankHistory.filter(r => !currentRank || r.keyword === currentRank.query).slice(0, 12).reverse().map(r => r.rank);
+                if (series.length < 2) return null;
+                const vals = series.map(v => v == null ? 101 : v); const W = 560, H = 78, pad = 8;
+                const mx = Math.max(...vals), mn = Math.min(...vals), sp = Math.max(1, mx - mn);
+                const pts = vals.map((v, i) => `${(pad + i * (W - pad * 2) / (vals.length - 1)).toFixed(1)},${(pad + (v - mn) / sp * (H - pad * 2)).toFixed(1)}`);
+                const up = vals[vals.length - 1] <= vals[0]; const col = up ? M.green : M.pink;
+                return <div style={{ padding: "12px 16px 4px" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}><b style={{ fontSize: 12 }}>📈 순위 추이</b><span style={{ fontSize: 10, color: M.sub }}>위로 갈수록 상위</span><span style={{ marginLeft: "auto", fontSize: 11.5, fontWeight: 900, color: col }}>{up ? "▲ 상승세" : "▼ 하락·정체"}</span></div>
+                  <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", height: 78, display: "block" }} preserveAspectRatio="none"><polyline points={pts.join(" ")} fill="none" stroke={col} strokeWidth={2.5} strokeLinejoin="round" strokeLinecap="round" />{pts.map((p, i) => { const [x, y] = p.split(","); return <circle key={i} cx={x} cy={y} r={3} fill={col} />; })}</svg>
+                </div>;
+              })()}
+              {livePlace?.imageUrls && livePlace.imageUrls.length > 0 && <div style={{ display: "flex", gap: 6, padding: "10px 16px 0", overflowX: "auto" }}>{livePlace.imageUrls.slice(0, 10).map((u, i) => <img key={i} src={u} alt="" style={{ width: 66, height: 66, objectFit: "cover", borderRadius: 10, flex: "none", border: `1px solid ${M.line}` }} />)}</div>}
+              <div className="p360-tiles" style={{ padding: 16 }}>{numTiles.map(t => <div key={t.l} title={t.d} style={{ padding: "10px 11px", borderRadius: 12, background: M.soft, border: `1px solid ${M.line}` }}><div style={{ fontSize: 10, color: M.sub, display: "flex", alignItems: "center", gap: 4 }}><span>{t.i}</span>{t.l}</div><b style={{ fontSize: 17, color: t.c, display: "block", margin: "2px 0 3px" }}>{t.v}</b><div style={{ fontSize: 9, color: M.sub, lineHeight: 1.35 }}>{t.d}</div></div>)}</div>
+              <div style={{ padding: "0 16px 16px" }}><button className="p360-btn" onClick={downloadReport} style={{ width: "100%", background: M.text, color: M.bg }}>📄 진단 보고서 PDF로 저장</button></div>
+            </section>
+
+            {/* 진단(항목별 별점) */}
+            {placeReport.groups.map(g => <section key={g.title} className="p360-card" style={{ padding: 16 }}>
+              <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap", marginBottom: 9 }}><b style={{ fontSize: 13.5 }}>{g.title}</b><span style={{ fontSize: 10, color: M.sub }}>{g.subtitle}</span><span style={{ marginLeft: "auto", fontSize: 9.5, fontWeight: 900, color: M.rose, background: `${M.rose}12`, borderRadius: 99, padding: "2px 8px" }}>{g.weight}</span></div>
+              <div style={{ display: "grid", gap: 8 }}>{g.items.map(it => { const st = placeReport.itemStar(it); const sc = it.status === "good" ? M.green : it.status === "warn" ? M.amber : it.status === "input" ? M.sub : M.pink; return <article key={it.key} style={{ padding: 12, borderRadius: 12, background: M.soft, borderLeft: `5px solid ${sc}` }}><div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}><span style={{ fontSize: 18 }}>{it.icon}</span><b style={{ fontSize: 13 }}>{it.label}</b><span style={{ fontSize: 11, color: M.text, fontWeight: 800 }}>{it.value}</span><span style={{ marginLeft: "auto", fontSize: 12.5, color: M.amber }}>{"★".repeat(st)}{"☆".repeat(5 - st)}</span></div><p style={{ margin: "7px 0 0", color: M.sub, fontSize: 11, lineHeight: 1.55 }}><b style={{ color: M.text }}>왜?</b> {it.why}</p><p style={{ margin: "4px 0 0", color: M.text, fontSize: 11, lineHeight: 1.55 }}><b>👉</b> {it.how}</p></article>; })}</div>
+            </section>)}
+
+            {/* 자동 키워드 제안 + 순위 */}
+            <section id="p360-rank" className="p360-card" style={{ padding: 16 }}>
+              <b style={{ fontSize: 13.5 }}>🎯 노릴 키워드 & 순위</b>
+              <p style={{ color: M.sub, fontSize: 11, lineHeight: 1.5, margin: "5px 0 10px" }}>검색어를 넣고 순위 확인을 누르면 실시간으로 재요. 아래는 자동 추천이에요.</p>
+              {kwSuggestions.length > 0 && <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 10 }}>{kwSuggestions.map(k => <button key={k} className="p360-btn" onClick={() => { persistKeywords([...trackedKeywords, k]); checkKeywordRank(k); }} style={{ minHeight: 34, padding: "6px 11px", fontSize: 11.5, background: `${M.purple}14`, color: M.purple, border: `1px solid ${M.purple}44` }}>＋ {k}</button>)}</div>}
+              <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 7, marginBottom: 10 }}>
+                <input value={newKeyword} onChange={e => setNewKeyword(e.target.value)} onKeyDown={e => { if (e.key === "Enter" && newKeyword.trim()) { const v = newKeyword.trim(); if (!trackedKeywords.includes(v)) persistKeywords([...trackedKeywords, v]); setNewKeyword(""); checkKeywordRank(v); } }} placeholder="예: 횡성 한우 맛집" className="p360-in" />
+                <button className="p360-btn" onClick={() => { const v = newKeyword.trim(); if (!v) return; if (!trackedKeywords.includes(v)) persistKeywords([...trackedKeywords, v]); setNewKeyword(""); checkKeywordRank(v); }} style={{ background: M.soft, color: M.text, border: `1px solid ${M.line}`, whiteSpace: "nowrap" }}>+ 추가</button>
+              </div>
+              <div style={{ display: "grid", gap: 7 }}>{trackedKeywords.length === 0 ? <p style={{ color: M.sub, fontSize: 11.5 }}>추천 키워드를 누르거나 검색어를 추가하세요.</p> : trackedKeywords.map(kw => { const last = rankHistory.find(r => r.keyword === kw); const chk = checkingKeyword === kw; return <div key={kw} style={{ display: "grid", gridTemplateColumns: "1fr auto auto", alignItems: "center", gap: 8, padding: "9px 11px", borderRadius: 11, background: M.soft, border: `1px solid ${M.line}` }}><div style={{ minWidth: 0 }}><b style={{ fontSize: 12.5, overflowWrap: "anywhere" }}>{kw}</b>{last ? <span style={{ marginLeft: 6, fontSize: 11, fontWeight: 900, color: last.rank ? M.green : M.amber }}>{last.rank ? `${last.rank}위` : "상위 밖"}</span> : <span style={{ marginLeft: 6, fontSize: 10.5, color: M.sub }}>미확인</span>}</div><button className="p360-btn" disabled={Boolean(checkingKeyword)} onClick={() => checkKeywordRank(kw)} style={{ minHeight: 34, padding: "6px 11px", fontSize: 11.5, background: chk ? M.card : M.rose, color: chk ? M.sub : "#fff", border: chk ? `1px solid ${M.line}` : "none" }}>{chk ? "확인 중…" : "순위 확인"}</button><button onClick={() => persistKeywords(trackedKeywords.filter(x => x !== kw))} style={{ border: "none", background: "transparent", color: M.sub, cursor: "pointer", fontSize: 15 }}>×</button></div>; })}</div>
+            </section>
+
+            {/* 손님 행동 입력(저장·길찾기) */}
+            <section className="p360-card" style={{ padding: 16, borderColor: `${M.amber}44`, borderWidth: 2 }}>
+              <div style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "4px 10px", borderRadius: 99, background: M.amber, color: dark ? "#2b2620" : "#fff", fontSize: 11, fontWeight: 950 }}>✏️ 손님 행동 직접 입력</div>
+              <p style={{ margin: "8px 0 10px", color: M.sub, fontSize: 11, lineHeight: 1.55 }}>저장·길찾기 수는 공개 화면에 없어요. 스마트플레이스 앱 → 통계에서 확인해 넣으면 위 별점에 반영돼요.</p>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                <label><b style={{ display: "block", fontSize: 11.5, marginBottom: 5 }}>💾 저장하기 수</b><input inputMode="numeric" type="number" min={0} value={behaviorInput.saves || ""} onChange={e => updateBehavior({ saves: Number(e.target.value) || 0 })} placeholder="예: 128" className="p360-in" /></label>
+                <label><b style={{ display: "block", fontSize: 11.5, marginBottom: 5 }}>🧭 길찾기 수</b><input inputMode="numeric" type="number" min={0} value={behaviorInput.directions || ""} onChange={e => updateBehavior({ directions: Number(e.target.value) || 0 })} placeholder="예: 64" className="p360-in" /></label>
+              </div>
+            </section>
+
+            {/* 퍼블리 순위상승 솔루션 */}
+            <section className="p360-card" style={{ padding: 16, borderLeft: `6px solid ${M.rose}` }}>
+              <b style={{ fontSize: 13.5 }}>🚀 순위 올리는 퍼블리 솔루션</b>
+              <p style={{ color: M.sub, fontSize: 11, lineHeight: 1.55, margin: "5px 0 10px" }}>상위노출의 가장 큰 지렛대는 <b style={{ color: M.text }}>블로그 리뷰</b>예요{comparison ? ` (내 ${(ownPlace?.blogReviewCount || 0).toLocaleString()} · 주변 평균 ${comparison.avgBlog.toLocaleString()})` : ""}. 아래에서 리뷰 쓴 블로거를 찾아 섭외하고, 퍼블리 글쓰기로 리뷰를 채워요.</p>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                <button className="p360-btn" onClick={() => { setDiscoveryOpen(true); setTimeout(() => document.getElementById("p360-discovery")?.scrollIntoView({ behavior: "smooth" }), 60); }} style={{ background: M.rose, color: "#fff" }}>🕵️ 리뷰 블로거 찾기 →</button>
+                <button className="p360-btn" onClick={() => onOpenCrawl?.()} style={{ background: M.soft, color: M.text, border: `1px solid ${M.line}` }}>🔍 크롤링으로 섭외 →</button>
+              </div>
+            </section>
+
+            {/* 포스 자료(접이식) */}
+            {hasStore && <section id="p360-pos" className="p360-card" style={{ padding: 16, borderColor: `${M.amber}44`, borderWidth: 2 }}>
+              <button onClick={() => setPosOpen(o => !o)} style={{ width: "100%", display: "flex", alignItems: "center", gap: 8, background: "transparent", border: "none", cursor: "pointer", fontFamily: "inherit", padding: 0 }}>
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "4px 10px", borderRadius: 99, background: M.amber, color: dark ? "#2b2620" : "#fff", fontSize: 11, fontWeight: 950 }}>📊 포스 자료 입력</span>
+                <b style={{ fontSize: 12.5, color: M.text }}>신규·재방문·광고·매출 (선택)</b>
+                <span style={{ marginLeft: "auto", fontSize: 15, color: M.sub }}>{posOpen ? "▲" : "▼"}</span>
+              </button>
+              {posOpen && <div style={{ marginTop: 12 }}>
+                <div style={{ display: "flex", gap: 7, flexWrap: "wrap", marginBottom: 11 }}><button className="p360-btn" onClick={downloadMetricsTemplate} style={{ minHeight: 38, fontSize: 11.5, background: M.soft, color: M.text, border: `1px solid ${M.line}` }}>⬇️ CSV 양식</button><button className="p360-btn" onClick={() => csvInputRef.current?.click()} style={{ minHeight: 38, fontSize: 11.5, background: M.amber, color: dark ? "#2b2620" : "#fff" }}>📂 CSV 불러오기</button><input ref={csvInputRef} type="file" accept=".csv,text/csv" onChange={ev => void importMetricsCsv(ev.target.files?.[0])} style={{ display: "none" }} /></div>
+                <div style={{ display: "grid", gap: 7 }}>{([["신규 고객", "current_new_customers", "previous_new_customers"], ["재방문 고객", "current_repeat_customers", "previous_repeat_customers"], ["광고비", "current_ad_spend", "previous_ad_spend"], ["광고 행동", "current_ad_actions", "previous_ad_actions"], ["매출", "current_sales", "previous_sales"]] as const).map(([t, ck, pk]) => <div key={ck} style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 7, alignItems: "center" }}><b style={{ fontSize: 11.5 }}>{t}</b><input inputMode="numeric" type="number" value={businessMetrics[ck]} onChange={e => updateBusinessMetric(ck, e.target.value)} placeholder="최근30일" className="p360-in" style={{ minHeight: 40, fontSize: 13 }} /><input inputMode="numeric" type="number" value={businessMetrics[pk]} onChange={e => updateBusinessMetric(pk, e.target.value)} placeholder="이전30일" className="p360-in" style={{ minHeight: 40, fontSize: 13 }} /></div>)}</div>
+                <button className="p360-btn" disabled={metricsLoading} onClick={() => void saveBusinessMetrics()} style={{ width: "100%", marginTop: 11, background: M.green, color: "#fff", opacity: metricsLoading ? .6 : 1 }}>{metricsLoading ? "저장 중…" : "이 숫자로 원인 진단하기"}</button>
+                {metricsSavedAt && <p style={{ margin: "7px 0 0", textAlign: "center", color: M.sub, fontSize: 10 }}>마지막 저장 · {new Date(metricsSavedAt).toLocaleString("ko-KR")}</p>}
+              </div>}
+            </section>}
+          </>}
         </div>
       </div>
-      {/* 📈 순위 상승 그래프(최근 측정 추이) */}
-      {(() => {
-        const series = rankHistory.filter(r => !currentRank || r.keyword === currentRank.query).slice(0, 12).reverse().map(r => r.rank);
-        if (series.length < 2) return null;
-        const vals = series.map(v => v == null ? 101 : v);   // 미노출=101(맨 아래)
-        const W = 560, H = 90, pad = 8;
-        const max = Math.max(...vals), min = Math.min(...vals);
-        const span = Math.max(1, max - min);
-        const pts = vals.map((v, i) => { const x = pad + i * (W - pad * 2) / (vals.length - 1); const y = pad + (v - min) / span * (H - pad * 2); return `${x.toFixed(1)},${y.toFixed(1)}`; });   // 순위 낮을수록(좋을수록) 위
-        const up = (vals[vals.length - 1] <= vals[0]);
-        const col = up ? colors.green : colors.pink;
-        return <div style={{ padding: "12px 16px 0" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}><b style={{ fontSize: 12 }}>📈 순위 추이</b><span style={{ fontSize: 10.5, color: colors.sub }}>“{currentRank?.query || ""}” · 위로 갈수록 상위</span><span style={{ marginLeft: "auto", fontSize: 11.5, fontWeight: 900, color: col }}>{up ? "▲ 상승세" : "▼ 하락·정체"}</span></div>
-          <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", height: 90, display: "block" }} preserveAspectRatio="none">
-            <polyline points={pts.join(" ")} fill="none" stroke={col} strokeWidth={2.5} strokeLinejoin="round" strokeLinecap="round" />
-            {vals.map((v, i) => { const [x, y] = pts[i].split(","); return <circle key={i} cx={x} cy={y} r={3} fill={col} />; })}
-          </svg>
-        </div>;
-      })()}
-      {livePlace?.imageUrls && livePlace.imageUrls.length > 0 && <div style={{ display: "flex", gap: 6, padding: "12px 16px 0", overflowX: "auto" }}>{livePlace.imageUrls.slice(0, 10).map((u, i) => <img key={i} src={u} alt="" style={{ width: 72, height: 72, objectFit: "cover", borderRadius: 10, flex: "none", border: `1px solid ${colors.line}` }} />)}</div>}
-      <div className="p360-tiles" style={{ padding: 16 }}>{numTiles.map(t => <div key={t.l} title={t.d} style={{ padding: "11px 12px", borderRadius: 12, background: colors.soft, border: `1px solid ${colors.line}` }}><div style={{ fontSize: 10.5, color: colors.sub, display: "flex", alignItems: "center", gap: 4 }}><span>{t.i}</span>{t.l}</div><b style={{ fontSize: 18, color: t.c, display: "block", margin: "2px 0 4px" }}>{t.v}</b><div style={{ fontSize: 9.5, color: colors.sub, lineHeight: 1.4 }}>{t.d}</div></div>)}</div>
-      <div style={{ padding: "0 16px 16px" }}><button type="button" className="p360-button" onClick={downloadReport} style={{ width: "100%", background: colors.text, color: colors.bg }}>📄 진단 보고서 PDF로 저장하기</button></div>
-    </section>}
 
-    {/* ── 등급 사용표 ── */}
-    {plan !== "admin" && <section className="p360-card" style={{ ...cardStyle, padding: 16, marginBottom: 12, border: `2px solid ${colors.rose}30` }}>
-      <b style={{ fontSize: 13 }}>📋 플레이스 360 등급별 사용 한도</b>
-      <div style={{ overflowX: "auto", marginTop: 10 }}><div style={{ minWidth: 520, border: `1px solid ${colors.line}`, borderRadius: 12, overflow: "hidden" }}><div style={{ display: "grid", gridTemplateColumns: "1fr repeat(3,1fr)", background: colors.soft }}>{["등급", "등록 매장", "진단/일", "기록 보관"].map(t => <b key={t} style={{ padding: 9, fontSize: 11 }}>{t}</b>)}</div>{(["free", "basic", "pro"] as const).map(level => <div key={level} style={{ display: "grid", gridTemplateColumns: "1fr repeat(3,1fr)", borderTop: `1px solid ${colors.line}`, background: plan === level ? `${colors.rose}10` : colors.card }}><b style={{ padding: 9, fontSize: 11.5, color: plan === level ? colors.rose : colors.text }}>{level.toUpperCase()}{plan === level ? " ·내 등급" : ""}</b><span style={{ padding: 9, fontSize: 11.5 }}>{PLACE360_STORE_LIMIT[level]}개</span><span style={{ padding: 9, fontSize: 11.5 }}>{PLACE360_DAILY_DIAGNOSIS_LIMIT[level]}회</span><span style={{ padding: 9, fontSize: 11.5 }}>{PLACE360_HISTORY_DAYS[level]}일</span></div>)}</div></div>
-      <p style={{ color: colors.sub, fontSize: 10.5, margin: "8px 0 0", lineHeight: 1.5 }}>순위 측정은 별도 한도(무료 {PLACE360_RANK_DAILY_LIMIT.free}·베이직 {PLACE360_RANK_DAILY_LIMIT.basic}·프로 {PLACE360_RANK_DAILY_LIMIT.pro}회/일)예요.</p>
-    </section>}
-
-    {/* ── ③ 상단노출 진단(별점 프로세스) ── */}
-    {placeReport ? <>{placeReport.groups.map(group => <section key={group.title} className="p360-card" style={{ ...cardStyle, padding: 16, marginBottom: 12 }}>
-      <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap", marginBottom: 10 }}><b style={{ fontSize: 14 }}>{group.title}</b><span style={{ fontSize: 10.5, color: colors.sub }}>{group.subtitle}</span><span style={{ marginLeft: "auto", fontSize: 9.5, fontWeight: 900, color: colors.rose, background: `${colors.rose}12`, borderRadius: 99, padding: "2px 8px" }}>{group.weight}</span></div>
-      <div style={{ display: "grid", gap: 8 }}>{group.items.map(item => {
-        const st = placeReport.itemStar(item);
-        const sc = item.status === "good" ? colors.green : item.status === "warn" ? colors.amber : item.status === "input" ? colors.sub : colors.rose;
-        const onAct = () => { if (item.go === "discovery") { document.getElementById("p360-discovery")?.scrollIntoView({ behavior: "smooth" }); } else if (item.go === "rank") { document.getElementById("p360-rank")?.scrollIntoView({ behavior: "smooth" }); } else if (item.go === "data") { setPosOpen(true); setTimeout(() => document.getElementById("p360-pos")?.scrollIntoView({ behavior: "smooth" }), 60); } };
-        return <article key={item.key} style={{ padding: 13, borderRadius: 13, background: colors.soft, borderLeft: `5px solid ${sc}` }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}><span style={{ fontSize: 19 }}>{item.icon}</span><b style={{ fontSize: 13.5 }}>{item.label}</b><span style={{ fontSize: 11, color: colors.text, fontWeight: 800 }}>{item.value}</span><span style={{ marginLeft: "auto", fontSize: 13, color: colors.amber, letterSpacing: 1 }}>{"★".repeat(st)}{"☆".repeat(5 - st)}</span></div>
-          <p style={{ margin: "8px 0 0", color: colors.sub, fontSize: 11.5, lineHeight: 1.6 }}><b style={{ color: colors.text }}>왜?</b> {item.why}</p>
-          <p style={{ margin: "5px 0 0", color: colors.text, fontSize: 11.5, lineHeight: 1.6 }}><b>👉 이렇게:</b> {item.how}</p>
-          {item.action && item.go && <button type="button" className="p360-button" onClick={onAct} style={{ marginTop: 9, minHeight: 38, padding: "7px 13px", fontSize: 12, background: item.status === "good" ? colors.card : sc, color: item.status === "good" ? colors.text : "#fff", border: item.status === "good" ? `1px solid ${colors.line}` : 0 }}>{item.action}</button>}
-        </article>;
-      })}</div>
-    </section>)}</> : null}
-
-    {/* 손님 행동 직접 입력(저장·길찾기) */}
-    <section className="p360-card" style={{ ...cardStyle, padding: 16, marginBottom: 12, border: `2px solid ${colors.amber}45` }}>
-      <div style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "4px 10px", borderRadius: 99, background: colors.amber, color: dark ? "#2b2620" : "#fff", fontSize: 11, fontWeight: 950 }}>✏️ 손님 행동 직접 입력</div>
-      <p style={{ margin: "9px 0 11px", color: colors.sub, fontSize: 11.5, lineHeight: 1.6 }}>저장·길찾기 수는 공개 화면에 없어요. <b style={{ color: colors.text }}>스마트플레이스 앱 → 통계</b>에서 확인해 넣으면 위 별점에 반영돼요.</p>
-      <div className="p360-two"><label><b style={{ display: "block", marginBottom: 6, fontSize: 12 }}>💾 저장하기 수</b><input inputMode="numeric" type="number" min={0} value={behaviorInput.saves || ""} onChange={e => updateBehavior({ saves: Number(e.target.value) || 0 })} placeholder="예: 128" style={fieldStyle} /></label><label><b style={{ display: "block", marginBottom: 6, fontSize: 12 }}>🧭 길찾기 수</b><input inputMode="numeric" type="number" min={0} value={behaviorInput.directions || ""} onChange={e => updateBehavior({ directions: Number(e.target.value) || 0 })} placeholder="예: 64" style={fieldStyle} /></label></div>
-    </section>
-
-    {/* ── ④ 순위 측정 ── */}
-    {hasStore && <section id="p360-rank" className="p360-card" style={{ ...cardStyle, padding: 16, marginBottom: 12, scrollMarginTop: 12 }}>
-      <b style={{ fontSize: 14 }}>📍 노릴 키워드 & 순위</b>
-      <p style={{ color: colors.sub, fontSize: 11.5, lineHeight: 1.6, margin: "6px 0 11px" }}>검색어를 넣고 <b style={{ color: colors.rose }}>순위 확인</b>을 누르면 그 검색에서 내 매장이 몇 위인지 실시간으로 재요.</p>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 8, marginBottom: 11 }}>
-        <input value={newKeyword} onChange={e => setNewKeyword(e.target.value)} onKeyDown={e => { if (e.key === "Enter" && newKeyword.trim()) { const v = newKeyword.trim(); if (!trackedKeywords.includes(v)) persistKeywords([...trackedKeywords, v]); setNewKeyword(""); checkKeywordRank(v); } }} placeholder="예: 횡성 한우 맛집" style={fieldStyle} />
-        <button type="button" className="p360-button" onClick={() => { const v = newKeyword.trim(); if (!v) return; if (!trackedKeywords.includes(v)) persistKeywords([...trackedKeywords, v]); setNewKeyword(""); checkKeywordRank(v); }} style={{ background: colors.soft, color: colors.text, border: `1px solid ${colors.line}`, whiteSpace: "nowrap" }}>+ 추가</button>
-      </div>
-      <div style={{ display: "grid", gap: 8 }}>{trackedKeywords.length === 0 ? <p style={{ color: colors.sub, fontSize: 11.5 }}>노리는 검색어를 추가해 순위를 확인해 보세요.</p> : trackedKeywords.map(kw => { const last = rankHistory.find(r => r.keyword === kw); const isChecking = checkingKeyword === kw; return <div key={kw} style={{ display: "grid", gridTemplateColumns: "1fr auto auto", alignItems: "center", gap: 9, padding: "10px 12px", borderRadius: 12, background: colors.soft, border: `1px solid ${colors.line}` }}><div style={{ minWidth: 0 }}><b style={{ fontSize: 13, overflowWrap: "anywhere" }}>{kw}</b>{last ? <span style={{ marginLeft: 7, fontSize: 11.5, fontWeight: 900, color: last.rank ? colors.green : colors.amber }}>{last.rank ? `${last.rank}위` : "상위 밖"}</span> : <span style={{ marginLeft: 7, fontSize: 11, color: colors.sub }}>미확인</span>}</div><button type="button" className="p360-button" disabled={Boolean(checkingKeyword)} onClick={() => checkKeywordRank(kw)} style={{ padding: "6px 11px", fontSize: 12, background: isChecking ? colors.card : colors.rose, color: isChecking ? colors.sub : "#fff", border: isChecking ? `1px solid ${colors.line}` : "none" }}>{isChecking ? "확인 중…" : "순위 확인"}</button><button type="button" onClick={() => persistKeywords(trackedKeywords.filter(x => x !== kw))} style={{ border: "none", background: "transparent", color: colors.sub, cursor: "pointer", fontSize: 15 }}>×</button></div>; })}</div>
-    </section>}
-
-    {/* ── ⑤ 리뷰 블로거 분석 + ⑥ 퍼블리 순위상승 솔루션 ── */}
-    <section className="p360-card" style={{ ...cardStyle, padding: 16, marginBottom: 12, borderLeft: `6px solid ${colors.rose}` }}>
-      <b style={{ fontSize: 14 }}>🚀 순위 올리는 퍼블리 솔루션</b>
-      <p style={{ color: colors.sub, fontSize: 11.5, lineHeight: 1.6, margin: "6px 0 11px" }}>상위노출의 가장 큰 지렛대는 <b style={{ color: colors.text }}>블로그 리뷰</b>예요{comparison ? ` (내 ${(ownPlace?.blogReviewCount || 0).toLocaleString()}개 · 주변 평균 ${comparison.avgBlog.toLocaleString()}개)` : ""}. 아래에서 <b style={{ color: colors.rose }}>리뷰 쓴 블로거를 찾아</b> 서이추·협업을 제안하고, 퍼블리 글쓰기로 리뷰 글을 발행해 채워요.{reviewerHandoffCount > 0 ? ` 지금까지 ${reviewerHandoffCount}명 확보.` : ""}</p>
-      <div className="p360-two">
-        <button type="button" className="p360-button" onClick={() => document.getElementById("p360-discovery")?.scrollIntoView({ behavior: "smooth" })} style={{ background: colors.rose, color: "#fff" }}>🕵️ 리뷰 블로거 찾기 →</button>
-        <button type="button" className="p360-button" onClick={() => onOpenCrawl?.()} style={{ background: colors.soft, color: colors.text, border: `1px solid ${colors.line}` }}>🔍 크롤링으로 협업 제안 →</button>
-      </div>
-    </section>
-
-    {/* ── ⑦ 포스 자료(접이식) ── */}
-    {hasStore && <section id="p360-pos" className="p360-card" style={{ ...cardStyle, padding: 16, marginBottom: 12, scrollMarginTop: 12, border: `2px solid ${colors.amber}45` }}>
-      <button type="button" onClick={() => setPosOpen(o => !o)} style={{ width: "100%", display: "flex", alignItems: "center", gap: 8, background: "transparent", border: "none", cursor: "pointer", fontFamily: "inherit", padding: 0 }}>
-        <span style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "4px 10px", borderRadius: 99, background: colors.amber, color: dark ? "#2b2620" : "#fff", fontSize: 11, fontWeight: 950 }}>📊 포스 자료 입력</span>
-        <b style={{ fontSize: 13, color: colors.text }}>신규·재방문·광고·매출 (선택)</b>
-        <span style={{ marginLeft: "auto", fontSize: 16, color: colors.sub }}>{posOpen ? "▲" : "▼"}</span>
-      </button>
-      {posOpen && <div style={{ marginTop: 13 }}>
-        <p style={{ margin: "0 0 12px", color: colors.sub, fontSize: 11.5, lineHeight: 1.6 }}>순위·리뷰는 자동이지만 이 숫자들은 사장님만 아는 계산대·광고 값이에요. 최근 30일·이전 30일을 넣으면 무엇이 줄었는지 진단해요.</p>
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}><button type="button" className="p360-button" onClick={downloadMetricsTemplate} style={{ minHeight: 40, fontSize: 12, background: colors.soft, color: colors.text, border: `1px solid ${colors.line}` }}>⬇️ CSV 양식</button><button type="button" className="p360-button" onClick={() => csvInputRef.current?.click()} style={{ minHeight: 40, fontSize: 12, background: colors.amber, color: dark ? "#2b2620" : "#fff" }}>📂 CSV 불러오기</button><input ref={csvInputRef} type="file" accept=".csv,text/csv" onChange={ev => void importMetricsCsv(ev.target.files?.[0])} style={{ display: "none" }} /></div>
-        <div style={{ display: "grid", gap: 8 }}>{([["신규 고객 수", "current_new_customers", "previous_new_customers", "명"], ["재방문 고객 수", "current_repeat_customers", "previous_repeat_customers", "명"], ["광고비", "current_ad_spend", "previous_ad_spend", "원"], ["광고 행동 수", "current_ad_actions", "previous_ad_actions", "건"], ["매출", "current_sales", "previous_sales", "원"]] as const).map(([title, ck, pk, unit]) => <div key={ck} style={{ display: "grid", gridTemplateColumns: "1.2fr 1fr 1fr", gap: 8, alignItems: "center" }}><b style={{ fontSize: 12 }}>{title}<small style={{ color: colors.sub, fontWeight: 400 }}> ({unit})</small></b><input aria-label={`${title} 최근30일`} inputMode="numeric" type="number" value={businessMetrics[ck]} onChange={e => updateBusinessMetric(ck, e.target.value)} placeholder="최근30일" style={{ ...fieldStyle, minHeight: 42, fontSize: 14 }} /><input aria-label={`${title} 이전30일`} inputMode="numeric" type="number" value={businessMetrics[pk]} onChange={e => updateBusinessMetric(pk, e.target.value)} placeholder="이전30일" style={{ ...fieldStyle, minHeight: 42, fontSize: 14 }} /></div>)}</div>
-        <button type="button" className="p360-button" disabled={metricsLoading} onClick={() => void saveBusinessMetrics()} style={{ width: "100%", marginTop: 12, background: colors.green, color: "#fff", opacity: metricsLoading ? .6 : 1 }}>{metricsLoading ? "저장 중…" : "이 숫자로 원인 진단하기 →"}</button>
-        {metricsSavedAt && <p style={{ margin: "8px 0 0", textAlign: "center", color: colors.sub, fontSize: 10.5 }}>마지막 저장 · {new Date(metricsSavedAt).toLocaleString("ko-KR")}</p>}
-      </div>}
-    </section>}
-
+      {/* ── 역추적·업체찾기: 접이식 탭(기본 닫힘) ── */}
+      <section className="p360-card" style={{ padding: 0, overflow: "hidden" }}>
+        <button onClick={() => setDiscoveryOpen(o => !o)} style={{ width: "100%", display: "flex", alignItems: "center", gap: 10, padding: "15px 18px", background: discoveryOpen ? `${M.rose}0e` : "transparent", border: "none", cursor: "pointer", fontFamily: "inherit" }}>
+          <span style={{ fontSize: 20 }}>🕵️</span>
+          <div style={{ textAlign: "left", minWidth: 0 }}>
+            <b style={{ fontSize: 14, color: M.text }}>업체 발굴 · 리뷰 블로거 역추적</b>
+            <div style={{ fontSize: 11, color: M.sub, lineHeight: 1.4, marginTop: 2 }}>경쟁업체를 모으고, 그 매장에 <b style={{ color: M.text }}>리뷰 쓴 블로거</b>를 찾아 섭외 → 내 블로그 리뷰↑ → 상위노출. <b style={{ color: M.rose }}>{discoveryOpen ? "접기 ▲" : "펼치기 ▼"}</b></div>
+          </div>
+          <span style={{ marginLeft: "auto", fontSize: 18, color: M.sub }}>{discoveryOpen ? "▲" : "▼"}</span>
+        </button>
+        {discoveryOpen && <div id="p360-discovery" style={{ borderTop: `1px solid ${M.line}` }}>
+          <PlaceCenter showToast={showToast} theme={theme} userId={userId} plan={plan} initialRegion={profile.region} ownStoreName={profile.name} onPlacesCollected={onPlacesCollected} onReviewerHandoff={onReviewerHandoff} onOwnStoreDetailViewed={() => completeMissionAutomatically("customer")} onOpenCrawl={onOpenCrawl} />
+        </div>}
+      </section>
     </div>
-    </div>
-    {/* ── ⑧ 업체·리뷰어 찾기(실데이터, 항상 마운트, 전체폭) ── */}
-    <section className="p360-card" style={{ ...cardStyle, padding: "14px 16px 4px", marginBottom: 0 }}>
-      <b style={{ fontSize: 14 }}>🕵️ 업체·리뷰 블로거 찾기</b>
-      <p style={{ color: colors.sub, fontSize: 11.5, lineHeight: 1.6, margin: "5px 0 0" }}>경쟁업체를 수집하고, 그 매장에 <b style={{ color: colors.text }}>리뷰를 쓴 블로거</b>를 실시간으로 역추적해요. 찾은 블로거는 크롤링에서 서이추·협업 제안으로 보낼 수 있어요.</p>
-    </section>
-    <div id="p360-discovery" style={{ scrollMarginTop: 12 }}>
-      <PlaceCenter showToast={showToast} theme={theme} userId={userId} plan={plan} initialRegion={profile.region} ownStoreName={profile.name} onPlacesCollected={onPlacesCollected} onReviewerHandoff={onReviewerHandoff} onOwnStoreDetailViewed={() => completeMissionAutomatically("customer")} onOpenCrawl={onOpenCrawl} />
-    </div>
-    </div>{/* /zIndex 콘텐츠 래퍼 */}
   </div>;
 }
