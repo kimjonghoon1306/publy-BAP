@@ -762,9 +762,14 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
 
     {tab === "data" && <main>
       <section className="p360-card" style={{ ...cardStyle, padding: 22, marginBottom: 12 }}>
-        <div style={{ color: colors.amber, fontSize: 11, fontWeight: 950 }}>OWNER DATA CHECK</div>
+        <div style={{ color: colors.amber, fontSize: 11, fontWeight: 950 }}>OWNER DATA CHECK · 선택사항</div>
         <h2 style={{ margin: "6px 0", fontSize: 23 }}>📊 신규·재방문·광고, 무엇이 문제인지 나눠봐요</h2>
         <p style={{ color: colors.sub, fontSize: 12.5, lineHeight: 1.75, margin: 0 }}>플레이스 공개 화면만으로는 실제 신규 고객·재방문·광고 성과를 알 수 없어요. 포스(POS), 예약 장부, 광고 보고서에서 <b style={{ color: colors.text }}>최근 30일</b>과 <b style={{ color: colors.text }}>그 이전 30일</b> 숫자만 입력하면 서로 섞지 않고 비교해요.</p>
+        {hasStore && <div style={{ marginTop: 14, padding: "13px 15px", borderRadius: 13, background: `${colors.green}12`, border: `1px solid ${colors.green}40` }}>
+          <div style={{ fontSize: 12.5, fontWeight: 900, color: colors.green }}>✅ 이 화면은 안 채워도 돼요 (선택사항)</div>
+          <p style={{ margin: "6px 0 0", color: colors.sub, fontSize: 11.5, lineHeight: 1.7 }}>플레이스 <b style={{ color: colors.text }}>주소만 넣으면</b> 순위·리뷰·경쟁사 비교는 <b style={{ color: colors.text }}>자동으로 끝나요</b>. 이 숫자들(신규·재방문·광고비·매출)은 사장님만 아는 POS·광고 보고서 값이라 자동으로 못 가져와요. <b style={{ color: colors.text }}>광고비 대비 효율</b>까지 보고 싶을 때만 넣으세요.</p>
+          <button type="button" className="p360-button" onClick={() => setTab("rank")} style={{ marginTop: 11, minHeight: 40, background: colors.green, color: "#fff" }}>건너뛰고 내 순위 보기 →</button>
+        </div>}
         {!hasStore && <button type="button" className="p360-button" onClick={() => setTab("overview")} style={{ marginTop: 14, background: colors.rose, color: "#fff" }}>먼저 내 매장 등록하기 →</button>}
       </section>
       {hasStore && <>
