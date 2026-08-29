@@ -1,6 +1,6 @@
 import express from "express";
 import cors from "cors";
-import { saveSession, sessionExists, removeSession, crawlBlogIds, crawlBuddyPosts, analyzeBuddyKeywords, addNeighbors, NeighborResult, donePath, engageBlogs, EngageResult, engageDonePath, crawlMyPosts, replyToComments, crawlBlogStats, checkSelectedBlogExposure, pumasiEngage, crawlPumasiReport, pumasiPreview, updatePostTitle, checkProxy, analyzeBlogAuthenticity, fetchPostBody, crawlPostViews, sendWebmail, sendBlogComments, crawlPlaces, crawlPlaceBloggers, crawlPlaceDetail, crawlPlaceByUrl } from "./naver";
+import { saveSession, sessionExists, removeSession, crawlBlogIds, crawlBuddyPosts, analyzeBuddyKeywords, addNeighbors, NeighborResult, donePath, engageBlogs, EngageResult, engageDonePath, crawlMyPosts, replyToComments, crawlBlogStats, checkSelectedBlogExposure, pumasiEngage, crawlPumasiReport, pumasiPreview, updatePostTitle, checkProxy, analyzeBlogAuthenticity, fetchPostBody, crawlPostViews, sendWebmail, sendBlogComments, crawlPlaces, crawlPlaceBloggers, crawlPlaceDetail, crawlPlaceByUrl, suggestPlaceKeywords } from "./naver";
 import { checkNeighborQuota, incrementNeighborQuota, getNeighborDailyUsage, incrementEngageQuota, getEngageDailyUsage, getUserPlan, checkMembershipAccess, NEIGHBOR_DAILY_LIMIT, ENGAGE_DAILY_LIMIT, REPLY_DAILY_LIMIT, getReplyDailyUsage, incrementReplyQuota, addNeighborHistory, addReplyHistory, addBlogscoreHistory, incrementPumasiQuota, TITLE_EDIT_DAILY_LIMIT, getTitleEditDailyUsage, incrementTitleEditQuota, getProxyForAccount, supabase, getOutreachSender, getOutreachSentToday, addOutreachLog, checkPlaceDetailQuota, incrementPlaceDetailQuota } from "./supabase";
 import nodemailer from "nodemailer";
 import fs from "fs";
@@ -257,6 +257,24 @@ app.get("/api/place/resolve", async (req, res) => {
     res.json({ ok: true, detail });
   } catch (e: any) {
     res.status(500).json({ ok: false, error: e.message || "매장 정보를 불러오지 못했어요" });
+  }
+});
+
+/* ── 🎯 플레이스 키워드 발굴(자동완성+연관검색) — 계정 불필요 공개 소스 ── */
+app.get("/api/place/keywords", async (req, res) => {
+  const { userId, seeds } = req.query as Record<string, string>;
+  try {
+    if (userId) {
+      const access = await checkMembershipAccess(userId, "place360");
+      if (!access.ok) return res.status(403).json({ ok: false, error: access.reason || "플레이스 360 이용권을 확인해주세요", membershipBlocked: true });
+    }
+    let seedList: string[] = [];
+    try { seedList = JSON.parse(seeds || "[]"); } catch {}
+    if (!Array.isArray(seedList) || !seedList.length) return res.status(400).json({ ok: false, error: "키워드 시드가 필요해요" });
+    const keywords = await suggestPlaceKeywords({ seeds: seedList });
+    res.json({ ok: true, keywords });
+  } catch (e: any) {
+    res.status(500).json({ ok: false, error: e.message || "키워드 발굴 실패" });
   }
 });
 

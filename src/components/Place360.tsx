@@ -177,6 +177,8 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
   const [scanLog, setScanLog] = useState<string[]>([]);
   const [posOpen, setPosOpen] = useState(false);   // 포스 자료 입력 접이식
   const [discoveryOpen, setDiscoveryOpen] = useState(false);   // 역추적·업체찾기 탭(기본 닫힘)
+  const [autoKeywords, setAutoKeywords] = useState<{ keyword: string; source: string }[]>([]);   // 자동 발굴 키워드(자동완성·연관검색)
+  const [kwLoading, setKwLoading] = useState(false);
   const [autoRankKw, setAutoRankKw] = useState("");   // 링크 등록 직후 자동 순위측정할 키워드(프로필 반영 후 실행)
   useEffect(() => {
     if (plan === "admin") return;
@@ -628,6 +630,25 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
 
   // 🔎 플레이스 주소만 붙여넣으면 이름·업종·지역을 봇이 공개 페이지에서 바로 당겨온다(로그인 불필요).
   const pushLog = (pct: number, msg: string) => { setScanPct(pct); setScanLog(prev => [...prev, `${pct}% · ${msg}`]); };
+  // 🎯 자동 키워드 발굴(자동완성+연관검색) — 지역·업종·상호를 시드로 봇 공개 엔드포인트 호출
+  const loadAutoKeywords = async () => {
+    const reg = (profile.region || draft.region || "").trim();
+    const cat = (profile.category || draft.category || "").trim();
+    const nm = (profile.name || draft.name || "").trim();
+    const seeds = Array.from(new Set([reg && cat ? `${reg} ${cat}` : "", reg ? `${reg} 맛집` : "", nm, reg && nm ? `${reg} ${nm}` : "", cat].filter(Boolean)));
+    if (!seeds.length) { showToast?.("먼저 매장 정보(지역·업종)를 넣어주세요", "info"); return; }
+    setKwLoading(true); pushLog(scanPct, "🎯 키워드 발굴 중(자동완성·연관검색)…");
+    try {
+      const res = await botFetch(`${BOT}/api/place/keywords?userId=${encodeURIComponent(userId || "")}&seeds=${encodeURIComponent(JSON.stringify(seeds))}`);
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data?.ok && Array.isArray(data.keywords)) {
+        const list = (data.keywords as { keyword: string; source: string }[]).filter(k => !trackedKeywords.includes(k.keyword));
+        setAutoKeywords(list);
+        pushLog(scanPct, `🎯 키워드 ${list.length}개 발굴 완료`);
+      } else { showToast?.(data?.error || "키워드 발굴에 실패했어요", "error"); }
+    } catch { showToast?.("봇 연결 실패 — 앱 실행 확인", "error"); }
+    finally { setKwLoading(false); }
+  };
   const resolveFromUrl = async () => {
     const url = draft.placeUrl.trim();
     if (!url) { showToast?.("먼저 네이버 플레이스 주소를 붙여넣어 주세요", "info"); return; }
@@ -647,7 +668,8 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
       setLivePlace(d);   // ★리뷰·영업시간·전화·메뉴·편의시설·사진·저장수·평점·키워드까지 전체를 한 번에 보관
       const regionHint = String(d.address || "").match(/([가-힣]+(?:동|읍|면|리|가|로|구|시))/)?.[1] || "";
       setDraft(v => ({ ...v, name: d.name?.trim() || v.name, category: d.category?.trim() || v.category, region: v.region.trim() || regionHint, placeUrl: d.placeUrl?.trim() || url }));
-      pushLog(75, "경쟁사·키워드 비교 준비 완료");
+      pushLog(75, "🎯 노릴 키워드 자동 발굴 중…");
+      void loadAutoKeywords();   // 자동완성·연관검색 키워드 병행 수집
       pushLog(90, "종합 별점 산출 중…");
       pushLog(100, "완료 — 상위노출 진단표가 준비됐어요");
       showToast?.(`'${d.name || "매장"}' 전체 분석 완료`, "success");
@@ -977,9 +999,15 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
 
             {/* 자동 키워드 제안 + 순위 */}
             <section id="p360-rank" className="p360-card" style={{ padding: 16 }}>
-              <b style={{ fontSize: 13.5 }}>🎯 노릴 키워드 & 순위</b>
-              <p style={{ color: M.sub, fontSize: 11, lineHeight: 1.5, margin: "5px 0 10px" }}>검색어를 넣고 순위 확인을 누르면 실시간으로 재요. 아래는 자동 추천이에요.</p>
-              {kwSuggestions.length > 0 && <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 10 }}>{kwSuggestions.map(k => <button key={k} className="p360-btn" onClick={() => { persistKeywords([...trackedKeywords, k]); checkKeywordRank(k); }} style={{ minHeight: 34, padding: "6px 11px", fontSize: 11.5, background: `${M.purple}14`, color: M.purple, border: `1px solid ${M.purple}44` }}>＋ {k}</button>)}</div>}
+              <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                <b style={{ fontSize: 13.5 }}>🎯 노릴 키워드 & 순위</b>
+                <button className="p360-btn" disabled={kwLoading} onClick={() => void loadAutoKeywords()} style={{ marginLeft: "auto", minHeight: 32, padding: "6px 11px", fontSize: 11, background: `${M.purple}16`, color: M.purple, border: `1px solid ${M.purple}44` }}>{kwLoading ? "발굴 중…" : "🔄 키워드 자동 발굴"}</button>
+              </div>
+              <p style={{ color: M.sub, fontSize: 11, lineHeight: 1.5, margin: "5px 0 10px" }}>네이버 <b style={{ color: M.text }}>자동완성·연관검색</b>에서 실제 사람들이 치는 검색어를 긁어와요. 누르면 바로 순위를 재요.</p>
+              {(autoKeywords.length > 0 || kwSuggestions.length > 0) && <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 10 }}>
+                {autoKeywords.slice(0, 14).map(k => <button key={k.keyword} className="p360-btn" title={`출처: ${k.source}`} onClick={() => { persistKeywords([...trackedKeywords, k.keyword]); checkKeywordRank(k.keyword); setAutoKeywords(a => a.filter(x => x.keyword !== k.keyword)); }} style={{ minHeight: 34, padding: "6px 11px", fontSize: 11.5, background: `${M.purple}14`, color: M.purple, border: `1px solid ${M.purple}44`, display: "inline-flex", alignItems: "center", gap: 4 }}>＋ {k.keyword} <span style={{ fontSize: 8.5, opacity: .7, background: `${M.purple}22`, borderRadius: 5, padding: "1px 4px" }}>{k.source}</span></button>)}
+                {autoKeywords.length === 0 && kwSuggestions.map(k => <button key={k} className="p360-btn" onClick={() => { persistKeywords([...trackedKeywords, k]); checkKeywordRank(k); }} style={{ minHeight: 34, padding: "6px 11px", fontSize: 11.5, background: `${M.purple}10`, color: M.purple, border: `1px solid ${M.purple}33` }}>＋ {k}</button>)}
+              </div>}
               <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 7, marginBottom: 10 }}>
                 <input value={newKeyword} onChange={e => setNewKeyword(e.target.value)} onKeyDown={e => { if (e.key === "Enter" && newKeyword.trim()) { const v = newKeyword.trim(); if (!trackedKeywords.includes(v)) persistKeywords([...trackedKeywords, v]); setNewKeyword(""); checkKeywordRank(v); } }} placeholder="예: 횡성 한우 맛집" className="p360-in" />
                 <button className="p360-btn" onClick={() => { const v = newKeyword.trim(); if (!v) return; if (!trackedKeywords.includes(v)) persistKeywords([...trackedKeywords, v]); setNewKeyword(""); checkKeywordRank(v); }} style={{ background: M.soft, color: M.text, border: `1px solid ${M.line}`, whiteSpace: "nowrap" }}>+ 추가</button>

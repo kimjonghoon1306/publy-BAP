@@ -1502,6 +1502,52 @@ export function parsePlaceUrl(input: string): { domain: string; placeId: string 
 /* ── 🔎 주소만 붙여넣어도 내 매장 정보를 바로 당겨오기(플레이스 360 매장 등록용) ──
    어떤 형태의 링크든 최종 placeId·domain을 찾아 공개 상세정보를 가져온다.
    공개 페이지만 읽으므로 로그인 계정 불필요. naver.me 단축주소는 실제로 열어 리다이렉트된 최종 URL로 판별. */
+/** 🎯 플레이스 키워드 발굴 — 대행사식으로 여러 소스에서 실제 검색 키워드를 싹 긁어온다.
+ * 계정 불필요(공개 엔드포인트). 소스: ①네이버 자동완성 ②연관검색어 ③각 후보의 자동완성 확장.
+ * seed(지역+업종/상호)로 시작해 실제 사람들이 치는 검색어를 모은다. */
+export async function suggestPlaceKeywords(params: {
+  seeds: string[];              // 예: ["횡성 한식", "횡성 맛집", "꽃피는산골"]
+  region?: string;
+  onLog?: (msg: string) => void;
+}): Promise<{ keyword: string; source: string }[]> {
+  const log = params.onLog || console.log;
+  const seen = new Map<string, string>();   // keyword -> source
+  const add = (kw: string, source: string) => { const t = String(kw || "").trim().replace(/\s+/g, " "); if (t && t.length <= 25 && !seen.has(t)) seen.set(t, source); };
+  const H = { "User-Agent": UA, "Referer": "https://search.naver.com/" };
+
+  // ① 네이버 자동완성(ac.search.naver.com) — 실제 검색창 추천어
+  const autocomplete = async (q: string) => {
+    try {
+      const url = `https://ac.search.naver.com/nx/ac?q=${encodeURIComponent(q)}&con=1&frm=nv&ans=2&r_format=json&r_enc=UTF-8&r_unicode=0&t_koreng=1&run=2&rev=4&q_enc=UTF-8&st=100`;
+      const r = await fetch(url, { headers: H });
+      const j: any = await r.json();
+      const items: any[] = j?.items?.[0] || [];
+      for (const it of items) add(String(it?.[0] || ""), "자동완성");
+    } catch { /* skip */ }
+  };
+  // ② 연관검색어 — 통합검색 결과 페이지의 related HTML에서 추출
+  const related = async (q: string) => {
+    try {
+      const r = await fetch(`https://search.naver.com/search.naver?query=${encodeURIComponent(q)}`, { headers: H });
+      const html = await r.text();
+      // 연관검색어 앵커(related_srch / lst_related_srch) 텍스트 추출
+      const block = html.match(/related[_-]?srch[\s\S]{0,4000}?<\/(?:ul|div)>/i)?.[0] || "";
+      const rx = /query=([^"&]+)"/g; let m: RegExpExecArray | null;
+      while ((m = rx.exec(block))) { try { add(decodeURIComponent(m[1]), "연관검색"); } catch {} }
+    } catch { /* skip */ }
+  };
+
+  const baseSeeds = Array.from(new Set(params.seeds.map(s => s.trim()).filter(Boolean))).slice(0, 6);
+  log(`[키워드] ${baseSeeds.length}개 시드로 발굴 시작…`);
+  for (const s of baseSeeds) { add(s, "기본"); await autocomplete(s); await related(s); }
+  // ③ 상위 자동완성 결과를 한 번 더 확장(롱테일 확보) — 과부하 방지 위해 앞쪽 4개만
+  const expand = Array.from(seen.keys()).filter(k => !baseSeeds.includes(k)).slice(0, 4);
+  for (const k of expand) await autocomplete(k);
+  const out = Array.from(seen, ([keyword, source]) => ({ keyword, source }));
+  log(`[키워드] ${out.length}개 발굴 완료`);
+  return out.slice(0, 40);
+}
+
 export async function crawlPlaceByUrl(params: {
   placeUrl: string;
   ownerUserId?: string | null;
