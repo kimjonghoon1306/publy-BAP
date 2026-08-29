@@ -2170,6 +2170,18 @@ export async function addNeighbors(params: {
         if (/이미 이웃|이웃입니다|나와의 관계/.test(bodyTxt)) {
           throw new Error("이미 이웃이거나 신청 불가");
         }
+        // ★상대가 서로이웃을 막아놓은 경우 — 폼이 없고 안내문만 떠서 봇이 멈춘다(테리 신고).
+        //   이런 블로그는 즉시 건너뛰어 다음으로. (라디오·메시지칸이 없는 것도 함께 판단)
+        const BLOCKED_RE = /서로이웃.{0,6}(신청|받지|허용|거부).{0,6}(받지\s*않|않는|불가|거부|제한)|서로이웃을\s*허용하지|이웃\s*신청을\s*받지\s*않|비공개\s*블로그|서로이웃\s*맺기를\s*원하지/;
+        const hasForm = await page.$("#bothBuddyRadio, input[name='relation'], textarea.textarea_t1, textarea[name='message'], textarea").then(el => !!el).catch(() => false);
+        if (BLOCKED_RE.test(bodyTxt) || !hasForm) {
+          await onResult?.({ keyword, blogId, status: "skip", message: "서로이웃을 받지 않는 블로그" });
+          log(`[서이추] ⏭ ${blogId} 서로이웃 신청을 받지 않음 — 건너뜀`);
+          if (skipDone && retryMs > 0) { attempts[blogId] = Date.now(); saveAttempt(accountId, blogId, attempts); }  // 재시도 대기 등록(헛시도 방지)
+          onProgress?.(done, fail);
+          await page.waitForTimeout(humanDelay(delayMin, delayMax));
+          continue;
+        }
 
         // 서로이웃 라디오 선택 (#bothBuddyRadio = relation 1). 없으면 이웃추가로 진행.
         try {
