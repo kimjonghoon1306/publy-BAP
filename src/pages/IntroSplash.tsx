@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useRef, useState, useEffect } from "react";
 
 // 첫 실행 시 1회 재생되는 시네마틱 인트로(음악 포함 mp4).
 //   끝나면 자동 종료. 건너뛰기/다시 안 보기 제공. 모바일 터치 시 소리 재생 보장.
@@ -15,6 +15,15 @@ export default function IntroSplash({ onDone }: { onDone: () => void }) {
     setFading(true);
     setTimeout(onDone, 500);
   };
+
+  // ★안전장치(치명적 버그 방지): 영상이 윈도우 등에서 로드 실패하거나 재생이 안 되면
+  //   onEnded가 안 불려 인트로(fixed inset:0 z99999)가 화면을 영영 덮어 로그인·모든 입력이 막힌다.
+  //   → 로드 실패(onError)나 12초 안에 재생 못 하면 자동으로 인트로를 닫는다(영상은 부가 요소).
+  useEffect(() => {
+    const t = window.setTimeout(finish, 12000);   // 최대 12초 뒤엔 무조건 넘어감
+    return () => window.clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // 브라우저 자동재생 정책상 음소거로 시작될 수 있어, 사용자가 클릭하면 소리 켜기
   const enableSound = () => {
@@ -47,6 +56,8 @@ export default function IntroSplash({ onDone }: { onDone: () => void }) {
         autoPlay
         playsInline
         onEnded={finish}
+        onError={finish}
+        onStalled={() => { /* 재생 지연 시 12초 안전 타임아웃이 처리 */ }}
         onCanPlay={(e) => {
           // 소리 켠 채로 재생 시도, 막히면 음소거로 재생(자동재생 정책 대비)
           const v = e.currentTarget;
