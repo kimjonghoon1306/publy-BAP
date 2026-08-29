@@ -49,6 +49,8 @@ const CSS = `
 .cosmos-orb {
   position:absolute; border-radius:50%;
   filter:blur(80px);
+  /* 별도 GPU 레이어로 분리 → 입력창 타이핑 리페인트와 겹치지 않게(윈도우 버벅임/시간차 완화) */
+  will-change:transform; transform:translateZ(0);
 }
 .cosmos-orb-1 { width:600px; height:600px; top:-200px; left:-200px; animation:cosmos-drift 20s linear infinite; }
 .cosmos-orb-2 { width:400px; height:400px; bottom:-100px; right:-100px; animation:cosmos-drift 25s linear infinite reverse; }
@@ -96,20 +98,22 @@ const CSS = `
   border-radius:28px; padding:26px 34px;
   /* 가입 폼이 화면보다 커도 잘리지 않게 카드 안에서 스크롤(위아래 붙음 방지). card-float 제거(떠다니다 잘림) */
   max-height:calc(100vh - 24px); overflow-y:auto; overflow-x:hidden;
-  animation:form-rise .7s ease both, glow-breathe 4s ease-in-out infinite;
+  /* ★glow-breathe(box-shadow 무한 애니메이션) 제거 — box-shadow는 GPU가속 안 돼 매 프레임 리페인트,
+     카드 안 입력창 타이핑을 윈도우에서 버벅이게 함. 등장 애니메이션만 남김. */
+  animation:form-rise .7s ease both;
 }
 .login-card::-webkit-scrollbar { width:0; height:0; }
+/* ★backdrop-filter:blur(40px)가 움직이는 배경을 매 프레임 재블러 → 카드 안 입력창 타이핑이
+   윈도우에서 버벅임/시간차. 배경 불투명도를 올려 blur 없이도 카드가 또렷하게(성능 회복). */
 .dark .login-card {
-  background:rgba(255,255,255,.03);
+  background:rgba(28,24,20,.92);
   border:1px solid rgba(240,65,122,.15);
   box-shadow:0 0 0 1px rgba(240,65,122,.05), inset 0 1px 0 rgba(240,65,122,.1);
-  backdrop-filter:blur(40px);
 }
 .light .login-card {
-  background:rgba(255,255,255,.92);
+  background:rgba(255,255,255,.97);
   border:1px solid rgba(240,65,122,.15);
   box-shadow:0 32px 80px rgba(0,0,0,.08), 0 0 0 1px rgba(240,65,122,.08);
-  backdrop-filter:blur(40px);
 }
 
 /* 카드 상단 장식선 */
