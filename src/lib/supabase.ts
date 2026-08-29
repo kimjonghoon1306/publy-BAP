@@ -277,6 +277,15 @@ export async function deleteAdminPlace360Snapshot(id: string): Promise<void> {
   if (error || data !== true) throw new Error(error?.message || "측정 기록 삭제에 실패했습니다");
 }
 
+export interface Place360RankAdminRow { id: string; user_id: string; store_key: string; keyword: string; rank: number | null; checked_count: number; surface: string; device: string; measured_at: string; member_name: string; email: string; plan: string }
+export async function getAdminPlace360Ranks(search = ""): Promise<Place360RankAdminRow[]> {
+  const token = sessionStorage.getItem(ADMIN_SESSION_KEY) || "";
+  if (!token) return [];
+  const { data, error } = await supabase.rpc("publy_place360_admin_ranks", { p_token: token, p_search: search });
+  if (error) { if (/does not exist|없|function/.test(error.message)) return []; throw new Error(error.message); }   // RPC 미배포 시 빈 배열(안전)
+  return (data || []) as Place360RankAdminRow[];
+}
+
 export interface Place360DetailUsage { user_id: string; member_name: string; email: string; plan: string; used: number; daily_limit: number }
 export async function getAdminPlace360DetailUsage(): Promise<Place360DetailUsage[]> {
   const token = sessionStorage.getItem(ADMIN_SESSION_KEY) || "";
