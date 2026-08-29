@@ -179,6 +179,8 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
   const [discoveryOpen, setDiscoveryOpen] = useState(false);   // 역추적·업체찾기 탭(기본 닫힘)
   const [autoKeywords, setAutoKeywords] = useState<{ keyword: string; source: string }[]>([]);   // 자동 발굴 키워드(자동완성·연관검색)
   const [kwLoading, setKwLoading] = useState(false);
+  const [reportRange, setReportRange] = useState<1 | 7 | 30 | "custom">(7);   // 리포트 기간: 일간(1)/주간(7)/월간(30)/기간설정
+  const [reportCustom, setReportCustom] = useState(14);
   const [autoRankKw, setAutoRankKw] = useState("");   // 링크 등록 직후 자동 순위측정할 키워드(프로필 반영 후 실행)
   useEffect(() => {
     if (plan === "admin") return;
@@ -242,6 +244,28 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
     ];
     return { rows, top, myIdx, myRank: myIdx >= 0 ? myIdx + 1 : null, total: rows.length, leader, gaps };
   }, [collectedPlaces, ownPlace, comparison]);
+
+  // 📊 성과 리포트: 선택 기간(일/주/월/커스텀) 내 순위·리뷰 변화를 집계
+  const reportDays = reportRange === "custom" ? Math.max(1, reportCustom) : reportRange;
+  const report = useMemo(() => {
+    const cutoff = Date.now() - reportDays * 86400000;
+    const ranks = rankHistory.filter(r => new Date(r.measured_at).getTime() >= cutoff);
+    const snaps = snapshots.filter(s => new Date(s.created_at || s.measured_on).getTime() >= cutoff);
+    // 키워드별 순위 변화(기간 내 최신 vs 최오래)
+    const byKw = new Map<string, Place360RankMeasurement[]>();
+    ranks.forEach(r => { const a = byKw.get(r.keyword) || []; a.push(r); byKw.set(r.keyword, a); });
+    const kwRows = Array.from(byKw, ([keyword, list]) => {
+      const sorted = [...list].sort((a, b) => new Date(a.measured_at).getTime() - new Date(b.measured_at).getTime());
+      const first = sorted[0]?.rank ?? null, last = sorted[sorted.length - 1]?.rank ?? null;
+      const change = (first != null && last != null) ? first - last : null;   // +면 상승
+      return { keyword, first, last, change, series: sorted.map(s => s.rank), measures: sorted.length };
+    }).sort((a, b) => (a.last ?? 999) - (b.last ?? 999));
+    // 리뷰 증감(기간 내 최신-최오래 스냅샷)
+    const snapSorted = [...snaps].sort((a, b) => new Date(a.measured_on).getTime() - new Date(b.measured_on).getTime());
+    const sf = snapSorted[0], sl = snapSorted[snapSorted.length - 1];
+    const reviewDelta = sf && sl ? { blog: sl.blog_reviews - sf.blog_reviews, visitor: sl.visitor_reviews - sf.visitor_reviews } : null;
+    return { days: reportDays, measures: ranks.length, kwRows, reviewDelta, hasData: ranks.length > 0 || snaps.length > 1 };
+  }, [rankHistory, snapshots, reportDays]);
   const storeKey = place360StoreKey(profile.name, profile.region);
   const [completedMissions, setCompletedMissions] = useState<string[]>(() => loadCompletedMissions(userId, storeKey));
   const [reviewerHandoffCount, setReviewerHandoffCount] = useState(0);
@@ -821,16 +845,56 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
       const st = placeReport.itemStar(it); const badge = it.status === "good" ? "양호" : it.status === "warn" ? "보완" : it.status === "input" ? "입력필요" : "시급";
       return `<div class="it"><b>${esc(it.icon + " " + it.label)}</b> <span class="v">${esc(it.value)}</span> <span class="s">${"★".repeat(st)}${"☆".repeat(5 - st)} ${badge}</span><div class="d"><b>왜?</b> ${esc(it.why)}</div><div class="d"><b>이렇게:</b> ${esc(it.how)}</div></div>`;
     }).join("")).join("");
-    const html = `<!doctype html><html lang="ko"><head><meta charset="utf-8"><title>${esc(profile.name || "내 매장")} 상위노출 진단 보고서</title>
-    <style>body{font-family:'Noto Sans KR',-apple-system,sans-serif;color:#2b2620;max-width:720px;margin:32px auto;padding:0 20px;line-height:1.6}
-    h1{font-size:24px;border-bottom:3px solid #a8593a;padding-bottom:10px}.top{background:#f3eee4;border-radius:12px;padding:16px;margin:16px 0}
-    .stars{font-size:26px;color:#a8593a}h3{margin:22px 0 8px;font-size:15px}h3 small{color:#8c8377;font-weight:400;font-size:12px}
-    .it{border:1px solid #e0d7c9;border-radius:10px;padding:12px;margin:8px 0}.it .v{color:#a8593a;font-weight:700;margin-left:6px}.it .s{float:right;color:#d98a1f;font-size:13px}
-    .d{font-size:12.5px;color:#5c554a;margin-top:5px}.foot{margin-top:26px;color:#8c8377;font-size:11px;border-top:1px solid #e0d7c9;padding-top:12px}
+    // 📈 순위 추이 그래프(SVG) — 리포트 기간 내 측정값
+    const gseries = rankHistory.filter(r => !currentRank || r.keyword === currentRank.query).slice(0, 12).reverse().map(r => r.rank);
+    let chartSvg = "";
+    if (gseries.length >= 2) {
+      const vals = gseries.map(v => v == null ? 101 : v); const W = 640, H = 130, pad = 22;
+      const mx = Math.max(...vals), mn = Math.min(...vals), sp = Math.max(1, mx - mn);
+      const pts = vals.map((v, i) => `${(pad + i * (W - pad * 2) / (vals.length - 1)).toFixed(1)},${(pad + (v - mn) / sp * (H - pad * 2)).toFixed(1)}`);
+      const up = vals[vals.length - 1] <= vals[0]; const col = up ? "#00c896" : "#ff5fa2";
+      chartSvg = `<div class="chart"><b>📈 순위 추이 (${esc(currentRank?.query || "")}) · ${up ? "▲ 상승세" : "▼ 하락·정체"}</b>
+        <svg viewBox="0 0 ${W} ${H}" width="100%" height="150" preserveAspectRatio="none">
+        <polyline points="${pts.join(" ")}" fill="none" stroke="${col}" stroke-width="3" stroke-linejoin="round"/>
+        ${pts.map(p => { const [x, y] = p.split(","); return `<circle cx="${x}" cy="${y}" r="4" fill="${col}"/>`; }).join("")}
+        </svg><div class="csub">위로 갈수록 상위 · 최근 ${gseries.length}회 측정</div></div>`;
+    }
+    // 📊 기간 리포트 요약(선택 기간)
+    const rangeLabel = reportRange === 1 ? "일간" : reportRange === 7 ? "주간" : reportRange === 30 ? "월간" : `최근 ${reportDays}일`;
+    let reportBlock = "";
+    if (report.hasData) {
+      const kwr = report.kwRows.slice(0, 8).map(k => `<tr><td>${esc(k.keyword)}</td><td>${k.last != null ? k.last + "위" : "상위밖"}</td><td class="${k.change == null ? "" : k.change > 0 ? "up" : k.change < 0 ? "dn" : ""}">${k.change == null ? "기준" : k.change > 0 ? "▲ " + k.change : k.change < 0 ? "▼ " + Math.abs(k.change) : "— 유지"}</td></tr>`).join("");
+      reportBlock = `<h2>📊 ${rangeLabel} 성과 리포트</h2>
+        <div class="rgrid"><div class="rc"><span>측정 횟수</span><b>${report.measures}회</b></div>
+        <div class="rc"><span>블로그 리뷰 증감</span><b class="${(report.reviewDelta?.blog ?? 0) >= 0 ? "up" : "dn"}">${report.reviewDelta ? (report.reviewDelta.blog >= 0 ? "+" : "") + report.reviewDelta.blog : "-"}</b></div>
+        <div class="rc"><span>방문자 리뷰 증감</span><b class="${(report.reviewDelta?.visitor ?? 0) >= 0 ? "up" : "dn"}">${report.reviewDelta ? (report.reviewDelta.visitor >= 0 ? "+" : "") + report.reviewDelta.visitor : "-"}</b></div></div>
+        ${kwr ? `<table class="rtbl"><thead><tr><th>키워드</th><th>현재 순위</th><th>변화</th></tr></thead><tbody>${kwr}</tbody></table>` : ""}`;
+    }
+    // 🩺 경쟁사 비교 블록
+    let compBlock = "";
+    if (competitorTable) {
+      const tr = competitorTable.top.map((p, i) => `<tr class="${p.placeId === ownPlace?.placeId ? "me" : ""}"><td>${i + 1}</td><td>${esc(p.name)}${p.placeId === ownPlace?.placeId ? " (내 매장)" : ""}</td><td>📝${(p.blogReviewCount || 0).toLocaleString()}</td><td>🧾${(p.visitorReviewCount || 0).toLocaleString()}</td></tr>`).join("");
+      compBlock = `<h2>🩺 경쟁사 비교 (수집 ${competitorTable.total}곳)</h2>${competitorTable.myRank ? `<p>내 매장은 블로그 리뷰 기준 <b>${competitorTable.myRank}위 / ${competitorTable.total}</b>이며, 1위와 <b>${Math.max(0, (competitorTable.leader.blogReviewCount || 0) - (ownPlace?.blogReviewCount || 0)).toLocaleString()}개</b> 차이입니다.</p>` : ""}<table class="rtbl"><thead><tr><th>순위</th><th>업체</th><th>블로그</th><th>방문자</th></tr></thead><tbody>${tr}</tbody></table>`;
+    }
+    const html = `<!doctype html><html lang="ko"><head><meta charset="utf-8"><title>${esc(profile.name || "내 매장")} 상위노출 성과·진단 보고서</title>
+    <style>body{font-family:'Noto Sans KR',-apple-system,sans-serif;color:#0f2b23;max-width:760px;margin:32px auto;padding:0 22px;line-height:1.65}
+    h1{font-size:24px;border-bottom:3px solid #00c896;padding-bottom:10px}h2{font-size:16px;margin:26px 0 10px;color:#0f2b23}
+    .top{background:linear-gradient(120deg,#eefbf6,#fff0f6);border:1px solid #d6ede3;border-radius:14px;padding:18px;margin:16px 0}
+    .stars{font-size:28px;color:#e59214}h3{margin:20px 0 8px;font-size:14px}h3 small{color:#5c8478;font-weight:400;font-size:12px}
+    .it{border:1px solid #d6ede3;border-radius:10px;padding:12px;margin:8px 0}.it .v{color:#00a884;font-weight:700;margin-left:6px}.it .s{float:right;color:#e59214;font-size:13px}
+    .d{font-size:12.5px;color:#5c8478;margin-top:5px}.foot{margin-top:26px;color:#5c8478;font-size:11px;border-top:1px solid #d6ede3;padding-top:12px}
+    .chart{border:1px solid #d6ede3;border-radius:12px;padding:14px;margin:14px 0;background:#fafffd}.csub{font-size:11px;color:#5c8478;margin-top:4px}
+    .rgrid{display:flex;gap:10px;margin:10px 0}.rc{flex:1;border:1px solid #d6ede3;border-radius:10px;padding:11px;text-align:center}.rc span{font-size:11px;color:#5c8478;display:block}.rc b{font-size:20px}
+    .rtbl{width:100%;border-collapse:collapse;margin:8px 0;font-size:12.5px}.rtbl th,.rtbl td{border:1px solid #d6ede3;padding:7px 9px;text-align:left}.rtbl th{background:#effaf4}.rtbl tr.me{background:#eafff5;font-weight:700}
+    .up{color:#00a884;font-weight:700}.dn{color:#e5397f;font-weight:700}
     @media print{body{margin:0}}</style></head><body>
-    <h1>🏪 ${esc(profile.name || "내 매장")} · 네이버 상위노출 진단 보고서</h1>
+    <h1>🏪 ${esc(profile.name || "내 매장")} · 네이버 상위노출 성과·진단 보고서</h1>
     <div class="top"><div class="stars">${"★".repeat(Math.round(placeReport.overallStars))}${"☆".repeat(5 - Math.round(placeReport.overallStars))} ${placeReport.overallStars} / 5.0</div>
     <div>${esc([profile.region, profile.category].filter(Boolean).join(" · "))} · ${placeReport.totalCount}개 항목 중 ${placeReport.goodCount}개 양호 · ${new Date().toLocaleDateString("ko-KR")}</div></div>
+    ${chartSvg}
+    ${reportBlock}
+    ${compBlock}
+    <h2>🔎 항목별 진단</h2>
     ${rows}
     <div class="foot">본 보고서는 네이버 플레이스 공개 데이터와 상위노출 알고리즘(저장·리뷰·행동 신호) 기준으로 퍼블리 플레이스 360이 자동 생성했습니다. 부족 항목은 퍼블리 블로그 글쓰기·리뷰어 섭외로 채울 수 있습니다.</div>
     <script>window.onload=()=>{setTimeout(()=>window.print(),400)}</script></body></html>`;
@@ -1054,6 +1118,28 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
                 <button className="p360-btn" onClick={() => { const v = newKeyword.trim(); if (!v) return; if (!trackedKeywords.includes(v)) persistKeywords([...trackedKeywords, v]); setNewKeyword(""); checkKeywordRank(v); }} style={{ background: M.soft, color: M.text, border: `1px solid ${M.line}`, whiteSpace: "nowrap" }}>+ 추가</button>
               </div>
               <div style={{ display: "grid", gap: 7 }}>{trackedKeywords.length === 0 ? <p style={{ color: M.sub, fontSize: 11.5 }}>추천 키워드를 누르거나 검색어를 추가하세요.</p> : trackedKeywords.map(kw => { const last = rankHistory.find(r => r.keyword === kw); const chk = checkingKeyword === kw; return <div key={kw} style={{ display: "grid", gridTemplateColumns: "1fr auto auto", alignItems: "center", gap: 8, padding: "9px 11px", borderRadius: 11, background: M.soft, border: `1px solid ${M.line}` }}><div style={{ minWidth: 0 }}><b style={{ fontSize: 12.5, overflowWrap: "anywhere" }}>{kw}</b>{last ? <span style={{ marginLeft: 6, fontSize: 11, fontWeight: 900, color: last.rank ? M.green : M.amber }}>{last.rank ? `${last.rank}위` : "상위 밖"}</span> : <span style={{ marginLeft: 6, fontSize: 10.5, color: M.sub }}>미확인</span>}</div><button className="p360-btn" disabled={Boolean(checkingKeyword)} onClick={() => checkKeywordRank(kw)} style={{ minHeight: 34, padding: "6px 11px", fontSize: 11.5, background: chk ? M.card : M.rose, color: chk ? M.sub : "#fff", border: chk ? `1px solid ${M.line}` : "none" }}>{chk ? "확인 중…" : "순위 확인"}</button><button onClick={() => persistKeywords(trackedKeywords.filter(x => x !== kw))} style={{ border: "none", background: "transparent", color: M.sub, cursor: "pointer", fontSize: 15 }}>×</button></div>; })}</div>
+            </section>
+
+            {/* 📊 성과 리포트: 일/주/월/기간설정 */}
+            <section className="p360-card" style={{ padding: 16 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
+                <b style={{ fontSize: 13.5 }}>📊 성과 리포트</b>
+                <div style={{ marginLeft: "auto", display: "flex", gap: 5, flexWrap: "wrap" }}>
+                  {([[1, "일간"], [7, "주간"], [30, "월간"], ["custom", "기간설정"]] as const).map(([v, l]) => <button key={String(v)} className="p360-btn" onClick={() => setReportRange(v)} style={{ minHeight: 32, padding: "6px 11px", fontSize: 11, background: reportRange === v ? M.rose : M.soft, color: reportRange === v ? "#fff" : M.text, border: `1px solid ${reportRange === v ? M.rose : M.line}` }}>{l}</button>)}
+                </div>
+              </div>
+              {reportRange === "custom" && <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}><span style={{ fontSize: 11.5, color: M.sub }}>최근</span><input inputMode="numeric" type="number" min={1} max={365} value={reportCustom} onChange={e => setReportCustom(Math.max(1, Math.min(365, Number(e.target.value) || 1)))} className="p360-in" style={{ minHeight: 38, width: 90, fontSize: 13 }} /><span style={{ fontSize: 11.5, color: M.sub }}>일</span></div>}
+              {!report.hasData ? <p style={{ color: M.sub, fontSize: 11.5, lineHeight: 1.6, padding: "8px 0" }}>이 기간엔 측정 기록이 없어요. 순위를 재거나 경쟁사를 수집하면 변화가 여기에 쌓여요.</p> : <>
+                {/* 요약 타일 */}
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 8, marginBottom: 12 }}>
+                  <div style={{ padding: "10px 12px", borderRadius: 11, background: M.soft }}><div style={{ fontSize: 10, color: M.sub }}>측정 횟수</div><b style={{ fontSize: 17, color: M.rose }}>{report.measures}회</b></div>
+                  <div style={{ padding: "10px 12px", borderRadius: 11, background: M.soft }}><div style={{ fontSize: 10, color: M.sub }}>블로그 리뷰 증감</div><b style={{ fontSize: 17, color: (report.reviewDelta?.blog ?? 0) >= 0 ? M.green : M.pink }}>{report.reviewDelta ? `${report.reviewDelta.blog >= 0 ? "+" : ""}${report.reviewDelta.blog}` : "-"}</b></div>
+                  <div style={{ padding: "10px 12px", borderRadius: 11, background: M.soft }}><div style={{ fontSize: 10, color: M.sub }}>방문자 리뷰 증감</div><b style={{ fontSize: 17, color: (report.reviewDelta?.visitor ?? 0) >= 0 ? M.green : M.pink }}>{report.reviewDelta ? `${report.reviewDelta.visitor >= 0 ? "+" : ""}${report.reviewDelta.visitor}` : "-"}</b></div>
+                </div>
+                {/* 키워드별 순위 변화 */}
+                {report.kwRows.length > 0 && <div style={{ display: "grid", gap: 6 }}>{report.kwRows.slice(0, 8).map(k => <div key={k.keyword} style={{ display: "grid", gridTemplateColumns: "1fr auto auto", alignItems: "center", gap: 8, padding: "8px 11px", borderRadius: 10, background: M.soft }}><b style={{ fontSize: 12, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{k.keyword}</b><span style={{ fontSize: 12, fontWeight: 800, color: k.last != null ? M.text : M.amber }}>{k.last != null ? `${k.last}위` : "상위밖"}</span><span style={{ fontSize: 11, fontWeight: 900, minWidth: 60, textAlign: "right", color: k.change == null ? M.sub : k.change > 0 ? M.green : k.change < 0 ? M.pink : M.sub }}>{k.change == null ? "기준" : k.change > 0 ? `▲ ${k.change}` : k.change < 0 ? `▼ ${Math.abs(k.change)}` : "— 유지"}</span></div>)}</div>}
+                <button className="p360-btn" onClick={downloadReport} style={{ width: "100%", marginTop: 12, background: M.text, color: M.bg }}>📄 이 리포트 PDF로 저장</button>
+              </>}
             </section>
 
             {/* 손님 행동 입력(저장·길찾기) */}
