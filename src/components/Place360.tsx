@@ -163,6 +163,7 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
   const [storeFormOpen, setStoreFormOpen] = useState(() => loadProfiles(userId).length === 0);
   const [resolving, setResolving] = useState(false);
   const [livePlace, setLivePlace] = useState<LivePlaceDetail | null>(null);
+  const [autoRankKw, setAutoRankKw] = useState("");   // 링크 등록 직후 자동 순위측정할 키워드(프로필 반영 후 실행)
   useEffect(() => {
     if (plan === "admin") return;
     let active = true;
@@ -342,6 +343,15 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
     es.onerror = () => { if (!done) { showToast?.("봇 서버에 연결하지 못했어요. 퍼블리 앱이 켜져 있는지 확인해 주세요", "error"); finish(); } };
   };
   useEffect(() => () => { kwStreamRef.current?.close(); }, []);
+  // 링크 등록 직후, 프로필이 반영된 뒤 추천 키워드로 순위·경쟁사를 자동 측정(1회) → 링크 하나로 다 끌어오기
+  useEffect(() => {
+    if (!autoRankKw) return;
+    const kw = autoRankKw;
+    setAutoRankKw("");
+    void checkKeywordRank(kw);
+    // checkKeywordRank는 매 렌더 새로 생성되므로 deps에서 제외(무한 재실행 방지)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoRankKw]);
 
   const trend = useMemo(() => {
     if (snapshots.length < 2) return null;
@@ -600,8 +610,15 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
         setSnapshots(await getPlace360Snapshots(nextKey));
       } catch { /* 스냅샷 실패해도 등록은 유지 */ }
     }
-    showToast?.("내 매장을 저장하고 오늘 현황을 기록했어요. 이제 추적이 시작돼요", "success");
-    setTab("diagnosis");
+    // ★링크로 등록했으면(livePlace) 추천 키워드 1개로 순위·경쟁사까지 자동 측정 → 링크 하나로 다 끌어오기 완성
+    const autoKw = livePlace ? (suggestKeywords(next.name, next.category, next.region)[0] || "") : "";
+    if (autoKw) {
+      showToast?.("현황을 기록했어요. 이제 순위·경쟁사를 자동으로 측정할게요…", "success");
+      setAutoRankKw(autoKw);   // useEffect가 프로필 반영 후 실행(순위탭 자동 이동)
+    } else {
+      showToast?.("내 매장을 저장하고 오늘 현황을 기록했어요. 이제 추적이 시작돼요", "success");
+      setTab("diagnosis");
+    }
   };
   const selectStore = (next: StoreProfile) => {
     setProfile(next); setDraft(next); setEditingStoreKey(place360StoreKey(next.name, next.region));
