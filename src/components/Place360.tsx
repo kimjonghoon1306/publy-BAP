@@ -3,6 +3,7 @@ import PlaceCenter from "./PlaceCenter";
 import { botFetch, BotEventStream } from "../lib/botApi";
 import { deletePlace360Store, getPlace360BusinessMetrics, getPlace360Progress, getPlace360Ranks, getPlace360Snapshots, getPlace360StoreProfiles, PLACE360_DAILY_DIAGNOSIS_LIMIT, PLACE360_HISTORY_DAYS, PLACE360_RANK_DAILY_LIMIT, PLACE360_STORE_LIMIT, place360StoreKey, Place360BusinessMetrics, Place360RankMeasurement, Place360Snapshot, recordPlace360ReviewerHandoff, renamePlace360Store, savePlace360BusinessMetrics, savePlace360MissionProgress, savePlace360Rank, savePlace360Snapshot, savePlace360StoreProfile } from "../lib/supabase";
 import { koreaDateKey } from "../lib/date";
+import pearlyImg from "../assets/pearly.png";   // 🏪 플레이스 닥터 캐릭터(펄리)
 
 type Props = {
   showToast?: (message: string, type?: any) => void;
@@ -220,6 +221,8 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
   const [completedMissions, setCompletedMissions] = useState<string[]>(() => loadCompletedMissions(userId, storeKey));
   const [reviewerHandoffCount, setReviewerHandoffCount] = useState(0);
   const [businessMetrics, setBusinessMetrics] = useState<BusinessMetricDraft>(EMPTY_BUSINESS_METRICS);
+  // 🏪 손님 행동 신호 입력(저장·길찾기) — 공개 화면에 없어 사장님이 스마트플레이스 통계에서 확인해 넣는 값. DB 없이 매장별 localStorage에 보관.
+  const [behaviorInput, setBehaviorInput] = useState<{ saves: number; directions: number }>({ saves: 0, directions: 0 });
   const [metricsSavedAt, setMetricsSavedAt] = useState("");
   const [metricsLoading, setMetricsLoading] = useState(false);
   const csvInputRef = useRef<HTMLInputElement | null>(null);
@@ -227,6 +230,8 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
     const localMissions = loadCompletedMissions(userId, storeKey);
     setCompletedMissions(localMissions);
     setReviewerHandoffCount(Number(localStorage.getItem(`${missionKey(userId, storeKey)}:reviewers`) || 0));
+    // 🏪 손님 행동 입력(저장·길찾기) 매장별 복원
+    try { const b = JSON.parse(localStorage.getItem(`${missionKey(userId, storeKey)}:behavior`) || "null"); setBehaviorInput(b && typeof b === "object" ? { saves: Number(b.saves) || 0, directions: Number(b.directions) || 0 } : { saves: 0, directions: 0 }); } catch { setBehaviorInput({ saves: 0, directions: 0 }); }
     if (!storeKey || plan === "admin") return;
     let active = true;
     getPlace360Progress(storeKey).then(async row => {
@@ -400,6 +405,68 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
     missions.push({ id: "remeasure", icon: "📈", title: "같은 조건으로 다시 측정하기", why: "위치와 검색어가 달라지면 순위를 정확히 비교할 수 없어요.", how: "오늘 작업을 마친 뒤 다음 측정일에 같은 지역·업종·계정으로 다시 확인하세요.", action: "순위 기록 보기", go: "rank" });
     return missions.slice(0, 4);
   }, [businessMetrics, comparison, hasStore, metricsSavedAt, ownPlace]);
+  // 🏪 네이버 상위노출 종합 진단 리포트 — 링크로 가져온 플레이스 전 항목을 상위노출 기준(손님 행동 신호·리뷰·정보 완성도·키워드)으로 하나씩 짚어준다.
+  // 근거: 네이버 플레이스는 '손님이 실제로 한 행동'(저장·예약·길찾기·리뷰·재방문)을 사장님 입력값보다 크게 반영. 조작은 즉시 감지되므로 '정직한 유도'만 안내.
+  type ReportStatus = "good" | "warn" | "bad" | "input";
+  type ReportItem = { key: string; icon: string; label: string; status: ReportStatus; value: string; why: string; how: string; action?: string; go?: Place360Tab; openCrawl?: boolean };
+  type ReportGroup = { title: string; subtitle: string; weight: string; items: ReportItem[] };
+  const placeReport = useMemo<{ groups: ReportGroup[]; score: number; goodCount: number; totalCount: number } | null>(() => {
+    const src = livePlace || (ownPlace ? { visitorReviewCount: ownPlace.visitorReviewCount, blogReviewCount: ownPlace.blogReviewCount } as LivePlaceDetail : null);
+    if (!src) return null;
+    const blog = src.blogReviewCount || 0;
+    const visitor = src.visitorReviewCount || 0;
+    const photos = src.imageUrls?.length || 0;
+    const menus = src.menus?.length || 0;
+    const conv = src.conveniences?.length || 0;
+    const avgBlog = comparison?.avgBlog ?? 0;
+    const avgVisitor = comparison?.avgVisitor ?? 0;
+    const kwCount = trackedKeywords.length;
+
+    // A. 손님 행동 신호 — 공개 화면에 안 나오는 값은 사장님이 입력(가장 중요)
+    const behavior: ReportItem[] = [
+      { key: "save", icon: "💾", label: "저장하기 수", status: behaviorInput.saves > 0 ? "good" : "input", value: behaviorInput.saves > 0 ? `${behaviorInput.saves.toLocaleString()}회` : "직접 입력 필요", why: "저장은 '나중에 갈 집' 신호라 순위에 가장 강하게 반영돼요. 네이버가 공개 화면엔 안 띄우니 스마트플레이스 통계에서 확인해요.", how: "네이버 스마트플레이스 앱 → 통계에서 최근 저장수를 확인해 아래 손님 행동 입력칸에 넣으세요. 저장 유도는 정직하게(재방문 고객에게 '저장해두면 편해요' 안내).", action: "손님 행동 입력하기", go: "data" },
+      { key: "reserve", icon: "📅", label: "예약·주문·톡톡", status: src.bookingAvailable ? "good" : "bad", value: src.bookingAvailable ? "연결됨" : "미연결", why: "예약·주문은 방문으로 바로 이어지는 행동이라 순위에 크게 반영돼요. 연결만 해도 노출·전환이 같이 올라가요.", how: src.bookingAvailable ? "이미 연결됐어요. 예약 화면 사진·안내 문구를 최신으로 유지하세요." : "스마트플레이스에서 네이버 예약/주문 또는 톡톡을 켜서 손님이 앱에서 바로 예약하게 하세요.", action: "손님 행동 입력하기", go: "data" },
+      { key: "directions", icon: "🧭", label: "길찾기·재방문", status: behaviorInput.directions > 0 ? "good" : "input", value: behaviorInput.directions > 0 ? `${behaviorInput.directions.toLocaleString()}회` : "직접 입력 필요", why: "길찾기와 재방문은 '진짜 가는 손님' 신호예요. 반복될수록 충성도 높은 매장으로 읽혀 순위가 올라가요.", how: "스마트플레이스 통계의 길찾기 수를 아래 입력칸에 넣으세요. 재방문은 단골 혜택·새 소식으로 다시 올 이유를 만들어요.", action: "손님 행동 입력하기", go: "data" },
+    ];
+
+    // B. 리뷰 — 퍼블리가 직접 채우는 핵심 지렛대
+    const reviews: ReportItem[] = [
+      { key: "blog", icon: "📝", label: "블로그 리뷰", status: avgBlog > 0 ? (blog >= avgBlog ? "good" : blog >= avgBlog * 0.6 ? "warn" : "bad") : (blog >= 30 ? "good" : blog >= 10 ? "warn" : "bad"), value: `${blog.toLocaleString()}개${avgBlog ? ` (주변 평균 ${avgBlog.toLocaleString()})` : ""}`, why: "블로그 리뷰는 상위노출의 가장 큰 지렛대예요. 방문자 리뷰와 같은 키워드로 묶이면 노출 범위가 넓어져요. ★퍼블리가 제일 잘하는 부분!", how: avgBlog && blog < avgBlog ? `주변보다 ${Math.max(0, avgBlog - blog).toLocaleString()}개 적어요. 퍼블리 글쓰기로 리뷰 글을 발행하고, 리뷰어 찾기로 블로거를 섭외하세요.` : "지금 수준을 유지하되, 최근 30일 새 리뷰가 꾸준한지 확인하세요.", action: "리뷰어 찾기 →", go: "discovery" },
+      { key: "visitor", icon: "🧾", label: "방문자(영수증) 리뷰", status: avgVisitor > 0 ? (visitor >= avgVisitor ? "good" : visitor >= avgVisitor * 0.6 ? "warn" : "bad") : (visitor >= 50 ? "good" : visitor >= 15 ? "warn" : "bad"), value: `${visitor.toLocaleString()}개${avgVisitor ? ` (주변 평균 ${avgVisitor.toLocaleString()})` : ""}`, why: "방문자 리뷰의 '양+최신성'이 중요해요. 오래된 리뷰만 있으면 '식은 가게'로 읽혀 순위가 내려가요.", how: "결제 후 영수증 리뷰 안내가 손님 눈높이에 보이는지 확인하세요. 과한 보상 없이 정직하게 유도해야 안전해요(조작은 즉시 적발).", action: "방문자 리뷰 진단", go: "diagnosis" },
+    ];
+
+    // C. 정보 완성도 — 필수조건(경쟁사 이상으로)
+    const info: ReportItem[] = [
+      { key: "photo", icon: "📸", label: "사진", status: photos >= 10 ? "good" : photos >= 4 ? "warn" : "bad", value: `${photos}장`, why: "사진이 부실하면 방문 전 이탈해요. 외관·입구·내부·대표메뉴·가격표가 다 있어야 신뢰가 올라가요.", how: photos < 10 ? "외관/입구/내부/대표메뉴/가격표 위주로 10장 이상 채우고, 저화질·중복은 지우세요." : "충분해요. 계절·신메뉴 사진을 최신으로 갱신하세요.", action: "고객 화면 보기", go: "discovery" },
+      { key: "menu", icon: "🍽️", label: "메뉴·가격", status: menus >= 5 ? "good" : menus >= 1 ? "warn" : "bad", value: `${menus}개`, why: "메뉴·가격이 있어야 검색·AI가 '무엇을 파는 집'인지 이해하고 관련 검색에 노출해요.", how: menus < 5 ? "대표 메뉴와 가격을 5개 이상 등록하세요. 시그니처 메뉴는 사진과 함께." : "잘 채워졌어요. 가격 변동 시 바로 갱신하세요.", action: "고객 화면 보기", go: "discovery" },
+      { key: "hours", icon: "🕒", label: "영업시간·전화", status: (src.businessHours && src.phone) ? "good" : (src.businessHours || src.phone) ? "warn" : "bad", value: `${src.businessHours ? "영업시간 O" : "영업시간 X"} · ${src.phone ? "전화 O" : "전화 X"}`, why: "영업시간·휴무·전화가 정확해야 헛걸음이 없고, 정보 신뢰도가 순위에도 반영돼요.", how: (!src.businessHours || !src.phone) ? "영업시간·휴무·브레이크타임·전화를 빠짐없이 채우세요." : "정확해요. 명절·임시휴무는 그때그때 반영하세요.", action: "고객 화면 보기", go: "discovery" },
+      { key: "conv", icon: "🅿️", label: "편의시설", status: conv >= 4 ? "good" : conv >= 1 ? "warn" : "bad", value: `${conv}개`, why: "주차·예약·포장·와이파이·반려동물 등은 '상황 검색'(주차되는 맛집 등)에 걸리게 해줘요.", how: conv < 4 ? "해당되는 편의시설을 모두 체크하세요. 특히 주차·포장·예약은 검색에 자주 쓰여요." : "잘 돼 있어요.", action: "고객 화면 보기", go: "discovery" },
+    ];
+
+    // D. 키워드
+    const keyword: ReportItem[] = [
+      { key: "kw", icon: "🎯", label: "노릴 키워드", status: kwCount >= 3 ? "good" : kwCount >= 1 ? "warn" : "bad", value: `${kwCount}개`, why: "'역명+메뉴+상황' 같은 좁은 키워드 3~5개를 정해 집중해야 상위노출이 현실적이에요. 넓은 키워드는 경쟁이 너무 세요.", how: kwCount < 3 ? "지금 내 순위에서 좁은 키워드 3~5개를 추가하고 순위를 측정하세요." : "좋아요. 키워드별 순위를 주기적으로 재측정하세요.", action: "키워드·순위 보기", go: "rank" },
+    ];
+
+    const groups: ReportGroup[] = [
+      { title: "① 손님 행동 신호", subtitle: "저장·예약·길찾기 — 순위에 가장 크게 반영", weight: "가장 중요", items: behavior },
+      { title: "② 리뷰", subtitle: "블로그·방문자 리뷰 (퍼블리로 채우는 핵심)", weight: "매우 중요", items: reviews },
+      { title: "③ 정보 완성도", subtitle: "사진·메뉴·영업시간·편의시설 (필수 기본)", weight: "기본 필수", items: info },
+      { title: "④ 키워드 전략", subtitle: "좁은 지역 키워드 3~5개 집중", weight: "방향 설정", items: keyword },
+    ];
+    const all = groups.flatMap(g => g.items);
+    const goodCount = all.filter(i => i.status === "good").length;
+    const score = Math.round(goodCount / all.length * 100);
+    return { groups, score, goodCount, totalCount: all.length };
+  }, [livePlace, ownPlace, comparison, trackedKeywords, behaviorInput]);
+
+  const updateBehavior = (patch: Partial<{ saves: number; directions: number }>) => {
+    setBehaviorInput(prev => {
+      const next = { ...prev, ...patch };
+      if (storeKey) { try { localStorage.setItem(`${missionKey(userId, storeKey)}:behavior`, JSON.stringify(next)); } catch {} }
+      return next;
+    });
+  };
   const toggleMission = async (id: string) => {
     const next = completedMissions.includes(id) ? completedMissions.filter(item => item !== id) : [...completedMissions, id];
     setCompletedMissions(next);
@@ -690,6 +757,7 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
     <style>{`
       .p360 *{box-sizing:border-box}.p360-button{min-height:48px;border:0;border-radius:13px;padding:11px 16px;font-family:inherit;font-weight:900;cursor:pointer;transition:transform .15s,filter .15s}.p360-button:hover{filter:brightness(1.04);transform:translateY(-1px)}
       .p360-tabs{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:8px}.p360-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:11px}.p360-two{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+      @keyframes p360bob{0%,100%{transform:translateY(0)}50%{transform:translateY(-5px)}}
       @media(max-width:760px){.p360{padding:8px 6px 120px!important}.p360-tabs{grid-template-columns:1fr}.p360-grid,.p360-two{grid-template-columns:1fr}.p360-tab{text-align:left!important;display:grid!important;grid-template-columns:42px 1fr!important;align-items:center}.p360-hero{padding:20px 16px!important}.p360-title{font-size:25px!important}.p360-card{padding:16px!important}.p360-prescription,.p360-guide{grid-template-columns:1fr!important}.p360-prescription .p360-button,.p360-guide .p360-button{width:100%}}
     `}</style>
 
@@ -728,6 +796,55 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
     {profiles.length > 0 && <section className="p360-card" aria-label="내 매장 선택" style={{ ...cardStyle, padding: 14, marginBottom: 12 }}><div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 9, flexWrap: "wrap" }}><div><b style={{ fontSize: 13 }}>🏪 어느 매장을 볼까요?</b><div style={{ marginTop: 3, color: colors.sub, fontSize: 10.5 }}>매장을 누르면 순위·진단·운영자료가 그 매장으로 바뀌어요.</div></div><span style={{ color: colors.sub, fontSize: 11, fontWeight: 800 }}>{plan === "admin" || plan === "unlimited" ? `${profiles.length}개 등록` : `${profiles.length}/${PLACE360_STORE_LIMIT[plan] ?? PLACE360_STORE_LIMIT.free}개 등록`}</span></div><div style={{ display: "flex", gap: 7, flexWrap: "wrap", marginTop: 10 }}>{profiles.map(item => { const key = place360StoreKey(item.name, item.region); const active = key === storeKey && hasStore; return <button key={key} type="button" aria-pressed={active} className="p360-button" onClick={() => selectStore(item)} style={{ minHeight: 43, background: active ? colors.green : colors.soft, color: active ? "#fff" : colors.text, border: `1px solid ${active ? colors.green : colors.line}` }}>🏷️ {item.name}{item.region ? ` · ${item.region}` : ""}</button>; })}<button type="button" className="p360-button" onClick={startAddingStore} style={{ minHeight: 43, background: "transparent", color: colors.rose, border: `1px dashed ${colors.rose}` }}>＋ 다른 매장 등록</button></div></section>}
 
     {<main id="p360-sec-overview">
+      {placeReport && <section className="p360-card" aria-label="네이버 상위노출 종합 진단 리포트" style={{ ...cardStyle, padding: 0, marginBottom: 12, overflow: "hidden", border: `2px solid ${colors.rose}45` }}>
+        {/* 🏪 캐릭터 헤더 + 종합 점수 */}
+        <div style={{ display: "flex", alignItems: "center", gap: 14, padding: "18px 20px", background: `linear-gradient(120deg,${colors.rose}14,${colors.green}12)` }}>
+          <img src={pearlyImg} alt="플레이스 닥터 펄리" onError={e => { const s = document.createElement("div"); s.textContent = "🏪"; s.style.cssText = "font-size:44px"; e.currentTarget.replaceWith(s); }} style={{ width: 62, height: 62, objectFit: "contain", flexShrink: 0, filter: "drop-shadow(0 6px 12px rgba(255,90,140,.3))", animation: "p360bob 2.4s ease-in-out infinite" }} />
+          <div style={{ minWidth: 0, flex: 1 }}>
+            <div style={{ color: colors.rose, fontSize: 10.5, fontWeight: 950, letterSpacing: ".08em" }}>플레이스 닥터 · 종합 진단</div>
+            <b style={{ display: "block", fontSize: 16.5, margin: "3px 0 5px", letterSpacing: "-.02em" }}>{profile.name || "내 매장"} 상위노출 건강검진표</b>
+            <div style={{ display: "flex", alignItems: "center", gap: 9, flexWrap: "wrap" }}>
+              <div style={{ flex: "1 1 130px", minWidth: 120, height: 10, borderRadius: 99, overflow: "hidden", background: colors.soft }}><div style={{ width: `${placeReport.score}%`, height: "100%", background: `linear-gradient(90deg,${placeReport.score >= 70 ? colors.green : placeReport.score >= 40 ? colors.amber : colors.rose},${colors.rose})`, transition: "width .4s" }} /></div>
+              <b style={{ fontSize: 15, color: placeReport.score >= 70 ? colors.green : placeReport.score >= 40 ? colors.amber : colors.rose }}>{placeReport.score}점</b>
+              <span style={{ fontSize: 11, color: colors.sub, fontWeight: 800 }}>{placeReport.totalCount}개 중 {placeReport.goodCount}개 양호</span>
+            </div>
+          </div>
+        </div>
+        <p style={{ margin: 0, padding: "12px 20px 4px", color: colors.sub, fontSize: 12, lineHeight: 1.7 }}>네이버 상단노출은 <b style={{ color: colors.text }}>손님이 실제로 한 행동(저장·예약·길찾기·리뷰)</b>을 가장 크게 봐요. 아래 항목을 <b style={{ color: colors.text }}>위에서부터 하나씩</b> 짚어드릴게요. <b style={{ color: colors.rose }}>🔴 빨강</b>부터 고치면 순위가 가장 빨리 올라가요.</p>
+        <div style={{ padding: "6px 14px 16px" }}>
+          {placeReport.groups.map(group => <div key={group.title} style={{ marginTop: 12 }}>
+            <div style={{ display: "flex", alignItems: "baseline", gap: 8, padding: "0 6px 8px", flexWrap: "wrap" }}>
+              <b style={{ fontSize: 13.5 }}>{group.title}</b>
+              <span style={{ fontSize: 10, color: colors.sub }}>{group.subtitle}</span>
+              <span style={{ marginLeft: "auto", fontSize: 9.5, fontWeight: 900, color: colors.rose, background: `${colors.rose}12`, borderRadius: 99, padding: "2px 8px" }}>{group.weight}</span>
+            </div>
+            <div style={{ display: "grid", gap: 8 }}>{group.items.map(item => {
+              const sc = item.status === "good" ? colors.green : item.status === "warn" ? colors.amber : item.status === "input" ? colors.sub : colors.rose;
+              const badge = item.status === "good" ? "✅ 양호" : item.status === "warn" ? "🟡 보완" : item.status === "input" ? "✏️ 입력필요" : "🔴 시급";
+              return <article key={item.key} className="p360-card" style={{ ...cardStyle, padding: 13, borderLeft: `5px solid ${sc}` }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 9, flexWrap: "wrap" }}>
+                  <span style={{ fontSize: 20 }}>{item.icon}</span>
+                  <b style={{ fontSize: 13.5 }}>{item.label}</b>
+                  <span style={{ fontSize: 11, color: colors.text, fontWeight: 800 }}>{item.value}</span>
+                  <span style={{ marginLeft: "auto", fontSize: 10, fontWeight: 900, color: sc }}>{badge}</span>
+                </div>
+                <p style={{ margin: "8px 0 0", color: colors.sub, fontSize: 11.5, lineHeight: 1.65 }}><b style={{ color: colors.text }}>왜?</b> {item.why}</p>
+                <p style={{ margin: "5px 0 0", color: colors.text, fontSize: 11.5, lineHeight: 1.65 }}><b>👉 이렇게:</b> {item.how}</p>
+                {item.action && item.go && <button type="button" className="p360-button" onClick={() => item.openCrawl ? onOpenCrawl?.() : item.go && setTab(item.go)} style={{ marginTop: 10, minHeight: 40, padding: "8px 14px", fontSize: 12, background: item.status === "good" ? colors.soft : sc, color: item.status === "good" ? colors.text : "#fff", border: item.status === "good" ? `1px solid ${colors.line}` : 0 }}>{item.action}</button>}
+              </article>;
+            })}</div>
+          </div>)}
+        </div>
+        {/* ✏️ 손님 행동 입력(저장·길찾기) — 공개 화면에 없어 사장님이 직접 넣는 값 */}
+        <div style={{ margin: "0 14px 16px", padding: 15, borderRadius: 14, background: `${colors.amber}0e`, border: `2px solid ${colors.amber}45` }}>
+          <div style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "4px 10px", borderRadius: 99, background: colors.amber, color: dark ? "#2b2620" : "#fff", fontSize: 11, fontWeight: 950 }}>✏️ 손님 행동 직접 입력</div>
+          <p style={{ margin: "9px 0 12px", color: colors.sub, fontSize: 11.5, lineHeight: 1.7 }}>저장·길찾기 수는 네이버가 <b style={{ color: colors.text }}>공개 화면에 안 띄워요</b>. <b style={{ color: colors.text }}>스마트플레이스 앱 → 통계</b>에서 확인해 넣으면 위 진단에 반영돼요.</p>
+          <div className="p360-two">
+            <label><b style={{ display: "block", marginBottom: 6, fontSize: 12 }}>💾 저장하기 수</b><input inputMode="numeric" type="number" min={0} value={behaviorInput.saves || ""} onChange={e => updateBehavior({ saves: Number(e.target.value) || 0 })} placeholder="예: 128" style={fieldStyle} /></label>
+            <label><b style={{ display: "block", marginBottom: 6, fontSize: 12 }}>🧭 길찾기 수</b><input inputMode="numeric" type="number" min={0} value={behaviorInput.directions || ""} onChange={e => updateBehavior({ directions: Number(e.target.value) || 0 })} placeholder="예: 64" style={fieldStyle} /></label>
+          </div>
+        </div>
+      </section>}
       {!hasStore || storeFormOpen ? <section id="p360-store-form" className="p360-card" style={{ ...cardStyle, padding: 22, marginBottom: 12, scrollMarginTop: 12 }}>
         <div style={{ fontSize: 19, fontWeight: 950 }}>먼저 내 매장을 알려주세요</div>
         <p style={{ color: colors.sub, fontSize: 12.5, lineHeight: 1.7, margin: "6px 0 16px" }}>네이버 플레이스 <b style={{ color: colors.text }}>주소만 붙여넣고 ‘불러오기’</b>를 누르면 매장 이름·업종·지역을 자동으로 채워드려요. 순위 측정도 이 주소를 기준으로 정확히 잡아요.</p>
