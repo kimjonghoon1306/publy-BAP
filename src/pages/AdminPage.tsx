@@ -613,7 +613,7 @@ const TABS = [
   {k:"manage",          i:"📋", l:"발행 관리"},
   {k:"blogscore",       i:"📈", l:"블로그 지수"},
   {k:"crawl",           i:"🔍", l:"크롤링"},
-  {k:"place",           i:"🏪", l:"플레이스 360"},
+  {k:"place",           i:"🏪", l:"플레이스 365"},
   {k:"accounts",        i:"🔗", l:"계정관리"},
   {k:"calendar",        i:"📅", l:"콘텐츠 캘린더"},
   {k:"crawl_manage",    i:"🔎", l:"크롤링 관리"},
@@ -2573,7 +2573,7 @@ POST3: (제목)|(이유)
   async function toggleActive(u: UserFull) { if (!confirm(`${u.name||u.email} ${u.is_active?"비활성화":"활성화"}?`)) return; try { const next=!u.is_active; const {data,error}=await supabase.from("publy_users").update({is_active:next}).eq("id",u.id).select("id,is_active"); if(error)throw new Error(error.message); if(!data?.[0]||data[0].is_active!==next)throw new Error("권한/RLS로 반영된 행이 없습니다"); await loadUsers(); } catch(e:any){alert("활성 상태 저장 실패 — "+e.message);} }
   // 🔎 크롤링 잠금해제 토글 — 회원 publy_users.crawl_enabled. 반영 검증(.select) 후 목록 갱신.
   async function toggleCrawl(u: UserFull) { try { const cur=u.crawl_enabled!==false; const next=!cur; const {data,error}=await supabase.from("publy_users").update({crawl_enabled:next}).eq("id",u.id).select("id,crawl_enabled"); if(error)throw new Error(error.message); if(!data?.[0]||data[0].crawl_enabled!==next)throw new Error("권한/RLS로 반영된 행이 없습니다"); await loadUsers(); showToast(next?`🔓 ${u.name||u.email} 크롤링 잠금해제`:`🔒 ${u.name||u.email} 크롤링 잠금`, "success"); } catch(e:any){ showToast("크롤링 권한 저장 실패 — "+e.message, "error"); } }
-  async function togglePlace360(u: UserFull) { try { const cur=u.place360_enabled!==false; const next=!cur; const {data,error}=await supabase.from("publy_users").update({place360_enabled:next}).eq("id",u.id).select("id,place360_enabled"); if(error)throw new Error(error.message); if(!data?.[0]||data[0].place360_enabled!==next)throw new Error("권한/RLS로 반영된 행이 없습니다"); await loadUsers(); showToast(next?`🏪 ${u.name||u.email} 플레이스 360 사용 허용`:`🔒 ${u.name||u.email} 플레이스 360 잠금`, "success"); } catch(e:any){ showToast("플레이스 360 권한 저장 실패 — "+e.message, "error"); } }
+  async function togglePlace360(u: UserFull) { try { const cur=u.place360_enabled!==false; const next=!cur; const {data,error}=await supabase.from("publy_users").update({place360_enabled:next}).eq("id",u.id).select("id,place360_enabled"); if(error)throw new Error(error.message); if(!data?.[0]||data[0].place360_enabled!==next)throw new Error("권한/RLS로 반영된 행이 없습니다"); await loadUsers(); showToast(next?`🏪 ${u.name||u.email} 플레이스 365 사용 허용`:`🔒 ${u.name||u.email} 플레이스 365 잠금`, "success"); } catch(e:any){ showToast("플레이스 365 권한 저장 실패 — "+e.message, "error"); } }
   // 🔒 기기 잠금 토글 — allow_multi_device. 기본 OFF(한 기기만). ON이면 여러 컴퓨터 동시 로그인 허용.
   //   ON으로 켜면 지금 물려있는 활성 기기도 풀어(active_device_id=null) 즉시 다른 곳에서도 열림.
   async function toggleMultiDevice(u: UserFull) { try { const cur=u.allow_multi_device===true; const next=!cur; const {data,error}=await supabase.from("publy_users").update({allow_multi_device:next, ...(next?{active_device_id:null}:{})}).eq("id",u.id).select("id,allow_multi_device"); if(error)throw new Error(error.message); if(!data?.[0]||data[0].allow_multi_device!==next)throw new Error("권한/RLS로 반영된 행이 없습니다"); await loadUsers(); showToast(next?`🔓 ${u.name||u.email} 여러 기기 허용(어디서나 열림)`:`🔒 ${u.name||u.email} 한 기기만 로그인`, "success"); } catch(e:any){ showToast("기기 설정 저장 실패 — "+e.message, "error"); } }
@@ -2701,7 +2701,7 @@ POST3: (제목)|(이유)
                 {ico:"💰",title:"결제 등록",desc:"금액 + 플랜 선택 → 결제 내역 기록 + 플랜 자동 업그레이드.",color:GREEN},
                 {ico:"📝",title:"메모",desc:"회원별 관리 메모. 상담 내역, 요청 사항 기록.",color:RED},
                 {ico:"🔍",title:"크롤링 허용/잠김",desc:"버튼에 적힌 게 지금 상태예요. ‘허용됨’=쓸 수 있음, ‘잠김’=못 씀. 누르면 반대로 바뀌어요.",color:"#2f9e5e"},
-                {ico:"🏪",title:"플레이스360 허용/잠김",desc:"‘허용됨’이면 순위·진단·업체수집·고객화면을 쓸 수 있고, ‘잠김’이면 못 써요. 누르면 전환돼요.",color:"#d53d73"},
+                {ico:"🏪",title:"플레이스 365 허용/잠김",desc:"‘허용됨’이면 순위·진단·업체수집·고객화면을 쓸 수 있고, ‘잠김’이면 못 써요. 누르면 전환돼요.",color:"#d53d73"},
               ].map((item,i) => (
                 <div key={i} className="g-step" style={{borderColor:`${item.color}35`,background:`${item.color}07`,padding:"12px 14px"}}>
                   <div style={{display:"flex",alignItems:"center",gap:10}}>
@@ -2713,15 +2713,15 @@ POST3: (제목)|(이유)
               <div className="g-tip">⚠️ <b>저장 버튼</b>을 꼭 눌러야 변경사항이 반영돼요!</div>
             </div>,
 
-            // 4 - 플레이스 360 관리
+            // 4 - 플레이스 365 관리
             <div key="4">
               <div className="g-step" style={{borderColor:"rgba(22,133,107,.45)",background:"rgba(22,133,107,.09)"}}>
-                <div className="g-step-num" style={{color:"#4ade80"}}>🏪 회원과 같은 플레이스 360</div>
+                <div className="g-step-num" style={{color:"#4ade80"}}>🏪 회원과 같은 플레이스 365</div>
                 <div className="g-step-title" style={{color:"#fff"}}>관리자도 실제 회원 화면과 같은 순서로 직접 시험해요</div>
-                <div className="g-step-desc">왼쪽 <b>플레이스 360</b>에서 여러 매장 등록·전환 → 현재 순위 → 공개자료 진단 → 신규·재방문·광고 운영자료 직접 입력·CSV 진단 → 오늘 할 일 → 고객 화면 확인 → 리뷰어 역추적을 그대로 사용할 수 있어요. 관리자는 모든 횟수가 무제한이에요.</div>
+                <div className="g-step-desc">왼쪽 <b>플레이스 365</b>에서 여러 매장 등록·전환 → 현재 순위 → 공개자료 진단 → 신규·재방문·광고 운영자료 직접 입력·CSV 진단 → 오늘 할 일 → 고객 화면 확인 → 리뷰어 역추적을 그대로 사용할 수 있어요. 관리자는 모든 횟수가 무제한이에요.</div>
               </div>
               {[
-                {ico:"🔐",title:"회원 사용 권한",desc:"크롤링 관리에서 회원별 ‘🏪 플레이스360 허용됨/잠김’ 버튼을 눌러 사용을 허용하거나 잠가요.",color:PINK},
+                {ico:"🔐",title:"회원 사용 권한",desc:"크롤링 관리에서 회원별 ‘🏪 플레이스 365 허용됨/잠김’ 버튼을 눌러 사용을 허용하거나 잠가요.",color:PINK},
                 {ico:"📋",title:"매장 진단 기록",desc:"회원이 저장한 매장·날짜·방문자 리뷰·블로그 리뷰·주변 평균을 확인하고 잘못된 기록은 삭제해요.",color:GREEN},
                 {ico:"👀",title:"고객 화면 사용량",desc:"회원별 오늘 사용량을 확인해요. 고객 지원이 필요한 경우에만 ‘초기화’를 눌러 0회로 돌려요.",color:YELLOW},
                 {ico:"📊",title:"등급 한도 확인",desc:"회원관리 상세의 ‘모든 기능 한도’에서 등록 매장·진단·순위·고객 화면 확인 횟수를 한꺼번에 확인해요.",color:"#3b82f6"},
@@ -2764,7 +2764,7 @@ POST3: (제목)|(이유)
                 {q:"회원이 발행이 안 된다고 해요",a:"1) 봇 온라인 상태 확인 2) 계정 연결 상태 확인 3) 발행 건수 초과 여부 확인 4) 회원의 오류확인 버튼으로 구체적인 오류 메시지 확인",c:GREEN},
                 {q:"새 오류 배지가 안 사라져요",a:"오류 팝업을 열고 '모두 읽음' 버튼을 누르면 배지가 사라져요.",c:"#8B5CF6"},
                 {q:"회원을 비활성화하면 어떻게 되나요?",a:"비활성화된 회원은 로그인이 차단돼요. 발행 기록과 데이터는 그대로 보존되고, 다시 활성화하면 정상 사용 가능해요.",c:"#4ECDC4"},
-                {q:"회원이 플레이스 360을 열 수 없어요",a:"1) 회원이 활성 상태인지 확인 2) 이용기간이 남았는지 확인 3) 크롤링·플레이스 관리에서 해당 회원의 ‘🏪 360’이 ON인지 확인하세요.",c:"#d53d73"},
+                {q:"회원이 플레이스 365을 열 수 없어요",a:"1) 회원이 활성 상태인지 확인 2) 이용기간이 남았는지 확인 3) 크롤링·플레이스 관리에서 해당 회원의 ‘🏪 360’이 ON인지 확인하세요.",c:"#d53d73"},
                 {q:"고객 화면 확인 횟수를 모두 썼대요",a:"크롤링·플레이스 관리 아래 ‘오늘 고객 화면 확인 사용량’에서 해당 회원을 찾고, 상담상 필요할 때만 초기화하세요. 등급 자체 한도는 회원관리 기능표에서 확인할 수 있어요.",c:"#16856b"},
               ].map((item,i)=>(
                 <div key={i} className="g-step" style={{borderColor:`${item.c}55`,background:`${item.c}15`,marginBottom:10,padding:"14px 16px"}}>
@@ -2900,21 +2900,21 @@ POST3: (제목)|(이유)
               <div style={{animation:"fadeUp .25s ease both"}}><CrawlCenter showToast={showToast} theme={theme==="dark"?"dark":"light"} userId={ADM_HISTORY_UID} plan="unlimited" /></div>
             )}
 
-            {/* ───── 🏪 플레이스 360 (회원과 동일 · 관리자는 무제한) ───── */}
+            {/* ───── 🏪 플레이스 365 (회원과 동일 · 관리자는 무제한) ───── */}
             {tab === "place" && (
               <div style={{animation:"fadeUp .25s ease both"}}><Place360 showToast={showToast} theme={theme==="dark"?"dark":"light"} userId={ADM_UID} plan="admin" onOpenCrawl={()=>setTab("crawl")} /></div>
             )}
 
-            {/* ───── 🔎 크롤링·플레이스 360 관리 (관리자 전용 · 공용 권한 승인) ───── */}
+            {/* ───── 🔎 크롤링·플레이스 365 관리 (관리자 전용 · 공용 권한 승인) ───── */}
             {tab === "crawl_manage" && (
               <div style={{animation:"fadeUp .25s ease both"}}>
                 <div className="card">
                   <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap",marginBottom:6}}>
-                    <div className="card-title" style={{margin:0}}>🔎 크롤링·플레이스 360 관리</div>
+                    <div className="card-title" style={{margin:0}}>🔎 크롤링·플레이스 365 관리</div>
                     <span style={{fontSize:11,fontWeight:800,color:"#ff6fa5",background:"rgba(255,111,165,.12)",padding:"2px 9px",borderRadius:99}}>회원 공용 권한</span>
                     <button onClick={loadUsers} style={{marginLeft:"auto",padding:"7px 13px",borderRadius:8,border:"1px solid var(--border)",background:"var(--bg)",color:"var(--text2)",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:"inherit"}}>↻ 새로고침</button>
                   </div>
-                  <div style={{fontSize:12.5,color:"var(--text2)",lineHeight:1.7,marginBottom:10}}>회원마다 <b style={{color:"var(--text)"}}>크롤링</b>과 <b style={{color:"var(--text)"}}>플레이스 360</b> 권한을 각각 켜고 끕니다. 플레이스 360을 켜야 매장 진단·측정 기록·업체 수집·리뷰어 역추적을 사용할 수 있어요. 관리자는 항상 열려 있고 모든 횟수가 무제한입니다.</div>
+                  <div style={{fontSize:12.5,color:"var(--text2)",lineHeight:1.7,marginBottom:10}}>회원마다 <b style={{color:"var(--text)"}}>크롤링</b>과 <b style={{color:"var(--text)"}}>플레이스 365</b> 권한을 각각 켜고 끕니다. 플레이스 365을 켜야 매장 진단·측정 기록·업체 수집·리뷰어 역추적을 사용할 수 있어요. 관리자는 항상 열려 있고 모든 횟수가 무제한입니다.</div>
                   <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:14}}>{["현재 순위 측정","매장 원인 진단","고객 화면 상세 확인","정보 완성도·개선 순서","업체 크롤링","리뷰어 역추적","크롤링 제안 연결"].map(label=><span key={label} style={{fontSize:11,fontWeight:750,color:"#16856b",background:"rgba(22,133,107,.1)",border:"1px solid rgba(22,133,107,.2)",padding:"5px 9px",borderRadius:99}}>✓ {label}</span>)}</div>
                   <input className="inp" placeholder="🔍 이름·이메일 검색" value={search} onChange={e=>setSearch(e.target.value)} style={{marginBottom:12}} />
                   {(() => {
@@ -2926,7 +2926,7 @@ POST3: (제목)|(이유)
                       <div style={{display:"flex",gap:8,marginBottom:12,flexWrap:"wrap"}}>
                         <span style={{fontSize:12,fontWeight:800,color:"var(--text2)",background:"var(--bg)",border:"1px solid var(--border)",padding:"6px 12px",borderRadius:99}}>전체 {users.length}명</span>
                         <span style={{fontSize:12,fontWeight:800,color:"#2f9e5e",background:"rgba(47,158,94,.1)",border:"1px solid rgba(47,158,94,.25)",padding:"6px 12px",borderRadius:99}}>🔍 크롤링 켜짐 {onCount}명</span>
-                        <span style={{fontSize:12,fontWeight:800,color:"#d53d73",background:"rgba(213,61,115,.1)",border:"1px solid rgba(213,61,115,.25)",padding:"6px 12px",borderRadius:99}}>🏪 플레이스 360 켜짐 {placeOnCount}명</span>
+                        <span style={{fontSize:12,fontWeight:800,color:"#d53d73",background:"rgba(213,61,115,.1)",border:"1px solid rgba(213,61,115,.25)",padding:"6px 12px",borderRadius:99}}>🏪 플레이스 365 켜짐 {placeOnCount}명</span>
                       </div>
                       {loading ? <div style={{padding:"30px 0",textAlign:"center",color:"var(--text3)"}}><span className="spinner"/> 회원 불러오는 중…</div>
                        : list.length===0 ? <div style={{padding:"30px 0",textAlign:"center",color:"var(--text3)"}}>회원이 없습니다.</div>
@@ -2937,7 +2937,7 @@ POST3: (제목)|(이유)
                                 <div style={{fontSize:14,fontWeight:700,color:"var(--text)",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{u.name||"(이름 없음)"} <span style={{fontSize:11,fontWeight:600,color:"var(--text3)"}}>{u.plan}</span></div>
                                 <div style={{fontSize:11.5,color:"var(--text3)",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{u.email}</div>
                               </div>
-                              {(()=>{ const crawlOn=u.crawl_enabled!==false; const placeOn=u.place360_enabled!==false; const multiOn=u.allow_multi_device===true; return <div style={{display:"flex",gap:6,flexWrap:"wrap",justifyContent:"flex-end"}}><button onClick={()=>toggleCrawl(u)} title={crawlOn?"이 회원은 크롤링을 쓸 수 있어요 — 누르면 잠급니다":"이 회원은 크롤링이 잠겨 있어요 — 누르면 허용합니다"} style={{padding:"8px 12px",borderRadius:99,border:`1.5px solid ${crawlOn?"#2f9e5e":"var(--border)"}`,background:crawlOn?"rgba(47,158,94,.12)":"var(--card)",color:crawlOn?"#2f9e5e":"var(--text3)",cursor:"pointer",fontSize:11.5,fontWeight:800,fontFamily:"inherit",whiteSpace:"nowrap"}}>🔍 크롤링 {crawlOn?"허용됨":"잠김"}</button><button onClick={()=>togglePlace360(u)} title={placeOn?"이 회원은 플레이스360을 쓸 수 있어요 — 누르면 잠급니다":"이 회원은 플레이스360이 잠겨 있어요 — 누르면 허용합니다"} style={{padding:"8px 12px",borderRadius:99,border:`1.5px solid ${placeOn?"#d53d73":"var(--border)"}`,background:placeOn?"rgba(213,61,115,.12)":"var(--card)",color:placeOn?"#d53d73":"var(--text3)",cursor:"pointer",fontSize:11.5,fontWeight:800,fontFamily:"inherit",whiteSpace:"nowrap"}}>🏪 플레이스360 {placeOn?"허용됨":"잠김"}</button><button onClick={()=>toggleMultiDevice(u)} title={multiOn?"여러 컴퓨터에서 동시 로그인 허용 중 — 누르면 한 기기만 허용":"한 기기만 로그인(다른 컴퓨터는 튕김) — 누르면 여러 기기 허용"} style={{padding:"8px 12px",borderRadius:99,border:`1.5px solid ${multiOn?"#e0952f":"var(--border)"}`,background:multiOn?"rgba(224,149,47,.12)":"var(--card)",color:multiOn?"#e0952f":"var(--text3)",cursor:"pointer",fontSize:11.5,fontWeight:800,fontFamily:"inherit",whiteSpace:"nowrap"}}>{multiOn?"🔓 여러기기":"🔒 한기기"}</button></div>; })()}
+                              {(()=>{ const crawlOn=u.crawl_enabled!==false; const placeOn=u.place360_enabled!==false; const multiOn=u.allow_multi_device===true; return <div style={{display:"flex",gap:6,flexWrap:"wrap",justifyContent:"flex-end"}}><button onClick={()=>toggleCrawl(u)} title={crawlOn?"이 회원은 크롤링을 쓸 수 있어요 — 누르면 잠급니다":"이 회원은 크롤링이 잠겨 있어요 — 누르면 허용합니다"} style={{padding:"8px 12px",borderRadius:99,border:`1.5px solid ${crawlOn?"#2f9e5e":"var(--border)"}`,background:crawlOn?"rgba(47,158,94,.12)":"var(--card)",color:crawlOn?"#2f9e5e":"var(--text3)",cursor:"pointer",fontSize:11.5,fontWeight:800,fontFamily:"inherit",whiteSpace:"nowrap"}}>🔍 크롤링 {crawlOn?"허용됨":"잠김"}</button><button onClick={()=>togglePlace360(u)} title={placeOn?"이 회원은 플레이스 365을 쓸 수 있어요 — 누르면 잠급니다":"이 회원은 플레이스 365이 잠겨 있어요 — 누르면 허용합니다"} style={{padding:"8px 12px",borderRadius:99,border:`1.5px solid ${placeOn?"#d53d73":"var(--border)"}`,background:placeOn?"rgba(213,61,115,.12)":"var(--card)",color:placeOn?"#d53d73":"var(--text3)",cursor:"pointer",fontSize:11.5,fontWeight:800,fontFamily:"inherit",whiteSpace:"nowrap"}}>🏪 플레이스 365 {placeOn?"허용됨":"잠김"}</button><button onClick={()=>toggleMultiDevice(u)} title={multiOn?"여러 컴퓨터에서 동시 로그인 허용 중 — 누르면 한 기기만 허용":"한 기기만 로그인(다른 컴퓨터는 튕김) — 누르면 여러 기기 허용"} style={{padding:"8px 12px",borderRadius:99,border:`1.5px solid ${multiOn?"#e0952f":"var(--border)"}`,background:multiOn?"rgba(224,149,47,.12)":"var(--card)",color:multiOn?"#e0952f":"var(--text3)",cursor:"pointer",fontSize:11.5,fontWeight:800,fontFamily:"inherit",whiteSpace:"nowrap"}}>{multiOn?"🔓 여러기기":"🔒 한기기"}</button></div>; })()}
                             </div>
                           ))}
                          </div>}
@@ -4323,7 +4323,7 @@ POST3: (제목)|(이유)
                               </div>
                               <div style={{marginLeft:"auto",display:"flex",gap:8,flexWrap:"wrap"}}>
                                 <button className="btn btn-secondary btn-sm" onClick={()=>toggleCrawl(u)}>🔍 크롤링 {u.crawl_enabled!==false?"허용됨":"잠김"}</button>
-                                <button className="btn btn-secondary btn-sm" onClick={()=>togglePlace360(u)}>🏪 플레이스360 {u.place360_enabled!==false?"허용됨":"잠김"}</button>
+                                <button className="btn btn-secondary btn-sm" onClick={()=>togglePlace360(u)}>🏪 플레이스 365 {u.place360_enabled!==false?"허용됨":"잠김"}</button>
                                 <button className="btn btn-secondary btn-sm" onClick={()=>toggleActive(u)}>{u.is_active?"비활성화":"활성화"}</button>
                                 <button className="btn btn-secondary btn-sm" onClick={()=>resetQuota(u.id)}>건수 초기화</button>
                                 <button onClick={()=>{setErrorFilter(u.id);loadErrorLogs(u.id);setShowAllErrors(true);}} style={{padding:"4px 10px",borderRadius:6,background:"var(--danger)",color:"#fff",border:"none",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:"inherit"}}>🚨 오류확인</button>

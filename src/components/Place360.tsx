@@ -385,7 +385,7 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
     try {
       await savePlace360Snapshot({ store_key: storeKey, store_name: own.name, region: profile.region, category: profile.category, visitor_reviews: own.visitorReviewCount || 0, blog_reviews: own.blogReviewCount || 0, competitor_count: competitors.length, competitor_avg_visitor: avgVisitor, competitor_avg_blog: avgBlog, collected_count: rows.length });
       setSnapshots(await getPlace360Snapshots(storeKey));
-      showToast?.("오늘의 플레이스 360 측정 기록을 안전하게 저장했어요", "success");
+      showToast?.("오늘의 플레이스 365 측정 기록을 안전하게 저장했어요", "success");
     } catch (error: any) {
       const message = String(error?.message || "");
       showToast?.(message.includes("PLACE360_STORE_LIMIT") ? "내 등급에서 등록할 수 있는 매장 수를 모두 사용했어요" : message.includes("PLACE360_DAILY_LIMIT") ? "오늘 사용할 수 있는 매장 진단 횟수를 모두 사용했어요" : "비교는 완료됐지만 측정 기록 서버가 아직 준비되지 않았어요", "info");
@@ -590,7 +590,7 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
   const downloadMetricsTemplate = () => {
     const csv = "\ufeff기간,신규고객수,재방문고객수,광고비,광고행동수,매출\r\n최근30일,0,0,0,0,0\r\n이전30일,0,0,0,0,0\r\n";
     const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
-    const anchor = document.createElement("a"); anchor.href = url; anchor.download = "퍼블리-플레이스360-운영자료.csv"; anchor.click(); URL.revokeObjectURL(url);
+    const anchor = document.createElement("a"); anchor.href = url; anchor.download = "퍼블리-플레이스 365-운영자료.csv"; anchor.click(); URL.revokeObjectURL(url);
     showToast?.("CSV 양식을 저장했어요. 숫자를 채운 뒤 다시 불러오세요", "success");
   };
   const importMetricsCsv = async (file?: File) => {

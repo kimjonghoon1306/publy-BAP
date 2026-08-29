@@ -155,7 +155,7 @@ const NAV_GROUPS = [
     {k:"keyword",i:"🔍",l:"키워드/제목"},{k:"write",i:"✍️",l:"글 생성"},{k:"image",i:"🖼️",l:"이미지 생성"},{k:"photo",i:"📷",l:"사진 글쓰기"},{k:"publish",i:"🚀",l:"발행하기"},
   ]},
   {label:"블로그 운영",tabs:[
-    {k:"calendar",i:"📅",l:"콘텐츠 캘린더",shine:true},{k:"manage",i:"📋",l:"발행 관리"},{k:"blogscore",i:"📈",l:"블로그 지수"},{k:"crawl",i:"🔍",l:"크롤링"},{k:"place",i:"🏪",l:"플레이스 360"},
+    {k:"calendar",i:"📅",l:"콘텐츠 캘린더",shine:true},{k:"manage",i:"📋",l:"발행 관리"},{k:"blogscore",i:"📈",l:"블로그 지수"},{k:"crawl",i:"🔍",l:"크롤링"},{k:"place",i:"🏪",l:"플레이스 365"},
   ]},
   {label:"관계·소통 자동화",tabs:[
     {k:"neighbor",i:"🤝",l:"서이추"},{k:"engage",i:"❤️",l:"공감·댓글"},{k:"reply",i:"💬",l:"답방"},{k:"pumasi",i:"💞",l:"품앗이"},{k:"insta_dm",i:"📱",l:"인스타 DM"},
@@ -3805,8 +3805,8 @@ POST3: (제목)|(이유)
       </div>
       <div className="g-step" style={{borderColor:"rgba(22,133,107,.35)",background:"rgba(22,133,107,.08)"}}>
         <div className="g-step-num" style={{color:"#16856b"}}>🏪 매장을 운영하시나요?</div>
-        <div className="g-step-title" style={{color:"var(--g-fg)"}}>플레이스 360부터 눌러보세요</div>
-        <div className="g-step-desc">왼쪽의 <b>🏪 플레이스 360</b>에서 내 매장을 등록하면 현재 순위, 주변 업체 비교, 고객에게 보이는 정보를 한눈에 확인할 수 있어요.</div>
+        <div className="g-step-title" style={{color:"var(--g-fg)"}}>플레이스 365부터 눌러보세요</div>
+        <div className="g-step-desc">왼쪽의 <b>🏪 플레이스 365</b>에서 내 매장을 등록하면 현재 순위, 주변 업체 비교, 고객에게 보이는 정보를 한눈에 확인할 수 있어요.</div>
         <button className="g-btn" style={{background:"linear-gradient(135deg,#16856b,#22a880)",color:"#fff"}} onClick={()=>{setShowGuide(false);setTab("place");}}>🏪 내 매장 진단 시작하기</button>
       </div>
       <div className="g-step" style={{borderColor:`${Y}40`,background:`${Y}08`}}>
@@ -3923,10 +3923,10 @@ POST3: (제목)|(이유)
       </div>
     </div>,
 
-    /* ── 5: 플레이스 360 ── */
+    /* ── 5: 플레이스 365 ── */
     <div key="5">
       <div className="g-step" style={{borderColor:"rgba(22,133,107,.4)",background:"rgba(22,133,107,.08)"}}>
-        <div className="g-step-num" style={{color:"#16856b"}}>🏪 플레이스 360이 뭐예요?</div>
+        <div className="g-step-num" style={{color:"#16856b"}}>🏪 플레이스 365이 뭐예요?</div>
         <div className="g-step-title" style={{color:"var(--g-fg)"}}>내 가게를 찾고, 비교하고, 키우는 매장 성장센터예요</div>
         <div className="g-step-desc">단순 순위 조회가 아니에요. 고객에게 내 매장이 어떻게 보이는지 확인하고, 주변 업체보다 부족한 점과 다음 행동을 알려줘요.</div>
       </div>
@@ -3939,7 +3939,7 @@ POST3: (제목)|(이유)
         {n:"STEP 6",i:"👀",t:"고객 화면 상세 확인",c:"#3b82f6",d:"업체 카드의 ‘고객 화면 보기’를 눌러 사진·영업시간·전화·메뉴·가격·예약·주차와 완성도 점수를 확인해요."},
         {n:"STEP 7",i:"🧭",t:"리뷰 블로거 역추적",c:"#8b5cf6",d:"경쟁업체를 체크하고 리뷰어 찾기를 누르면 실제 리뷰 블로거를 모아 크롤링 협업 제안으로 보낼 수 있어요."},
       ].map((s,i)=><div key={i} className="g-step" style={{borderColor:`${s.c}40`,background:`${s.c}08`}}><div className="g-step-num" style={{color:s.c}}>{s.i} {s.n}</div><div className="g-step-title" style={{color:"var(--g-fg)"}}>{s.t}</div><div className="g-step-desc">{s.d}</div></div>)}
-      <div className="g-step" style={{borderColor:`${Y}55`,background:`${Y}08`}}><div className="g-step-num" style={{color:"var(--g-yellow)"}}>⚠️ 꼭 알아두세요</div><div className="g-step-desc">오늘 미션은 한국시간 자정에 새로 시작하고 리뷰어 전달 누적은 유지돼요. 순위는 위치·시간·기기·개인화에 따라 달라질 수 있으니 같은 조건으로 반복 확인하세요. 같은 네이버 계정은 한 번에 한 작업만 가능하고, 다른 계정은 동시에 사용할 수 있어요.</div><button className="g-btn" style={{background:"linear-gradient(135deg,#16856b,#22a880)",color:"#fff"}} onClick={()=>{setShowGuide(false);setTab("place");}}>플레이스 360 열기 →</button></div>
+      <div className="g-step" style={{borderColor:`${Y}55`,background:`${Y}08`}}><div className="g-step-num" style={{color:"var(--g-yellow)"}}>⚠️ 꼭 알아두세요</div><div className="g-step-desc">오늘 미션은 한국시간 자정에 새로 시작하고 리뷰어 전달 누적은 유지돼요. 순위는 위치·시간·기기·개인화에 따라 달라질 수 있으니 같은 조건으로 반복 확인하세요. 같은 네이버 계정은 한 번에 한 작업만 가능하고, 다른 계정은 동시에 사용할 수 있어요.</div><button className="g-btn" style={{background:"linear-gradient(135deg,#16856b,#22a880)",color:"#fff"}} onClick={()=>{setShowGuide(false);setTab("place");}}>플레이스 365 열기 →</button></div>
     </div>,
 
     /* ── 6: FAQ ── */
@@ -7142,7 +7142,7 @@ POST3: (제목)|(이유)
         </a>
 
         <div className="mob-bar">
-          {/* 모바일도 PC 사이드바와 동일한 전체 탭 노출(회원=관리자 동일 원칙). 크롤링·플레이스360·캘린더·인스타DM·계정관리가 모바일에서 빠져 있던 것 복구.
+          {/* 모바일도 PC 사이드바와 동일한 전체 탭 노출(회원=관리자 동일 원칙). 크롤링·플레이스 365·캘린더·인스타DM·계정관리가 모바일에서 빠져 있던 것 복구.
               잠금(crawl/place)·곧 출시(insta_dm) 게이팅은 데스크탑 사이드바와 동일하게 처리 */}
           {MAIN_TABS.map(t=>{
             const lbl:Record<string,string>={control:"홈",keyword:"키워드",write:"글쓰기",image:"이미지",photo:"사진글쓰기",publish:"발행",calendar:"캘린더",manage:"발행관리",blogscore:"지수",crawl:"크롤링",place:"플레이스",neighbor:"서이추",engage:"공감댓글",reply:"답방",pumasi:"품앗이",insta_dm:"인스타DM",accounts:"계정관리",settings:"설정"};

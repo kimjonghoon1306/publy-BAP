@@ -15,7 +15,7 @@ export default function Place360AdminManager({ showToast }: Props) {
   const load = async (query = search) => {
     setLoading(true);
     try { const [nextRows, nextUsage, nextBusinessRows, nextProgressRows, nextRankRows] = await Promise.all([getAdminPlace360Snapshots(query.trim()), getAdminPlace360DetailUsage(), getAdminPlace360BusinessMetrics(), getAdminPlace360Progress(), getAdminPlace360Ranks(query.trim())]); const normalized = query.trim().toLocaleLowerCase("ko-KR"); setRows(nextRows); setUsage(nextUsage); setRankRows(nextRankRows); setBusinessRows(nextBusinessRows.filter(row => !normalized || [row.store_name, row.member_name, row.email].some(value => value.toLocaleLowerCase("ko-KR").includes(normalized)))); setProgressRows(nextProgressRows.filter(row => !normalized || [row.store_name, row.member_name, row.email].some(value => (value || "").toLocaleLowerCase("ko-KR").includes(normalized)))); }
-    catch (error: any) { showToast?.(error?.message || "플레이스 360 기록을 불러오지 못했어요", "error"); }
+    catch (error: any) { showToast?.(error?.message || "플레이스 365 기록을 불러오지 못했어요", "error"); }
     finally { setLoading(false); }
   };
 
@@ -45,7 +45,7 @@ export default function Place360AdminManager({ showToast }: Props) {
   return <section style={{ marginTop: 18, paddingTop: 18, borderTop: "1px solid var(--border)" }}>
     <div style={{ display: "flex", gap: 9, alignItems: "center", flexWrap: "wrap" }}><b style={{ fontSize: 16 }}>🏪 회원 매장 진단 기록 관리</b><span style={{ padding: "4px 9px", borderRadius: 99, background: "rgba(240,65,122,.1)", color: "var(--accent-text)", fontSize: 10.5, fontWeight: 900 }}>관리자 전용</span></div>
     <p style={{ margin: "6px 0 12px", color: "var(--text2)", fontSize: 12, lineHeight: 1.65 }}>회원이 측정한 매장·날짜·리뷰 비교 기록을 확인해요. 개인정보 보호를 위해 진단 수치만 관리하며 네이버 비밀번호는 저장하지 않아요.</p>
-    {/* 📊 전체 현황 요약 — 관리자가 플레이스360 사용 규모를 한눈에 */}
+    {/* 📊 전체 현황 요약 — 관리자가 플레이스 365 사용 규모를 한눈에 */}
     {(() => {
       const stores = new Set(rows.map(r => `${r.store_key}`)).size;
       const activeMembers = new Set(businessRows.map(r => r.email)).size;

@@ -2375,7 +2375,31 @@ async function generateFlowImagesCDP(params) {
         const queue = prompts.map((_, i) => i);
         const attemptsById = {};
         const softened = {}; // 정책 거부로 프롬프트를 순화한 슬롯 표시
-        while (queue.length > 0 && results.length < target) {
+        // ── 부족분 자동 채우기 ──
+        // 저작권/정책으로 원래 프롬프트가 막혀 목표 장수에 못 미치면(예: 5장 중 2장 거부),
+        // 성공했던(=안전한) 프롬프트를 다시 그려 목표 장수를 채운다. 사용자가 다시 명령하지 않아도
+        // '첫 지시(N장)'의 연장으로 자동 진행. Flow는 매번 다른 이미지를 주므로 같은 프롬프트라도 새 그림이 나온다.
+        let fillTotal = 0; // 채우기로 큐에 넣은 총 횟수(무한루프 방지)
+        const fillCap = target * 3 + 3; // 채우기 시도 상한
+        let fillNotice = false;
+        while (results.length < target) {
+            if (queue.length === 0) {
+                const safeIdxs = [...new Set(results.map(r => r.promptIndex))]; // 성공한(=안전한) 프롬프트 인덱스
+                if (safeIdxs.length === 0)
+                    break; // 성공작이 하나도 없으면 채울 재료가 없어 종료
+                if (fillTotal >= fillCap) {
+                    log(`[Flow] ⚠️ 자동 채우기 상한 도달 — ${results.length}/${target}장에서 마칠게요`);
+                    break;
+                }
+                if (!fillNotice) {
+                    log(`[Flow] 🧩 ${target}장 중 ${results.length}장만 됐어요(나머진 정책으로 막힘). 부족한 만큼 안전한 그림으로 자동으로 채울게요...`);
+                    fillNotice = true;
+                }
+                const need = target - results.length;
+                for (let k = 0; k < need; k++)
+                    queue.push(safeIdxs[(fillTotal + k) % safeIdxs.length]);
+                fillTotal += need;
+            }
             const i = queue.shift();
             attemptsById[i] = (attemptsById[i] || 0) + 1;
             const requeue = () => { if (attemptsById[i] < 3) {
