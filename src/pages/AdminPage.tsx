@@ -2699,8 +2699,8 @@ POST3: (제목)|(이유)
                 {ico:"📅",title:"만료일 연장",desc:"일수 입력 → 현재 만료일에서 자동 연장.",color:"#8B5CF6"},
                 {ico:"💰",title:"결제 등록",desc:"금액 + 플랜 선택 → 결제 내역 기록 + 플랜 자동 업그레이드.",color:GREEN},
                 {ico:"📝",title:"메모",desc:"회원별 관리 메모. 상담 내역, 요청 사항 기록.",color:RED},
-                {ico:"🔍",title:"크롤링 ON/OFF",desc:"회원마다 블로거 크롤링 사용 권한을 따로 켜거나 잠글 수 있어요.",color:"#2f9e5e"},
-                {ico:"🏪",title:"플레이스 360 ON/OFF",desc:"회원마다 순위·진단·업체 수집·고객 화면 확인 권한을 따로 관리해요.",color:"#d53d73"},
+                {ico:"🔍",title:"크롤링 허용/잠김",desc:"버튼에 적힌 게 지금 상태예요. ‘허용됨’=쓸 수 있음, ‘잠김’=못 씀. 누르면 반대로 바뀌어요.",color:"#2f9e5e"},
+                {ico:"🏪",title:"플레이스360 허용/잠김",desc:"‘허용됨’이면 순위·진단·업체수집·고객화면을 쓸 수 있고, ‘잠김’이면 못 써요. 누르면 전환돼요.",color:"#d53d73"},
               ].map((item,i) => (
                 <div key={i} className="g-step" style={{borderColor:`${item.color}35`,background:`${item.color}07`,padding:"12px 14px"}}>
                   <div style={{display:"flex",alignItems:"center",gap:10}}>
@@ -2720,7 +2720,7 @@ POST3: (제목)|(이유)
                 <div className="g-step-desc">왼쪽 <b>플레이스 360</b>에서 여러 매장 등록·전환 → 현재 순위 → 공개자료 진단 → 신규·재방문·광고 운영자료 직접 입력·CSV 진단 → 오늘 할 일 → 고객 화면 확인 → 리뷰어 역추적을 그대로 사용할 수 있어요. 관리자는 모든 횟수가 무제한이에요.</div>
               </div>
               {[
-                {ico:"🔐",title:"회원 사용 권한",desc:"크롤링 관리에서 회원별 ‘🏪 360 ON/OFF’를 눌러 사용을 허용하거나 잠가요.",color:PINK},
+                {ico:"🔐",title:"회원 사용 권한",desc:"크롤링 관리에서 회원별 ‘🏪 플레이스360 허용됨/잠김’ 버튼을 눌러 사용을 허용하거나 잠가요.",color:PINK},
                 {ico:"📋",title:"매장 진단 기록",desc:"회원이 저장한 매장·날짜·방문자 리뷰·블로그 리뷰·주변 평균을 확인하고 잘못된 기록은 삭제해요.",color:GREEN},
                 {ico:"👀",title:"고객 화면 사용량",desc:"회원별 오늘 사용량을 확인해요. 고객 지원이 필요한 경우에만 ‘초기화’를 눌러 0회로 돌려요.",color:YELLOW},
                 {ico:"📊",title:"등급 한도 확인",desc:"회원관리 상세의 ‘모든 기능 한도’에서 등록 매장·진단·순위·고객 화면 확인 횟수를 한꺼번에 확인해요.",color:"#3b82f6"},
@@ -2936,7 +2936,7 @@ POST3: (제목)|(이유)
                                 <div style={{fontSize:14,fontWeight:700,color:"var(--text)",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{u.name||"(이름 없음)"} <span style={{fontSize:11,fontWeight:600,color:"var(--text3)"}}>{u.plan}</span></div>
                                 <div style={{fontSize:11.5,color:"var(--text3)",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{u.email}</div>
                               </div>
-                              {(()=>{ const crawlOn=u.crawl_enabled!==false; const placeOn=u.place360_enabled!==false; const multiOn=u.allow_multi_device===true; return <div style={{display:"flex",gap:6,flexWrap:"wrap",justifyContent:"flex-end"}}><button onClick={()=>toggleCrawl(u)} style={{padding:"8px 12px",borderRadius:99,border:`1.5px solid ${crawlOn?"#2f9e5e":"var(--border)"}`,background:crawlOn?"rgba(47,158,94,.12)":"var(--card)",color:crawlOn?"#2f9e5e":"var(--text3)",cursor:"pointer",fontSize:11.5,fontWeight:800,fontFamily:"inherit",whiteSpace:"nowrap"}}>🔍 크롤링 {crawlOn?"ON":"OFF"}</button><button onClick={()=>togglePlace360(u)} style={{padding:"8px 12px",borderRadius:99,border:`1.5px solid ${placeOn?"#d53d73":"var(--border)"}`,background:placeOn?"rgba(213,61,115,.12)":"var(--card)",color:placeOn?"#d53d73":"var(--text3)",cursor:"pointer",fontSize:11.5,fontWeight:800,fontFamily:"inherit",whiteSpace:"nowrap"}}>🏪 360 {placeOn?"ON":"OFF"}</button><button onClick={()=>toggleMultiDevice(u)} title={multiOn?"여러 컴퓨터에서 동시 로그인 허용 중 — 누르면 한 기기만 허용":"한 기기만 로그인(다른 컴퓨터는 튕김) — 누르면 여러 기기 허용"} style={{padding:"8px 12px",borderRadius:99,border:`1.5px solid ${multiOn?"#e0952f":"var(--border)"}`,background:multiOn?"rgba(224,149,47,.12)":"var(--card)",color:multiOn?"#e0952f":"var(--text3)",cursor:"pointer",fontSize:11.5,fontWeight:800,fontFamily:"inherit",whiteSpace:"nowrap"}}>{multiOn?"🔓 여러기기":"🔒 한기기"}</button></div>; })()}
+                              {(()=>{ const crawlOn=u.crawl_enabled!==false; const placeOn=u.place360_enabled!==false; const multiOn=u.allow_multi_device===true; return <div style={{display:"flex",gap:6,flexWrap:"wrap",justifyContent:"flex-end"}}><button onClick={()=>toggleCrawl(u)} title={crawlOn?"이 회원은 크롤링을 쓸 수 있어요 — 누르면 잠급니다":"이 회원은 크롤링이 잠겨 있어요 — 누르면 허용합니다"} style={{padding:"8px 12px",borderRadius:99,border:`1.5px solid ${crawlOn?"#2f9e5e":"var(--border)"}`,background:crawlOn?"rgba(47,158,94,.12)":"var(--card)",color:crawlOn?"#2f9e5e":"var(--text3)",cursor:"pointer",fontSize:11.5,fontWeight:800,fontFamily:"inherit",whiteSpace:"nowrap"}}>🔍 크롤링 {crawlOn?"허용됨":"잠김"}</button><button onClick={()=>togglePlace360(u)} title={placeOn?"이 회원은 플레이스360을 쓸 수 있어요 — 누르면 잠급니다":"이 회원은 플레이스360이 잠겨 있어요 — 누르면 허용합니다"} style={{padding:"8px 12px",borderRadius:99,border:`1.5px solid ${placeOn?"#d53d73":"var(--border)"}`,background:placeOn?"rgba(213,61,115,.12)":"var(--card)",color:placeOn?"#d53d73":"var(--text3)",cursor:"pointer",fontSize:11.5,fontWeight:800,fontFamily:"inherit",whiteSpace:"nowrap"}}>🏪 플레이스360 {placeOn?"허용됨":"잠김"}</button><button onClick={()=>toggleMultiDevice(u)} title={multiOn?"여러 컴퓨터에서 동시 로그인 허용 중 — 누르면 한 기기만 허용":"한 기기만 로그인(다른 컴퓨터는 튕김) — 누르면 여러 기기 허용"} style={{padding:"8px 12px",borderRadius:99,border:`1.5px solid ${multiOn?"#e0952f":"var(--border)"}`,background:multiOn?"rgba(224,149,47,.12)":"var(--card)",color:multiOn?"#e0952f":"var(--text3)",cursor:"pointer",fontSize:11.5,fontWeight:800,fontFamily:"inherit",whiteSpace:"nowrap"}}>{multiOn?"🔓 여러기기":"🔒 한기기"}</button></div>; })()}
                             </div>
                           ))}
                          </div>}
@@ -4281,8 +4281,8 @@ POST3: (제목)|(이유)
                                 <div style={{fontSize:12,color:"var(--text2)",fontFamily:"monospace"}}>{u.email}</div>
                               </div>
                               <div style={{marginLeft:"auto",display:"flex",gap:8,flexWrap:"wrap"}}>
-                                <button className="btn btn-secondary btn-sm" onClick={()=>toggleCrawl(u)}>🔍 크롤링 {u.crawl_enabled!==false?"ON":"OFF"}</button>
-                                <button className="btn btn-secondary btn-sm" onClick={()=>togglePlace360(u)}>🏪 플레이스 360 {u.place360_enabled!==false?"ON":"OFF"}</button>
+                                <button className="btn btn-secondary btn-sm" onClick={()=>toggleCrawl(u)}>🔍 크롤링 {u.crawl_enabled!==false?"허용됨":"잠김"}</button>
+                                <button className="btn btn-secondary btn-sm" onClick={()=>togglePlace360(u)}>🏪 플레이스360 {u.place360_enabled!==false?"허용됨":"잠김"}</button>
                                 <button className="btn btn-secondary btn-sm" onClick={()=>toggleActive(u)}>{u.is_active?"비활성화":"활성화"}</button>
                                 <button className="btn btn-secondary btn-sm" onClick={()=>resetQuota(u.id)}>건수 초기화</button>
                                 <button onClick={()=>{setErrorFilter(u.id);loadErrorLogs(u.id);setShowAllErrors(true);}} style={{padding:"4px 10px",borderRadius:6,background:"var(--danger)",color:"#fff",border:"none",cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:"inherit"}}>🚨 오류확인</button>
