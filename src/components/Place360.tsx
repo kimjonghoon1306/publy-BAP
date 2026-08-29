@@ -3,6 +3,7 @@ import PlaceCenter from "./PlaceCenter";
 import { botFetch, BotEventStream } from "../lib/botApi";
 import { deletePlace360Store, getPlace360BusinessMetrics, getPlace360Progress, getPlace360Ranks, getPlace360Snapshots, getPlace360StoreProfiles, PLACE360_DAILY_DIAGNOSIS_LIMIT, PLACE360_HISTORY_DAYS, PLACE360_RANK_DAILY_LIMIT, PLACE360_STORE_LIMIT, place360StoreKey, Place360BusinessMetrics, Place360RankMeasurement, Place360Snapshot, recordPlace360ReviewerHandoff, renamePlace360Store, savePlace360BusinessMetrics, savePlace360MissionProgress, savePlace360Rank, savePlace360Snapshot, savePlace360StoreProfile } from "../lib/supabase";
 import { koreaDateKey } from "../lib/date";
+import UsageGuide, { Pearly } from "./UsageGuide";   // 블로그지수와 동일한 온보딩 카드 + 마스코트 SVG
 import pearlyImg from "../assets/pearly.png";   // 🏪 플레이스 닥터 캐릭터(펄리)
 
 type Props = {
@@ -815,27 +816,37 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
     { i: "🧭", l: "길찾기", v: behaviorInput.directions || "입력", c: colors.sub, d: "공개 화면에 없어 통계에서 직접 입력. 실방문 신호." },
   ] : [];
 
-  return <div className="p360" style={{ minHeight: 600, padding: "clamp(10px,2vw,22px)", borderRadius: 10, background: colors.bg, color: colors.text }}>
+  return <div className="p360" style={{ position: "relative", minHeight: 600, padding: "clamp(10px,2vw,22px)", borderRadius: 10, background: colors.bg, color: colors.text, overflow: "hidden" }}>
+    {/* ── 본바탕 오브제(크롤링식 장식 도형) — 콘텐츠 뒤에 은은하게 ── */}
+    <div aria-hidden style={{ position: "absolute", inset: 0, overflow: "hidden", pointerEvents: "none", zIndex: 0 }}>
+      <div style={{ position: "absolute", right: -120, top: -140, width: 420, height: 420, borderRadius: "50%", background: `conic-gradient(from 0deg, transparent 0 18deg, ${colors.rose}14 18deg 30deg, transparent 30deg 44deg, ${colors.pink}10 44deg 56deg)`, animation: "p360rays 24s linear infinite" }} />
+      <div style={{ position: "absolute", left: -100, bottom: -120, width: 320, height: 320, borderRadius: "50%", background: `radial-gradient(circle, ${colors.green}14, transparent 66%)` }} />
+      <div style={{ position: "absolute", left: "42%", top: -60, width: 200, height: 200, borderRadius: "50%", background: `radial-gradient(circle, ${colors.purple}0e, transparent 68%)` }} />
+    </div>
+    <div style={{ position: "relative", zIndex: 1 }}>
     <style>{`
       .p360 *{box-sizing:border-box}.p360-button{min-height:48px;border:0;border-radius:13px;padding:11px 16px;font-family:inherit;font-weight:900;cursor:pointer;transition:transform .15s,filter .15s}.p360-button:hover{filter:brightness(1.04);transform:translateY(-1px)}
+      @keyframes p360rays{0%{transform:rotate(0)}100%{transform:rotate(360deg)}}
       .p360-two{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.p360-tiles{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:9px}
+      /* 블로그지수식 2단: 왼쪽 조작(고정폭) · 오른쪽 결과·로그(가변) */
+      .p360-2col{display:grid;grid-template-columns:380px 1fr;gap:16px;align-items:start}
+      .p360-col{display:flex;flex-direction:column;gap:12px;min-width:0}
       @keyframes p360bob{0%,100%{transform:translateY(0)}50%{transform:translateY(-5px)}}
+      @media(max-width:900px){.p360-2col{grid-template-columns:1fr}}
       @media(max-width:760px){.p360{padding:8px 6px 120px!important}.p360-two{grid-template-columns:1fr}.p360-tiles{grid-template-columns:repeat(2,minmax(0,1fr))}.p360-title{font-size:24px!important}.p360-card{padding:16px!important}}
     `}</style>
 
-    {/* ── 히어로(크롤링 톤) ── */}
-    <header className="p360-card" style={{ ...cardStyle, position: "relative", overflow: "hidden", padding: "22px 24px", marginBottom: 12 }}>
-      <div style={{ position: "absolute", right: -50, top: -60, width: 190, height: 190, borderRadius: "50%", border: `30px solid ${colors.rose}12` }} />
-      <div style={{ display: "flex", alignItems: "center", gap: 13 }}>
-        <img src={pearlyImg} alt="플레이스 닥터 펄리" onError={e => { const s = document.createElement("div"); s.textContent = "🏪"; s.style.cssText = "font-size:40px"; e.currentTarget.replaceWith(s); }} style={{ width: 56, height: 56, objectFit: "contain", flexShrink: 0, animation: "p360bob 2.6s ease-in-out infinite" }} />
-        <div>
-          <div style={{ color: colors.rose, fontSize: 10.5, fontWeight: 950, letterSpacing: ".16em" }}>PUBLY PLACE 360</div>
-          <h1 className="p360-title" style={{ margin: "3px 0 4px", fontSize: 25, letterSpacing: "-.04em" }}>안녕하세요! 상위노출 플랜을 짜볼까요? 🩺</h1>
-          <p style={{ margin: 0, color: colors.sub, fontSize: 12.5, lineHeight: 1.6 }}>플레이스 <b style={{ color: colors.text }}>주소만 붙여넣으면</b> 제가 매장을 통째로 진단하고, 순위 올리는 길을 하나씩 짚어드릴게요. 부족한 건 <b style={{ color: colors.rose }}>퍼블리로</b> 채워요.</p>
-        </div>
-      </div>
-    </header>
+    {/* ── 온보딩(블로그지수와 동일 카드 + 캐릭터 + 가로 3스텝) ── */}
+    <UsageGuide theme={dark ? "dark" : "light"} accent={colors.rose} subtitle="안녕하세요! 플레이스 365예요. 이제부터 상위노출 플랜을 함께 짜볼까요? 🩺"
+      steps={[
+        { ico: "🔗", title: "① 링크 넣기", desc: "네이버 플레이스 주소를 붙여넣고 불러오기를 누르면 매장을 통째로 가져와요." },
+        { ico: "🔎", title: "② 검사하기", desc: "저장·리뷰·별점·사진·키워드까지 실시간으로 진단해 점수를 매겨요." },
+        { ico: "🚀", title: "③ 진단·솔루션", desc: "순위 올리는 길을 하나씩 짚어주고, 부족한 건 퍼블리로 채워요." },
+      ]} />
 
+    {/* ── 블로그지수식 2단: 왼쪽=조작 / 오른쪽=결과 ── */}
+    <div className="p360-2col">
+    <div className="p360-col">
     {/* ── 매장 선택 칩 ── */}
     {profiles.length > 0 && <section className="p360-card" style={{ ...cardStyle, padding: 13, marginBottom: 12 }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}><b style={{ fontSize: 12.5 }}>🏪 어느 매장을 볼까요?</b><span style={{ color: colors.sub, fontSize: 11, fontWeight: 800 }}>{plan === "admin" || plan === "unlimited" ? `${profiles.length}개` : `${profiles.length}/${PLACE360_STORE_LIMIT[plan] ?? PLACE360_STORE_LIMIT.free}개`} 등록</span></div>
@@ -850,11 +861,17 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
         <input value={draft.placeUrl} onChange={e => setDraft(v => ({ ...v, placeUrl: e.target.value }))} onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); void resolveFromUrl(); } }} placeholder="https://naver.me/xxxx" style={fieldStyle} />
         <button type="button" className="p360-button" disabled={resolving} onClick={() => void resolveFromUrl()} style={{ background: colors.rose, color: "#fff", whiteSpace: "nowrap", opacity: resolving ? 0.7 : 1 }}>{resolving ? "분석 중…" : "🔎 통째로 분석"}</button>
       </div>
-      {(resolving || scanLog.length > 0) && <div style={{ marginTop: 13, padding: 13, borderRadius: 12, background: colors.soft, border: `1px solid ${colors.line}` }}>
-        <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, fontWeight: 900, color: colors.rose }}><span>수집 진행</span><span>{scanPct}%</span></div>
-        <div style={{ height: 8, borderRadius: 99, overflow: "hidden", background: colors.card, margin: "6px 0 9px" }}><div style={{ width: `${scanPct}%`, height: "100%", background: `linear-gradient(90deg,${colors.rose},${colors.amber})`, transition: "width .3s" }} /></div>
-        <div style={{ display: "grid", gap: 3, maxHeight: 120, overflowY: "auto" }}>{scanLog.map((l, i) => <div key={i} style={{ fontSize: 11, color: colors.sub }}>{l}</div>)}</div>
-      </div>}
+      {/* 📟 검은 작업 로그 터미널(블로그지수와 동일 톤) */}
+      <div style={{ marginTop: 13, borderRadius: 12, overflow: "hidden", border: `1px solid ${colors.line}` }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 12px", background: colors.soft }}>
+          <b style={{ fontSize: 12 }}>📟 작업 로그</b>
+          <span style={{ fontSize: 11, fontWeight: 900, color: colors.rose }}>{scanPct}%</span>
+        </div>
+        <div style={{ height: 6, background: "#0b1220" }}><div style={{ width: `${scanPct}%`, height: "100%", background: `linear-gradient(90deg,${colors.rose},${colors.amber})`, transition: "width .3s" }} /></div>
+        <div style={{ minHeight: 120, maxHeight: 260, overflowY: "auto", padding: "12px 14px", background: "#050a0f", fontFamily: "'JetBrains Mono', monospace", fontSize: 12, lineHeight: 1.8 }}>
+          {scanLog.length === 0 ? <span style={{ color: "#3a5a7a" }}>대기 중... 링크를 넣고 불러오기를 누르면 진행 상황이 여기 나와요.</span> : scanLog.map((l, i) => <div key={i} style={{ color: i === scanLog.length - 1 ? "#34e0b8" : "#8fb3c9" }}>{l}</div>)}
+        </div>
+      </div>
       <div className="p360-two" style={{ marginTop: 12 }}>
         <label><b style={{ display: "block", marginBottom: 6, fontSize: 12 }}>매장 이름 · 필수</b><input value={draft.name} onChange={e => setDraft(v => ({ ...v, name: e.target.value }))} placeholder="예: 꽃피는산골 횡성점" style={fieldStyle} /></label>
         <label><b style={{ display: "block", marginBottom: 6, fontSize: 12 }}>업종</b><input value={draft.category} onChange={e => setDraft(v => ({ ...v, category: e.target.value }))} placeholder="예: 한식" style={fieldStyle} /></label>
@@ -863,6 +880,8 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
       <div style={{ display: "grid", gridTemplateColumns: profiles.length ? "1fr auto" : "1fr", gap: 8, marginTop: 12 }}><button type="button" className="p360-button" onClick={() => void saveStore()} style={{ background: colors.green, color: "#fff" }}>내 매장 저장하고 진단 시작 →</button>{profiles.length > 0 && <button type="button" className="p360-button" onClick={() => { const s = profiles.find(item => place360StoreKey(item.name, item.region) === editingStoreKey) || profiles[0]; selectStore(s); }} style={{ background: colors.soft, color: colors.text, border: `1px solid ${colors.line}` }}>취소</button>}</div>
     </section>}
 
+    </div>
+    <div className="p360-col">
     {/* ── ② 컨트롤 대시보드(별점·사진·수치·PDF) ── */}
     {placeReport && <section className="p360-card" style={{ ...cardStyle, padding: 0, marginBottom: 12, overflow: "hidden", border: `2px solid ${colors.rose}45` }}>
       <div style={{ padding: "18px 20px", background: `linear-gradient(120deg,${colors.rose}14,${colors.amber}10)` }}>
@@ -972,7 +991,9 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
       </div>}
     </section>}
 
-    {/* ── ⑧ 업체·리뷰어 찾기(실데이터, 항상 마운트) ── */}
+    </div>
+    </div>
+    {/* ── ⑧ 업체·리뷰어 찾기(실데이터, 항상 마운트, 전체폭) ── */}
     <section className="p360-card" style={{ ...cardStyle, padding: "14px 16px 4px", marginBottom: 0 }}>
       <b style={{ fontSize: 14 }}>🕵️ 업체·리뷰 블로거 찾기</b>
       <p style={{ color: colors.sub, fontSize: 11.5, lineHeight: 1.6, margin: "5px 0 0" }}>경쟁업체를 수집하고, 그 매장에 <b style={{ color: colors.text }}>리뷰를 쓴 블로거</b>를 실시간으로 역추적해요. 찾은 블로거는 크롤링에서 서이추·협업 제안으로 보낼 수 있어요.</p>
@@ -980,5 +1001,6 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
     <div id="p360-discovery" style={{ scrollMarginTop: 12 }}>
       <PlaceCenter showToast={showToast} theme={theme} userId={userId} plan={plan} initialRegion={profile.region} ownStoreName={profile.name} onPlacesCollected={onPlacesCollected} onReviewerHandoff={onReviewerHandoff} onOwnStoreDetailViewed={() => completeMissionAutomatically("customer")} onOpenCrawl={onOpenCrawl} />
     </div>
+    </div>{/* /zIndex 콘텐츠 래퍼 */}
   </div>;
 }
