@@ -153,7 +153,7 @@ const DEFAULT_MULTI_MSGS = [
 interface EngageResult { keyword: string; blogId: string; postUrl: string; liked: boolean; commented: boolean; status: "success"|"fail"|"skip"|"pending"|"running"; message: string; }
 // 상단·사이드바 배지와 동일한 플랜별 하루 한도 (lib/supabase.ts의 NEIGHBOR/ENGAGE_DAILY_LIMIT와 일치)
 const DAILY_LIMIT_BY_PLAN: Record<string, number> = { free: 10, basic: 50, pro: 100, unlimited: 999999, admin: 9999 };
-interface Props { theme: "dark"|"light"; userId?: string; plan?: string; initialTab?: "neighbor"|"engage"|"reply"|"score"|"pumasi"; singleTab?: boolean; onEngageUsageChange?: (used:number)=>void; initialNeighborUsed?: number; initialEngageUsed?: number; onBusyChange?: (busy:boolean)=>void; }
+interface Props { theme: "dark"|"light"; userId?: string; plan?: string; initialTab?: "neighbor"|"engage"|"reply"|"score"|"pumasi"; singleTab?: boolean; isActive?: boolean; onEngageUsageChange?: (used:number)=>void; initialNeighborUsed?: number; initialEngageUsed?: number; onBusyChange?: (busy:boolean)=>void; }
 
 /* ── 내 이웃 키워드 분석 카드 (서이추·공감댓글 공용) ── */
 const KeywordAnalyzer = ({ keywords, loading, onAnalyze, onPick }: {
@@ -454,7 +454,7 @@ const GuideModal = ({ tab, onClose }: { tab: "neighbor"|"engage"|"reply"|"score"
 };
 
 /* ── 메인 컴포넌트 ── */
-export default function NeighborPage({ theme, userId, plan = "free", initialTab, singleTab, onEngageUsageChange, initialNeighborUsed = 0, initialEngageUsed = 0, onBusyChange }: Props) {
+export default function NeighborPage({ theme, userId, plan = "free", initialTab, singleTab, isActive = true, onEngageUsageChange, initialNeighborUsed = 0, initialEngageUsed = 0, onBusyChange }: Props) {
   const [tab, setTab] = useState<"neighbor"|"engage"|"reply"|"score"|"pumasi">(initialTab || "neighbor");
   // ★탭별 계정·세션 완전 격리(2026-08-23): 서이추·공감댓글·답방·품앗이·지수가 각각 자기 계정 목록과 세션을 따로 갖는다.
   //   한 탭에서 연결해도 다른 탭엔 공유되지 않음. accountId에 tabKey를 붙여 봇 세션(naver_{accountId})까지 자동 격리.
@@ -572,10 +572,10 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
   // 🎉 블로그지수 웰컴 팝업(진입 시 팡!) — 7일 보지않기(localStorage until)
   const [welcome, setWelcome] = useState(false);
   useEffect(() => {
-    if (tab !== "score") return;
+    if (!isActive || tab !== "score") return;
     const until = Number(localStorage.getItem("publy_blogscore_welcome_until") || "0");
     if (Date.now() > until) setWelcome(true);
-  }, [tab]);
+  }, [isActive, tab]);
   const closeWelcome = (week?: boolean) => {
     if (week) localStorage.setItem("publy_blogscore_welcome_until", String(Date.now() + 7 * 86400000));
     setWelcome(false);
@@ -1920,7 +1920,7 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
 
 
   return (
-    <div style={{ animation: "fadeUp .25s ease both" }}>
+    <div>
       <style>{`
         .npg-2col{display:grid;grid-template-columns:400px 1fr;gap:20px;align-items:start;}
         @media(max-width:820px){
@@ -3903,7 +3903,7 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
     {/* 🎉 블로그지수 웰컴 팝업 — 진입 시 팡! 캐릭터+사용순서+멘토 멘트. [닫기][일주일 보지않기] */}
     {/* 🛑 전체 제목 변경 중 한도 도달 → 업그레이드 안내 팝업 */}
     {/* 🩺 수정추적 '제목 변경' → 개선안 제목1·2 모달(관찰중 글은 재발행 목록에 없어 여기서 보여줌) */}
-    {trackSol && createPortal(
+    {isActive && trackSol && createPortal(
       <div className={theme === "dark" ? "app dark" : "app light"} style={{ display: "contents" }}>
       <div onClick={() => !titleEditingKey && setTrackSol(null)} style={{ position: "fixed", inset: 0, zIndex: 100001, background: "rgba(12,10,20,.6)", backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
         <div onClick={e => e.stopPropagation()} style={{ background: "var(--card)", borderRadius: 20, padding: "24px 24px 20px", maxWidth: 460, width: "100%", maxHeight: "88vh", overflowY: "auto", boxShadow: "0 30px 90px -20px rgba(0,0,0,.55)", border: "1px solid var(--border)" }}>
@@ -3938,7 +3938,7 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
       </div>
       </div>, document.body)}
 
-    {bulkUpgrade && createPortal(
+    {isActive && bulkUpgrade && createPortal(
       <div className={theme === "dark" ? "app dark" : "app light"} style={{ display: "contents" }}>
       <div onClick={() => setBulkUpgrade(null)} style={{ position: "fixed", inset: 0, zIndex: 100001, background: "rgba(12,10,20,.62)", backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
         <div onClick={e => e.stopPropagation()} style={{ background: "var(--card)", borderRadius: 22, padding: "32px 28px 24px", maxWidth: 400, width: "100%", textAlign: "center", boxShadow: "0 30px 90px -20px rgba(0,0,0,.55)", border: "1px solid var(--border)" }}>
@@ -3953,7 +3953,7 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
       </div>
       </div>, document.body)}
 
-    {welcome && createPortal(
+    {isActive && welcome && createPortal(
       /* ★ body로 포탈되면 .app.dark/.light의 CSS변수(--card 등)가 안 먹혀 팝업이 투명해짐 → 테마 클래스로 변수 범위 복원(display:contents=레이아웃 영향 0) */
       <div className={theme === "dark" ? "app dark" : "app light"} style={{ display: "contents" }}>
       <div onClick={() => closeWelcome(false)} style={{ position: "fixed", inset: 0, zIndex: 100000, background: "rgba(12,10,20,.6)", backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
@@ -4029,7 +4029,7 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
       </div>, document.body)}
 
     {/* 🎉 완치(노출) 축포 세리머니 — createPortal로 body에(transform 조상 무관), 하늘에서 색종이 낙하 */}
-    {celebrate && createPortal(
+    {isActive && celebrate && createPortal(
       <div className={theme === "dark" ? "app dark" : "app light"} style={{ display: "contents" }}>
       <div onClick={() => setCelebrate(null)} style={{ position: "fixed", inset: 0, zIndex: 100000, background: "rgba(12,10,20,.62)", backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20, overflow: "hidden" }}>
         <style>{`@keyframes bdConfetti{0%{transform:translateY(-15vh) rotate(0);opacity:1}100%{transform:translateY(110vh) rotate(720deg);opacity:.85}}@keyframes bdPop{0%{transform:scale(.7);opacity:0}60%{transform:scale(1.05)}100%{transform:scale(1);opacity:1}}@keyframes bdBob{0%,100%{transform:translateY(0)}50%{transform:translateY(-10px)}}`}</style>

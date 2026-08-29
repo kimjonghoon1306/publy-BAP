@@ -632,11 +632,21 @@ async function flowChromeHealthy(): Promise<boolean> {
 /* ── 좀비/잔여 Flow 크롬 강제 정리 ── (재실행 전에 깨끗이 청소) */
 async function killStaleFlowChrome() {
   const dir = flowProfileDir();
-  try { if (flowChromeProc && flowChromeProc.pid) { try { process.kill(-flowChromeProc.pid, "SIGKILL"); } catch {} try { flowChromeProc.kill("SIGKILL"); } catch {} } } catch {}
+  try {
+    if (flowChromeProc?.pid) {
+      if (process.platform === "win32") await execAsync(`taskkill /PID ${flowChromeProc.pid} /T /F`);
+      else { try { process.kill(-flowChromeProc.pid, "SIGKILL"); } catch {} try { flowChromeProc.kill("SIGKILL"); } catch {} }
+    }
+  } catch {}
   flowChromeProc = null;
   try {
     if (process.platform === "win32") {
-      try { execSync(`wmic process where "commandline like '%.publy-flow-chrome%'" call terminate`, { stdio: "ignore" }); } catch {}
+      // WMIC은 최신 Windows에서 제거됐다. 인자를 Base64로 전달해 사용자 경로의 따옴표/특수문자도
+      // 명령으로 해석되지 않게 하고, 이 전용 프로필을 사용하는 Chrome 트리만 정리한다.
+      const escapedDir = dir.replace(/'/g, "''");
+      const script = `Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -and $_.CommandLine.Contains('--user-data-dir=${escapedDir}') } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }`;
+      const encoded = Buffer.from(script, "utf16le").toString("base64");
+      await execAsync(`powershell.exe -NoProfile -NonInteractive -EncodedCommand ${encoded}`);
     } else {
       try { execSync(`pkill -9 -f "user-data-dir=${dir}"`, { stdio: "ignore" }); } catch {}
     }
@@ -651,12 +661,6 @@ async function killStaleFlowChrome() {
 
 ipcMain.handle("flow-launch-chrome", async () => {
   const fs = await import("fs");
-
-  // 이미 "건강한" 디버깅 크롬이 떠 있으면 재사용 (좀비면 재사용 안 하고 아래에서 재생성)
-  if (await flowChromeHealthy()) return { ok: true, already: true };
-
-  // 포트는 응답해도 좀비(타겟 0개)이거나 죽은 크롬일 수 있음 → 깨끗이 정리 후 새로 띄운다
-  await killStaleFlowChrome();
 
   // OS별 크롬 실행 파일 경로 후보
   const candidates = process.platform === "darwin"
@@ -676,6 +680,22 @@ ipcMain.handle("flow-launch-chrome", async () => {
 
   // 전용 프로필 폴더(사용자 평소 크롬과 분리, 로그인 유지됨)
   const profileDir = flowProfileDir();
+  const flowUrl = "https://labs.google/fx/ko/tools/flow";
+
+  // Windows Chrome singleton은 같은 프로필의 두 번째 실행 요청을 기존의 최소화/후면 창으로
+  // 넘길 수 있다. 준비 버튼을 다시 누르면 새 창 요청을 기존 인스턴스에 전달해 사용자가 볼 수 있게 한다.
+  if (await flowChromeHealthy()) {
+    if (process.platform === "win32") {
+      try {
+        const reveal = spawn(chromePath, [`--user-data-dir=${profileDir}`, "--new-window", flowUrl], { detached: true, stdio: "ignore" });
+        reveal.unref();
+      } catch {}
+    }
+    return { ok: true, already: true };
+  }
+
+  // 포트는 응답해도 좀비(타겟 0개)이거나 죽은 크롬일 수 있음 → 깨끗이 정리 후 새로 띄운다
+  await killStaleFlowChrome();
 
   try {
     flowChromeProc = spawn(chromePath, [
@@ -685,7 +705,8 @@ ipcMain.handle("flow-launch-chrome", async () => {
       "--no-first-run",
       "--no-default-browser-check",
       "--disable-features=Translate",
-      "https://labs.google/fx/ko/tools/flow",
+      "--new-window",
+      flowUrl,
     ], { detached: true, stdio: "ignore" });
     flowChromeProc.unref();
   } catch (e: any) {

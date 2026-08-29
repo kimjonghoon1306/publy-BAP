@@ -5084,27 +5084,27 @@ POST3: (제목)|(이유)
             {/* ───── 자동화 탭 keep-alive: 방문한 탭은 숨기기만(작업·데이터 유지) ───── */}
             {visitedAutoTabs.has("neighbor") && (
               <div style={{ display: tab === "neighbor" ? "block" : "none" }}>
-                <NeighborPage theme={theme} userId={ADM_HISTORY_UID} plan="admin" singleTab />
+                <NeighborPage theme={theme} userId={ADM_HISTORY_UID} plan="admin" singleTab isActive={tab === "neighbor"} />
               </div>
             )}
             {visitedAutoTabs.has("engage") && (
               <div style={{ display: tab === "engage" ? "block" : "none" }}>
-                <NeighborPage theme={theme} userId={ADM_HISTORY_UID} plan="admin" initialTab="engage" singleTab />
+                <NeighborPage theme={theme} userId={ADM_HISTORY_UID} plan="admin" initialTab="engage" singleTab isActive={tab === "engage"} />
               </div>
             )}
             {visitedAutoTabs.has("reply") && (
               <div style={{ display: tab === "reply" ? "block" : "none" }}>
-                <NeighborPage theme={theme} userId={ADM_HISTORY_UID} plan="admin" initialTab="reply" singleTab />
+                <NeighborPage theme={theme} userId={ADM_HISTORY_UID} plan="admin" initialTab="reply" singleTab isActive={tab === "reply"} />
               </div>
             )}
             {visitedAutoTabs.has("pumasi") && (
               <div style={{ display: tab === "pumasi" ? "block" : "none" }}>
-                <NeighborPage theme={theme} userId={ADM_HISTORY_UID} plan="admin" initialTab="pumasi" singleTab />
+                <NeighborPage theme={theme} userId={ADM_HISTORY_UID} plan="admin" initialTab="pumasi" singleTab isActive={tab === "pumasi"} />
               </div>
             )}
             {visitedAutoTabs.has("blogscore") && (
               <div style={{ display: tab === "blogscore" ? "block" : "none" }}>
-                <NeighborPage theme={theme} userId={ADM_HISTORY_UID} plan="admin" initialTab="score" singleTab />
+                <NeighborPage theme={theme} userId={ADM_HISTORY_UID} plan="admin" initialTab="score" singleTab isActive={tab === "blogscore"} />
               </div>
             )}
 

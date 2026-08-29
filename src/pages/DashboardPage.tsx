@@ -5223,7 +5223,18 @@ POST3: (제목)|(이유)
                               {genImgLoading?<><span className="spinner"/>생성 중...</>:<>🎨 이미지 생성 시작</>}
                             </button>
                             {genImgLoading&&<button className="btn-stop" style={{width:"100%",justifyContent:"center"}} onClick={stopImageGen}>⏹ 생성 중단</button>}
-                            {imgGenFailed&&!genImgLoading&&<button className="btn btn-sm" onClick={()=>{setImgGenFailed(false);handleGenerateImages();}} style={{background:"var(--warn)",color:"#fff",border:"none",cursor:"pointer",width:"100%",justifyContent:"center",marginTop:4}}>🔄 재시도</button>}
+                            {imgGenFailed&&!genImgLoading&&(
+                              <div style={{marginTop:6,padding:"13px 15px",borderRadius:12,background:"rgba(255,159,63,.08)",border:"1px solid rgba(255,159,63,.35)",display:"flex",flexDirection:"column",gap:8}}>
+                                <div style={{fontSize:12.5,fontWeight:800,color:"var(--warn,#e0952f)"}}>⚠️ 이미지 생성이 중간에 멈췄어요</div>
+                                <div style={{fontSize:11.5,color:"var(--text3)",lineHeight:1.6}}>화면 로그는 사라져도 <b style={{color:"var(--text2)"}}>기록은 저장돼 있어요</b>. 아래 <b style={{color:"var(--text2)"}}>로그 보기</b>로 어디서 멈췄는지 확인하거나, <b style={{color:"var(--text2)"}}>신고</b>를 누르면 로그가 관리자에게 자동 전송돼요.</div>
+                                <button className="btn btn-sm" onClick={()=>{setImgGenFailed(false);handleGenerateImages();}} style={{background:"var(--warn)",color:"#fff",border:"none",cursor:"pointer",width:"100%",justifyContent:"center"}}>🔄 다시 시도</button>
+                                <div style={{display:"flex",gap:6}}>
+                                  <button className="btn btn-sm" onClick={openFullLog} disabled={fullLogLoading||!window.electron?.readBotLog} style={{flex:1,justifyContent:"center",border:"1px solid var(--border)",background:"var(--bg)",color:"var(--text2)",cursor:"pointer"}}>{fullLogLoading?"불러오는 중...":"📋 로그 보기"}</button>
+                                  <button className="btn btn-sm" onClick={()=>(window as any).electron?.openLogFolder?.()} style={{flex:1,justifyContent:"center",border:"1px solid var(--border)",background:"var(--bg)",color:"var(--text2)",cursor:"pointer"}}>📂 폴더</button>
+                                  <button className="btn btn-sm" onClick={submitBugReport} disabled={bugSending} style={{flex:1,justifyContent:"center",border:"none",background:"var(--accent)",color:"#000",cursor:bugSending?"default":"pointer",fontWeight:800}}>{bugSending?"전송 중":"🐞 신고"}</button>
+                                </div>
+                              </div>
+                            )}
                             {imgGenType==="flow"&&generatedImages.length>0&&!genImgLoading&&(
                               <div style={{padding:"12px 14px",borderRadius:12,background:"rgba(16,185,129,.08)",border:"1px solid rgba(16,185,129,.3)",display:"flex",flexDirection:"column",gap:8}}>
                                 <div style={{fontSize:12,color:"#10b981",fontWeight:700,lineHeight:1.6}}>
@@ -6935,34 +6946,34 @@ POST3: (제목)|(이유)
 
             {/* ★자동화 탭 keep-alive: 방문한 탭은 언마운트하지 않고 display로만 숨김 → 탭 이동해도 작업·데이터 유지 */}
             {visitedAutoTabs.has("neighbor") && (
-              <div className="tab-neighbor" style={{ display: tab==="neighbor" ? "block" : "none" }}>
-                <NeighborPage theme={theme as "dark"|"light"} userId={user.id} plan={user.plan} singleTab initialNeighborUsed={neighborUsed} onBusyChange={setNeighborBusy} />
+              <div className="tab-neighbor" aria-hidden={tab!=="neighbor"} style={{ display: tab==="neighbor" ? "block" : "none", pointerEvents: tab==="neighbor" ? "auto" : "none" }}>
+                <NeighborPage theme={theme as "dark"|"light"} userId={user.id} plan={user.plan} singleTab isActive={tab==="neighbor"} initialNeighborUsed={neighborUsed} onBusyChange={setNeighborBusy} />
               </div>
             )}
             {visitedAutoTabs.has("engage") && (
-              <div className="tab-engage" style={{ display: tab==="engage" ? "block" : "none" }}>
-                <NeighborPage theme={theme as "dark"|"light"} userId={user.id} plan={user.plan} initialTab="engage" singleTab onEngageUsageChange={setEngageUsed} initialEngageUsed={engageUsed} onBusyChange={setNeighborBusy} />
+              <div className="tab-engage" aria-hidden={tab!=="engage"} style={{ display: tab==="engage" ? "block" : "none", pointerEvents: tab==="engage" ? "auto" : "none" }}>
+                <NeighborPage theme={theme as "dark"|"light"} userId={user.id} plan={user.plan} initialTab="engage" singleTab isActive={tab==="engage"} onEngageUsageChange={setEngageUsed} initialEngageUsed={engageUsed} onBusyChange={setNeighborBusy} />
               </div>
             )}
             {visitedAutoTabs.has("reply") && (
-              <div className="tab-reply" style={{ display: tab==="reply" ? "block" : "none" }}>
-                <NeighborPage theme={theme as "dark"|"light"} userId={user.id} plan={user.plan} initialTab="reply" singleTab onBusyChange={setNeighborBusy} />
+              <div className="tab-reply" aria-hidden={tab!=="reply"} style={{ display: tab==="reply" ? "block" : "none", pointerEvents: tab==="reply" ? "auto" : "none" }}>
+                <NeighborPage theme={theme as "dark"|"light"} userId={user.id} plan={user.plan} initialTab="reply" singleTab isActive={tab==="reply"} onBusyChange={setNeighborBusy} />
               </div>
             )}
             {tab==="crawl" && crawlEnabled && (
-              <div style={{animation:"fadeUp .25s ease both"}}><CrawlCenter showToast={showToast} theme={theme==="dark"?"dark":"light"} userId={user.id} plan={user.plan} /></div>
+              <div><CrawlCenter showToast={showToast} theme={theme==="dark"?"dark":"light"} userId={user.id} plan={user.plan} /></div>
             )}
             {tab==="place" && place360Enabled && (
-              <div style={{animation:"fadeUp .25s ease both"}}><Place360 showToast={showToast} theme={theme==="dark"?"dark":"light"} userId={user.id} plan={user.plan} onOpenCrawl={()=>setTab("crawl")} /></div>
+              <div><Place360 showToast={showToast} theme={theme==="dark"?"dark":"light"} userId={user.id} plan={user.plan} onOpenCrawl={()=>setTab("crawl")} /></div>
             )}
             {visitedAutoTabs.has("pumasi") && (
-              <div className="tab-pumasi" style={{ display: tab==="pumasi" ? "block" : "none" }}>
-                <NeighborPage theme={theme as "dark"|"light"} userId={user.id} plan={user.plan} initialTab="pumasi" singleTab onBusyChange={setNeighborBusy} />
+              <div className="tab-pumasi" aria-hidden={tab!=="pumasi"} style={{ display: tab==="pumasi" ? "block" : "none", pointerEvents: tab==="pumasi" ? "auto" : "none" }}>
+                <NeighborPage theme={theme as "dark"|"light"} userId={user.id} plan={user.plan} initialTab="pumasi" singleTab isActive={tab==="pumasi"} onBusyChange={setNeighborBusy} />
               </div>
             )}
             {visitedAutoTabs.has("blogscore") && (
-              <div className="tab-blogscore" style={{ display: tab==="blogscore" ? "block" : "none" }}>
-                <NeighborPage theme={theme as "dark"|"light"} userId={user.id} plan={user.plan} initialTab="score" singleTab onBusyChange={setNeighborBusy} />
+              <div className="tab-blogscore" aria-hidden={tab!=="blogscore"} style={{ display: tab==="blogscore" ? "block" : "none", pointerEvents: tab==="blogscore" ? "auto" : "none" }}>
+                <NeighborPage theme={theme as "dark"|"light"} userId={user.id} plan={user.plan} initialTab="score" singleTab isActive={tab==="blogscore"} onBusyChange={setNeighborBusy} />
               </div>
             )}
 
