@@ -1048,6 +1048,22 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
         </div>
       </section>
 
+      {/* ── 진행 스트립: 지금 어디까지 왔는지(회진 칩) ── */}
+      {(() => {
+        const steps = [
+          { k: "매장 등록", done: hasStore },
+          { k: "매장 검사", done: !!placeReport },
+          { k: "키워드·순위", done: rankHistory.length > 0 },
+          { k: "경쟁사 비교", done: !!competitorTable },
+          { k: "리뷰어 섭외", done: reviewerHandoffCount > 0 },
+        ];
+        const doneN = steps.filter(s => s.done).length;
+        return <section className="p360-card" style={{ padding: "12px 16px" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 9 }}><b style={{ fontSize: 12.5 }}>🧭 진행 단계</b><span style={{ fontSize: 10.5, color: M.sub }}>{doneN}/{steps.length} 완료</span><div style={{ marginLeft: "auto", flex: "0 0 120px", height: 6, borderRadius: 99, background: M.soft, overflow: "hidden" }}><div style={{ width: `${doneN / steps.length * 100}%`, height: "100%", background: `linear-gradient(90deg,${M.rose},${M.green})`, transition: "width .4s" }} /></div></div>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>{steps.map((s, i) => <span key={s.k} style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "6px 11px", borderRadius: 99, fontSize: 11, fontWeight: 800, background: s.done ? `${M.green}14` : M.soft, color: s.done ? M.green : M.sub, border: `1px solid ${s.done ? M.green : M.line}` }}>{s.done ? "✓" : i + 1} {s.k}</span>)}</div>
+        </section>;
+      })()}
+
       {/* ── 메인 2단: 왼쪽 콘솔 / 오른쪽 대시보드 ── */}
       <div className="p360-2col">
         {/* ===== 왼쪽 콘솔 ===== */}
