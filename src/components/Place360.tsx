@@ -1005,16 +1005,6 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
               </div>
             </section>
 
-            {/* 역추적·업체찾기 — 솔루션 흐름 안에 통합. 로그는 왼쪽 공용 터미널로. */}
-            {discoveryOpen && <section id="p360-discovery" className="p360-card" style={{ padding: 0, overflow: "hidden", borderColor: `${M.rose}40`, borderWidth: 2, animation: "p360slide .3s ease both" }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 9, padding: "13px 16px", background: `${M.rose}10`, borderBottom: `1px solid ${M.line}` }}>
-                <span style={{ fontSize: 18 }}>🕵️</span>
-                <div style={{ minWidth: 0 }}><b style={{ fontSize: 13.5 }}>업체 발굴 · 리뷰 블로거 역추적</b><div style={{ fontSize: 10.5, color: M.sub, lineHeight: 1.4 }}>경쟁업체 → 리뷰 쓴 블로거 찾기 → 섭외 → 내 리뷰↑. <b style={{ color: M.rose }}>진행상황은 왼쪽 작업 로그에 실시간으로 찍혀요.</b></div></div>
-                <button onClick={() => setDiscoveryOpen(false)} style={{ marginLeft: "auto", background: "transparent", border: "none", cursor: "pointer", fontSize: 16, color: M.sub }}>▲</button>
-              </div>
-              <PlaceCenter showToast={showToast} theme={theme} userId={userId} plan={plan} initialRegion={profile.region} ownStoreName={profile.name} onPlacesCollected={onPlacesCollected} onReviewerHandoff={onReviewerHandoff} onOwnStoreDetailViewed={() => completeMissionAutomatically("customer")} onOpenCrawl={onOpenCrawl} onLog={(m) => pushLog(scanPct, m)} hideLog />
-            </section>}
-
             {/* 포스 자료(접이식) */}
             {hasStore && <section id="p360-pos" className="p360-card" style={{ padding: 16, borderColor: `${M.amber}44`, borderWidth: 2 }}>
               <button onClick={() => setPosOpen(o => !o)} style={{ width: "100%", display: "flex", alignItems: "center", gap: 8, background: "transparent", border: "none", cursor: "pointer", fontFamily: "inherit", padding: 0 }}>
@@ -1030,6 +1020,21 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
               </div>}
             </section>}
           </>}
+
+          {/* 🕵️ 업체 발굴·리뷰 블로거 역추적 — 항상 보이는 접이식 섹션(검사 전에도 접근 가능). 로그는 왼쪽 공용 터미널로 */}
+          <section className="p360-card" style={{ padding: 0, overflow: "hidden", borderColor: discoveryOpen ? `${M.rose}40` : M.line, borderWidth: discoveryOpen ? 2 : 1 }}>
+            <button onClick={() => { setDiscoveryOpen(o => !o); }} style={{ width: "100%", display: "flex", alignItems: "center", gap: 10, padding: "14px 16px", background: discoveryOpen ? `${M.rose}10` : "transparent", border: "none", cursor: "pointer", fontFamily: "inherit" }}>
+              <span style={{ fontSize: 20 }}>🕵️</span>
+              <div style={{ textAlign: "left", minWidth: 0 }}>
+                <b style={{ fontSize: 13.5, color: M.text }}>업체 발굴 · 리뷰 블로거 역추적</b>
+                <div style={{ fontSize: 10.5, color: M.sub, lineHeight: 1.4, marginTop: 2 }}>경쟁업체 → <b style={{ color: M.text }}>리뷰 쓴 블로거</b> 찾기 → 섭외 → 내 리뷰↑ → 상위노출. <b style={{ color: M.rose }}>진행상황은 왼쪽 작업 로그에 실시간으로.</b></div>
+              </div>
+              <span style={{ marginLeft: "auto", fontSize: 17, color: M.rose, fontWeight: 900 }}>{discoveryOpen ? "접기 ▲" : "펼치기 ▼"}</span>
+            </button>
+            {discoveryOpen && <div id="p360-discovery" style={{ borderTop: `1px solid ${M.line}`, animation: "p360slide .3s ease both" }}>
+              <PlaceCenter showToast={showToast} theme={theme} userId={userId} plan={plan} initialRegion={profile.region} ownStoreName={profile.name} onPlacesCollected={onPlacesCollected} onReviewerHandoff={onReviewerHandoff} onOwnStoreDetailViewed={() => completeMissionAutomatically("customer")} onOpenCrawl={onOpenCrawl} onLog={(m) => pushLog(scanPct, m)} hideLog />
+            </div>}
+          </section>
         </div>
       </div>
 
