@@ -724,7 +724,7 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
   // ★자동화 탭 keep-alive(대시보드와 동일): 방문한 탭은 언마운트 안 하고 숨김 → 작업·데이터 유지
   const [visitedAutoTabs, setVisitedAutoTabs] = useState<Set<string>>(new Set());
   useEffect(() => {
-    if (["neighbor", "engage", "reply", "pumasi", "blogscore"].includes(tab)) {
+    if (["neighbor", "engage", "reply", "pumasi", "blogscore", "place"].includes(tab)) {
       setVisitedAutoTabs(prev => prev.has(tab) ? prev : new Set(prev).add(tab));
     }
   }, [tab]);
@@ -2901,8 +2901,8 @@ POST3: (제목)|(이유)
             )}
 
             {/* ───── 🏪 플레이스 365 (회원과 동일 · 관리자는 무제한) ───── */}
-            {tab === "place" && (
-              <div style={{animation:"fadeUp .25s ease both"}}><Place360 showToast={showToast} theme={theme==="dark"?"dark":"light"} userId={ADM_UID} plan="admin" onOpenCrawl={()=>setTab("crawl")} /></div>
+            {visitedAutoTabs.has("place") && (
+              <div style={{ display: tab === "place" ? "block" : "none" }}><Place360 showToast={showToast} theme={theme==="dark"?"dark":"light"} userId={ADM_UID} plan="admin" onOpenCrawl={()=>setTab("crawl")} /></div>
             )}
 
             {/* ───── 🔎 크롤링·플레이스 365 관리 (관리자 전용 · 공용 권한 승인) ───── */}

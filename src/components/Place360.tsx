@@ -1124,7 +1124,7 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "9px 13px", background: M.soft }}><b style={{ fontSize: 12.5 }}>{resolving && <span className="p360-live" />}📟 작업 로그</b><span style={{ fontSize: 11, fontWeight: 900, color: M.rose }}>{resolving ? "진행 중" : `${scanPct}%`}</span></div>
             <div className="p360-help" style={{ margin: "8px 13px 0" }}><span>💬</span><span>매장 검사·순위 측정·업체 발굴이 <b>지금 어디까지 됐는지</b> 실시간으로 보여줘요. 문제가 생기면 여기 마지막 줄을 확인하세요.</span></div>
             <div style={{ height: 5, background: "#0b1220" }}><div style={{ width: `${scanPct}%`, height: "100%", background: `linear-gradient(90deg,${M.rose},${M.amber})`, transition: "width .3s" }} /></div>
-            <div style={{ minHeight: 150, maxHeight: 300, overflowY: "auto", padding: "12px 14px", background: "#050a0f", fontFamily: "'JetBrains Mono',monospace", fontSize: 11.5, lineHeight: 1.85 }}>
+            <div style={{ minHeight: "min(68vh, 620px)", maxHeight: "82vh", overflowY: "auto", padding: "14px 16px", background: "#050a0f", fontFamily: "'JetBrains Mono',monospace", fontSize: 12.5, lineHeight: 1.9 }}>
               {scanLog.length === 0 ? <span style={{ color: "#3a5a7a" }}>대기 중... 링크를 넣고 불러오기를 누르면 진행 상황이 여기 나와요.</span> : scanLog.map((l, i) => <div key={i} style={{ color: i === scanLog.length - 1 ? "#34e0b8" : "#8fb3c9" }}>{l}</div>)}
             </div>
           </section>
