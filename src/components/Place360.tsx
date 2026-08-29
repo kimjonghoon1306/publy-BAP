@@ -276,6 +276,31 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
     const oldest = rows.length ? rows[rows.length - 1].measured_at : null;
     return { rows, dayCount: days.size, kwCount: kws.size, total: rows.length, oldest };
   }, [rankHistory]);
+  // 🔬 키워드 처방전: 순위 잰 키워드별로 '왜 이 순위인지 + 올리는 법'을 자동 분석
+  //   A) 키워드가 소개글·대표키워드·메뉴·상호에 들어있나(관련도) B) 경쟁사 대비 부족 C) 상위밖 여부
+  const keywordRx = useMemo(() => {
+    const measured = trackedKeywords.map(kw => rankHistory.find(r => r.keyword === kw)).filter(Boolean) as Place360RankMeasurement[];
+    if (!measured.length || !livePlace) return [];
+    const desc = (livePlace.description || "").toLowerCase();
+    const kwText = (livePlace.keywords || []).join(" ").toLowerCase();
+    const menuText = (livePlace.menus || []).map(m => m.name).join(" ").toLowerCase();
+    const nameText = (livePlace.name || profile.name || "").toLowerCase();
+    // 검색어의 핵심 토큰(2글자↑)이 각 영역에 있나
+    return measured.map(m => {
+      const rank = m.rank; const kw = m.keyword;
+      const tokens = kw.toLowerCase().split(/\s+/).filter(t => t.length >= 2);
+      const inField = (text: string) => tokens.some(t => text.includes(t));
+      const isBrand = nameText && tokens.some(t => nameText.includes(t) && t.length >= 2);
+      const checks = [
+        { ok: inField(desc), label: "소개글", how: "스마트플레이스 소개글에 이 검색어를 자연스럽게 넣으세요." },
+        { ok: inField(kwText) || (livePlace.keywords || []).length >= 3, label: "대표 키워드", how: "대표 키워드에 이 검색어를 추가하세요." },
+        { ok: inField(menuText), label: "메뉴", how: "관련 메뉴명을 등록하면 관련도가 올라가요." },
+      ];
+      const missing = checks.filter(c => !c.ok);
+      const blogGap = comparison ? Math.max(0, (comparison.avgBlog) - (ownPlace?.blogReviewCount || 0)) : 0;
+      return { kw, rank, isBrand, checks, missing, blogGap, out: rank == null };
+    }).sort((a, b) => (a.rank ?? 999) - (b.rank ?? 999));
+  }, [trackedKeywords, rankHistory, livePlace, comparison, ownPlace, profile.name]);
   const storeKey = place360StoreKey(profile.name, profile.region);
   const [completedMissions, setCompletedMissions] = useState<string[]>(() => loadCompletedMissions(userId, storeKey));
   const [reviewerHandoffCount, setReviewerHandoffCount] = useState(0);
@@ -1187,6 +1212,26 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
               })()}
             </section>;
           })()}
+
+          {/* 🔬 키워드 처방전 — 순위 잰 키워드별 '왜 이 순위인지 + 올리는 법' */}
+          {keywordRx.length > 0 && <section className="p360-card" style={{ padding: 16 }}>
+            <b style={{ fontSize: 13 }}>🔬 키워드 처방전</b>
+            <div className="p360-help"><span>💬</span><span>같은 매장인데 <b>키워드마다 순위가 다른 이유</b>를 짚어드려요. 상호명 검색은 원래 1위고, 일반 검색어는 <b>소개글·대표키워드·메뉴에 그 단어가 있는지</b>와 리뷰 양이 순위를 갈라요. 아래 부족한 곳을 채우면 올라가요.</span></div>
+            <div style={{ display: "grid", gap: 9, marginTop: 4 }}>{keywordRx.map(r => {
+              const rc = r.rank == null ? M.pink : r.rank <= 3 ? M.green : r.rank <= 10 ? M.amber : M.pink;
+              return <div key={r.kw} style={{ padding: 12, borderRadius: 12, background: M.soft, borderLeft: `5px solid ${rc}` }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 7, flexWrap: "wrap" }}>
+                  <b style={{ fontSize: 12.5 }}>🔍 {r.kw}</b>
+                  <span style={{ fontSize: 12, fontWeight: 900, color: rc }}>{r.rank == null ? "상위 밖" : `${r.rank}위`}</span>
+                  {r.isBrand && <span style={{ fontSize: 9.5, fontWeight: 800, color: M.green, background: `${M.green}16`, borderRadius: 99, padding: "2px 7px" }}>내 상호 검색</span>}
+                </div>
+                {r.isBrand ? <p style={{ margin: "6px 0 0", fontSize: 11, color: M.sub, lineHeight: 1.5 }}>내 가게 이름 검색이라 경쟁자가 없어요. 1위가 정상이에요 👍</p> : <>
+                  <div style={{ display: "flex", gap: 5, flexWrap: "wrap", margin: "7px 0 6px" }}>{r.checks.map(c => <span key={c.label} style={{ fontSize: 9.5, fontWeight: 800, padding: "2px 8px", borderRadius: 99, background: c.ok ? `${M.green}14` : `${M.pink}14`, color: c.ok ? M.green : M.pink, border: `1px solid ${c.ok ? M.green : M.pink}44` }}>{c.ok ? "✓" : "✗"} {c.label}</span>)}</div>
+                  <div style={{ fontSize: 11, color: M.text, lineHeight: 1.55 }}>👉 {r.missing.length ? <>이 검색어가 <b style={{ color: M.pink }}>{r.missing.map(c => c.label).join("·")}</b>에 없어요. {r.missing[0].how} </> : "정보엔 잘 반영됐어요. "}{r.blogGap > 0 ? <>블로그 리뷰가 주변보다 <b>{r.blogGap}개</b> 적으니 <button onClick={() => setDiscoveryOpen(true)} style={{ border: "none", background: "transparent", color: M.rose, fontWeight: 800, cursor: "pointer", padding: 0, fontSize: 11 }}>리뷰어 찾기</button>로 채우세요.</> : "리뷰도 충분해요."}</div>
+                </>}
+              </div>;
+            })}</div>
+          </section>}
 
           {/* 검은 작업 로그 */}
           <section className="p360-card" style={{ overflow: "hidden" }}>
