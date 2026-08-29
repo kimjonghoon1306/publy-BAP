@@ -155,12 +155,12 @@ function normalizeCsvHeader(value: string) {
 }
 
 export default function Place360({ showToast, theme = "light", userId, plan = "free", onOpenCrawl }: Props) {
-  // ★블로그지수처럼 '단일 자동 흐름'으로 통합: 6개 탭을 한 페이지에 모두 렌더하고
-  //   기존 setTab(x) 네비게이션은 해당 섹션으로 부드럽게 스크롤하는 '점프'로 동작하게 한다.
+  // 단일 흐름: 기존 setTab(x) 호출은 해당 섹션으로 스크롤하는 점프로 동작(탭 없음).
   const [tab, setTabState] = useState<Place360Tab>("overview");
   const setTab = useCallback((t: Place360Tab) => {
     setTabState(t);
-    if (typeof document !== "undefined") setTimeout(() => document.getElementById(`p360-sec-${t}`)?.scrollIntoView({ behavior: "smooth", block: "start" }), 40);
+    const map: Record<string, string> = { rank: "p360-rank", data: "p360-pos", diagnosis: "p360-rank", discovery: "p360-discovery" };
+    const id = map[t]; if (id && typeof document !== "undefined") setTimeout(() => document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" }), 40);
   }, []);
   const [profiles, setProfiles] = useState<StoreProfile[]>(() => loadProfiles(userId));
   const [profile, setProfile] = useState<StoreProfile>(() => loadSelectedProfile(userId));
@@ -271,7 +271,7 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
   const [reviewerHandoffCount, setReviewerHandoffCount] = useState(0);
   const [businessMetrics, setBusinessMetrics] = useState<BusinessMetricDraft>(EMPTY_BUSINESS_METRICS);
   // 🏪 손님 행동 신호 입력(저장·길찾기) — 공개 화면에 없어 사장님이 스마트플레이스 통계에서 확인해 넣는 값. DB 없이 매장별 localStorage에 보관.
-  const [behaviorInput, setBehaviorInput] = useState<{ saves: number; directions: number }>({ saves: 0, directions: 0 });
+  const [behaviorInput, setBehaviorInput] = useState<{ saves: number; directions: number; shares: number }>({ saves: 0, directions: 0, shares: 0 });
   const [metricsSavedAt, setMetricsSavedAt] = useState("");
   const [metricsLoading, setMetricsLoading] = useState(false);
   const csvInputRef = useRef<HTMLInputElement | null>(null);
@@ -280,7 +280,7 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
     setCompletedMissions(localMissions);
     setReviewerHandoffCount(Number(localStorage.getItem(`${missionKey(userId, storeKey)}:reviewers`) || 0));
     // 🏪 손님 행동 입력(저장·길찾기) 매장별 복원
-    try { const b = JSON.parse(localStorage.getItem(`${missionKey(userId, storeKey)}:behavior`) || "null"); setBehaviorInput(b && typeof b === "object" ? { saves: Number(b.saves) || 0, directions: Number(b.directions) || 0 } : { saves: 0, directions: 0 }); } catch { setBehaviorInput({ saves: 0, directions: 0 }); }
+    try { const b = JSON.parse(localStorage.getItem(`${missionKey(userId, storeKey)}:behavior`) || "null"); setBehaviorInput(b && typeof b === "object" ? { saves: Number(b.saves) || 0, directions: Number(b.directions) || 0, shares: Number(b.shares) || 0 } : { saves: 0, directions: 0, shares: 0 }); } catch { setBehaviorInput({ saves: 0, directions: 0, shares: 0 }); }
     if (!storeKey || plan === "admin") return;
     let active = true;
     getPlace360Progress(storeKey).then(async row => {
@@ -476,6 +476,7 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
       (() => { const saves = src.savedCount ?? behaviorInput.saves; const auto = src.savedCount != null; return { key: "save", icon: "💾", label: "저장하기(찜) 수", status: saves > 0 ? "good" : "input", value: saves > 0 ? `${saves.toLocaleString()}회${auto ? " (자동)" : ""}` : "직접 입력 필요", why: "저장은 '나중에 갈 집' 신호라 순위에 가장 강하게 반영돼요.", how: auto ? "링크에서 자동으로 가져왔어요. 재방문 고객에게 '저장해두면 편해요'라고 정직하게 안내하면 더 늘어요." : "네이버 스마트플레이스 앱 → 통계에서 최근 저장수를 확인해 아래 손님 행동 입력칸에 넣으세요.", action: "손님 행동 입력하기", go: "data" as Place360Tab }; })(),
       { key: "reserve", icon: "📅", label: "예약·주문·톡톡", status: (src.bookingAvailable || src.hasTalktalk) ? "good" : "bad", value: [src.bookingAvailable ? "예약/주문" : "", src.hasTalktalk ? "톡톡" : ""].filter(Boolean).join(" · ") || "미연결", why: "예약·주문·톡톡은 방문으로 바로 이어지는 행동이라 순위에 크게 반영돼요. 연결만 해도 노출·전환이 같이 올라가요.", how: (src.bookingAvailable || src.hasTalktalk) ? "이미 연결됐어요. 예약 화면 사진·안내 문구를 최신으로 유지하세요." : "스마트플레이스에서 네이버 예약/주문 또는 톡톡을 켜서 손님이 앱에서 바로 예약하게 하세요.", action: "고객 화면 보기", go: "discovery" },
       { key: "directions", icon: "🧭", label: "길찾기·재방문", status: behaviorInput.directions > 0 ? "good" : "input", value: behaviorInput.directions > 0 ? `${behaviorInput.directions.toLocaleString()}회` : "직접 입력 필요", why: "길찾기와 재방문은 '진짜 가는 손님' 신호예요. 반복될수록 충성도 높은 매장으로 읽혀 순위가 올라가요.", how: "스마트플레이스 통계의 길찾기 수를 아래 입력칸에 넣으세요. 재방문은 단골 혜택·새 소식으로 다시 올 이유를 만들어요.", action: "손님 행동 입력하기", go: "data" },
+      { key: "share", icon: "🔗", label: "공유 수", status: behaviorInput.shares > 0 ? "good" : "input", value: behaviorInput.shares > 0 ? `${behaviorInput.shares.toLocaleString()}회` : "직접 입력 필요", why: "공유는 입소문 확산 신호예요. 손님이 친구에게 보낼수록 도달이 넓어져 노출에 도움돼요.", how: "스마트플레이스 통계의 공유 수를 아래 입력칸에 넣으세요. 이벤트·특별메뉴는 공유를 자연스럽게 유도해요.", action: "손님 행동 입력하기", go: "data" },
     ];
 
     // B. 리뷰 — 퍼블리가 직접 채우는 핵심 지렛대
@@ -511,14 +512,14 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
     const score = Math.round(goodCount / all.length * 100);
     // ★ 별점: 항목 상태→별(good 5·warn 3·bad 1·input 2) × 서치 근거 가중치(영수증리뷰·저장 최고). 종합=가중평균(5점)
     const itemStar = (i: ReportItem): number => i.status === "good" ? 5 : i.status === "warn" ? 3 : i.status === "input" ? 2 : 1;
-    const WEIGHT: Record<string, number> = { visitor: 5, save: 5, blog: 4, directions: 4, kw: 4, reserve: 3, photo: 3, menu: 3, hours: 2, conv: 2, news: 2, desc: 3 };
+    const WEIGHT: Record<string, number> = { visitor: 5, save: 5, blog: 4, directions: 4, kw: 4, reserve: 3, photo: 3, menu: 3, share: 3, hours: 2, conv: 2, news: 2, desc: 3 };
     let ws = 0, wsum = 0;
     for (const i of all) { const w = WEIGHT[i.key] ?? 2; ws += itemStar(i) * w; wsum += 5 * w; }
     const overallStars = Math.round((ws / wsum) * 5 * 10) / 10;   // 0.0~5.0
     return { groups, score, goodCount, totalCount: all.length, overallStars, itemStar };
   }, [livePlace, ownPlace, comparison, trackedKeywords, behaviorInput]);
 
-  const updateBehavior = (patch: Partial<{ saves: number; directions: number }>) => {
+  const updateBehavior = (patch: Partial<{ saves: number; directions: number; shares: number }>) => {
     setBehaviorInput(prev => {
       const next = { ...prev, ...patch };
       if (storeKey) { try { localStorage.setItem(`${missionKey(userId, storeKey)}:behavior`, JSON.stringify(next)); } catch {} }
@@ -916,7 +917,7 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
     { i: "📖", l: "소개글", v: livePlace.description ? `${livePlace.description.length}자` : "없음", c: livePlace.description ? colors.green : colors.pink, d: "검색·AI가 ‘어떤 집인지’ 이해하는 근거." },
     { i: "📞", l: "전화", v: livePlace.phone ? "있음" : "없음", c: livePlace.phone ? colors.green : colors.pink, d: "정보 신뢰도. 없으면 헛걸음·이탈." },
     { i: "🎯", l: "대표 키워드", v: `${livePlace.keywords?.length || 0}`, c: colors.purple, d: "손님이 많이 남긴 키워드. 노릴 검색어 힌트." },
-    { i: "🔗", l: "공유", v: (behaviorInput as any).shares || "입력", c: colors.sub, d: "공개 화면에 없어 통계에서 직접 입력. 확산 신호." },
+    { i: "🔗", l: "공유", v: behaviorInput.shares || "입력", c: colors.sub, d: "공개 화면에 없어 통계에서 직접 입력. 확산 신호." },
     { i: "🧭", l: "길찾기", v: behaviorInput.directions || "입력", c: colors.sub, d: "공개 화면에 없어 통계에서 직접 입력. 실방문 신호." },
   ] : [];
 
@@ -1146,9 +1147,10 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
             <section className="p360-card" style={{ padding: 16, borderColor: `${M.amber}44`, borderWidth: 2 }}>
               <div style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "4px 10px", borderRadius: 99, background: M.amber, color: dark ? "#2b2620" : "#fff", fontSize: 11, fontWeight: 950 }}>✏️ 손님 행동 직접 입력</div>
               <p style={{ margin: "8px 0 10px", color: M.sub, fontSize: 11, lineHeight: 1.55 }}>저장·길찾기 수는 공개 화면에 없어요. 스마트플레이스 앱 → 통계에서 확인해 넣으면 위 별점에 반영돼요.</p>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-                <label><b style={{ display: "block", fontSize: 11.5, marginBottom: 5 }}>💾 저장하기 수</b><input inputMode="numeric" type="number" min={0} value={behaviorInput.saves || ""} onChange={e => updateBehavior({ saves: Number(e.target.value) || 0 })} placeholder="예: 128" className="p360-in" /></label>
-                <label><b style={{ display: "block", fontSize: 11.5, marginBottom: 5 }}>🧭 길찾기 수</b><input inputMode="numeric" type="number" min={0} value={behaviorInput.directions || ""} onChange={e => updateBehavior({ directions: Number(e.target.value) || 0 })} placeholder="예: 64" className="p360-in" /></label>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10 }}>
+                <label><b style={{ display: "block", fontSize: 11.5, marginBottom: 5 }}>💾 저장하기</b><input inputMode="numeric" type="number" min={0} value={behaviorInput.saves || ""} onChange={e => updateBehavior({ saves: Number(e.target.value) || 0 })} placeholder="예: 128" className="p360-in" /></label>
+                <label><b style={{ display: "block", fontSize: 11.5, marginBottom: 5 }}>🧭 길찾기</b><input inputMode="numeric" type="number" min={0} value={behaviorInput.directions || ""} onChange={e => updateBehavior({ directions: Number(e.target.value) || 0 })} placeholder="예: 64" className="p360-in" /></label>
+                <label><b style={{ display: "block", fontSize: 11.5, marginBottom: 5 }}>🔗 공유</b><input inputMode="numeric" type="number" min={0} value={behaviorInput.shares || ""} onChange={e => updateBehavior({ shares: Number(e.target.value) || 0 })} placeholder="예: 20" className="p360-in" /></label>
               </div>
             </section>
 
