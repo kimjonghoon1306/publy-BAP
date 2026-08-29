@@ -508,7 +508,9 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
     // B. 리뷰 — 퍼블리가 직접 채우는 핵심 지렛대
     const reviews: ReportItem[] = [
       { key: "blog", icon: "📝", label: "블로그 리뷰", status: avgBlog > 0 ? (blog >= avgBlog ? "good" : blog >= avgBlog * 0.6 ? "warn" : "bad") : (blog >= 30 ? "good" : blog >= 10 ? "warn" : "bad"), value: `${blog.toLocaleString()}개${avgBlog ? ` (주변 평균 ${avgBlog.toLocaleString()})` : ""}`, why: "블로그 리뷰는 상위노출의 가장 큰 지렛대예요. 방문자 리뷰와 같은 키워드로 묶이면 노출 범위가 넓어져요. ★퍼블리가 제일 잘하는 부분!", how: avgBlog && blog < avgBlog ? `주변보다 ${Math.max(0, avgBlog - blog).toLocaleString()}개 적어요. 퍼블리 글쓰기로 리뷰 글을 발행하고, 리뷰어 찾기로 블로거를 섭외하세요.` : "지금 수준을 유지하되, 최근 30일 새 리뷰가 꾸준한지 확인하세요.", action: "리뷰어 찾기 →", go: "discovery" },
-      { key: "visitor", icon: "🧾", label: "방문자(영수증) 리뷰", status: avgVisitor > 0 ? (visitor >= avgVisitor ? "good" : visitor >= avgVisitor * 0.6 ? "warn" : "bad") : (visitor >= 50 ? "good" : visitor >= 15 ? "warn" : "bad"), value: `${visitor.toLocaleString()}개${avgVisitor ? ` (주변 평균 ${avgVisitor.toLocaleString()})` : ""}${src.visitorReviewScore ? ` · ⭐${src.visitorReviewScore}` : ""}`, why: "방문자 리뷰의 '양+최신성'이 중요해요. 오래된 리뷰만 있으면 '식은 가게'로 읽혀 순위가 내려가요.", how: "결제 후 영수증 리뷰 안내가 손님 눈높이에 보이는지 확인하세요. 과한 보상 없이 정직하게 유도해야 안전해요(조작은 즉시 적발).", action: "방문자 리뷰 진단", go: "diagnosis" },
+      { key: "visitor", icon: "🧾", label: "방문자(영수증) 리뷰", status: avgVisitor > 0 ? (visitor >= avgVisitor ? "good" : visitor >= avgVisitor * 0.6 ? "warn" : "bad") : (visitor >= 50 ? "good" : visitor >= 15 ? "warn" : "bad"), value: `${visitor.toLocaleString()}개${avgVisitor ? ` (주변 평균 ${avgVisitor.toLocaleString()})` : ""}${src.visitorReviewScore ? ` · ⭐${src.visitorReviewScore}` : ""}`, why: "방문자 리뷰의 '양+최신성'이 중요해요. 오래된 리뷰만 있으면 '식은 가게'로 읽혀 순위가 내려가요.", how: "결제 후 영수증 리뷰 안내가 손님 눈높이에 보이는지 확인하세요. 과한 보상 없이 정직하게 유도해야 안전해요(조작은 즉시 적발).", action: "고객 화면 보기", go: "discovery" },
+      { key: "freshness", icon: "🕒", label: "리뷰 최신성", status: "warn", value: "직접 확인", why: "네이버는 '최근 리뷰'를 크게 봐요. 3년 전 리뷰 100개보다 최근 한 달 리뷰 10개가 더 무겁게 평가돼요. 오래된 리뷰만 있으면 '식은 가게'로 밀려요.", how: "고객 화면에서 최근 30일 안에 새 리뷰가 있는지 보세요. 없으면 재방문 고객에게 영수증 리뷰를 정직하게 유도하세요.", action: "고객 화면 보기", go: "discovery" },
+      { key: "reply", icon: "💬", label: "리뷰 답변", status: "warn", value: "직접 확인", why: "사장님이 리뷰에 답변을 달면 네이버가 '활발히 관리하는 가게'로 봐서 노출에 도움돼요. 불만 리뷰에 정중히 답하면 신뢰도 올라가요.", how: "스마트플레이스에서 최근 리뷰에 답변이 달렸는지 확인하고, 안 단 리뷰에 감사·안내 답변을 남기세요.", action: "고객 화면 보기", go: "discovery" },
     ];
 
     // C. 정보 완성도 — 필수조건(경쟁사 이상으로)
@@ -527,22 +529,32 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
       { key: "kw", icon: "🎯", label: "노릴 키워드", status: kwCount >= 3 ? "good" : kwCount >= 1 ? "warn" : "bad", value: `${kwCount}개 설정`, why: "'역명+메뉴+상황' 같은 좁은 키워드 3~5개를 정해 집중해야 상위노출이 현실적이에요. 넓은 키워드는 경쟁이 너무 세요.", how: (autoKw.length ? `손님이 많이 남긴 키워드: ${autoKw.slice(0, 6).join(", ")}. ` : "") + (kwCount < 3 ? "이 중 좁은 키워드 3~5개를 골라 순위를 측정하세요." : "좋아요. 키워드별 순위를 주기적으로 재측정하세요."), action: "키워드·순위 보기", go: "rank" },
     ];
 
+    // E. 순위 하락·페널티 자가진단 (안내형: 조작·어뷰징이 순위를 떨어뜨림)
+    const penalty: ReportItem[] = [
+      { key: "pen_traffic", icon: "🚫", label: "허위 트래픽·저장 조작", status: "warn", value: "확인 필요", why: "몇 초마다 방문·특정 검색어로만 방문·체류 0초 같은 인위적 패턴은 네이버가 즉시 감지해 순위를 급락시켜요. 대행사 '리워드 트래픽'도 위험해요.", how: "트래픽·저장수를 돈 주고 늘리는 업체를 쓰고 있다면 중단하세요. 실제 손님 행동만 순위에 안전하게 반영돼요.", action: undefined, go: undefined },
+      { key: "pen_review", icon: "⚠️", label: "리뷰 이벤트·대가성 리뷰", status: "warn", value: "확인 필요", why: "과한 보상을 걸고 리뷰를 몰아 받으면 어뷰징으로 걸려 노출에서 빠질 수 있어요. 짧은 시간에 비슷한 리뷰가 쏟아지는 것도 위험 신호예요.", how: "리뷰는 자연스럽게·꾸준히 받으세요. '리뷰 쓰면 서비스' 정도의 가벼운 안내는 괜찮지만 현금·상품권 남발은 피하세요.", action: undefined, go: undefined },
+      { key: "pen_info", icon: "🔀", label: "정보 불일치·잦은 변경", status: "warn", value: "확인 필요", why: "상호·주소·업종이 실제와 다르거나 대표 키워드를 자주 바꾸면 신뢰도가 떨어져 순위가 흔들려요.", how: "간판·사업자등록과 일치하게 맞추고, 대표 키워드는 정한 뒤 자주 바꾸지 마세요.", action: "고객 화면 보기", go: "discovery" },
+    ];
+
     const groups: ReportGroup[] = [
       { title: "① 손님 행동 신호", subtitle: "저장·예약·길찾기 — 순위에 가장 크게 반영", weight: "가장 중요", items: behavior },
       { title: "② 리뷰", subtitle: "블로그·방문자 리뷰 (퍼블리로 채우는 핵심)", weight: "매우 중요", items: reviews },
       { title: "③ 정보 완성도", subtitle: "사진·메뉴·영업시간·편의시설 (필수 기본)", weight: "기본 필수", items: info },
       { title: "④ 키워드 전략", subtitle: "좁은 지역 키워드 3~5개 집중", weight: "방향 설정", items: keyword },
+      { title: "⑤ 순위 하락·페널티 자가진단", subtitle: "조작·어뷰징이 순위를 떨어뜨려요", weight: "주의", items: penalty },
     ];
     const all = groups.flatMap(g => g.items);
-    const goodCount = all.filter(i => i.status === "good").length;
-    const score = Math.round(goodCount / all.length * 100);
     // ★ 별점: 항목 상태→별(good 5·warn 3·bad 1·input 2) × 서치 근거 가중치(영수증리뷰·저장 최고). 종합=가중평균(5점)
     const itemStar = (i: ReportItem): number => i.status === "good" ? 5 : i.status === "warn" ? 3 : i.status === "input" ? 2 : 1;
     const WEIGHT: Record<string, number> = { visitor: 5, save: 5, blog: 4, directions: 4, kw: 4, reserve: 3, photo: 3, menu: 3, share: 3, hours: 2, conv: 2, news: 2, desc: 3 };
+    // 안내형(페널티·최신성·답변)은 점수에서 제외 — WEIGHT에 있는 항목만 채점
+    const scored = all.filter(i => WEIGHT[i.key] != null);
+    const goodCountScored = scored.filter(i => i.status === "good").length;
+    const score = scored.length ? Math.round(goodCountScored / scored.length * 100) : 0;
     let ws = 0, wsum = 0;
-    for (const i of all) { const w = WEIGHT[i.key] ?? 2; ws += itemStar(i) * w; wsum += 5 * w; }
-    const overallStars = Math.round((ws / wsum) * 5 * 10) / 10;   // 0.0~5.0
-    return { groups, score, goodCount, totalCount: all.length, overallStars, itemStar };
+    for (const i of scored) { const w = WEIGHT[i.key]; ws += itemStar(i) * w; wsum += 5 * w; }
+    const overallStars = wsum ? Math.round((ws / wsum) * 5 * 10) / 10 : 0;   // 0.0~5.0
+    return { groups, score, goodCount: goodCountScored, totalCount: scored.length, overallStars, itemStar };
   }, [livePlace, ownPlace, comparison, trackedKeywords, behaviorInput]);
 
   const updateBehavior = (patch: Partial<{ saves: number; directions: number; shares: number }>) => {
@@ -1299,6 +1311,14 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
                 <button className="p360-btn" onClick={() => { if (window.confirm(`추적 키워드 ${trackedKeywords.length}개를 모두 지울까요?`)) persistKeywords([]); }} style={{ marginLeft: "auto", minHeight: 34, padding: "7px 12px", fontSize: 11.5, background: "transparent", color: M.sub, border: `1px solid ${M.line}` }}>전체 삭제</button>
               </div>}
               <div style={{ display: "grid", gap: 7 }}>{trackedKeywords.length === 0 ? <p style={{ color: M.sub, fontSize: 11.5 }}>추천 키워드를 누르거나 검색어를 추가하세요.</p> : trackedKeywords.map(kw => { const last = rankHistory.find(r => r.keyword === kw); const chk = checkingKeyword === kw; const spark = kwSpark(kw); return <div key={kw} style={{ display: "grid", gridTemplateColumns: "1fr auto auto auto", alignItems: "center", gap: 8, padding: "9px 11px", borderRadius: 11, background: M.soft, border: `1px solid ${M.line}` }}><div style={{ minWidth: 0 }}><b style={{ fontSize: 12.5, overflowWrap: "anywhere" }}>{kw}</b>{last ? <span style={{ marginLeft: 6, fontSize: 11, fontWeight: 900, color: last.rank ? M.green : M.amber }}>{last.rank ? `${last.rank}위` : "상위 밖"}</span> : <span style={{ marginLeft: 6, fontSize: 10.5, color: M.sub }}>미확인</span>}</div>{spark || <span style={{ width: 56 }} />}<button className="p360-btn" disabled={Boolean(checkingKeyword)} onClick={() => checkKeywordRank(kw)} style={{ minHeight: 34, padding: "6px 11px", fontSize: 11.5, background: chk ? M.card : M.rose, color: chk ? M.sub : "#fff", border: chk ? `1px solid ${M.line}` : "none" }}>{chk ? "확인 중…" : "순위 확인"}</button><button onClick={() => persistKeywords(trackedKeywords.filter(x => x !== kw))} style={{ border: "none", background: "transparent", color: M.sub, cursor: "pointer", fontSize: 15 }}>×</button></div>; })}</div>
+              {/* 🏅 이 검색의 상위 업체(경쟁사 순위 노출) — 순위 확인하면 함께 수집된 업체 목록 */}
+              {collectedPlaces.length > 1 && (() => {
+                const ranked = [...collectedPlaces].sort((a, b) => (b.visitorReviewCount || 0) - (a.visitorReviewCount || 0)).slice(0, 8);
+                return <div style={{ marginTop: 12, paddingTop: 12, borderTop: `1px solid ${M.line}` }}>
+                  <div className="p360-help" style={{ margin: "0 0 8px" }}><span>🏅</span><span><b>이 검색 화면에 뜨는 업체들</b>이에요. 내 매장을 이기려면 이들의 리뷰·저장을 넘어서야 해요.</span></div>
+                  <div style={{ display: "grid", gap: 5 }}>{ranked.map((p, i) => { const mine = p.placeId === ownPlace?.placeId; return <div key={p.placeId} style={{ display: "grid", gridTemplateColumns: "24px 1fr auto auto", alignItems: "center", gap: 8, padding: "7px 10px", borderRadius: 9, background: mine ? `${M.rose}12` : M.soft, border: `1px solid ${mine ? M.rose : M.line}` }}><b style={{ fontSize: 11.5, color: i === 0 ? M.amber : M.sub }}>{i + 1}</b><span style={{ fontSize: 11.5, fontWeight: mine ? 900 : 600, color: mine ? M.rose : M.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.name}{mine ? " (내 매장)" : ""}</span><span style={{ fontSize: 10, color: M.sub }}>🧾{(p.visitorReviewCount || 0).toLocaleString()}</span><span style={{ fontSize: 10, color: M.sub }}>📝{(p.blogReviewCount || 0).toLocaleString()}</span></div>; })}</div>
+                </div>;
+              })()}
             </section>
 
             {/* 📊 성과 리포트: 일/주/월/기간설정 */}
