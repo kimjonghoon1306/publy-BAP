@@ -1068,7 +1068,8 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
         ];
         const doneN = steps.filter(s => s.done).length;
         return <section className="p360-card" style={{ padding: "12px 16px" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 9 }}><b style={{ fontSize: 12.5 }}>🧭 진행 단계</b><span style={{ fontSize: 10.5, color: M.sub }}>{doneN}/{steps.length} 완료</span><div style={{ marginLeft: "auto", flex: "0 0 120px", height: 6, borderRadius: 99, background: M.soft, overflow: "hidden" }}><div style={{ width: `${doneN / steps.length * 100}%`, height: "100%", background: `linear-gradient(90deg,${M.rose},${M.green})`, transition: "width .4s" }} /></div></div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}><b style={{ fontSize: 12.5 }}>🧭 진행 단계</b><span style={{ fontSize: 10.5, color: M.sub }}>{doneN}/{steps.length} 완료</span><div style={{ marginLeft: "auto", flex: "0 0 120px", height: 6, borderRadius: 99, background: M.soft, overflow: "hidden" }}><div style={{ width: `${doneN / steps.length * 100}%`, height: "100%", background: `linear-gradient(90deg,${M.rose},${M.green})`, transition: "width .4s" }} /></div></div>
+          <div className="p360-help" style={{ margin: "0 0 9px" }}><span>💬</span><span>상위노출까지 <b>지금 어느 단계</b>인지 보여줘요. 왼쪽부터 순서대로 하면 돼요.</span></div>
           <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>{steps.map((s, i) => <span key={s.k} style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "6px 11px", borderRadius: 99, fontSize: 11, fontWeight: 800, background: s.done ? `${M.green}14` : M.soft, color: s.done ? M.green : M.sub, border: `1px solid ${s.done ? M.green : M.line}` }}>{s.done ? "✓" : i + 1} {s.k}</span>)}</div>
         </section>;
       })()}
@@ -1149,6 +1150,7 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
                   <span style={{ fontSize: 11.5, color: M.sub, fontWeight: 800 }}>{placeReport.totalCount}개 중 {placeReport.goodCount}개 양호</span>
                   {currentRank && <span style={{ marginLeft: "auto", fontSize: 13, fontWeight: 900, color: M.rose }}>“{currentRank.query}” {currentRank.rank ? `${currentRank.rank}위` : "상위 밖"}</span>}
                 </div>
+                <div className="p360-help" style={{ margin: "8px 0 0" }}><span>💬</span><span>매장의 <b>상위노출 준비 상태를 별점</b>으로 요약했어요. 저장·리뷰·정보 완성도 등을 종합한 점수예요. 아래에서 항목별로 자세히 볼 수 있어요.</span></div>
               </div>
               {/* 🔔 순위 급변 알림 */}
               {rankAlerts.length > 0 && <div style={{ display: "grid", gap: 6, padding: "10px 16px 0" }}>{rankAlerts.map(a => { const good = a.up; const c = good ? M.green : M.pink; return <div key={a.keyword} style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 12px", borderRadius: 11, background: `${c}12`, border: `1px solid ${c}44`, animation: "p360slide .3s ease both" }}><span style={{ fontSize: 16 }}>{a.entered ? "🎉" : good ? "🚀" : "⚠️"}</span><b style={{ fontSize: 12, color: M.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{a.keyword}</b><span style={{ marginLeft: "auto", fontSize: 12, fontWeight: 900, color: c }}>{a.entered ? `검색 진입 · ${a.to}위` : good ? `▲ ${a.delta}계단 상승 (${a.from}→${a.to}위)` : `▼ ${Math.abs(a.delta)}계단 하락 (${a.from}→${a.to}위)`}</span></div>; })}</div>}
