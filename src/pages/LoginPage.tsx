@@ -367,6 +367,11 @@ export default function LoginPage({ onLogin, onAdminLogin, theme, onThemeToggle 
   const [pw, setPw] = useState("");
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
+  // 브라우저 자동완성이 onChange를 안 쏘면 state가 비어 "연락처 필수" 오류가 남 → 제출 시 입력창 실제값(DOM)으로 보정
+  const emailRef = useRef<HTMLInputElement>(null);
+  const pwRef = useRef<HTMLInputElement>(null);
+  const nameRef = useRef<HTMLInputElement>(null);
+  const phoneRef = useRef<HTMLInputElement>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [refCode, setRefCode] = useState("");
@@ -425,19 +430,32 @@ export default function LoginPage({ onLogin, onAdminLogin, theme, onThemeToggle 
   }
 
   async function handleSubmit() {
-    if (!email || !pw) { setError("이메일과 비밀번호를 입력하세요"); return; }
+    // ★자동완성으로 채워도 onChange가 안 불려 state가 빈 경우가 있다 → 입력창 실제값(DOM)으로 보정 후 그 값으로 검증/전송.
+    const emailV = (email.trim() || emailRef.current?.value.trim() || "");
+    const pwV = (pw || pwRef.current?.value || "");
+    const nameV = (name.trim() || nameRef.current?.value.trim() || "");
+    const phoneV = (phone.trim() || phoneRef.current?.value.trim() || "");
+    // 보정값을 화면 상태에도 반영(다음 렌더에서 일관되게 보이도록)
+    if (emailV !== email) setEmail(emailV);
+    if (pwV !== pw) setPw(pwV);
+    if (nameV !== name) setName(nameV);
+    if (phoneV !== phone) setPhone(phoneV);
+
+    if (!emailV || !pwV) { setError("이메일과 비밀번호를 입력하세요"); return; }
     if (mode === "register") {
-      if (!name) { setError("이름을 입력하세요"); return; }
-      if (!phone.trim()) { setError("연락처는 필수 입력 항목이에요\n이메일/비밀번호 찾기에 사용됩니다 📱"); return; }
-      if (!/^01[0-9]-?\d{3,4}-?\d{4}$/.test(phone.replace(/\s/g,""))) {
-        setError("올바른 연락처 형식으로 입력해주세요\n예: 010-1234-5678"); return;
+      if (!nameV) { setError("이름을 입력하세요"); return; }
+      if (!phoneV) { setError("연락처는 필수 입력 항목이에요\n이메일/비밀번호 찾기에 사용됩니다 📱"); return; }
+      // 형식은 넉넉하게: 숫자만 남겨 010/011 등으로 시작하는 10~11자리면 통과(대시·공백·+82 허용)
+      const digits = phoneV.replace(/\D/g, "").replace(/^82/, "0");
+      if (!/^01[0-9]\d{7,8}$/.test(digits)) {
+        setError("연락처를 010-1234-5678 형식으로 입력해주세요"); return;
       }
     }
     setLoading(true); setError("");
     try {
       if (mode === "login") {
-        const user = await signIn(email, pw);
-        rememberEmail(email);
+        const user = await signIn(emailV, pwV);
+        rememberEmail(emailV);
         onLogin(user);
       } else {
         // 초대 코드 8자리 → userId 조회
@@ -450,8 +468,8 @@ export default function LoginPage({ onLogin, onAdminLogin, theme, onThemeToggle 
             .maybeSingle();
           if (refUser?.id) referredBy = refUser.id;
         }
-        const user = await signUp(email, pw, name, phone.trim(), referredBy);
-        rememberEmail(email);
+        const user = await signUp(emailV, pwV, nameV, phoneV, referredBy);
+        rememberEmail(emailV);
         onLogin(user);
       }
     } catch (e: any) { setError(e.message); }
@@ -540,14 +558,14 @@ export default function LoginPage({ onLogin, onAdminLogin, theme, onThemeToggle 
           {mode === "register" && (
             <div className="field">
               <div className="field-label">👤 이름</div>
-              <input className="field-input" placeholder="홍길동"
+              <input ref={nameRef} className="field-input" placeholder="홍길동"
                 value={name} onChange={e => setName(e.target.value)} />
             </div>
           )}
           <div className="field">
             <div className="field-label">✉️ 이메일</div>
             <div style={{ position: "relative" }}>
-              <input className="field-input" type="email" placeholder="email@example.com" autoComplete="off"
+              <input ref={emailRef} className="field-input" type="email" placeholder="email@example.com" autoComplete="off"
                 value={email} onChange={e => { setEmail(e.target.value); setShowRecent(true); }}
                 onFocus={() => setShowRecent(true)}
                 onBlur={() => setTimeout(() => setShowRecent(false), 180)}
@@ -576,7 +594,7 @@ export default function LoginPage({ onLogin, onAdminLogin, theme, onThemeToggle 
           </div>
           <div className="field">
             <div className="field-label">🔒 비밀번호</div>
-            <input className="field-input" type="password" placeholder="••••••••"
+            <input ref={pwRef} className="field-input" type="password" placeholder="••••••••"
               value={pw} onChange={e => setPw(e.target.value)}
               onKeyDown={e => e.key === "Enter" && handleSubmit()} />
           </div>
@@ -585,7 +603,7 @@ export default function LoginPage({ onLogin, onAdminLogin, theme, onThemeToggle 
               <div className="field-label">
                 📱 연락처 <span style={{color:"#ff6b6b",fontSize:10,marginLeft:4}}>필수</span>
               </div>
-              <input className="field-input" type="tel" placeholder="010-1234-5678"
+              <input ref={phoneRef} className="field-input" type="tel" placeholder="010-1234-5678"
                 value={phone} onChange={e => setPhone(e.target.value)}
                 onKeyDown={e => e.key === "Enter" && handleSubmit()} />
               <div style={{marginTop:6,padding:"8px 12px",borderRadius:9,fontSize:11,lineHeight:1.6,
