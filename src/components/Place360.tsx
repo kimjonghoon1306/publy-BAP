@@ -1130,6 +1130,52 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
             </div>
           </section>}
 
+          {/* 🎮 게임형 컨트롤보드 — 점수를 레벨·게이지·배지로, 순위 추이 미니그래프 */}
+          {placeReport && (() => {
+            const score = Math.round(placeReport.overallStars / 5 * 100);
+            const level = score >= 80 ? 5 : score >= 60 ? 4 : score >= 40 ? 3 : score >= 20 ? 2 : 1;
+            const levelName = ["", "🌱 새싹 매장", "🌿 성장 매장", "⭐ 인기 매장", "🔥 상위 매장", "👑 지역 챔피언"][level];
+            const levelColor = [M.sub, M.sub, M.green, M.amber, M.rose, M.purple][level];
+            const nextGoal = [20, 20, 40, 60, 80, 100][level];
+            // 배지: 각 그룹 all-good 여부로 획득
+            const badges = [
+              { i: "💾", n: "손님행동", got: placeReport.groups[0]?.items.every(x => x.status === "good") },
+              { i: "📝", n: "리뷰왕", got: placeReport.groups[1]?.items.every(x => x.status === "good") },
+              { i: "📸", n: "정보완성", got: placeReport.groups[2]?.items.every(x => x.status === "good") },
+              { i: "🎯", n: "키워드", got: (placeReport.groups[3]?.items || []).every(x => x.status === "good") },
+            ];
+            const series = rankHistory.filter(r => !currentRank || r.keyword === currentRank.query).slice(0, 10).reverse().map(r => r.rank);
+            return <section className="p360-card" style={{ padding: 0, overflow: "hidden", border: `2px solid ${levelColor}44` }}>
+              <div style={{ padding: "14px 16px", background: `linear-gradient(120deg,${levelColor}18,${M.rose}0a)` }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <div style={{ width: 48, height: 48, borderRadius: 14, flexShrink: 0, display: "grid", placeItems: "center", background: `${levelColor}1e`, fontSize: 24, boxShadow: `0 0 0 3px ${levelColor}22` }}>{levelName.split(" ")[0]}</div>
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <div style={{ fontSize: 10, fontWeight: 950, color: levelColor, letterSpacing: ".06em" }}>LV.{level} · {levelName.split(" ").slice(1).join(" ")}</div>
+                    <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}><b style={{ fontSize: 22, color: levelColor }}>{score}</b><span style={{ fontSize: 11, color: M.sub, fontWeight: 800 }}>/ 100점</span></div>
+                  </div>
+                </div>
+                {/* 다음 레벨 게이지 */}
+                <div style={{ marginTop: 10 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 9.5, color: M.sub, marginBottom: 3 }}><span>다음 레벨까지</span><span>{Math.max(0, nextGoal - score)}점</span></div>
+                  <div style={{ height: 9, borderRadius: 99, background: M.soft, overflow: "hidden" }}><div style={{ width: `${Math.min(100, score / nextGoal * 100)}%`, height: "100%", background: `linear-gradient(90deg,${levelColor},${M.rose})`, transition: "width .5s", borderRadius: 99 }} /></div>
+                </div>
+              </div>
+              {/* 획득 배지 */}
+              <div style={{ display: "flex", gap: 6, padding: "11px 14px", flexWrap: "wrap" }}>{badges.map(b => <div key={b.n} title={b.got ? `${b.n} 달성!` : `${b.n} 미달성`} style={{ display: "flex", alignItems: "center", gap: 4, padding: "5px 9px", borderRadius: 99, fontSize: 10.5, fontWeight: 800, background: b.got ? `${M.green}14` : M.soft, color: b.got ? M.green : M.sub, border: `1px solid ${b.got ? M.green : M.line}`, opacity: b.got ? 1 : .6 }}>{b.got ? b.i : "🔒"} {b.n}</div>)}</div>
+              {/* 순위 추이 미니그래프 */}
+              {series.length >= 2 && (() => {
+                const vals = series.map(v => v == null ? 101 : v); const W = 300, H = 54, pad = 6;
+                const mx = Math.max(...vals), mn = Math.min(...vals), sp = Math.max(1, mx - mn);
+                const pts = vals.map((v, i) => `${(pad + i * (W - pad * 2) / (vals.length - 1)).toFixed(1)},${(pad + (v - mn) / sp * (H - pad * 2)).toFixed(1)}`);
+                const up = vals[vals.length - 1] <= vals[0]; const col = up ? M.green : M.pink;
+                return <div style={{ padding: "0 14px 14px" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 5, marginBottom: 3 }}><b style={{ fontSize: 10.5 }}>📈 순위 추이</b><span style={{ marginLeft: "auto", fontSize: 10, fontWeight: 900, color: col }}>{up ? "▲ 상승세" : "▼ 하락·정체"}</span></div>
+                  <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", height: 54, display: "block" }} preserveAspectRatio="none"><polyline points={pts.join(" ")} fill="none" stroke={col} strokeWidth={2.2} strokeLinejoin="round" strokeLinecap="round" />{pts.map((p, i) => { const [x, y] = p.split(","); return <circle key={i} cx={x} cy={y} r={2.6} fill={col} />; })}</svg>
+                </div>;
+              })()}
+            </section>;
+          })()}
+
           {/* 검은 작업 로그 */}
           <section className="p360-card" style={{ overflow: "hidden" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "9px 13px", background: M.soft }}><b style={{ fontSize: 12.5 }}>{resolving && <span className="p360-live" />}📟 작업 로그</b><span style={{ fontSize: 11, fontWeight: 900, color: M.rose }}>{resolving ? "진행 중" : `${scanPct}%`}</span></div>
