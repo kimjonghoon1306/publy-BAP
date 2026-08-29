@@ -656,6 +656,19 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
     const currentTime = new Date(currentRank.measuredAt).getTime();
     return rankTimeline.find(row => new Date(row.measured_at).getTime() < currentTime - 1000);
   }, [currentRank, rankTimeline]);
+  // 🔔 순위 급변 감지: 키워드별 최근 2개 측정 비교(3계단 이상). 축하(상승)·경고(하락) 알림용
+  const rankAlerts = useMemo(() => {
+    const byKw = new Map<string, Place360RankMeasurement[]>();
+    rankHistory.forEach(r => { const a = byKw.get(r.keyword) || []; a.push(r); byKw.set(r.keyword, a); });
+    const alerts: { keyword: string; from: number | null; to: number | null; delta: number; up: boolean; entered: boolean }[] = [];
+    byKw.forEach((list, keyword) => {
+      const s = [...list].sort((a, b) => new Date(b.measured_at).getTime() - new Date(a.measured_at).getTime());
+      const to = s[0]?.rank ?? null, from = s[1]?.rank ?? null;
+      if (from == null && to != null) { alerts.push({ keyword, from, to, delta: 0, up: true, entered: true }); return; }   // 새로 진입
+      if (from != null && to != null && from !== to) { const delta = from - to; if (Math.abs(delta) >= 3) alerts.push({ keyword, from, to, delta, up: delta > 0, entered: false }); }
+    });
+    return alerts.sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta)).slice(0, 3);
+  }, [rankHistory]);
   const weeklySummary = useMemo(() => {
     const cutoff = Date.now() - 7 * 86400000;
     const ranks = rankHistory.filter(row => (!currentRank || row.keyword === currentRank.query) && new Date(row.measured_at).getTime() >= cutoff);
@@ -1067,6 +1080,8 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
                   {currentRank && <span style={{ marginLeft: "auto", fontSize: 13, fontWeight: 900, color: M.rose }}>“{currentRank.query}” {currentRank.rank ? `${currentRank.rank}위` : "상위 밖"}</span>}
                 </div>
               </div>
+              {/* 🔔 순위 급변 알림 */}
+              {rankAlerts.length > 0 && <div style={{ display: "grid", gap: 6, padding: "10px 16px 0" }}>{rankAlerts.map(a => { const good = a.up; const c = good ? M.green : M.pink; return <div key={a.keyword} style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 12px", borderRadius: 11, background: `${c}12`, border: `1px solid ${c}44`, animation: "p360slide .3s ease both" }}><span style={{ fontSize: 16 }}>{a.entered ? "🎉" : good ? "🚀" : "⚠️"}</span><b style={{ fontSize: 12, color: M.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{a.keyword}</b><span style={{ marginLeft: "auto", fontSize: 12, fontWeight: 900, color: c }}>{a.entered ? `검색 진입 · ${a.to}위` : good ? `▲ ${a.delta}계단 상승 (${a.from}→${a.to}위)` : `▼ ${Math.abs(a.delta)}계단 하락 (${a.from}→${a.to}위)`}</span></div>; })}</div>}
               {(() => {
                 const series = rankHistory.filter(r => !currentRank || r.keyword === currentRank.query).slice(0, 12).reverse().map(r => r.rank);
                 if (series.length < 2) return null;
