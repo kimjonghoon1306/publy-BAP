@@ -895,6 +895,17 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
   const cardStyle: React.CSSProperties = { border: `1px solid ${colors.line}`, borderRadius: 20, background: colors.card };
   // ★ 별 렌더 헬퍼(0~5, 반개 반영)
   const starStr = (n: number) => { const full = Math.floor(n); const half = n - full >= 0.5; return "★".repeat(full) + (half ? "⯪" : "") + "☆".repeat(Math.max(0, 5 - full - (half ? 1 : 0))); };
+  // 진단 항목 실행 버튼: '고객 화면 보기'=네이버 플레이스 실제 페이지 열기, 나머지는 해당 섹션으로.
+  const runItemAction = (item: { action?: string; go?: Place360Tab }) => {
+    if (item.action && item.action.includes("고객 화면")) {
+      const url = livePlace?.placeUrl || profile.placeUrl || draft.placeUrl;
+      if (url) { window.open(url, "_blank", "noopener,noreferrer"); return; }
+      showToast?.("먼저 플레이스 주소를 등록해 주세요", "info"); return;
+    }
+    if (item.go === "discovery") setDiscoveryOpen(true);
+    else if (item.go === "data") { setPosOpen(true); setTimeout(() => document.getElementById("p360-pos")?.scrollIntoView({ behavior: "smooth" }), 60); }
+    else if (item.go) setTab(item.go as Place360Tab);
+  };
   // 키워드별 미니 순위 스파크라인(오래된→최신). 위로 갈수록 상위. 2개 미만이면 null.
   const kwSpark = (kw: string) => {
     const series = rankHistory.filter(r => r.keyword === kw).sort((a, b) => new Date(a.measured_at).getTime() - new Date(b.measured_at).getTime()).slice(-8).map(r => r.rank);
@@ -1185,7 +1196,7 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
                 <div style={{ padding: 16 }}>
                   <p style={{ margin: 0, color: M.sub, fontSize: 12, lineHeight: 1.6 }}><b style={{ color: M.text }}>왜?</b> {rx.why}</p>
                   <p style={{ margin: "7px 0 0", color: M.text, fontSize: 12.5, lineHeight: 1.6 }}><b>👉 이렇게:</b> {rx.how}</p>
-                  {rx.action && rx.go && <button className="p360-btn" onClick={() => { if (rx.go === "discovery") setDiscoveryOpen(true); else setTab(rx.go as Place360Tab); }} style={{ marginTop: 12, background: M.rose, color: "#fff" }}>{rx.action} →</button>}
+                  {rx.action && rx.go && <button className="p360-btn" onClick={() => runItemAction(rx)} style={{ marginTop: 12, background: M.rose, color: "#fff" }}>{rx.action} →</button>}
                 </div>
               </section>;
             })()}
@@ -1236,6 +1247,11 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
                 <input value={newKeyword} onChange={e => setNewKeyword(e.target.value)} onKeyDown={e => { if (e.key === "Enter" && newKeyword.trim()) { const v = newKeyword.trim(); if (!trackedKeywords.includes(v)) persistKeywords([...trackedKeywords, v]); setNewKeyword(""); checkKeywordRank(v); } }} placeholder="예: 횡성 한우 맛집" className="p360-in" />
                 <button className="p360-btn" onClick={() => { const v = newKeyword.trim(); if (!v) return; if (!trackedKeywords.includes(v)) persistKeywords([...trackedKeywords, v]); setNewKeyword(""); checkKeywordRank(v); }} style={{ background: M.soft, color: M.text, border: `1px solid ${M.line}`, whiteSpace: "nowrap" }}>+ 추가</button>
               </div>
+              {trackedKeywords.length > 0 && <div style={{ display: "flex", alignItems: "center", gap: 7, flexWrap: "wrap", marginBottom: 9 }}>
+                <button className="p360-btn" disabled={Boolean(checkingKeyword) || rankQueue.length > 0} onClick={() => setRankQueue(q => Array.from(new Set([...q, ...trackedKeywords])))} style={{ minHeight: 34, padding: "7px 13px", fontSize: 12, background: M.rose, color: "#fff", opacity: (checkingKeyword || rankQueue.length) ? .6 : 1 }}>📊 전체 순위 확인 ({trackedKeywords.length})</button>
+                {(checkingKeyword || rankQueue.length > 0) && <span style={{ fontSize: 11, fontWeight: 800, color: M.purple }}>측정 중… {rankQueue.length > 0 ? `${rankQueue.length}개 대기` : "마무리"}</span>}
+                <button className="p360-btn" onClick={() => { if (window.confirm(`추적 키워드 ${trackedKeywords.length}개를 모두 지울까요?`)) persistKeywords([]); }} style={{ marginLeft: "auto", minHeight: 34, padding: "7px 12px", fontSize: 11.5, background: "transparent", color: M.sub, border: `1px solid ${M.line}` }}>전체 삭제</button>
+              </div>}
               <div style={{ display: "grid", gap: 7 }}>{trackedKeywords.length === 0 ? <p style={{ color: M.sub, fontSize: 11.5 }}>추천 키워드를 누르거나 검색어를 추가하세요.</p> : trackedKeywords.map(kw => { const last = rankHistory.find(r => r.keyword === kw); const chk = checkingKeyword === kw; const spark = kwSpark(kw); return <div key={kw} style={{ display: "grid", gridTemplateColumns: "1fr auto auto auto", alignItems: "center", gap: 8, padding: "9px 11px", borderRadius: 11, background: M.soft, border: `1px solid ${M.line}` }}><div style={{ minWidth: 0 }}><b style={{ fontSize: 12.5, overflowWrap: "anywhere" }}>{kw}</b>{last ? <span style={{ marginLeft: 6, fontSize: 11, fontWeight: 900, color: last.rank ? M.green : M.amber }}>{last.rank ? `${last.rank}위` : "상위 밖"}</span> : <span style={{ marginLeft: 6, fontSize: 10.5, color: M.sub }}>미확인</span>}</div>{spark || <span style={{ width: 56 }} />}<button className="p360-btn" disabled={Boolean(checkingKeyword)} onClick={() => checkKeywordRank(kw)} style={{ minHeight: 34, padding: "6px 11px", fontSize: 11.5, background: chk ? M.card : M.rose, color: chk ? M.sub : "#fff", border: chk ? `1px solid ${M.line}` : "none" }}>{chk ? "확인 중…" : "순위 확인"}</button><button onClick={() => persistKeywords(trackedKeywords.filter(x => x !== kw))} style={{ border: "none", background: "transparent", color: M.sub, cursor: "pointer", fontSize: 15 }}>×</button></div>; })}</div>
             </section>
 
@@ -1315,9 +1331,12 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
                 <span style={{ marginLeft: "auto", fontSize: 15, color: M.sub }}>{posOpen ? "▲" : "▼"}</span>
               </button>
               {posOpen && <div style={{ marginTop: 12 }}>
-                <div style={{ display: "flex", gap: 7, flexWrap: "wrap", marginBottom: 11 }}><button className="p360-btn" onClick={downloadMetricsTemplate} style={{ minHeight: 38, fontSize: 11.5, background: M.soft, color: M.text, border: `1px solid ${M.line}` }}>⬇️ CSV 양식</button><button className="p360-btn" onClick={() => csvInputRef.current?.click()} style={{ minHeight: 38, fontSize: 11.5, background: M.amber, color: dark ? "#2b2620" : "#fff" }}>📂 CSV 불러오기</button><input ref={csvInputRef} type="file" accept=".csv,text/csv" onChange={ev => void importMetricsCsv(ev.target.files?.[0])} style={{ display: "none" }} /></div>
-                <div style={{ display: "grid", gap: 7 }}>{([["신규 고객", "current_new_customers", "previous_new_customers"], ["재방문 고객", "current_repeat_customers", "previous_repeat_customers"], ["광고비", "current_ad_spend", "previous_ad_spend"], ["광고 행동", "current_ad_actions", "previous_ad_actions"], ["매출", "current_sales", "previous_sales"]] as const).map(([t, ck, pk]) => <div key={ck} style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 7, alignItems: "center" }}><b style={{ fontSize: 11.5 }}>{t}</b><input inputMode="numeric" type="number" value={businessMetrics[ck]} onChange={e => updateBusinessMetric(ck, e.target.value)} placeholder="최근30일" className="p360-in" style={{ minHeight: 40, fontSize: 13 }} /><input inputMode="numeric" type="number" value={businessMetrics[pk]} onChange={e => updateBusinessMetric(pk, e.target.value)} placeholder="이전30일" className="p360-in" style={{ minHeight: 40, fontSize: 13 }} /></div>)}</div>
-                <button className="p360-btn" disabled={metricsLoading} onClick={() => void saveBusinessMetrics()} style={{ width: "100%", marginTop: 11, background: M.green, color: "#fff", opacity: metricsLoading ? .6 : 1 }}>{metricsLoading ? "저장 중…" : "이 숫자로 원인 진단하기"}</button>
+                <div className="p360-help"><span>💬</span><span>매장 <b>포스기(계산대)·네이버 광고 관리자</b>에서 본 숫자를 넣는 곳이에요. <b>최근 30일</b>과 <b>그 전 30일(31~60일 전)</b>을 각각 넣으면, 손님이 왜 줄었는지(신규가 준 건지·광고가 비싼 건지)를 진단해드려요. <b>모르는 칸은 0으로 두면</b> 그 항목만 빼고 계산해요. (선택 사항)</span></div>
+                <div style={{ display: "flex", gap: 7, flexWrap: "wrap", margin: "4px 0 12px", alignItems: "center" }}><button className="p360-btn" onClick={downloadMetricsTemplate} style={{ minHeight: 36, fontSize: 11.5, background: M.soft, color: M.text, border: `1px solid ${M.line}` }}>⬇️ 엑셀 양식 받기</button><button className="p360-btn" onClick={() => csvInputRef.current?.click()} style={{ minHeight: 36, fontSize: 11.5, background: M.amber, color: dark ? "#2b2620" : "#fff" }}>📂 작성한 파일 올리기</button><input ref={csvInputRef} type="file" accept=".csv,text/csv" onChange={ev => void importMetricsCsv(ev.target.files?.[0])} style={{ display: "none" }} /><span style={{ fontSize: 10.5, color: M.sub }}>양식으로 한 번에 넣거나, 아래에 직접 입력</span></div>
+                {/* 열 헤더 */}
+                <div style={{ display: "grid", gridTemplateColumns: "1.2fr 1fr 1fr", gap: 7, marginBottom: 6, padding: "0 2px" }}><span style={{ fontSize: 10.5, fontWeight: 900, color: M.sub }}>항목</span><span style={{ fontSize: 10.5, fontWeight: 900, color: M.rose, textAlign: "center" }}>📅 최근 30일</span><span style={{ fontSize: 10.5, fontWeight: 900, color: M.sub, textAlign: "center" }}>📅 이전 30일</span></div>
+                <div style={{ display: "grid", gap: 7 }}>{([["신규 고객", "처음 온 손님 수(명)", "current_new_customers", "previous_new_customers"], ["재방문 고객", "다시 온 손님 수(명)", "current_repeat_customers", "previous_repeat_customers"], ["광고비", "네이버 등 광고에 쓴 돈(원)", "current_ad_spend", "previous_ad_spend"], ["광고 행동", "광고로 생긴 전화·예약·클릭(건)", "current_ad_actions", "previous_ad_actions"], ["매출", "총 매출(원)", "current_sales", "previous_sales"]] as const).map(([t, d, ck, pk]) => <div key={ck} style={{ display: "grid", gridTemplateColumns: "1.2fr 1fr 1fr", gap: 7, alignItems: "center" }}><div style={{ minWidth: 0 }}><b style={{ fontSize: 12, display: "block" }}>{t}</b><small style={{ fontSize: 9.5, color: M.sub, lineHeight: 1.3 }}>{d}</small></div><input inputMode="numeric" type="number" value={businessMetrics[ck]} onChange={e => updateBusinessMetric(ck, e.target.value)} className="p360-in" style={{ minHeight: 40, fontSize: 13, textAlign: "center" }} /><input inputMode="numeric" type="number" value={businessMetrics[pk]} onChange={e => updateBusinessMetric(pk, e.target.value)} className="p360-in" style={{ minHeight: 40, fontSize: 13, textAlign: "center" }} /></div>)}</div>
+                <button className="p360-btn" disabled={metricsLoading} onClick={() => void saveBusinessMetrics()} style={{ width: "100%", marginTop: 12, background: M.green, color: "#fff", opacity: metricsLoading ? .6 : 1 }}>{metricsLoading ? "저장 중…" : "이 숫자로 원인 진단하기 →"}</button>
                 {metricsSavedAt && <p style={{ margin: "7px 0 0", textAlign: "center", color: M.sub, fontSize: 10 }}>마지막 저장 · {new Date(metricsSavedAt).toLocaleString("ko-KR")}</p>}
               </div>}
             </section>}
