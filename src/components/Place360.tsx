@@ -1133,10 +1133,11 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
         {/* ===== 오른쪽 대시보드 ===== */}
         <div className="p360-col">
           {!placeReport ? (
-            <section className="p360-card" style={{ padding: "60px 24px", textAlign: "center" }}>
-              <img src={pearlyImg} alt="" onError={e => { const s = document.createElement("div"); s.textContent = "🏪"; s.style.cssText = "font-size:56px"; e.currentTarget.replaceWith(s); }} style={{ width: 72, height: 72, objectFit: "contain", opacity: .6, margin: "0 auto 14px", display: "block" }} />
-              <b style={{ fontSize: 15 }}>왼쪽에서 플레이스 주소를 넣고 불러오기를 누르면</b>
-              <p style={{ color: M.sub, fontSize: 12.5, marginTop: 6 }}>매장 건강검진표가 여기에 나타나요.</p>
+            <section className="p360-card" style={{ padding: "48px 24px", textAlign: "center", background: `linear-gradient(135deg,${M.rose}0a,${M.pink}06)` }}>
+              <img src={pearlyImg} alt="" onError={e => { const s = document.createElement("div"); s.textContent = "🏪"; s.style.cssText = "font-size:56px"; e.currentTarget.replaceWith(s); }} style={{ width: 78, height: 78, objectFit: "contain", margin: "0 auto 14px", display: "block", animation: "p360bob 2.6s ease-in-out infinite", filter: `drop-shadow(0 8px 16px ${M.rose}33)` }} />
+              <b style={{ fontSize: 16 }}>왼쪽에 <span style={{ color: M.rose }}>플레이스 주소</span>를 붙여넣고 <span style={{ color: M.rose }}>불러오기·검사</span>를 눌러주세요</b>
+              <p style={{ color: M.sub, fontSize: 12.5, marginTop: 7, lineHeight: 1.6 }}>매장을 통째로 진단해 <b style={{ color: M.text }}>별점·순위·경쟁사·솔루션</b>을 여기에 펼쳐드려요.<br/>먼저 <b style={{ color: M.text }}>업체·리뷰 블로거 찾기</b>부터 써보고 싶다면 아래 카드를 열어보세요.</p>
+              <button className="p360-btn" onClick={() => setDiscoveryOpen(true)} style={{ marginTop: 14, background: M.rose, color: "#fff" }}>🕵️ 먼저 업체·블로거 찾아보기 →</button>
             </section>
           ) : <>
             {/* 컨트롤타워 헤더: 점수 + 순위 */}
