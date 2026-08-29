@@ -615,10 +615,12 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
   const dark = theme === "dark";
 
   // 색감=크롤링(CrawlCenter)과 통일: 따뜻한 테라코타/크림 톤. accent(rose 키 유지)=크롤 accent
+  // 색감=블로그지수(주치의)와 통일. 메인=민트그린 #00c896, 강조=핑크 #ff5fa2, 특별=퍼플 #8b5cf6, 경고=앰버 #f59e0b.
+  // rose 키=메인 민트(기존 코드 호환 위해 키 이름 유지), green=서브 민트, amber=경고, pink/purple 추가.
   const colors = useMemo(() => dark ? {
-    bg: "#221f1b", card: "#2e2b26", soft: "#39352f", line: "#4a443c", text: "#f7f3ec", sub: "#cabeae", rose: "#f0a074", green: "#67d5b5", amber: "#ffc466",
+    bg: "#161b1a", card: "#1e2624", soft: "#26302d", line: "#33403c", text: "#eafff7", sub: "#9fc4b7", rose: "#00d6a4", green: "#34e0b8", amber: "#ffca4d", pink: "#ff7db0", purple: "#a78bfa",
   } : {
-    bg: "#eee9df", card: "#faf7f1", soft: "#f3eee4", line: "#e0d7c9", text: "#2b2620", sub: "#8c8377", rose: "#a8593a", green: "#2f9e5e", amber: "#d98a1f",
+    bg: "#eefbf6", card: "#ffffff", soft: "#effaf4", line: "#d6ede3", text: "#0f2b23", sub: "#5c8478", rose: "#00c896", green: "#12a594", amber: "#e59214", pink: "#ff5fa2", purple: "#8b5cf6",
   }, [dark]);
 
   // 🔎 플레이스 주소만 붙여넣으면 이름·업종·지역을 봇이 공개 페이지에서 바로 당겨온다(로그인 불필요).
@@ -795,15 +797,22 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
     w.document.write(html); w.document.close();
   };
 
+  // 컨트롤타워 정보 타일 — 플레이스에서 가져온 모든 항목 + 각 기능 설명(왜 중요한지). 자동 못 오는 값(공유·길찾기)은 입력값 표시.
   const numTiles = livePlace ? [
-    { l: "저장(찜)", v: livePlace.savedCount != null ? livePlace.savedCount.toLocaleString() : "입력", c: colors.rose },
-    { l: "방문자 리뷰", v: (livePlace.visitorReviewCount || 0).toLocaleString(), c: colors.green },
-    { l: "블로그 리뷰", v: (livePlace.blogReviewCount || 0).toLocaleString(), c: colors.rose },
-    { l: "평점", v: livePlace.visitorReviewScore ? `⭐${livePlace.visitorReviewScore}` : "-", c: colors.amber },
-    { l: "사진", v: `${livePlace.imageUrls?.length || 0}장`, c: colors.green },
-    { l: "메뉴", v: `${livePlace.menus?.length || 0}개`, c: colors.rose },
-    { l: "소식", v: livePlace.newsCount != null ? `${livePlace.newsCount}건` : "-", c: colors.amber },
-    { l: "예약·톡톡", v: (livePlace.bookingAvailable || livePlace.hasTalktalk) ? "연결" : "미연결", c: (livePlace.bookingAvailable || livePlace.hasTalktalk) ? colors.green : colors.sub },
+    { i: "💾", l: "저장(찜)", v: livePlace.savedCount != null ? livePlace.savedCount.toLocaleString() : (behaviorInput.saves || "입력"), c: colors.rose, d: "‘나중에 가야지’ 신호. 상위노출에 가장 강하게 반영돼요." },
+    { i: "🧾", l: "방문자 리뷰", v: (livePlace.visitorReviewCount || 0).toLocaleString(), c: colors.green, d: "실방문 인증 리뷰. 최신성이 중요해요(식은 가게 방지)." },
+    { i: "📝", l: "블로그 리뷰", v: (livePlace.blogReviewCount || 0).toLocaleString(), c: colors.pink, d: "외부 언급. 퍼블리로 채우는 핵심 지렛대." },
+    { i: "⭐", l: "평점", v: livePlace.visitorReviewScore ? `${livePlace.visitorReviewScore}` : "-", c: colors.amber, d: "방문자 평균 별점. 4점 이상 꾸준하면 검증된 가게." },
+    { i: "📸", l: "사진", v: `${livePlace.photoCount ?? livePlace.imageUrls?.length ?? 0}`, c: colors.green, d: "외관·메뉴·가격표 사진이 많을수록 방문 전 이탈↓." },
+    { i: "🍽️", l: "메뉴", v: `${livePlace.menus?.length || 0}`, c: colors.rose, d: "메뉴·가격이 있어야 관련 검색·AI가 이해해요." },
+    { i: "🅿️", l: "편의시설", v: `${livePlace.conveniences?.length || 0}`, c: colors.green, d: "주차·포장·예약 등. ‘상황 검색’에 걸려요." },
+    { i: "📢", l: "소식", v: livePlace.newsCount != null ? `${livePlace.newsCount}` : "-", c: colors.amber, d: "새 소식이 꾸준하면 ‘살아있는 가게’로 읽혀요." },
+    { i: "📅", l: "예약·톡톡", v: (livePlace.bookingAvailable || livePlace.hasTalktalk) ? "연결" : "미연결", c: (livePlace.bookingAvailable || livePlace.hasTalktalk) ? colors.green : colors.sub, d: "방문으로 바로 잇는 행동. 켜면 노출·전환↑." },
+    { i: "📖", l: "소개글", v: livePlace.description ? `${livePlace.description.length}자` : "없음", c: livePlace.description ? colors.green : colors.pink, d: "검색·AI가 ‘어떤 집인지’ 이해하는 근거." },
+    { i: "📞", l: "전화", v: livePlace.phone ? "있음" : "없음", c: livePlace.phone ? colors.green : colors.pink, d: "정보 신뢰도. 없으면 헛걸음·이탈." },
+    { i: "🎯", l: "대표 키워드", v: `${livePlace.keywords?.length || 0}`, c: colors.purple, d: "손님이 많이 남긴 키워드. 노릴 검색어 힌트." },
+    { i: "🔗", l: "공유", v: (behaviorInput as any).shares || "입력", c: colors.sub, d: "공개 화면에 없어 통계에서 직접 입력. 확산 신호." },
+    { i: "🧭", l: "길찾기", v: behaviorInput.directions || "입력", c: colors.sub, d: "공개 화면에 없어 통계에서 직접 입력. 실방문 신호." },
   ] : [];
 
   return <div className="p360" style={{ minHeight: 600, padding: "clamp(10px,2vw,22px)", borderRadius: 10, background: colors.bg, color: colors.text }}>
@@ -821,8 +830,8 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
         <img src={pearlyImg} alt="플레이스 닥터 펄리" onError={e => { const s = document.createElement("div"); s.textContent = "🏪"; s.style.cssText = "font-size:40px"; e.currentTarget.replaceWith(s); }} style={{ width: 56, height: 56, objectFit: "contain", flexShrink: 0, animation: "p360bob 2.6s ease-in-out infinite" }} />
         <div>
           <div style={{ color: colors.rose, fontSize: 10.5, fontWeight: 950, letterSpacing: ".16em" }}>PUBLY PLACE 360</div>
-          <h1 className="p360-title" style={{ margin: "3px 0 4px", fontSize: 27, letterSpacing: "-.04em" }}>플레이스 링크 하나로, 상단노출까지</h1>
-          <p style={{ margin: 0, color: colors.sub, fontSize: 12.5, lineHeight: 1.6 }}>주소만 붙여넣고 <b style={{ color: colors.text }}>엔터</b> → 매장을 통째로 분석하고, 부족한 건 <b style={{ color: colors.rose }}>퍼블리로</b> 채워 순위를 올려드려요.</p>
+          <h1 className="p360-title" style={{ margin: "3px 0 4px", fontSize: 25, letterSpacing: "-.04em" }}>안녕하세요! 상위노출 플랜을 짜볼까요? 🩺</h1>
+          <p style={{ margin: 0, color: colors.sub, fontSize: 12.5, lineHeight: 1.6 }}>플레이스 <b style={{ color: colors.text }}>주소만 붙여넣으면</b> 제가 매장을 통째로 진단하고, 순위 올리는 길을 하나씩 짚어드릴게요. 부족한 건 <b style={{ color: colors.rose }}>퍼블리로</b> 채워요.</p>
         </div>
       </div>
     </header>
@@ -865,9 +874,34 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
           <span style={{ fontSize: 11.5, color: colors.sub, fontWeight: 800 }}>{placeReport.totalCount}개 중 {placeReport.goodCount}개 양호</span>
           {currentRank && <span style={{ marginLeft: "auto", fontSize: 13, fontWeight: 900, color: colors.rose }}>“{currentRank.query}” {currentRank.rank ? `${currentRank.rank}위` : "상위 밖"}</span>}
         </div>
+        {/* 매장 관리: 수정 · 삭제 · 전체 재조회 */}
+        <div style={{ display: "flex", gap: 7, marginTop: 12, flexWrap: "wrap" }}>
+          <button type="button" className="p360-button" onClick={() => { setDraft(profile); setEditingStoreKey(storeKey); setStoreFormOpen(true); }} style={{ minHeight: 38, padding: "7px 13px", fontSize: 12, background: colors.soft, color: colors.text, border: `1px solid ${colors.line}` }}>✏️ 매장 정보 수정</button>
+          <button type="button" className="p360-button" disabled={resolving || !draft.placeUrl} onClick={() => void resolveFromUrl()} style={{ minHeight: 38, padding: "7px 13px", fontSize: 12, background: colors.rose, color: "#fff", opacity: (resolving || !draft.placeUrl) ? .6 : 1 }}>{resolving ? "재조회 중…" : "🔄 전체 재조회"}</button>
+          <button type="button" className="p360-button" onClick={() => void removeCurrentStore()} style={{ minHeight: 38, padding: "7px 13px", fontSize: 12, background: "transparent", color: colors.pink, border: `1px solid ${colors.pink}` }}>🗑️ 매장·기록 삭제</button>
+        </div>
       </div>
+      {/* 📈 순위 상승 그래프(최근 측정 추이) */}
+      {(() => {
+        const series = rankHistory.filter(r => !currentRank || r.keyword === currentRank.query).slice(0, 12).reverse().map(r => r.rank);
+        if (series.length < 2) return null;
+        const vals = series.map(v => v == null ? 101 : v);   // 미노출=101(맨 아래)
+        const W = 560, H = 90, pad = 8;
+        const max = Math.max(...vals), min = Math.min(...vals);
+        const span = Math.max(1, max - min);
+        const pts = vals.map((v, i) => { const x = pad + i * (W - pad * 2) / (vals.length - 1); const y = pad + (v - min) / span * (H - pad * 2); return `${x.toFixed(1)},${y.toFixed(1)}`; });   // 순위 낮을수록(좋을수록) 위
+        const up = (vals[vals.length - 1] <= vals[0]);
+        const col = up ? colors.green : colors.pink;
+        return <div style={{ padding: "12px 16px 0" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}><b style={{ fontSize: 12 }}>📈 순위 추이</b><span style={{ fontSize: 10.5, color: colors.sub }}>“{currentRank?.query || ""}” · 위로 갈수록 상위</span><span style={{ marginLeft: "auto", fontSize: 11.5, fontWeight: 900, color: col }}>{up ? "▲ 상승세" : "▼ 하락·정체"}</span></div>
+          <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", height: 90, display: "block" }} preserveAspectRatio="none">
+            <polyline points={pts.join(" ")} fill="none" stroke={col} strokeWidth={2.5} strokeLinejoin="round" strokeLinecap="round" />
+            {vals.map((v, i) => { const [x, y] = pts[i].split(","); return <circle key={i} cx={x} cy={y} r={3} fill={col} />; })}
+          </svg>
+        </div>;
+      })()}
       {livePlace?.imageUrls && livePlace.imageUrls.length > 0 && <div style={{ display: "flex", gap: 6, padding: "12px 16px 0", overflowX: "auto" }}>{livePlace.imageUrls.slice(0, 10).map((u, i) => <img key={i} src={u} alt="" style={{ width: 72, height: 72, objectFit: "cover", borderRadius: 10, flex: "none", border: `1px solid ${colors.line}` }} />)}</div>}
-      <div className="p360-tiles" style={{ padding: 16 }}>{numTiles.map(t => <div key={t.l} style={{ padding: "11px 12px", borderRadius: 12, background: colors.soft, border: `1px solid ${colors.line}` }}><div style={{ fontSize: 10.5, color: colors.sub }}>{t.l}</div><b style={{ fontSize: 17, color: t.c }}>{t.v}</b></div>)}</div>
+      <div className="p360-tiles" style={{ padding: 16 }}>{numTiles.map(t => <div key={t.l} title={t.d} style={{ padding: "11px 12px", borderRadius: 12, background: colors.soft, border: `1px solid ${colors.line}` }}><div style={{ fontSize: 10.5, color: colors.sub, display: "flex", alignItems: "center", gap: 4 }}><span>{t.i}</span>{t.l}</div><b style={{ fontSize: 18, color: t.c, display: "block", margin: "2px 0 4px" }}>{t.v}</b><div style={{ fontSize: 9.5, color: colors.sub, lineHeight: 1.4 }}>{t.d}</div></div>)}</div>
       <div style={{ padding: "0 16px 16px" }}><button type="button" className="p360-button" onClick={downloadReport} style={{ width: "100%", background: colors.text, color: colors.bg }}>📄 진단 보고서 PDF로 저장하기</button></div>
     </section>}
 
