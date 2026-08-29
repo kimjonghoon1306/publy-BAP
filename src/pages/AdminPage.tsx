@@ -2871,13 +2871,13 @@ POST3: (제목)|(이유)
                 <div className="nav-section" style={{...secStyle,borderTop:"none",marginTop:0,padding:"8px 12px 4px"}}>콘텐츠 만들기</div>
                 {["keyword","write","image","photo","publish"].map(navBtn)}
                 <div className="nav-section" style={secStyle}>블로그 운영</div>
-                {["calendar","manage","blogscore","crawl"].map(navBtn)}
+                {["calendar","manage","blogscore","crawl","place"].map(navBtn)}
                 <div className="nav-section" style={secStyle}>관계·소통 자동화</div>
                 {["neighbor","engage","reply","pumasi","insta_dm"].map(navBtn)}
                 <div className="nav-section" style={secStyle}>계정·설정</div>
                 {["accounts","settings"].map(navBtn)}
                 <div className="nav-section" style={{...secStyle,color:"#FF6B9D",background:"linear-gradient(90deg,rgba(255,107,157,.08),transparent)"}}>🔐 관리자 전용</div>
-                {["crawl_manage","users","stats","proxy","insta_dm_manage","neighbor_manage","engage_manage","reply_manage","blogscore_manage"].map(navBtn)}
+                {["crawl_manage","place_manage","users","stats","proxy","insta_dm_manage","neighbor_manage","engage_manage","reply_manage","blogscore_manage"].map(navBtn)}
               </>);
             })()}
             <div className="sidebar-stats">
