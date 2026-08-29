@@ -617,6 +617,7 @@ const TABS = [
   {k:"accounts",        i:"🔗", l:"계정관리"},
   {k:"calendar",        i:"📅", l:"콘텐츠 캘린더"},
   {k:"crawl_manage",    i:"🔎", l:"크롤링 관리"},
+  {k:"place_manage",    i:"🏪", l:"플레이스 관리"},
   {k:"neighbor",        i:"🤝", l:"서이추"},
   {k:"engage",          i:"❤️", l:"공감·댓글"},
   {k:"reply",           i:"💬", l:"답방"},
@@ -636,7 +637,7 @@ const TABS = [
 ] as const;
 
 export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: Props) {
-  const [tab, setTab] = useState<"keyword"|"write"|"image"|"photo"|"publish"|"manage"|"accounts"|"rank"|"blogscore"|"calendar"|"crawl"|"place"|"crawl_manage"|"neighbor"|"engage"|"reply"|"pumasi"|"neighbor_manage"|"engage_manage"|"reply_manage"|"blogscore_manage"|"insta_dm"|"insta_dm_manage"|"users"|"bug"|"stats"|"live"|"settings"|"proxy">("keyword");
+  const [tab, setTab] = useState<"keyword"|"write"|"image"|"photo"|"publish"|"manage"|"accounts"|"rank"|"blogscore"|"calendar"|"crawl"|"place"|"crawl_manage"|"place_manage"|"neighbor"|"engage"|"reply"|"pumasi"|"neighbor_manage"|"engage_manage"|"reply_manage"|"blogscore_manage"|"insta_dm"|"insta_dm_manage"|"users"|"bug"|"stats"|"live"|"settings"|"proxy">("keyword");
 
   // ── 프록시(계정별 IP) 관리 ──
   const NEIGHBOR_BOT = "http://127.0.0.1:3334";   // 서이추·공감·품앗이 봇(프록시 헬스체크도 여기서 실행)
@@ -2939,6 +2940,46 @@ POST3: (제목)|(이유)
                               {(()=>{ const crawlOn=u.crawl_enabled!==false; const placeOn=u.place360_enabled!==false; const multiOn=u.allow_multi_device===true; return <div style={{display:"flex",gap:6,flexWrap:"wrap",justifyContent:"flex-end"}}><button onClick={()=>toggleCrawl(u)} title={crawlOn?"이 회원은 크롤링을 쓸 수 있어요 — 누르면 잠급니다":"이 회원은 크롤링이 잠겨 있어요 — 누르면 허용합니다"} style={{padding:"8px 12px",borderRadius:99,border:`1.5px solid ${crawlOn?"#2f9e5e":"var(--border)"}`,background:crawlOn?"rgba(47,158,94,.12)":"var(--card)",color:crawlOn?"#2f9e5e":"var(--text3)",cursor:"pointer",fontSize:11.5,fontWeight:800,fontFamily:"inherit",whiteSpace:"nowrap"}}>🔍 크롤링 {crawlOn?"허용됨":"잠김"}</button><button onClick={()=>togglePlace360(u)} title={placeOn?"이 회원은 플레이스360을 쓸 수 있어요 — 누르면 잠급니다":"이 회원은 플레이스360이 잠겨 있어요 — 누르면 허용합니다"} style={{padding:"8px 12px",borderRadius:99,border:`1.5px solid ${placeOn?"#d53d73":"var(--border)"}`,background:placeOn?"rgba(213,61,115,.12)":"var(--card)",color:placeOn?"#d53d73":"var(--text3)",cursor:"pointer",fontSize:11.5,fontWeight:800,fontFamily:"inherit",whiteSpace:"nowrap"}}>🏪 플레이스360 {placeOn?"허용됨":"잠김"}</button><button onClick={()=>toggleMultiDevice(u)} title={multiOn?"여러 컴퓨터에서 동시 로그인 허용 중 — 누르면 한 기기만 허용":"한 기기만 로그인(다른 컴퓨터는 튕김) — 누르면 여러 기기 허용"} style={{padding:"8px 12px",borderRadius:99,border:`1.5px solid ${multiOn?"#e0952f":"var(--border)"}`,background:multiOn?"rgba(224,149,47,.12)":"var(--card)",color:multiOn?"#e0952f":"var(--text3)",cursor:"pointer",fontSize:11.5,fontWeight:800,fontFamily:"inherit",whiteSpace:"nowrap"}}>{multiOn?"🔓 여러기기":"🔒 한기기"}</button></div>; })()}
                             </div>
                           ))}
+                         </div>}
+                    </>);
+                  })()}
+                </div>
+              </div>
+            )}
+
+            {/* ───── 🏪 플레이스 365 회원 관리 (관리자 전용) ───── */}
+            {tab === "place_manage" && (
+              <div style={{animation:"fadeUp .25s ease both"}}>
+                <div className="card">
+                  <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap",marginBottom:6}}>
+                    <div className="card-title" style={{margin:0}}>🏪 플레이스 365 회원 관리</div>
+                    <span style={{fontSize:11,fontWeight:800,color:"#d53d73",background:"rgba(213,61,115,.12)",padding:"2px 9px",borderRadius:99}}>관리자 전용</span>
+                    <button onClick={loadUsers} style={{marginLeft:"auto",padding:"7px 13px",borderRadius:8,border:"1px solid var(--border)",background:"var(--bg)",color:"var(--text2)",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:"inherit"}}>↻ 새로고침</button>
+                  </div>
+                  <div style={{fontSize:12.5,color:"var(--text2)",lineHeight:1.7,marginBottom:10}}>회원별 <b style={{color:"var(--text)"}}>플레이스 365</b> 사용 권한을 켜고 끕니다. 켜야 매장 진단·순위 측정·경쟁사 비교·업체 발굴·리뷰어 역추적을 쓸 수 있어요. 관리자는 항상 열려 있고 모든 횟수가 무제한입니다.</div>
+                  <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:14}}>{["링크 검사·별점","현재 순위 측정","경쟁사 비교","자동 키워드 발굴","성과 리포트·PDF","업체 발굴·리뷰어 역추적","측정 기록 보관"].map(label=><span key={label} style={{fontSize:11,fontWeight:750,color:"#d53d73",background:"rgba(213,61,115,.1)",border:"1px solid rgba(213,61,115,.2)",padding:"5px 9px",borderRadius:99}}>✓ {label}</span>)}</div>
+                  <input className="inp" placeholder="🔍 이름·이메일 검색" value={search} onChange={e=>setSearch(e.target.value)} style={{marginBottom:12}} />
+                  {(() => {
+                    const q = search.trim().toLowerCase();
+                    const list = users.filter(u => !q || (u.name||"").toLowerCase().includes(q) || (u.email||"").toLowerCase().includes(q));
+                    const placeOnCount = users.filter(u=>u.place360_enabled!==false).length;
+                    return (<>
+                      <div style={{display:"flex",gap:8,marginBottom:12,flexWrap:"wrap"}}>
+                        <span style={{fontSize:12,fontWeight:800,color:"var(--text2)",background:"var(--bg)",border:"1px solid var(--border)",padding:"6px 12px",borderRadius:99}}>전체 {users.length}명</span>
+                        <span style={{fontSize:12,fontWeight:800,color:"#d53d73",background:"rgba(213,61,115,.1)",border:"1px solid rgba(213,61,115,.25)",padding:"6px 12px",borderRadius:99}}>🏪 플레이스 365 켜짐 {placeOnCount}명</span>
+                      </div>
+                      {loading ? <div style={{padding:"30px 0",textAlign:"center",color:"var(--text3)"}}><span className="spinner"/> 회원 불러오는 중…</div>
+                       : list.length===0 ? <div style={{padding:"30px 0",textAlign:"center",color:"var(--text3)"}}>회원이 없습니다.</div>
+                       : <div style={{display:"flex",flexDirection:"column",gap:8}}>
+                          {list.map(u=>{ const placeOn=u.place360_enabled!==false; return (
+                            <div key={u.id} style={{display:"flex",alignItems:"center",gap:12,padding:"12px 14px",border:"1px solid var(--border)",borderRadius:12,background:"var(--bg)"}}>
+                              <div style={{minWidth:0,flex:1}}>
+                                <div style={{fontSize:14,fontWeight:700,color:"var(--text)",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{u.name||"(이름 없음)"} <span style={{fontSize:11,fontWeight:600,color:"var(--text3)"}}>{u.plan}</span></div>
+                                <div style={{fontSize:11.5,color:"var(--text3)",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{u.email}</div>
+                              </div>
+                              <button onClick={()=>togglePlace360(u)} title={placeOn?"이 회원은 플레이스365를 쓸 수 있어요 — 누르면 잠급니다":"이 회원은 플레이스365가 잠겨 있어요 — 누르면 허용합니다"} style={{padding:"8px 14px",borderRadius:99,border:`1.5px solid ${placeOn?"#d53d73":"var(--border)"}`,background:placeOn?"rgba(213,61,115,.12)":"var(--card)",color:placeOn?"#d53d73":"var(--text3)",cursor:"pointer",fontSize:12,fontWeight:800,fontFamily:"inherit",whiteSpace:"nowrap"}}>🏪 플레이스 365 {placeOn?"허용됨":"잠김"}</button>
+                            </div>
+                          ); })}
                          </div>}
                     </>);
                   })()}
