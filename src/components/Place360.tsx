@@ -21,6 +21,8 @@ type StoreProfile = {
   goal: "visitors" | "reviews" | "exposure" | "repeat";
 };
 type CollectedPlace = { placeId: string; name: string; category?: string; address?: string; visitorReviewCount?: number; blogReviewCount?: number; placeUrl: string };
+// 링크 하나로 한 번에 끌어오는 플레이스 전체 현황(공개 데이터 전부)
+type LivePlaceDetail = { placeId?: string; name?: string; category?: string; address?: string; phone?: string; businessHours?: string; visitorReviewCount?: number; blogReviewCount?: number; imageUrls?: string[]; menus?: { name: string; price?: string }[]; conveniences?: string[]; bookingAvailable?: boolean; placeUrl?: string; collectedAt?: string };
 type RankMeasurement = { query: string; rank: number | null; checkedCount: number; measuredAt: string; surface: string };
 
 const EMPTY_PROFILE: StoreProfile = { name: "", placeUrl: "", category: "", region: "", goal: "visitors" };
@@ -31,7 +33,7 @@ const DIAGNOSIS_ITEMS = [
   { icon: "🧲", title: "신규 고객", state: "진단 준비", desc: "검색 노출과 최근 리뷰 증가를 경쟁업체와 비교해요." },
   { icon: "📍", title: "플레이스 노출", state: "진단 준비", desc: "지역·업종 키워드에서 매장이 얼마나 잘 보이는지 확인해요." },
   { icon: "⭐", title: "리뷰 활동", state: "진단 준비", desc: "방문자 리뷰와 블로그 리뷰가 꾸준히 늘고 있는지 살펴봐요." },
-  { icon: "🔁", title: "재방문 가능성", state: "자료 필요", desc: "반복 방문 표현을 분석하고, POS 자료 연결 시 실제 재방문율도 확인해요." },
+  { icon: "🔁", title: "재방문 가능성", state: "자료 필요", desc: "반복 방문 표현을 분석하고, 계산대·예약장부 숫자를 넣으면 실제 재방문율도 확인해요." },
   { icon: "📣", title: "광고 효율", state: "자료 필요", desc: "광고 보고서를 연결하면 비용 대비 클릭·전화·예약을 진단해요." },
   { icon: "🏙️", title: "상권 관심도", state: "추정 진단", desc: "주변 업체와 지역 검색 변화를 이용해 상권 흐름을 추정해요." },
 ] as const;
@@ -160,6 +162,7 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
   });
   const [storeFormOpen, setStoreFormOpen] = useState(() => loadProfiles(userId).length === 0);
   const [resolving, setResolving] = useState(false);
+  const [livePlace, setLivePlace] = useState<LivePlaceDetail | null>(null);
   useEffect(() => {
     if (plan === "admin") return;
     let active = true;
@@ -357,7 +360,7 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
     if ((ownPlace.blogReviewCount || 0) < comparison.avgBlog) items.push({ level: "danger", title: "블로그 리뷰 보강이 먼저예요", reason: `내 매장은 ${(ownPlace.blogReviewCount || 0).toLocaleString()}개, 주변 평균은 ${comparison.avgBlog.toLocaleString()}개로 차이가 있어요.`, action: "경쟁업체 리뷰어 찾기", go: "discovery" });
     if ((ownPlace.visitorReviewCount || 0) < comparison.avgVisitor) items.push({ level: "warning", title: "방문 고객의 리뷰 참여를 점검하세요", reason: `방문자 리뷰가 주변 평균보다 ${(comparison.avgVisitor - (ownPlace.visitorReviewCount || 0)).toLocaleString()}개 적어요.`, action: "업체 비교 근거 보기", go: "diagnosis" });
     if (trend && trend.blog <= 0) items.push({ level: "warning", title: `최근 ${trend.days}일 블로그 리뷰가 정체됐어요`, reason: "새로운 지역형 리뷰어를 찾고 협업 후보로 보내는 작업을 추천해요.", action: "리뷰어 역추적", go: "discovery" });
-    if (!metricsSavedAt) items.push({ level: "ready", title: "실제 운영자료를 연결하면 원인이 더 정확해져요", reason: "POS·예약·광고 숫자가 있어야 신규·재방문·광고 문제를 서로 구분할 수 있어요.", action: "30일 자료 입력", go: "data" });
+    if (!metricsSavedAt) items.push({ level: "ready", title: "실제 운영자료를 연결하면 원인이 더 정확해져요", reason: "계산대·예약장부·광고 숫자가 있어야 신규·재방문·광고 문제를 서로 구분할 수 있어요.", action: "30일 자료 입력", go: "data" });
     if (!items.length) items.push({ level: "ready", title: "현재 리뷰 기준은 주변 평균 이상이에요", reason: "지금 상태를 유지하면서 다음 측정에서 증가 속도를 비교해 보세요.", action: "다음 측정 준비", go: "discovery" });
     return items.slice(0, 3);
   }, [businessMetrics.current_new_customers, businessMetrics.previous_new_customers, comparison, metricsSavedAt, ownPlace, trend]);
@@ -367,7 +370,7 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
     const missions: Array<{ id: string; icon: string; title: string; why: string; how: string; action: string; go: Place360Tab }> = [];
     if ((ownPlace.blogReviewCount || 0) < comparison.avgBlog) missions.push({ id: "blogger", icon: "🤝", title: "지역 리뷰어 후보 찾기", why: `블로그 리뷰가 주변 평균보다 ${Math.max(0, comparison.avgBlog - (ownPlace.blogReviewCount || 0)).toLocaleString()}개 적어요.`, how: "경쟁업체 2~3곳을 체크하고 리뷰어 역추적을 실행한 뒤 크롤링 협업 제안으로 보내세요.", action: "리뷰어 찾기", go: "discovery" });
     if ((ownPlace.visitorReviewCount || 0) < comparison.avgVisitor) missions.push({ id: "visitor", icon: "🧾", title: "방문 고객 리뷰 동선 점검하기", why: `방문자 리뷰가 주변 평균보다 ${Math.max(0, comparison.avgVisitor - (ownPlace.visitorReviewCount || 0)).toLocaleString()}개 적어요.`, how: "결제 후 영수증 리뷰 안내가 고객 눈높이에 보이는지 확인하고, 과도한 보상 없이 정직하게 참여를 안내하세요.", action: "비교 근거 보기", go: "diagnosis" });
-    if (!metricsSavedAt) missions.push({ id: "owner-data", icon: "📊", title: "신규·재방문·광고 숫자 넣기", why: "공개 플레이스 자료만으로는 손님이 줄어든 실제 원인을 알 수 없어요.", how: "POS·예약 장부·광고 보고서에서 최근 30일과 이전 30일 숫자를 입력하세요.", action: "운영자료 입력", go: "data" });
+    if (!metricsSavedAt) missions.push({ id: "owner-data", icon: "📊", title: "신규·재방문·광고 숫자 넣기", why: "공개 플레이스 자료만으로는 손님이 줄어든 실제 원인을 알 수 없어요.", how: "계산대(카드단말기)·예약장부·광고 보고서에서 최근 30일과 이전 30일 숫자를 입력하세요.", action: "운영자료 입력", go: "data" });
     if (metricsSavedAt && businessMetrics.previous_new_customers > 0 && businessMetrics.current_new_customers < businessMetrics.previous_new_customers) missions.push({ id: "new-customer", icon: "🧲", title: "신규 고객 감소 원인 좁히기", why: `신규 고객이 ${businessMetrics.previous_new_customers.toLocaleString()}명에서 ${businessMetrics.current_new_customers.toLocaleString()}명으로 줄었어요.`, how: "같은 기간의 순위가 함께 하락했는지 확인하고, 순위가 유지됐다면 고객 화면·광고 유입을 차례로 점검하세요.", action: "원인표 다시 보기", go: "data" });
     const currentTotal = businessMetrics.current_new_customers + businessMetrics.current_repeat_customers;
     const previousTotal = businessMetrics.previous_new_customers + businessMetrics.previous_repeat_customers;
@@ -533,7 +536,8 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
         showToast?.(data?.error || "매장 정보를 불러오지 못했어요. 주소를 확인해 주세요", "error");
         return;
       }
-      const d = data.detail as { name?: string; category?: string; address?: string; placeUrl?: string };
+      const d = data.detail as LivePlaceDetail;
+      setLivePlace(d);   // ★리뷰·영업시간·전화·메뉴·편의시설·사진까지 전체를 한 번에 보관
       // 주소에서 '동/구' 같은 지역 힌트를 추출(있으면 지역칸 자동 채움)
       const regionHint = String(d.address || "").match(/([가-힣]+(?:동|읍|면|리|가|로|구|시))/)?.[1] || "";
       setDraft(v => ({
@@ -543,7 +547,7 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
         region: v.region.trim() || regionHint,
         placeUrl: d.placeUrl?.trim() || url,
       }));
-      showToast?.(`'${d.name || "매장"}' 정보를 불러왔어요`, "success");
+      showToast?.(`'${d.name || "매장"}' 정보를 한 번에 불러왔어요`, "success");
     } catch {
       showToast?.("봇 서버에 연결하지 못했어요. 퍼블리 앱이 실행 중인지 확인해 주세요", "error");
     } finally {
@@ -589,7 +593,14 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
     setDraft(next);
     setEditingStoreKey(nextKey);
     setStoreFormOpen(false);
-    showToast?.("내 매장을 저장했어요. 이제 진단을 시작할 수 있어요", "success");
+    // ★링크로 불러온 현황(리뷰수)을 오늘 기준 스냅샷으로 기록 → 다음에 다시 불러올 때 증감 추적 시작(블로그지수식)
+    if (livePlace && plan !== "admin" && ((livePlace.visitorReviewCount || 0) > 0 || (livePlace.blogReviewCount || 0) > 0)) {
+      try {
+        await savePlace360Snapshot({ store_key: nextKey, store_name: next.name, region: next.region, category: next.category, visitor_reviews: livePlace.visitorReviewCount || 0, blog_reviews: livePlace.blogReviewCount || 0, competitor_count: 0, competitor_avg_visitor: 0, competitor_avg_blog: 0, collected_count: 0 });
+        setSnapshots(await getPlace360Snapshots(nextKey));
+      } catch { /* 스냅샷 실패해도 등록은 유지 */ }
+    }
+    showToast?.("내 매장을 저장하고 오늘 현황을 기록했어요. 이제 추적이 시작돼요", "success");
     setTab("diagnosis");
   };
   const selectStore = (next: StoreProfile) => {
@@ -703,6 +714,26 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
           </div>
           <p style={{ color: colors.sub, fontSize: 11, lineHeight: 1.6, margin: "6px 2px 0" }}>네이버 지도에서 내 매장 → ‘공유’ 버튼의 주소를 붙여넣으면 가장 정확해요.</p>
         </div>
+        {livePlace && <div style={{ marginBottom: 14, padding: 15, borderRadius: 14, background: colors.soft, border: `1px solid ${colors.green}45` }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
+            <b style={{ fontSize: 13.5 }}>✅ 링크로 한 번에 불러온 내 플레이스 현황</b>
+            {livePlace.category && <span style={{ fontSize: 10.5, color: colors.green, background: `${colors.green}18`, borderRadius: 99, padding: "3px 9px", fontWeight: 800 }}>{livePlace.category}</span>}
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+            <div style={{ padding: "10px 12px", borderRadius: 11, background: colors.card, border: `1px solid ${colors.line}` }}><div style={{ fontSize: 10.5, color: colors.sub }}>방문자 리뷰</div><b style={{ fontSize: 18, color: colors.rose }}>{(livePlace.visitorReviewCount || 0).toLocaleString()}</b></div>
+            <div style={{ padding: "10px 12px", borderRadius: 11, background: colors.card, border: `1px solid ${colors.line}` }}><div style={{ fontSize: 10.5, color: colors.sub }}>블로그 리뷰</div><b style={{ fontSize: 18, color: colors.green }}>{(livePlace.blogReviewCount || 0).toLocaleString()}</b></div>
+          </div>
+          <div style={{ display: "grid", gap: 5, marginTop: 10, fontSize: 12, color: colors.text }}>
+            {livePlace.address && <div>📍 {livePlace.address}</div>}
+            {livePlace.phone && <div>📞 {livePlace.phone}</div>}
+            {livePlace.businessHours && <div>🕒 {livePlace.businessHours}</div>}
+            {typeof livePlace.bookingAvailable === "boolean" && <div>📅 예약 {livePlace.bookingAvailable ? "가능" : "정보 없음"}</div>}
+          </div>
+          {livePlace.menus && livePlace.menus.length > 0 && <div style={{ marginTop: 10 }}><div style={{ fontSize: 10.5, color: colors.sub, marginBottom: 5 }}>대표 메뉴</div><div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>{livePlace.menus.slice(0, 6).map((m, i) => <span key={i} style={{ fontSize: 11, background: colors.card, border: `1px solid ${colors.line}`, borderRadius: 8, padding: "4px 8px" }}>{m.name}{m.price ? ` · ${m.price}` : ""}</span>)}</div></div>}
+          {livePlace.conveniences && livePlace.conveniences.length > 0 && <div style={{ marginTop: 8, display: "flex", flexWrap: "wrap", gap: 5 }}>{livePlace.conveniences.slice(0, 8).map((c, i) => <span key={i} style={{ fontSize: 10.5, color: colors.sub, background: colors.card, borderRadius: 99, padding: "3px 8px" }}>{c}</span>)}</div>}
+          {livePlace.imageUrls && livePlace.imageUrls.length > 0 && <div style={{ display: "flex", gap: 6, marginTop: 10, overflowX: "auto" }}>{livePlace.imageUrls.slice(0, 6).map((u, i) => <img key={i} src={u} alt="" style={{ width: 62, height: 62, objectFit: "cover", borderRadius: 9, flex: "none" }} />)}</div>}
+          <p style={{ margin: "10px 2px 0", fontSize: 10.5, color: colors.sub, lineHeight: 1.6 }}>아래 <b style={{ color: colors.text }}>저장</b>하면 이 숫자가 오늘 기준으로 기록돼, 다음에 다시 불러올 때 <b style={{ color: colors.text }}>리뷰 증감 추적</b>이 시작돼요.</p>
+        </div>}
         <div className="p360-two">
           <label><b style={{ display: "block", marginBottom: 7, fontSize: 12 }}>매장 이름 · 필수</b><input value={draft.name} onChange={e => setDraft(v => ({ ...v, name: e.target.value }))} placeholder="예: 퍼블리 식당 성수점" style={fieldStyle} /></label>
           <label><b style={{ display: "block", marginBottom: 7, fontSize: 12 }}>업종</b><input value={draft.category} onChange={e => setDraft(v => ({ ...v, category: e.target.value }))} placeholder="예: 한식, 카페, 미용실" style={fieldStyle} /></label>
@@ -727,7 +758,7 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
     {tab === "diagnosis" && <main>
       <section className="p360-card" style={{ ...cardStyle, padding: 22, marginBottom: 12 }}>
         <div style={{ fontSize: 20, fontWeight: 950 }}>🩺 손님이 줄어든 이유를 찾아볼까요?</div>
-        <p style={{ color: colors.sub, fontSize: 12.5, lineHeight: 1.7, margin: "7px 0 0" }}>{hasStore ? <><b style={{ color: colors.text }}>{profile.name}</b>의 공개 데이터를 먼저 점검하고, 광고·POS 자료가 필요한 항목은 따로 알려드려요.</> : <>정확한 진단을 시작하려면 먼저 한눈에 보기에서 내 매장을 등록해 주세요.</>}</p>
+        <p style={{ color: colors.sub, fontSize: 12.5, lineHeight: 1.7, margin: "7px 0 0" }}>{hasStore ? <><b style={{ color: colors.text }}>{profile.name}</b>의 공개 데이터를 먼저 점검하고, 광고·매출(계산대) 자료가 필요한 항목은 따로 알려드려요.</> : <>정확한 진단을 시작하려면 먼저 한눈에 보기에서 내 매장을 등록해 주세요.</>}</p>
       </section>
       {collectedPlaces.length > 0 && <section className="p360-card" style={{ ...cardStyle, padding: 20, marginBottom: 12 }}>
         <b>📊 방금 수집한 {collectedPlaces.length}개 업체 비교 결과</b>
@@ -764,10 +795,10 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
       <section className="p360-card" style={{ ...cardStyle, padding: 22, marginBottom: 12 }}>
         <div style={{ color: colors.amber, fontSize: 11, fontWeight: 950 }}>OWNER DATA CHECK · 선택사항</div>
         <h2 style={{ margin: "6px 0", fontSize: 23 }}>📊 신규·재방문·광고, 무엇이 문제인지 나눠봐요</h2>
-        <p style={{ color: colors.sub, fontSize: 12.5, lineHeight: 1.75, margin: 0 }}>플레이스 공개 화면만으로는 실제 신규 고객·재방문·광고 성과를 알 수 없어요. 포스(POS), 예약 장부, 광고 보고서에서 <b style={{ color: colors.text }}>최근 30일</b>과 <b style={{ color: colors.text }}>그 이전 30일</b> 숫자만 입력하면 서로 섞지 않고 비교해요.</p>
+        <p style={{ color: colors.sub, fontSize: 12.5, lineHeight: 1.75, margin: 0 }}>플레이스 공개 화면만으로는 실제 신규 고객·재방문·광고 성과를 알 수 없어요. 계산대(카드단말기)·예약장부·네이버 광고 보고서에서 <b style={{ color: colors.text }}>최근 30일</b>과 <b style={{ color: colors.text }}>그 이전 30일</b> 숫자만 입력하면 서로 섞지 않고 비교해요.</p>
         {hasStore && <div style={{ marginTop: 14, padding: "13px 15px", borderRadius: 13, background: `${colors.green}12`, border: `1px solid ${colors.green}40` }}>
           <div style={{ fontSize: 12.5, fontWeight: 900, color: colors.green }}>✅ 이 화면은 안 채워도 돼요 (선택사항)</div>
-          <p style={{ margin: "6px 0 0", color: colors.sub, fontSize: 11.5, lineHeight: 1.7 }}>플레이스 <b style={{ color: colors.text }}>주소만 넣으면</b> 순위·리뷰·경쟁사 비교는 <b style={{ color: colors.text }}>자동으로 끝나요</b>. 이 숫자들(신규·재방문·광고비·매출)은 사장님만 아는 POS·광고 보고서 값이라 자동으로 못 가져와요. <b style={{ color: colors.text }}>광고비 대비 효율</b>까지 보고 싶을 때만 넣으세요.</p>
+          <p style={{ margin: "6px 0 0", color: colors.sub, fontSize: 11.5, lineHeight: 1.7 }}>플레이스 <b style={{ color: colors.text }}>주소만 넣으면</b> 순위·리뷰·경쟁사 비교는 <b style={{ color: colors.text }}>자동으로 끝나요</b>. 이 숫자들(신규·재방문·광고비·매출)은 사장님만 아는 계산대·광고 보고서 값이라 자동으로 못 가져와요. <b style={{ color: colors.text }}>광고비 대비 효율</b>까지 보고 싶을 때만 넣으세요.</p>
           <button type="button" className="p360-button" onClick={() => setTab("rank")} style={{ marginTop: 11, minHeight: 40, background: colors.green, color: "#fff" }}>건너뛰고 내 순위 보기 →</button>
         </div>}
         {!hasStore && <button type="button" className="p360-button" onClick={() => setTab("overview")} style={{ marginTop: 14, background: colors.rose, color: "#fff" }}>먼저 내 매장 등록하기 →</button>}
