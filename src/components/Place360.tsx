@@ -179,6 +179,7 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
   const [scanLog, setScanLog] = useState<string[]>([]);
   const [posOpen, setPosOpen] = useState(false);   // 포스 자료 입력 접이식
   const [discoveryOpen, setDiscoveryOpen] = useState(false);   // 역추적·업체찾기 탭(기본 닫힘)
+  const [tileModal, setTileModal] = useState<{ i: string; l: string; c: string; key: string; act: string } | null>(null);   // 타일 클릭 팝업(행위→이유→성과)
   const [autoKeywords, setAutoKeywords] = useState<{ keyword: string; source: string }[]>([]);   // 자동 발굴 키워드(자동완성·연관검색)
   const [kwLoading, setKwLoading] = useState(false);
   const [reportRange, setReportRange] = useState<1 | 7 | 30 | "custom">(7);   // 리포트 기간: 일간(1)/주간(7)/월간(30)/기간설정
@@ -1027,21 +1028,22 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
   };
 
   // 컨트롤타워 정보 타일 — 플레이스에서 가져온 모든 항목 + 각 기능 설명(왜 중요한지). 자동 못 오는 값(공유·길찾기)은 입력값 표시.
+  // 타일: key=진단 항목 매칭(팝업에서 왜?/이렇게/성과 표시), act=클릭 동작
   const numTiles = livePlace ? [
-    { i: "💾", l: "저장(찜)", v: livePlace.savedCount != null ? livePlace.savedCount.toLocaleString() : (behaviorInput.saves || "입력"), c: colors.rose, d: "‘나중에 가야지’ 신호. 상위노출에 가장 강하게 반영돼요." },
-    { i: "🧾", l: "방문자 리뷰", v: (livePlace.visitorReviewCount || 0).toLocaleString(), c: colors.green, d: "실방문 인증 리뷰. 최신성이 중요해요(식은 가게 방지)." },
-    { i: "📝", l: "블로그 리뷰", v: (livePlace.blogReviewCount || 0).toLocaleString(), c: colors.pink, d: "외부 언급. 퍼블리로 채우는 핵심 지렛대." },
-    { i: "⭐", l: "평점", v: livePlace.visitorReviewScore ? `${livePlace.visitorReviewScore}` : "-", c: colors.amber, d: "방문자 평균 별점. 4점 이상 꾸준하면 검증된 가게." },
-    { i: "📸", l: "사진", v: `${livePlace.photoCount ?? livePlace.imageUrls?.length ?? 0}`, c: colors.green, d: "외관·메뉴·가격표 사진이 많을수록 방문 전 이탈↓." },
-    { i: "🍽️", l: "메뉴", v: `${livePlace.menus?.length || 0}`, c: colors.rose, d: "메뉴·가격이 있어야 관련 검색·AI가 이해해요." },
-    { i: "🅿️", l: "편의시설", v: `${livePlace.conveniences?.length || 0}`, c: colors.green, d: "주차·포장·예약 등. ‘상황 검색’에 걸려요." },
-    { i: "📢", l: "소식", v: livePlace.newsCount != null ? `${livePlace.newsCount}` : "-", c: colors.amber, d: "새 소식이 꾸준하면 ‘살아있는 가게’로 읽혀요." },
-    { i: "📅", l: "예약·톡톡", v: (livePlace.bookingAvailable || livePlace.hasTalktalk) ? "연결" : "미연결", c: (livePlace.bookingAvailable || livePlace.hasTalktalk) ? colors.green : colors.sub, d: "방문으로 바로 잇는 행동. 켜면 노출·전환↑." },
-    { i: "📖", l: "소개글", v: livePlace.description ? `${livePlace.description.length}자` : "없음", c: livePlace.description ? colors.green : colors.pink, d: "검색·AI가 ‘어떤 집인지’ 이해하는 근거." },
-    { i: "📞", l: "전화", v: livePlace.phone ? "있음" : "없음", c: livePlace.phone ? colors.green : colors.pink, d: "정보 신뢰도. 없으면 헛걸음·이탈." },
-    { i: "🎯", l: "대표 키워드", v: `${livePlace.keywords?.length || 0}`, c: colors.purple, d: "손님이 많이 남긴 키워드. 노릴 검색어 힌트." },
-    { i: "🔗", l: "공유", v: behaviorInput.shares || "입력", c: colors.sub, d: "공개 화면에 없어 통계에서 직접 입력. 확산 신호." },
-    { i: "🧭", l: "길찾기", v: behaviorInput.directions || "입력", c: colors.sub, d: "공개 화면에 없어 통계에서 직접 입력. 실방문 신호." },
+    { i: "💾", l: "저장(찜)", v: livePlace.savedCount != null ? livePlace.savedCount.toLocaleString() : (behaviorInput.saves || "입력"), c: colors.rose, d: "‘나중에 가야지’ 신호. 상위노출에 가장 강하게 반영돼요.", key: "save", act: "behavior" as const },
+    { i: "🧾", l: "방문자 리뷰", v: (livePlace.visitorReviewCount || 0).toLocaleString(), c: colors.green, d: "실방문 인증 리뷰. 최신성이 중요해요(식은 가게 방지).", key: "visitor", act: "customer" as const },
+    { i: "📝", l: "블로그 리뷰", v: (livePlace.blogReviewCount || 0).toLocaleString(), c: colors.pink, d: "외부 언급. 퍼블리로 채우는 핵심 지렛대.", key: "blog", act: "discovery" as const },
+    { i: "⭐", l: "평점", v: livePlace.visitorReviewScore ? `${livePlace.visitorReviewScore}` : "-", c: colors.amber, d: "방문자 평균 별점. 4점 이상 꾸준하면 검증된 가게.", key: "visitor", act: "customer" as const },
+    { i: "📸", l: "사진", v: `${livePlace.photoCount ?? livePlace.imageUrls?.length ?? 0}`, c: colors.green, d: "외관·메뉴·가격표 사진이 많을수록 방문 전 이탈↓.", key: "photo", act: "customer" as const },
+    { i: "🍽️", l: "메뉴", v: `${livePlace.menus?.length || 0}`, c: colors.rose, d: "메뉴·가격이 있어야 관련 검색·AI가 이해해요.", key: "menu", act: "customer" as const },
+    { i: "🅿️", l: "편의시설", v: `${livePlace.conveniences?.length || 0}`, c: colors.green, d: "주차·포장·예약 등. ‘상황 검색’에 걸려요.", key: "conv", act: "customer" as const },
+    { i: "📢", l: "소식", v: livePlace.newsCount != null ? `${livePlace.newsCount}` : "-", c: colors.amber, d: "새 소식이 꾸준하면 ‘살아있는 가게’로 읽혀요.", key: "news", act: "customer" as const },
+    { i: "📅", l: "예약·톡톡", v: (livePlace.bookingAvailable || livePlace.hasTalktalk) ? "연결" : "미연결", c: (livePlace.bookingAvailable || livePlace.hasTalktalk) ? colors.green : colors.sub, d: "방문으로 바로 잇는 행동. 켜면 노출·전환↑.", key: "reserve", act: "customer" as const },
+    { i: "📖", l: "소개글", v: livePlace.description ? `${livePlace.description.length}자` : "없음", c: livePlace.description ? colors.green : colors.pink, d: "검색·AI가 ‘어떤 집인지’ 이해하는 근거.", key: "desc", act: "customer" as const },
+    { i: "📞", l: "전화", v: livePlace.phone ? "있음" : "없음", c: livePlace.phone ? colors.green : colors.pink, d: "정보 신뢰도. 없으면 헛걸음·이탈.", key: "hours", act: "customer" as const },
+    { i: "🎯", l: "대표 키워드", v: `${livePlace.keywords?.length || 0}`, c: colors.purple, d: "손님이 많이 남긴 키워드. 노릴 검색어 힌트.", key: "kw", act: "rank" as const },
+    { i: "🔗", l: "공유", v: behaviorInput.shares || "입력", c: colors.sub, d: "공개 화면에 없어 통계에서 직접 입력. 확산 신호.", key: "share", act: "behavior" as const },
+    { i: "🧭", l: "길찾기", v: behaviorInput.directions || "입력", c: colors.sub, d: "공개 화면에 없어 통계에서 직접 입력. 실방문 신호.", key: "directions", act: "behavior" as const },
   ] : [];
 
   // 자동 키워드 제안(실데이터 기반): 손님이 남긴 대표키워드 + 지역·업종 조합
@@ -1282,7 +1284,7 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
                 </div>;
               })()}
               {livePlace?.imageUrls && livePlace.imageUrls.length > 0 && <div style={{ display: "flex", gap: 6, padding: "10px 16px 0", overflowX: "auto" }}>{livePlace.imageUrls.slice(0, 10).map((u, i) => <img key={i} src={u} alt="" style={{ width: 66, height: 66, objectFit: "cover", borderRadius: 10, flex: "none", border: `1px solid ${M.line}` }} />)}</div>}
-              <div className="p360-tiles" style={{ padding: 16 }}>{numTiles.map(t => <div key={t.l} title={t.d} style={{ padding: "10px 11px", borderRadius: 12, background: M.soft, border: `1px solid ${M.line}` }}><div style={{ fontSize: 10, color: M.sub, display: "flex", alignItems: "center", gap: 4 }}><span>{t.i}</span>{t.l}</div><b style={{ fontSize: 17, color: t.c, display: "block", margin: "2px 0 3px" }}>{t.v}</b><div style={{ fontSize: 9, color: M.sub, lineHeight: 1.35 }}>{t.d}</div></div>)}</div>
+              <div className="p360-tiles" style={{ padding: 16 }}>{numTiles.map(t => <button key={t.l} className="p360-tile" title="눌러서 자세히 보기" onClick={() => setTileModal(t)} style={{ padding: "10px 11px", borderRadius: 12, background: M.soft, border: `1px solid ${M.line}`, textAlign: "left", cursor: "pointer", fontFamily: "inherit", position: "relative" }}><div style={{ fontSize: 10, color: M.sub, display: "flex", alignItems: "center", gap: 4 }}><span>{t.i}</span>{t.l}<span style={{ marginLeft: "auto", fontSize: 9, color: M.rose }}>ⓘ</span></div><b style={{ fontSize: 17, color: t.c, display: "block", margin: "2px 0 3px" }}>{t.v}</b><div style={{ fontSize: 9, color: M.sub, lineHeight: 1.35 }}>{t.d}</div></button>)}</div>
               <div style={{ padding: "0 16px 16px" }}><button className="p360-btn" onClick={downloadReport} style={{ width: "100%", background: M.text, color: M.bg }}>📄 진단 보고서 PDF로 저장</button></div>
             </section>
 
@@ -1414,7 +1416,7 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
             </section>
 
             {/* 손님 행동 입력(저장·길찾기) */}
-            <section className="p360-card" style={{ padding: 16, borderColor: `${M.amber}44`, borderWidth: 2 }}>
+            <section data-behavior-input className="p360-card" style={{ padding: 16, borderColor: `${M.amber}44`, borderWidth: 2 }}>
               <div style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "4px 10px", borderRadius: 99, background: M.amber, color: dark ? "#2b2620" : "#fff", fontSize: 11, fontWeight: 950 }}>✏️ 손님 행동 직접 입력</div>
               <p style={{ margin: "8px 0 10px", color: M.sub, fontSize: 11, lineHeight: 1.55 }}>저장·길찾기 수는 공개 화면에 없어요. 스마트플레이스 앱 → 통계에서 확인해 넣으면 위 별점에 반영돼요.</p>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10 }}>
@@ -1476,6 +1478,49 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
             </div>
             <PlaceCenter showToast={showToast} theme={theme} userId={userId} plan={plan} initialRegion={profile.region} ownStoreName={profile.name} onPlacesCollected={onPlacesCollected} onReviewerHandoff={onReviewerHandoff} onOwnStoreDetailViewed={() => completeMissionAutomatically("customer")} onOpenCrawl={onOpenCrawl} onLog={(m) => pushLog(scanPct, m)} hideLog />
           </div>
+        </div>, document.body)}
+
+      {/* 🔍 타일 클릭 팝업 — 행위 → 이유 → 성과 → 실행 */}
+      {tileModal && createPortal(
+        <div onMouseDown={e => { if (e.target === e.currentTarget) setTileModal(null); }} style={{ position: "fixed", inset: 0, zIndex: 2147483000, background: "rgba(6,20,16,.5)", backdropFilter: "blur(3px)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16, fontFamily: "'Noto Sans KR',sans-serif" }}>
+          {(() => {
+            const item = placeReport?.groups.flatMap(g => g.items).find(x => x.key === tileModal.key);
+            const done = item?.status === "good";
+            const sc = done ? M.green : item?.status === "warn" ? M.amber : tileModal.c;
+            // 성과 예측: 이 항목을 good으로 만들면 별점/점수 얼마 오르나
+            let gain = "";
+            if (placeReport && item && !done) {
+              const WEIGHT: Record<string, number> = { visitor: 5, save: 5, blog: 4, directions: 4, kw: 4, reserve: 3, photo: 3, menu: 3, share: 3, hours: 2, conv: 2, news: 2, desc: 3 };
+              const w = WEIGHT[item.key];
+              if (w) {
+                const cur = item.status === "warn" ? 3 : item.status === "input" ? 2 : 1;
+                const deltaStar = (5 - cur) * w;   // 별 상승분 × 가중치
+                gain = `이 항목을 채우면 종합 별점이 약 +${(deltaStar / (placeReport.totalCount * 5) * 5).toFixed(1)}점 올라요`;
+              }
+            }
+            const actLabel = tileModal.act === "behavior" ? "✏️ 손님 행동 입력하기" : tileModal.act === "discovery" ? "🕵️ 리뷰 블로거 찾기" : tileModal.act === "rank" ? "🎯 키워드·순위 보기" : "🔗 네이버 플레이스에서 고치기";
+            const runAct = () => {
+              setTileModal(null);
+              if (tileModal.act === "behavior") { setPosOpen(false); setTimeout(() => { const el = document.querySelector('[data-behavior-input]'); el?.scrollIntoView({ behavior: "smooth", block: "center" }); }, 60); }
+              else if (tileModal.act === "discovery") setDiscoveryOpen(true);
+              else if (tileModal.act === "rank") document.getElementById("p360-rank")?.scrollIntoView({ behavior: "smooth" });
+              else { const url = livePlace?.placeUrl || profile.placeUrl; if (url) window.open(url, "_blank", "noopener,noreferrer"); else showToast?.("먼저 플레이스 주소를 등록해 주세요", "info"); }
+            };
+            return <div style={{ width: "100%", maxWidth: 420, background: M.bg, borderRadius: 18, border: `2px solid ${sc}55`, boxShadow: "0 30px 80px -20px rgba(0,0,0,.6)", overflow: "hidden", animation: "p360pop .3s cubic-bezier(.2,1.3,.4,1) both" }}>
+              <div style={{ padding: "16px 18px", background: `linear-gradient(120deg,${sc}18,${M.rose}0a)`, display: "flex", alignItems: "center", gap: 10 }}>
+                <span style={{ fontSize: 26 }}>{tileModal.i}</span>
+                <div><b style={{ fontSize: 15 }}>{tileModal.l}</b><div style={{ fontSize: 11, fontWeight: 800, color: sc }}>{done ? "✅ 양호" : item?.status === "warn" ? "🟡 보완 필요" : item?.status === "input" ? "✏️ 입력 필요" : "🔴 시급"}</div></div>
+                <button onClick={() => setTileModal(null)} style={{ marginLeft: "auto", background: "transparent", border: "none", fontSize: 18, color: M.sub, cursor: "pointer" }}>✕</button>
+              </div>
+              <div style={{ padding: 18 }}>
+                <div style={{ marginBottom: 12 }}><div style={{ fontSize: 10.5, fontWeight: 900, color: M.sub, marginBottom: 3 }}>왜 중요한가요?</div><p style={{ margin: 0, fontSize: 12.5, color: M.text, lineHeight: 1.6 }}>{item?.why || tileModal.act === "behavior" ? (item?.why || "손님 행동은 순위에 크게 반영돼요.") : (item?.why || "")}</p></div>
+                <div style={{ marginBottom: 12 }}><div style={{ fontSize: 10.5, fontWeight: 900, color: M.sub, marginBottom: 3 }}>어떻게 하나요?</div><p style={{ margin: 0, fontSize: 12.5, color: M.text, lineHeight: 1.6 }}>👉 {item?.how || "아래 버튼으로 이어서 처리하세요."}</p></div>
+                {gain && <div style={{ padding: "10px 12px", borderRadius: 11, background: `${M.green}12`, border: `1px solid ${M.green}33`, marginBottom: 14 }}><div style={{ fontSize: 10.5, fontWeight: 900, color: M.green, marginBottom: 2 }}>🎁 하면 이만큼 좋아져요</div><p style={{ margin: 0, fontSize: 12, color: M.text, lineHeight: 1.5 }}>{gain} → 별점이 오르면 <b>레벨·순위 상승</b>으로 이어져요.</p></div>}
+                {done && <div style={{ padding: "10px 12px", borderRadius: 11, background: `${M.green}12`, marginBottom: 14, fontSize: 12, color: M.green, fontWeight: 700 }}>✅ 이미 잘 하고 있어요! 이 상태를 유지하세요.</div>}
+                <button className="p360-btn" onClick={runAct} style={{ width: "100%", background: sc, color: "#fff" }}>{actLabel} →</button>
+              </div>
+            </div>;
+          })()}
         </div>, document.body)}
 
     </div>
