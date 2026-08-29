@@ -887,6 +887,16 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
   const cardStyle: React.CSSProperties = { border: `1px solid ${colors.line}`, borderRadius: 20, background: colors.card };
   // ★ 별 렌더 헬퍼(0~5, 반개 반영)
   const starStr = (n: number) => { const full = Math.floor(n); const half = n - full >= 0.5; return "★".repeat(full) + (half ? "⯪" : "") + "☆".repeat(Math.max(0, 5 - full - (half ? 1 : 0))); };
+  // 키워드별 미니 순위 스파크라인(오래된→최신). 위로 갈수록 상위. 2개 미만이면 null.
+  const kwSpark = (kw: string) => {
+    const series = rankHistory.filter(r => r.keyword === kw).sort((a, b) => new Date(a.measured_at).getTime() - new Date(b.measured_at).getTime()).slice(-8).map(r => r.rank);
+    if (series.length < 2) return null;
+    const vals = series.map(v => v == null ? 101 : v); const W = 56, H = 18;
+    const mx = Math.max(...vals), mn = Math.min(...vals), sp = Math.max(1, mx - mn);
+    const pts = vals.map((v, i) => `${(i * W / (vals.length - 1)).toFixed(1)},${(2 + (v - mn) / sp * (H - 4)).toFixed(1)}`).join(" ");
+    const up = vals[vals.length - 1] <= vals[0];
+    return <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} style={{ flexShrink: 0 }}><polyline points={pts} fill="none" stroke={up ? colors.green : colors.pink} strokeWidth={1.6} strokeLinejoin="round" strokeLinecap="round" /></svg>;
+  };
   // 📄 PDF 보고서 — 진단 전체를 깔끔한 새 창으로 열어 인쇄(PDF로 저장). 앱 크롬 없이 보고서만.
   const downloadReport = () => {
     if (!placeReport) { showToast?.("먼저 매장 링크로 분석을 실행해 주세요", "info"); return; }
@@ -1169,7 +1179,7 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
                 <input value={newKeyword} onChange={e => setNewKeyword(e.target.value)} onKeyDown={e => { if (e.key === "Enter" && newKeyword.trim()) { const v = newKeyword.trim(); if (!trackedKeywords.includes(v)) persistKeywords([...trackedKeywords, v]); setNewKeyword(""); checkKeywordRank(v); } }} placeholder="예: 횡성 한우 맛집" className="p360-in" />
                 <button className="p360-btn" onClick={() => { const v = newKeyword.trim(); if (!v) return; if (!trackedKeywords.includes(v)) persistKeywords([...trackedKeywords, v]); setNewKeyword(""); checkKeywordRank(v); }} style={{ background: M.soft, color: M.text, border: `1px solid ${M.line}`, whiteSpace: "nowrap" }}>+ 추가</button>
               </div>
-              <div style={{ display: "grid", gap: 7 }}>{trackedKeywords.length === 0 ? <p style={{ color: M.sub, fontSize: 11.5 }}>추천 키워드를 누르거나 검색어를 추가하세요.</p> : trackedKeywords.map(kw => { const last = rankHistory.find(r => r.keyword === kw); const chk = checkingKeyword === kw; return <div key={kw} style={{ display: "grid", gridTemplateColumns: "1fr auto auto", alignItems: "center", gap: 8, padding: "9px 11px", borderRadius: 11, background: M.soft, border: `1px solid ${M.line}` }}><div style={{ minWidth: 0 }}><b style={{ fontSize: 12.5, overflowWrap: "anywhere" }}>{kw}</b>{last ? <span style={{ marginLeft: 6, fontSize: 11, fontWeight: 900, color: last.rank ? M.green : M.amber }}>{last.rank ? `${last.rank}위` : "상위 밖"}</span> : <span style={{ marginLeft: 6, fontSize: 10.5, color: M.sub }}>미확인</span>}</div><button className="p360-btn" disabled={Boolean(checkingKeyword)} onClick={() => checkKeywordRank(kw)} style={{ minHeight: 34, padding: "6px 11px", fontSize: 11.5, background: chk ? M.card : M.rose, color: chk ? M.sub : "#fff", border: chk ? `1px solid ${M.line}` : "none" }}>{chk ? "확인 중…" : "순위 확인"}</button><button onClick={() => persistKeywords(trackedKeywords.filter(x => x !== kw))} style={{ border: "none", background: "transparent", color: M.sub, cursor: "pointer", fontSize: 15 }}>×</button></div>; })}</div>
+              <div style={{ display: "grid", gap: 7 }}>{trackedKeywords.length === 0 ? <p style={{ color: M.sub, fontSize: 11.5 }}>추천 키워드를 누르거나 검색어를 추가하세요.</p> : trackedKeywords.map(kw => { const last = rankHistory.find(r => r.keyword === kw); const chk = checkingKeyword === kw; const spark = kwSpark(kw); return <div key={kw} style={{ display: "grid", gridTemplateColumns: "1fr auto auto auto", alignItems: "center", gap: 8, padding: "9px 11px", borderRadius: 11, background: M.soft, border: `1px solid ${M.line}` }}><div style={{ minWidth: 0 }}><b style={{ fontSize: 12.5, overflowWrap: "anywhere" }}>{kw}</b>{last ? <span style={{ marginLeft: 6, fontSize: 11, fontWeight: 900, color: last.rank ? M.green : M.amber }}>{last.rank ? `${last.rank}위` : "상위 밖"}</span> : <span style={{ marginLeft: 6, fontSize: 10.5, color: M.sub }}>미확인</span>}</div>{spark || <span style={{ width: 56 }} />}<button className="p360-btn" disabled={Boolean(checkingKeyword)} onClick={() => checkKeywordRank(kw)} style={{ minHeight: 34, padding: "6px 11px", fontSize: 11.5, background: chk ? M.card : M.rose, color: chk ? M.sub : "#fff", border: chk ? `1px solid ${M.line}` : "none" }}>{chk ? "확인 중…" : "순위 확인"}</button><button onClick={() => persistKeywords(trackedKeywords.filter(x => x !== kw))} style={{ border: "none", background: "transparent", color: M.sub, cursor: "pointer", fontSize: 15 }}>×</button></div>; })}</div>
             </section>
 
             {/* 📊 성과 리포트: 일/주/월/기간설정 */}
