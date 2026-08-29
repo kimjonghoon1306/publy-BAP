@@ -620,7 +620,7 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
   // 색감=블로그지수(주치의)와 통일. 메인=민트그린 #00c896, 강조=핑크 #ff5fa2, 특별=퍼플 #8b5cf6, 경고=앰버 #f59e0b.
   // rose 키=메인 민트(기존 코드 호환 위해 키 이름 유지), green=서브 민트, amber=경고, pink/purple 추가.
   const colors = useMemo(() => dark ? {
-    bg: "#161b1a", card: "#1e2624", soft: "#26302d", line: "#33403c", text: "#eafff7", sub: "#9fc4b7", rose: "#00d6a4", green: "#34e0b8", amber: "#ffca4d", pink: "#ff7db0", purple: "#a78bfa",
+    bg: "#20302b", card: "#2a3d37", soft: "#324841", line: "#3f5850", text: "#eafff7", sub: "#a9d0c3", rose: "#1fe0b0", green: "#4ae8c2", amber: "#ffce5c", pink: "#ff8fbc", purple: "#b4a0fb",
   } : {
     bg: "#eefbf6", card: "#ffffff", soft: "#effaf4", line: "#d6ede3", text: "#0f2b23", sub: "#5c8478", rose: "#00c896", green: "#12a594", amber: "#e59214", pink: "#ff5fa2", purple: "#8b5cf6",
   }, [dark]);
@@ -837,6 +837,13 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
       .p360-in{width:100%;min-height:46px;border-radius:12px;border:1px solid ${M.line};background:${dark ? M.soft : "#fff"};color:${M.text};padding:11px 13px;font-family:inherit;font-size:15px;outline:none}
       @keyframes p360rays{to{transform:rotate(360deg)}}
       @keyframes p360bob{0%,100%{transform:translateY(0)}50%{transform:translateY(-6px)}}
+      @keyframes p360slide{0%{opacity:0;transform:translateY(-8px)}100%{opacity:1;transform:translateY(0)}}
+      @keyframes p360fade{0%{opacity:0;transform:translateY(10px)}100%{opacity:1;transform:translateY(0)}}
+      @keyframes p360pulse{0%,100%{box-shadow:0 0 0 0 ${M.rose}55}50%{box-shadow:0 0 0 7px ${M.rose}00}}
+      @keyframes p360blink{0%,100%{opacity:1}50%{opacity:.35}}
+      .p360-card{animation:p360fade .4s ease both}
+      .p360-btn:active{transform:scale(.96)}
+      .p360-live{display:inline-block;width:7px;height:7px;border-radius:50%;background:#34e0b8;animation:p360blink 1s ease-in-out infinite;margin-right:5px}
       @media(max-width:1000px){.p360-2col{grid-template-columns:1fr}}
       @media(max-width:640px){.p360-tiles{grid-template-columns:repeat(2,minmax(0,1fr))}.p360-steps{grid-template-columns:1fr}}
     `}</style>
@@ -914,7 +921,7 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
 
           {/* 검은 작업 로그 */}
           <section className="p360-card" style={{ overflow: "hidden" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "9px 13px", background: M.soft }}><b style={{ fontSize: 12.5 }}>📟 작업 로그</b><span style={{ fontSize: 11, fontWeight: 900, color: M.rose }}>{scanPct}%</span></div>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "9px 13px", background: M.soft }}><b style={{ fontSize: 12.5 }}>{resolving && <span className="p360-live" />}📟 작업 로그</b><span style={{ fontSize: 11, fontWeight: 900, color: M.rose }}>{resolving ? "진행 중" : `${scanPct}%`}</span></div>
             <div style={{ height: 5, background: "#0b1220" }}><div style={{ width: `${scanPct}%`, height: "100%", background: `linear-gradient(90deg,${M.rose},${M.amber})`, transition: "width .3s" }} /></div>
             <div style={{ minHeight: 150, maxHeight: 300, overflowY: "auto", padding: "12px 14px", background: "#050a0f", fontFamily: "'JetBrains Mono',monospace", fontSize: 11.5, lineHeight: 1.85 }}>
               {scanLog.length === 0 ? <span style={{ color: "#3a5a7a" }}>대기 중... 링크를 넣고 불러오기를 누르면 진행 상황이 여기 나와요.</span> : scanLog.map((l, i) => <div key={i} style={{ color: i === scanLog.length - 1 ? "#34e0b8" : "#8fb3c9" }}>{l}</div>)}
@@ -993,10 +1000,20 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
               <b style={{ fontSize: 13.5 }}>🚀 순위 올리는 퍼블리 솔루션</b>
               <p style={{ color: M.sub, fontSize: 11, lineHeight: 1.55, margin: "5px 0 10px" }}>상위노출의 가장 큰 지렛대는 <b style={{ color: M.text }}>블로그 리뷰</b>예요{comparison ? ` (내 ${(ownPlace?.blogReviewCount || 0).toLocaleString()} · 주변 평균 ${comparison.avgBlog.toLocaleString()})` : ""}. 아래에서 리뷰 쓴 블로거를 찾아 섭외하고, 퍼블리 글쓰기로 리뷰를 채워요.</p>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-                <button className="p360-btn" onClick={() => { setDiscoveryOpen(true); setTimeout(() => document.getElementById("p360-discovery")?.scrollIntoView({ behavior: "smooth" }), 60); }} style={{ background: M.rose, color: "#fff" }}>🕵️ 리뷰 블로거 찾기 →</button>
+                <button className="p360-btn" onClick={() => { setDiscoveryOpen(o => !o); if (!discoveryOpen) setTimeout(() => document.getElementById("p360-discovery")?.scrollIntoView({ behavior: "smooth", block: "nearest" }), 60); }} style={{ background: discoveryOpen ? M.soft : M.rose, color: discoveryOpen ? M.text : "#fff", border: discoveryOpen ? `1px solid ${M.line}` : 0 }}>🕵️ 리뷰 블로거 찾기 {discoveryOpen ? "▲" : "▼"}</button>
                 <button className="p360-btn" onClick={() => onOpenCrawl?.()} style={{ background: M.soft, color: M.text, border: `1px solid ${M.line}` }}>🔍 크롤링으로 섭외 →</button>
               </div>
             </section>
+
+            {/* 역추적·업체찾기 — 솔루션 흐름 안에 통합. 로그는 왼쪽 공용 터미널로. */}
+            {discoveryOpen && <section id="p360-discovery" className="p360-card" style={{ padding: 0, overflow: "hidden", borderColor: `${M.rose}40`, borderWidth: 2, animation: "p360slide .3s ease both" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 9, padding: "13px 16px", background: `${M.rose}10`, borderBottom: `1px solid ${M.line}` }}>
+                <span style={{ fontSize: 18 }}>🕵️</span>
+                <div style={{ minWidth: 0 }}><b style={{ fontSize: 13.5 }}>업체 발굴 · 리뷰 블로거 역추적</b><div style={{ fontSize: 10.5, color: M.sub, lineHeight: 1.4 }}>경쟁업체 → 리뷰 쓴 블로거 찾기 → 섭외 → 내 리뷰↑. <b style={{ color: M.rose }}>진행상황은 왼쪽 작업 로그에 실시간으로 찍혀요.</b></div></div>
+                <button onClick={() => setDiscoveryOpen(false)} style={{ marginLeft: "auto", background: "transparent", border: "none", cursor: "pointer", fontSize: 16, color: M.sub }}>▲</button>
+              </div>
+              <PlaceCenter showToast={showToast} theme={theme} userId={userId} plan={plan} initialRegion={profile.region} ownStoreName={profile.name} onPlacesCollected={onPlacesCollected} onReviewerHandoff={onReviewerHandoff} onOwnStoreDetailViewed={() => completeMissionAutomatically("customer")} onOpenCrawl={onOpenCrawl} onLog={(m) => pushLog(scanPct, m)} hideLog />
+            </section>}
 
             {/* 포스 자료(접이식) */}
             {hasStore && <section id="p360-pos" className="p360-card" style={{ padding: 16, borderColor: `${M.amber}44`, borderWidth: 2 }}>
@@ -1016,20 +1033,6 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
         </div>
       </div>
 
-      {/* ── 역추적·업체찾기: 접이식 탭(기본 닫힘) ── */}
-      <section className="p360-card" style={{ padding: 0, overflow: "hidden" }}>
-        <button onClick={() => setDiscoveryOpen(o => !o)} style={{ width: "100%", display: "flex", alignItems: "center", gap: 10, padding: "15px 18px", background: discoveryOpen ? `${M.rose}0e` : "transparent", border: "none", cursor: "pointer", fontFamily: "inherit" }}>
-          <span style={{ fontSize: 20 }}>🕵️</span>
-          <div style={{ textAlign: "left", minWidth: 0 }}>
-            <b style={{ fontSize: 14, color: M.text }}>업체 발굴 · 리뷰 블로거 역추적</b>
-            <div style={{ fontSize: 11, color: M.sub, lineHeight: 1.4, marginTop: 2 }}>경쟁업체를 모으고, 그 매장에 <b style={{ color: M.text }}>리뷰 쓴 블로거</b>를 찾아 섭외 → 내 블로그 리뷰↑ → 상위노출. <b style={{ color: M.rose }}>{discoveryOpen ? "접기 ▲" : "펼치기 ▼"}</b></div>
-          </div>
-          <span style={{ marginLeft: "auto", fontSize: 18, color: M.sub }}>{discoveryOpen ? "▲" : "▼"}</span>
-        </button>
-        {discoveryOpen && <div id="p360-discovery" style={{ borderTop: `1px solid ${M.line}` }}>
-          <PlaceCenter showToast={showToast} theme={theme} userId={userId} plan={plan} initialRegion={profile.region} ownStoreName={profile.name} onPlacesCollected={onPlacesCollected} onReviewerHandoff={onReviewerHandoff} onOwnStoreDetailViewed={() => completeMissionAutomatically("customer")} onOpenCrawl={onOpenCrawl} />
-        </div>}
-      </section>
     </div>
   </div>;
 }

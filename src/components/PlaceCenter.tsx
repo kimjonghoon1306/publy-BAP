@@ -9,7 +9,7 @@ const BOT = "http://127.0.0.1:3334";
 const THEMES = {
   // 플레이스365(민트)와 배색 통일
   light: { bg: "#eefbf6", surf: "#ffffff", surf2: "#effaf4", ink: "#0f2b23", sub: "#5c8478", line: "#d6ede3", line2: "#c3e3d6", accent: "#00c896", accentSoft: "#d6f5ec", logBg: "#050a0f", logInk: "#8fb3c9" },
-  dark: { bg: "#161b1a", surf: "#1e2624", surf2: "#26302d", ink: "#eafff7", sub: "#9fc4b7", line: "#33403c", line2: "#435049", accent: "#00d6a4", accentSoft: "#123a30", logBg: "#050a0f", logInk: "#8fb3c9" },
+  dark: { bg: "#20302b", surf: "#2a3d37", surf2: "#324841", ink: "#eafff7", sub: "#a9d0c3", line: "#3f5850", line2: "#4a6157", accent: "#1fe0b0", accentSoft: "#20463b", logBg: "#0a1512", logInk: "#8fb3c9" },
 };
 
 type Place = { placeId: string; name: string; category?: string; address?: string; visitorReviewCount?: number; blogReviewCount?: number; placeUrl: string };
@@ -17,7 +17,7 @@ type PlaceDetail = Place & { imageUrls: string[]; businessHours?: string; phone?
 type Blogger = { blogId: string; nick?: string; title?: string; fromPlace?: string; fromPlaces: string[] };
 type PlaceAcct = { accountId: string; id: string; pw: string; blogId: string; sessionOk: boolean; loginLoading?: boolean };
 type PlaceCollectionMeta = { query: string; domain: string; measuredAt: string; surface: "네이버 지도 PC" };
-type Props = { showToast?: (m: string, t?: any) => void; theme?: "dark" | "light"; userId?: string; plan?: string; onOpenCrawl?: () => void; initialRegion?: string; ownStoreName?: string; onPlacesCollected?: (places: Place[], meta: PlaceCollectionMeta) => void; onReviewerHandoff?: (count: number) => void | Promise<void>; onOwnStoreDetailViewed?: () => void | Promise<void> };
+type Props = { showToast?: (m: string, t?: any) => void; theme?: "dark" | "light"; userId?: string; plan?: string; onOpenCrawl?: () => void; initialRegion?: string; ownStoreName?: string; onPlacesCollected?: (places: Place[], meta: PlaceCollectionMeta) => void; onReviewerHandoff?: (count: number) => void | Promise<void>; onOwnStoreDetailViewed?: () => void | Promise<void>; onLog?: (msg: string) => void; hideLog?: boolean };
 
 const PLACE_LS_KEY = "publy_accounts_place";
 const PLACE_DETAIL_CACHE_TTL = 6 * 60 * 60 * 1000;
@@ -40,7 +40,7 @@ function needsMarketing(p: Place): boolean {
   return visitors >= 30 && blogs <= Math.max(10, Math.round(visitors * .08));
 }
 
-export default function PlaceCenter({ showToast, theme: extTheme, userId, plan = "free", onOpenCrawl, initialRegion = "", ownStoreName = "", onPlacesCollected, onReviewerHandoff, onOwnStoreDetailViewed }: Props) {
+export default function PlaceCenter({ showToast, theme: extTheme, userId, plan = "free", onOpenCrawl, initialRegion = "", ownStoreName = "", onPlacesCollected, onReviewerHandoff, onOwnStoreDetailViewed, onLog, hideLog }: Props) {
   const toast = (m: string, t?: string) => showToast?.(m, t);
   const theme: "dark" | "light" = extTheme === "dark" ? "dark" : "light";
   const C = THEMES[theme];
@@ -125,7 +125,7 @@ export default function PlaceCenter({ showToast, theme: extTheme, userId, plan =
   });
 
   useEffect(() => () => { searchRef.current?.close(); bloggersRef.current?.close(); }, []);
-  const pushLog = (msg: string) => setLogs(l => [...l, `${new Date().toLocaleTimeString("ko-KR")}  ${msg}`]);
+  const pushLog = (msg: string) => { onLog?.(msg); setLogs(l => [...l, `${new Date().toLocaleTimeString("ko-KR")}  ${msg}`]); };
   const requireAccount = () => {
     if (!mailAcctId || !connectedMail.some(a => a.accountId === mailAcctId)) { toast("먼저 네이버 계정을 연결하고 ◉ 라디오로 작업 계정을 선택하세요", "info"); return false; }
     return true;
@@ -371,7 +371,8 @@ export default function PlaceCenter({ showToast, theme: extTheme, userId, plan =
       </div>
     </div></div>}
 
-    <section style={{ ...card, padding: 18, marginBottom: 15 }}><div style={{ fontSize: 15, fontWeight: 900, marginBottom: 5 }}>📟 진행 안내</div><Help>찾는 동안 봇이 무엇을 하고 있는지 보여줘요. 문제가 생기면 마지막 빨간 안내를 확인하세요.</Help>{quota && <div style={{ fontSize: 12, color: quota.remaining <= 0 ? "#d45b50" : C.accent, fontWeight: 900, marginBottom: 8 }}>{plan === "admin" || plan === "unlimited" ? "관리자 무제한 ∞" : `오늘 발굴 ${quota.used} / ${quota.limit} · ${quota.remaining} 남음`}</div>}<div style={{ background: C.logBg, color: C.logInk, borderRadius: 13, padding: 13, maxHeight: 150, overflowY: "auto", fontFamily: "monospace", fontSize: 11, lineHeight: 1.7, whiteSpace: "pre-wrap" }}>{logs.length ? logs.join("\n") : "작업을 시작하면 진행 내용이 여기에 나와요."}</div></section>
+    {!hideLog && <section style={{ ...card, padding: 18, marginBottom: 15 }}><div style={{ fontSize: 15, fontWeight: 900, marginBottom: 5 }}>📟 진행 안내</div><Help>찾는 동안 봇이 무엇을 하고 있는지 보여줘요. 문제가 생기면 마지막 빨간 안내를 확인하세요.</Help>{quota && <div style={{ fontSize: 12, color: quota.remaining <= 0 ? "#d45b50" : C.accent, fontWeight: 900, marginBottom: 8 }}>{plan === "admin" || plan === "unlimited" ? "관리자 무제한 ∞" : `오늘 발굴 ${quota.used} / ${quota.limit} · ${quota.remaining} 남음`}</div>}<div style={{ background: C.logBg, color: C.logInk, borderRadius: 13, padding: 13, maxHeight: 150, overflowY: "auto", fontFamily: "monospace", fontSize: 11, lineHeight: 1.7, whiteSpace: "pre-wrap" }}>{logs.length ? logs.join("\n") : "작업을 시작하면 진행 내용이 여기에 나와요."}</div></section>}
+    {quota && hideLog && <div style={{ fontSize: 12, color: quota.remaining <= 0 ? "#d45b50" : C.accent, fontWeight: 900, marginBottom: 12 }}>{plan === "admin" || plan === "unlimited" ? "관리자 무제한 ∞" : `오늘 발굴 ${quota.used} / ${quota.limit} · ${quota.remaining} 남음`}</div>}
 
     {(plan === "admin" || plan === "unlimited") ? <section style={{ ...card, padding: 18 }}><b style={{ color: C.accent }}>👑 관리자 플레이스 360 — 모든 기능 무제한</b></section> : <section style={{ ...card, padding: 18 }}><div style={{ fontSize: 15, fontWeight: 900, marginBottom: 5 }}>📋 등급별 플레이스 기능 한도</div><Help>플레이스 발굴은 크롤링 발굴과 <b style={{ color: C.ink }}>같은 하루 한도</b>를 함께 써요. 고객 화면 확인은 사진·영업시간·메뉴를 새로 읽는 작업이라 별도 횟수를 사용해요. 매일 자정에 다시 채워져요.</Help>{detailQuota && <div style={{ marginBottom: 10, padding: "8px 11px", borderRadius: 10, background: C.accentSoft, color: C.accent, fontSize: 11.5, fontWeight: 900 }}>오늘 고객 화면 확인 {detailQuota.used}/{detailQuota.limit}회 · {detailQuota.remaining}회 남음</div>}<div style={{ border: `1px solid ${C.line}`, borderRadius: 13, overflowX: "auto" }}><div style={{ minWidth: 610 }}><div style={{ display: "grid", gridTemplateColumns: "1fr .7fr .9fr 1fr 1fr", background: C.surf2 }}>{["등급", "계정", "발굴/일", "역추적/업체", "고객화면/일"].map((h, i) => <div key={h} style={{ padding: "9px 10px", fontSize: 10.5, color: C.sub, fontWeight: 900, borderLeft: i ? `1px solid ${C.line}` : "none" }}>{h}</div>)}</div>{(["free", "basic", "pro"] as const).map(pl => { const conf = PLAN_CONFIG[pl]; const current = plan === pl; const crawl = CRAWL_DAILY_LIMIT[pl] ?? conf.dailyCrawl; const blog = PLACE_BLOGGER_LIMIT[pl]; const detail = PLACE_DETAIL_DAILY_LIMIT[pl]; return <div key={pl} style={{ display: "grid", gridTemplateColumns: "1fr .7fr .9fr 1fr 1fr", borderTop: `1px solid ${C.line}`, background: current ? C.accentSoft : "transparent" }}><div style={{ padding: 10, fontSize: 12, color: current ? C.accent : C.ink, fontWeight: 900 }}>{conf.label}{current ? " (내 등급)" : ""}</div><div style={{ padding: 10, fontSize: 12, borderLeft: `1px solid ${C.line}` }}>{conf.maxAccounts}개</div><div style={{ padding: 10, fontSize: 12, borderLeft: `1px solid ${C.line}`, fontWeight: 800 }}>{crawl}곳</div><div style={{ padding: 10, fontSize: 12, borderLeft: `1px solid ${C.line}`, fontWeight: 800, color: C.accent }}>{blog}명</div><div style={{ padding: 10, fontSize: 12, borderLeft: `1px solid ${C.line}`, fontWeight: 800 }}>{detail}회</div></div>; })}</div></div><div style={{ fontSize: 10.5, color: C.sub, marginTop: 9 }}>💡 이미 확인한 매장을 다시 여는 것은 앱을 끄기 전까지 횟수를 차감하지 않아요.</div></section>}
   </div>;
