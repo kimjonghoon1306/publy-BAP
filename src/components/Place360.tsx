@@ -226,6 +226,22 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
     const avgBlog = Math.round(competitors.reduce((sum, place) => sum + (place.blogReviewCount || 0), 0) / competitors.length);
     return { count: competitors.length, avgVisitor, avgBlog };
   }, [collectedPlaces, ownPlace?.placeId]);
+
+  // 🩺 진짜 진단: 수집된 업체를 블로그리뷰 많은 순으로 줄세워 '내 매장' 위치·경쟁사 갭을 실제 비교표로
+  const competitorTable = useMemo(() => {
+    if (collectedPlaces.length < 2 || !ownPlace) return null;
+    const rows = [...collectedPlaces].sort((a, b) => (b.blogReviewCount || 0) - (a.blogReviewCount || 0));
+    const myIdx = rows.findIndex(p => p.placeId === ownPlace.placeId);
+    const top = rows.slice(0, 5);
+    const leader = rows[0];
+    const my = ownPlace;
+    // 항목별 갭(리더 대비)
+    const gaps = [
+      { label: "블로그 리뷰", mine: my.blogReviewCount || 0, top: leader.blogReviewCount || 0, avg: comparison?.avgBlog || 0, icon: "📝", good: (my.blogReviewCount || 0) >= (comparison?.avgBlog || 0) },
+      { label: "방문자 리뷰", mine: my.visitorReviewCount || 0, top: leader.visitorReviewCount || 0, avg: comparison?.avgVisitor || 0, icon: "🧾", good: (my.visitorReviewCount || 0) >= (comparison?.avgVisitor || 0) },
+    ];
+    return { rows, top, myIdx, myRank: myIdx >= 0 ? myIdx + 1 : null, total: rows.length, leader, gaps };
+  }, [collectedPlaces, ownPlace, comparison]);
   const storeKey = place360StoreKey(profile.name, profile.region);
   const [completedMissions, setCompletedMissions] = useState<string[]>(() => loadCompletedMissions(userId, storeKey));
   const [reviewerHandoffCount, setReviewerHandoffCount] = useState(0);
@@ -990,6 +1006,31 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
               <div className="p360-tiles" style={{ padding: 16 }}>{numTiles.map(t => <div key={t.l} title={t.d} style={{ padding: "10px 11px", borderRadius: 12, background: M.soft, border: `1px solid ${M.line}` }}><div style={{ fontSize: 10, color: M.sub, display: "flex", alignItems: "center", gap: 4 }}><span>{t.i}</span>{t.l}</div><b style={{ fontSize: 17, color: t.c, display: "block", margin: "2px 0 3px" }}>{t.v}</b><div style={{ fontSize: 9, color: M.sub, lineHeight: 1.35 }}>{t.d}</div></div>)}</div>
               <div style={{ padding: "0 16px 16px" }}><button className="p360-btn" onClick={downloadReport} style={{ width: "100%", background: M.text, color: M.bg }}>📄 진단 보고서 PDF로 저장</button></div>
             </section>
+
+            {/* 🩺 경쟁사 비교 진단표(실데이터: 수집된 업체 줄세우기 + 내 위치 + 갭) */}
+            {competitorTable ? <section className="p360-card" style={{ padding: 16 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 4 }}>
+                <b style={{ fontSize: 13.5 }}>🩺 경쟁사 비교 진단</b>
+                <span style={{ fontSize: 10, color: M.sub }}>수집한 {competitorTable.total}곳을 블로그 리뷰 순으로 줄세웠어요</span>
+                {competitorTable.myRank && <span style={{ marginLeft: "auto", fontSize: 12, fontWeight: 900, color: competitorTable.myRank <= 3 ? M.green : M.pink }}>내 매장 {competitorTable.myRank}위 / {competitorTable.total}</span>}
+              </div>
+              {/* 항목별 갭 바 */}
+              <div style={{ display: "grid", gap: 9, margin: "10px 0 12px" }}>{competitorTable.gaps.map(g => { const max = Math.max(g.top, g.mine, 1); return <div key={g.label}>
+                <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11.5, marginBottom: 4 }}><span>{g.icon}</span><b>{g.label}</b><span style={{ color: g.good ? M.green : M.pink, fontWeight: 800 }}>내 {g.mine.toLocaleString()}</span><span style={{ color: M.sub }}>· 평균 {g.avg.toLocaleString()} · 1위 {g.top.toLocaleString()}</span>{!g.good && <span style={{ marginLeft: "auto", fontSize: 10.5, fontWeight: 900, color: M.pink }}>▼ {Math.max(0, g.avg - g.mine).toLocaleString()} 부족</span>}</div>
+                <div style={{ position: "relative", height: 16, borderRadius: 8, background: M.soft, overflow: "hidden" }}>
+                  <div style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: `${g.top ? Math.min(100, g.top / max * 100) : 0}%`, background: `${M.sub}22` }} />
+                  <div style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: `${Math.min(100, g.mine / max * 100)}%`, background: g.good ? M.green : M.pink, borderRadius: 8, transition: "width .4s" }} />
+                  {g.avg > 0 && <div title="주변 평균" style={{ position: "absolute", left: `${Math.min(100, g.avg / max * 100)}%`, top: -2, bottom: -2, width: 2, background: M.amber }} />}
+                </div>
+              </div>; })}</div>
+              {/* 상위 5곳 랭킹 */}
+              <div style={{ display: "grid", gap: 5 }}>{competitorTable.top.map((p, i) => { const mine = p.placeId === ownPlace?.placeId; return <div key={p.placeId} style={{ display: "grid", gridTemplateColumns: "26px 1fr auto auto", alignItems: "center", gap: 8, padding: "7px 10px", borderRadius: 10, background: mine ? `${M.rose}12` : M.soft, border: `1px solid ${mine ? M.rose : M.line}` }}><b style={{ fontSize: 12, color: i === 0 ? M.amber : M.sub }}>{i + 1}</b><span style={{ fontSize: 12, fontWeight: mine ? 900 : 600, color: mine ? M.rose : M.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.name}{mine ? " (내 매장)" : ""}</span><span style={{ fontSize: 10.5, color: M.sub }}>📝{(p.blogReviewCount || 0).toLocaleString()}</span><span style={{ fontSize: 10.5, color: M.sub }}>🧾{(p.visitorReviewCount || 0).toLocaleString()}</span></div>; })}</div>
+              <p style={{ margin: "10px 0 0", color: M.sub, fontSize: 10.5, lineHeight: 1.5 }}>💡 1위와 <b style={{ color: M.text }}>블로그 리뷰 {Math.max(0, (competitorTable.leader.blogReviewCount || 0) - (ownPlace?.blogReviewCount || 0)).toLocaleString()}개</b> 차이예요. 아래 솔루션에서 리뷰 블로거를 찾아 이 격차를 좁히세요.</p>
+            </section> : <section className="p360-card" style={{ padding: 16, textAlign: "center" }}>
+              <b style={{ fontSize: 13 }}>🩺 경쟁사와 비교하려면</b>
+              <p style={{ color: M.sub, fontSize: 11.5, margin: "6px 0 10px", lineHeight: 1.5 }}>아래 <b style={{ color: M.text }}>업체 발굴</b>로 주변 경쟁업체를 수집하면, 내 매장이 몇 위인지·리뷰가 얼마나 부족한지 실제 비교표가 나와요.</p>
+              <button className="p360-btn" onClick={() => setDiscoveryOpen(true)} style={{ background: M.rose, color: "#fff" }}>🕵️ 경쟁업체 발굴하기 →</button>
+            </section>}
 
             {/* 진단(항목별 별점) */}
             {placeReport.groups.map(g => <section key={g.title} className="p360-card" style={{ padding: 16 }}>
