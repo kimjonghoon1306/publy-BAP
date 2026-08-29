@@ -344,8 +344,32 @@ const DEVICE_ID_KEY = "publy_device_id";
 // 이 이메일들은 여러 기기 동시 로그인 항상 허용(관리자). 튕기지 않음.
 const ALWAYS_MULTI_DEVICE = ["s9653@naver.com"];
 function isAlwaysMulti(email?: string) { return !!email && ALWAYS_MULTI_DEVICE.includes(email.trim().toLowerCase()); }
-// 이 컴퓨터(브라우저)의 고유 ID — localStorage에 1회 생성해 유지.
+// 이 컴퓨터의 고유 ID.
+// ★같은 컴퓨터면 웹(브라우저)과 앱(Electron)에서 '같은 ID'가 나와야 한다.
+//   localStorage 랜덤 UUID는 웹/앱 저장소가 분리돼 서로 다른 기기로 오인 → 한 컴퓨터에서
+//   웹·앱 동시 사용 시 서로 튕김. → 하드웨어 지문(플랫폼·화면·코어·타임존)으로 생성해
+//   저장소와 무관하게 같은 PC면 같은 값이 나오게 한다.
+function hardwareFingerprint(): string {
+  try {
+    const n: any = (typeof navigator !== "undefined") ? navigator : {};
+    const s: any = (typeof screen !== "undefined") ? screen : {};
+    const parts = [
+      n.platform || "",
+      n.hardwareConcurrency || "",
+      (n.userAgentData?.platform) || (n.userAgent || "").replace(/[\d.]+/g, ""), // 버전 숫자 제거(업데이트에도 안정)
+      `${s.width || 0}x${s.height || 0}x${s.colorDepth || 0}`,
+      (() => { try { return Intl.DateTimeFormat().resolvedOptions().timeZone || ""; } catch { return ""; } })(),
+      n.language || "",
+    ].join("|");
+    // 간단한 해시(문자열→짧은 안정 ID)
+    let h = 0; for (let i = 0; i < parts.length; i++) { h = (h * 31 + parts.charCodeAt(i)) | 0; }
+    return "hw_" + (h >>> 0).toString(36);
+  } catch { return ""; }
+}
 export function getDeviceId(): string {
+  const hw = hardwareFingerprint();
+  if (hw) return hw;   // 하드웨어 지문 우선(웹·앱 공통)
+  // 폴백: 지문 불가 환경만 localStorage 랜덤
   let id = localStorage.getItem(DEVICE_ID_KEY);
   if (!id) { id = (globalThis.crypto?.randomUUID?.() || `d_${Date.now()}_${Math.random().toString(36).slice(2)}`); localStorage.setItem(DEVICE_ID_KEY, id); }
   return id;
