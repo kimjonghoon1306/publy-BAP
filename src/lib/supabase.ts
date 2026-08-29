@@ -374,24 +374,38 @@ export function getDeviceId(): string {
   if (!id) { id = (globalThis.crypto?.randomUUID?.() || `d_${Date.now()}_${Math.random().toString(36).slice(2)}`); localStorage.setItem(DEVICE_ID_KEY, id); }
   return id;
 }
+// 모바일 여부. 데스크탑(PC 웹/앱)과 모바일이 서로 다른 활성기기 '슬롯'을 쓰게 해
+// PC 로그인과 모바일 로그인이 서로 튕기지 않도록 한다(테리: 앱1·웹1·모바일1 공존).
+function isMobileDevice(): boolean {
+  try {
+    const n: any = (typeof navigator !== "undefined") ? navigator : {};
+    if (n.userAgentData && typeof n.userAgentData.mobile === "boolean") return n.userAgentData.mobile;
+    return /Android|iPhone|iPad|iPod|IEMobile|Opera Mini|Mobile/i.test(n.userAgent || "");
+  } catch { return false; }
+}
+// 활성기기 컬럼: 데스크탑=active_device_id, 모바일=active_mobile_device_id (플랫폼별 독립 슬롯)
+type ActiveDeviceCol = "active_device_id" | "active_mobile_device_id";
+function activeDeviceColumn(): ActiveDeviceCol { return isMobileDevice() ? "active_mobile_device_id" : "active_device_id"; }
 // 로그인 시 이 기기를 '활성 기기'로 등록 → 다른 기기는 하트비트에서 튕긴다. 관리자·멀티허용이면 등록 안 함(안 뺏음).
 export async function claimActiveDevice(userId: string, email?: string): Promise<void> {
   if (isAlwaysMulti(email)) return;
   try {
     const { data } = await supabase.from("publy_users").select("allow_multi_device").eq("id", userId).maybeSingle();
     if ((data as any)?.allow_multi_device) return;   // 멀티 허용 회원은 뺏지 않음
-    await supabase.from("publy_users").update({ active_device_id: getDeviceId() }).eq("id", userId);
+    // 내 플랫폼 슬롯만 갱신 → 다른 플랫폼(PC↔모바일)은 안 뺏김
+    await supabase.from("publy_users").update({ [activeDeviceColumn()]: getDeviceId() }).eq("id", userId);
   } catch { /* 컬럼 없거나 오류 시 무시(잠금 미적용, 앱은 정상) */ }
 }
 // 하트비트: 내 기기가 아직 활성인지 확인. false면 다른 기기에서 로그인돼 로그아웃해야 함.
 export async function isThisDeviceActive(userId: string, email?: string): Promise<boolean> {
   if (isAlwaysMulti(email)) return true;
   try {
-    const { data } = await supabase.from("publy_users").select("active_device_id, allow_multi_device").eq("id", userId).maybeSingle();
+    const { data } = await supabase.from("publy_users").select("active_device_id, active_mobile_device_id, allow_multi_device").eq("id", userId).maybeSingle();
     if (!data) return true;                                   // 조회 실패 → 튕기지 않음(안전)
     if ((data as any).allow_multi_device) return true;        // 관리자가 열어준 회원
-    const active = (data as any).active_device_id;
-    if (!active) return true;                                 // 아직 아무도 클레임 안 함
+    // 내 플랫폼 슬롯만 비교 → 같은 플랫폼에서 다른 기기가 로그인했을 때만 튕김
+    const active = (data as any)[activeDeviceColumn()];
+    if (!active) return true;                                 // 아직 이 플랫폼은 아무도 클레임 안 함
     return active === getDeviceId();
   } catch { return true; }                                    // 컬럼 없음/오류 → 튕기지 않음
 }
