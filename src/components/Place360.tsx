@@ -1141,6 +1141,24 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
               <div style={{ padding: "0 16px 16px" }}><button className="p360-btn" onClick={downloadReport} style={{ width: "100%", background: M.text, color: M.bg }}>📄 진단 보고서 PDF로 저장</button></div>
             </section>
 
+            {/* 🩺 오늘의 처방 — 가장 시급한 딱 한 가지(멘토가 리딩) */}
+            {(() => {
+              const items = placeReport.groups.flatMap(g => g.items);
+              const rx = items.find(i => i.status === "bad") || items.find(i => i.status === "warn");
+              if (!rx) return <section className="p360-card" style={{ padding: 16, borderLeft: `6px solid ${M.green}` }}><div style={{ display: "flex", alignItems: "center", gap: 10 }}><span style={{ fontSize: 24 }}>🎉</span><div><b style={{ fontSize: 14 }}>지금은 시급한 게 없어요!</b><p style={{ margin: "3px 0 0", color: M.sub, fontSize: 11.5 }}>잘 관리되고 있어요. 순위를 주기적으로 재며 유지하세요.</p></div></div></section>;
+              return <section className="p360-card" style={{ padding: 0, overflow: "hidden", borderColor: `${M.pink}44`, borderWidth: 2 }}>
+                <div style={{ padding: "14px 16px", background: `linear-gradient(120deg,${M.pink}14,${M.rose}0c)`, display: "flex", alignItems: "center", gap: 11 }}>
+                  <img src={pearlyImg} alt="" onError={e => { const s = document.createElement("div"); s.textContent = "🩺"; s.style.cssText = "font-size:30px"; e.currentTarget.replaceWith(s); }} style={{ width: 40, height: 40, objectFit: "contain", flexShrink: 0, animation: "p360bob 2.6s ease-in-out infinite" }} />
+                  <div style={{ minWidth: 0 }}><div style={{ fontSize: 10, fontWeight: 950, color: M.pink, letterSpacing: ".08em" }}>오늘의 처방 · 딱 한 가지만</div><b style={{ fontSize: 14.5 }}>{rx.icon} {rx.label}부터 손보세요</b></div>
+                </div>
+                <div style={{ padding: 16 }}>
+                  <p style={{ margin: 0, color: M.sub, fontSize: 12, lineHeight: 1.6 }}><b style={{ color: M.text }}>왜?</b> {rx.why}</p>
+                  <p style={{ margin: "7px 0 0", color: M.text, fontSize: 12.5, lineHeight: 1.6 }}><b>👉 이렇게:</b> {rx.how}</p>
+                  {rx.action && rx.go && <button className="p360-btn" onClick={() => { if (rx.go === "discovery") setDiscoveryOpen(true); else setTab(rx.go as Place360Tab); }} style={{ marginTop: 12, background: M.rose, color: "#fff" }}>{rx.action} →</button>}
+                </div>
+              </section>;
+            })()}
+
             {/* 🩺 경쟁사 비교 진단표(실데이터: 수집된 업체 줄세우기 + 내 위치 + 갭) */}
             {competitorTable ? <section className="p360-card" style={{ padding: 16 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 4 }}>
