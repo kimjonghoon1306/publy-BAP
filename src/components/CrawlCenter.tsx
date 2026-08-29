@@ -922,6 +922,8 @@ export default function CrawlCenter({ showToast, theme: extTheme, userId, plan =
           <div><div style={label}>Keyword · 세부 검색어(선택)</div><input value={keyword} onChange={e => setKeyword(e.target.value)} placeholder="예: 감성카페, 아이랑 갈만한곳" style={inp} /></div>
           <div><div style={label}>Count · 인원</div><select value={count} onChange={(e) => setCount(Number(e.target.value))} style={inp}>{[10, 20, 30, 50, 100].map((n) => <option key={n} value={n}>{n}명</option>)}</select></div>
         </div>
+        {/* A안: 다른 주제 키워드를 단일 주제 밑에 넣으면 두 주제가 섞임 → '전체'로 두라고 안내 */}
+        {keyword.trim() && topic !== "ALL" && <div style={{ fontSize: 11.5, color: C.sub, marginTop: 8, lineHeight: 1.55, background: `${C.accent}0e`, border: `1px solid ${C.accent}44`, borderRadius: 8, padding: "9px 12px" }}>💬 입력한 키워드 <b style={{ color: C.ink }}>“{keyword.trim()}”</b>가 위에서 고른 주제 <b style={{ color: C.ink }}>{TOPIC_KR[topic] || topic}</b>와 <b style={{ color: C.accent }}>다른 주제</b>라면, 주제를 <b onClick={() => setTopic("ALL")} style={{ color: C.accent, cursor: "pointer", textDecoration: "underline" }}>🌐 전체</b>로 두세요. 그래야 <b style={{ color: C.ink }}>그 키워드만</b>으로 정확히 찾아요. (지금은 “{TOPIC_KR[topic] || topic} + {keyword.trim()}” 둘이 섞여 검색돼요)</div>}
         <hr style={{ border: 0, borderTop: `1px solid ${C.line2}`, margin: "20px 0 18px" }} />
         <div style={{ display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap" }}>
           {!running

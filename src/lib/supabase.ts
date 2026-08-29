@@ -353,11 +353,14 @@ function hardwareFingerprint(): string {
   try {
     const n: any = (typeof navigator !== "undefined") ? navigator : {};
     const s: any = (typeof screen !== "undefined") ? screen : {};
+    // 화면 크기는 큰값×작은값으로 정규화 — 모바일 회전(가로↔세로)에도 지문이 안 바뀌게(회전 시 self-logout 방지)
+    const dw = Math.max(s.width || 0, s.height || 0);
+    const dh = Math.min(s.width || 0, s.height || 0);
     const parts = [
       n.platform || "",
       n.hardwareConcurrency || "",
       (n.userAgentData?.platform) || (n.userAgent || "").replace(/[\d.]+/g, ""), // 버전 숫자 제거(업데이트에도 안정)
-      `${s.width || 0}x${s.height || 0}x${s.colorDepth || 0}`,
+      `${dw}x${dh}x${s.colorDepth || 0}`,
       (() => { try { return Intl.DateTimeFormat().resolvedOptions().timeZone || ""; } catch { return ""; } })(),
       n.language || "",
     ].join("|");
@@ -374,8 +377,9 @@ export function getDeviceId(): string {
   if (!id) { id = (globalThis.crypto?.randomUUID?.() || `d_${Date.now()}_${Math.random().toString(36).slice(2)}`); localStorage.setItem(DEVICE_ID_KEY, id); }
   return id;
 }
-// 모바일 여부. 데스크탑(PC 웹/앱)과 모바일이 서로 다른 활성기기 '슬롯'을 쓰게 해
-// PC 로그인과 모바일 로그인이 서로 튕기지 않도록 한다(테리: 앱1·웹1·모바일1 공존).
+// 활성기기 '슬롯'을 플랫폼별로 3개 완전 분리 → 앱1 · 웹1 · 모바일1 동시 로그인 허용(테리 요구).
+//   ▸ 같은 PC의 웹·앱이 한 슬롯을 두고 서로 뺏어 튕기던 문제를 근본 해결.
+//   ▸ 각 슬롯은 같은 종류끼리만 경쟁(다른 PC의 앱이 이 앱을 밀어냄 = 계정 공유 방지는 유지).
 function isMobileDevice(): boolean {
   try {
     const n: any = (typeof navigator !== "undefined") ? navigator : {};
@@ -383,9 +387,17 @@ function isMobileDevice(): boolean {
     return /Android|iPhone|iPad|iPod|IEMobile|Opera Mini|Mobile/i.test(n.userAgent || "");
   } catch { return false; }
 }
-// 활성기기 컬럼: 데스크탑=active_device_id, 모바일=active_mobile_device_id (플랫폼별 독립 슬롯)
-type ActiveDeviceCol = "active_device_id" | "active_mobile_device_id";
-function activeDeviceColumn(): ActiveDeviceCol { return isMobileDevice() ? "active_mobile_device_id" : "active_device_id"; }
+// 설치형 앱(Electron)은 preload가 window.electron을 노출한다. 웹 브라우저엔 없음.
+function isElectronApp(): boolean {
+  try { return typeof window !== "undefined" && !!(window as any).electron; } catch { return false; }
+}
+// active_device_id=PC 웹 · active_app_device_id=설치 앱 · active_mobile_device_id=모바일
+type ActiveDeviceCol = "active_device_id" | "active_app_device_id" | "active_mobile_device_id";
+function activeDeviceColumn(): ActiveDeviceCol {
+  if (isMobileDevice()) return "active_mobile_device_id";
+  if (isElectronApp()) return "active_app_device_id";
+  return "active_device_id";
+}
 // 로그인 시 이 기기를 '활성 기기'로 등록 → 다른 기기는 하트비트에서 튕긴다. 관리자·멀티허용이면 등록 안 함(안 뺏음).
 export async function claimActiveDevice(userId: string, email?: string): Promise<void> {
   if (isAlwaysMulti(email)) return;
@@ -400,7 +412,7 @@ export async function claimActiveDevice(userId: string, email?: string): Promise
 export async function isThisDeviceActive(userId: string, email?: string): Promise<boolean> {
   if (isAlwaysMulti(email)) return true;
   try {
-    const { data } = await supabase.from("publy_users").select("active_device_id, active_mobile_device_id, allow_multi_device").eq("id", userId).maybeSingle();
+    const { data } = await supabase.from("publy_users").select("active_device_id, active_app_device_id, active_mobile_device_id, allow_multi_device").eq("id", userId).maybeSingle();
     if (!data) return true;                                   // 조회 실패 → 튕기지 않음(안전)
     if ((data as any).allow_multi_device) return true;        // 관리자가 열어준 회원
     // 내 플랫폼 슬롯만 비교 → 같은 플랫폼에서 다른 기기가 로그인했을 때만 튕김
