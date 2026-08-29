@@ -61,7 +61,7 @@ begin
   if v_plan is null then raise exception using errcode = 'P0001', message = 'PLACE360_DISABLED'; end if;
   v_store_limit := case v_plan when 'basic' then 2 when 'pro' then 5 when 'unlimited' then 999999 else 1 end;
   v_daily_limit := case v_plan when 'basic' then 3 when 'pro' then 10 when 'unlimited' then 999999 else 1 end;
-  v_history_days := case v_plan when 'basic' then 90 when 'pro' then 365 when 'unlimited' then 3650 else 30 end;
+  v_history_days := case v_plan when 'basic' then 90 when 'pro' then 180 when 'unlimited' then 3650 else 30 end;
   select count(distinct store_key) into v_store_count from public.publy_place360_snapshots where user_id = v_user_id;
   if not exists(select 1 from public.publy_place360_snapshots where user_id = v_user_id and store_key = p_store_key) and v_store_count >= v_store_limit then
     raise exception using errcode = 'P0001', message = 'PLACE360_STORE_LIMIT';

@@ -80,7 +80,7 @@ export interface Place360Snapshot {
 
 export const PLACE360_STORE_LIMIT: Record<string, number> = { free: 1, basic: 2, pro: 5, unlimited: 999999, admin: 999999 };
 export const PLACE360_DAILY_DIAGNOSIS_LIMIT: Record<string, number> = { free: 1, basic: 3, pro: 10, unlimited: 999999, admin: 999999 };
-export const PLACE360_HISTORY_DAYS: Record<string, number> = { free: 30, basic: 90, pro: 365, unlimited: 3650, admin: 3650 };
+export const PLACE360_HISTORY_DAYS: Record<string, number> = { free: 30, basic: 90, pro: 180, unlimited: 3650, admin: 3650 };
 export const PLACE360_RANK_DAILY_LIMIT: Record<string, number> = { free: 3, basic: 10, pro: 30, unlimited: 999999, admin: 999999 };
 export const PLACE_DETAIL_DAILY_LIMIT: Record<string, number> = { free: 2, basic: 5, pro: 20, unlimited: 999999, admin: 999999 };
 
