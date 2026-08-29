@@ -707,7 +707,22 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
     const reg = (profile.region || draft.region || "").trim();
     const cat = (profile.category || draft.category || "").trim();
     const nm = (profile.name || draft.name || "").trim();
-    const seeds = Array.from(new Set([reg && cat ? `${reg} ${cat}` : "", reg ? `${reg} 맛집` : "", nm, reg && nm ? `${reg} ${nm}` : "", cat].filter(Boolean)));
+    // 업종별 '상황어'를 붙여 롱테일 시드 확장(대행사식: 역명+메뉴+상황). 감지 안 되면 범용어.
+    const blob = `${cat} ${nm}`;
+    const situ = /식당|맛집|고기|한우|횟집|족발|치킨|국밥|분식|밥집|중식|일식|한식|양식|해산물|음식/.test(blob) ? ["맛집", "회식", "데이트", "가족모임", "혼밥", "포장", "예약"]
+      : /카페|커피|디저트|베이커리|브런치|빵/.test(blob) ? ["카페", "감성카페", "디저트", "브런치", "데이트", "공부"]
+      : /미용|헤어|네일|피부|왁싱|에스테틱|살롱|뷰티/.test(blob) ? ["잘하는곳", "예약", "가격", "남자", "여자"]
+      : /병원|의원|치과|한의원|clinic|정형|피부과|성형/.test(blob) ? ["잘하는곳", "야간", "주말", "예약", "후기"]
+      : /헬스|피트|필라테스|요가|pt|운동/.test(blob) ? ["가격", "PT", "1일권", "여성", "24시"]
+      : /펜션|숙박|호텔|모텔|게스트|캠핑|글램핑/.test(blob) ? ["가족", "커플", "바베큐", "오션뷰", "예약"]
+      : ["잘하는곳", "추천", "가격", "예약"];
+    const seedSet = new Set<string>();
+    if (reg && cat) seedSet.add(`${reg} ${cat}`);
+    if (reg) situ.slice(0, 5).forEach(s => seedSet.add(`${reg} ${s}`));   // 지역+상황
+    if (nm) seedSet.add(nm);
+    if (reg && nm) seedSet.add(`${reg} ${nm}`);
+    if (cat) seedSet.add(cat);
+    const seeds = Array.from(seedSet).filter(Boolean).slice(0, 6);
     if (!seeds.length) { showToast?.("먼저 매장 정보(지역·업종)를 넣어주세요", "info"); return; }
     setKwLoading(true); pushLog(scanPct, "🎯 키워드 발굴 중(자동완성·연관검색)…");
     try {
