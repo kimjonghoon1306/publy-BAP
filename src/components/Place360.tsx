@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import PlaceCenter from "./PlaceCenter";
 import { botFetch, BotEventStream } from "../lib/botApi";
 import { deletePlace360Store, getPlace360BusinessMetrics, getPlace360Progress, getPlace360Ranks, getPlace360Snapshots, getPlace360StoreProfiles, PLACE360_DAILY_DIAGNOSIS_LIMIT, PLACE360_HISTORY_DAYS, PLACE360_RANK_DAILY_LIMIT, PLACE360_STORE_LIMIT, place360StoreKey, Place360BusinessMetrics, Place360RankMeasurement, Place360Snapshot, recordPlace360ReviewerHandoff, renamePlace360Store, savePlace360BusinessMetrics, savePlace360MissionProgress, savePlace360Rank, savePlace360Snapshot, savePlace360StoreProfile } from "../lib/supabase";
@@ -1034,19 +1035,18 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
         </div>
       </div>
 
-      {/* 역추적·업체찾기 모달 */}
-      {discoveryOpen && <div onMouseDown={e => { if (e.target === e.currentTarget) setDiscoveryOpen(false); }} style={{ position: "fixed", inset: 0, zIndex: 3000, background: "rgba(6,20,16,.55)", backdropFilter: "blur(3px)", display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "clamp(10px,4vh,40px) 14px", overflowY: "auto", animation: "p360fade .2s ease both" }}>
-        <div style={{ width: "100%", maxWidth: 920, background: M.bg, borderRadius: 18, border: `1px solid ${M.line}`, boxShadow: "0 30px 80px -20px rgba(0,0,0,.6)", overflow: "hidden", animation: "p360pop .32s cubic-bezier(.2,1.3,.4,1) both" }}>
-          <div style={{ position: "sticky", top: 0, zIndex: 2, display: "flex", alignItems: "center", gap: 11, padding: "14px 18px", background: `linear-gradient(120deg,${M.rose}18,${M.pink}10)`, borderBottom: `1px solid ${M.line}` }}>
-            <span style={{ fontSize: 20 }}>🕵️</span>
-            <div style={{ minWidth: 0 }}><b style={{ fontSize: 14.5, color: M.text }}>업체 발굴 · 리뷰 블로거 역추적</b><div style={{ fontSize: 10.5, color: M.sub }}>진행상황은 뒤 왼쪽 작업 로그에 실시간으로 찍혀요.</div></div>
-            <button onClick={() => setDiscoveryOpen(false)} className="p360-btn" style={{ marginLeft: "auto", background: M.soft, color: M.text, border: `1px solid ${M.line}`, fontSize: 13, padding: "8px 13px" }}>✕ 닫기</button>
-          </div>
-          <div style={{ padding: "4px 6px 6px" }}>
+      {/* 역추적·업체찾기 모달 — createPortal로 body에 붙여 조상 transform 함정 회피(뷰포트 정중앙) */}
+      {discoveryOpen && createPortal(
+        <div onMouseDown={e => { if (e.target === e.currentTarget) setDiscoveryOpen(false); }} style={{ position: "fixed", inset: 0, zIndex: 2147483000, background: "rgba(6,20,16,.55)", backdropFilter: "blur(3px)", display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "clamp(10px,4vh,40px) 14px", overflowY: "auto", fontFamily: "'Noto Sans KR',sans-serif" }}>
+          <div style={{ width: "100%", maxWidth: 920, background: M.bg, borderRadius: 18, border: `1px solid ${M.line}`, boxShadow: "0 30px 80px -20px rgba(0,0,0,.6)", overflow: "hidden", animation: "p360pop .32s cubic-bezier(.2,1.3,.4,1) both" }}>
+            <div style={{ position: "sticky", top: 0, zIndex: 2, display: "flex", alignItems: "center", gap: 11, padding: "14px 18px", background: dark ? M.card : "#fff", borderBottom: `1px solid ${M.line}` }}>
+              <span style={{ fontSize: 20 }}>🕵️</span>
+              <div style={{ minWidth: 0 }}><b style={{ fontSize: 14.5, color: M.text }}>업체 발굴 · 리뷰 블로거 역추적</b><div style={{ fontSize: 10.5, color: M.sub }}>진행상황은 뒤 왼쪽 작업 로그에 실시간으로 찍혀요.</div></div>
+              <button onClick={() => setDiscoveryOpen(false)} className="p360-btn" style={{ marginLeft: "auto", background: M.soft, color: M.text, border: `1px solid ${M.line}`, fontSize: 13, padding: "8px 13px" }}>✕ 닫기</button>
+            </div>
             <PlaceCenter showToast={showToast} theme={theme} userId={userId} plan={plan} initialRegion={profile.region} ownStoreName={profile.name} onPlacesCollected={onPlacesCollected} onReviewerHandoff={onReviewerHandoff} onOwnStoreDetailViewed={() => completeMissionAutomatically("customer")} onOpenCrawl={onOpenCrawl} onLog={(m) => pushLog(scanPct, m)} hideLog />
           </div>
-        </div>
-      </div>}
+        </div>, document.body)}
 
     </div>
   </div>;
