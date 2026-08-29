@@ -7142,9 +7142,17 @@ POST3: (제목)|(이유)
         </a>
 
         <div className="mob-bar">
-          {MAIN_TABS.filter(t=>["control","keyword","write","image","photo","publish","manage","blogscore","neighbor","engage","reply","pumasi","settings"].includes(t.k)).map(t=>{
-            const lbl:Record<string,string>={control:"홈",keyword:"키워드",write:"글쓰기",image:"이미지",photo:"사진글쓰기",publish:"발행",manage:"발행관리",blogscore:"지수",neighbor:"서이추",engage:"공감댓글",reply:"답방",pumasi:"품앗이",settings:"설정"};
-            return (<button key={t.k} className={`mob-btn ${tab===t.k?"active":""}`} onClick={()=>setTab(t.k as MainTab)}><span className="mob-btn-ico">{t.i}</span><span className="mob-btn-lbl">{lbl[t.k]||t.l}</span></button>);
+          {/* 모바일도 PC 사이드바와 동일한 전체 탭 노출(회원=관리자 동일 원칙). 크롤링·플레이스360·캘린더·인스타DM·계정관리가 모바일에서 빠져 있던 것 복구.
+              잠금(crawl/place)·곧 출시(insta_dm) 게이팅은 데스크탑 사이드바와 동일하게 처리 */}
+          {MAIN_TABS.map(t=>{
+            const lbl:Record<string,string>={control:"홈",keyword:"키워드",write:"글쓰기",image:"이미지",photo:"사진글쓰기",publish:"발행",calendar:"캘린더",manage:"발행관리",blogscore:"지수",crawl:"크롤링",place:"플레이스",neighbor:"서이추",engage:"공감댓글",reply:"답방",pumasi:"품앗이",insta_dm:"인스타DM",accounts:"계정관리",settings:"설정"};
+            const locked = (t.k==="crawl"&&!crawlEnabled)||(t.k==="place"&&!place360Enabled);
+            const onClick=()=>{
+              if(t.k==="insta_dm"){showToast("📱 인스타 DM은 곧 출시됩니다!","info");return;}
+              if(locked){setShowCrawlLock(true);return;}
+              setTab(t.k as MainTab);
+            };
+            return (<button key={t.k} className={`mob-btn ${tab===t.k&&!locked?"active":""}`} onClick={onClick}><span className="mob-btn-ico">{locked?"🔒":t.i}</span><span className="mob-btn-lbl">{lbl[t.k]||t.l}</span></button>);
           })}
         </div>
       </div>
