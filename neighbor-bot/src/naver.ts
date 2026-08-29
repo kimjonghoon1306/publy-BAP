@@ -1368,6 +1368,16 @@ export interface PlaceDetail extends PlaceTarget {
   conveniences: string[];
   bookingAvailable?: boolean;
   collectedAt: string;
+  // ── 상위노출 종합진단용 확장 필드(같은 __APOLLO_STATE__에서 추가 추출) ──
+  savedCount?: number;         // 저장(찜) 수 — 상위노출 핵심 신호
+  visitorReviewScore?: number; // 방문자 평점
+  description?: string;        // 매장 소개/한줄평
+  keywords?: string[];         // 방문자가 많이 남긴 대표 키워드
+  hasTalktalk?: boolean;       // 네이버 톡톡 연결 여부
+  homepage?: string;          // 홈페이지/SNS 링크
+  newsCount?: number;          // 소식/공지 개수
+  photoCount?: number;         // 등록 사진 총 개수
+  imageCount?: number;         // (photoCount 별칭 원본)
 }
 
 /** 공개 플레이스 홈에서 고객에게 실제로 보이는 상세정보만 읽는다.
@@ -1396,25 +1406,49 @@ export async function crawlPlaceDetail(params: {
       const root = values.find((v: any) => String(v.id || "") === placeId && v.name) || values.find((v: any) => v.name && (v.roadAddress || v.address));
       if (!root) throw new Error("공개 매장 정보를 찾지 못했어요");
       const clean = (value: unknown) => typeof value === "string" ? value.trim() : "";
+      // 여러 후보 키에서 처음 발견되는 값을 취한다(네이버 스키마가 타입마다 키가 달라서). 없으면 undefined로 비워 둔다.
+      const numFrom = (obj: any, keys: string[]): number | undefined => { for (const k of keys) { const n = Number(obj?.[k]); if (Number.isFinite(n) && n > 0) return n; } return undefined; };
+      const strFrom = (obj: any, keys: string[]): string => { for (const k of keys) { const s = clean(obj?.[k]); if (s) return s; } return ""; };
       const images = new Set<string>();
       const menus = new Map<string, string>();
       const conveniences = new Set<string>();
+      const keywords = new Set<string>();
       let hours = clean(root.businessHours || root.openingHours || root.businessHoursInfo);
       let phone = clean(root.phone || root.virtualPhone || root.phoneNumber);
       let booking: boolean | undefined = typeof root.bookingBusinessId === "string" || root.bookingAvailable === true ? true : undefined;
+      // ── 확장 지표: 루트에서 우선 추출 ──
+      let savedCount = numFrom(root, ["keptCount", "savedCount", "keepCount", "favoriteCount", "bookmarkCount"]);
+      let reviewScore = numFrom(root, ["visitorReviewsScore", "visitorReviewScore", "reviewScore", "totalScore", "score"]);
+      let description = strFrom(root, ["microReview", "description", "shortDescription", "introduction", "placeDescription"]);
+      let talktalk: boolean | undefined = (root.talktalkUrl || root.talktalkId || root.nchatUrl) ? true : undefined;
+      let homepage = strFrom(root, ["homepage", "homePage"]);
+      let photoCount = numFrom(root, ["imageCount", "photoCount", "totalPhotoCount"]);
+      let newsCount = numFrom(root, ["newsCount", "announcementCount", "feedCount"]);
       for (const value of values) {
+        const v = value as any;
         for (const key of ["imageUrl", "image", "thumbnail", "photoUrl", "originalUrl"]) {
-          const candidate = clean((value as any)[key]);
+          const candidate = clean(v[key]);
           if (/^https?:\/\//.test(candidate) && /naver|pstatic/.test(candidate)) images.add(candidate);
         }
-        const menuName = clean((value as any).name || (value as any).menuName);
-        const price = clean((value as any).price || (value as any).priceText);
-        if (menuName && price && (/menu/i.test(String((value as any).__typename || "")) || (value as any).menuName)) menus.set(menuName, price);
-        const facility = clean((value as any).name || (value as any).label);
+        const menuName = clean(v.name || v.menuName);
+        const price = clean(v.price || v.priceText);
+        if (menuName && price && (/menu/i.test(String(v.__typename || "")) || v.menuName)) menus.set(menuName, price);
+        const facility = clean(v.name || v.label);
         if (facility && /주차|예약|포장|배달|무선 인터넷|반려동물|남녀 화장실|유아/.test(facility)) conveniences.add(facility);
-        if (!hours) hours = clean((value as any).businessHours || (value as any).openingHours);
-        if (!phone) phone = clean((value as any).phone || (value as any).virtualPhone);
-        if (booking === undefined && ((value as any).bookingAvailable === true || (value as any).bookingUrl)) booking = true;
+        if (!hours) hours = clean(v.businessHours || v.openingHours);
+        if (!phone) phone = clean(v.phone || v.virtualPhone);
+        if (booking === undefined && (v.bookingAvailable === true || v.bookingUrl)) booking = true;
+        // 확장 지표: 어느 값 객체에든 있으면 채운다
+        if (savedCount === undefined) savedCount = numFrom(v, ["keptCount", "savedCount", "keepCount", "favoriteCount", "bookmarkCount"]);
+        if (reviewScore === undefined) reviewScore = numFrom(v, ["visitorReviewsScore", "visitorReviewScore", "reviewScore", "totalScore"]);
+        if (!description) description = strFrom(v, ["microReview", "description", "shortDescription", "introduction"]);
+        if (talktalk === undefined && (v.talktalkUrl || v.talktalkId || v.nchatUrl)) talktalk = true;
+        if (!homepage) { const h = strFrom(v, ["homepage", "homePage"]); if (/^https?:\/\//.test(h)) homepage = h; }
+        if (photoCount === undefined) photoCount = numFrom(v, ["imageCount", "photoCount", "totalPhotoCount"]);
+        if (newsCount === undefined) newsCount = numFrom(v, ["newsCount", "announcementCount", "feedCount"]);
+        // 대표 키워드: 방문자 리뷰 키워드 배열({ keyword|name|displayName, count })
+        const kwArr = v.reviewKeywords || v.keywordList || v.representativeKeywords || v.visitorReviewKeywords || v.keywords;
+        if (Array.isArray(kwArr)) for (const k of kwArr) { const s = typeof k === "string" ? clean(k) : clean(k?.keyword || k?.name || k?.displayName); if (s && s.length <= 25) keywords.add(s); }
       }
       const text = document.body?.innerText || "";
       if (!hours) hours = text.match(/(?:영업 중|영업 종료|오늘 휴무)[^\n]{0,80}/)?.[0]?.trim() || "";
@@ -1433,6 +1467,15 @@ export async function crawlPlaceDetail(params: {
         conveniences: Array.from(conveniences).slice(0, 20),
         bookingAvailable: booking,
         collectedAt: new Date().toISOString(),
+        savedCount,
+        visitorReviewScore: reviewScore,
+        description: description || undefined,
+        keywords: Array.from(keywords).slice(0, 15),
+        hasTalktalk: talktalk,
+        homepage: homepage || undefined,
+        newsCount,
+        photoCount: photoCount ?? (images.size || undefined),
+        imageCount: photoCount,
       };
     }, { placeId: params.placeId, domain });
     log(`[플레이스 360] 상세정보 확인 완료`);

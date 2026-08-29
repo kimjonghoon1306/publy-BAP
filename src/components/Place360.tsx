@@ -23,7 +23,7 @@ type StoreProfile = {
 };
 type CollectedPlace = { placeId: string; name: string; category?: string; address?: string; visitorReviewCount?: number; blogReviewCount?: number; placeUrl: string };
 // 링크 하나로 한 번에 끌어오는 플레이스 전체 현황(공개 데이터 전부)
-type LivePlaceDetail = { placeId?: string; name?: string; category?: string; address?: string; phone?: string; businessHours?: string; visitorReviewCount?: number; blogReviewCount?: number; imageUrls?: string[]; menus?: { name: string; price?: string }[]; conveniences?: string[]; bookingAvailable?: boolean; placeUrl?: string; collectedAt?: string };
+type LivePlaceDetail = { placeId?: string; name?: string; category?: string; address?: string; phone?: string; businessHours?: string; visitorReviewCount?: number; blogReviewCount?: number; imageUrls?: string[]; menus?: { name: string; price?: string }[]; conveniences?: string[]; bookingAvailable?: boolean; placeUrl?: string; collectedAt?: string; savedCount?: number; visitorReviewScore?: number; description?: string; keywords?: string[]; hasTalktalk?: boolean; homepage?: string; newsCount?: number; photoCount?: number };
 type RankMeasurement = { query: string; rank: number | null; checkedCount: number; measuredAt: string; surface: string };
 
 const EMPTY_PROFILE: StoreProfile = { name: "", placeUrl: "", category: "", region: "", goal: "visitors" };
@@ -424,15 +424,15 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
 
     // A. 손님 행동 신호 — 공개 화면에 안 나오는 값은 사장님이 입력(가장 중요)
     const behavior: ReportItem[] = [
-      { key: "save", icon: "💾", label: "저장하기 수", status: behaviorInput.saves > 0 ? "good" : "input", value: behaviorInput.saves > 0 ? `${behaviorInput.saves.toLocaleString()}회` : "직접 입력 필요", why: "저장은 '나중에 갈 집' 신호라 순위에 가장 강하게 반영돼요. 네이버가 공개 화면엔 안 띄우니 스마트플레이스 통계에서 확인해요.", how: "네이버 스마트플레이스 앱 → 통계에서 최근 저장수를 확인해 아래 손님 행동 입력칸에 넣으세요. 저장 유도는 정직하게(재방문 고객에게 '저장해두면 편해요' 안내).", action: "손님 행동 입력하기", go: "data" },
-      { key: "reserve", icon: "📅", label: "예약·주문·톡톡", status: src.bookingAvailable ? "good" : "bad", value: src.bookingAvailable ? "연결됨" : "미연결", why: "예약·주문은 방문으로 바로 이어지는 행동이라 순위에 크게 반영돼요. 연결만 해도 노출·전환이 같이 올라가요.", how: src.bookingAvailable ? "이미 연결됐어요. 예약 화면 사진·안내 문구를 최신으로 유지하세요." : "스마트플레이스에서 네이버 예약/주문 또는 톡톡을 켜서 손님이 앱에서 바로 예약하게 하세요.", action: "손님 행동 입력하기", go: "data" },
+      (() => { const saves = src.savedCount ?? behaviorInput.saves; const auto = src.savedCount != null; return { key: "save", icon: "💾", label: "저장하기(찜) 수", status: saves > 0 ? "good" : "input", value: saves > 0 ? `${saves.toLocaleString()}회${auto ? " (자동)" : ""}` : "직접 입력 필요", why: "저장은 '나중에 갈 집' 신호라 순위에 가장 강하게 반영돼요.", how: auto ? "링크에서 자동으로 가져왔어요. 재방문 고객에게 '저장해두면 편해요'라고 정직하게 안내하면 더 늘어요." : "네이버 스마트플레이스 앱 → 통계에서 최근 저장수를 확인해 아래 손님 행동 입력칸에 넣으세요.", action: "손님 행동 입력하기", go: "data" as Place360Tab }; })(),
+      { key: "reserve", icon: "📅", label: "예약·주문·톡톡", status: (src.bookingAvailable || src.hasTalktalk) ? "good" : "bad", value: [src.bookingAvailable ? "예약/주문" : "", src.hasTalktalk ? "톡톡" : ""].filter(Boolean).join(" · ") || "미연결", why: "예약·주문·톡톡은 방문으로 바로 이어지는 행동이라 순위에 크게 반영돼요. 연결만 해도 노출·전환이 같이 올라가요.", how: (src.bookingAvailable || src.hasTalktalk) ? "이미 연결됐어요. 예약 화면 사진·안내 문구를 최신으로 유지하세요." : "스마트플레이스에서 네이버 예약/주문 또는 톡톡을 켜서 손님이 앱에서 바로 예약하게 하세요.", action: "고객 화면 보기", go: "discovery" },
       { key: "directions", icon: "🧭", label: "길찾기·재방문", status: behaviorInput.directions > 0 ? "good" : "input", value: behaviorInput.directions > 0 ? `${behaviorInput.directions.toLocaleString()}회` : "직접 입력 필요", why: "길찾기와 재방문은 '진짜 가는 손님' 신호예요. 반복될수록 충성도 높은 매장으로 읽혀 순위가 올라가요.", how: "스마트플레이스 통계의 길찾기 수를 아래 입력칸에 넣으세요. 재방문은 단골 혜택·새 소식으로 다시 올 이유를 만들어요.", action: "손님 행동 입력하기", go: "data" },
     ];
 
     // B. 리뷰 — 퍼블리가 직접 채우는 핵심 지렛대
     const reviews: ReportItem[] = [
       { key: "blog", icon: "📝", label: "블로그 리뷰", status: avgBlog > 0 ? (blog >= avgBlog ? "good" : blog >= avgBlog * 0.6 ? "warn" : "bad") : (blog >= 30 ? "good" : blog >= 10 ? "warn" : "bad"), value: `${blog.toLocaleString()}개${avgBlog ? ` (주변 평균 ${avgBlog.toLocaleString()})` : ""}`, why: "블로그 리뷰는 상위노출의 가장 큰 지렛대예요. 방문자 리뷰와 같은 키워드로 묶이면 노출 범위가 넓어져요. ★퍼블리가 제일 잘하는 부분!", how: avgBlog && blog < avgBlog ? `주변보다 ${Math.max(0, avgBlog - blog).toLocaleString()}개 적어요. 퍼블리 글쓰기로 리뷰 글을 발행하고, 리뷰어 찾기로 블로거를 섭외하세요.` : "지금 수준을 유지하되, 최근 30일 새 리뷰가 꾸준한지 확인하세요.", action: "리뷰어 찾기 →", go: "discovery" },
-      { key: "visitor", icon: "🧾", label: "방문자(영수증) 리뷰", status: avgVisitor > 0 ? (visitor >= avgVisitor ? "good" : visitor >= avgVisitor * 0.6 ? "warn" : "bad") : (visitor >= 50 ? "good" : visitor >= 15 ? "warn" : "bad"), value: `${visitor.toLocaleString()}개${avgVisitor ? ` (주변 평균 ${avgVisitor.toLocaleString()})` : ""}`, why: "방문자 리뷰의 '양+최신성'이 중요해요. 오래된 리뷰만 있으면 '식은 가게'로 읽혀 순위가 내려가요.", how: "결제 후 영수증 리뷰 안내가 손님 눈높이에 보이는지 확인하세요. 과한 보상 없이 정직하게 유도해야 안전해요(조작은 즉시 적발).", action: "방문자 리뷰 진단", go: "diagnosis" },
+      { key: "visitor", icon: "🧾", label: "방문자(영수증) 리뷰", status: avgVisitor > 0 ? (visitor >= avgVisitor ? "good" : visitor >= avgVisitor * 0.6 ? "warn" : "bad") : (visitor >= 50 ? "good" : visitor >= 15 ? "warn" : "bad"), value: `${visitor.toLocaleString()}개${avgVisitor ? ` (주변 평균 ${avgVisitor.toLocaleString()})` : ""}${src.visitorReviewScore ? ` · ⭐${src.visitorReviewScore}` : ""}`, why: "방문자 리뷰의 '양+최신성'이 중요해요. 오래된 리뷰만 있으면 '식은 가게'로 읽혀 순위가 내려가요.", how: "결제 후 영수증 리뷰 안내가 손님 눈높이에 보이는지 확인하세요. 과한 보상 없이 정직하게 유도해야 안전해요(조작은 즉시 적발).", action: "방문자 리뷰 진단", go: "diagnosis" },
     ];
 
     // C. 정보 완성도 — 필수조건(경쟁사 이상으로)
@@ -441,11 +441,14 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
       { key: "menu", icon: "🍽️", label: "메뉴·가격", status: menus >= 5 ? "good" : menus >= 1 ? "warn" : "bad", value: `${menus}개`, why: "메뉴·가격이 있어야 검색·AI가 '무엇을 파는 집'인지 이해하고 관련 검색에 노출해요.", how: menus < 5 ? "대표 메뉴와 가격을 5개 이상 등록하세요. 시그니처 메뉴는 사진과 함께." : "잘 채워졌어요. 가격 변동 시 바로 갱신하세요.", action: "고객 화면 보기", go: "discovery" },
       { key: "hours", icon: "🕒", label: "영업시간·전화", status: (src.businessHours && src.phone) ? "good" : (src.businessHours || src.phone) ? "warn" : "bad", value: `${src.businessHours ? "영업시간 O" : "영업시간 X"} · ${src.phone ? "전화 O" : "전화 X"}`, why: "영업시간·휴무·전화가 정확해야 헛걸음이 없고, 정보 신뢰도가 순위에도 반영돼요.", how: (!src.businessHours || !src.phone) ? "영업시간·휴무·브레이크타임·전화를 빠짐없이 채우세요." : "정확해요. 명절·임시휴무는 그때그때 반영하세요.", action: "고객 화면 보기", go: "discovery" },
       { key: "conv", icon: "🅿️", label: "편의시설", status: conv >= 4 ? "good" : conv >= 1 ? "warn" : "bad", value: `${conv}개`, why: "주차·예약·포장·와이파이·반려동물 등은 '상황 검색'(주차되는 맛집 등)에 걸리게 해줘요.", how: conv < 4 ? "해당되는 편의시설을 모두 체크하세요. 특히 주차·포장·예약은 검색에 자주 쓰여요." : "잘 돼 있어요.", action: "고객 화면 보기", go: "discovery" },
+      { key: "news", icon: "📢", label: "소식·공지", status: (src.newsCount || 0) >= 1 ? "good" : "warn", value: src.newsCount != null ? `${src.newsCount}건` : "확인 필요", why: "새 소식(이벤트·신메뉴)을 꾸준히 올리면 '살아있는 가게'로 읽혀 노출과 재방문에 도움돼요.", how: (src.newsCount || 0) < 1 ? "스마트플레이스 '소식'에 이벤트·신메뉴·휴무 공지를 주기적으로 올리세요." : "잘하고 있어요. 최소 2주에 한 번은 새 소식을 올리세요.", action: "고객 화면 보기", go: "discovery" },
+      { key: "desc", icon: "📖", label: "매장 소개글", status: (src.description && src.description.length >= 20) ? "good" : "bad", value: src.description ? `${src.description.length}자` : "비어 있음", why: "소개글은 검색·네이버 AI가 '어떤 집인지' 이해하는 근거예요. 대표 키워드가 들어가면 관련 검색에 더 잘 걸려요.", how: (!src.description || src.description.length < 20) ? "누가·무엇을·어떤 특징인지 2~3문장으로 쓰고, 노리는 지역 키워드를 자연스럽게 넣으세요." : "잘 작성됐어요. 노리는 키워드가 들어갔는지 확인하세요.", action: "고객 화면 보기", go: "discovery" },
     ];
 
     // D. 키워드
+    const autoKw = src.keywords || [];
     const keyword: ReportItem[] = [
-      { key: "kw", icon: "🎯", label: "노릴 키워드", status: kwCount >= 3 ? "good" : kwCount >= 1 ? "warn" : "bad", value: `${kwCount}개`, why: "'역명+메뉴+상황' 같은 좁은 키워드 3~5개를 정해 집중해야 상위노출이 현실적이에요. 넓은 키워드는 경쟁이 너무 세요.", how: kwCount < 3 ? "지금 내 순위에서 좁은 키워드 3~5개를 추가하고 순위를 측정하세요." : "좋아요. 키워드별 순위를 주기적으로 재측정하세요.", action: "키워드·순위 보기", go: "rank" },
+      { key: "kw", icon: "🎯", label: "노릴 키워드", status: kwCount >= 3 ? "good" : kwCount >= 1 ? "warn" : "bad", value: `${kwCount}개 설정`, why: "'역명+메뉴+상황' 같은 좁은 키워드 3~5개를 정해 집중해야 상위노출이 현실적이에요. 넓은 키워드는 경쟁이 너무 세요.", how: (autoKw.length ? `손님이 많이 남긴 키워드: ${autoKw.slice(0, 6).join(", ")}. ` : "") + (kwCount < 3 ? "이 중 좁은 키워드 3~5개를 골라 순위를 측정하세요." : "좋아요. 키워드별 순위를 주기적으로 재측정하세요."), action: "키워드·순위 보기", go: "rank" },
     ];
 
     const groups: ReportGroup[] = [
