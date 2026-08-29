@@ -44,6 +44,19 @@ export default function Place360AdminManager({ showToast }: Props) {
   return <section style={{ marginTop: 18, paddingTop: 18, borderTop: "1px solid var(--border)" }}>
     <div style={{ display: "flex", gap: 9, alignItems: "center", flexWrap: "wrap" }}><b style={{ fontSize: 16 }}>🏪 회원 매장 진단 기록 관리</b><span style={{ padding: "4px 9px", borderRadius: 99, background: "rgba(240,65,122,.1)", color: "var(--accent-text)", fontSize: 10.5, fontWeight: 900 }}>관리자 전용</span></div>
     <p style={{ margin: "6px 0 12px", color: "var(--text2)", fontSize: 12, lineHeight: 1.65 }}>회원이 측정한 매장·날짜·리뷰 비교 기록을 확인해요. 개인정보 보호를 위해 진단 수치만 관리하며 네이버 비밀번호는 저장하지 않아요.</p>
+    {/* 📊 전체 현황 요약 — 관리자가 플레이스360 사용 규모를 한눈에 */}
+    {(() => {
+      const stores = new Set(rows.map(r => `${r.store_key}`)).size;
+      const activeMembers = new Set(businessRows.map(r => r.email)).size;
+      const handoffTotal = progressRows.reduce((s, r) => s + (r.reviewer_handoff_count || 0), 0);
+      const cards: [string, string | number, string][] = [
+        ["측정 기록", rows.length, "🩺"],
+        ["진단 매장", stores, "🏪"],
+        ["운영자료 회원", activeMembers, "📊"],
+        ["리뷰어 전달", handoffTotal, "🕵️"],
+      ];
+      return <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 8, margin: "0 0 14px" }}>{cards.map(([l, v, i]) => <div key={l} style={{ padding: "11px 12px", borderRadius: 12, background: "var(--bg)", border: "1px solid var(--border)", textAlign: "center" }}><div style={{ fontSize: 18 }}>{i}</div><b style={{ display: "block", fontSize: 18, color: "var(--accent-text)", margin: "2px 0" }}>{typeof v === "number" ? v.toLocaleString() : v}</b><small style={{ color: "var(--text3)", fontSize: 10.5 }}>{l}</small></div>)}</div>;
+    })()}
     <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) auto", gap: 8 }}><input className="inp" value={search} onChange={e => setSearch(e.target.value)} onKeyDown={e => { if (e.key === "Enter") void load(); }} placeholder="회원 이름·이메일·매장 이름 검색"/><button className="btn btn-primary" onClick={() => void load()} disabled={loading}>{loading ? "불러오는 중…" : "기록 검색"}</button></div>
     <div style={{ marginTop: 12, overflowX: "auto", WebkitOverflowScrolling: "touch" }}><div style={{ minWidth: 720, border: "1px solid var(--border)", borderRadius: 12, overflow: "hidden" }}>
       <div style={{ display: "grid", gridTemplateColumns: "1.5fr .8fr .8fr 1.2fr 70px", padding: "9px 11px", background: "var(--bg)", color: "var(--text3)", fontSize: 10.5, fontWeight: 900 }}><span>매장</span><span>방문자 리뷰</span><span>블로그 리뷰</span><span>측정일·주변 업체</span><span>관리</span></div>
