@@ -412,6 +412,15 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
     // checkKeywordRank는 매 렌더 새로 생성되므로 deps에서 제외(무한 재실행 방지)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoRankKw]);
+  // 🎯 자동 순위 측정 큐: 키워드가 비어 있으면 하나 꺼내 측정, 끝나면(checkingKeyword=="") 다음 것
+  const [rankQueue, setRankQueue] = useState<string[]>([]);
+  useEffect(() => {
+    if (checkingKeyword || rankQueue.length === 0) return;
+    const [next, ...rest] = rankQueue;
+    setRankQueue(rest);
+    if (next && !rankHistory.some(r => r.keyword === next)) { if (!trackedKeywords.includes(next)) persistKeywords([...trackedKeywords, next]); void checkKeywordRank(next); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [checkingKeyword, rankQueue]);
 
   const trend = useMemo(() => {
     if (snapshots.length < 2) return null;
@@ -685,7 +694,10 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
       if (res.ok && data?.ok && Array.isArray(data.keywords)) {
         const list = (data.keywords as { keyword: string; source: string }[]).filter(k => !trackedKeywords.includes(k.keyword));
         setAutoKeywords(list);
-        pushLog(scanPct, `🎯 키워드 ${list.length}개 발굴 완료`);
+        pushLog(scanPct, `🎯 키워드 ${list.length}개 발굴 완료 — 상위 3개 자동 순위 측정`);
+        // 대행사식: 발굴 즉시 상위 3개는 순위까지 자동 측정
+        const auto3 = list.slice(0, 3).map(k => k.keyword).filter(k => !rankHistory.some(r => r.keyword === k));
+        if (auto3.length) setRankQueue(q => Array.from(new Set([...q, ...auto3])));
       } else { showToast?.(data?.error || "키워드 발굴에 실패했어요", "error"); }
     } catch { showToast?.("봇 연결 실패 — 앱 실행 확인", "error"); }
     finally { setKwLoading(false); }
@@ -1109,7 +1121,7 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
                 <b style={{ fontSize: 13.5 }}>🎯 노릴 키워드 & 순위</b>
                 <button className="p360-btn" disabled={kwLoading} onClick={() => void loadAutoKeywords()} style={{ marginLeft: "auto", minHeight: 32, padding: "6px 11px", fontSize: 11, background: `${M.purple}16`, color: M.purple, border: `1px solid ${M.purple}44` }}>{kwLoading ? "발굴 중…" : "🔄 키워드 자동 발굴"}</button>
               </div>
-              <p style={{ color: M.sub, fontSize: 11, lineHeight: 1.5, margin: "5px 0 10px" }}>네이버 <b style={{ color: M.text }}>자동완성·연관검색</b>에서 실제 사람들이 치는 검색어를 긁어와요. 누르면 바로 순위를 재요.</p>
+              <p style={{ color: M.sub, fontSize: 11, lineHeight: 1.5, margin: "5px 0 10px" }}>네이버 <b style={{ color: M.text }}>자동완성·연관검색</b>에서 실제 사람들이 치는 검색어를 긁어와요. 누르면 바로 순위를 재요.{(checkingKeyword || rankQueue.length > 0) && <b style={{ color: M.purple }}> · 🎯 자동 순위 측정 중{rankQueue.length > 0 ? ` (${rankQueue.length}개 대기)` : ""}…</b>}</p>
               {(autoKeywords.length > 0 || kwSuggestions.length > 0) && <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 10 }}>
                 {autoKeywords.slice(0, 14).map(k => <button key={k.keyword} className="p360-btn" title={`출처: ${k.source}`} onClick={() => { persistKeywords([...trackedKeywords, k.keyword]); checkKeywordRank(k.keyword); setAutoKeywords(a => a.filter(x => x.keyword !== k.keyword)); }} style={{ minHeight: 34, padding: "6px 11px", fontSize: 11.5, background: `${M.purple}14`, color: M.purple, border: `1px solid ${M.purple}44`, display: "inline-flex", alignItems: "center", gap: 4 }}>＋ {k.keyword} <span style={{ fontSize: 8.5, opacity: .7, background: `${M.purple}22`, borderRadius: 5, padding: "1px 4px" }}>{k.source}</span></button>)}
                 {autoKeywords.length === 0 && kwSuggestions.map(k => <button key={k} className="p360-btn" onClick={() => { persistKeywords([...trackedKeywords, k]); checkKeywordRank(k); }} style={{ minHeight: 34, padding: "6px 11px", fontSize: 11.5, background: `${M.purple}10`, color: M.purple, border: `1px solid ${M.purple}33` }}>＋ {k}</button>)}
