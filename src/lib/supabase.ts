@@ -855,6 +855,34 @@ export async function incrementPlaceReplyQuota(userId: string, by = 1): Promise<
   await supabase.from("publy_settings").upsert({ key, value: String(used + by) }, { onConflict: "key" });
 }
 
+// ── 📈 컨트롤타워 주간 활동 추이 (실데이터) ──
+//    publy_settings에 날짜별로 쌓인 사용량 키(publish/neighbor/engage/reply_daily_{uid}_{날짜})를
+//    최근 N일치 한 번에 조회해 그래프용 배열로 만든다. 저장 안 된 날은 0.
+export type WeeklyActivity = { date: string; label: string; publish: number; neighbor: number; engage: number; reply: number; total: number };
+export async function getWeeklyActivity(userId: string, days = 7): Promise<WeeklyActivity[]> {
+  try {
+    const dateKeys: string[] = [];
+    for (let i = days - 1; i >= 0; i--) {
+      const d = new Date(Date.now() - i * 86400000);
+      dateKeys.push(koreaDateKey(d));
+    }
+    const metrics = ["publish", "neighbor", "engage", "reply"] as const;
+    const allKeys: string[] = [];
+    for (const dk of dateKeys) for (const m of metrics) allKeys.push(`${m}_daily_${userId}_${dk}`);
+    const { data } = await supabase.from("publy_settings").select("key,value").in("key", allKeys);
+    const map: Record<string, number> = {};
+    (data || []).forEach((row: any) => { map[row.key] = parseInt(row.value) || 0; });
+    return dateKeys.map(dk => {
+      const publish = map[`publish_daily_${userId}_${dk}`] || 0;
+      const neighbor = map[`neighbor_daily_${userId}_${dk}`] || 0;
+      const engage = map[`engage_daily_${userId}_${dk}`] || 0;
+      const reply = map[`reply_daily_${userId}_${dk}`] || 0;
+      const [, mm, dd] = dk.split("-");
+      return { date: dk, label: `${Number(mm)}/${Number(dd)}`, publish, neighbor, engage, reply, total: publish + neighbor + engage + reply };
+    });
+  } catch { return []; }
+}
+
 // ── 🔍 크롤링 발굴 일일 한도(자정 초기화 = 날짜별 키) ──
 export const CRAWL_DAILY_LIMIT: Record<string, number> = {
   free: PLAN_CONFIG.free.dailyCrawl, basic: PLAN_CONFIG.basic.dailyCrawl, pro: PLAN_CONFIG.pro.dailyCrawl, unlimited: PLAN_CONFIG.unlimited.dailyCrawl, admin: PLAN_CONFIG.admin.dailyCrawl,
