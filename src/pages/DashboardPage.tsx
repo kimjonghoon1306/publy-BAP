@@ -4387,14 +4387,6 @@ POST3: (제목)|(이유)
               ];
               const now = new Date();
               const greeting = now.getHours()<12?"좋은 아침이에요":now.getHours()<18?"좋은 오후예요":"오늘도 수고 많으셨어요";
-              const quick = [
-                {label:"글 쓰러 가기", icon:"✍️", go:"keyword" as MainTab,    color:"var(--accent)"},
-                {label:"서이추 시작",  icon:"🤝", go:"neighbor" as MainTab, color:"#00b8d4"},
-                {label:"공감·댓글",    icon:"❤️", go:"engage" as MainTab,   color:"#e5397f"},
-                {label:"답방",        icon:"💬", go:"reply" as MainTab,    color:"#8b5cf6"},
-                {label:"품앗이",       icon:"💞", go:"pumasi" as MainTab,   color:"#ec4899"},
-                {label:"발행 관리",    icon:"📋", go:"manage" as MainTab,   color:"#f59e0b"},
-              ];
               const recent = history.slice(0,5);
               return (
                 <div className="ct" style={{animation:"fadeUp .3s ease both"}}>
@@ -4582,23 +4574,6 @@ POST3: (제목)|(이유)
                     )}
                   </section>
 
-                  {/* 빠른 실행 */}
-                  <section className="ct-section">
-                    <div className="ct-sec-head">
-                      <h2 className="ct-sec-title">⚡ 빠른 실행</h2>
-                      <p className="ct-sec-desc">자주 쓰는 작업으로 한 번에 이동해요.</p>
-                    </div>
-                    <div className="ct-quick-grid">
-                      {quick.map(q=>(
-                        <button key={q.label} className="ct-quick-btn" onClick={()=>setTab(q.go)} style={{["--qc" as any]:q.color}}>
-                          <span className="ct-quick-ico">{q.icon}</span><span className="ct-quick-lbl">{q.label}</span><span className="ct-quick-arrow">→</span>
-                        </button>
-                      ))}
-                      <button className="ct-quick-btn" onClick={()=>setTab("blogscore")} style={{["--qc" as any]:"#10b981"}}>
-                        <span className="ct-quick-ico">📈</span><span className="ct-quick-lbl">블로그 지수 진단</span><span className="ct-quick-arrow">→</span>
-                      </button>
-                    </div>
-                  </section>
 
                   {/* 최근 활동 */}
                   <section className="ct-section">
