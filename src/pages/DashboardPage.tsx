@@ -6982,7 +6982,7 @@ POST3: (제목)|(이유)
               <div><CrawlCenter showToast={showToast} theme={theme==="dark"?"dark":"light"} userId={user.id} plan={user.plan} /></div>
             )}
             {visitedAutoTabs.has("place") && place360Enabled && (
-              <div aria-hidden={tab!=="place"} style={{ display: tab==="place" ? "block" : "none", pointerEvents: tab==="place" ? "auto" : "none" }}><Place360 showToast={showToast} theme={theme==="dark"?"dark":"light"} userId={user.id} plan={user.plan} onOpenCrawl={()=>setTab("crawl")} /></div>
+              <div aria-hidden={tab!=="place"} style={{ display: tab==="place" ? "block" : "none", pointerEvents: tab==="place" ? "auto" : "none" }}><Place360 showToast={showToast} theme={theme==="dark"?"dark":"light"} userId={user.id} plan={user.plan} onOpenCrawl={()=>setTab("crawl")} onOpenReview={()=>setTab("place_reply")} /></div>
             )}
             {tab==="place_reply" && place360Enabled && (
               <PlaceReview showToast={showToast} theme={theme==="dark"?"dark":"light"} userId={user.id} plan={user.plan} onOpenPlace={()=>setTab("place")} />

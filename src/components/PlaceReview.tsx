@@ -215,13 +215,13 @@ export default function PlaceReview({
       <div style={{ ...card, background: isDark ? "linear-gradient(180deg,rgba(240,160,116,.08),transparent)" : "linear-gradient(180deg,rgba(168,89,58,.06),transparent)" }}>
         <div style={{ fontSize: 13, fontWeight: 800, color: "var(--text)", marginBottom: 10 }}>💎 등급별 하루 리뷰답글 한도</div>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(88px,1fr))", gap: 8 }}>
-          {([["무료", "free"], ["베이직", "basic"], ["프로", "pro"], ["무제한", "unlimited"]] as const).map(([label, key]) => {
+          {([["무료", "free"], ["베이직", "basic"], ["프로", "pro"]] as const).map(([label, key]) => {
             const v = PLACE_REPLY_DAILY_LIMIT[key];
-            const mine = plan === key || (key === "unlimited" && isUnlimited);
+            const mine = plan === key;
             return (
               <div key={key} style={{ textAlign: "center", padding: "10px 6px", borderRadius: 12, border: `1.5px solid ${mine ? ACC : "var(--border)"}`, background: mine ? (isDark ? "rgba(240,160,116,.12)" : "rgba(168,89,58,.08)") : "transparent" }}>
                 <div style={{ fontSize: 11, color: "var(--text3)", fontWeight: 700 }}>{label}{mine ? " (나)" : ""}</div>
-                <div style={{ fontSize: 15, fontWeight: 900, color: mine ? ACC : "var(--text)" }}>{v >= 999999 ? "∞" : `${v}건`}</div>
+                <div style={{ fontSize: 15, fontWeight: 900, color: mine ? ACC : "var(--text)" }}>{v}건</div>
               </div>
             );
           })}

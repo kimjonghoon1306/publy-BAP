@@ -2917,7 +2917,7 @@ POST3: (제목)|(이유)
 
             {/* ───── 🏪 플레이스 365 (회원과 동일 · 관리자는 무제한) ───── */}
             {visitedAutoTabs.has("place") && (
-              <div style={{ display: tab === "place" ? "block" : "none" }}><Place360 showToast={showToast} theme={theme==="dark"?"dark":"light"} userId={ADM_UID} plan="admin" onOpenCrawl={()=>setTab("crawl")} /></div>
+              <div style={{ display: tab === "place" ? "block" : "none" }}><Place360 showToast={showToast} theme={theme==="dark"?"dark":"light"} userId={ADM_UID} plan="admin" onOpenCrawl={()=>setTab("crawl")} onOpenReview={()=>setTab("place_reply")} /></div>
             )}
             {/* ───── 🗣️ 플레이스 리뷰답글 (회원과 동일 · 관리자는 무제한) ───── */}
             {tab==="place_reply" && (

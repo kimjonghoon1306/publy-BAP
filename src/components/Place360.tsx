@@ -13,6 +13,7 @@ type Props = {
   userId?: string;
   plan?: string;
   onOpenCrawl?: () => void;
+  onOpenReview?: () => void;   // 🗣️ 플레이스 리뷰답글 탭으로 이동
 };
 
 type Place360Tab = "overview" | "rank" | "diagnosis" | "data" | "mission" | "discovery";
@@ -156,7 +157,7 @@ function normalizeCsvHeader(value: string) {
   return value.replace(/^\ufeff/, "").trim().toLocaleLowerCase("ko-KR").replace(/[\s_·/()-]/g, "");
 }
 
-export default function Place360({ showToast, theme = "light", userId, plan = "free", onOpenCrawl }: Props) {
+export default function Place360({ showToast, theme = "light", userId, plan = "free", onOpenCrawl, onOpenReview }: Props) {
   // 단일 흐름: 기존 setTab(x) 호출은 해당 섹션으로 스크롤하는 점프로 동작(탭 없음).
   const [tab, setTabState] = useState<Place360Tab>("overview");
   const setTab = useCallback((t: Place360Tab) => {
@@ -1434,6 +1435,12 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
                 <button className="p360-btn" onClick={() => setDiscoveryOpen(true)} style={{ background: M.rose, color: "#fff" }}>🕵️ 리뷰 블로거 찾기 →</button>
                 <button className="p360-btn" onClick={() => onOpenCrawl?.()} style={{ background: M.soft, color: M.text, border: `1px solid ${M.line}` }}>🔍 크롤링으로 섭외 →</button>
               </div>
+              {onOpenReview && (
+                <>
+                  <p style={{ color: M.sub, fontSize: 11, lineHeight: 1.55, margin: "12px 0 8px" }}>내 매장에 달린 <b style={{ color: M.text }}>손님 리뷰에 사장님 답글</b>을 달면 소통 점수가 올라 순위에 도움돼요. 악플·저점은 자동 등록하지 않고 확인 후 승인해요.</p>
+                  <button className="p360-btn" onClick={() => onOpenReview()} style={{ width: "100%", background: M.rose, color: "#fff", fontWeight: 800 }}>🗣️ 리뷰에 사장님 답글 달기 →</button>
+                </>
+              )}
             </section>
 
             {/* 포스 자료(접이식) */}
