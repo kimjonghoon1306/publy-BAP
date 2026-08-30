@@ -159,7 +159,7 @@ export default function PlaceReview({
   // ── 자동 모드: 수집 → 초안 → 좋은 리뷰 자동 등록까지 봇이 한 번에 ──
   async function runAuto() {
     if (!isUnlimited && used >= limit) { showToast(`오늘 리뷰답글 한도(${limit}건)를 다 썼어요. 자정에 초기화됩니다.`, "error"); return; }
-    addLog(`🤖 자동 모드 시작 — 수집 → 초안 → 좋은 리뷰 자동 등록`);
+    addLog(`🪄 자동 모드 시작 — 수집 → 초안 → 좋은 리뷰 자동 등록`);
     const items = await apiFetch();
     if (!items.length) { addLog("자동 모드 종료: 처리할 리뷰가 없어요."); return; }
     const drafted = await apiDrafts(items, true);
@@ -302,7 +302,7 @@ export default function PlaceReview({
           {/* 자동/수동 모드 토글 (회원이 선택) */}
           <div style={{ display: "flex", gap: 8, marginBottom: 6 }}>
             <button onClick={() => setAutoMode(false)} style={{ flex: 1, padding: "12px", borderRadius: 12, border: `1.5px solid ${!autoMode ? ACC : "var(--border)"}`, background: !autoMode ? (isDark ? "rgba(240,160,116,.14)" : "rgba(168,89,58,.1)") : "transparent", color: !autoMode ? ACC : "var(--text2)", cursor: "pointer", fontSize: 13.5, fontWeight: 800, fontFamily: "inherit" }}>✋ 수동 (하나씩 확인)</button>
-            <button onClick={() => setAutoMode(true)} style={{ flex: 1, padding: "12px", borderRadius: 12, border: `1.5px solid ${autoMode ? ACC : "var(--border)"}`, background: autoMode ? (isDark ? "rgba(240,160,116,.14)" : "rgba(168,89,58,.1)") : "transparent", color: autoMode ? ACC : "var(--text2)", cursor: "pointer", fontSize: 13.5, fontWeight: 800, fontFamily: "inherit" }}>🤖 자동 (알아서)</button>
+            <button onClick={() => setAutoMode(true)} style={{ flex: 1, padding: "12px", borderRadius: 12, border: `1.5px solid ${autoMode ? ACC : "var(--border)"}`, background: autoMode ? (isDark ? "rgba(240,160,116,.14)" : "rgba(168,89,58,.1)") : "transparent", color: autoMode ? ACC : "var(--text2)", cursor: "pointer", fontSize: 13.5, fontWeight: 800, fontFamily: "inherit" }}>🪄 자동 (알아서)</button>
           </div>
           <div style={{ fontSize: 11.5, color: "var(--text3)", marginBottom: 14, lineHeight: 1.5 }}>{autoMode ? "봇이 리뷰를 모아 좋은 리뷰에 자동으로 답글을 달아요. 악플·저점은 자동 등록하지 않고 승인 대기로 남겨요." : "리뷰를 불러와 하나씩 확인하고, 승인한 답글만 등록해요."}</div>
 
@@ -330,7 +330,7 @@ export default function PlaceReview({
               </label>
             )}
             <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: (autoMode || autoApprove) ? "var(--text)" : "var(--text3)", paddingLeft: autoMode ? 0 : 24 }}>
-              <span>{autoMode ? "🤖 자동 등록 최소 별점" : "자동 승인 최소 별점"}</span>
+              <span>{autoMode ? "🪄 자동 등록 최소 별점" : "자동 승인 최소 별점"}</span>
               <select value={minAutoRating} disabled={!autoMode && !autoApprove} onChange={e => setMinAutoRating(Number(e.target.value))} style={{ padding: "5px 8px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--bg2)", color: "var(--text)", fontFamily: "inherit" }}>
                 {[3, 4, 5].map(n => <option key={n} value={n}>⭐{n}점 이상</option>)}
               </select>
@@ -340,7 +340,7 @@ export default function PlaceReview({
 
           {/* 실행 버튼 — 자동/수동 분기 */}
           {autoMode ? (
-            <button onClick={runAuto} disabled={fetching || running} style={{ width: "100%", marginTop: 14, padding: "13px", borderRadius: 12, border: "none", background: (fetching || running) ? "var(--border)" : `linear-gradient(135deg,${ACC},${isDark ? "#ffbf9a" : "#c8724f"})`, color: (fetching || running) ? "var(--text3)" : "#fff", fontWeight: 800, fontSize: 14.5, cursor: (fetching || running) ? "default" : "pointer", fontFamily: "inherit" }}>{fetching ? "리뷰 수집 중..." : running ? "답글 등록 중..." : "🤖 자동 답글 실행 (수집 → 초안 → 등록)"}</button>
+            <button onClick={runAuto} disabled={fetching || running} style={{ width: "100%", marginTop: 14, padding: "13px", borderRadius: 12, border: "none", background: (fetching || running) ? "var(--border)" : `linear-gradient(135deg,${ACC},${isDark ? "#ffbf9a" : "#c8724f"})`, color: (fetching || running) ? "var(--text3)" : "#fff", fontWeight: 800, fontSize: 14.5, cursor: (fetching || running) ? "default" : "pointer", fontFamily: "inherit" }}>{fetching ? "리뷰 수집 중..." : running ? "답글 등록 중..." : "🪄 자동 답글 실행 (수집 → 초안 → 등록)"}</button>
           ) : (
             <div style={{ display: "flex", gap: 8, marginTop: 14, flexWrap: "wrap" }}>
               <button onClick={generateDrafts} disabled={!reviews.length} style={{ flex: 1, minWidth: 160, padding: "12px", borderRadius: 12, border: `1.5px solid ${ACC}`, background: "transparent", color: ACC, fontWeight: 800, fontSize: 14, cursor: reviews.length ? "pointer" : "default", fontFamily: "inherit", opacity: reviews.length ? 1 : .5 }}>✍️ 답글 초안 만들기</button>
