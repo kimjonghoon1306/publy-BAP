@@ -2984,6 +2984,17 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
                           {relapseN > 0 && <span style={{ fontSize: 11, fontWeight: 800, color: "#f59e0b", background: "rgba(245,158,11,.12)", padding: "4px 11px", borderRadius: 20 }}>🔴 재점검 필요 {relapseN}</span>}
                           {curedN > 0 && <span style={{ fontSize: 11, fontWeight: 800, color: "#00c896", background: "rgba(0,200,150,.12)", padding: "4px 11px", borderRadius: 20 }}>✅ 완치 {curedN}</span>}
                         </div>
+                        {/* 🔴 재점검 필요(관찰 끝났는데도 안 뜬) 글 전체 제목 다시 바꾸기 — 기존 전체변경 로직 재사용 */}
+                        {relapseN > 0 && (
+                          <div style={{ padding: "0 18px 14px" }}>
+                            <button onClick={() => runBulkRetitle(tracked.filter(c => computeCareStatus(c).status === "relapse").map(c => ({ title: c.title || "", logNo: c.post_key, blogId: activeAccount?.blogId })))}
+                              disabled={bulkRunning}
+                              style={{ width: "100%", padding: "11px", borderRadius: 11, border: "none", background: bulkRunning ? "var(--card2)" : "linear-gradient(135deg,#f59e0b,#ef4444)", color: bulkRunning ? "var(--text3)" : "#fff", cursor: bulkRunning ? "default" : "pointer", fontSize: 13, fontWeight: 800, fontFamily: "inherit" }}>
+                              {bulkRunning ? `🔄 제목 바꾸는 중… (${bulkProgress.done}/${bulkProgress.total})` : `🔴 재점검 ${relapseN}개 제목 전체 다시 바꾸기 (AI가 글 읽고 새 제목)`}
+                            </button>
+                            <div style={{ fontSize: 10.5, color: "var(--text3)", marginTop: 5, lineHeight: 1.5 }}>충분히 기다렸는데도 검색에 안 뜬 글이에요. AI가 본문을 읽고 새 제목으로 한 번에 바꿔 다시 도전해요.</div>
+                          </div>
+                        )}
                         {/* 펼침 리스트 */}
                         {trackOpen && (
                           <div style={{ background: "var(--bg)", borderTop: "1px solid var(--border)", padding: "12px 14px" }}>
