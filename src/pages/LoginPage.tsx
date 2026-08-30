@@ -364,6 +364,7 @@ export default function LoginPage({ onLogin, onAdminLogin, theme, onThemeToggle 
     logoTapTimer.current = setTimeout(() => { logoTapCount.current = 0; }, 1400);
   };
   const [mode, setMode] = useState<"login" | "register">("login");
+  const [showPw, setShowPw] = useState(false);
   const [email, setEmail] = useState("");
   // 📇 최근 로그인 아이디 — 브라우저 자동완성 대신 우리가 직접 저장/표시(웹·PC앱 공통 localStorage). 스크롤 드롭다운으로 골라 채운다.
   const RECENT_EMAILS_KEY = "publy_recent_emails";
@@ -603,9 +604,13 @@ export default function LoginPage({ onLogin, onAdminLogin, theme, onThemeToggle 
           </div>
           <div className="field">
             <div className="field-label">🔒 비밀번호</div>
-            <input ref={pwRef} className="field-input" type="password" placeholder="••••••••"
-              value={pw} onChange={e => setPw(e.target.value)}
-              onKeyDown={e => e.key === "Enter" && handleSubmit()} />
+            <div style={{ position: "relative" }}>
+              <input ref={pwRef} className="field-input" type={showPw ? "text" : "password"} placeholder="••••••••"
+                value={pw} onChange={e => setPw(e.target.value)} style={{ paddingRight: 44 }}
+                onKeyDown={e => e.key === "Enter" && handleSubmit()} />
+              <button type="button" onClick={() => setShowPw(v => !v)} aria-label="비밀번호 보기"
+                style={{ position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)", background: "none", border: "none", cursor: "pointer", fontSize: 18, padding: 4, lineHeight: 1 }}>{showPw ? "🙈" : "👁️"}</button>
+            </div>
           </div>
           {mode === "register" && (
             <div className="field">

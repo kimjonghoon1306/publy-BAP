@@ -890,7 +890,7 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
   const [accCats, setAccCats] = useState<Record<string,string[]>>(()=>{try{return JSON.parse(localStorage.getItem("publy_adm_acc_cats")||"{}");}catch{return {};}});
   const [editingCatAccId, setEditingCatAccId] = useState<string|null>(null);
   const [catInput, setCatInput] = useState("");
-  const [showPw, setShowPw] = useState(false); const [showPw1, setShowPw1] = useState(false); const [showPw2, setShowPw2] = useState(false);
+  const [showPw, setShowPw] = useState(false); const [showPw1, setShowPw1] = useState(false); const [showPw2, setShowPw2] = useState(false); const [showDmIgPw, setShowDmIgPw] = useState(false);
 
   // 회원
   const [users, setUsers] = useState<UserFull[]>([]); const [loading, setLoading] = useState(true); const [search, setSearch] = useState(""); const [selUser, setSelUser] = useState<UserFull|null>(null);
@@ -5483,7 +5483,7 @@ POST3: (제목)|(이유)
                     <div style={{fontSize:11,color:"var(--text3)",marginBottom:10}}>발송·크롤링은 로컬 봇(:3335)에서 실행돼요. 연결 시 창이 뜨면 2단계 인증/캡차는 직접 통과시켜 주세요.</div>
                     <div style={{display:"grid",gridTemplateColumns:"1fr 1fr auto",gap:8,alignItems:"end"}}>
                       <div><label className="inp-label">인스타 아이디</label><input className="inp" placeholder="@내계정" value={dmAccount} onChange={e=>setDmAccount(e.target.value)} onBlur={()=>checkDmSession(dmAccount.trim().replace(/^@/,""))}/></div>
-                      <div><label className="inp-label">비밀번호</label><input className="inp" type="password" placeholder="비밀번호" value={dmIgPw} onChange={e=>setDmIgPw(e.target.value)}/></div>
+                      <div><label className="inp-label">비밀번호</label><div style={{position:"relative"}}><input className="inp" type={showDmIgPw?"text":"password"} placeholder="비밀번호" value={dmIgPw} onChange={e=>setDmIgPw(e.target.value)} style={{paddingRight:40}}/><button type="button" onClick={()=>setShowDmIgPw(v=>!v)} aria-label="비밀번호 보기" style={{position:"absolute",right:10,top:"50%",transform:"translateY(-50%)",background:"none",border:"none",cursor:"pointer",fontSize:18,color:"var(--text3)"}}>{showDmIgPw?"🙈":"👁️"}</button></div></div>
                       <button onClick={connectIg} disabled={dmConnecting} style={{padding:"11px 18px",borderRadius:10,border:"none",background:dmConnecting?"var(--border)":"linear-gradient(135deg,#FF6B9D,#C77DFF)",color:"#fff",cursor:dmConnecting?"default":"pointer",fontSize:13,fontWeight:800,fontFamily:"inherit",whiteSpace:"nowrap"}}>{dmConnecting?"연결 중...":dmSessionOk?"재연결":"계정 연결"}</button>
                     </div>
                   </div>

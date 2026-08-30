@@ -1493,6 +1493,11 @@ Output (JSON object only): {"keyword":"핵심키워드","title":"새 SEO 제목"
   const [currentPw, setCurrentPw] = useState("");
   const [newPw1, setNewPw1] = useState("");
   const [newPw2, setNewPw2] = useState("");
+  const [showCurrentPw, setShowCurrentPw] = useState(false);
+  const [showNewPw1, setShowNewPw1] = useState(false);
+  const [showNewPw2, setShowNewPw2] = useState(false);
+  const [showDmIgPw, setShowDmIgPw] = useState(false);
+  const [showPwPrompt, setShowPwPrompt] = useState(false);
   const [pwMsg, setPwMsg] = useState("");
   const [pwChanging, setPwChanging] = useState(false);
   // 버그 신고
@@ -4024,10 +4029,13 @@ POST3: (제목)|(이유)
               </div>
               <div style={{padding:"20px 22px"}}>
                 <div style={{fontSize:12,color:"var(--text3)",marginBottom:6}}>계정: <b style={{color:"var(--text)"}}>{pwPrompt.acc.username}</b></div>
-                <input type="password" autoFocus className="inp" placeholder="비밀번호" value={pwPrompt.value}
-                  onChange={e=>setPwPrompt(p=>p?{...p,value:e.target.value}:p)}
-                  onKeyDown={e=>{ if(e.key==="Enter"&&pwPrompt.value){ pwPromptResolve.current?.(pwPrompt.value); pwPromptResolve.current=null; setPwPrompt(null); } }}
-                  style={{fontSize:14,padding:"12px 14px",marginBottom:14}}/>
+                <div style={{position:"relative",marginBottom:14}}>
+                  <input type={showPwPrompt?"text":"password"} autoFocus className="inp" placeholder="비밀번호" value={pwPrompt.value}
+                    onChange={e=>setPwPrompt(p=>p?{...p,value:e.target.value}:p)}
+                    onKeyDown={e=>{ if(e.key==="Enter"&&pwPrompt.value){ pwPromptResolve.current?.(pwPrompt.value); pwPromptResolve.current=null; setPwPrompt(null); } }}
+                    style={{fontSize:14,padding:"12px 44px 12px 14px"}}/>
+                  <button type="button" onClick={()=>setShowPwPrompt(v=>!v)} aria-label="비밀번호 보기" style={{position:"absolute",right:10,top:"50%",transform:"translateY(-50%)",background:"none",border:"none",cursor:"pointer",fontSize:18,color:"var(--text3)"}}>{showPwPrompt?"🙈":"👁️"}</button>
+                </div>
                 <div style={{display:"flex",gap:8}}>
                   <button onClick={()=>{ pwPromptResolve.current?.(null); pwPromptResolve.current=null; setPwPrompt(null); }}
                     style={{flex:1,padding:"11px",borderRadius:10,border:"1px solid var(--border)",background:"var(--bg2)",color:"var(--text2)",cursor:"pointer",fontSize:13,fontWeight:700,fontFamily:"inherit"}}>취소</button>
@@ -6750,7 +6758,7 @@ POST3: (제목)|(이유)
                       <div style={{fontSize:11,color:"var(--text3)",marginBottom:10}}>발송·크롤링은 로컬 봇(:3335)에서 실행돼요. 연결 시 창이 뜨면 2단계 인증/캡차는 직접 통과시켜 주세요.</div>
                       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr auto",gap:8,alignItems:"end"}}>
                         <div><label className="inp-label">인스타 아이디</label><input className="inp" placeholder="@내계정" value={dmAccount} onChange={e=>setDmAccount(e.target.value)} onBlur={()=>checkDmSession(dmAccount.trim().replace(/^@/,""))}/></div>
-                        <div><label className="inp-label">비밀번호</label><input className="inp" type="password" placeholder="비밀번호" value={dmIgPw} onChange={e=>setDmIgPw(e.target.value)}/></div>
+                        <div><label className="inp-label">비밀번호</label><div style={{position:"relative"}}><input className="inp" type={showDmIgPw?"text":"password"} placeholder="비밀번호" value={dmIgPw} onChange={e=>setDmIgPw(e.target.value)} style={{paddingRight:40}}/><button type="button" onClick={()=>setShowDmIgPw(v=>!v)} aria-label="비밀번호 보기" style={{position:"absolute",right:10,top:"50%",transform:"translateY(-50%)",background:"none",border:"none",cursor:"pointer",fontSize:18,color:"var(--text3)"}}>{showDmIgPw?"🙈":"👁️"}</button></div></div>
                         <button onClick={connectIg} disabled={dmConnecting} style={{padding:"11px 18px",borderRadius:10,border:"none",background:dmConnecting?"var(--border)":"linear-gradient(135deg,#f0417a,#ff6fa1)",color:"#fff",cursor:dmConnecting?"default":"pointer",fontSize:13,fontWeight:800,fontFamily:"inherit",whiteSpace:"nowrap"}}>{dmConnecting?"연결 중...":dmSessionOk?"재연결":"계정 연결"}</button>
                       </div>
                     </div>
@@ -7065,15 +7073,15 @@ POST3: (제목)|(이유)
                   <div style={{display:"flex",flexDirection:"column",gap:10}}>
                     <div>
                       <label className="inp-label">현재 비밀번호</label>
-                      <input className="inp" type="password" placeholder="현재 비밀번호" value={currentPw} onChange={e=>setCurrentPw(e.target.value)}/>
+                      <div style={{position:"relative"}}><input className="inp" type={showCurrentPw?"text":"password"} placeholder="현재 비밀번호" value={currentPw} onChange={e=>setCurrentPw(e.target.value)} style={{paddingRight:40}}/><button type="button" onClick={()=>setShowCurrentPw(v=>!v)} aria-label="비밀번호 보기" style={{position:"absolute",right:10,top:"50%",transform:"translateY(-50%)",background:"none",border:"none",cursor:"pointer",fontSize:18,color:"var(--text3)"}}>{showCurrentPw?"🙈":"👁️"}</button></div>
                     </div>
                     <div>
                       <label className="inp-label">새 비밀번호 (6자 이상)</label>
-                      <input className="inp" type="password" placeholder="새 비밀번호" value={newPw1} onChange={e=>setNewPw1(e.target.value)}/>
+                      <div style={{position:"relative"}}><input className="inp" type={showNewPw1?"text":"password"} placeholder="새 비밀번호" value={newPw1} onChange={e=>setNewPw1(e.target.value)} style={{paddingRight:40}}/><button type="button" onClick={()=>setShowNewPw1(v=>!v)} aria-label="비밀번호 보기" style={{position:"absolute",right:10,top:"50%",transform:"translateY(-50%)",background:"none",border:"none",cursor:"pointer",fontSize:18,color:"var(--text3)"}}>{showNewPw1?"🙈":"👁️"}</button></div>
                     </div>
                     <div>
                       <label className="inp-label">새 비밀번호 확인</label>
-                      <input className="inp" type="password" placeholder="새 비밀번호 재입력" value={newPw2} onChange={e=>setNewPw2(e.target.value)}/>
+                      <div style={{position:"relative"}}><input className="inp" type={showNewPw2?"text":"password"} placeholder="새 비밀번호 재입력" value={newPw2} onChange={e=>setNewPw2(e.target.value)} style={{paddingRight:40}}/><button type="button" onClick={()=>setShowNewPw2(v=>!v)} aria-label="비밀번호 보기" style={{position:"absolute",right:10,top:"50%",transform:"translateY(-50%)",background:"none",border:"none",cursor:"pointer",fontSize:18,color:"var(--text3)"}}>{showNewPw2?"🙈":"👁️"}</button></div>
                     </div>
                     <button className="btn btn-primary" onClick={handleChangePw} disabled={pwChanging} style={{alignSelf:"flex-start"}}>
                       {pwChanging?<><span className="spinner"/>변경 중...</>:"🔐 비밀번호 변경"}

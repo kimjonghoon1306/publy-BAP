@@ -111,6 +111,7 @@ const CSS = `
 
 export default function AdminLoginPage({ onAdminAuth, onBack, theme, onThemeToggle }: Props) {
   const [pw, setPw] = useState("");
+  const [showPw, setShowPw] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [failedAttempts, setFailedAttempts] = useState(() => Number(localStorage.getItem("publy_admin_failed_attempts") || 0));
@@ -177,9 +178,13 @@ export default function AdminLoginPage({ onAdminAuth, onBack, theme, onThemeTogg
           </div>
 
           <label className="admin-label">관리자 비밀번호</label>
-          <input className="admin-input" type="password" placeholder="관리자 비밀번호 입력"
-            value={pw} onChange={e=>setPw(e.target.value)}
-            onKeyDown={e=>e.key==="Enter"&&handleLogin()}/>
+          <div style={{position:"relative"}}>
+            <input className="admin-input" type={showPw?"text":"password"} placeholder="관리자 비밀번호 입력"
+              value={pw} onChange={e=>setPw(e.target.value)} style={{paddingRight:44}}
+              onKeyDown={e=>e.key==="Enter"&&handleLogin()}/>
+            <button type="button" onClick={()=>setShowPw(v=>!v)} aria-label="비밀번호 보기"
+              style={{position:"absolute",right:8,top:"50%",transform:"translateY(-50%)",background:"none",border:"none",cursor:"pointer",fontSize:18,padding:4,lineHeight:1}}>{showPw?"🙈":"👁️"}</button>
+          </div>
 
           <button className="admin-btn" onClick={handleLogin} disabled={loading}>
             {loading
