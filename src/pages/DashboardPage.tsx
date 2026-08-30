@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import GoogleFlowCard from "../GoogleFlowCard";
-import { PublyUser, getQuota, getHistory, getAccounts, PublyQuota, PublyHistory, PublyAccount, upsertAccount, useQuota, refundQuota, addHistory, getHistoryContent, deleteHistory, deleteAllHistory, deleteFailedHistory, changeUserPassword, getNaverApiKeys, saveNaverApiKeys, NaverApiKeys, checkNaverQuota, incrementNaverQuota, getNaverDailyUsage, NAVER_DAILY_LIMIT, getUserNaverApiKeys, logError, PLAN_CONFIG, checkDailyPublishQuota, incrementDailyPublish, getDailyPublishUsage, getNeighborDailyUsage, NEIGHBOR_DAILY_LIMIT, getEngageDailyUsage, ENGAGE_DAILY_LIMIT, InstaDmTarget, InstaDmHistory, InstaDmQuota, getInstaDmTargets, addInstaDmTarget, deleteInstaDmTarget, getInstaDmHistory, addInstaDmHistory, getInstaDmQuota, upsertInstaDmQuota, incrementInstaDmUsage, INSTA_DM_DAILY_LIMIT, getReplyDailyUsage, REPLY_DAILY_LIMIT, pushLiveLog, getWeeklyActivity, WeeklyActivity } from "../lib/supabase";
+import { PublyUser, getQuota, getHistory, getAccounts, PublyQuota, PublyHistory, PublyAccount, upsertAccount, useQuota, refundQuota, addHistory, getHistoryContent, deleteHistory, deleteAllHistory, deleteFailedHistory, changeUserPassword, getNaverApiKeys, saveNaverApiKeys, NaverApiKeys, checkNaverQuota, incrementNaverQuota, getNaverDailyUsage, NAVER_DAILY_LIMIT, getUserNaverApiKeys, logError, PLAN_CONFIG, checkDailyPublishQuota, incrementDailyPublish, getDailyPublishUsage, getNeighborDailyUsage, NEIGHBOR_DAILY_LIMIT, getEngageDailyUsage, ENGAGE_DAILY_LIMIT, InstaDmTarget, InstaDmHistory, InstaDmQuota, getInstaDmTargets, addInstaDmTarget, deleteInstaDmTarget, getInstaDmHistory, addInstaDmHistory, getInstaDmQuota, upsertInstaDmQuota, incrementInstaDmUsage, INSTA_DM_DAILY_LIMIT, getReplyDailyUsage, REPLY_DAILY_LIMIT, pushLiveLog, getWeeklyActivity, WeeklyActivity, getActivityByRange, ActivityRange } from "../lib/supabase";
 import { supabase, submitBugReportRow, getMyResolvedBugAlerts, markBugNotified, PublyBugReport, getPlace360Access } from "../lib/supabase";
 import NeighborPage from "./NeighborPage";
 import CrawlCenter from "../components/CrawlCenter";
@@ -936,7 +936,8 @@ export default function DashboardPage({user, onLogout, onAdminLogin, onThemeTogg
   const [accounts, setAccounts] = useState<PublyAccount[]>([]);
   const [history, setHistory] = useState<PublyHistory[]>([]);
   const [historyError, setHistoryError] = useState("");
-  const [weekly, setWeekly] = useState<WeeklyActivity[]>([]);   // 📈 컨트롤타워 주간 활동 그래프
+  const [weekly, setWeekly] = useState<WeeklyActivity[]>([]);   // 📈 컨트롤타워 활동 그래프(선택 기간)
+  const [actRange, setActRange] = useState<ActivityRange>("week");   // 주간/월간/1년
   const [histPeriod, setHistPeriod] = useState<"all"|"today"|"week"|"month">("all");   // 발행기록 기간 필터
   const [histStatus, setHistStatus] = useState<"all"|"success"|"fail">("all");          // 발행기록 상태 필터
   // 사진 글쓰기 안내 모달(모바일 최적화 — window.open 대신 앱 내 모달)
@@ -2003,8 +2004,8 @@ Output (JSON object only): {"keyword":"핵심키워드","title":"새 SEO 제목"
   // ★발행관리 탭 진입 시 발행기록 항상 다시 불러온다(초기 로드 누락/화면 0건 방지).
   //   발행기록은 서버(publy_history)에 user_id별 영구저장 → 탭 열 때마다 최신 반영.
   useEffect(()=>{ if(tab==="manage"&&user?.id) void loadHistory(); },[tab,user?.id]);
-  // 📈 컨트롤타워 진입 시 최근 7일 활동 그래프 로드
-  useEffect(()=>{ if(tab==="control"&&user?.id) getWeeklyActivity(user.id,7).then(setWeekly).catch(()=>{}); },[tab,user?.id]);
+  // 📈 컨트롤타워 진입 or 기간 변경 시 활동 그래프 로드(주간/월간/1년)
+  useEffect(()=>{ if(tab==="control"&&user?.id) getActivityByRange(user.id,actRange).then(setWeekly).catch(()=>{}); },[tab,user?.id,actRange]);
 
   function recommendImgCount(content:string):number{
     // 글 길이에 맞춰 이미지 수 추천 — 약 700자당 1장, 최소 2장 최대 8장.
@@ -4404,28 +4405,40 @@ POST3: (제목)|(이유)
                     </div>
                   </div>
 
-                  {/* 📈 이번 주 활동 그래프 + 시너지 수치 (실데이터) */}
+                  {/* 📈 자동화 현황 그래프 + 시너지 수치 (실데이터 · 주간/월간/1년) */}
                   {(()=>{
-                    const wk = weekly.length ? weekly : Array.from({length:7},(_,i)=>{ const d=new Date(Date.now()-(6-i)*86400000); return {date:"",label:`${d.getMonth()+1}/${d.getDate()}`,publish:0,neighbor:0,engage:0,reply:0,total:0}; });
+                    const fbLen = actRange==="year"?12:actRange==="month"?30:7;
+                    const wk = weekly.length ? weekly : Array.from({length:fbLen},(_,i)=>{ const d=new Date(Date.now()-(fbLen-1-i)*86400000); return {date:"",label: actRange==="year"?`${((new Date().getMonth()-(11-i)+12)%12)+1}월`:`${d.getMonth()+1}/${d.getDate()}`,publish:0,neighbor:0,engage:0,reply:0,total:0}; });
                     const weekTotal = wk.reduce((s,d)=>s+d.total,0);
                     const maxTotal = Math.max(1,...wk.map(d=>d.total));
                     const savedMin = weekTotal*3;   // 작업 1건당 약 3분 수작업 절감 가정
                     const savedHours = Math.floor(savedMin/60), savedRemMin = savedMin%60;
                     const cumPublish = history.length;   // 누적 발행(발행 이력 총계)
                     const parts=[{k:"publish",label:"발행",color:"var(--accent)"},{k:"neighbor",label:"서이추",color:"#00b8d4"},{k:"engage",label:"공감·댓글",color:"#e5397f"},{k:"reply",label:"답방",color:"#8b5cf6"}] as const;
+                    const rLabel = actRange==="year"?"최근 1년":actRange==="month"?"최근 30일":"이번 주";
+                    const rDesc = actRange==="year"?"최근 12개월간 자동화가 처리한 작업이에요. 매달 이어질수록 블로그가 커집니다.":actRange==="month"?"최근 30일간 퍼블리가 자동으로 처리한 작업이에요.":"최근 7일간 퍼블리가 자동으로 처리한 작업이에요. 여러 기능이 합쳐져 블로그를 키웁니다.";
+                    // 연속: 일별(week/month)=연속 활동일, 년=활동한 달 수
+                    const streak=(()=>{let s=0;for(let i=wk.length-1;i>=0;i--){if(wk[i].total>0)s++;else break;}return s;})();
                     return (
                   <section className="ct-section">
-                    <div className="ct-sec-head">
-                      <h2 className="ct-sec-title">📈 이번 주 자동화 현황</h2>
-                      <p className="ct-sec-desc">최근 7일간 퍼블리가 자동으로 처리한 작업이에요. 여러 기능이 <b>합쳐져</b> 블로그를 키웁니다.</p>
+                    <div className="ct-sec-head" style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:12,flexWrap:"wrap"}}>
+                      <div>
+                        <h2 className="ct-sec-title">📈 자동화 현황</h2>
+                        <p className="ct-sec-desc">{rDesc} 기록은 <b>매일 계속 누적</b>돼요.</p>
+                      </div>
+                      <div style={{display:"flex",gap:4,background:"var(--bg)",border:"1px solid var(--border)",borderRadius:12,padding:4,flexShrink:0}}>
+                        {([["week","주간"],["month","월간"],["year","1년"]] as [ActivityRange,string][]).map(([r,l])=>(
+                          <button key={r} onClick={()=>setActRange(r)} style={{padding:"7px 14px",borderRadius:9,border:"none",cursor:"pointer",fontSize:12.5,fontWeight:800,fontFamily:"inherit",background: actRange===r?"var(--accent)":"transparent",color: actRange===r?"#fff":"var(--text2)",transition:"all .15s"}}>{l}</button>
+                        ))}
+                      </div>
                     </div>
                     {/* 시너지 수치 4개 */}
                     <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(140px,1fr))",gap:12,marginBottom:20}}>
                       {[
-                        {ic:"⚡",lbl:"이번 주 총 작업",val:`${weekTotal.toLocaleString()}건`,sub:"발행+서이추+공감+답방",color:"var(--accent-text)"},
+                        {ic:"⚡",lbl:`${rLabel} 총 작업`,val:`${weekTotal.toLocaleString()}건`,sub:"발행+서이추+공감+답방",color:"var(--accent-text)"},
                         {ic:"⏱️",lbl:"아낀 시간(약)",val: savedHours>0?`${savedHours}시간 ${savedRemMin}분`:`${savedMin}분`,sub:"수작업 대비 절감",color:"#f59e0b"},
-                        {ic:"📝",lbl:"누적 발행 글",val:`${cumPublish.toLocaleString()}개`,sub:"지금까지 쓴 글",color:"#00b487"},
-                        {ic:"🔥",lbl:"연속 활동일",val:`${(()=>{let s=0;for(let i=wk.length-1;i>=0;i--){if(wk[i].total>0)s++;else break;}return s;})()}일`,sub:"매일 이어가면 지수 ↑",color:"#e5397f"},
+                        {ic:"📝",lbl:"누적 발행 글",val:`${cumPublish.toLocaleString()}개`,sub:"전체 기간 누적",color:"#00b487"},
+                        {ic:"🔥",lbl: actRange==="year"?"연속 활동 달":"연속 활동일",val:`${streak}${actRange==="year"?"개월":"일"}`,sub:"이어갈수록 지수 ↑",color:"#e5397f"},
                       ].map(m=>(
                         <div key={m.lbl} style={{background:"var(--bg)",border:"1px solid var(--border)",borderRadius:16,padding:"16px 14px"}}>
                           <div style={{fontSize:11.5,color:"var(--text3)",fontWeight:700,marginBottom:6,display:"flex",alignItems:"center",gap:5}}><span>{m.ic}</span>{m.lbl}</div>

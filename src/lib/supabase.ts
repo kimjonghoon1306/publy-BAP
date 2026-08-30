@@ -883,6 +883,52 @@ export async function getWeeklyActivity(userId: string, days = 7): Promise<Weekl
   } catch { return []; }
 }
 
+// ── 📈 기간별 활동 추이: 'week'(최근7일 일별)·'month'(최근30일 일별)·'year'(최근12개월 월별) ──
+//    데이터는 날짜별로 계속 누적되므로, 기간만 바꿔 같은 소스를 다르게 묶어 보여준다.
+export type ActivityRange = "week" | "month" | "year";
+export async function getActivityByRange(userId: string, range: ActivityRange): Promise<WeeklyActivity[]> {
+  const metrics = ["publish", "neighbor", "engage", "reply"] as const;
+  try {
+    if (range === "year") {
+      // 최근 12개월: 각 달의 모든 날짜 키를 모아 조회 후 월별 합산
+      const now = new Date();
+      const months: { y: number; m: number; label: string }[] = [];
+      for (let i = 11; i >= 0; i--) {
+        const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+        months.push({ y: d.getFullYear(), m: d.getMonth() + 1, label: `${d.getMonth() + 1}월` });
+      }
+      const allKeys: string[] = [];
+      for (const mo of months) {
+        const daysInMonth = new Date(mo.y, mo.m, 0).getDate();
+        for (let dd = 1; dd <= daysInMonth; dd++) {
+          const dk = `${mo.y}-${String(mo.m).padStart(2, "0")}-${String(dd).padStart(2, "0")}`;
+          for (const me of metrics) allKeys.push(`${me}_daily_${userId}_${dk}`);
+        }
+      }
+      const map: Record<string, number> = {};
+      // in() 은 대량 키에 한계가 있어 500개씩 나눠 조회
+      for (let i = 0; i < allKeys.length; i += 500) {
+        const { data } = await supabase.from("publy_settings").select("key,value").in("key", allKeys.slice(i, i + 500));
+        (data || []).forEach((row: any) => { map[row.key] = parseInt(row.value) || 0; });
+      }
+      return months.map(mo => {
+        const daysInMonth = new Date(mo.y, mo.m, 0).getDate();
+        let publish = 0, neighbor = 0, engage = 0, reply = 0;
+        for (let dd = 1; dd <= daysInMonth; dd++) {
+          const dk = `${mo.y}-${String(mo.m).padStart(2, "0")}-${String(dd).padStart(2, "0")}`;
+          publish += map[`publish_daily_${userId}_${dk}`] || 0;
+          neighbor += map[`neighbor_daily_${userId}_${dk}`] || 0;
+          engage += map[`engage_daily_${userId}_${dk}`] || 0;
+          reply += map[`reply_daily_${userId}_${dk}`] || 0;
+        }
+        return { date: `${mo.y}-${mo.m}`, label: mo.label, publish, neighbor, engage, reply, total: publish + neighbor + engage + reply };
+      });
+    }
+    // week/month = 일별
+    return await getWeeklyActivity(userId, range === "month" ? 30 : 7);
+  } catch { return []; }
+}
+
 // ── 🔍 크롤링 발굴 일일 한도(자정 초기화 = 날짜별 키) ──
 export const CRAWL_DAILY_LIMIT: Record<string, number> = {
   free: PLAN_CONFIG.free.dailyCrawl, basic: PLAN_CONFIG.basic.dailyCrawl, pro: PLAN_CONFIG.pro.dailyCrawl, unlimited: PLAN_CONFIG.unlimited.dailyCrawl, admin: PLAN_CONFIG.admin.dailyCrawl,
