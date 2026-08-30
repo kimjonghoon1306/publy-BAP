@@ -1725,8 +1725,8 @@ export async function crawlBuddyPosts(params: {
 }): Promise<BlogTarget[]> {
   const { accountId, maxCount, onLog } = params;
   const log = onLog || console.log;
-  if (!sessionExists(accountId)) throw new Error("세션 없음 — 먼저 계정을 연결하세요");
-  const { cookies } = loadSession(accountId);
+  // ★세션 만료 시 저장된 비번으로 자동 재연결(다른 기능과 동일). 이게 없어서 세션 풀리면 '글 없음'으로 나왔음.
+  const cookies = await ensureLiveSession(accountId, log);
 
   const results: BlogTarget[] = [];
   const seen = new Set<string>();
@@ -1738,20 +1738,28 @@ export async function crawlBuddyPosts(params: {
   try {
     await page.goto("https://section.blog.naver.com/BlogHome.naver", { waitUntil: "domcontentloaded", timeout: 20000 }).catch(() => {});
     await page.waitForTimeout(800);
+    // 로그인 페이지로 튕겼는지 확인(세션 문제 조기 감지)
+    if (/nid\.naver\.com|nidlogin/.test(page.url())) { log("[이웃새글] ❌ 로그인이 풀렸어요 — 계정관리에서 다시 연결해 주세요"); return results; }
     log("[이웃새글] 내 서로이웃 최근 글 수집 중...");
 
     const maxPages = 30;
+    let firstPageDiag = "";
     for (let pageNum = 1; pageNum <= maxPages && results.length < maxCount; pageNum++) {
-      const apiUrl = `https://section.blog.naver.com/ajax/BuddyPostList.naver?page=${pageNum}&groupId=0`;
+      const apiUrl = `https://section.blog.naver.com/ajax/BuddyPostList.naver?page=${pageNum}&groupId=0&currentPage=${pageNum}&countPerPage=30`;
       let list: any[] = [];
+      let rawSnippet = "";
       try {
         const raw = await page.evaluate(async (u) => {
-          const r = await fetch(u, { headers: { Referer: "https://section.blog.naver.com/BlogHome.naver" } });
+          const r = await fetch(u, { headers: { Referer: "https://section.blog.naver.com/BlogHome.naver", "X-Requested-With": "XMLHttpRequest" }, credentials: "include" });
           return await r.text();
         }, apiUrl);
+        rawSnippet = (raw || "").slice(0, 120);
+        // 로그인 HTML이 오면(JSON 아님) 세션 문제
+        if (/^\s*</.test(raw) || /nidlogin|로그인/.test(rawSnippet)) { if (pageNum === 1) firstPageDiag = "로그인 필요 응답(HTML)"; break; }
         const data = JSON.parse(raw.replace(/^\)\]\}',?\s*/, ""));
-        list = data?.result?.buddyPostList || data?.result?.postList || data?.result?.list || [];
-      } catch { list = []; }
+        list = data?.result?.buddyPostList || data?.result?.postList || data?.result?.list || data?.buddyPostList || [];
+        if (pageNum === 1 && !list.length) firstPageDiag = `응답은 왔으나 글 0개 (키: ${Object.keys(data?.result || data || {}).join(",").slice(0,80)})`;
+      } catch (e: any) { if (pageNum === 1) firstPageDiag = `파싱 실패: ${rawSnippet}`; list = []; }
       if (!list.length) break;
 
       for (const item of list) {
@@ -1773,7 +1781,12 @@ export async function crawlBuddyPosts(params: {
       }
       await page.waitForTimeout(250);
     }
-    log(`[이웃새글] ✅ 이웃 블로거 ${results.length}명 수집 완료`);
+    if (!results.length) {
+      log(`[이웃새글] ⚠️ 수집된 이웃 글이 0개예요. ${firstPageDiag || "서로이웃이 없거나, 이웃들이 최근 글을 안 썼거나, 공감·댓글이 모두 막힌 글일 수 있어요"}`);
+      log(`[이웃새글] 💡 확인: ①이 계정에 서로이웃이 있나요? ②최근 이웃들이 글을 올렸나요? ③안 되면 계정관리에서 재연결 후 다시 시도해 주세요.`);
+    } else {
+      log(`[이웃새글] ✅ 이웃 블로거 ${results.length}명 수집 완료`);
+    }
   } finally {
     await browser.close().catch(() => {});
   }
