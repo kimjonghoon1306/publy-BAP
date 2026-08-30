@@ -200,14 +200,18 @@ const AccountCard = React.memo(({ accounts, onLogin, onAdd, onRemove, onChange, 
   connectingAll?: boolean;
 }) => {
   const pendingCount = accounts.filter(a => a.id && a.pw && !a.sessionOk).length;
+  // ★전체 연결은 '아이디·비번이 입력된 계정'이 하나라도 있으면 언제든 활성화(연결됨 표시여도 세션이 풀릴 수 있어 재연결 필요).
+  const credCount = accounts.filter(a => a.id && a.pw).length;
+  const allDisabled = connectingAll || credCount === 0;
   return (
   <div className="card" style={{ padding: "18px 20px" }}>
     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 14 }}>
       <div className="card-title" style={{ margin: 0, fontSize: 15 }}>👤 작업 계정</div>
       {onConnectAll && accounts.length >= 2 && (
-        <button onClick={onConnectAll} disabled={connectingAll || pendingCount === 0}
-          style={{ padding: "7px 14px", borderRadius: 9, border: "none", background: connectingAll || pendingCount === 0 ? "var(--card2)" : "linear-gradient(135deg,#ec4899,#a855f7)", color: connectingAll || pendingCount === 0 ? "var(--text3)" : "#fff", cursor: connectingAll || pendingCount === 0 ? "default" : "pointer", fontSize: 12, fontWeight: 800, fontFamily: "inherit", whiteSpace: "nowrap" }}>
-          {connectingAll ? "🔄 연결 중..." : `🔗 전체 연결${pendingCount ? ` (${pendingCount})` : ""}`}
+        <button onClick={onConnectAll} disabled={allDisabled}
+          style={{ padding: "7px 14px", borderRadius: 9, border: "none", background: allDisabled ? "var(--card2)" : "linear-gradient(135deg,#ec4899,#a855f7)", color: allDisabled ? "var(--text3)" : "#fff", cursor: allDisabled ? "default" : "pointer", fontSize: 12, fontWeight: 800, fontFamily: "inherit", whiteSpace: "nowrap" }}
+          title={pendingCount ? `아직 연결 안 된 ${pendingCount}개 계정을 로그인해요` : "연결됨 상태여도 세션이 풀릴 수 있어요 — 눌러서 전체 재연결"}>
+          {connectingAll ? "🔄 연결 중..." : pendingCount ? `🔗 전체 연결 (${pendingCount})` : "🔗 전체 재연결"}
         </button>
       )}
     </div>
@@ -1089,10 +1093,13 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
   /* 전체 계정 연결: 아이디·비번 입력된 계정을 순서대로 자동 로그인(개별 연결과 별개, 둘 다 사용 가능) */
   const [connectingAll, setConnectingAll] = useState(false);
   const handleConnectAll = async () => {
-    const targets = accounts.filter(a => a.id && a.pw && !a.sessionOk);
-    if (!targets.length) return alert("연결할 계정이 없어요. (아이디·비번을 입력한 미연결 계정이 있어야 해요)");
+    const withCreds = accounts.filter(a => a.id && a.pw);
+    if (!withCreds.length) return alert("연결할 계정이 없어요. 먼저 아이디·비밀번호를 입력해 주세요.");
+    // 미연결이 있으면 그것만, 다 '연결됨'이면 전체 재연결(세션이 풀렸을 수 있어 언제든 재연결 가능)
+    const pending = withCreds.filter(a => !a.sessionOk);
+    const targets = pending.length ? pending : withCreds;
     setConnectingAll(true);
-    addLog(`🔗 전체 연결 시작 — ${targets.length}개 계정을 순서대로 로그인합니다`);
+    addLog(`🔗 전체 연결 시작 — ${targets.length}개 계정을 순서대로 ${pending.length ? "로그인" : "재연결"}합니다`);
     let ok = 0, fail = 0;
     for (const a of targets) {
       const success = await handleLogin(a.accountId, true);   // 조용히(개별 alert 없이)
@@ -2082,7 +2089,7 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
               🔒 <b>{tabName}</b> 전용 계정 <b style={{ color: "#00c896" }}>{accounts.length}</b>/{isUnlimitedPlan ? "∞" : accountLimit}개 · 다른 탭과 <b>완전히 분리</b>돼요(한 곳에서 문제가 생겨도 다른 탭엔 영향 없어요).
             </div>
             <AccountAccordion accounts={accounts} open={acctOpen} setOpen={setAcctOpen} tabName={tabName} accountLimit={accountLimit} isUnlimited={isUnlimitedPlan}>
-              <AccountCard accounts={accounts} onLogin={handleLogin} onAdd={handleAddAccount} onRemove={handleRemoveAccount} onChange={handleAccountChange} />
+              <AccountCard accounts={accounts} onLogin={handleLogin} onAdd={handleAddAccount} onRemove={handleRemoveAccount} onChange={handleAccountChange} onConnectAll={handleConnectAll} connectingAll={connectingAll} />
               <AccountSelector accounts={accounts} selectedId={selectedAcctId} onSelect={setSelectedAcctId} />
             </AccountAccordion>
 
@@ -2369,7 +2376,7 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
               🔒 <b>{tabName}</b> 전용 계정 <b style={{ color: "#00c896" }}>{accounts.length}</b>/{isUnlimitedPlan ? "∞" : accountLimit}개 · 다른 탭과 <b>완전히 분리</b>돼요(한 곳에서 문제가 생겨도 다른 탭엔 영향 없어요).
             </div>
             <AccountAccordion accounts={accounts} open={acctOpen} setOpen={setAcctOpen} tabName={tabName} accountLimit={accountLimit} isUnlimited={isUnlimitedPlan}>
-              <AccountCard accounts={accounts} onLogin={handleLogin} onAdd={handleAddAccount} onRemove={handleRemoveAccount} onChange={handleAccountChange} />
+              <AccountCard accounts={accounts} onLogin={handleLogin} onAdd={handleAddAccount} onRemove={handleRemoveAccount} onChange={handleAccountChange} onConnectAll={handleConnectAll} connectingAll={connectingAll} />
               <AccountSelector accounts={accounts} selectedId={selectedAcctId} onSelect={setSelectedAcctId} />
             </AccountAccordion>
 
@@ -2634,7 +2641,7 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
               🔒 <b>{tabName}</b> 전용 계정 <b style={{ color: "#00c896" }}>{accounts.length}</b>/{isUnlimitedPlan ? "∞" : accountLimit}개 · 다른 탭과 <b>완전히 분리</b>돼요(한 곳에서 문제가 생겨도 다른 탭엔 영향 없어요).
             </div>
             <AccountAccordion accounts={accounts} open={acctOpen} setOpen={setAcctOpen} tabName={tabName} accountLimit={accountLimit} isUnlimited={isUnlimitedPlan}>
-              <AccountCard accounts={accounts} onLogin={handleLogin} onAdd={handleAddAccount} onRemove={handleRemoveAccount} onChange={handleAccountChange} />
+              <AccountCard accounts={accounts} onLogin={handleLogin} onAdd={handleAddAccount} onRemove={handleRemoveAccount} onChange={handleAccountChange} onConnectAll={handleConnectAll} connectingAll={connectingAll} />
               <AccountSelector accounts={accounts} selectedId={selectedAcctId} onSelect={setSelectedAcctId} />
             </AccountAccordion>
 
@@ -2792,7 +2799,7 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
               🔒 <b>{tabName}</b> 전용 계정 <b style={{ color: "#00c896" }}>{accounts.length}</b>/{isUnlimitedPlan ? "∞" : accountLimit}개 · 다른 탭과 <b>완전히 분리</b>돼요(한 곳에서 문제가 생겨도 다른 탭엔 영향 없어요).
             </div>
             <AccountAccordion accounts={accounts} open={acctOpen} setOpen={setAcctOpen} tabName={tabName} accountLimit={accountLimit} isUnlimited={isUnlimitedPlan}>
-              <AccountCard accounts={accounts} onLogin={handleLogin} onAdd={handleAddAccount} onRemove={handleRemoveAccount} onChange={handleAccountChange} />
+              <AccountCard accounts={accounts} onLogin={handleLogin} onAdd={handleAddAccount} onRemove={handleRemoveAccount} onChange={handleAccountChange} onConnectAll={handleConnectAll} connectingAll={connectingAll} />
               <AccountSelector accounts={accounts} selectedId={selectedAcctId} onSelect={setSelectedAcctId} />
             </AccountAccordion>
             <div className="card" style={{ padding: "18px 20px" }}>
