@@ -588,6 +588,7 @@ textarea.inp{resize:vertical;line-height:1.75;min-height:80px;}
 .nav-item.nav-soon:hover{opacity:.8;}
 .nav-soon-badge{margin-left:auto;font-size:9px;font-weight:800;letter-spacing:.3px;color:var(--text3);background:var(--card2);border:1px solid var(--border);padding:2px 7px;border-radius:99px;}
 .nav-item.nav-control .nav-ico{filter:drop-shadow(0 0 6px var(--accent-30));}
+@media (max-width:640px){.loop-arrow{display:none!important;}}
 
 .ct{display:flex;flex-direction:column;gap:20px;max-width:1120px;padding-bottom:20px;}
 .ct-hero{display:flex;justify-content:space-between;align-items:flex-start;gap:20px;padding:26px 28px;border-radius:20px;background:linear-gradient(135deg,var(--accent-bg),transparent 65%),var(--card);border:1px solid var(--border);position:relative;overflow:hidden;}
@@ -4406,6 +4407,63 @@ POST3: (제목)|(이유)
                       <div className="ct-plan-lbl">이용권 남음</div>
                     </div>
                   </div>
+
+                  {/* 💰 수익 루프 — 노트북 한 대로 도는 자동 캐시플로우. 각 단계가 왜 필요한지 + 실제 기능으로 이동 */}
+                  <section className="ct-section" style={{background:"linear-gradient(135deg,rgba(255,196,0,.07),transparent 60%),var(--card)",border:"1px solid rgba(255,180,0,.3)"}}>
+                    <div className="ct-sec-head">
+                      <h2 className="ct-sec-title">💰 수익 루프 <span style={{fontSize:11,fontWeight:800,color:"#000",background:"linear-gradient(135deg,#ffd85e,#ffab2e)",padding:"2px 8px",borderRadius:99}}>노트북 한 대로</span></h2>
+                      <p className="ct-sec-desc">발굴 → 홍보 → 수익화 → 상위노출이 <b>하나로 이어져 돌아가는 흐름</b>이에요. 각 단계는 <b>왜 필요한지</b> 이유가 있고, 버튼을 누르면 <b>실제 그 기능</b>으로 바로 갑니다.</p>
+                    </div>
+                    <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(155px,1fr))",gap:10}}>
+                      {[
+                        {n:1,icon:"🔍",title:"블로거·업체 발굴",why:"홍보해줄 블로거와 잠재 고객(업체)을 직접 찾아야 시작돼요.",act:"크롤링 열기",go:()=>{ if(crawlEnabled) setTab("crawl"); else setShowCrawlLock(true); }},
+                        {n:2,icon:"🌱",title:"홍보할 상품 찾기",why:"팔 물건(온종일팜 산지 상품)이 있어야 콘텐츠가 수익으로 이어져요.",act:"온종일팜 열기",href:"https://app.yuanfnb.com/landing"},
+                        {n:3,icon:"🔗",title:"온파트너로 수익화",why:"추천 링크가 있어야 내가 소개한 상품이 팔릴 때 수익이 들어와요.",act:"온파트너 신청",href:"https://partner.yuanfnb.com/pages/signup.html"},
+                        {n:4,icon:"✍️",title:"퍼블리로 홍보글 발행",why:"블로그·SNS에 글을 올려야 링크가 노출되고 클릭·구매가 생겨요.",act:"글 생성 열기",go:()=>setTab("write")},
+                        {n:5,icon:"📈",title:"상위노출로 증폭",why:"검색 상위에 떠야 더 많은 사람이 보고, 이 과정이 반복·확대돼요.",act:"순위 관리 열기",go:()=>setTab("place")},
+                      ].map((s,i,arr)=>(
+                        <div key={s.n} style={{position:"relative",display:"flex",flexDirection:"column",background:"var(--bg)",border:"1px solid var(--border)",borderRadius:14,padding:"14px 13px"}}>
+                          <div style={{display:"flex",alignItems:"center",gap:7,marginBottom:7}}>
+                            <span style={{width:22,height:22,flexShrink:0,borderRadius:"50%",background:"linear-gradient(135deg,#ffd85e,#ffab2e)",color:"#3a2500",fontSize:12,fontWeight:900,display:"flex",alignItems:"center",justifyContent:"center"}}>{s.n}</span>
+                            <span style={{fontSize:18}}>{s.icon}</span>
+                          </div>
+                          <div style={{fontSize:13.5,fontWeight:800,color:"var(--text)",marginBottom:5}}>{s.title}</div>
+                          <div style={{fontSize:11.5,color:"var(--text2)",lineHeight:1.5,flex:1,marginBottom:10}}><b style={{color:"#c78a00"}}>왜?</b> {s.why}</div>
+                          {"href" in s
+                            ? <a href={s.href} target="_blank" rel="noreferrer" style={{textAlign:"center",padding:"8px",borderRadius:9,background:"var(--card2)",border:"1px solid var(--border)",color:"var(--accent-text)",fontSize:12,fontWeight:800,textDecoration:"none"}}>{s.act} ↗</a>
+                            : <button onClick={s.go} style={{padding:"8px",borderRadius:9,background:"var(--accent)",border:"none",color:"#fff",fontSize:12,fontWeight:800,cursor:"pointer",fontFamily:"inherit"}}>{s.act} →</button>}
+                          {i<arr.length-1 && <span style={{position:"absolute",right:-9,top:"50%",transform:"translateY(-50%)",fontSize:15,color:"#ffab2e",zIndex:1}} className="loop-arrow">→</span>}
+                        </div>
+                      ))}
+                    </div>
+                    <div style={{marginTop:12,padding:"10px 14px",borderRadius:10,background:"rgba(255,180,0,.09)",border:"1px dashed rgba(255,180,0,.4)",fontSize:12,color:"var(--text2)",lineHeight:1.55,fontWeight:600}}>🔄 <b style={{color:"#c78a00"}}>다시 1번으로.</b> 5번에서 얻은 수익·노출이 다시 발굴·홍보에 재투자돼요. 노트북 한 대로 이 바퀴가 계속 굴러갈수록 캐시플로우가 커집니다.</div>
+                  </section>
+
+                  {/* 🎯 내 업종에 맞게 시작 — 대상별 시작 경로(각각 실제 첫 기능으로 이동) */}
+                  <section className="ct-section">
+                    <div className="ct-sec-head">
+                      <h2 className="ct-sec-title">🎯 내 상황에 맞게 시작하기</h2>
+                      <p className="ct-sec-desc">뭘 먼저 해야 할지 모르겠다면, <b>내 경우를 골라</b> 바로 시작하세요. 상황별 추천 순서로 안내해요.</p>
+                    </div>
+                    <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(210px,1fr))",gap:10}}>
+                      {[
+                        {icon:"🏪",who:"매장·플레이스 사장님",desc:"내 가게를 검색 상위에 올리고 리뷰를 관리",steps:"플레이스365 진단 → 리뷰답글 → 블로그 리뷰로 상위노출",act:"플레이스365 시작",go:()=>{ if(place360Enabled) setTab("place"); else showToast("플레이스365는 관리자 승인이 필요해요","info"); }},
+                        {icon:"🛒",who:"쇼핑몰·온라인 판매",desc:"상품을 블로거·블로그로 홍보해 매출 상승",steps:"블로거 발굴 → 홍보글 발행 → 블로그 순위 관리",act:"홍보글 만들기",go:()=>setTab("write")},
+                        {icon:"🚀",who:"창업·프랜차이즈 모집",desc:"온파트너로 창업자·가맹점주를 모집",steps:"온파트너 가입 → 모집 링크 발급 → 퍼블리로 홍보",act:"온파트너 열기",href:"https://partner.yuanfnb.com/pages/signup.html"},
+                        {icon:"💸",who:"부업·N잡러",desc:"추천 링크로 소개 수익 만들기",steps:"온파트너 가입 → 상품 링크 → SNS·블로그 홍보",act:"온파트너 열기",href:"https://partner.yuanfnb.com/pages/signup.html"},
+                      ].map(p=>(
+                        <div key={p.who} style={{display:"flex",flexDirection:"column",background:"var(--bg)",border:"1px solid var(--border)",borderRadius:14,padding:"15px 14px"}}>
+                          <div style={{fontSize:24,marginBottom:7}}>{p.icon}</div>
+                          <div style={{fontSize:14,fontWeight:800,color:"var(--text)",marginBottom:4}}>{p.who}</div>
+                          <div style={{fontSize:12,color:"var(--text2)",lineHeight:1.5,marginBottom:8}}>{p.desc}</div>
+                          <div style={{fontSize:11,color:"var(--text3)",lineHeight:1.5,marginBottom:12,flex:1,paddingLeft:9,borderLeft:"2px solid var(--accent-30)"}}>{p.steps}</div>
+                          {"href" in p
+                            ? <a href={p.href} target="_blank" rel="noreferrer" style={{textAlign:"center",padding:"9px",borderRadius:9,background:"var(--accent)",color:"#fff",fontSize:12.5,fontWeight:800,textDecoration:"none"}}>{p.act} ↗</a>
+                            : <button onClick={p.go} style={{padding:"9px",borderRadius:9,background:"var(--accent)",border:"none",color:"#fff",fontSize:12.5,fontWeight:800,cursor:"pointer",fontFamily:"inherit"}}>{p.act} →</button>}
+                        </div>
+                      ))}
+                    </div>
+                  </section>
 
                   {/* 오늘의 성과 */}
                   <section className="ct-section">

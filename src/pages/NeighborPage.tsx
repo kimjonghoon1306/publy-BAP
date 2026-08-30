@@ -1489,6 +1489,78 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
     es.onerror = () => { addScLog("❌ 연결 오류 (다시 시도해주세요)"); setScLoading(false); es.close(); };
   };
 
+  /* 📄 블로그 진단 보고서 PDF — 진단 결과를 제출용 새 창(인쇄→PDF 저장)으로. 소상공인·대행사 미팅 제출용. */
+  const downloadBlogReport = () => {
+    if (!scResult) { alert("먼저 '블로그 진단 시작'으로 건강 리포트를 만들어 주세요"); return; }
+    const s = scResult;
+    const esc = (v: any) => String(v ?? "").replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c] || c));
+    // 점수·등급 재계산(화면과 동일 로직)
+    const kstDayNum = (ms: number) => Math.floor((ms + 9 * 3600000) / 86400000);
+    const todayNum = kstDayNum(Date.now());
+    const dayNumOf = (d: string) => { const t = new Date(`${d}T00:00:00+09:00`).getTime(); return Number.isFinite(t) ? kstDayNum(t) : NaN; };
+    const dayNums = (s.recentDates || []).map(dayNumOf).filter(n => Number.isFinite(n)).sort((a, b) => b - a);
+    const recent30 = dayNums.filter(n => (todayNum - n) <= 30).length;
+    const lastDaysAgo = dayNums.length ? (todayNum - dayNums[0]) : 999;
+    const score = Math.round(Math.min(30, (s.totalPosts / 100) * 30) + Math.min(25, (s.neighbors / 1000) * 25) + Math.min(30, (recent30 / 12) * 30) + (lastDaysAgo <= 3 ? 15 : lastDaysAgo <= 7 ? 10 : lastDaysAgo <= 14 ? 5 : 0));
+    const grade = score >= 80 ? { label: "최적화", color: "#8b5cf6" } : score >= 60 ? { label: "우수", color: "#3b82f6" } : score >= 40 ? { label: "성장중", color: "#00c896" } : score >= 20 ? { label: "초기", color: "#f59e0b" } : { label: "휴면", color: "#ef4444" };
+    // 진단·처방
+    const tips: string[] = [];
+    if (recent30 < 8) tips.push("발행이 뜸해요. 네이버는 꾸준한 발행을 선호합니다 — 최소 주 2~3회 이상 권장.");
+    if (lastDaysAgo > 7) tips.push(`마지막 글이 ${lastDaysAgo}일 전입니다. 방치되면 노출이 줄어요 — 새 글 발행 필요.`);
+    if (s.neighbors < 300) tips.push("이웃이 적어요. 서이추로 이웃을 늘리면 방문·소통이 커집니다.");
+    if (s.totalPosts < 30) tips.push("글이 아직 적어요. 주제를 정해 꾸준히 쌓아야 블로그 힘이 붙습니다.");
+    if (s.lowQualitySuspected === true) tips.push("검사한 글 다수가 제목 검색 100위 밖에서 누락됐어요. 제목·본문의 반복 키워드·상업성 표현 점검 필요.");
+    if (s.visitorDrop?.detected) tips.push(`${s.visitorDrop.message}. 유입 검색어 순위 변화와 최근 수정·삭제 글을 확인하세요.`);
+    if (!tips.length) tips.push("전반적으로 건강합니다. 공감·댓글·답방으로 소통을 더 키우세요.");
+    // 노출 검사
+    const checks = (s.exposureChecks || []).filter(c => c.exposed !== null);
+    const exposed = checks.filter(c => c.exposed).length;
+    const exposeRows = checks.slice(0, 12).map(c => `<tr><td>${esc(c.title)}</td><td class="${c.exposed ? "up" : "dn"}">${c.exposed ? (c.rank ? c.rank + "위" : "노출") : "누락"}</td></tr>`).join("");
+    // 방문자 추이(SVG)
+    const vd = s.visitorDays || [];
+    let chartSvg = "";
+    if (vd.length >= 2) {
+      const vals = vd.map(d => d.visitors); const W = 640, H = 130, pad = 22;
+      const mx = Math.max(...vals), mn = Math.min(...vals), sp = Math.max(1, mx - mn);
+      const pts = vals.map((v, i) => `${(pad + i * (W - pad * 2) / (vals.length - 1)).toFixed(1)},${(H - pad - (v - mn) / sp * (H - pad * 2)).toFixed(1)}`);
+      chartSvg = `<div class="chart"><b>📈 방문자 추이 (최근 ${vd.length}일)</b><svg viewBox="0 0 ${W} ${H}" width="100%" height="150" preserveAspectRatio="none"><polyline points="${pts.join(" ")}" fill="none" stroke="#00c896" stroke-width="3" stroke-linejoin="round"/>${pts.map(p => { const [x, y] = p.split(","); return `<circle cx="${x}" cy="${y}" r="3.5" fill="#00c896"/>`; }).join("")}</svg></div>`;
+    }
+    // 유입 키워드
+    const kw = (s.inflowKeywords || []).slice(0, 10);
+    const kwBlock = kw.length ? `<h2>🔑 유입 검색어 TOP ${kw.length}</h2><div class="kw">${kw.map(k => `<span>${esc(k.keyword)}${k.count ? ` <b>${k.count}</b>` : ""}</span>`).join("")}</div>` : "";
+    const activityLabel = s.activity ? (s.activity.level === "active" ? "🟢 활성" : s.activity.level === "normal" ? "🟡 보통" : "🔴 비활성") : "-";
+    const html = `<!doctype html><html lang="ko"><head><meta charset="utf-8"><title>${esc(s.blogId)} 블로그 건강 진단 보고서</title>
+    <style>body{font-family:'Noto Sans KR',-apple-system,sans-serif;color:#141821;max-width:760px;margin:32px auto;padding:0 22px;line-height:1.65}
+    h1{font-size:24px}h2{font-size:16px;margin:26px 0 10px}
+    .brand{display:flex;align-items:center;gap:10px;padding-bottom:12px;border-bottom:3px solid ${grade.color};margin-bottom:4px}
+    .logo{width:34px;height:34px;border-radius:9px;background:linear-gradient(135deg,#8b5cf6,#ec4899);color:#fff;font-weight:900;font-size:18px;display:flex;align-items:center;justify-content:center}
+    .btag{font-size:11px;font-weight:900;letter-spacing:.12em;color:${grade.color}}.bttl{font-size:20px;font-weight:900}
+    .top{background:linear-gradient(120deg,#f5f3ff,#fdf2f8);border:1px solid #e9e4f5;border-radius:14px;padding:18px;margin:16px 0;display:flex;align-items:center;gap:18px}
+    .scorec{width:88px;height:88px;border-radius:50%;border:8px solid ${grade.color};display:flex;flex-direction:column;align-items:center;justify-content:center;flex-shrink:0}
+    .scorec b{font-size:26px;color:${grade.color};line-height:1}.scorec span{font-size:10px;color:#6b7280}
+    .gl{font-size:22px;font-weight:900;color:${grade.color}}
+    .mgrid{display:flex;gap:10px;margin:10px 0}.mc{flex:1;border:1px solid #e5e7eb;border-radius:10px;padding:11px;text-align:center}.mc span{font-size:11px;color:#6b7280;display:block}.mc b{font-size:19px}
+    .todo{margin:8px 0;padding-left:20px}.todo li{margin:6px 0;font-size:13px}
+    .rtbl{width:100%;border-collapse:collapse;margin:8px 0;font-size:12.5px}.rtbl th,.rtbl td{border:1px solid #e5e7eb;padding:7px 9px;text-align:left}.rtbl th{background:#f5f3ff}
+    .up{color:#059669;font-weight:700}.dn{color:#dc2626;font-weight:700}
+    .chart{border:1px solid #e5e7eb;border-radius:12px;padding:14px;margin:14px 0;background:#fafafa}
+    .kw{display:flex;flex-wrap:wrap;gap:6px}.kw span{background:#f5f3ff;border:1px solid #e9e4f5;border-radius:99px;padding:5px 11px;font-size:12px}.kw b{color:#8b5cf6}
+    .foot{margin-top:26px;color:#6b7280;font-size:11px;border-top:1px solid #e5e7eb;padding-top:12px}
+    @media print{body{margin:0}}</style></head><body>
+    <div class="brand"><div class="logo">P</div><div><div class="btag">PUBLY · 블로그 건강 진단 보고서</div><div class="bttl">📊 ${esc(s.blogId)}</div></div><div style="margin-left:auto;text-align:right;font-size:11px;color:#6b7280">발행일<br/><b style="color:#141821;font-size:13px">${new Date().toLocaleDateString("ko-KR")}</b></div></div>
+    <div class="top"><div class="scorec"><b>${score}</b><span>점 / 100</span></div><div><div class="gl">${grade.label}</div><div style="font-size:12px;color:#4b5563;margin-top:4px">발행 활성도 ${activityLabel} · 최근 30일 ${recent30}회 발행 · 마지막 ${lastDaysAgo === 0 ? "오늘" : lastDaysAgo >= 999 ? "-" : lastDaysAgo + "일 전"}</div></div></div>
+    <div class="mgrid"><div class="mc"><span>총 글 수</span><b>${s.totalPosts.toLocaleString()}</b></div><div class="mc"><span>이웃 수</span><b>${s.neighbors.toLocaleString()}</b></div><div class="mc"><span>최근 30일 발행</span><b>${recent30}회</b></div><div class="mc"><span>검색 노출</span><b>${checks.length ? `${exposed}/${checks.length}` : "-"}</b></div></div>
+    <h2>🎯 지금 해야 할 것</h2><ol class="todo">${tips.map(t => `<li>${esc(t)}</li>`).join("")}</ol>
+    ${chartSvg}
+    ${kwBlock}
+    ${exposeRows ? `<h2>🔎 글 검색 노출 진단</h2><table class="rtbl"><thead><tr><th>글 제목</th><th>검색 순위</th></tr></thead><tbody>${exposeRows}</tbody></table>` : ""}
+    <div class="foot">본 보고서는 네이버 블로그 공개 지표(글 수·이웃·발행 활동·검색 노출)를 기준으로 <b>퍼블리</b>가 자동 생성했습니다. 부족 항목은 퍼블리 글쓰기·제목 최적화·서이추·품앗이로 개선할 수 있습니다. · publy.blogautopro.com</div>
+    <script>window.onload=()=>{setTimeout(()=>window.print(),400)}</script></body></html>`;
+    const w = window.open("", "_blank");
+    if (!w) { alert("팝업이 차단됐어요. 팝업을 허용한 뒤 다시 시도해 주세요."); return; }
+    w.document.write(html); w.document.close();
+  };
+
   /* 제목 수정 한도 로드 (지수 탭 진입 시) */
   useEffect(() => {
     if (tab === "score" && userId) botFetch(`${BOT}/api/title-edit-quota/${userId}`).then(r => r.json())
@@ -2833,6 +2905,8 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
               const maxVisitors = Math.max(1, ...visitorDays.map(day => day.visitors));
               return (
                 <div className="card" style={{ padding: "24px 26px" }}>
+                  {/* 📄 진단 보고서 PDF — 눈에 잘 띄는 자리(제출용). 소상공인·대행사 미팅용 */}
+                  <button onClick={downloadBlogReport} style={{ width: "100%", marginBottom: 16, padding: "13px", borderRadius: 12, border: "none", background: "linear-gradient(135deg,#8b5cf6,#ec4899)", color: "#fff", fontWeight: 800, fontSize: 14.5, cursor: "pointer", fontFamily: "inherit", boxShadow: "0 4px 14px rgba(139,92,246,.3)", display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>📄 이 진단을 보고서(PDF)로 저장 · 고객 제출용</button>
                   {/* 종합 등급 */}
                   <div style={{ display: "flex", alignItems: "center", gap: 18, paddingBottom: 20, marginBottom: 20, borderBottom: "1px solid var(--border)" }}>
                     <div style={{ position: "relative", width: 92, height: 92, flexShrink: 0 }}>
