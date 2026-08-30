@@ -3726,6 +3726,7 @@ export async function replyToComments(params: {
   comment: string;
   tone: string;
   onlyNew: boolean;
+  replyToReplies?: boolean;   // ★상대가 내 답글에 '대대댓글'로 또 말 걸면 딱 1번만 더 답한다(대대대답). 무한 사슬 방지 위해 원댓글당 내 답 2개면 정지.
   delayMin: number;
   delayMax: number;
   geminiKey?: string;
@@ -3734,7 +3735,7 @@ export async function replyToComments(params: {
   onProgress?: (done: number, fail: number) => void;
   stopSignal?: () => boolean;
 }): Promise<void> {
-  const { accountId, ownerUserId, posts, mode, comment, tone, onlyNew, delayMin, delayMax, geminiKey = "", onLog, onResult, onProgress, stopSignal } = params;
+  const { accountId, ownerUserId, posts, mode, comment, tone, onlyNew, replyToReplies = false, delayMin, delayMax, geminiKey = "", onLog, onResult, onProgress, stopSignal } = params;
   const log = onLog || console.log;
   const cookies = await ensureLiveSession(accountId, log);   // ★세션 만료면 저장된 비번으로 자동 재연결(테리: "연결됨"인데 로그인풀림 방지)
 
@@ -3745,6 +3746,62 @@ export async function replyToComments(params: {
   const page = await context.newPage();
   await page.bringToFront().catch(() => {});   // ★크롬 창을 화면 앞으로
   let done = 0, fail = 0;
+
+  // ── 답글 문구 만들기(원댓글·대대댓글 공용) ──
+  const makeReplyText = async (commentText: string, author: string): Promise<string> => {
+    if (mode === "ai") {
+      let t = await generateAiReply(geminiKey, tone, commentText, author || "", log);
+      if (!t) { t = pickFallbackReply(); log(`[답방] AI 답글 실패 → 순환 답글 사용: "${t}"`); }
+      return t;
+    }
+    // 고정 답글: 여러 줄이면 줄마다 랜덤으로 번갈아(반복 방지). 비었으면 기본 인사.
+    const lines = String(comment || "").split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+    return lines.length ? lines[Math.floor(Math.random() * lines.length)] : pickFallbackReply();
+  };
+
+  // ── 특정 댓글(원댓글이든 대댓글이든)에 답글 1개 달기. commentNo로 정확히 타겟. 성공 true ──
+  //    ★네이버 댓글 위젯은 원댓글·대댓글 모두 같은 셀렉터 패턴을 씀(답글버튼 a.u_cbox_btn_reply[data-param],
+  //      입력창 [id$=reply_textarea_{no}], 등록 [data-ui-selector=replyButton_{no}]) → 대대댓글에도 그대로 재사용.
+  const postReply = async (ctx: any, commentNo: string, replyText: string, tag: string): Promise<boolean> => {
+    // ① 답글 버튼 클릭(commentNo로 타겟) → 입력 영역 펼침
+    const opened = await ctx.evaluate((cno: string) => {
+      const btns = Array.from(document.querySelectorAll(`a.u_cbox_btn_reply[data-param='${cno}']`)) as HTMLElement[];
+      const btn = btns.find(b => !b.classList.contains("u_cbox_btn_reply_on") && b.style.display !== "none") || btns[0];
+      if (!btn) return false;
+      btn.click();
+      return true;
+    }, commentNo).catch(() => false);
+    if (!opened) { log(`[답방] ${tag} 답글 버튼 못찾음 — 스킵`); return false; }
+    await page.waitForTimeout(1000);
+
+    // ② 펼쳐진 답글 입력창(contenteditable, id가 …reply_textarea_{commentNo})에 타이핑
+    const inputSel = `[id$='reply_textarea_${commentNo}']`;
+    const inputEl = await ctx.$(inputSel);
+    if (!inputEl) { log(`[답방] ${tag} 답글 입력창 못찾음 — 스킵`); return false; }
+    try { await inputEl.scrollIntoViewIfNeeded({ timeout: 2000 }); } catch {}
+    try { await inputEl.click({ force: true, timeout: 3000 }); }
+    catch { const b = await inputEl.boundingBox(); if (b) await page.mouse.click(b.x + b.width / 2, b.y + b.height / 2); }
+    await page.waitForTimeout(400);
+    await page.keyboard.press(process.platform === "darwin" ? "Meta+A" : "Control+A").catch(() => {});
+    await page.keyboard.press("Backspace").catch(() => {});
+    await humanType(page, naturalizeMsg(replyText));
+    await page.waitForTimeout(500);
+    const typedOk = await ctx.evaluate((sel: string) => {
+      const el = document.querySelector(sel) as HTMLElement | null;
+      return !!el && (el.textContent || "").trim().length > 0;
+    }, inputSel).catch(() => false);
+    if (!typedOk) { log(`[답방] ${tag} 답글 입력 실패 — 스킵`); return false; }
+
+    // ③ 등록 버튼
+    const submitted = await ctx.evaluate((cno: string) => {
+      const btn = (document.querySelector(`[data-ui-selector='replyButton_${cno}']`)
+        || document.querySelector(`button.u_cbox_btn_upload[data-action*='reply']`)) as HTMLElement | null;
+      if (btn) { btn.click(); return true; }
+      return false;
+    }, commentNo).catch(() => false);
+    await page.waitForTimeout(1500);
+    return submitted;
+  };
 
   try {
     for (const postUrl of posts) {
@@ -3778,17 +3835,33 @@ export async function replyToComments(params: {
         // 이 글의 댓글 목록 파악 (작성자·내용·commentNo·이미 답글있는지)
         //  ★2026-08 실측: 답글 버튼 a.u_cbox_btn_reply[data-param='{commentNo}'], 입력창 id는 …__reply_textarea_{commentNo}(contenteditable),
         //    답글 등록 버튼 [data-ui-selector='replyButton_{commentNo}']. commentNo로 타겟해야 순번 어긋남이 없다(기존 idx 매칭 버그 제거).
-        const commentInfos: { commentNo: string; author: string; text: string; hasReply: boolean }[] = await ctx.evaluate(() => {
+        type ReplyItem = { commentNo: string; author: string; text: string; isMine: boolean };
+        type CommentInfo = { commentNo: string; author: string; text: string; hasReply: boolean; replies: ReplyItem[] };
+        const commentInfos: CommentInfo[] = await ctx.evaluate(() => {
+          // 한 원댓글의 답글영역(u_cbox_reply_area) 안 대댓글들을 순서대로 수집.
+          //  isMine=내가 쓴 답글(네이버는 본인 댓글에만 '삭제' 버튼을 노출 → 그걸로 판별).
+          const parseReplies = (li: Element): { commentNo: string; author: string; text: string; isMine: boolean }[] => {
+            const area = li.querySelector(".u_cbox_reply_area");
+            if (!area) return [];
+            return Array.from(area.querySelectorAll("li.u_cbox_comment")).map((r) => {
+              const author = (r.querySelector(".u_cbox_nick")?.textContent || "").trim();
+              const text = (r.querySelector(".u_cbox_contents")?.textContent || "").trim();
+              const rBtn = r.querySelector("a.u_cbox_btn_reply[data-action='reply#toggle'], a.u_cbox_btn_reply");
+              const commentNo = rBtn?.getAttribute("data-param") || "";
+              const isMine = !!r.querySelector("a.u_cbox_btn_delete, a[data-action='comment#delete'], .u_cbox_btn_delete");
+              return { commentNo, author, text, isMine };
+            }).filter(x => x.text);
+          };
           // 원댓글만: 대댓글(u_cbox_reply_area 안)은 제외
           const items = Array.from(document.querySelectorAll("li.u_cbox_comment")).filter(li => !li.closest(".u_cbox_reply_area"));
-          const res: { commentNo: string; author: string; text: string; hasReply: boolean }[] = [];
+          const res: { commentNo: string; author: string; text: string; hasReply: boolean; replies: { commentNo: string; author: string; text: string; isMine: boolean }[] }[] = [];
           items.forEach((li) => {
             const author = (li.querySelector(".u_cbox_nick")?.textContent || "").trim();
             const text = (li.querySelector(".u_cbox_contents")?.textContent || "").trim();
             const replyBtn = li.querySelector("a.u_cbox_btn_reply[data-action='reply#toggle'], a.u_cbox_btn_reply");
             const commentNo = replyBtn?.getAttribute("data-param") || "";
             const hasReply = !!li.querySelector(".u_cbox_reply_area .u_cbox_comment, .u_cbox_reply_cnt");
-            if (text && commentNo) res.push({ commentNo, author, text, hasReply });
+            if (text && commentNo) res.push({ commentNo, author, text, hasReply, replies: parseReplies(li) });
           });
           return res;
         }).catch(() => []);
@@ -3796,67 +3869,40 @@ export async function replyToComments(params: {
         if (!commentInfos.length) { log(`[답방] 댓글 없음, 스킵`); await onResult?.({ postTitle: postUrl, status: "skip", message: "댓글 없음" }); onProgress?.(done, fail); continue; }
 
         const targets = onlyNew ? commentInfos.filter(c => !c.hasReply) : commentInfos;
-        log(`[답방] 댓글 ${commentInfos.length}개 중 답방 대상 ${targets.length}개`);
+        log(`[답방] 댓글 ${commentInfos.length}개 중 답방 대상 ${targets.length}개${replyToReplies ? " (+ 대대댓글 1회 답)" : ""}`);
 
+        // ── Phase 1: 원댓글에 답글 달기 ──
         for (const c of targets) {
           if (stopSignal?.()) break;
-          // 답글 문구 결정
-          let replyText = comment;
-          if (mode === "ai") {
-            replyText = await generateAiReply(geminiKey, tone, c.text, c.author || "", log);
-            // ★AI 실패(한도·오류)해도 스킵하지 말고 순환 답글로 답한다(테리: 답방도 순환 문구 사용).
-            if (!replyText) { replyText = pickFallbackReply(); log(`[답방] AI 답글 실패 → 순환 답글 사용: "${replyText}"`); }
-          } else {
-            // ★고정 답글: 여러 줄 입력하면 줄마다 하나씩 랜덤으로 번갈아 답한다(똑같은 답글 반복 방지). 비었으면 기본 인사.
-            const lines = String(comment || "").split(/\r?\n/).map(s => s.trim()).filter(Boolean);
-            replyText = lines.length ? lines[Math.floor(Math.random() * lines.length)] : pickFallbackReply();
-          }
-          // ① 해당 댓글의 '답글' 버튼 클릭(commentNo로 정확히 타겟) → 답글 입력 영역 펼침
-          const opened = await ctx.evaluate((cno: string) => {
-            const btns = Array.from(document.querySelectorAll(`a.u_cbox_btn_reply[data-param='${cno}']`)) as HTMLElement[];
-            // 열기(off) 상태이면서 화면에 보이는 버튼 우선
-            const btn = btns.find(b => !b.classList.contains("u_cbox_btn_reply_on") && b.style.display !== "none") || btns[0];
-            if (!btn) return false;
-            btn.click();
-            return true;
-          }, c.commentNo).catch(() => false);
-          if (!opened) { log(`[답방] 답글 버튼 못찾음 — 스킵`); continue; }
-          await page.waitForTimeout(1000);
-
-          // ② 펼쳐진 답글 입력창(contenteditable div, id가 …reply_textarea_{commentNo}로 끝남)에 키보드로 입력
-          const inputSel = `[id$='reply_textarea_${c.commentNo}']`;
-          const inputEl = await ctx.$(inputSel);
-          if (!inputEl) { log(`[답방] 답글 입력창 못찾음 — 스킵`); continue; }
-          try { await inputEl.scrollIntoViewIfNeeded({ timeout: 2000 }); } catch {}
-          // placeholder 안내(.u_cbox_guide)가 클릭을 가로챌 수 있어 force 클릭으로 포커스
-          try { await inputEl.click({ force: true, timeout: 3000 }); }
-          catch { const b = await inputEl.boundingBox(); if (b) await page.mouse.click(b.x + b.width / 2, b.y + b.height / 2); }
-          await page.waitForTimeout(400);
-          // contenteditable은 value 대입이 안 먹음 → 전체선택·삭제 후 사람처럼 타이핑
-          await page.keyboard.press(process.platform === "darwin" ? "Meta+A" : "Control+A").catch(() => {});
-          await page.keyboard.press("Backspace").catch(() => {});
-          await humanType(page, naturalizeMsg(replyText));
-          await page.waitForTimeout(500);
-          // 실제 입력됐는지 확인(안 됐으면 이 댓글 스킵)
-          const typedOk = await ctx.evaluate((sel: string) => {
-            const el = document.querySelector(sel) as HTMLElement | null;
-            return !!el && (el.textContent || "").trim().length > 0;
-          }, inputSel).catch(() => false);
-          if (!typedOk) { log(`[답방] 답글 입력 실패 — 스킵`); continue; }
-
-          // ③ 등록 버튼(해당 commentNo의 답글 등록)
-          const submitted = await ctx.evaluate((cno: string) => {
-            const btn = (document.querySelector(`[data-ui-selector='replyButton_${cno}']`)
-              || document.querySelector(`button.u_cbox_btn_upload[data-action*='reply']`)) as HTMLElement | null;
-            if (btn) { btn.click(); return true; }
-            return false;
-          }, c.commentNo).catch(() => false);
-          await page.waitForTimeout(1500);
-
+          const replyText = await makeReplyText(c.text, c.author);
+          const submitted = await postReply(ctx, c.commentNo, replyText, `${c.author}님 원댓글`);
           if (submitted) { done++; log(`[답방] ✅ ${c.author}님 댓글에 답글: "${replyText}"`); await onResult?.({ postTitle: c.author, status: "success", message: replyText.slice(0, 30) }); }
-          else { fail++; log(`[답방] ❌ 등록 버튼 못찾음`); await onResult?.({ postTitle: c.author, status: "fail", message: "등록 실패" }); }
+          else { fail++; log(`[답방] ❌ ${c.author}님 원댓글 답글 실패`); await onResult?.({ postTitle: c.author, status: "fail", message: "등록 실패" }); }
           onProgress?.(done, fail);
           await page.waitForTimeout(humanDelay(delayMin, delayMax));
+        }
+
+        // ── Phase 2: 대대댓글 1왕복 답(옵션) ──
+        //   상대가 내 답글에 다시 '대대댓글'을 달았으면 딱 1번만 더 답한다(대대대답).
+        //   무한 사슬 방지: 한 원댓글의 답글영역에 '내 답글'이 이미 2개면(원답1 + 대대대답1) 더 안 함.
+        //   판별: 답글영역 마지막 댓글이 '상대'(isMine=false)이고, 내 답글 수 < 2 → 그 대대댓글에 1회 답.
+        if (replyToReplies) {
+          for (const c of commentInfos) {
+            if (stopSignal?.()) break;
+            const replies = c.replies || [];
+            if (!replies.length) continue;
+            const myCount = replies.filter(r => r.isMine).length;
+            const last = replies[replies.length - 1];
+            // 답글영역에 내 답글이 하나라도 있어야(=내가 답방한 흐름) + 마지막이 상대 + 아직 2번 미만 + 타겟 번호 존재
+            if (myCount >= 1 && myCount < 2 && !last.isMine && last.commentNo && last.text) {
+              const replyText = await makeReplyText(last.text, last.author);
+              const submitted = await postReply(ctx, last.commentNo, replyText, `${last.author}님 대대댓글`);
+              if (submitted) { done++; log(`[답방] ✅ ${last.author}님 대대댓글에 1회 추가 답글: "${replyText}"`); await onResult?.({ postTitle: last.author, status: "success", message: "↩ " + replyText.slice(0, 28) }); }
+              else { fail++; log(`[답방] ❌ ${last.author}님 대대댓글 답글 실패`); await onResult?.({ postTitle: last.author, status: "fail", message: "대대댓글 답글 실패" }); }
+              onProgress?.(done, fail);
+              await page.waitForTimeout(humanDelay(delayMin, delayMax));
+            }
+          }
         }
       } catch (e: any) {
         fail++; log(`[답방] 글 처리 오류: ${e.message}`); onProgress?.(done, fail);

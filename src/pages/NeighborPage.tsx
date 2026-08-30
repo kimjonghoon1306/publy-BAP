@@ -503,6 +503,7 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
   );
   const [rTone, setRTone] = useState<"담백"|"다정"|"짧게">("다정");
   const [rOnlyNew, setROnlyNew] = useState(true);          // 아직 답글 없는 댓글만
+  const [rReplyToReplies, setRReplyToReplies] = useState(false);   // 대대댓글에도 딱 1번만 더 답하기
   const [rDelayMin, setRDelayMin] = useState(5);
   const [rDelayMax, setRDelayMax] = useState(10);
   const [rWorking, setRWorking] = useState(false);
@@ -1377,8 +1378,8 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
     setRDoneCnt(0); setRFailCnt(0); setRWorking(true);
     rJobIdRef.current = Date.now().toString();
     const geminiKey = rMode === "ai" ? ((localStorage.getItem("publy_gemini_key") || "")) : "";
-    addRLog(`🚀 답방 시작 — 글 ${rMyPosts.length}개 / ${rMode === "ai" ? `AI 답글(${rTone})` : "고정 답글"}${rOnlyNew ? " / 미답변만" : ""}`);
-    const body = JSON.stringify({ accountId: acc.accountId, posts: rMyPosts.map(p => p.url), mode: rMode, comment: rComment, tone: rTone, onlyNew: rOnlyNew, delayMin: rDelayMin, delayMax: rDelayMax, geminiKey, jobId: rJobIdRef.current, ...(userId ? { userId } : {}) });
+    addRLog(`🚀 답방 시작 — 글 ${rMyPosts.length}개 / ${rMode === "ai" ? `AI 답글(${rTone})` : "고정 답글"}${rOnlyNew ? " / 미답변만" : ""}${rReplyToReplies ? " / 대대댓글 1회 답" : ""}`);
+    const body = JSON.stringify({ accountId: acc.accountId, posts: rMyPosts.map(p => p.url), mode: rMode, comment: rComment, tone: rTone, onlyNew: rOnlyNew, replyToReplies: rReplyToReplies, delayMin: rDelayMin, delayMax: rDelayMax, geminiKey, jobId: rJobIdRef.current, ...(userId ? { userId } : {}) });
     const es = new BotEventStream(`${BOT}/api/reply`, { method: "POST", headers: { "Content-Type": "application/json" }, body }); rEsRef.current = es;
     es.onmessage = e => {
       const d = JSON.parse(e.data);
@@ -2632,6 +2633,8 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
               )}
 
               <Toggle val={rOnlyNew} set={setROnlyNew} label="아직 답글 없는 댓글만 (중복 답글 방지)" />
+              <Toggle val={rReplyToReplies} set={setRReplyToReplies} label="상대가 내 답글에 또 답하면 1번만 더 답하기 (대대댓글)" />
+              <div style={{ fontSize: 11, color: "var(--text3)", marginTop: 4, marginBottom: 2, lineHeight: 1.5 }}>💬 내 답글에 이웃이 다시 댓글을 달면, 딱 <b>한 번만 더</b> 답해서 대화를 마무리해요. (무한 반복은 자동으로 막아요)</div>
 
               <div style={{ marginTop: 12 }}>
                 <label className="inp-label" style={{ fontSize: 12, marginBottom: 6, display: "block" }}>딜레이 (초)</label>

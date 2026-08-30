@@ -585,7 +585,7 @@ app.post("/api/engage", async (req, res) => {
 
 /* ── 답방 ②: 내 글 댓글에 대댓글(답글) 작업 (SSE) ── */
 app.post("/api/reply", async (req, res) => {
-  const { userId, accountId, posts, mode, comment, tone, onlyNew, delayMin, delayMax, geminiKey, jobId } = req.body as Record<string, any>;
+  const { userId, accountId, posts, mode, comment, tone, onlyNew, replyToReplies, delayMin, delayMax, geminiKey, jobId } = req.body as Record<string, any>;
   if (!accountId || !Array.isArray(posts) || posts.length === 0)
     return res.status(400).json({ error: "accountId, posts 필요" });
   sseSetup(res);
@@ -615,6 +615,7 @@ app.post("/api/reply", async (req, res) => {
       comment: comment || "댓글 감사합니다 😊",
       tone: tone || "다정",
       onlyNew: onlyNew !== false && onlyNew !== "false",
+      replyToReplies: replyToReplies === true || replyToReplies === "true",
       delayMin: parseFloat(String(delayMin ?? "5")),
       delayMax: parseFloat(String(delayMax ?? "10")),
       geminiKey: geminiKey || "",
