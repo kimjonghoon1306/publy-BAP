@@ -3097,7 +3097,14 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
                               {shown.map((item, i) => <div key={`${item.title}-${page}-${i}`} style={{ display: "grid", gridTemplateColumns: "22px minmax(0,1fr) auto", gap: 7, alignItems: "center", fontSize: 12 }}>
                                 <span>{item.exposed === true ? "✅" : item.exposed === false ? "❌" : "➖"}</span>
                                 <span title={item.title} style={{ overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis", color: "var(--text2)" }}>{item.title}</span>
-                                <b style={{ color: item.exposed === false ? "#ef4444" : "var(--text2)" }}>{item.exposed === true ? `약 ${item.rank}위` : item.exposed === false ? "100위 내 누락" : "확인 불가"}</b>
+                                <div style={{ display: "flex", alignItems: "center", gap: 7, justifyContent: "flex-end" }}>
+                                  <b style={{ color: item.exposed === false ? "#ef4444" : "var(--text2)", whiteSpace: "nowrap" }}>{item.exposed === true ? `약 ${item.rank}위` : item.exposed === false ? "100위 내 누락" : "확인 불가"}</b>
+                                  {/* 미노출 글은 바로 개선안 받아 살리기(기존 개선안 흐름 재사용) */}
+                                  {item.exposed === false && item.logNo && (
+                                    <button onClick={() => handleTrackedRepublish({ title: item.title, logNo: item.logNo, blogId: activeAccount?.blogId }, 0, { status: "needs" })}
+                                      style={{ flexShrink: 0, padding: "4px 10px", borderRadius: 7, border: "none", background: "linear-gradient(135deg,#f59e0b,#ef4444)", color: "#fff", fontSize: 11, fontWeight: 800, cursor: "pointer", fontFamily: "inherit" }}>✏️ 살리기</button>
+                                  )}
+                                </div>
                               </div>)}
                             </div>
                           )}
