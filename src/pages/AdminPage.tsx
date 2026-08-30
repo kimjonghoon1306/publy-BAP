@@ -1934,6 +1934,27 @@ Output (JSON object only): {"keyword":"핵심키워드","title":"새 제목","st
     const pattern=bare.split("").map(esc).join("\\s*");
     try{ return text.replace(new RegExp(pattern,"g"), exact); }catch{ return text; }
   }
+  const kwCountOf=(s:string, kw:string):number=>{
+    const bare=(kw||"").replace(/\s/g,""); if(bare.length<2) return 0;
+    const esc=(c:string)=>c.replace(/[.*+?^${}()|[\]\\]/g,"\\$&");
+    try{ return (s.match(new RegExp(bare.split("").map(esc).join("\\s*"),"g"))||[]).length; }catch{ return 0; }
+  };
+  // ★키워드 횟수 보장(제목·본문 완성) — 형태통일→부족시 AI재요청→최후 문장보충. 상위노출 목적.
+  async function ensureKeywordCount(text:string, kw:string, min=5):Promise<string>{
+    const exact=(kw||"").trim(); if(!exact||exact.replace(/\s/g,"").length<2) return text;
+    let out=enforceExactKeyword(text,exact);
+    if(kwCountOf(out,exact)>=min) return out;
+    try{
+      const ask=`아래 블로그 글을 내용·길이·문단 구성 거의 그대로 유지하되, 핵심 키워드 "${exact}"가 글 전체에서 정확히 ${min}~${min+1}번 나오도록 자연스럽게 문장 몇 곳만 다듬어줘. 키워드는 반드시 "${exact}" 형태 그대로(띄어쓰기까지 동일). 마크다운·설명 없이 완성된 본문만 출력.\n\n[글]\n${out}`;
+      const re=enforceExactKeyword(stripMarkdown(await callAI(ask)).trim(), exact);
+      if(re.length>=Math.min(200,out.length*0.7) && kwCountOf(re,exact)>kwCountOf(out,exact)) out=re;
+      if(kwCountOf(out,exact)>=min) return out;
+    }catch{}
+    const fillers=[`${exact} 찾으시는 분들께 도움이 됐길 바라요.`,`${exact} 관련해 궁금한 점은 댓글로 남겨주세요.`,`${exact} 준비하실 때 이 글이 참고가 되면 좋겠어요.`,`${exact} 더 알아보고 싶다면 저장해두고 다시 보셔도 좋아요.`];
+    let i=0;
+    while(kwCountOf(out,exact)<min && i<6){ out=out.trimEnd()+`\n\n${fillers[i%fillers.length]}`; i++; }
+    return out;
+  }
   function stripMarkdown(text: string): string {
     const markers = ["[FAQ시작]","[FAQ끝]","[관련글시작]","[관련글끝]"];
     const ph: [string,string][] = markers.map((m,i) => [`XMARK${i}X`,m]);
@@ -2309,7 +2330,7 @@ POST3: (제목)|(이유)
       const bm = cleaned.match(/태그[^\n]*\n([\s\S]+)/);
       setGenTitle(title);
       if (tgm) setGenTags(tgm[1].trim());
-      const body = enforceExactKeyword(bm ? bm[1].trim() : cleaned, keyword||title);
+      const body = await ensureKeywordCount(bm ? bm[1].trim() : cleaned, keyword||title, 5);
       setGenContent(body);
       setQualityScore(calcQualityScore(body,keyword));
       const recCount = imgCountManual ?? recommendImageCount(body);

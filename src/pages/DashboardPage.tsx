@@ -2388,6 +2388,30 @@ Output (JSON object only): {"keyword":"핵심키워드","title":"새 SEO 제목"
     const pattern=bare.split("").map(esc).join("\\s*"); // 공백 제거한 글자들 사이 공백 유연 매칭
     try{ return text.replace(new RegExp(pattern,"g"), exact); }catch{ return text; }
   }
+  // ★키워드 횟수 보장: 제목·본문에 키워드가 최소 min회 나오게 완성(상위노출 목적).
+  //   1)형태통일 2)부족하면 AI 재요청1회 3)그래도 부족하면 자연스러운 문장으로 보충 → 무조건 채움.
+  const kwCountOf=(s:string, kw:string):number=>{
+    const bare=(kw||"").replace(/\s/g,""); if(bare.length<2) return 0;
+    const esc=(c:string)=>c.replace(/[.*+?^${}()|[\]\\]/g,"\\$&");
+    try{ return (s.match(new RegExp(bare.split("").map(esc).join("\\s*"),"g"))||[]).length; }catch{ return 0; }
+  };
+  async function ensureKeywordCount(text:string, kw:string, min=5):Promise<string>{
+    const exact=(kw||"").trim(); if(!exact||exact.replace(/\s/g,"").length<2) return text;
+    let out=enforceExactKeyword(text,exact);
+    if(kwCountOf(out,exact)>=min) return out;
+    // 2) AI 재요청 1회 — 글은 유지하고 키워드만 자연스럽게 min회 이상
+    try{
+      const ask=`아래 블로그 글을 내용·길이·문단 구성 거의 그대로 유지하되, 핵심 키워드 "${exact}"가 글 전체에서 정확히 ${min}~${min+1}번 나오도록 자연스럽게 문장 몇 곳만 다듬어줘. 키워드는 반드시 "${exact}" 형태 그대로(띄어쓰기까지 동일). 마크다운·설명 없이 완성된 본문만 출력.\n\n[글]\n${out}`;
+      const re=enforceExactKeyword(stripMarkdown(await callAI(ask)).trim(), exact);
+      if(re.length>=Math.min(200,out.length*0.7) && kwCountOf(re,exact)>kwCountOf(out,exact)) out=re;
+      if(kwCountOf(out,exact)>=min) return out;
+    }catch{}
+    // 3) 최후 보충 — 마무리에 키워드 포함 문장(다양하게)으로 부족분 채움
+    const fillers=[`${exact} 찾으시는 분들께 도움이 됐길 바라요.`,`${exact} 관련해 궁금한 점은 댓글로 남겨주세요.`,`${exact} 준비하실 때 이 글이 참고가 되면 좋겠어요.`,`${exact} 더 알아보고 싶다면 저장해두고 다시 보셔도 좋아요.`];
+    let i=0;
+    while(kwCountOf(out,exact)<min && i<6){ out=out.trimEnd()+`\n\n${fillers[i%fillers.length]}`; i++; }
+    return out;
+  }
   function ensureQuestionHeadings(text:string, topic:string):string {
     const markerIndex=text.search(/\n?\[FAQ시작\]/);
     const main=markerIndex>=0?text.slice(0,markerIndex).trim():text.trim();
@@ -2768,8 +2792,8 @@ POST3: (제목)|(이유)
       setGenTitle(title);if(tgm)setGenTags(tgm[1].trim());
       const generatedBody=ensureQuestionHeadings(bm?bm[1].trim():cleaned,keyword||title);
       const body0=onPartnerItems.length>0?placeOnPartnerProduct(generatedBody,onPartnerItems.map(it=>it.product)):generatedBody.trim();
-      // ★키워드 형태 통일: AI가 "원주 맛집"처럼 띄어 쓴 걸 입력한 "원주맛집" 형태 그대로로 맞춰 SEO 정확반복 보장(문장은 유지, 형태만).
-      const body=enforceExactKeyword(body0,keyword||title);
+      // ★키워드 완성: 입력 형태 그대로 최소 5회 보장(형태통일→부족시 AI재요청→최후 문장보충). 상위노출의 핵심.
+      const body=await ensureKeywordCount(body0,keyword||title,5);
       setGenContent(body);setQualityScore(calcQualityScore(body,keyword));
       setPendingPromo(null);   // 홍보 삽입 1회용 → 사용 후 해제(다음 글에 안 남게)
       // 비동기 글 생성 도중 직접입력으로 바뀌었으면 추천값으로 절대 덮지 않는다.
