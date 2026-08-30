@@ -213,7 +213,7 @@ export async function incrementReplyQuota(userId: string): Promise<void> {
 
 // 🗣️ 플레이스 리뷰답글 일일 한도(자정 리셋)
 export const PLACE_REPLY_DAILY_LIMIT: Record<string, number> = {
-  free: 5, basic: 20, pro: 50, unlimited: 999999, admin: 9999,
+  free: 3, basic: 10, pro: 20, unlimited: 999999, admin: 9999,
 };
 function placeReplyQuotaKey(userId: string): string {
   return `place_reply_daily_${userId}_${koreaDateKey()}`;

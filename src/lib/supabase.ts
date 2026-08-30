@@ -838,7 +838,7 @@ export async function incrementReplyQuota(userId: string, by = 1): Promise<void>
 // ── 🗣️ 플레이스 리뷰답글 일일 한도 ──
 //    스마트플레이스 리뷰에 사장 자격으로 답글 등록. 도배 위험이 있어 답방보다 보수적으로.
 export const PLACE_REPLY_DAILY_LIMIT: Record<string, number> = {
-  free: 5, basic: 20, pro: 50, unlimited: 999999, admin: 9999,
+  free: 3, basic: 10, pro: 20, unlimited: 999999, admin: 9999,
 };
 function placeReplyQuotaKey(userId: string): string {
   return `place_reply_daily_${userId}_${koreaDateKey()}`;
