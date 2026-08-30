@@ -3,8 +3,9 @@ import GoogleFlowCard from "../GoogleFlowCard";
 import CrawlCenter from "../components/CrawlCenter";
 import Place360 from "../components/Place360";
 import Place360AdminManager from "../components/Place360AdminManager";
+import PlaceReview from "../components/PlaceReview";
 import UsageGuide from "../components/UsageGuide";
-import { supabase, getAccounts, upsertAccount, PublyAccount, getHistory, getHistoryContent, PublyHistory, addHistory, deleteHistory, deleteAllHistory, setAdminPassword, saveAdminNaverApiKeys, getNaverApiKeys, NaverApiKeys, getNaverDailyUsage, NAVER_DAILY_LIMIT, checkNaverQuota, incrementNaverQuota, getUserNaverApiKeys, getReferrals, getErrorLogs, getUnreadErrorCount, markErrorsAsRead, logError, PLAN_CONFIG, getAllNeighborHistory, NeighborHistory, getAllEngageHistory, EngageHistory, InstaDmTarget, InstaDmHistory, InstaDmQuota, getInstaDmTargets, addInstaDmTarget, updateInstaDmTargetStatus, deleteInstaDmTarget, getInstaDmHistory, addInstaDmHistory, getAllInstaDmHistory, getInstaDmQuota, upsertInstaDmQuota, getAllInstaDmQuotas, INSTA_DM_DAILY_LIMIT, PublyBugReport, getBugReports, updateBugReportStatus, deleteBugReport, resetDailyPublish, getAllDailyUsageToday, DailyUsageRow, getAllReplyHistory, ReplyHistory, getAllBlogscoreHistory, BlogscoreHistory, NEIGHBOR_DAILY_LIMIT, ENGAGE_DAILY_LIMIT, REPLY_DAILY_LIMIT, BLOGSCORE_DAILY_LIMIT, PUMASI_ACCOUNT_LIMIT, PUMASI_POSTS_LIMIT, CRAWL_DAILY_LIMIT, EMAIL_DAILY_LIMIT, COMMENT_DAILY_LIMIT, PLACE_BLOGGER_LIMIT, PLACE360_STORE_LIMIT, PLACE360_DAILY_DIAGNOSIS_LIMIT, PLACE360_HISTORY_DAYS, PublyProxy, getProxies, addProxy, updateProxy, deleteProxy, getProxyAssignments, assignAccountToProxy, unassignAccount, setAccountFeatures, ProxyAssign, PROXY_FEATURES, checkProxyHealth, getLiveLog, getRunningLiveLogs, LiveLogRow } from "../lib/supabase";
+import { supabase, getAccounts, upsertAccount, PublyAccount, getHistory, getHistoryContent, PublyHistory, addHistory, deleteHistory, deleteAllHistory, setAdminPassword, saveAdminNaverApiKeys, getNaverApiKeys, NaverApiKeys, getNaverDailyUsage, NAVER_DAILY_LIMIT, checkNaverQuota, incrementNaverQuota, getUserNaverApiKeys, getReferrals, getErrorLogs, getUnreadErrorCount, markErrorsAsRead, logError, PLAN_CONFIG, getAllNeighborHistory, NeighborHistory, getAllEngageHistory, EngageHistory, InstaDmTarget, InstaDmHistory, InstaDmQuota, getInstaDmTargets, addInstaDmTarget, updateInstaDmTargetStatus, deleteInstaDmTarget, getInstaDmHistory, addInstaDmHistory, getAllInstaDmHistory, getInstaDmQuota, upsertInstaDmQuota, getAllInstaDmQuotas, INSTA_DM_DAILY_LIMIT, PublyBugReport, getBugReports, updateBugReportStatus, deleteBugReport, resetDailyPublish, getAllDailyUsageToday, DailyUsageRow, getAllReplyHistory, ReplyHistory, getAllPlaceReplyHistory, PlaceReplyHistory, getAllBlogscoreHistory, BlogscoreHistory, NEIGHBOR_DAILY_LIMIT, ENGAGE_DAILY_LIMIT, REPLY_DAILY_LIMIT, PLACE_REPLY_DAILY_LIMIT, BLOGSCORE_DAILY_LIMIT, PUMASI_ACCOUNT_LIMIT, PUMASI_POSTS_LIMIT, CRAWL_DAILY_LIMIT, EMAIL_DAILY_LIMIT, COMMENT_DAILY_LIMIT, PLACE_BLOGGER_LIMIT, PLACE360_STORE_LIMIT, PLACE360_DAILY_DIAGNOSIS_LIMIT, PLACE360_HISTORY_DAYS, PublyProxy, getProxies, addProxy, updateProxy, deleteProxy, getProxyAssignments, assignAccountToProxy, unassignAccount, setAccountFeatures, ProxyAssign, PROXY_FEATURES, checkProxyHealth, getLiveLog, getRunningLiveLogs, LiveLogRow } from "../lib/supabase";
 import NeighborPage from "./NeighborPage";
 import { botFetch, BotEventStream } from "../lib/botApi";
 import { PLACE360_RANK_DAILY_LIMIT, PLACE_DETAIL_DAILY_LIMIT } from "../lib/supabase";
@@ -181,6 +182,12 @@ const CSS = `
 .layout{flex:1;display:flex;overflow:hidden;min-height:0;padding-left:210px;}
 .sidebar{position:fixed;left:0;top:60px;bottom:0;z-index:50;width:210px;background:var(--bg2);border-right:1px solid var(--border);display:flex;flex-direction:column;padding:12px 8px;gap:2px;overflow-y:auto;}
 .nav-section{font-size:10px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--text3);padding:4px 10px 6px;margin-top:4px;}
+/* 플레이스 세트: 플레이스365+리뷰답글 테두리 묶음 (회원 대시보드와 동일) */
+.nav-box{margin:8px 4px;padding:6px 5px 7px;border:1.5px solid rgba(22,133,107,.35);border-radius:12px;background:linear-gradient(180deg,rgba(22,133,107,.06),rgba(22,133,107,.02));}
+.nav-box-lbl{font-size:10px;font-weight:800;letter-spacing:.08em;color:#16856b;padding:2px 6px 6px;display:flex;align-items:center;gap:4px;}
+.nav-box-lbl::before{content:"🏪";font-size:11px;}
+.dark .nav-box{border-color:rgba(34,168,128,.4);background:linear-gradient(180deg,rgba(34,168,128,.08),rgba(34,168,128,.02));}
+.dark .nav-box-lbl{color:#5fd3ac;}
 .nav-item{display:flex;align-items:center;gap:10px;padding:11px 12px;border-radius:8px;border:none;cursor:pointer;width:100%;font-size:13px;font-weight:500;font-family:'Noto Sans KR',sans-serif;color:var(--text2);background:transparent;transition:all .15s;text-align:left;position:relative;}
 .nav-item:hover{background:var(--card-hover);color:var(--text);}
 .nav-item.active{background:rgba(248,81,73,.08);color:var(--danger);font-weight:700;}
@@ -614,10 +621,12 @@ const TABS = [
   {k:"blogscore",       i:"📈", l:"블로그 지수"},
   {k:"crawl",           i:"🔍", l:"크롤링"},
   {k:"place",           i:"🏪", l:"플레이스 365"},
+  {k:"place_reply",     i:"🗣️", l:"플레이스 리뷰답글"},
   {k:"accounts",        i:"🔗", l:"계정관리"},
   {k:"calendar",        i:"📅", l:"콘텐츠 캘린더"},
   {k:"crawl_manage",    i:"🔎", l:"크롤링 관리"},
   {k:"place_manage",    i:"🏪", l:"플레이스 관리"},
+  {k:"place_reply_manage", i:"🗣️", l:"리뷰답글 관리"},
   {k:"neighbor",        i:"🤝", l:"서이추"},
   {k:"engage",          i:"❤️", l:"공감·댓글"},
   {k:"reply",           i:"💬", l:"답방"},
@@ -637,7 +646,7 @@ const TABS = [
 ] as const;
 
 export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: Props) {
-  const [tab, setTab] = useState<"keyword"|"write"|"image"|"photo"|"publish"|"manage"|"accounts"|"rank"|"blogscore"|"calendar"|"crawl"|"place"|"crawl_manage"|"place_manage"|"neighbor"|"engage"|"reply"|"pumasi"|"neighbor_manage"|"engage_manage"|"reply_manage"|"blogscore_manage"|"insta_dm"|"insta_dm_manage"|"users"|"bug"|"stats"|"live"|"settings"|"proxy">("keyword");
+  const [tab, setTab] = useState<"keyword"|"write"|"image"|"photo"|"publish"|"manage"|"accounts"|"rank"|"blogscore"|"calendar"|"crawl"|"place"|"place_reply"|"crawl_manage"|"place_manage"|"place_reply_manage"|"neighbor"|"engage"|"reply"|"pumasi"|"neighbor_manage"|"engage_manage"|"reply_manage"|"blogscore_manage"|"insta_dm"|"insta_dm_manage"|"users"|"bug"|"stats"|"live"|"settings"|"proxy">("keyword");
 
   // ── 프록시(계정별 IP) 관리 ──
   const NEIGHBOR_BOT = "http://127.0.0.1:3334";   // 서이추·공감·품앗이 봇(프록시 헬스체크도 여기서 실행)
@@ -822,6 +831,8 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
   // 답방·지수 이력
   const [replyHistory, setReplyHistory] = useState<(ReplyHistory & {user_name?:string;user_email?:string})[]>([]);
   const [replyLoading, setReplyLoading] = useState(false);
+  const [placeReplyHistory, setPlaceReplyHistory] = useState<(PlaceReplyHistory & {user_name?:string;user_email?:string})[]>([]);
+  const [placeReplyLoading, setPlaceReplyLoading] = useState(false);
   const [blogscoreHistory, setBlogscoreHistory] = useState<(BlogscoreHistory & {user_name?:string;user_email?:string})[]>([]);
   const [blogscoreLoading, setBlogscoreLoading] = useState(false);
   // 실시간 사용현황
@@ -2871,13 +2882,17 @@ POST3: (제목)|(이유)
                 <div className="nav-section" style={{...secStyle,borderTop:"none",marginTop:0,padding:"8px 12px 4px"}}>콘텐츠 만들기</div>
                 {["keyword","write","image","photo","publish"].map(navBtn)}
                 <div className="nav-section" style={secStyle}>블로그 운영</div>
-                {["calendar","manage","blogscore","crawl","place"].map(navBtn)}
+                {["calendar","manage","blogscore","crawl"].map(navBtn)}
+                <div className="nav-box">
+                  <div className="nav-box-lbl">플레이스</div>
+                  {["place","place_reply"].map(navBtn)}
+                </div>
                 <div className="nav-section" style={secStyle}>관계·소통 자동화</div>
                 {["neighbor","engage","reply","pumasi","insta_dm"].map(navBtn)}
                 <div className="nav-section" style={secStyle}>계정·설정</div>
                 {["accounts","settings"].map(navBtn)}
                 <div className="nav-section" style={{...secStyle,color:"#FF6B9D",background:"linear-gradient(90deg,rgba(255,107,157,.08),transparent)"}}>🔐 관리자 전용</div>
-                {["crawl_manage","place_manage","users","stats","proxy","insta_dm_manage","neighbor_manage","engage_manage","reply_manage","blogscore_manage"].map(navBtn)}
+                {["crawl_manage","place_manage","place_reply_manage","users","stats","proxy","insta_dm_manage","neighbor_manage","engage_manage","reply_manage","blogscore_manage"].map(navBtn)}
               </>);
             })()}
             <div className="sidebar-stats">
@@ -2903,6 +2918,10 @@ POST3: (제목)|(이유)
             {/* ───── 🏪 플레이스 365 (회원과 동일 · 관리자는 무제한) ───── */}
             {visitedAutoTabs.has("place") && (
               <div style={{ display: tab === "place" ? "block" : "none" }}><Place360 showToast={showToast} theme={theme==="dark"?"dark":"light"} userId={ADM_UID} plan="admin" onOpenCrawl={()=>setTab("crawl")} /></div>
+            )}
+            {/* ───── 🗣️ 플레이스 리뷰답글 (회원과 동일 · 관리자는 무제한) ───── */}
+            {tab==="place_reply" && (
+              <PlaceReview showToast={showToast} theme={theme==="dark"?"dark":"light"} userId={ADM_UID} plan="admin" onOpenPlace={()=>setTab("place")} />
             )}
 
             {/* ───── 🔎 크롤링·플레이스 365 관리 (관리자 전용 · 공용 권한 승인) ───── */}
@@ -2984,6 +3003,31 @@ POST3: (제목)|(이유)
                     </>);
                   })()}
                   <Place360AdminManager showToast={showToast} />
+                </div>
+              </div>
+            )}
+            {/* ───── 🗣️ 리뷰답글 관리 (관리자 전용) ───── */}
+            {tab === "place_reply_manage" && (
+              <div style={{animation:"fadeUp .25s ease both"}}>
+                <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:10,marginBottom:16}}>
+                  <div>
+                    <div style={{fontSize:19,fontWeight:900,color:"var(--text)"}}>🗣️ 리뷰답글 관리</div>
+                    <div style={{fontSize:12,color:"var(--text3)",marginTop:4}}>회원들이 매장 리뷰에 남긴 사장님 답글 이력이에요. {placeReplyHistory.length>0&&`· 총 ${placeReplyHistory.length}건`}</div>
+                  </div>
+                  <button onClick={()=>{setPlaceReplyLoading(true);getAllPlaceReplyHistory().then(d=>{setPlaceReplyHistory(d);setPlaceReplyLoading(false);});}} disabled={placeReplyLoading} style={{padding:"8px 16px",borderRadius:9,border:"none",background:"var(--accent)",color:"#000",cursor:"pointer",fontSize:12,fontWeight:800,fontFamily:"inherit"}}>{placeReplyLoading?"불러오는 중...":"🔄 새로고침"}</button>
+                </div>
+                <div className="card">
+                  {placeReplyLoading&&placeReplyHistory.length===0 ? <div style={{padding:"40px",textAlign:"center",color:"var(--text3)"}}>불러오는 중...</div>
+                  : placeReplyHistory.length===0 ? <div style={{padding:"40px",textAlign:"center",color:"var(--text3)",fontSize:13}}>아직 리뷰답글 이력이 없어요.<br/><span style={{fontSize:11.5}}>회원이 리뷰답글을 등록하면 여기 쌓여요.</span></div>
+                  : <div style={{overflowX:"auto"}}><table style={{width:"100%",borderCollapse:"collapse",fontSize:13,minWidth:560}}>
+                      <thead><tr style={{borderBottom:"2px solid var(--border)"}}>{["회원","매장","결과","답글 내용","시각"].map(h=><th key={h} style={{padding:"9px 10px",textAlign:"left",fontWeight:700,color:"var(--text3)",whiteSpace:"nowrap"}}>{h}</th>)}</tr></thead>
+                      <tbody>{placeReplyHistory.map(r=>(<tr key={r.id} style={{borderBottom:"1px solid var(--border)"}}>
+                        <td style={{padding:"9px 10px",fontWeight:600,whiteSpace:"nowrap"}}>{r.user_name||r.user_email||r.user_id.slice(0,8)}</td>
+                        <td style={{padding:"9px 10px",maxWidth:180,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}} title={r.store_name}>{r.store_name||"-"}</td>
+                        <td style={{padding:"9px 10px"}}><span style={{fontSize:11.5,fontWeight:700,color:r.status==="success"?"var(--success)":r.status==="fail"?"var(--danger)":"var(--text3)"}}>{r.status==="success"?"✅ 성공":r.status==="fail"?"❌ 실패":"⏭️ 스킵"}</span></td>
+                        <td style={{padding:"9px 10px",color:"var(--text2)",maxWidth:220,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}} title={r.message}>{r.message||"-"}</td>
+                        <td style={{padding:"9px 10px",color:"var(--text3)",whiteSpace:"nowrap"}}>{new Date(r.created_at).toLocaleString("ko-KR",{month:"numeric",day:"numeric",hour:"2-digit",minute:"2-digit"})}</td>
+                      </tr>))}</tbody></table></div>}
                 </div>
               </div>
             )}
@@ -4364,6 +4408,7 @@ POST3: (제목)|(이유)
                                   {label:"🩺 360 매장 진단",val:`${fmt(PLACE360_DAILY_DIAGNOSIS_LIMIT[pl]??1)}회/일`},
                                   {label:"📍 360 순위 측정",val:`${fmt(PLACE360_RANK_DAILY_LIMIT[pl]??3)}회/일`},
                                   {label:"👀 360 고객 화면 확인",val:`${fmt(PLACE_DETAIL_DAILY_LIMIT[pl]??2)}회/일`},
+                                  {label:"🗣️ 플레이스 리뷰답글",val:`${fmt(PLACE_REPLY_DAILY_LIMIT[pl]??5)}건/일`},
                                   {label:"📈 360 기록 보관",val:`${fmt(PLACE360_HISTORY_DAYS[pl]??30)}일`},
                                   {label:"💞 품앗이 계정",val:`${fmt(PUMASI_ACCOUNT_LIMIT[pl]??2)}개`},
                                   {label:"💞 품앗이 계정당 글",val:`${fmt(PUMASI_POSTS_LIMIT[pl]??3)}개`},

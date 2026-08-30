@@ -76,6 +76,29 @@ export async function addReplyHistory(data: {
   }
 }
 
+// 🗣️ 플레이스 리뷰답글 이력 저장
+export async function addPlaceReplyHistory(data: {
+  user_id: string;
+  store_name: string;
+  review_author?: string;
+  rating?: number | null;
+  status: "success" | "fail" | "skip";
+  message: string;
+}): Promise<void> {
+  try {
+    await supabase.from("publy_place_reply_history").insert({
+      user_id: data.user_id,
+      store_name: data.store_name,
+      review_author: data.review_author || "",
+      rating: data.rating ?? null,
+      status: data.status,
+      message: data.message,
+    });
+  } catch (e) {
+    console.error("[place-reply] 히스토리 저장 오류:", e);
+  }
+}
+
 // 블로그지수 진단 이력 저장
 export async function addBlogscoreHistory(data: {
   user_id: string;
@@ -185,6 +208,23 @@ export async function getReplyDailyUsage(userId: string): Promise<number> {
 export async function incrementReplyQuota(userId: string): Promise<void> {
   const key = replyQuotaKey(userId);
   const used = await getReplyDailyUsage(userId);
+  await supabase.from("publy_settings").upsert({ key, value: String(used + 1) }, { onConflict: "key" });
+}
+
+// 🗣️ 플레이스 리뷰답글 일일 한도(자정 리셋)
+export const PLACE_REPLY_DAILY_LIMIT: Record<string, number> = {
+  free: 5, basic: 20, pro: 50, unlimited: 999999, admin: 9999,
+};
+function placeReplyQuotaKey(userId: string): string {
+  return `place_reply_daily_${userId}_${koreaDateKey()}`;
+}
+export async function getPlaceReplyDailyUsage(userId: string): Promise<number> {
+  const { data } = await supabase.from("publy_settings").select("value").eq("key", placeReplyQuotaKey(userId)).maybeSingle();
+  return Number.parseInt(data?.value || "0", 10) || 0;
+}
+export async function incrementPlaceReplyQuota(userId: string): Promise<void> {
+  const key = placeReplyQuotaKey(userId);
+  const used = await getPlaceReplyDailyUsage(userId);
   await supabase.from("publy_settings").upsert({ key, value: String(used + 1) }, { onConflict: "key" });
 }
 

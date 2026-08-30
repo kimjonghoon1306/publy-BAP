@@ -1,7 +1,7 @@
 import express from "express";
 import cors from "cors";
-import { saveSession, sessionExists, removeSession, crawlBlogIds, crawlBuddyPosts, analyzeBuddyKeywords, addNeighbors, NeighborResult, donePath, engageBlogs, EngageResult, engageDonePath, crawlMyPosts, replyToComments, crawlBlogStats, checkSelectedBlogExposure, pumasiEngage, crawlPumasiReport, pumasiPreview, updatePostTitle, checkProxy, analyzeBlogAuthenticity, fetchPostBody, crawlPostViews, sendWebmail, sendBlogComments, crawlPlaces, crawlPlaceBloggers, crawlPlaceDetail, crawlPlaceByUrl, suggestPlaceKeywords } from "./naver";
-import { checkNeighborQuota, incrementNeighborQuota, getNeighborDailyUsage, incrementEngageQuota, getEngageDailyUsage, getUserPlan, checkMembershipAccess, NEIGHBOR_DAILY_LIMIT, ENGAGE_DAILY_LIMIT, REPLY_DAILY_LIMIT, getReplyDailyUsage, incrementReplyQuota, addNeighborHistory, addReplyHistory, addBlogscoreHistory, incrementPumasiQuota, TITLE_EDIT_DAILY_LIMIT, getTitleEditDailyUsage, incrementTitleEditQuota, getProxyForAccount, supabase, getOutreachSender, getOutreachSentToday, addOutreachLog, checkPlaceDetailQuota, incrementPlaceDetailQuota } from "./supabase";
+import { saveSession, sessionExists, removeSession, crawlBlogIds, crawlBuddyPosts, analyzeBuddyKeywords, addNeighbors, NeighborResult, donePath, engageBlogs, EngageResult, engageDonePath, crawlMyPosts, replyToComments, crawlPlaceReviews, generatePlaceReviewReply, replyToPlaceReviews, crawlBlogStats, checkSelectedBlogExposure, pumasiEngage, crawlPumasiReport, pumasiPreview, updatePostTitle, checkProxy, analyzeBlogAuthenticity, fetchPostBody, crawlPostViews, sendWebmail, sendBlogComments, crawlPlaces, crawlPlaceBloggers, crawlPlaceDetail, crawlPlaceByUrl, suggestPlaceKeywords } from "./naver";
+import { checkNeighborQuota, incrementNeighborQuota, getNeighborDailyUsage, incrementEngageQuota, getEngageDailyUsage, getUserPlan, checkMembershipAccess, NEIGHBOR_DAILY_LIMIT, ENGAGE_DAILY_LIMIT, REPLY_DAILY_LIMIT, getReplyDailyUsage, incrementReplyQuota, PLACE_REPLY_DAILY_LIMIT, getPlaceReplyDailyUsage, incrementPlaceReplyQuota, addNeighborHistory, addReplyHistory, addPlaceReplyHistory, addBlogscoreHistory, incrementPumasiQuota, TITLE_EDIT_DAILY_LIMIT, getTitleEditDailyUsage, incrementTitleEditQuota, getProxyForAccount, supabase, getOutreachSender, getOutreachSentToday, addOutreachLog, checkPlaceDetailQuota, incrementPlaceDetailQuota } from "./supabase";
 import nodemailer from "nodemailer";
 import fs from "fs";
 import { acquireAccountLock } from "./account-lock";
@@ -629,6 +629,85 @@ app.post("/api/reply", async (req, res) => {
       },
       onProgress: (done, fail) => sseSend(res, { type: "progress", done, fail }),
       stopSignal: () => stopMap.get(jid) === true || replyRemaining <= 0,
+    });
+    sseSend(res, { type: "done" });
+  } catch (e: any) {
+    sseSend(res, { type: "error", msg: e.message });
+  }
+  releaseAccounts();
+  endJob(jid);
+  res.end();
+});
+
+/* ── 🗣️ 플레이스 리뷰답글 ① 리뷰 수집 (JSON) ── */
+app.post("/api/place-review-fetch", async (req, res) => {
+  const { userId, accountId, placeUrl, storeName, onlyNew } = req.body as Record<string, any>;
+  if (!accountId) return res.status(400).json({ error: "accountId 필요" });
+  try {
+    const reviews = await crawlPlaceReviews({
+      accountId, placeUrl, storeName,
+      onlyNew: onlyNew !== false && onlyNew !== "false",
+      ownerUserId: userId,
+      onLog: (m) => console.log(m),
+    });
+    res.json({ reviews });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+/* ── 🗣️ 플레이스 리뷰답글 ② AI/고정 답글 초안 (JSON) ── */
+app.post("/api/place-review-drafts", async (req, res) => {
+  const { mode, tone, fixedText, geminiKey, reviews } = req.body as Record<string, any>;
+  if (!Array.isArray(reviews)) return res.status(400).json({ error: "reviews 필요" });
+  try {
+    const lines = String(fixedText || "").split(/\r?\n/).map((s: string) => s.trim()).filter(Boolean);
+    const drafts: { reviewId: string; reply: string }[] = [];
+    for (const rv of reviews) {
+      let reply = "";
+      if (mode === "fixed") {
+        reply = lines.length ? lines[Math.floor(Math.random() * lines.length)] : "방문해 주셔서 감사합니다 😊";
+      } else {
+        reply = await generatePlaceReviewReply(geminiKey || "", tone || "다정", Number(rv.rating) || 0, rv.text || "", rv.author || "", (m) => console.log(m));
+        if (!reply) reply = (Number(rv.rating) || 5) <= 3 ? "불편을 드려 죄송합니다. 더 나아지겠습니다 🙏" : "소중한 후기 남겨주셔서 감사합니다 😊";
+      }
+      drafts.push({ reviewId: String(rv.reviewId), reply });
+    }
+    res.json({ drafts });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+/* ── 🗣️ 플레이스 리뷰답글 ③ 답글 등록 (SSE) ── */
+app.post("/api/place-review-reply", async (req, res) => {
+  const { userId, accountId, placeUrl, storeName, replies, jobId } = req.body as Record<string, any>;
+  if (!accountId || !Array.isArray(replies) || !replies.length) return res.status(400).json({ error: "accountId, replies 필요" });
+  sseSetup(res);
+  const jid = jobId || Date.now().toString();
+  beginJob(jid, "place_reply", res);
+  let releaseAccounts = () => {};
+  try {
+    if (!await ensureActiveMember(userId, res)) { endJob(jid); return; }
+    let remaining = Number.MAX_SAFE_INTEGER;
+    if (userId) {
+      const plan = await getUserPlan(userId);
+      const used = await getPlaceReplyDailyUsage(userId);
+      const limit = PLACE_REPLY_DAILY_LIMIT[plan] ?? PLACE_REPLY_DAILY_LIMIT.free;
+      remaining = Math.max(0, limit - used);
+      if (!remaining) { sseSend(res, { type: "quota_exceeded", used, limit }); endJob(jid); return res.end(); }
+      sseSend(res, { type: "quota_info", used, limit, remaining });
+    }
+    const release = acquireAccountsOrReport([accountId], "리뷰답글", res);
+    if (!release) { endJob(jid); return; }
+    releaseAccounts = release;
+    sseSend(res, { type: "start", total: replies.length });
+    await replyToPlaceReviews({
+      accountId, placeUrl, storeName, replies, ownerUserId: userId,
+      onLog: (msg) => sseSend(res, { type: "log", msg }),
+      onResult: async (r) => {
+        sseSend(res, { type: "result", ...r });
+        if (userId && r.status === "success" && remaining > 0) { await incrementPlaceReplyQuota(userId); remaining -= 1; }
+        if (userId) await addPlaceReplyHistory({ user_id: userId, store_name: storeName || "", status: r.status === "success" ? "success" : "fail", message: r.message || "" });
+      },
+      onProgress: (done, fail) => sseSend(res, { type: "progress", done, fail }),
+      stopSignal: () => stopMap.get(jid) === true || remaining <= 0,
     });
     sseSend(res, { type: "done" });
   } catch (e: any) {

@@ -4902,3 +4902,187 @@ export async function fetchPostBody(blogId: string, logNo: string): Promise<{ ti
     return { title, body };
   } catch { return { title: "", body: "" }; }
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   🗣️ 플레이스 리뷰답글 봇
+   ★★ 정직 고지: 스마트플레이스(사장님) 리뷰관리 페이지의 실제 DOM/URL은 아직 실기기로
+      검증하지 못했다. 아래 URL·셀렉터는 "최선의 추정"이며, 실제 화면에서 교정이 필요하다.
+      - 모든 단계에 상세 로그(현재 URL, 발견 개수, 실패 사유)를 남겨 실측 시 바로 고칠 수 있게 함.
+      - 안전장치: 요소를 못 찾으면 조용히 skip → 엉뚱한 클릭/오답글을 절대 만들지 않는다.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+export type PlaceReviewRaw = { reviewId: string; author: string; rating: number; text: string; date?: string; hasReply: boolean };
+
+// ── AI 리뷰 답글 초안(별점 맥락 반영) ──
+export async function generatePlaceReviewReply(key: string, tone: string, rating: number, reviewText: string, author: string, log: (m: string) => void): Promise<string> {
+  if (!key) { log("[리뷰답글] Gemini 키 없음 — AI 초안 건너뜀"); return ""; }
+  const toneGuide = tone === "담백" ? "깔끔하고 담백한" : tone === "짧게" ? "짧고 간결한" : "다정하고 따뜻한";
+  const lowStar = rating > 0 && rating <= 3;
+  const stance = lowStar
+    ? "낮은 평점(불만) 리뷰야. 변명하지 말고 진심으로 사과하고, 개선하겠다는 의지를 짧게 전해. 감정적으로 맞받아치지 마."
+    : "만족스러운 리뷰야. 구체적으로 고마움을 표하고 재방문을 부드럽게 권해.";
+  const nameRule = author
+    ? `상대 닉네임은 정확히 "${author}"야. 부를 거면 한 글자도 바꾸지 말고 그대로 쓰고, 어색하면 부르지 말고 내용에만 반응해.`
+    : `닉네임을 모르니 사람 이름·호칭을 지어내지 말고 내용에만 반응해.`;
+  const prompt = `너는 네이버 플레이스에 등록된 매장의 사장이야. 손님이 남긴 아래 리뷰에 ${toneGuide} 말투로 사장님 답글을 딱 1개만 써줘.\n${stance}\n${nameRule}\n규칙: 1~2문장, 60자 이내, 리뷰 내용에 구체적으로 반응, 이모지 1개 정도, 광고·링크·전화번호 금지, 따옴표 없이 답글만 출력.\n\n[손님 리뷰(별점 ${rating || "없음"})]\n${reviewText}`;
+  for (const model of GEMINI_MODELS) {
+    try {
+      const generationConfig: any = { maxOutputTokens: 800, temperature: 0.95 };
+      if (model.startsWith("gemini-2.5")) generationConfig.thinkingConfig = { thinkingBudget: 0 };
+      const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }], generationConfig }),
+        signal: AbortSignal.timeout(12000),
+      });
+      const d: any = await r.json();
+      if (!r.ok) { log(`[리뷰답글] ${model} 실패(${r.status}) → 다음 모델`); continue; }
+      const cand = d?.candidates?.[0];
+      const raw = cand?.content?.parts?.[0]?.text?.trim();
+      if (!raw || cand?.finishReason === "MAX_TOKENS") { log(`[리뷰답글] ${model} 잘림/빈응답 → 다음 모델`); continue; }
+      const cleaned = raw.replace(/^["'\s]+|["'\s]+$/g, "").replace(/\s*[\r\n]+\s*/g, " ").replace(/\s{2,}/g, " ").trim().slice(0, 140);
+      if (cleaned.length >= 3) return cleaned;
+    } catch { log(`[리뷰답글] ${model} 응답 지연/오류 → 다음 모델`); }
+  }
+  return "";
+}
+
+// 스마트플레이스 리뷰관리 페이지로 진입(로그인 세션 활용). 성공 시 page가 리뷰 목록 화면에 있음.
+async function gotoSmartplaceReviews(page: any, storeName: string, log: (m: string) => void): Promise<boolean> {
+  // ★미검증: 스마트플레이스 진입 URL 후보. 실제 경로는 실기기에서 확인해 교정.
+  await page.goto("https://new.smartplace.naver.com/", { waitUntil: "domcontentloaded", timeout: 30000 }).catch(() => {});
+  await page.waitForTimeout(2500);
+  // 로그인 필요하면 뜬 창에서 사장이 직접 통과(최대 ~90초)
+  if (/nid\.naver\.com\/nidlogin|nidlogin\.login/.test(page.url())) {
+    log("[리뷰답글] ⚠️ 로그인 필요 — 열린 창에서 직접 로그인/2차인증을 통과해 주세요(최대 90초 대기)");
+    for (let i = 0; i < 45 && /nidlogin/.test(page.url()); i++) await page.waitForTimeout(2000);
+    if (/nidlogin/.test(page.url())) { log("[리뷰답글] ❌ 로그인 대기 시간 초과"); return false; }
+    await page.goto("https://new.smartplace.naver.com/", { waitUntil: "domcontentloaded", timeout: 30000 }).catch(() => {});
+    await page.waitForTimeout(2500);
+  }
+  log(`[리뷰답글] 스마트플레이스 진입 (URL: ${page.url()})`);
+  // 업체가 여러 개면 storeName으로 선택 시도(있으면). 없으면 현재 업체 그대로.
+  if (storeName) {
+    const picked = await page.evaluate((name: string) => {
+      const els = Array.from(document.querySelectorAll("a,button,li,div")) as HTMLElement[];
+      const t = els.find(e => (e.textContent || "").trim() === name || (e.textContent || "").includes(name));
+      if (t) { t.click(); return true; }
+      return false;
+    }, storeName).catch(() => false);
+    if (picked) { await page.waitForTimeout(2000); log(`[리뷰답글] 업체 "${storeName}" 선택 시도`); }
+  }
+  // 리뷰 메뉴로 이동(텍스트가 '리뷰'인 링크/버튼 클릭 후보)
+  const toReview = await page.evaluate(() => {
+    const els = Array.from(document.querySelectorAll("a,button")) as HTMLElement[];
+    const t = els.find(e => /리뷰/.test((e.textContent || "").trim()) && (e.textContent || "").trim().length <= 6);
+    if (t) { t.click(); return true; }
+    return false;
+  }).catch(() => false);
+  await page.waitForTimeout(2500);
+  log(`[리뷰답글] 리뷰 메뉴 이동 ${toReview ? "클릭됨" : "(리뷰 링크 못찾음 — 실측 교정 필요)"} · 현재 URL: ${page.url()}`);
+  return true;
+}
+
+// 현재 리뷰 화면에서 리뷰들을 파싱(여러 후보 셀렉터). 못 찾으면 빈 배열 + 로그.
+async function parseSmartplaceReviews(page: any, log: (m: string) => void): Promise<PlaceReviewRaw[]> {
+  // 리뷰 리스트가 지연 로드될 수 있어 스크롤
+  for (let s = 0; s < 3; s++) { await page.mouse.wheel(0, 2000); await page.waitForTimeout(600); }
+  const reviews: PlaceReviewRaw[] = await page.evaluate(() => {
+    // ★미검증: 리뷰 카드 셀렉터 후보. 실제 클래스는 실기기에서 확인해 교정.
+    const cardSel = ["li[class*='review']", "div[class*='review_item']", "div[class*='ReviewItem']", "li[class*='item']", "[data-review-id]"];
+    let cards: Element[] = [];
+    for (const sel of cardSel) { const found = Array.from(document.querySelectorAll(sel)); if (found.length > cards.length) cards = found; }
+    const pickText = (el: Element, sels: string[]): string => { for (const s of sels) { const n = el.querySelector(s); const t = (n?.textContent || "").trim(); if (t) return t; } return ""; };
+    const out: { reviewId: string; author: string; rating: number; text: string; date?: string; hasReply: boolean }[] = [];
+    cards.forEach((c, i) => {
+      const author = pickText(c, ["[class*='nick']", "[class*='name']", "strong", "[class*='author']"]);
+      const text = pickText(c, ["[class*='content']", "[class*='text']", "p", "[class*='body']"]);
+      // 별점: 텍스트에서 숫자/별 추출
+      const ratingText = pickText(c, ["[class*='star']", "[class*='score']", "[class*='rating']"]);
+      let rating = 0; const m = ratingText.match(/([1-5])(\.\d)?/); if (m) rating = Math.round(Number(m[1]));
+      const date = pickText(c, ["[class*='date']", "time", "[class*='day']"]);
+      // 이미 사장 답글이 달렸는지(답글 영역 존재)
+      const hasReply = !!c.querySelector("[class*='reply'],[class*='owner'],[class*='answer']");
+      const reviewId = (c.getAttribute("data-review-id") || c.getAttribute("data-id") || String(i));
+      if (text) out.push({ reviewId, author: author || "익명", rating, text, date, hasReply });
+    });
+    return out;
+  }).catch(() => []);
+  log(`[리뷰답글] 리뷰 파싱 ${reviews.length}건 (현재 URL: ${page.url()})`);
+  if (!reviews.length) log("[리뷰답글] ⚠️ 리뷰를 못 찾았어요 — 스마트플레이스 화면 구조가 코드 추정과 다릅니다(실기기 셀렉터 교정 필요).");
+  return reviews;
+}
+
+// ── 리뷰 수집 ──
+export async function crawlPlaceReviews(params: {
+  accountId: string; placeUrl?: string; storeName?: string; onlyNew?: boolean;
+  ownerUserId?: string | null; onLog?: (m: string) => void;
+}): Promise<PlaceReviewRaw[]> {
+  const log = params.onLog || console.log;
+  const cookies = await ensureLiveSession(params.accountId, log);
+  const browser = await launchBrowser(params.accountId, { headless: false, maximized: true, log, feature: "reply", ownerUserId: params.ownerUserId });
+  const context = await browser.newContext({ userAgent: UA, viewport: { width: 1280, height: 900 }, locale: "ko-KR" });
+  await applyAntiDetection(context);
+  await context.addCookies(cookies);
+  const page = await context.newPage();
+  await page.bringToFront().catch(() => {});
+  try {
+    const ok = await gotoSmartplaceReviews(page, params.storeName || "", log);
+    if (!ok) return [];
+    let reviews = await parseSmartplaceReviews(page, log);
+    if (params.onlyNew) reviews = reviews.filter(r => !r.hasReply);
+    return reviews;
+  } finally { await browser.close().catch(() => {}); }
+}
+
+// ── 답글 등록(SSE 콜백) ──
+export async function replyToPlaceReviews(params: {
+  accountId: string; placeUrl?: string; storeName?: string;
+  replies: { reviewId: string; reply: string }[];
+  ownerUserId?: string | null;
+  onLog?: (m: string) => void;
+  onResult?: (r: { reviewId: string; status: "success" | "fail"; message?: string }) => Promise<void> | void;
+  onProgress?: (done: number, fail: number) => void;
+  stopSignal?: () => boolean;
+}): Promise<void> {
+  const log = params.onLog || console.log;
+  const cookies = await ensureLiveSession(params.accountId, log);
+  const browser = await launchBrowser(params.accountId, { headless: false, maximized: true, log, feature: "reply", ownerUserId: params.ownerUserId });
+  const context = await browser.newContext({ userAgent: UA, viewport: { width: 1280, height: 900 }, locale: "ko-KR" });
+  await applyAntiDetection(context);
+  await context.addCookies(cookies);
+  const page = await context.newPage();
+  await page.bringToFront().catch(() => {});
+  let done = 0, fail = 0;
+  try {
+    const ok = await gotoSmartplaceReviews(page, params.storeName || "", log);
+    if (!ok) { log("[리뷰답글] 리뷰 페이지 진입 실패 — 중단"); return; }
+    await parseSmartplaceReviews(page, log); // 화면 로드 보장
+    for (const item of params.replies) {
+      if (params.stopSignal?.()) { log("[리뷰답글] 중단 신호 수신"); break; }
+      // ★미검증: reviewId로 해당 리뷰 카드의 '답글' 버튼 → 입력창 → 등록. 셀렉터는 실기기 교정 필요.
+      const posted = await page.evaluate(({ rid, text }: { rid: string; text: string }) => {
+        const card = document.querySelector(`[data-review-id='${rid}'],[data-id='${rid}']`)
+          || Array.from(document.querySelectorAll("li,div")).find(c => (c as HTMLElement).innerText && false); // id 매칭 우선
+        if (!card) return "no-card";
+        const btn = card.querySelector("button,a");
+        // 답글 쓰기 버튼(텍스트에 '답글') 클릭
+        const replyBtn = Array.from(card.querySelectorAll("button,a")).find(b => /답글|답변/.test((b.textContent || ""))) as HTMLElement | undefined;
+        (replyBtn || (btn as HTMLElement))?.click();
+        const ta = card.querySelector("textarea,[contenteditable='true']") as HTMLElement | null;
+        if (!ta) return "no-input";
+        if (ta.tagName === "TEXTAREA") { (ta as HTMLTextAreaElement).value = text; ta.dispatchEvent(new Event("input", { bubbles: true })); }
+        else { ta.textContent = text; ta.dispatchEvent(new Event("input", { bubbles: true })); }
+        const submit = Array.from(card.querySelectorAll("button")).find(b => /등록|저장|완료/.test((b.textContent || ""))) as HTMLElement | undefined;
+        if (!submit) return "no-submit";
+        submit.click();
+        return "ok";
+      }, { rid: item.reviewId, text: item.reply }).catch(() => "error");
+      await page.waitForTimeout(1800);
+      if (posted === "ok") { done++; log(`[리뷰답글] ✅ 리뷰(${item.reviewId})에 답글 등록: "${item.reply.slice(0, 30)}"`); await params.onResult?.({ reviewId: item.reviewId, status: "success" }); }
+      else { fail++; log(`[리뷰답글] ❌ 리뷰(${item.reviewId}) 답글 실패: ${posted} (실기기 셀렉터 교정 필요)`); await params.onResult?.({ reviewId: item.reviewId, status: "fail", message: String(posted) }); }
+      params.onProgress?.(done, fail);
+      await page.waitForTimeout(humanDelay(2, 4));
+    }
+    log(`[리뷰답글] 완료 — 등록 ${done} / 실패 ${fail}`);
+  } finally { await browser.close().catch(() => {}); }
+}

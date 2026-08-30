@@ -5,13 +5,14 @@ import { supabase, submitBugReportRow, getMyResolvedBugAlerts, markBugNotified, 
 import NeighborPage from "./NeighborPage";
 import CrawlCenter from "../components/CrawlCenter";
 import Place360 from "../components/Place360";
+import PlaceReview from "../components/PlaceReview";
 import { botFetch, BotEventStream } from "../lib/botApi";
 import WebInstallNotice from "../WebInstallNotice";
 import UsageGuide from "../components/UsageGuide";
 import Daebaekseo, { DAEBAEKSEO_VERSION } from "../components/Daebaekseo";
 import dodoImg from "../assets/dodo.png";
 
-type MainTab = "control" | "keyword" | "write" | "image" | "photo" | "publish" | "manage" | "accounts" | "rank" | "blogscore" | "calendar" | "settings" | "neighbor" | "engage" | "reply" | "pumasi" | "insta_dm" | "crawl" | "place";
+type MainTab = "control" | "keyword" | "write" | "image" | "photo" | "publish" | "manage" | "accounts" | "rank" | "blogscore" | "calendar" | "settings" | "neighbor" | "engage" | "reply" | "pumasi" | "insta_dm" | "crawl" | "place" | "place_reply";
 type OnPartnerProduct = {id:string|null;name:string;image:string;price:number|null;available:boolean;partnerUrl:string;shopUrl:string};
 type OnPartnerPlacement = "auto"|"adpost"|"after_first"|"middle"|"before_last"|"bottom";
 type PublishConcept = "full" | "body_faq" | "body_only";
@@ -155,7 +156,10 @@ const NAV_GROUPS = [
     {k:"keyword",i:"🔍",l:"키워드/제목"},{k:"write",i:"✍️",l:"글 생성"},{k:"image",i:"🖼️",l:"이미지 생성"},{k:"photo",i:"📷",l:"사진 글쓰기"},{k:"publish",i:"🚀",l:"발행하기"},
   ]},
   {label:"블로그 운영",tabs:[
-    {k:"calendar",i:"📅",l:"콘텐츠 캘린더",shine:true},{k:"manage",i:"📋",l:"발행 관리"},{k:"blogscore",i:"📈",l:"블로그 지수"},{k:"crawl",i:"🔍",l:"크롤링"},{k:"place",i:"🏪",l:"플레이스 365"},
+    {k:"calendar",i:"📅",l:"콘텐츠 캘린더",shine:true},{k:"manage",i:"📋",l:"발행 관리"},{k:"blogscore",i:"📈",l:"블로그 지수"},{k:"crawl",i:"🔍",l:"크롤링"},
+  ]},
+  {label:"플레이스",boxed:true,tabs:[
+    {k:"place",i:"🏪",l:"플레이스 365"},{k:"place_reply",i:"🗣️",l:"플레이스 리뷰답글"},
   ]},
   {label:"관계·소통 자동화",tabs:[
     {k:"neighbor",i:"🤝",l:"서이추"},{k:"engage",i:"❤️",l:"공감·댓글"},{k:"reply",i:"💬",l:"답방"},{k:"pumasi",i:"💞",l:"품앗이"},{k:"insta_dm",i:"📱",l:"인스타 DM"},
@@ -163,7 +167,7 @@ const NAV_GROUPS = [
   {label:"계정·설정",tabs:[
     {k:"accounts",i:"🔗",l:"계정 관리"},{k:"settings",i:"⚙️",l:"설정"},
   ]},
-] as const satisfies ReadonlyArray<{label:string;tabs:ReadonlyArray<{k:MainTab;i:string;l:string;shine?:boolean}>}>;
+] as const satisfies ReadonlyArray<{label:string;boxed?:boolean;tabs:ReadonlyArray<{k:MainTab;i:string;l:string;shine?:boolean}>}>;
 const MAIN_TABS: ReadonlyArray<{k:MainTab;i:string;l:string}> = NAV_GROUPS.flatMap(group=>
   group.tabs as unknown as ReadonlyArray<{k:MainTab;i:string;l:string}>
 );
@@ -286,6 +290,12 @@ const CSS = `
 .layout{flex:1;display:flex;overflow:hidden;min-height:0;}
 .sidebar{position:relative;flex-shrink:0;z-index:50;width:210px;background:var(--bg2);border-right:1px solid var(--border);display:flex;flex-direction:column;padding:12px 8px;gap:2px;overflow-y:auto;}
 .nav-lbl{font-size:9px;font-weight:800;letter-spacing:.13em;text-transform:uppercase;color:var(--text3);padding:5px 11px 7px;margin-top:4px;}
+/* 플레이스 세트: 플레이스365+리뷰답글을 테두리로 묶어 한 눈에 */
+.nav-box{margin:8px 6px;padding:6px 6px 7px;border:1.5px solid var(--accent-soft,rgba(22,133,107,.35));border-radius:12px;background:linear-gradient(180deg,rgba(22,133,107,.06),rgba(22,133,107,.02));position:relative;}
+.nav-box-lbl{font-size:9px;font-weight:800;letter-spacing:.13em;text-transform:uppercase;color:#16856b;padding:2px 6px 6px;display:flex;align-items:center;gap:4px;}
+.nav-box-lbl::before{content:"🏪";font-size:11px;}
+.dark .nav-box{border-color:rgba(34,168,128,.4);background:linear-gradient(180deg,rgba(34,168,128,.08),rgba(34,168,128,.02));}
+.dark .nav-box-lbl{color:#5fd3ac;}
 .nav-item{display:flex;align-items:center;gap:10px;padding:11px 12px;border-radius:9px;border:none;cursor:pointer;width:100%;font-size:13px;font-weight:500;font-family:'Noto Sans KR',sans-serif;color:var(--text2);background:transparent;transition:all .15s;text-align:left;position:relative;}
 .nav-item:hover{background:var(--card-hover);color:var(--text);}
 .nav-item.active{background:var(--accent-bg);color:var(--accent-text);font-weight:700;border:1px solid var(--accent-border);}
@@ -4274,9 +4284,9 @@ POST3: (제목)|(이유)
         <div className="layout">
           <div className="sidebar">
             {NAV_GROUPS.map(group=>(
-              <div key={group.label}>
-                {group.label&&<div className="nav-lbl">{group.label}</div>}
-                {group.tabs.map(t=> (t.k==="crawl" || t.k==="place") ? (() => { const enabled = t.k === "place" ? place360Enabled : crawlEnabled; return (
+              <div key={group.label} className={(group as any).boxed?"nav-box":""}>
+                {group.label&&<div className={(group as any).boxed?"nav-box-lbl":"nav-lbl"}>{group.label}</div>}
+                {group.tabs.map(t=> (t.k==="crawl" || t.k==="place" || t.k==="place_reply") ? (() => { const enabled = (t.k === "place" || t.k === "place_reply") ? place360Enabled : crawlEnabled; return (
                   <button key={t.k} className={`nav-item nav-crawl nav-shine ${tab===t.k&&enabled?"active":""} ${enabled?"":"nav-crawl-locked"}`} onClick={()=>{ if(!enabled){ setShowCrawlLock(true); return; } setTab(t.k); }}>
                     <span className="nav-ico">{t.i}</span><span className="nav-crawl-label">{t.l}</span>
                     <span className="nav-hot">HOT</span>
@@ -6973,6 +6983,9 @@ POST3: (제목)|(이유)
             )}
             {visitedAutoTabs.has("place") && place360Enabled && (
               <div aria-hidden={tab!=="place"} style={{ display: tab==="place" ? "block" : "none", pointerEvents: tab==="place" ? "auto" : "none" }}><Place360 showToast={showToast} theme={theme==="dark"?"dark":"light"} userId={user.id} plan={user.plan} onOpenCrawl={()=>setTab("crawl")} /></div>
+            )}
+            {tab==="place_reply" && place360Enabled && (
+              <PlaceReview showToast={showToast} theme={theme==="dark"?"dark":"light"} userId={user.id} plan={user.plan} onOpenPlace={()=>setTab("place")} />
             )}
             {visitedAutoTabs.has("pumasi") && (
               <div className="tab-pumasi" aria-hidden={tab!=="pumasi"} style={{ display: tab==="pumasi" ? "block" : "none", pointerEvents: tab==="pumasi" ? "auto" : "none" }}>

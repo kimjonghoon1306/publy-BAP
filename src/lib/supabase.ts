@@ -835,6 +835,26 @@ export async function incrementReplyQuota(userId: string, by = 1): Promise<void>
   await supabase.from("publy_settings").upsert({ key, value: String(used + by) }, { onConflict: "key" });
 }
 
+// ── 🗣️ 플레이스 리뷰답글 일일 한도 ──
+//    스마트플레이스 리뷰에 사장 자격으로 답글 등록. 도배 위험이 있어 답방보다 보수적으로.
+export const PLACE_REPLY_DAILY_LIMIT: Record<string, number> = {
+  free: 5, basic: 20, pro: 50, unlimited: 999999, admin: 9999,
+};
+function placeReplyQuotaKey(userId: string): string {
+  return `place_reply_daily_${userId}_${koreaDateKey()}`;
+}
+export async function getPlaceReplyDailyUsage(userId: string): Promise<number> {
+  try {
+    const { data } = await supabase.from("publy_settings").select("value").eq("key", placeReplyQuotaKey(userId)).maybeSingle();
+    return data?.value ? parseInt(data.value) || 0 : 0;
+  } catch { return 0; }
+}
+export async function incrementPlaceReplyQuota(userId: string, by = 1): Promise<void> {
+  const key = placeReplyQuotaKey(userId);
+  const used = await getPlaceReplyDailyUsage(userId);
+  await supabase.from("publy_settings").upsert({ key, value: String(used + by) }, { onConflict: "key" });
+}
+
 // ── 🔍 크롤링 발굴 일일 한도(자정 초기화 = 날짜별 키) ──
 export const CRAWL_DAILY_LIMIT: Record<string, number> = {
   free: PLAN_CONFIG.free.dailyCrawl, basic: PLAN_CONFIG.basic.dailyCrawl, pro: PLAN_CONFIG.pro.dailyCrawl, unlimited: PLAN_CONFIG.unlimited.dailyCrawl, admin: PLAN_CONFIG.admin.dailyCrawl,
@@ -1219,6 +1239,15 @@ export async function getAllReplyHistory(): Promise<(ReplyHistory & { user_name?
   try {
     const { data } = await supabase.from("publy_reply_history").select("*, publy_users(name, email)").order("created_at", { ascending: false }).limit(500);
     return (data || []).map((d: Record<string, any>) => ({ id: d.id, user_id: d.user_id, post_title: d.post_title, status: d.status, message: d.message, created_at: d.created_at, user_name: d.publy_users?.name, user_email: d.publy_users?.email }));
+  } catch { return []; }
+}
+
+// ── 🗣️ 플레이스 리뷰답글 이력 (관리자) ──
+export interface PlaceReplyHistory { id: string; user_id: string; store_name: string; review_author: string; rating: number|null; status: "success"|"fail"|"skip"; message: string; created_at: string; }
+export async function getAllPlaceReplyHistory(): Promise<(PlaceReplyHistory & { user_name?: string; user_email?: string })[]> {
+  try {
+    const { data } = await supabase.from("publy_place_reply_history").select("*, publy_users(name, email)").order("created_at", { ascending: false }).limit(500);
+    return (data || []).map((d: Record<string, any>) => ({ id: d.id, user_id: d.user_id, store_name: d.store_name, review_author: d.review_author, rating: d.rating, status: d.status, message: d.message, created_at: d.created_at, user_name: d.publy_users?.name, user_email: d.publy_users?.email }));
   } catch { return []; }
 }
 
