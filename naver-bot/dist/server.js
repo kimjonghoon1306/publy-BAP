@@ -638,15 +638,16 @@ const YNA_SECTIONS = {
 // 🆕 대중 생활 카테고리 — 뉴스에 안 나오는 블로그 실전 주제. 각 카테고리를 여러 '씨앗 키워드'로 잡고,
 //    네이버 실시간 자동완성(지금 사람들이 검색하는 것)으로 실제 인기 주제를 뽑는다(실시간).
 const LIFE_SEEDS = {
-    음식레시피: ["레시피", "집밥", "간단요리", "다이어트 요리", "에어프라이어", "밑반찬", "자취요리"],
-    패션: ["패션", "코디", "여자 코디", "남자 코디", "가을 코디", "데일리룩", "신발 추천"],
-    뷰티: ["화장품 추천", "스킨케어", "메이크업", "다이어트", "헤어스타일", "네일", "향수 추천"],
-    여행: ["여행", "국내여행", "가볼만한곳", "당일치기", "제주 여행", "해외여행", "캠핑"],
-    인테리어: ["인테리어", "셀프 인테리어", "원룸 인테리어", "홈카페", "수납 정리", "소품 추천", "이사 준비"],
-    반려동물: ["강아지", "고양이", "반려동물 용품", "강아지 훈련", "고양이 사료", "펫 미용", "반려견 간식"],
-    재테크: ["재테크", "부업", "적금 추천", "주식 초보", "청약", "절약 방법", "정부지원금"],
-    육아: ["육아", "이유식", "아기 용품", "신생아", "육아템", "어린이집", "출산 준비"],
-    건강운동: ["홈트", "다이어트 운동", "헬스", "스트레칭", "런닝", "요가", "체중 감량"],
+    음식레시피: ["레시피", "집밥", "간단요리", "다이어트 요리", "에어프라이어", "밑반찬", "자취요리", "국물요리", "찌개", "볶음요리", "반찬", "야식", "안주", "도시락", "아침메뉴", "저녁메뉴", "닭가슴살 요리", "계란 요리", "감자 요리", "두부 요리", "김치 요리", "파스타", "면요리", "국수", "덮밥", "비빔밥", "찜요리", "구이요리", "전 부치기", "나물무침", "샐러드", "홈베이킹", "디저트", "간식 만들기", "제철 요리", "명절 음식", "손님상", "캠핑 요리", "전자레인지 요리", "노오븐 디저트"],
+    패션: ["패션", "코디", "여자 코디", "남자 코디", "가을 코디", "데일리룩", "신발 추천", "오피스룩", "니트 코디", "청바지 코디", "원피스 코디", "아우터 추천", "가방 추천", "하객룩", "키작녀 코디"],
+    뷰티: ["화장품 추천", "스킨케어", "메이크업", "다이어트", "헤어스타일", "네일", "향수 추천", "선크림", "수분크림", "클렌징", "모공 관리", "탈모 예방", "다크서클", "립 제품", "피부 진정"],
+    여행: ["여행", "국내여행", "가볼만한곳", "당일치기", "제주 여행", "해외여행", "캠핑", "호캉스", "드라이브 코스", "단풍 명소", "온천 여행", "섬 여행", "글램핑", "데이트 코스", "아이와 여행"],
+    인테리어: ["인테리어", "셀프 인테리어", "원룸 인테리어", "홈카페", "수납 정리", "소품 추천", "이사 준비", "거실 인테리어", "주방 정리", "조명 추천", "침실 꾸미기", "화장실 인테리어", "식물 인테리어", "벽 꾸미기", "가구 배치"],
+    반려동물: ["강아지", "고양이", "반려동물 용품", "강아지 훈련", "고양이 사료", "펫 미용", "반려견 간식", "강아지 사료 추천", "배변 훈련", "분리불안", "고양이 장난감", "반려견 산책", "펫 보험", "강아지 옷", "반려동물 등록"],
+    재테크: ["재테크", "부업", "적금 추천", "주식 초보", "청약", "절약 방법", "정부지원금", "앱테크", "무지출 챌린지", "청년도약계좌", "연금저축", "배당주", "공모주", "가계부", "목돈 만들기"],
+    육아: ["육아", "이유식", "아기 용품", "신생아", "육아템", "어린이집", "출산 준비", "아기 수면교육", "예방접종", "돌잔치 준비", "유아식", "아기 발달", "기저귀 추천", "분유 추천", "아이 훈육"],
+    건강운동: ["홈트", "다이어트 운동", "헬스", "스트레칭", "런닝", "요가", "체중 감량", "복부 운동", "하체 운동", "코어 운동", "걷기 운동", "자세 교정", "폼롤러", "유산소", "근력 운동"],
+    정책자금: ["정부지원금", "정책자금", "소상공인 지원금", "청년 지원금", "창업 지원금", "소상공인 대출", "국가지원금", "청년 정책", "소상공인 정책자금", "고용지원금", "자영업자 지원", "중소기업 지원", "긴급경영안정자금", "햇살론", "근로장려금", "청년내일채움공제", "두루누리 지원금", "일자리 지원금", "지역화폐", "소상공인 방역지원금"],
 };
 // 네이버 자동완성으로 씨앗 키워드의 실시간 인기 연관검색어를 가져온다(공개 API, 세션 불필요).
 async function naverAutocomplete(seed) {
@@ -672,12 +673,21 @@ function cleanHeadline(s) {
         .replace(/^\[[^\]]*\]\s*/g, "").replace(/\([^)]*종합[^)]*\)/g, "").replace(/\.{2,}$/, "")
         .replace(/\s+/g, " ").trim();
 }
+// 실시간 종합용 블로그 글감 씨앗 — 뉴스가 아니라 '지금 사람들이 검색하는 블로그 주제'로.
+const REALTIME_SEEDS = ["요즘 뜨는", "제철 음식", "이번주 여행", "인기 레시피", "다이어트", "부업 추천", "정부지원금", "정책자금", "소상공인 지원금", "청년 지원금", "창업 지원금", "인테리어 팁", "건강 관리", "재테크", "반려동물", "가볼만한곳", "선물 추천", "생활 꿀팁", "패션 코디"];
+// Fisher–Yates 셔플(새로고침마다 다양한 주제가 위로 오게)
+function shuffle(a) { const r = a.slice(); for (let i = r.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [r[i], r[j]] = [r[j], r[i]];
+} return r; }
 app.get("/api/hot-issues", async (req, res) => {
     const category = String(req.query.category || "실시간");
+    const fresh = req.query.fresh === "1"; // 새로고침 버튼 → 캐시 우회하고 즉시 새로 수집
     const now = Date.now();
     const cached = HOT_CACHE[category];
-    if (cached && now - cached.at < 30 * 60 * 1000)
-        return res.json({ ok: true, category, items: cached.items, cached: true });
+    // 캐시가 있어도 매 요청 셔플해서 '다양하게' 보여준다(30분 안이라도 위쪽 주제가 바뀜). fresh면 아예 새로 수집.
+    if (!fresh && cached && now - cached.at < 30 * 60 * 1000)
+        return res.json({ ok: true, category, items: shuffle(cached.items), cached: true });
     try {
         // 주제를 풍부하게: 소스에서 당겨올 수 있는 건 최대한 다 당겨와 중복만 제거(양을 크게).
         const uniq = (arr) => { const seen = new Set(); const out = []; for (const x of arr) {
@@ -689,21 +699,24 @@ app.get("/api/hot-issues", async (req, res) => {
         } return out; };
         let items = [];
         if (category === "실시간") {
-            // 구글 트렌드(KR) + 연합뉴스 주요 섹션 헤드라인을 합쳐서 실시간 주제를 최대한 풍부하게
+            // ★블로그 글감 중심으로: 네이버 실시간 자동완성(사람들이 지금 검색하는 것)을 메인으로,
+            //   뉴스(구글 트렌드·연합)는 시의성 보조로 소량만. → '쓸 수 있는' 주제가 매번 다르게 나온다.
             const pulls = await Promise.allSettled([
-                fetch("https://trends.google.com/trending/rss?geo=KR", { headers: { "User-Agent": "Mozilla/5.0" } }).then(r => r.text()),
-                ...["economy", "society", "entertainment", "sports", "industry"].map(sec => fetch(`https://www.yna.co.kr/rss/${sec}.xml`, { headers: { "User-Agent": "Mozilla/5.0" } }).then(r => r.text())),
+                ...REALTIME_SEEDS.map(s => naverAutocomplete(s).then(a => ({ kind: "blog", list: a }))),
+                fetch("https://trends.google.com/trending/rss?geo=KR", { headers: { "User-Agent": "Mozilla/5.0" } }).then(r => r.text()).then(t => ({ kind: "news", list: [...t.matchAll(/<title[^>]*>([\s\S]*?)<\/title>/g)].map(m => cleanHeadline(m[1])) })),
             ]);
-            const merged = [];
-            pulls.forEach((p, i) => {
+            const blogTopics = [], newsTopics = [];
+            pulls.forEach(p => {
                 if (p.status !== "fulfilled")
                     return;
-                const cleaned = [...p.value.matchAll(/<title[^>]*>([\s\S]*?)<\/title>/g)].map(m => cleanHeadline(m[1]))
-                    .filter(x => x && !/trends|google|피드|연합뉴스|저작권|헤드라인|알림|RSS/i.test(x));
-                // 구글 트렌드는 앞쪽(더 뜨거움) 우선, 뉴스는 섹션당 상위 몇 개만
-                merged.push(...(i === 0 ? cleaned.slice(0, 30) : cleaned.slice(0, 8)));
+                const v = p.value;
+                if (v.kind === "blog")
+                    blogTopics.push(...v.list.filter(x => x.length >= 2 && !REALTIME_SEEDS.includes(x)));
+                else
+                    newsTopics.push(...v.list.filter(x => x && !/trends|google|피드|RSS/i.test(x)).slice(0, 12));
             });
-            items = uniq(merged).slice(0, 60);
+            // 블로그 주제를 앞에(많이), 뉴스는 뒤에 소량 섞기
+            items = uniq([...shuffle(blogTopics), ...newsTopics]).slice(0, 60);
         }
         else if (LIFE_SEEDS[category]) {
             // 🆕 대중 생활 카테고리 — 네이버 실시간 자동완성으로 지금 뜨는 검색 주제 수집(뉴스와 별개)
