@@ -1925,6 +1925,15 @@ Output (JSON object only): {"keyword":"핵심키워드","title":"새 제목","st
     return clean.split("\n").map(l=>l.replace(/^[\d]+[).\s]+|^[-*•\s]+/,"").replace(/^[\s"']+|[\s"']+$/g,"").trim()).filter(l=>l.length>4&&l.length<100);
   }
 
+  // ★키워드 형태 통일(제목·본문 공통) — 입력 키워드를 입력한 형태 그대로 일정하게(띄어쓰기까지). 상위노출용.
+  function enforceExactKeyword(text:string, kw:string):string {
+    const exact=(kw||"").trim();
+    const bare=exact.replace(/\s/g,"");
+    if(!exact||bare.length<2) return text;
+    const esc=(c:string)=>c.replace(/[.*+?^${}()|[\]\\]/g,"\\$&");
+    const pattern=bare.split("").map(esc).join("\\s*");
+    try{ return text.replace(new RegExp(pattern,"g"), exact); }catch{ return text; }
+  }
   function stripMarkdown(text: string): string {
     const markers = ["[FAQ시작]","[FAQ끝]","[관련글시작]","[관련글끝]"];
     const ph: [string,string][] = markers.map((m,i) => [`XMARK${i}X`,m]);
@@ -2176,7 +2185,7 @@ Output (JSON object only): {"keyword":"핵심키워드","title":"새 제목","st
       : `당신은 구글 애드센스 최적화 SEO 전문가입니다.\n키워드: "${keyword.trim()}"\n목적: 구글 검색 상위노출 + 애드센스 클릭률 극대화\n\n반드시 제목 30개를 JSON 배열로만 반환하세요.\n- 키워드를 자연스럽게 포함\n- 15~20자, 정보성·전문적 톤, 검색어 포함\n- "완벽 가이드", "총정리", "이유 5가지" 등\n\nJSON 배열만 반환.`;
     try {
       const text = await callAI(prompt);
-      const parsed = parseArr(text);
+      const parsed = parseArr(text).map((t:string)=>enforceExactKeyword(t, keyword.trim()));
       if (!parsed.length) throw new Error("제목 파싱 실패");
       setTitles(prev => {
         const combined = [...parsed,...prev];
@@ -2262,7 +2271,7 @@ ${catGuide}
 ✅ 독자에게 직접 말 걸기
 ✅ 구체적 수치, 가격, 기간 포함
 ✅ 문장 끝: ~해요, ~거든요, ~더라고요, ~잖아요 다양하게
-✅ 키워드 3~4회 자연스럽게 (동의어 활용)
+✅ ★핵심 키워드 "${keyword||title}"를 본문에 **띄어쓰기·글자 그대로 똑같이 정확히 5~6번** 반복 (예: "원주맛집"이면 "원주 맛집"으로 띄우지 말고 "원주맛집" 그대로 — 검색 노출의 핵심)
 ✅ 반드시 ${chars-100}~${chars+100}자 사이로 작성
 
 === 글 패턴 가이드 (매번 다르게) ===
@@ -2300,7 +2309,7 @@ POST3: (제목)|(이유)
       const bm = cleaned.match(/태그[^\n]*\n([\s\S]+)/);
       setGenTitle(title);
       if (tgm) setGenTags(tgm[1].trim());
-      const body = bm ? bm[1].trim() : cleaned;
+      const body = enforceExactKeyword(bm ? bm[1].trim() : cleaned, keyword||title);
       setGenContent(body);
       setQualityScore(calcQualityScore(body,keyword));
       const recCount = imgCountManual ?? recommendImageCount(body);

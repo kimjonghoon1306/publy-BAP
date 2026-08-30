@@ -2377,6 +2377,17 @@ Output (JSON object only): {"keyword":"핵심키워드","title":"새 SEO 제목"
     return cleaned.replace(/§BR(\d+)§/g, (_:string,i:string) => brands[parseInt(i)] ?? "");
   }
 
+  // ★키워드 형태 통일(제목·본문 공통): 입력 키워드를 '입력한 형태 그대로' 일정하게 맞춘다.
+  //   "원주맛집"이면 본문의 "원주 맛집"→"원주맛집", "강남 맛집"이면 "강남맛집"→"강남 맛집".
+  //   블로그 상위노출·플레이스 노출은 키워드가 띄어쓰기까지 똑같이 반복돼야 유리하다.
+  function enforceExactKeyword(text:string, kw:string):string {
+    const exact=(kw||"").trim();
+    const bare=exact.replace(/\s/g,"");
+    if(!exact||bare.length<2) return text;
+    const esc=(c:string)=>c.replace(/[.*+?^${}()|[\]\\]/g,"\\$&");
+    const pattern=bare.split("").map(esc).join("\\s*"); // 공백 제거한 글자들 사이 공백 유연 매칭
+    try{ return text.replace(new RegExp(pattern,"g"), exact); }catch{ return text; }
+  }
   function ensureQuestionHeadings(text:string, topic:string):string {
     const markerIndex=text.search(/\n?\[FAQ시작\]/);
     const main=markerIndex>=0?text.slice(0,markerIndex).trim():text.trim();
@@ -2532,7 +2543,8 @@ Output (JSON object only): {"keyword":"핵심키워드","title":"새 SEO 제목"
       :`당신은 구글 애드센스 SEO 전문가입니다.\n키워드: "${keyword.trim()}"\n\n검색 노출이 잘 되는 정보성 제목 30개를 JSON 배열로만 반환하세요.\n- 키워드 "${keyword.trim()}"를 앞부분에 자연스럽게 포함\n- 25~40자, 차분한 정보성 톤\n- 실제 검색 형태("완벽 가이드","총정리","비교","이유","방법")\n- 과장·낚시성 감탄사(대박/진짜/충격) 금지, 물음표·느낌표 남발 금지\n\nJSON 배열만 반환.`;
     try{
       const text=await callAI(prompt,abortRef.current.signal);
-      const parsed=parseArr(text);
+      // 생성된 제목의 키워드 형태를 입력 형태 그대로 통일(제목·본문 일관)
+      const parsed=parseArr(text).map((t:string)=>enforceExactKeyword(t,keyword.trim()));
       if(!parsed.length)throw new Error("제목 생성 실패. 다시 시도해주세요.");
       setTitles(prev=>{
         const combined=[...parsed,...prev];
@@ -2696,14 +2708,14 @@ ${catGuide}
 ⛔ AI 티 나는 상투어 절대 금지: "~해보겠습니다/알아보겠습니다/살펴보겠습니다/소개해드리겠습니다/정리해보겠습니다", "결론적으로", "중요합니다", "다양한", "효과적인", "필수적으로", "무엇보다도", "뿐만 아니라", "~하는 것이 좋습니다", "추천드립니다" → 전부 실제 사람 말투(~해볼게요, 여러, 꼭, 그래서, 추천해요)로
 ✅ 구체적 수치, 가격, 기간 포함
 ✅ ${endTone}
-✅ 키워드 3~4회 자연스럽게 (동의어 활용)
+✅ ★핵심 키워드 "${keyword||title}"를 본문에 **띄어쓰기·글자 그대로 똑같이 정확히 5~6번** 반복 (예: "원주맛집"이면 "원주 맛집"으로 띄우지 말고 "원주맛집" 그대로. 검색 노출의 핵심)
 ✅ 반드시 ${chars-100}~${chars+100}자 사이로 작성
 
 === 🔍 검색 최적화(SEO) 규칙 — 반드시 지킬 것 ===
 ✅ 본문을 4~6개 구간으로 나누고, 각 구간 맨 앞에 "소제목"을 한 줄 단독으로 넣기 (## 없이 순수 텍스트)
 ✅ 소제목 일부에 검색어 요소(왜/어떻게/추천/고르는법/가격/후기/비교/주의점)를 자연스럽게 담기 — 단, 물음표는 소제목당 최대 1개, 전체에서 남발 금지
 ✅ 소제목은 짧게(10~30자), 실제 검색어 형태로 (낚시성 감탄사 금지)
-✅ 키워드 "${keyword||title}"를 본문에 3~6회 자연스럽게 반복 (검색 노출)
+✅ 핵심 키워드 "${keyword||title}"를 **띄어쓰기까지 똑같은 형태 그대로 정확히 5~6회** 반복 (형태 변형·띄어쓰기 금지 — 체험단/플레이스 리뷰 상위노출의 핵심)
 
 === ⭐ 저품질 방지 — 네이버가 좋아하는 '진짜 정보 글' (가장 중요) ===
 ✅ 독자가 실제로 궁금해할 구체 정보를 담기: 가격/비용, 위치·지역, 소요 시간, 준비물, 장단점, 실패담·주의점, 단계별 방법 — 추상적인 미사여구 말고 '알맹이'
@@ -2755,7 +2767,10 @@ POST3: (제목)|(이유)
       const bm=cleaned.match(/태그[^\n]*\n([\s\S]+)/);
       setGenTitle(title);if(tgm)setGenTags(tgm[1].trim());
       const generatedBody=ensureQuestionHeadings(bm?bm[1].trim():cleaned,keyword||title);
-      const body=onPartnerItems.length>0?placeOnPartnerProduct(generatedBody,onPartnerItems.map(it=>it.product)):generatedBody.trim();setGenContent(body);setQualityScore(calcQualityScore(body,keyword));
+      const body0=onPartnerItems.length>0?placeOnPartnerProduct(generatedBody,onPartnerItems.map(it=>it.product)):generatedBody.trim();
+      // ★키워드 형태 통일: AI가 "원주 맛집"처럼 띄어 쓴 걸 입력한 "원주맛집" 형태 그대로로 맞춰 SEO 정확반복 보장(문장은 유지, 형태만).
+      const body=enforceExactKeyword(body0,keyword||title);
+      setGenContent(body);setQualityScore(calcQualityScore(body,keyword));
       setPendingPromo(null);   // 홍보 삽입 1회용 → 사용 후 해제(다음 글에 안 남게)
       // 비동기 글 생성 도중 직접입력으로 바뀌었으면 추천값으로 절대 덮지 않는다.
       if(imgCountAutoRef.current){
