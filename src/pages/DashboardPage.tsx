@@ -2536,20 +2536,27 @@ Output (JSON object only): {"keyword":"핵심키워드","title":"새 SEO 제목"
     return clean.split("\n").map(l=>l.replace(/^[\d]+[).\s]+|^[-*•\s]+/,"").replace(/^[\s"']+|[\s"']+$/g,"").trim()).filter(l=>l.length>4&&l.length<100);
   }
 
+  // ★제목 점수 = 실제 네이버 상위노출 기준(프롬프트와 일치). 낚시가 아니라 '검색에 잘 잡히는 깨끗한 제목'에 점수.
   function calcTitleScore(title:string):number{
     let score=0;
-    const len=title.length;
-    // 적정 길이 (25~42자)
-    if(len>=25&&len<=42)score+=30;else if(len>=20&&len<=50)score+=15;
-    // 숫자 포함 (BEST 7, TOP 5 등)
-    if(/[0-9]/.test(title))score+=20;
-    // 상업적/클릭유발 단어
-    if(/추천|리뷰|후기|방법|비결|솔직|이것만|꿀팁|실패|성공|필수|완벽|최고|진짜|효과|비교/.test(title))score+=25;
-    // 경험공유형
-    if(/써봤|해봤|다녀온|먹어본|가봤|사봤|써보니|해보니/.test(title))score+=15;
-    // 질문형/호기심
-    if(/\?|왜|어떻게|언제|어디|뭐가|무엇이/.test(title))score+=10;
-    return Math.min(100,score);
+    const t=(title||"").trim();
+    const len=t.length;
+    // 1) 핵심 키워드가 제목 앞쪽(검색 매칭의 1순위)
+    const kw=(keyword||"").trim();
+    if(kw){ const idx=t.replace(/\s/g,"").indexOf(kw.replace(/\s/g,"")); if(idx>=0&&idx<=8)score+=32; else if(idx>=0)score+=16; }
+    else score+=16;
+    // 2) 적정 길이(25~40자 롱테일)
+    if(len>=25&&len<=40)score+=24; else if(len>=20&&len<=46)score+=12;
+    // 3) 실제 검색 의도어(낚시 아님 — 사람들이 실제로 붙여 검색)
+    if(/추천|방법|후기|비교|가격|고르는\s?법|순위|정리|총정리|가이드|위치|예약|메뉴|코스|장단점|주의|가성비|근처/.test(t))score+=20;
+    // 4) 구체 정보(수치+단위 / 지역·장소) — 롱테일 노출에 유리
+    if(/\d+\s?(원|만원|분|시간|일|개월|년|kg|명|곳|가지|위)/.test(t))score+=14;
+    if(/[가-힣]{2,}(시|구|동|읍|면|역|점|맛집|해수욕장)/.test(t))score+=10;
+    // 5) 낚시·과장(저품질 필터에 걸림) — 감점
+    if(/대박|충격|미쳤|소름|경악|1등|최고|완벽|이것만|나만\s?알던|절대|무조건|역대급|레전드/.test(t))score-=25;
+    // 6) 물음표·느낌표 남발 감점(1개까진 허용)
+    const marks=(t.match(/[?!]/g)||[]).length; if(marks>=2)score-=15;
+    return Math.max(0,Math.min(100,score));
   }
 
   async function handleGenerateTitles(reset=false){
