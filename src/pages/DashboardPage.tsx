@@ -4450,7 +4450,7 @@ POST3: (제목)|(이유)
                       {[
                         {icon:"🏪",who:"매장·플레이스 사장님",desc:"내 가게를 검색 상위에 올리고 리뷰를 관리",steps:"플레이스365 진단 → 리뷰답글 → 블로그 리뷰로 상위노출",act:"플레이스365 시작",go:()=>{ if(place360Enabled) setTab("place"); else showToast("플레이스365는 관리자 승인이 필요해요","info"); }},
                         {icon:"🛒",who:"쇼핑몰·온라인 판매",desc:"상품을 블로거·블로그로 홍보해 매출 상승",steps:"블로거 발굴 → 홍보글 발행 → 블로그 순위 관리",act:"홍보글 만들기",go:()=>setTab("write")},
-                        {icon:"🚀",who:"창업·프랜차이즈 모집",desc:"온파트너로 창업자·가맹점주를 모집",steps:"온파트너 가입 → 모집 링크 발급 → 퍼블리로 홍보",act:"온파트너 열기",href:"https://partner.yuanfnb.com/pages/signup.html"},
+                        {icon:"🚀",who:"창업·프랜차이즈 모집",desc:"모집 홍보글을 검색 상위에 올려 예비 창업자를 유입",steps:"모집 홍보글 발행 → 블로그 상위노출 → 예비 창업자 검색 유입 → 문의",act:"모집 홍보글 만들기",go:()=>setTab("write")},
                         {icon:"💸",who:"부업·N잡러",desc:"추천 링크로 소개 수익 만들기",steps:"온파트너 가입 → 상품 링크 → SNS·블로그 홍보",act:"온파트너 열기",href:"https://partner.yuanfnb.com/pages/signup.html"},
                       ].map(p=>(
                         <div key={p.who} style={{display:"flex",flexDirection:"column",background:"var(--bg)",border:"1px solid var(--border)",borderRadius:14,padding:"15px 14px"}}>
