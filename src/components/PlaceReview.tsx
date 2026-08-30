@@ -62,7 +62,8 @@ export default function PlaceReview({
   const [tone, setTone] = useState<(typeof TONES)[number]>("다정");
   const [fixedText, setFixedText] = useState("방문해 주셔서 진심으로 감사합니다 😊\n소중한 후기 남겨주셔서 감사해요! 또 뵙겠습니다\n좋게 봐주셔서 감사합니다 🙏 더 노력하는 매장이 될게요");
   const [onlyNew, setOnlyNew] = useState(true);           // 아직 답글 없는 리뷰만
-  const [autoApprove, setAutoApprove] = useState(false);  // false=사장 승인 후 등록(안전). true=좋은 리뷰 자동
+  const [autoMode, setAutoMode] = useState(false);        // false=수동(하나씩 확인), true=자동(봇이 알아서). [[feedback_auto_manual_coexist]]
+  const [autoApprove, setAutoApprove] = useState(false);  // (수동 모드) 좋은 리뷰 자동 승인 토글
   const [minAutoRating, setMinAutoRating] = useState(4);  // 이 별점 이상만 자동 대상, 미만은 승인 대기(악플 보호)
   const logRef = useRef<HTMLDivElement>(null);
   const esRef = useRef<EventSource | null>(null);
@@ -81,10 +82,10 @@ export default function PlaceReview({
 
   const addLog = useCallback((m: string) => setLogs(l => [...l.slice(-400), `${new Date().toLocaleTimeString("ko-KR", { hour12: false })}  ${m}`]), []);
 
-  // ── 리뷰 불러오기(봇 크롤) ──
-  async function fetchReviews() {
-    if (!hasStore) { showToast("먼저 플레이스365에서 매장을 등록하세요", "info"); return; }
-    if (!accountId) { showToast("스마트플레이스에 로그인할 네이버 계정을 먼저 연결/선택하세요", "info"); return; }
+  // ── 리뷰 불러오기(봇 크롤) — 수집한 배열을 반환(자동 파이프라인 재사용) ──
+  async function apiFetch(): Promise<PlaceReviewItem[]> {
+    if (!hasStore) { showToast("먼저 플레이스365에서 매장을 등록하세요", "info"); return []; }
+    if (!accountId) { showToast("스마트플레이스에 로그인할 네이버 계정을 먼저 연결/선택하세요", "info"); return []; }
     setFetching(true); setReviews([]);
     addLog(`📥 "${storeName || placeUrl}" 리뷰 불러오는 중... (계정 ${accountId})`);
     try {
@@ -107,17 +108,20 @@ export default function PlaceReview({
       setReviews(items);
       addLog(`✅ 리뷰 ${items.length}건 수집 (답글 없는 리뷰 ${items.filter(x => !x.hasReply).length}건)`);
       if (!items.length) showToast("가져올 리뷰가 없어요", "info");
+      return items;
     } catch (e: any) {
       addLog(`❌ 리뷰 불러오기 실패: ${e.message}`);
       addLog(`   → 앱(PC)에서 실행 중인지, 스마트플레이스 계정이 연결됐는지 확인하세요.`);
       showToast("리뷰 불러오기 실패 — 로그 확인", "error");
+      return [];
     } finally { setFetching(false); }
   }
+  const fetchReviews = () => { void apiFetch(); };
 
-  // ── AI 답글 초안 미리 생성(등록 전에 사장이 검토) ──
-  async function generateDrafts() {
-    const targets = reviews.filter(r => (!onlyNew || !r.hasReply) && r.text);
-    if (!targets.length) { showToast("초안 만들 리뷰가 없어요", "info"); return; }
+  // ── AI 답글 초안 생성 — 초안 채운 배열 반환. forceAuto=true면 좋은 리뷰 자동 승인(자동 모드용) ──
+  async function apiDrafts(items: PlaceReviewItem[], forceAuto = false): Promise<PlaceReviewItem[]> {
+    const targets = items.filter(r => (!onlyNew || !r.hasReply) && r.text);
+    if (!targets.length) { showToast("초안 만들 리뷰가 없어요", "info"); return items; }
     addLog(`✍️ 답글 초안 ${targets.length}건 생성 중... (${mode === "ai" ? "AI" : "고정문구"})`);
     try {
       const r = await fetch(`${BOT}/api/place-review-drafts`, {
@@ -133,23 +137,42 @@ export default function PlaceReview({
       const d = await r.json();
       const map: Record<string, string> = {};
       (d.drafts || []).forEach((x: any) => { map[String(x.reviewId)] = x.reply || ""; });
-      setReviews(prev => prev.map(rv => {
+      const useAuto = forceAuto || autoApprove;   // 자동 모드거나 자동승인 토글이면 좋은 리뷰 자동 승인
+      const updated = items.map(rv => {
         if (map[rv.reviewId] === undefined) return rv;
         const draft = map[rv.reviewId];
-        // 자동 대상 판정: 자동모드 && 별점 기준 이상 → approved, 아니면 hold(승인 대기)
-        const auto = autoApprove && rv.rating >= minAutoRating && !!draft;
-        return { ...rv, draft, status: draft ? (auto ? "approved" : "hold") : rv.status };
-      }));
+        // 별점 기준 이상 → approved(자동), 미만·악플 → hold(승인 대기)
+        const auto = useAuto && rv.rating >= minAutoRating && !!draft;
+        return { ...rv, draft, status: (draft ? (auto ? "approved" : "hold") : rv.status) as ReviewStatus };
+      });
+      setReviews(updated);
       addLog(`✅ 초안 생성 완료. 저점(별 ${minAutoRating} 미만)·악플은 '승인 대기'로 분류됐어요.`);
+      return updated;
     } catch (e: any) {
       addLog(`❌ 초안 생성 실패: ${e.message}`);
       showToast("초안 생성 실패 — 로그 확인", "error");
+      return items;
     }
+  }
+  const generateDrafts = () => { void apiDrafts(reviews); };
+
+  // ── 자동 모드: 수집 → 초안 → 좋은 리뷰 자동 등록까지 봇이 한 번에 ──
+  async function runAuto() {
+    if (!isUnlimited && used >= limit) { showToast(`오늘 리뷰답글 한도(${limit}건)를 다 썼어요. 자정에 초기화됩니다.`, "error"); return; }
+    addLog(`🤖 자동 모드 시작 — 수집 → 초안 → 좋은 리뷰 자동 등록`);
+    const items = await apiFetch();
+    if (!items.length) { addLog("자동 모드 종료: 처리할 리뷰가 없어요."); return; }
+    const drafted = await apiDrafts(items, true);
+    const approved = drafted.filter(r => r.status === "approved" && r.draft.trim());
+    const hold = drafted.filter(r => r.status === "hold").length;
+    if (hold > 0) addLog(`⚠️ 저점·악플 ${hold}건은 자동 등록하지 않고 '승인 대기'로 남겼어요(사장님 확인 필요).`);
+    if (!approved.length) { addLog("자동 등록 대상(좋은 리뷰)이 없어요. 승인 대기만 남았어요."); return; }
+    apiRegister(approved);
   }
 
   // ── 승인된 답글을 봇이 실제 등록(SSE) ──
-  function runRegister() {
-    const approved = reviews.filter(r => r.status === "approved" && r.draft.trim());
+  function runRegister() { apiRegister(reviews.filter(r => r.status === "approved" && r.draft.trim())); }
+  function apiRegister(approved: PlaceReviewItem[]) {
     if (!approved.length) { showToast("등록할(승인된) 답글이 없어요. 리뷰 옆 '승인'을 눌러주세요", "info"); return; }
     if (!accountId) { showToast("스마트플레이스에 로그인할 네이버 계정을 먼저 연결/선택하세요", "info"); return; }
     if (!isUnlimited && used >= limit) { showToast(`오늘 리뷰답글 한도(${limit}건)를 다 썼어요. 자정에 초기화됩니다.`, "error"); return; }
@@ -274,7 +297,15 @@ export default function PlaceReview({
       {/* 답글 설정 */}
       {hasStore && (
         <div style={card}>
-          <div style={{ fontSize: 13, fontWeight: 800, color: "var(--text)", marginBottom: 12 }}>⚙️ 답글 설정</div>
+          <div style={{ fontSize: 13, fontWeight: 800, color: "var(--text)", marginBottom: 10 }}>⚙️ 답글 설정</div>
+
+          {/* 자동/수동 모드 토글 (회원이 선택) */}
+          <div style={{ display: "flex", gap: 8, marginBottom: 6 }}>
+            <button onClick={() => setAutoMode(false)} style={{ flex: 1, padding: "12px", borderRadius: 12, border: `1.5px solid ${!autoMode ? ACC : "var(--border)"}`, background: !autoMode ? (isDark ? "rgba(240,160,116,.14)" : "rgba(168,89,58,.1)") : "transparent", color: !autoMode ? ACC : "var(--text2)", cursor: "pointer", fontSize: 13.5, fontWeight: 800, fontFamily: "inherit" }}>✋ 수동 (하나씩 확인)</button>
+            <button onClick={() => setAutoMode(true)} style={{ flex: 1, padding: "12px", borderRadius: 12, border: `1.5px solid ${autoMode ? ACC : "var(--border)"}`, background: autoMode ? (isDark ? "rgba(240,160,116,.14)" : "rgba(168,89,58,.1)") : "transparent", color: autoMode ? ACC : "var(--text2)", cursor: "pointer", fontSize: 13.5, fontWeight: 800, fontFamily: "inherit" }}>🤖 자동 (알아서)</button>
+          </div>
+          <div style={{ fontSize: 11.5, color: "var(--text3)", marginBottom: 14, lineHeight: 1.5 }}>{autoMode ? "봇이 리뷰를 모아 좋은 리뷰에 자동으로 답글을 달아요. 악플·저점은 자동 등록하지 않고 승인 대기로 남겨요." : "리뷰를 불러와 하나씩 확인하고, 승인한 답글만 등록해요."}</div>
+
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
             <button onClick={() => setMode("ai")} style={chip(mode === "ai")}>✨ AI 자동 답글</button>
             <button onClick={() => setMode("fixed")} style={chip(mode === "fixed")}>📝 고정 문구</button>
@@ -292,22 +323,30 @@ export default function PlaceReview({
             <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontSize: 13, color: "var(--text)" }}>
               <input type="checkbox" checked={onlyNew} onChange={e => setOnlyNew(e.target.checked)} /> 아직 답글 없는 리뷰만 (중복 방지)
             </label>
-            <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontSize: 13, color: "var(--text)" }}>
-              <input type="checkbox" checked={autoApprove} onChange={e => setAutoApprove(e.target.checked)} /> 좋은 리뷰는 <b style={{ color: ACC }}>자동 승인</b> (아래 별점 이상만)
-            </label>
-            <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: autoApprove ? "var(--text)" : "var(--text3)", paddingLeft: 24 }}>
-              <span>자동 승인 최소 별점</span>
-              <select value={minAutoRating} disabled={!autoApprove} onChange={e => setMinAutoRating(Number(e.target.value))} style={{ padding: "5px 8px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--bg2)", color: "var(--text)", fontFamily: "inherit" }}>
+            {/* 자동 승인 토글은 수동 모드에서만. 자동 모드는 항상 좋은 리뷰 자동 승인 */}
+            {!autoMode && (
+              <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontSize: 13, color: "var(--text)" }}>
+                <input type="checkbox" checked={autoApprove} onChange={e => setAutoApprove(e.target.checked)} /> 좋은 리뷰는 <b style={{ color: ACC }}>자동 승인</b> (아래 별점 이상만)
+              </label>
+            )}
+            <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: (autoMode || autoApprove) ? "var(--text)" : "var(--text3)", paddingLeft: autoMode ? 0 : 24 }}>
+              <span>{autoMode ? "🤖 자동 등록 최소 별점" : "자동 승인 최소 별점"}</span>
+              <select value={minAutoRating} disabled={!autoMode && !autoApprove} onChange={e => setMinAutoRating(Number(e.target.value))} style={{ padding: "5px 8px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--bg2)", color: "var(--text)", fontFamily: "inherit" }}>
                 {[3, 4, 5].map(n => <option key={n} value={n}>⭐{n}점 이상</option>)}
               </select>
               <span style={{ fontSize: 11, color: "var(--text3)" }}>그 미만·악플은 <b>승인 대기</b>로 빠져요</span>
             </div>
           </div>
 
-          <div style={{ display: "flex", gap: 8, marginTop: 14, flexWrap: "wrap" }}>
-            <button onClick={generateDrafts} disabled={!reviews.length} style={{ flex: 1, minWidth: 160, padding: "12px", borderRadius: 12, border: `1.5px solid ${ACC}`, background: "transparent", color: ACC, fontWeight: 800, fontSize: 14, cursor: reviews.length ? "pointer" : "default", fontFamily: "inherit", opacity: reviews.length ? 1 : .5 }}>✍️ 답글 초안 만들기</button>
-            <button onClick={runRegister} disabled={running || !approvedCount} style={{ flex: 1, minWidth: 160, padding: "12px", borderRadius: 12, border: "none", background: running || !approvedCount ? "var(--border)" : `linear-gradient(135deg,${ACC},${isDark ? "#ffbf9a" : "#c8724f"})`, color: running || !approvedCount ? "var(--text3)" : "#fff", fontWeight: 800, fontSize: 14, cursor: running || !approvedCount ? "default" : "pointer", fontFamily: "inherit" }}>{running ? "등록 중..." : `🚀 승인된 답글 등록 (${approvedCount})`}</button>
-          </div>
+          {/* 실행 버튼 — 자동/수동 분기 */}
+          {autoMode ? (
+            <button onClick={runAuto} disabled={fetching || running} style={{ width: "100%", marginTop: 14, padding: "13px", borderRadius: 12, border: "none", background: (fetching || running) ? "var(--border)" : `linear-gradient(135deg,${ACC},${isDark ? "#ffbf9a" : "#c8724f"})`, color: (fetching || running) ? "var(--text3)" : "#fff", fontWeight: 800, fontSize: 14.5, cursor: (fetching || running) ? "default" : "pointer", fontFamily: "inherit" }}>{fetching ? "리뷰 수집 중..." : running ? "답글 등록 중..." : "🤖 자동 답글 실행 (수집 → 초안 → 등록)"}</button>
+          ) : (
+            <div style={{ display: "flex", gap: 8, marginTop: 14, flexWrap: "wrap" }}>
+              <button onClick={generateDrafts} disabled={!reviews.length} style={{ flex: 1, minWidth: 160, padding: "12px", borderRadius: 12, border: `1.5px solid ${ACC}`, background: "transparent", color: ACC, fontWeight: 800, fontSize: 14, cursor: reviews.length ? "pointer" : "default", fontFamily: "inherit", opacity: reviews.length ? 1 : .5 }}>✍️ 답글 초안 만들기</button>
+              <button onClick={runRegister} disabled={running || !approvedCount} style={{ flex: 1, minWidth: 160, padding: "12px", borderRadius: 12, border: "none", background: running || !approvedCount ? "var(--border)" : `linear-gradient(135deg,${ACC},${isDark ? "#ffbf9a" : "#c8724f"})`, color: running || !approvedCount ? "var(--text3)" : "#fff", fontWeight: 800, fontSize: 14, cursor: running || !approvedCount ? "default" : "pointer", fontFamily: "inherit" }}>{running ? "등록 중..." : `🚀 승인된 답글 등록 (${approvedCount})`}</button>
+            </div>
+          )}
           {holdCount > 0 && <div style={{ fontSize: 11.5, color: "#e0952f", marginTop: 8 }}>⚠️ 승인 대기 {holdCount}건 — 저점/악플이에요. 내용 확인 후 '승인'을 눌러야 등록돼요.</div>}
         </div>
       )}
