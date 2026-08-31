@@ -186,12 +186,27 @@ async function forkBotServer(opts: {
       return false;
     }
     if (app.isQuitting) return false;
+    // ★봇 크래시 원인 캡처: stdout/stderr을 '파일 fd로 직접' 리다이렉트한다(메인 프로세스를 거치지 않으므로
+    //   v2.0.26의 '메인이 봇 출력 받아 화면 멈춤' 문제가 없다). 봇이 왜 죽는지(OOM·예외 등)가 파일에 남는다.
+    let crashFd: number | "ignore" = "ignore";
+    try {
+      const fs = require("fs") as typeof import("fs");
+      const logDir = path.join(app.getPath("userData"), "logs");
+      fs.mkdirSync(logDir, { recursive: true });
+      const crashLog = path.join(logDir, `bot-crash-${opts.name}.log`);
+      // 너무 커지면(5MB+) 새로 시작해 무한 증가 방지
+      try { if (fs.statSync(crashLog).size > 5 * 1024 * 1024) fs.truncateSync(crashLog, 0); } catch {}
+      crashFd = fs.openSync(crashLog, "a");
+      fs.writeSync(crashFd, `\n━━━━━ ${new Date().toISOString()} ${opts.name} spawn ━━━━━\n`);
+    } catch { crashFd = "ignore"; }
     const child = spawn(process.execPath, [serverJs], {
       cwd: opts.botPath,
-      stdio: "ignore",
+      stdio: ["ignore", crashFd, crashFd],
       windowsHide: true,
       env: { ...env, ELECTRON_RUN_AS_NODE: "1" },
     });
+    // 부모는 상속시킨 fd를 닫아 누수 방지(자식이 계속 소유). 실패해도 무해.
+    if (typeof crashFd === "number") { const _fd = crashFd; setTimeout(() => { try { (require("fs") as typeof import("fs")).closeSync(_fd); } catch {} }, 2000); }
     if (myGeneration !== generation || app.isQuitting) {
       expectedExits.add(child);
       await terminateTrackedChild(child);
@@ -212,13 +227,18 @@ async function forkBotServer(opts: {
   };
 
   let entry: BotEntry;
+  let restartStartedAt = 0;
   const restart = (reason: "initial" | "scheduled" | "watchdog" | "manual"): Promise<boolean> => {
-    if (restartInFlight) return restartInFlight;
+    // ★재시작이 갇히지 않게: 진행 중이라도 45초 넘게 안 끝났으면(hung) 강제로 새 재시작을 허용한다.
+    if (restartInFlight && Date.now() - restartStartedAt < 45000) return restartInFlight;
+    if (restartInFlight) { console.warn(`[${opts.name}] 이전 재시작이 45초+ 지속(hung) → 강제 재시도`); restartInFlight = null; }
     cancelScheduledRestart();
     if (graceTimer) clearTimeout(graceTimer);
     const waitMs = reason === "manual" ? Math.max(0, 2000 - (Date.now() - lastRestartAt)) : 0;
     setState("restarting", entry);
-    restartInFlight = (async () => {
+    restartStartedAt = Date.now();
+    // 재시작 본체에 전체 타임아웃(40초). 어떤 await가 멈춰도 재시작이 영구 정지하지 않게 한다.
+    const core = (async () => {
       if (waitMs) await new Promise(resolve => setTimeout(resolve, waitMs));
       const oldChild = opts.getProc();
       generation++;
@@ -228,8 +248,17 @@ async function forkBotServer(opts: {
       if (reason !== "scheduled") restartAttempts = 0;
       lastRestartAt = Date.now();
       return await start(generation);
-    })().finally(() => {
-      restartInFlight = null;
+    })();
+    const guarded = Promise.race([
+      core,
+      new Promise<boolean>(resolve => setTimeout(() => resolve(false), 40000)),
+    ]);
+    restartInFlight = guarded;
+    guarded.then(ok => {
+      // ★재시작이 실패/타임아웃이면 재시도 체인을 유지한다(과거엔 실패 시 재시도가 끊겨 영구 오프라인).
+      if (!ok && !app.isQuitting) { console.warn(`[${opts.name}] 재시작 실패/타임아웃 → 재예약`); scheduleRestart(); }
+    }).catch(() => { if (!app.isQuitting) scheduleRestart(); }).finally(() => {
+      if (restartInFlight === guarded) restartInFlight = null;
       if (app.isQuitting) return;
       setState("grace", entry);
       const graceGeneration = generation;
@@ -238,7 +267,7 @@ async function forkBotServer(opts: {
         graceTimer = null;
       }, 15000);
     });
-    return restartInFlight;
+    return guarded;
   };
 
   entry = {
@@ -270,25 +299,31 @@ async function waitForBotHealth(port: number, timeoutMs = 8000): Promise<boolean
   return false;
 }
 
+// 봇별 '언제부터 offline인지' 추적 → 상태(restarting/grace 등)와 무관하게 너무 오래 죽어있으면 강제 재시작.
+const botOfflineSince: Record<string, number> = {};
 function startBotWatchdog() {
   const scan = async () => {
     try {
       if (app.isQuitting) return;
       for (const bot of botRegistry) {
-        if (bot.state !== "idle") continue;
-        if (await pingBot(bot.port)) continue;
-        await new Promise((r) => setTimeout(r, 1500));
-        if (await pingBot(bot.port)) continue;
-        console.warn(`[watchdog] ${bot.name}(:${bot.port}) 인증 health 실패 → 자동 재시작`);
-        try { await bot.restart(); } catch (e: any) { console.error(`[watchdog] ${bot.name} 재시작 실패:`, e?.message); }
+        const online = await pingBot(bot.port) || (await new Promise(r => setTimeout(r, 1500)), await pingBot(bot.port));
+        if (online) { botOfflineSince[bot.name] = 0; continue; }
+        // 여기 도달 = 지금 offline. 처음이면 시각 기록.
+        if (!botOfflineSince[bot.name]) botOfflineSince[bot.name] = Date.now();
+        const downMs = Date.now() - botOfflineSince[bot.name];
+        // idle이면 바로 재시작. restarting/grace라도 '90초+ 계속 죽어있으면' 갇힌 것으로 보고 강제 재시작.
+        if (bot.state === "idle" || downMs > 90000) {
+          console.warn(`[watchdog] ${bot.name}(:${bot.port}) offline ${Math.round(downMs/1000)}s (state=${bot.state}) → 재시작`);
+          try { await bot.restart(); } catch (e: any) { console.error(`[watchdog] ${bot.name} 재시작 실패:`, e?.message); }
+        }
       }
     } catch (e: any) {
       console.error("[watchdog] 검사 실패:", e?.message);
     } finally {
-      if (!app.isQuitting) setTimeout(() => { void scan(); }, 30000);
+      if (!app.isQuitting) setTimeout(() => { void scan(); }, 15000);   // 30초→15초: 더 빨리 복구
     }
   };
-  setTimeout(() => { void scan(); }, 30000);
+  setTimeout(() => { void scan(); }, 15000);
 }
 
 const resourceDir = (rel: string) =>
