@@ -1124,7 +1124,7 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
       }
       if(otStopRef.current) break;
       const hasNext=i<kws.length-1;
-      if(hasNext){ const until=Date.now()+termMin*60000; setOtNextAt(until); const hhmm=(d:number)=>new Date(d).toLocaleTimeString("ko-KR",{hour:"2-digit",minute:"2-digit"}); otLive(`  ⏱️ ${termMin}분 대기 (지금 ${hhmm(Date.now())} → ${hhmm(until)}에 다음 글 시작)`); while(Date.now()<until){ if(otStopRef.current)break; await new Promise(r=>setTimeout(r,1000)); } setOtNextAt(null); if(otStopRef.current)break; otLive(`  ▶ ${hhmm(Date.now())} 대기 끝 — 다음 글 시작`); }
+      if(hasNext){ const jitter=0.85+Math.random()*0.3; const actualMin=Math.max(1,Math.round(termMin*jitter)); const until=Date.now()+actualMin*60000; setOtNextAt(until); const hhmm=(d:number)=>new Date(d).toLocaleTimeString("ko-KR",{hour:"2-digit",minute:"2-digit"}); otLive(`  ⏱️ 약 ${actualMin}분 대기 (설정 ${termMin}분 ±안전 랜덤 · ${hhmm(Date.now())} → ${hhmm(until)}에 다음 글)`); while(Date.now()<until){ if(otStopRef.current)break; await new Promise(r=>setTimeout(r,1000)); } setOtNextAt(null); if(otStopRef.current)break; otLive(`  ▶ ${hhmm(Date.now())} 대기 끝 — 다음 글 시작`); }
     }
     if(otStopRef.current){
       const remain=kws.slice(nextResumeIdx);
@@ -4705,6 +4705,7 @@ POST3: (제목)|(이유)
                     </div>
                   </div>
                   {termMin<10&&<div style={{fontSize:12,color:"#f59e0b",fontWeight:700,marginBottom:8}}>⚠️ 너무 짧으면 네이버가 스팸으로 볼 수 있어요.</div>}
+                  <div style={{fontSize:11.5,color:"var(--text3)",marginBottom:8,lineHeight:1.5}}>🛡️ 계정 보호를 위해 실제 발행 간격은 설정값에서 <b>조금씩 랜덤(±15%)</b>으로 흔들려요.</div>
                   <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
                     <span style={{fontSize:13,fontWeight:700}}>🖼️ 글당 이미지</span>
                     {[1,2,3,4,5].map(n=>(

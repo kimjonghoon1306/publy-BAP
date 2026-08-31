@@ -3153,9 +3153,11 @@ POST3: (제목)|(이유)
       if(otStopRef.current) break;
       const hasNext=i<kws.length-1;
       if(hasNext){
-        const until=Date.now()+termMin*60000; setOtNextAt(until);
+        // ★계정 안전: 텀을 ±15% 랜덤으로 흔든다(칼같이 N분마다 = 봇 티 → 저품질 위험). 사람처럼 들쭉날쭉하게.
+        const jitter=0.85+Math.random()*0.3; const actualMin=Math.max(1,Math.round(termMin*jitter));
+        const until=Date.now()+actualMin*60000; setOtNextAt(until);
         const hhmm=(d:number)=>new Date(d).toLocaleTimeString("ko-KR",{hour:"2-digit",minute:"2-digit"});
-        otLive(`  ⏱️ ${termMin}분 대기 (지금 ${hhmm(Date.now())} → ${hhmm(until)}에 다음 글 시작)`);
+        otLive(`  ⏱️ 약 ${actualMin}분 대기 (설정 ${termMin}분 ±안전 랜덤 · ${hhmm(Date.now())} → ${hhmm(until)}에 다음 글)`);
         while(Date.now()<until){ if(otStopRef.current)break; await new Promise(r=>setTimeout(r,1000)); }
         setOtNextAt(null);
         if(otStopRef.current) break;
@@ -6790,6 +6792,7 @@ POST3: (제목)|(이유)
                     </div>
                   </div>
                   {termMin<10&&<div style={{fontSize:12,color:"#f59e0b",fontWeight:700,marginBottom:8}}>⚠️ 너무 짧으면 네이버가 스팸으로 볼 수 있어요. 넉넉한 간격을 권장해요.</div>}
+                  <div style={{fontSize:11.5,color:"var(--text3)",marginBottom:8,lineHeight:1.5}}>🛡️ 계정 보호를 위해 실제 발행 간격은 설정값에서 <b>조금씩 랜덤(±15%)</b>으로 흔들려요. 칼같이 같은 간격으로 올리면 봇으로 보여 불이익을 받을 수 있거든요.</div>
                   <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
                     <span style={{fontSize:13,fontWeight:700}}>🖼️ 글당 이미지</span>
                     {[1,2,3,4,5].map(n=>(
