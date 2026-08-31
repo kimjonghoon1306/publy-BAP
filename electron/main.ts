@@ -303,16 +303,17 @@ async function waitForBotHealth(port: number, timeoutMs = 8000): Promise<boolean
 const botOfflineSince: Record<string, number> = {};
 function startBotWatchdog() {
   const scan = async () => {
+    let anyOffline = false;
     try {
       if (app.isQuitting) return;
       for (const bot of botRegistry) {
-        const online = await pingBot(bot.port) || (await new Promise(r => setTimeout(r, 1500)), await pingBot(bot.port));
+        const online = await pingBot(bot.port) || (await new Promise(r => setTimeout(r, 1000)), await pingBot(bot.port));
         if (online) { botOfflineSince[bot.name] = 0; continue; }
-        // 여기 도달 = 지금 offline. 처음이면 시각 기록.
+        anyOffline = true;
         if (!botOfflineSince[bot.name]) botOfflineSince[bot.name] = Date.now();
         const downMs = Date.now() - botOfflineSince[bot.name];
-        // idle이면 바로 재시작. restarting/grace라도 '90초+ 계속 죽어있으면' 갇힌 것으로 보고 강제 재시작.
-        if (bot.state === "idle" || downMs > 90000) {
+        // idle이면 바로 재시작. restarting/grace라도 '45초+ 계속 죽어있으면' 갇힌 것으로 보고 강제 재시작.
+        if (bot.state === "idle" || downMs > 45000) {
           console.warn(`[watchdog] ${bot.name}(:${bot.port}) offline ${Math.round(downMs/1000)}s (state=${bot.state}) → 재시작`);
           try { await bot.restart(); } catch (e: any) { console.error(`[watchdog] ${bot.name} 재시작 실패:`, e?.message); }
         }
@@ -320,10 +321,11 @@ function startBotWatchdog() {
     } catch (e: any) {
       console.error("[watchdog] 검사 실패:", e?.message);
     } finally {
-      if (!app.isQuitting) setTimeout(() => { void scan(); }, 15000);   // 30초→15초: 더 빨리 복구
+      // 평소 10초 주기. 하나라도 죽어있으면 4초로 더 자주 재검(빠른 복구).
+      if (!app.isQuitting) setTimeout(() => { void scan(); }, anyOffline ? 4000 : 10000);
     }
   };
-  setTimeout(() => { void scan(); }, 15000);
+  setTimeout(() => { void scan(); }, 8000);   // 앱 켠 뒤 8초부터 감시 시작
 }
 
 const resourceDir = (rel: string) =>
