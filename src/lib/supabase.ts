@@ -1830,10 +1830,22 @@ export function computeCareStatus(c: PostCare): { status: CareStatus; daysLeft?:
   const exposed = c.cured_at || (last && last.rank != null && last.rank <= CURE_RANK);
   if (exposed) return { status: "cured" };
   // 🕐 색인 유예 — 발행한 지 얼마 안 된 글은 미노출이어도 '치료필요'로 몰지 않음(네이버가 아직 읽는 중).
-  //    제목을 아직 안 바꾼 글에만 적용(막 쓴 글이므로). published_at 없는 옛 글은 스킵 → 기존 판정 유지.
-  if (!c.title_changed_at && c.published_at) {
-    const age = Math.floor((Date.now() - new Date(c.published_at).getTime()) / 86400000);
-    if (Number.isFinite(age) && age >= 0 && age < INDEX_GRACE_DAYS) return { status: "indexing", daysLeft: INDEX_GRACE_DAYS - age };
+  //    제목을 아직 안 바꾼 글에만 적용(막 쓴 글이므로).
+  if (!c.title_changed_at) {
+    if (c.published_at) {
+      const age = Math.floor((Date.now() - new Date(c.published_at).getTime()) / 86400000);
+      if (Number.isFinite(age) && age >= 0 && age < INDEX_GRACE_DAYS) return { status: "indexing", daysLeft: INDEX_GRACE_DAYS - age };
+    } else {
+      // ★발행일을 모르면(진료차트에 발행일 미저장) 최근에 쓴 글일 수 있으므로 '치료필요'로 몰지 않는다.
+      //   진료차트에 처음 잡힌 시각(검사 시작일)을 대용으로 → 그로부터 14일은 색인 대기로 보류(테리: 하루도 안 된 글이 치료필요로 뜸).
+      const firstSeen = c.rank_history?.[0]?.date;
+      if (firstSeen) {
+        const age = Math.floor((Date.now() - new Date(firstSeen).getTime()) / 86400000);
+        if (Number.isFinite(age) && age >= 0 && age < INDEX_GRACE_DAYS) return { status: "indexing", daysLeft: INDEX_GRACE_DAYS - age };
+      } else {
+        return { status: "indexing", daysLeft: INDEX_GRACE_DAYS };   // 아무 날짜도 없으면 일단 색인 대기(치료필요 금지)
+      }
+    }
   }
   if (c.title_changed_at) {
     const days = Math.floor((Date.now() - new Date(c.title_changed_at).getTime()) / 86400000);

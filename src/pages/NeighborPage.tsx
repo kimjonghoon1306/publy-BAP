@@ -811,7 +811,9 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
       const rank = chk?.rank ?? null;
       setLiveRanks(p => ({ ...p, [postKey]: { rank, at: Date.now() } }));
       // 카르테에 이 순위도 저장(회복 그래프·완치 감지에 반영)
-      if (userId && chk) { try { const { newlyCured } = await savePostCareChecks(userId, acc.accountId, [{ logNo: postKey, title: chk.title || careMap[postKey]?.title || "", rank, exposed: chk.exposed ?? null }]); if (newlyCured.length) setCelebrate(newlyCured); await loadCare(); } catch {} }
+      // ★발행일(date)도 같이 저장 → 색인 유예 판정에 필요(안 넣으면 published_at null → 하루된 글도 치료필요로 뜸)
+      const careDate = scPosts.find(p => scLogNo(p.url) === postKey)?.date || careMap[postKey]?.published_at || undefined;
+      if (userId && chk) { try { const { newlyCured } = await savePostCareChecks(userId, acc.accountId, [{ logNo: postKey, title: chk.title || careMap[postKey]?.title || "", rank, exposed: chk.exposed ?? null, date: careDate }]); if (newlyCured.length) setCelebrate(newlyCured); await loadCare(); } catch {} }
     } catch (e: any) {
       setLiveRanks(p => ({ ...p, [postKey]: { rank: null, at: Date.now() } }));
       addScLog(`🔴 순위 검사 실패 (글 ${postKey}): ${e?.message || e}`);
