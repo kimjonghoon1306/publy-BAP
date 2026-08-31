@@ -939,22 +939,29 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
   },[otRunning, publishing, otSchedOn]);
   // ⏰ 예약 감시: 30초마다 예약 시각 확인 → 원터치 자동 시작(중복 방지).
   useEffect(()=>{ otRunRef.current=()=>runOneTouch(); });
+  // ⏰ 예약 감시 — '다음 목표 시각'을 계산해 그 시각이 실제로 지나야만 실행. 켜자마자 절대 안 돎.
+  const otSchedTargetRef=useRef<number>(0);
   useEffect(()=>{
-    if(!otSchedOn) return;
-    const nowArm=new Date();
-    const armStamp=`${nowArm.getFullYear()}${nowArm.getMonth()}${nowArm.getDate()}${String(nowArm.getHours()).padStart(2,"0")}${String(nowArm.getMinutes()).padStart(2,"0")}`;
-    otSchedFiredRef.current=armStamp;   // 켠 순간의 분은 이미 발동 처리 → 켜자마자 실행 차단
+    if(!otSchedOn){ otSchedTargetRef.current=0; return; }
+    const computeTarget=()=>{
+      const [th,tm]=otSchedTime.split(":").map(n=>parseInt(n,10));
+      if(!Number.isFinite(th)||!Number.isFinite(tm)) return 0;
+      const now=new Date();
+      const t=new Date(now.getFullYear(),now.getMonth(),now.getDate(),th,tm,0,0);
+      if(t.getTime()<=now.getTime()) t.setDate(t.getDate()+1);
+      return t.getTime();
+    };
+    otSchedTargetRef.current=computeTarget();
     const check=()=>{
       if(otRunning) return;
-      const now=new Date(); const hh=String(now.getHours()).padStart(2,"0"); const mm=String(now.getMinutes()).padStart(2,"0");
-      if(`${hh}:${mm}`!==otSchedTime) return;
-      const stamp=`${now.getFullYear()}${now.getMonth()}${now.getDate()}${hh}${mm}`;
-      if(otSchedFiredRef.current===stamp) return;
-      otSchedFiredRef.current=stamp;
+      const tgt=otSchedTargetRef.current;
+      if(!tgt || Date.now()<tgt) return;
+      if(otSchedDaily){ const n=new Date(tgt); n.setDate(n.getDate()+1); otSchedTargetRef.current=n.getTime(); }
+      else { otSchedTargetRef.current=0; setOtSchedOn(false); }
+      otSchedFiredRef.current="fired";
       otRunRef.current?.();
-      if(!otSchedDaily) setOtSchedOn(false);
     };
-    const iv=setInterval(check,20000);   // 켤 때 즉시 실행 안 함
+    const iv=setInterval(check,20000);
     return ()=>clearInterval(iv);
     // eslint-disable-next-line
   },[otSchedOn,otSchedTime,otSchedDaily]);
@@ -1087,11 +1094,17 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
     const termMin=otCustomTerm.trim()?Math.max(1,parseInt(otCustomTerm,10)||otTermMin):otTermMin;
     otStopRef.current=false;setOtRunning(true);setOtNextAt(null);setOtPaused(null);otFlowExhaustedRef.current.clear();
     const otLive=(t:string)=>setOtLiveLog(prev=>[...prev,`[${new Date().toLocaleTimeString("ko-KR")}] ${t}`].slice(-300));
-    setOtLiveLog(prev=>[...prev,`━━━━━ ${new Date().toLocaleString("ko-KR")} 원터치 ${resume?`이어가기(${resume.idx+1}번째부터)`:"시작"} ━━━━━`].slice(-300));
+    const bySched=otSchedFiredRef.current==="fired"; otSchedFiredRef.current="";
+    setOtLiveLog(prev=>[...prev,`━━━━━ ${new Date().toLocaleString("ko-KR")} 원터치 ${resume?`이어가기(${resume.idx+1}번째부터)`:bySched?"예약 자동 시작":"시작"} ━━━━━`].slice(-300));
     if(!resume){
-      const cntTxt=otAiKw?`AI 자동 ${otAiKwCount}개`:`${otKeywords.split(/[\n,]+/).map(s=>s.trim()).filter(Boolean).length}개`;
-      const bySched=otSchedFiredRef.current===`${new Date().getFullYear()}${new Date().getMonth()}${new Date().getDate()}${String(new Date().getHours()).padStart(2,"0")}${String(new Date().getMinutes()).padStart(2,"0")}`;
-      otLive(`📋 발행 계획: ${bySched?`⏰ 예약(${otSchedTime})으로 지금 시작 · `:""}지금부터 ${cntTxt}를 약 ${termMin}분 간격(±안전 랜덤)으로 순서대로 발행해요`);
+      const cntTxt=otAiKw?`AI 자동추천 ${otAiKwCount}개`:`직접 입력 ${otKeywords.split(/[\n,]+/).map(s=>s.trim()).filter(Boolean).length}개`;
+      const styleTxt=otWriteStyle==="자동"?"글패턴 자동":`글패턴 ${otWriteStyle}`;
+      const imgTxt=otImgMode==="flow"?`무료 Flow 이미지 ${otImgCount}장`:`AI 이미지 ${otImgCount}장`;
+      if(bySched){
+        otLive(`⏰ 예약 발행 자동 시작 — 예약 시각 ${otSchedTime}${otSchedDaily?" (매일 반복)":" (오늘 1회)"}`);
+        if(otSchedDaily) otLive(`   다음 예약: 내일 ${otSchedTime}`);
+      }
+      otLive(`📋 발행 계획: ${bySched?"예약으로 ":""}지금부터 ${cntTxt} · ${styleTxt} · ${imgTxt} · 발행 텀 약 ${termMin}분 간격(±15% 안전 랜덤)으로 순서대로 발행해요`);
     }
     let kws:string[]; let startIdx=0;
     if(activeRevive){
@@ -4779,7 +4792,7 @@ POST3: (제목)|(이유)
                     </div>
                     <div style={{display:"flex",alignItems:"center",gap:8}}>
                       <span style={{fontSize:12.5,fontWeight:800,color:otSchedOn?"#7c3aed":"var(--text3)"}}>{otSchedOn?"켜짐":"꺼짐"}</span>
-                      <button onClick={()=>{const v=!otSchedOn; if(v&&!(otAiKw||kwList.length>0)){showToast("먼저 키워드를 넣거나 AI 자동추천을 켜주세요","error");return;} if(v&&!pubAccId){showToast("발행할 네이버 계정을 먼저 선택해주세요","error");return;} setOtSchedOn(v); otSchedFiredRef.current="";}}
+                      <button onClick={()=>{const v=!otSchedOn; if(v&&!(otAiKw||kwList.length>0)){showToast("먼저 키워드를 넣거나 AI 자동추천을 켜주세요","error");return;} if(v&&!pubAccId){showToast("발행할 네이버 계정을 먼저 선택해주세요","error");return;} setOtSchedOn(v); /* armStamp 무효화 방지 */}}
                         title={otSchedOn?"예약 끄기":"예약 켜기"} style={{flexShrink:0,width:52,height:28,borderRadius:16,border:"none",cursor:"pointer",background:otSchedOn?"#7c3aed":"var(--border)",position:"relative",transition:"all .2s"}}>
                         <span style={{position:"absolute",top:3,left:otSchedOn?27:3,width:22,height:22,borderRadius:"50%",background:"#fff",transition:"all .2s",boxShadow:"0 1px 3px rgba(0,0,0,.3)"}}/>
                       </button>

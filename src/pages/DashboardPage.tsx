@@ -1439,28 +1439,34 @@ Output (JSON object only): {"keyword":"핵심키워드","title":"새 SEO 제목"
   },[publishing, genImgLoading, neighborBusy, otRunning, otSchedOn]);
   // ⏰ 예약 감시: 30초마다 현재 시각을 확인해 예약 시각이면 원터치 자동 시작(중복 방지). 매일 반복이면 계속.
   useEffect(()=>{ otRunRef.current=()=>runOneTouch(); });
+  // ⏰ 예약 감시 — '다음 목표 시각(timestamp)'을 계산해 그 시각이 실제로 지나야만 실행. 켜자마자 절대 안 돎.
+  const otSchedTargetRef=useRef<number>(0);   // 다음 예약 발동 목표 시각(ms). 0=미설정
   useEffect(()=>{
-    if(!otSchedOn) return;
-    // ★안전장치: 토글을 켠 '그 시각(분)'은 절대 실행하지 않는다(켜자마자 발행되는 버그 차단).
-    //   예약을 켠 순간의 분을 armStamp에 도장 → 그 분에는 발동 안 함. 다음에 시각이 정확히 도달할 때만 실행.
-    const nowArm=new Date();
-    const armStamp=`${nowArm.getFullYear()}${nowArm.getMonth()}${nowArm.getDate()}${String(nowArm.getHours()).padStart(2,"0")}${String(nowArm.getMinutes()).padStart(2,"0")}`;
-    otSchedFiredRef.current=armStamp;   // 켠 순간의 분을 이미 '발동함'으로 처리 → 이 분엔 안 돎
-    const check=()=>{
-      if(otRunning) return;                               // 이미 발행 중이면 스킵
-      const now=new Date(); const hh=String(now.getHours()).padStart(2,"0"); const mm=String(now.getMinutes()).padStart(2,"0");
-      const cur=`${hh}:${mm}`;
-      if(cur!==otSchedTime) return;                       // ★현재 '시:분'이 예약 시각과 정확히 같을 때만
-      const stamp=`${now.getFullYear()}${now.getMonth()}${now.getDate()}${hh}${mm}`;
-      if(otSchedFiredRef.current===stamp) return;         // 같은 분 중복(또는 켠 직후 그 분) 실행 방지
-      otSchedFiredRef.current=stamp;
-      otRunRef.current?.();                               // 원터치 시작
-      if(!otSchedDaily) setOtSchedOn(false);              // 1회 예약이면 실행 후 해제
+    if(!otSchedOn){ otSchedTargetRef.current=0; return; }
+    // 켠 순간 기준으로 '다음' 예약 시각을 계산(오늘 그 시각이 이미 지났으면 내일). 항상 미래 시각만 목표로.
+    const computeTarget=()=>{
+      const [th,tm]=otSchedTime.split(":").map(n=>parseInt(n,10));
+      if(!Number.isFinite(th)||!Number.isFinite(tm)) return 0;
+      const now=new Date();
+      const t=new Date(now.getFullYear(),now.getMonth(),now.getDate(),th,tm,0,0);
+      if(t.getTime()<=now.getTime()) t.setDate(t.getDate()+1);   // 이미 지난 시각이면 다음 날
+      return t.getTime();
     };
-    const iv=setInterval(check,20000);                    // ★켤 때 즉시 check() 호출 안 함(setInterval만) → 켜자마자 실행 차단
+    otSchedTargetRef.current=computeTarget();   // 켤 때 무조건 '미래' 시각 → 켜자마자 실행 불가
+    const check=()=>{
+      if(otRunning) return;
+      const tgt=otSchedTargetRef.current;
+      if(!tgt || Date.now()<tgt) return;         // ★목표 시각 도래 전이면 절대 실행 안 함
+      // 도래: 실행하고, 매일 반복이면 다음 목표(내일)로 재설정, 1회면 예약 종료
+      if(otSchedDaily){ const n=new Date(tgt); n.setDate(n.getDate()+1); otSchedTargetRef.current=n.getTime(); }
+      else { otSchedTargetRef.current=0; setOtSchedOn(false); }
+      otSchedFiredRef.current="fired";   // ★이번 실행이 '예약'발임을 표시 → 로그에 예약 정보 상세 출력
+      otRunRef.current?.();
+    };
+    const iv=setInterval(check,20000);   // 20초마다 목표 시각 도래 확인(켤 때 즉시 호출 안 함)
     return ()=>clearInterval(iv);
     // eslint-disable-next-line
-  },[otSchedOn,otSchedTime,otSchedDaily]);   // ★otRunning 제거: 발행 끝날 때마다 재평가되며 check가 재발동하던 문제 차단
+  },[otSchedOn,otSchedTime,otSchedDaily]);
 
   const liveLogActive = (tab==="publish"&&publishing)||(tab==="image"&&genImgLoading);
   useEffect(()=>{
@@ -3139,13 +3145,19 @@ POST3: (제목)|(이유)
     otStopRef.current=false;setOtRunning(true);setOtNextAt(null);setOtPaused(null);otFlowExhaustedRef.current.clear();
     // 📡 모든 단계를 라이브 로그로 → 회원 본인도, 관리자도 실시간 확인. (관리자 '라이브 로그' 탭에서 회원별로 보임)
     const liveLines:string[]=[];
-    setOtLiveLog(prev=>[...prev,`━━━━━ ${new Date().toLocaleString("ko-KR")} 원터치 ${resume?`이어가기(${resume.idx+1}번째부터)`:"시작"} ━━━━━`].slice(-300));
+    const bySched=otSchedFiredRef.current==="fired"; otSchedFiredRef.current="";   // 예약발 여부 확인 후 플래그 소비
+    setOtLiveLog(prev=>[...prev,`━━━━━ ${new Date().toLocaleString("ko-KR")} 원터치 ${resume?`이어가기(${resume.idx+1}번째부터)`:bySched?"예약 자동 시작":"시작"} ━━━━━`].slice(-300));
     const otLive=(t:string,running=true)=>{const line=`[${new Date().toLocaleTimeString("ko-KR")}] ${t}`; liveLines.push(line); setOtLiveLog(prev=>[...prev,line].slice(-300)); try{pushLiveLog(user.id,{name:user.name,email:user.email,context:"⚡ 원터치 발행",text:liveLines.slice(-80).join("\n"),running});}catch{}};
-    // ── 발행 계획 요약 한 줄(테리 요청: 몇 시부터·몇 개·몇 분 간격) ──
+    // ── 발행 계획 요약(테리 요청: 예약이면 몇 시 예약·매일반복 여부 / 몇 개 / 몇 분 간격 전부 디테일하게) ──
     if(!resume){
-      const cntTxt=otAiKw?`AI 자동 ${otAiKwCount}개`:`${otKeywords.split(/[\n,]+/).map(s=>s.trim()).filter(Boolean).length}개`;
-      const bySched=otSchedFiredRef.current===`${new Date().getFullYear()}${new Date().getMonth()}${new Date().getDate()}${String(new Date().getHours()).padStart(2,"0")}${String(new Date().getMinutes()).padStart(2,"0")}`;
-      otLive(`📋 발행 계획: ${bySched?`⏰ 예약(${otSchedTime})으로 지금 시작 · `:""}지금부터 ${cntTxt}를 약 ${termMin}분 간격(±안전 랜덤)으로 순서대로 발행해요`);
+      const cntTxt=otAiKw?`AI 자동추천 ${otAiKwCount}개`:`직접 입력 ${otKeywords.split(/[\n,]+/).map(s=>s.trim()).filter(Boolean).length}개`;
+      const styleTxt=otWriteStyle==="자동"?"글패턴 자동":`글패턴 ${otWriteStyle}`;
+      const imgTxt=otImgMode==="flow"?`무료 Flow 이미지 ${otImgCount}장`:`AI 이미지 ${otImgCount}장`;
+      if(bySched){
+        otLive(`⏰ 예약 발행 자동 시작 — 예약 시각 ${otSchedTime}${otSchedDaily?" (매일 반복)":" (오늘 1회)"}`);
+        if(otSchedDaily) otLive(`   다음 예약: 내일 ${otSchedTime}`);
+      }
+      otLive(`📋 발행 계획: ${bySched?"예약으로 ":""}지금부터 ${cntTxt} · ${styleTxt} · ${imgTxt} · 발행 텀 약 ${termMin}분 간격(±15% 안전 랜덤)으로 순서대로 발행해요`);
     }
     // ── 키워드 결정: 이어가기면 기존 목록, AI면 생성, 아니면 입력칸 ──
     let kws:string[]; let startIdx=0;
@@ -6990,7 +7002,7 @@ POST3: (제목)|(이유)
                     {/* 이 토글이 예약의 ON/OFF 스위치 — 켜야 아래 설정한 시각에 자동 시작 */}
                     <div style={{display:"flex",alignItems:"center",gap:8}}>
                       <span style={{fontSize:12.5,fontWeight:800,color:otSchedOn?"#7c3aed":"var(--text3)"}}>{otSchedOn?"켜짐":"꺼짐"}</span>
-                      <button onClick={()=>{const v=!otSchedOn; if(v&&!(otAiKw||kwList.length>0)){showToast("먼저 키워드를 넣거나 AI 자동추천을 켜주세요","error");return;} if(v&&!pubAccId){showToast("발행할 네이버 계정을 먼저 선택해주세요","error");return;} setOtSchedOn(v); otSchedFiredRef.current="";}}
+                      <button onClick={()=>{const v=!otSchedOn; if(v&&!(otAiKw||kwList.length>0)){showToast("먼저 키워드를 넣거나 AI 자동추천을 켜주세요","error");return;} if(v&&!pubAccId){showToast("발행할 네이버 계정을 먼저 선택해주세요","error");return;} setOtSchedOn(v); /* ★otSchedFiredRef 비우지 않음 — 감시 effect의 armStamp(켠 분 실행금지)를 지우면 켜자마자 실행되는 버그 */}}
                         title={otSchedOn?"예약 끄기":"예약 켜기"} style={{flexShrink:0,width:52,height:28,borderRadius:16,border:"none",cursor:"pointer",background:otSchedOn?"#7c3aed":"var(--border)",position:"relative",transition:"all .2s"}}>
                         <span style={{position:"absolute",top:3,left:otSchedOn?27:3,width:22,height:22,borderRadius:"50%",background:"#fff",transition:"all .2s",boxShadow:"0 1px 3px rgba(0,0,0,.3)"}}/>
                       </button>
