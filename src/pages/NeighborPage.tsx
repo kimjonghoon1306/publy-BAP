@@ -3913,12 +3913,12 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
             <div className="card" style={{ padding: "14px 18px" }}>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 9 }}>
                 <span style={{ fontSize: 12.5, fontWeight: 700, color: "var(--text2)" }}>💞 오늘 품앗이 <span style={{ fontSize: 10.5, color: "var(--text3)", fontWeight: 600 }}>(자정 초기화)</span></span>
-                <span style={{ fontSize: 13, fontWeight: 800, color: "#ec4899" }}>오늘 {pumUsed}건 완료</span>
+                <span style={{ fontSize: 13, fontWeight: 800, color: pumUsed>=100?"#f59e0b":"#ec4899" }}>오늘 {pumUsed}건 · 권장 100</span>
               </div>
               <div style={{ height: 8, borderRadius: 99, background: "var(--card2)", overflow: "hidden" }}>
-                <div style={{ height: "100%", borderRadius: 99, width: `${Math.min(100, pumUsed)}%`, background: "#ec4899", transition: "width .5s ease" }} />
+                <div style={{ height: "100%", borderRadius: 99, width: `${Math.min(100, pumUsed)}%`, background: pumUsed>=100?"#f59e0b":"#ec4899", transition: "width .5s ease" }} />
               </div>
-              <div style={{ fontSize: 11, color: "var(--text3)", marginTop: 7, fontWeight: 500 }}>오늘 품앗이로 남긴 공감·댓글 수예요. 품앗이는 <b>하루 몇 건까지</b> 같은 제한이 없어요 — 딜레이를 두고 천천히 진행돼요.</div>
+              <div style={{ fontSize: 11, color: pumUsed>=100?"#f59e0b":"var(--text3)", marginTop: 7, fontWeight: 500 }}>{pumUsed>=100?"⚠️ 네이버 안전 권장(100건)을 넘었어요 — 계정 보호 위해 잠시 쉬어가는 걸 권해요.":<>오늘 품앗이로 남긴 공감·댓글 수예요. 하루 <b>100건 이내</b>를 권장해요(강제는 아니에요).</>}</div>
             </div>
             <div className="card" style={{ padding: "20px 24px" }}>
               <div style={{ fontSize: 13, color: "var(--text3)", fontWeight: 700, marginBottom: 14 }}>🤝 품앗이 결과</div>

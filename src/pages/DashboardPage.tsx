@@ -33,6 +33,10 @@ const MAX_KW = 90;
 // ★실검증(2026-08-24): 2.0-flash·2.0-flash-lite·1.5-flash는 구글이 폐기(404). 살아있는 모델만 사용(각 한도 별도라 분산).
 const GEMINI_MODELS = ["gemini-2.5-flash","gemini-2.5-flash-lite","gemini-flash-latest","gemini-flash-lite-latest"];
 const PLAN_LABELS: Record<string,string> = {free:"FREE",basic:"BASIC",pro:"PRO",unlimited:"무제한",admin:"ADMIN"};
+// ★네이버 하루 안전 권장치(계정 제재 방지). 무제한/관리자도 사용량을 이 기준으로 보여줌 — 락이 아니라 참고 경고용.
+const NAVER_SAFE_NEIGHBOR = 100;   // 서이추
+const NAVER_SAFE_ENGAGE = 100;     // 공감·댓글
+const NAVER_SAFE_PUMASI = 50;      // 품앗이
 // 만료일까지 남은 일수 — 자정 기준으로 계산해 시각과 무관하게 항상 동일한 값(상단/하단 D-day 일치)
 function daysUntil(dateStr?: string): number | null {
   if (!dateStr) return null;
@@ -4559,27 +4563,33 @@ POST3: (제목)|(이유)
               const expiry = quota ? new Date(quota.reset_date) : null;
               const daysLeft = quota ? daysUntil(quota.reset_date) : null;
               const dColor = daysLeft === null ? "var(--text3)" : daysLeft <= 3 ? "var(--danger)" : daysLeft <= 7 ? "#ff9f3f" : "var(--success)";
+              // ★무제한이라도 서이추·공감·품앗이는 '네이버 안전 권장치'로 사용량을 보여준다(락 아님, 참고용). 넘으면 경고색.
               const items = [
-                { label:"✍️ 글쓰기", used: dailyPublishUsed, limit: publishLimit, color:"var(--accent)" },
-                { label:"🤝 서이추", used: neighborUsed, limit: neighborLimit, color:"#00c8ff" },
-                { label:"❤️ 공감·댓글", used: engageUsed, limit: engageLimit, color:"#ff6b9d" },
-                { label:"💬 답방", used: replyUsed, limit: replyLimit, color:"#8b5cf6" },
+                { label:"✍️ 글쓰기", used: dailyPublishUsed, limit: publishLimit, color:"var(--accent)", safe:0 },
+                { label:"🤝 서이추", used: neighborUsed, limit: neighborLimit, color:"#00c8ff", safe:NAVER_SAFE_NEIGHBOR },
+                { label:"❤️ 공감·댓글", used: engageUsed, limit: engageLimit, color:"#ff6b9d", safe:NAVER_SAFE_ENGAGE },
+                { label:"💬 답방", used: replyUsed, limit: replyLimit, color:"#8b5cf6", safe:0 },
               ];
               return (
                 <div style={{display:"flex",gap:10,marginBottom:16,flexWrap:"wrap",alignItems:"center"}}>
-                  {items.map(({label,used,limit,color})=>{
+                  {items.map(({label,used,limit,color,safe})=>{
                     const unlimited = limit>=99999 || (["unlimited","admin"] as string[]).includes(plan);
-                    const pct = unlimited ? 100 : Math.min(100, (used/limit)*100);
-                    const over = !unlimited && used >= limit;
+                    const useSafe = unlimited && safe>0;                 // 무제한이라도 안전 권장치로 표시
+                    const refLimit = useSafe ? safe : limit;
+                    const pct = (unlimited && !useSafe) ? 100 : Math.min(100, (used/refLimit)*100);
+                    const overSafe = useSafe && used>=safe;
+                    const over = overSafe || (!unlimited && used>=limit);
+                    const barColor = overSafe ? "#f59e0b" : over ? "var(--danger)" : color;   // 안전권장 초과=주황 경고, 실한도 초과=빨강
                     return (
-                      <div key={label} style={{flex:1,minWidth:120,padding:"10px 14px",borderRadius:14,background:"var(--card)",border:`1px solid ${over?"rgba(255,83,99,.4)":"var(--border)"}`,transition:"border .2s"}}>
+                      <div key={label} style={{flex:1,minWidth:120,padding:"10px 14px",borderRadius:14,background:"var(--card)",border:`1px solid ${overSafe?"rgba(245,158,11,.45)":over?"rgba(255,83,99,.4)":"var(--border)"}`,transition:"border .2s"}}>
                         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
                           <span style={{fontSize:12,fontWeight:700,color:"var(--text2)"}}>{label}</span>
-                          <span style={{fontSize:12,fontWeight:800,color:over?"var(--danger)":color}}>{used}<span style={{fontSize:11,color:"var(--text3)",fontWeight:500}}>{unlimited?" · 무제한":`/${limit}`}</span></span>
+                          <span style={{fontSize:12,fontWeight:800,color:barColor}}>{used}<span style={{fontSize:11,color:"var(--text3)",fontWeight:500}}>{useSafe?` · 권장 ${safe}`:(unlimited?" · 무제한":`/${limit}`)}</span></span>
                         </div>
                         <div style={{height:5,borderRadius:99,background:"var(--border)",overflow:"hidden"}}>
-                          <div style={{height:"100%",borderRadius:99,width:`${pct}%`,background:over?"var(--danger)":color,transition:"width .4s"}}/>
+                          <div style={{height:"100%",borderRadius:99,width:`${pct}%`,background:barColor,transition:"width .4s"}}/>
                         </div>
+                        {overSafe&&<div style={{fontSize:10.5,color:"#f59e0b",fontWeight:700,marginTop:4}}>⚠️ 네이버 안전 권장({safe})을 넘었어요 — 계정 보호 위해 잠시 쉬어가는 걸 권해요</div>}
                       </div>
                     );
                   })}
@@ -4596,10 +4606,10 @@ POST3: (제목)|(이유)
               const cfg = PLAN_CONFIG[user.plan] ?? PLAN_CONFIG.free;
               const isUnlim = (["unlimited","admin"] as string[]).includes(user.plan);
               const perf = [
-                {label:"오늘 발행", icon:"🚀", used:dailyPublishUsed, limit:cfg.dailyPublish??2, color:"var(--accent)", go:"publish" as MainTab, hint:"오늘 블로그에 발행한 글 수예요"},
-                {label:"서이추",    icon:"🤝", used:neighborUsed,   limit:NEIGHBOR_DAILY_LIMIT[user.plan]??10, color:"#00b8d4", go:"neighbor" as MainTab, hint:"오늘 보낸 서로이웃 신청 수예요"},
-                {label:"공감·댓글", icon:"❤️", used:engageUsed,     limit:ENGAGE_DAILY_LIMIT[user.plan]??10,   color:"#e5397f", go:"engage" as MainTab,   hint:"오늘 남긴 공감·댓글 수예요"},
-                {label:"답방",      icon:"💬", used:replyUsed,      limit:REPLY_DAILY_LIMIT[user.plan]??10,    color:"#8b5cf6", go:"reply" as MainTab,    hint:"오늘 내 글 댓글에 답한 수예요"},
+                {label:"오늘 발행", icon:"🚀", used:dailyPublishUsed, limit:cfg.dailyPublish??2, color:"var(--accent)", go:"publish" as MainTab, hint:"오늘 블로그에 발행한 글 수예요", safe:0},
+                {label:"서이추",    icon:"🤝", used:neighborUsed,   limit:NEIGHBOR_DAILY_LIMIT[user.plan]??10, color:"#00b8d4", go:"neighbor" as MainTab, hint:"오늘 보낸 서로이웃 신청 수예요", safe:NAVER_SAFE_NEIGHBOR},
+                {label:"공감·댓글", icon:"❤️", used:engageUsed,     limit:ENGAGE_DAILY_LIMIT[user.plan]??10,   color:"#e5397f", go:"engage" as MainTab,   hint:"오늘 남긴 공감·댓글 수예요", safe:NAVER_SAFE_ENGAGE},
+                {label:"답방",      icon:"💬", used:replyUsed,      limit:REPLY_DAILY_LIMIT[user.plan]??10,    color:"#8b5cf6", go:"reply" as MainTab,    hint:"오늘 내 글 댓글에 답한 수예요", safe:0},
               ];
               const now = new Date();
               const greeting = now.getHours()<12?"좋은 아침이에요":now.getHours()<18?"좋은 오후예요":"오늘도 수고 많으셨어요";
@@ -4751,14 +4761,18 @@ POST3: (제목)|(이유)
                     </div>
                     <div className="ct-perf-grid">
                       {perf.map(p=>{
-                        const pct = isUnlim?Math.min(100,p.used):Math.min(100,(p.used/Math.max(1,p.limit))*100);
-                        const danger = !isUnlim && p.used>=p.limit;
+                        const useSafe = isUnlim && p.safe>0;    // 무제한이라도 서이추·공감은 네이버 안전 권장치로 표시(락 아님)
+                        const refLimit = useSafe ? p.safe : p.limit;
+                        const pct = (isUnlim && !useSafe)?Math.min(100,p.used):Math.min(100,(p.used/Math.max(1,refLimit))*100);
+                        const overSafe = useSafe && p.used>=p.safe;
+                        const danger = overSafe || (!isUnlim && p.used>=p.limit);
+                        const barColor = overSafe?"#f59e0b":danger?"var(--danger)":p.color;
                         return (
                           <button key={p.label} className="ct-perf-card" onClick={()=>setTab(p.go)} style={{["--pc" as any]:p.color}}>
                             <div className="ct-perf-top"><span className="ct-perf-ico">{p.icon}</span><span className="ct-perf-name">{p.label}</span></div>
-                            <div className="ct-perf-num">{p.used}<span className="ct-perf-lim">{isUnlim?" · 무제한":` / ${p.limit}`}</span></div>
-                            <div className="ct-perf-bar"><div className="ct-perf-fill" style={{width:`${pct}%`,background:danger?"var(--danger)":p.color}}/></div>
-                            <div className="ct-perf-hint">{p.hint}</div>
+                            <div className="ct-perf-num">{p.used}<span className="ct-perf-lim">{useSafe?` · 권장 ${p.safe}`:(isUnlim?" · 무제한":` / ${p.limit}`)}</span></div>
+                            <div className="ct-perf-bar"><div className="ct-perf-fill" style={{width:`${pct}%`,background:barColor}}/></div>
+                            <div className="ct-perf-hint">{overSafe?`⚠️ 안전 권장 ${p.safe} 초과 — 잠시 쉬어가는 걸 권해요`:p.hint}</div>
                           </button>
                         );
                       })}

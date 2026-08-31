@@ -1843,10 +1843,18 @@ export async function analyzeBuddyKeywords(params: {
   ]);
   // 활용형 어미로 끝나는 단어(동사·형용사·부사) 제거: ~습니다/~해서/~하면/~네요/~게 등
   const CONJ = /(습니다|었습니다|였습니다|해요|아요|어요|에요|예요|이에요|이예요|네요|더라|겠다|었다|였다|린다|긴다|한다|된다|간다|온다|왔다|갔다|봤다|해서|아서|어서|하고|하며|하니|하는|되는|있는|없는|같은|으면|하면|되면|려고|면서|어도|아도|처럼|만큼|보다|라고|다고|든지|거나|지만|는데|은데|으로|에서|까지|부터|에게|한테)$/;
+  // 뒤에 붙은 조사 제거(자신"의"·활동"의"·수수료"를"·포스팅"은" → 자신·활동·수수료·포스팅). 남는 어간이 2자 이상일 때만.
+  const stripJosa = (w: string): string => {
+    const s = w.replace(/(으로서|으로써|이라는|라는|으로|로서|로써|에서|에게|한테|께서|부터|까지|보다|처럼|만큼|이나|이란|라도|든지|은|는|이|가|을|를|의|에|도|만|로|과|와|나)$/, "");
+    return s.length >= 2 ? s : w;
+  };
+  const EXTRA_STOP = new Set(["그런데","그래서","그러나","그리하여","지난","이번","다음","발생","총정리","직접","활동","구간","커넥트","포스팅","자신","수수료","공개","진행","포함","관심","여기","저기","우리","서로","이웃","방문","댓글","공감","이웃님","블로거","일상","기록","하루하루"]);
   const freq: Record<string, number> = {};
   const joined = texts.join(" ");
-  for (const w of joined.match(/[가-힣]{2,}/g) || []) {
-    if (STOP.has(w)) continue;
+  for (const raw of joined.match(/[가-힣]{2,}/g) || []) {
+    const w = stripJosa(raw);
+    if (w.length < 2) continue;
+    if (STOP.has(w) || EXTRA_STOP.has(w)) continue;
     if (CONJ.test(w)) continue;                 // 활용형 어미로 끝나면 제외(동사·형용사·부사)
     freq[w] = (freq[w] || 0) + 1;
   }
