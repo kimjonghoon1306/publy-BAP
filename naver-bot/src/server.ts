@@ -560,8 +560,10 @@ app.post("/api/ai-proxy", async (req, res) => {
 });
 
 /* ── 🔥 핫이슈 추천 (무료·키 불필요·누구나) — 카테고리별 실시간 인기 주제 ──
-   실시간 종합=구글 트렌드 KR RSS, 분야별=연합뉴스 섹션 RSS. 서버에서 fetch(브라우저 CORS 회피). 30분 캐시. */
-const HOT_CACHE: Record<string, { at: number; items: string[] }> = {};
+   실시간=구글 트렌드 급상승+구글뉴스, 생활=네이버 자동완성+구글뉴스(날짜 씨앗 로테이션), 뉴스=연합뉴스+구글뉴스.
+   서버에서 fetch(브라우저 CORS 회피). ★캐시는 'KST 하루' 단위 — 자정 넘어가면 무조건 재수집돼 매일 실제로 바뀐다.
+   같은 날 안에서는 날짜 시드로 순서를 고정(새로고침해도 안 흔들리는 눈속임 제거). */
+const HOT_CACHE: Record<string, { at: number; items: string[]; day: number }> = {};
 const YNA_SECTIONS: Record<string, string> = {
   경제: "economy", 증권: "market", 산업: "industry", 정치: "politics", 사회: "society",
   전국: "local", 세계: "international", 문화: "culture", 연예: "entertainment", 스포츠: "sports", 건강: "health",
@@ -598,56 +600,93 @@ function cleanHeadline(s: string): string {
 }
 // 실시간 종합용 블로그 글감 씨앗 — 뉴스가 아니라 '지금 사람들이 검색하는 블로그 주제'로.
 const REALTIME_SEEDS = ["요즘 뜨는", "제철 음식", "이번주 여행", "인기 레시피", "다이어트", "부업 추천", "정부지원금", "정책자금", "소상공인 지원금", "청년 지원금", "창업 지원금", "인테리어 팁", "건강 관리", "재테크", "반려동물", "가볼만한곳", "선물 추천", "생활 꿀팁", "패션 코디"];
-// Fisher–Yates 셔플(새로고침마다 다양한 주제가 위로 오게)
-function shuffle<T>(a: T[]): T[] { const r = a.slice(); for (let i = r.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [r[i], r[j]] = [r[j], r[i]]; } return r; }
+// ── 🔁 '매일 실제로 바뀌게' 하는 장치들 (셔플 눈속임 제거, 날짜 기반 실질 갱신) ──
+// 1) KST 자정 기준 '오늘 인덱스' — 날짜가 넘어가면 값이 달라진다(캐시 만료·정렬·씨앗 로테이션 기준).
+function kstDayIndex(): number { return Math.floor((Date.now() + 9 * 3600 * 1000) / 86400000); }
+// 2) 시드 고정 난수(mulberry32) — 같은 날엔 같은 순서(새로고침해도 안 흔들림=눈속임 제거), 날짜 바뀌면 순서도 바뀜.
+function seededRand(seed: number): () => number { return () => { seed = (seed + 0x6D2B79F5) | 0; let t = Math.imul(seed ^ (seed >>> 15), 1 | seed); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
+function seededShuffle<T>(a: T[], seed: number): T[] { const r = a.slice(); const rand = seededRand(seed); for (let i = r.length - 1; i > 0; i--) { const j = Math.floor(rand() * (i + 1)); [r[i], r[j]] = [r[j], r[i]]; } return r; }
+function strHash(s: string): number { let h = 0; for (let i = 0; i < s.length; i++) h = (Math.imul(h, 31) + s.charCodeAt(i)) | 0; return h; }
+// 3) 씨앗을 날짜로 회전 — 고정 리스트라도 매일 다른 부분집합을 조회 → 결과가 매일 달라진다.
+function rotateSeeds(seeds: string[], dayIdx: number, take: number): string[] {
+  if (seeds.length <= take) return seeds;
+  return seededShuffle(seeds, (dayIdx * 2654435761) ^ strHash(seeds[0] || "")).slice(0, take);
+}
+// 4) 구글 뉴스 RSS 검색(키 불필요·매일/매시간 최신) — 어떤 카테고리든 '지금 실제 이슈' 헤드라인을 당겨온다.
+async function googleNewsSearch(query: string): Promise<string[]> {
+  try {
+    const u = `https://news.google.com/rss/search?q=${encodeURIComponent(query + " when:2d")}&hl=ko&gl=KR&ceid=KR:ko`;
+    const r = await fetch(u, { headers: { "User-Agent": "Mozilla/5.0" } });
+    const t = await r.text();
+    // 구글뉴스에 섞이는 광고/스팸성 제목 제거(캐시워크 퀴즈·선착순 이벤트·쿠폰 등 — 블로그 글감이 아님)
+    const SPAM = /캐시워크|돈\s*버는\s*퀴즈|돈버는퀴즈|오늘의\s*정답|정답은|선착순|한정수량|무료나눔|이벤트\s*알아보기|쿠폰\s*받기|최저가|특가|당첨|응모|추첨/;
+    return [...t.matchAll(/<item>[\s\S]*?<title[^>]*>([\s\S]*?)<\/title>/g)].map(m => cleanHeadline((m[1] || "").replace(/\s*-\s*[^-]+$/, "")))
+      .filter(x => x && x.length >= 4 && !/구글 뉴스|google news/i.test(x) && !SPAM.test(x));
+  } catch { return []; }
+}
 app.get("/api/hot-issues", async (req, res) => {
   const category = String(req.query.category || "실시간");
-  const fresh = req.query.fresh === "1";   // 새로고침 버튼 → 캐시 우회하고 즉시 새로 수집
+  const fresh = req.query.fresh === "1";   // 새로고침 버튼 → 캐시 우회하고 라이브 소스에서 즉시 재수집
   const now = Date.now();
+  const day = kstDayIndex();
   const cached = HOT_CACHE[category];
-  // 캐시가 있어도 매 요청 셔플해서 '다양하게' 보여준다(30분 안이라도 위쪽 주제가 바뀜). fresh면 아예 새로 수집.
-  if (!fresh && cached && now - cached.at < 30 * 60 * 1000) return res.json({ ok: true, category, items: shuffle(cached.items), cached: true });
+  // 캐시는 '같은 날 + 30분 이내'에만 유효. 날짜가 바뀌면(KST 자정) 무조건 새로 수집 → 하루 지나면 반드시 최신화.
+  if (!fresh && cached && cached.day === day && now - cached.at < 30 * 60 * 1000) return res.json({ ok: true, category, items: cached.items, cached: true, day });
   try {
-    // 주제를 풍부하게: 소스에서 당겨올 수 있는 건 최대한 다 당겨와 중복만 제거(양을 크게).
     const uniq = (arr: string[]) => { const seen = new Set<string>(); const out: string[] = []; for (const x of arr) { const k = x.replace(/\s+/g, ""); if (x && !seen.has(k)) { seen.add(k); out.push(x); } } return out; };
     let items: string[] = [];
     if (category === "실시간") {
-      // ★블로그 글감 중심으로: 네이버 실시간 자동완성(사람들이 지금 검색하는 것)을 메인으로,
-      //   뉴스(구글 트렌드·연합)는 시의성 보조로 소량만. → '쓸 수 있는' 주제가 매번 다르게 나온다.
+      // 실시간 = 진짜 매일/매시간 바뀌는 소스를 메인으로: 구글 트렌드 급상승 + 구글뉴스 헤드라인, 블로그 글감은 보조.
+      const rotated = rotateSeeds(REALTIME_SEEDS, day, 10);
       const pulls = await Promise.allSettled([
-        ...REALTIME_SEEDS.map(s => naverAutocomplete(s).then(a => ({ kind: "blog" as const, list: a }))),
-        fetch("https://trends.google.com/trending/rss?geo=KR", { headers: { "User-Agent": "Mozilla/5.0" } }).then(r => r.text()).then(t => ({ kind: "news" as const, list: [...t.matchAll(/<title[^>]*>([\s\S]*?)<\/title>/g)].map(m => cleanHeadline(m[1])) })),
+        fetch("https://trends.google.com/trending/rss?geo=KR", { headers: { "User-Agent": "Mozilla/5.0" } }).then(r => r.text()).then(t => [...t.matchAll(/<title[^>]*>([\s\S]*?)<\/title>/g)].map(m => cleanHeadline(m[1]))),
+        googleNewsSearch("오늘의 이슈"),
+        ...rotated.map(s => naverAutocomplete(s)),
       ]);
-      const blogTopics: string[] = [], newsTopics: string[] = [];
-      pulls.forEach(p => {
+      const trend: string[] = [], news: string[] = [], blog: string[] = [];
+      pulls.forEach((p, i) => {
         if (p.status !== "fulfilled") return;
-        const v = p.value;
-        if (v.kind === "blog") blogTopics.push(...v.list.filter(x => x.length >= 2 && !REALTIME_SEEDS.includes(x)));
-        else newsTopics.push(...v.list.filter(x => x && !/trends|google|피드|RSS/i.test(x)).slice(0, 12));
+        const list = (p.value as string[]).filter(x => x && !/trends|google|피드|RSS/i.test(x));
+        if (i === 0) trend.push(...list.slice(0, 20));
+        else if (i === 1) news.push(...list.slice(0, 15));
+        else blog.push(...list.filter(x => x.length >= 2 && !REALTIME_SEEDS.includes(x)));
       });
-      // 블로그 주제를 앞에(많이), 뉴스는 뒤에 소량 섞기
-      items = uniq([...shuffle(blogTopics), ...newsTopics]).slice(0, 60);
+      // 실검(트렌드) 먼저 → 뉴스 → 블로그 글감. 날짜 시드로 정렬(같은 날 고정, 다음 날 변화).
+      items = uniq([...trend, ...seededShuffle(news, day), ...seededShuffle(blog, day)]).slice(0, 60);
     } else if (LIFE_SEEDS[category]) {
-      // 🆕 대중 생활 카테고리 — 네이버 실시간 자동완성으로 지금 뜨는 검색 주제 수집(뉴스와 별개)
+      // 생활 카테고리 = 네이버 자동완성(안정적 기반) + 구글뉴스 검색(오늘의 최신 이슈) + 날짜 씨앗 로테이션.
       const seeds = LIFE_SEEDS[category];
-      const pulls = await Promise.allSettled(seeds.map(s => naverAutocomplete(s)));
-      const merged: string[] = [];
-      pulls.forEach(p => { if (p.status === "fulfilled") merged.push(...p.value); });
-      // 씨앗 단어 자체(너무 일반적)만 남는 건 제외, 2글자 이상만
-      items = uniq(merged).filter(x => x.length >= 2 && !seeds.includes(x)).slice(0, 60);
-      // 혹시 자동완성이 다 막히면 씨앗이라도 넣어 빈 화면 방지
-      if (!items.length) items = uniq(seeds);
+      const rotated = rotateSeeds(seeds, day, Math.min(12, seeds.length));
+      const newsQ = category === "정책자금" ? "정부지원금 정책자금" : category;
+      const pulls = await Promise.allSettled([
+        ...rotated.map(s => naverAutocomplete(s)),
+        googleNewsSearch(newsQ),
+        googleNewsSearch(rotated[0] || category),
+      ]);
+      const ac: string[] = [], news: string[] = [];
+      pulls.forEach((p, i) => {
+        if (p.status !== "fulfilled") return;
+        const list = p.value as string[];
+        if (i < rotated.length) ac.push(...list);
+        else news.push(...list.slice(0, 8));
+      });
+      const acClean = uniq(ac).filter(x => x.length >= 2 && !seeds.includes(x));
+      items = uniq([...seededShuffle(news, day), ...seededShuffle(acClean, day)]).slice(0, 60);
+      if (!items.length) items = uniq(rotateSeeds(seeds, day, seeds.length)); // 자동완성 다 막혀도 매일 다른 순서로
     } else {
+      // 뉴스 카테고리 = 연합뉴스 섹션 RSS(시간마다 갱신) + 구글뉴스 검색 보강. 둘 다 라이브.
       const sec = YNA_SECTIONS[category];
       if (!sec) return res.status(400).json({ ok: false, error: "알 수 없는 카테고리" });
-      const r = await fetch(`https://www.yna.co.kr/rss/${sec}.xml`, { headers: { "User-Agent": "Mozilla/5.0" } });
-      const t = await r.text();
-      const raw = [...t.matchAll(/<title[^>]*>([\s\S]*?)<\/title>/g)].map(m => cleanHeadline(m[1]))
-        .filter(x => x && !/연합뉴스|저작권|헤드라인|알림|RSS/i.test(x));
-      items = uniq(raw).slice(0, 60);
+      const pulls = await Promise.allSettled([
+        fetch(`https://www.yna.co.kr/rss/${sec}.xml`, { headers: { "User-Agent": "Mozilla/5.0" } }).then(r => r.text()).then(t => [...t.matchAll(/<title[^>]*>([\s\S]*?)<\/title>/g)].map(m => cleanHeadline(m[1]))),
+        googleNewsSearch(category),
+      ]);
+      const raw: string[] = [];
+      pulls.forEach(p => { if (p.status === "fulfilled") raw.push(...(p.value as string[])); });
+      items = uniq(raw.filter(x => x && !/연합뉴스|저작권|헤드라인|알림|RSS/i.test(x))).slice(0, 60);
     }
-    HOT_CACHE[category] = { at: now, items };
-    res.json({ ok: true, category, items });
+    HOT_CACHE[category] = { at: now, items, day };
+    res.json({ ok: true, category, items, day });
   } catch (e: any) {
     res.status(500).json({ ok: false, error: e.message });
   }

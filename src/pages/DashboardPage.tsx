@@ -242,7 +242,7 @@ const CSS = `
 }
 .app{width:100vw;height:100dvh;font-family:'Noto Sans KR',sans-serif;color:var(--text);background:var(--bg);display:flex;flex-direction:column;overflow:hidden;transition:background .2s,color .2s;}
 *::-webkit-scrollbar{width:5px;}*::-webkit-scrollbar-thumb{background:var(--border2);border-radius:99px;}
-.header{height:58px;flex-shrink:0;display:flex;align-items:center;padding:0 16px;gap:10px;background:var(--header-bg);border-bottom:1px solid var(--border);backdrop-filter:blur(24px);position:sticky;top:0;z-index:100;}
+.header{min-height:58px;flex-shrink:0;display:flex;align-items:center;flex-wrap:wrap;padding:8px 16px;gap:10px;background:var(--header-bg);border-bottom:1px solid var(--border);backdrop-filter:blur(24px);position:sticky;top:0;z-index:100;}
 .logo{display:flex;align-items:center;gap:9px;text-decoration:none;flex-shrink:0;}
 .logo-ico{width:34px;height:34px;border-radius:10px;background:linear-gradient(135deg,#00ff9d,#00c870);display:flex;align-items:center;justify-content:center;flex-shrink:0;box-shadow:0 2px 12px rgba(0,255,157,.35);}
 .logo-text{font-size:17px;font-weight:900;letter-spacing:.18em;color:var(--accent-text);font-family:'Space Grotesk',sans-serif;}
@@ -6487,7 +6487,7 @@ POST3: (제목)|(이유)
                     <div className="card-title" style={{margin:0}}>🔥 오늘의 핫이슈 <span style={{fontSize:11,fontWeight:800,color:"#ff8c00",background:"rgba(255,180,0,.15)",padding:"2px 8px",borderRadius:99,marginLeft:4}}>무료</span></div>
                     <button onClick={()=>loadHotIssues(hotCat,{refreshed:true})} disabled={hotLoading} style={{fontSize:11,padding:"5px 10px",borderRadius:8,border:"1px solid var(--border)",background:"var(--card2)",color:"var(--text2)",cursor:"pointer",fontWeight:700,fontFamily:"inherit",transition:"all .15s"}} onMouseEnter={e=>{e.currentTarget.style.borderColor="#ff8c00";e.currentTarget.style.color="#ff8c00";}} onMouseLeave={e=>{e.currentTarget.style.borderColor="var(--border)";e.currentTarget.style.color="var(--text2)";}}>{hotLoading?"⏳ 불러오는 중...":"🔄 새로고침"}</button>
                   </div>
-                  <div style={{fontSize:11.5,color:"var(--text2)",lineHeight:1.5,marginBottom:11}}>지금 <b>실시간·분야별로 뜨는 주제</b>예요. 관심 있는 걸 <b style={{color:"#ff8c00"}}>탭하면 아래 키워드에 바로 추가</b>돼요. (실시간=구글 트렌드, 분야별=연합뉴스 · 30분마다 갱신)</div>
+                  <div style={{fontSize:11.5,color:"var(--text2)",lineHeight:1.5,marginBottom:11}}>지금 <b>실시간·분야별로 뜨는 주제</b>예요. 관심 있는 걸 <b style={{color:"#ff8c00"}}>탭하면 아래 키워드에 바로 추가</b>돼요. (실시간=구글 트렌드·뉴스, 분야별=뉴스+검색어 · <b style={{color:"#ff8c00"}}>매일 자동 갱신</b>)</div>
                   {/* 카테고리 탭 */}
                   <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:12}}>
                     {HOT_CATS.map(c=>(
