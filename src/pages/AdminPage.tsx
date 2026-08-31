@@ -887,6 +887,25 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
   const [otLiveLog,setOtLiveLog]=useState<string[]>(()=>{try{return JSON.parse(localStorage.getItem("publy_adm_ot_livelog")||"[]");}catch{return [];}});
   const [otDockOpen,setOtDockOpen]=useState(true);
   useEffect(()=>{try{localStorage.setItem("publy_adm_ot_livelog",JSON.stringify(otLiveLog.slice(-300)));}catch{}},[otLiveLog]);
+  // Flow 준비(이미지 탭과 동일 방식 — 디버깅 크롬 9222 공유)
+  const [flowReady,setFlowReady]=useState(false);
+  const [flowLaunching,setFlowLaunching]=useState(false);
+  async function handleFlowLaunchChrome(){
+    if(!(window as any).electron?.flowLaunchChrome){ showToast("PC 앱에서만 Flow 준비가 가능해요. Publy 앱을 실행해주세요.","error"); return; }
+    setFlowLaunching(true);
+    try{ const r=await (window as any).electron.flowLaunchChrome();
+      if(r.ok){ setFlowReady(true); showToast(r.already?"✅ Flow 크롬이 이미 준비돼 있어요!":"✅ Flow 크롬을 열었어요! 크롬 창에서 Google 로그인만 해주세요 (최초 1회)"); }
+      else showToast("❌ "+(r.error||"Flow 준비 실패"),"error");
+    }catch(e:any){ showToast("❌ Flow 준비 실패: "+e.message,"error"); }
+    finally{ setFlowLaunching(false); }
+  }
+  useEffect(()=>{
+    if(!(tab==="onetouch"&&otImgMode==="flow")||!(window as any).electron?.flowStatus)return;
+    let alive=true;
+    const check=async()=>{ try{ const s=await (window as any).electron.flowStatus(); if(alive)setFlowReady(!!s.ready); }catch{} };
+    check(); const iv=setInterval(check,5000);
+    return ()=>{ alive=false; clearInterval(iv); };
+  },[tab,otImgMode]);
   // ★글자수 하드 캡: AI 오버슈트(1500 지정→3000) 방지. 목표 125% 초과 시 FAQ 보존하고 본문 문단을 잘라 목표 근처로.
   function enforceMaxChars(body:string, target:number):string{
     if(!target||body.length<=Math.round(target*1.25))return body;
@@ -4433,9 +4452,13 @@ POST3: (제목)|(이유)
                       <div style={{marginTop:8,fontSize:12,color:"var(--text3)",lineHeight:1.5}}>{otImgMode==="flow"?"무료 Flow는 옆의 'Flow 준비'를 먼저 눌러 연결하세요.":"AI 이미지는 OpenAI/Replicate 키가 있어야 해요."}</div>
                     </div>
                     {otImgMode==="flow"&&(
-                      <div style={{flex:"1 1 280px",minWidth:250,maxWidth:400,padding:"12px 14px",borderRadius:12,border:`1.5px solid ${OT}33`,background:`${OT}08`}}>
-                        <div style={{fontSize:13,fontWeight:800,color:OT,marginBottom:8}}>🎬 Flow 이미지 준비 <span style={{fontSize:11,fontWeight:600,color:"var(--text3)"}}>· 시작 전 연결</span></div>
-                        <GoogleFlowCard botOnline={botOnline} botUrl={BOT} userId={ADM_UID} />
+                      <div style={{flex:"1 1 280px",minWidth:250,maxWidth:400,padding:"14px 16px",borderRadius:12,border:`1.5px solid ${flowReady?"rgba(0,200,120,.45)":`${OT}33`}`,background:flowReady?"rgba(0,200,120,.06)":`${OT}08`}}>
+                        <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
+                          <span style={{fontSize:20}}>{flowReady?"✅":"🎬"}</span>
+                          <div style={{fontSize:13,fontWeight:800,color:flowReady?"var(--success)":OT}}>{flowReady?"Flow 준비 완료!":"Flow 준비가 필요해요"}</div>
+                        </div>
+                        <div style={{fontSize:11.5,color:"var(--text3)",lineHeight:1.55,marginBottom:10}}>{flowReady?"이미지 생성·글 생성과 같은 크롬을 써요. 이제 시작하면 이미지가 자동으로 들어가요.":"버튼을 누르면 크롬이 열려요 → Google 로그인 1회 → 이미지 생성·글 생성과 같은 창을 그대로 공유해요."}</div>
+                        {!flowReady&&<button onClick={handleFlowLaunchChrome} disabled={flowLaunching} style={{width:"100%",padding:"11px",borderRadius:10,border:"none",background:"linear-gradient(135deg,#a855f7,#7c3aed)",color:"#fff",cursor:flowLaunching?"wait":"pointer",fontSize:13.5,fontWeight:800,fontFamily:"inherit",opacity:flowLaunching?.7:1}}>{flowLaunching?"준비 중...":"🚀 여기 눌러 Flow 준비 (크롬 열림)"}</button>}
                       </div>
                     )}
                   </div>

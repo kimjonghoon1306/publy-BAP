@@ -3060,14 +3060,15 @@ POST3: (제목)|(이유)
     }catch(e:any){ showToast("❌ Flow 준비 실패: "+e.message,"error"); }
     finally{ setFlowLaunching(false); }
   }
-  // Flow 선택 시 준비 상태 폴링
+  // Flow 선택 시 준비 상태 폴링 (이미지 탭 + 원터치 탭 공용 — 같은 디버깅 크롬 상태를 봄)
   useEffect(()=>{
-    if(imgGenType!=="flow"||!(window as any).electron?.flowStatus)return;
+    const flowActive = imgGenType==="flow" || (tab==="onetouch" && otImgMode==="flow");
+    if(!flowActive || !(window as any).electron?.flowStatus)return;
     let alive=true;
     const check=async()=>{ try{ const s=await (window as any).electron.flowStatus(); if(alive)setFlowReady(!!s.ready); }catch{} };
     check(); const iv=setInterval(check,5000);
     return ()=>{ alive=false; clearInterval(iv); };
-  },[imgGenType]);
+  },[imgGenType,tab,otImgMode]);
 
   // ── 글을 읽고 "장면이 서로 다른" 이미지 프롬프트 N개 생성 (Gemini) ──
   //   6하원칙(언제/어디서/무엇을/어떻게/왜)에 맞춰 이미지만 봐도 스토리가 읽히게.
@@ -6493,9 +6494,13 @@ POST3: (제목)|(이유)
                       <div style={{marginTop:8,fontSize:12,color:"var(--text3)",lineHeight:1.5}}>{otImgMode==="flow"?"무료 Flow는 옆의 'Flow 준비'를 먼저 눌러 연결하세요. 그 창으로 이미지를 만들어 넣어요.":"AI 이미지는 설정 탭에 OpenAI/Replicate 키가 있어야 해요. 키가 없으면 이미지 없이 글만 올라가요."}</div>
                     </div>
                     {otImgMode==="flow"&&(
-                      <div style={{flex:"1 1 280px",minWidth:250,maxWidth:400,padding:"12px 14px",borderRadius:12,border:`1.5px solid ${OT}33`,background:`${OT}08`}}>
-                        <div style={{fontSize:13,fontWeight:800,color:OT,marginBottom:8}}>🎬 Flow 이미지 준비 <span style={{fontSize:11,fontWeight:600,color:"var(--text3)"}}>· 시작 전 연결</span></div>
-                        <GoogleFlowCard botOnline={botOnline} botUrl={BOT} userId={user?.id||""} />
+                      <div style={{flex:"1 1 280px",minWidth:250,maxWidth:400,padding:"14px 16px",borderRadius:12,border:`1.5px solid ${flowReady?"rgba(0,200,120,.45)":`${OT}33`}`,background:flowReady?"rgba(0,200,120,.06)":`${OT}08`}}>
+                        <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
+                          <span style={{fontSize:20}}>{flowReady?"✅":"🎬"}</span>
+                          <div style={{fontSize:13,fontWeight:800,color:flowReady?"var(--success)":OT}}>{flowReady?"Flow 준비 완료!":"Flow 준비가 필요해요"}</div>
+                        </div>
+                        <div style={{fontSize:11.5,color:"var(--text3)",lineHeight:1.55,marginBottom:10}}>{flowReady?"이미지 생성·글 생성과 같은 크롬을 써요. 이제 시작하면 이미지가 자동으로 들어가요.":"버튼을 누르면 크롬이 열려요 → Google 로그인 1회 → 이미지 생성·글 생성과 같은 창을 그대로 공유해요."}</div>
+                        {!flowReady&&<button onClick={handleFlowLaunchChrome} disabled={flowLaunching} style={{width:"100%",padding:"11px",borderRadius:10,border:"none",background:"linear-gradient(135deg,#a855f7,#7c3aed)",color:"#fff",cursor:flowLaunching?"wait":"pointer",fontSize:13.5,fontWeight:800,fontFamily:"inherit",opacity:flowLaunching?.7:1}}>{flowLaunching?"준비 중...":"🚀 여기 눌러 Flow 준비 (크롬 열림)"}</button>}
                       </div>
                     )}
                   </div>
