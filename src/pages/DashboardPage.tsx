@@ -37,6 +37,8 @@ const PLAN_LABELS: Record<string,string> = {free:"FREE",basic:"BASIC",pro:"PRO",
 const NAVER_SAFE_NEIGHBOR = 100;   // 서이추
 const NAVER_SAFE_ENGAGE = 100;     // 공감·댓글
 const NAVER_SAFE_PUMASI = 50;      // 품앗이
+// ⚡ 원터치 AI 키워드 주제 카테고리(여러 개 선택 → 그 안에서만 생성)
+const OT_KW_CATS = ["맛집","여행","재테크·부업","건강·운동","육아","뷰티","패션","인테리어","IT·가전","정책자금","반려동물","자기계발","음식·레시피","문화·연예","스포츠","자동차","교육","부동산"];
 // 만료일까지 남은 일수 — 자정 기준으로 계산해 시각과 무관하게 항상 동일한 값(상단/하단 D-day 일치)
 function daysUntil(dateStr?: string): number | null {
   if (!dateStr) return null;
@@ -1335,6 +1337,9 @@ Output (JSON object only): {"keyword":"핵심키워드","title":"새 SEO 제목"
   const [quickKw, setQuickKw] = useState(""); // 핫이슈로 '바로 글쓰기'용(캘린더 스케줄과 별개 파이프라인)
   // ⚡ 원터치 발행(BEST): 키워드 여러 개 → 제목→본문→이미지→카테고리 자동→발행, 텀 간격 반복
   const [otKeywords,setOtKeywords]=useState("");
+  const [otAiKw,setOtAiKw]=useState(()=>localStorage.getItem("publy_ot_aikw")==="1");   // AI 자동추천 키워드 토글
+  const [otAiKwCount,setOtAiKwCount]=useState(()=>{const n=parseInt(localStorage.getItem("publy_ot_aikw_count")||"5");return isNaN(n)?5:Math.max(1,Math.min(30,n));});
+  const [otAiCats,setOtAiCats]=useState<string[]>(()=>{try{return JSON.parse(localStorage.getItem("publy_ot_aicats")||"[]");}catch{return [];}});   // AI 키워드 주제 제한(여러 개, 없으면 전체)
   const [otTermMin,setOtTermMin]=useState(60);            // 발행 텀(분): 프리셋 10/30/60/120 + 직접입력
   const [otCustomTerm,setOtCustomTerm]=useState("");
   const [otImgCount,setOtImgCount]=useState(3);
@@ -2967,10 +2972,28 @@ POST3: (제목)|(이유)
     return d.postUrl||"";
   }
   function stopOneTouch(){otStopRef.current=true;try{otAbortRef.current?.abort();}catch{};setOtRunning(false);setOtNextAt(null);showToast("원터치를 멈췄어요 — 진행 중이던 작업도 중단","info");}
+  // ── 14일 중복방지: 사용한 키워드 기록/조회 ──
+  function otRecentUsedKw():string[]{ try{ const cut=Date.now()-14*86400000; return (JSON.parse(localStorage.getItem("publy_ot_used_kw")||"[]") as any[]).filter(r=>r.at>cut).map(r=>r.kw); }catch{return [];} }
+  function otRecordUsedKw(kws:string[]){ try{ const cut=Date.now()-14*86400000; const kept=(JSON.parse(localStorage.getItem("publy_ot_used_kw")||"[]") as any[]).filter(r=>r.at>cut); const now=Date.now(); for(const k of kws) kept.push({kw:k,at:now}); localStorage.setItem("publy_ot_used_kw",JSON.stringify(kept.slice(-800))); }catch{} }
+  // ── AI 자동추천 키워드: 핫이슈 참고 + SEO 최적화, 서로 다른 분야 다양하게, 14일 내 사용분 제외 ──
+  async function otGenKeywords(count:number,signal?:AbortSignal):Promise<string[]>{
+    const used=otRecentUsedKw();
+    let hot:string[]=[];
+    try{ const r=await botFetch(`${BOT}/api/hot-issues?category=${encodeURIComponent("실시간")}`,{signal:AbortSignal.timeout(15000)} as any); const d=await r.json().catch(()=>({})); if(Array.isArray(d.items))hot=d.items.slice(0,30); }catch{}
+    const excl=used.slice(0,120).join(", ");
+    const hotHint=hot.length?`\n\n[요즘 뜨는 주제 참고 — 그대로 베끼지 말고 검색 잘 되는 SEO 키워드로 다듬어 활용]\n${hot.slice(0,25).join(", ")}`:"";
+    const catRule=otAiCats.length
+      ? `- ★반드시 다음 주제 카테고리 안에서만 생성하세요(이 밖의 주제 금지): ${otAiCats.join(", ")}. 고른 카테고리들에 골고루 분배.`
+      : `- 분야를 최대한 골고루 섞기: 맛집·여행·재테크·건강·육아·뷰티·인테리어·IT/가전·정책자금·반려동물·패션·자기계발 등`;
+    const prompt=`당신은 네이버 블로그 SEO·트렌드 전문가입니다.\n지금 검색이 잘 되고 사람들이 많이 찾는, 서로 겹치지 않는 다양한 블로그 키워드 ${count}개를 JSON 배열로만 생성하세요.\n[규칙]\n- 실제 검색량 많은 자연스러운 형태(예: "원주 맛집", "겨울 제철 음식", "소상공인 정책자금 신청", "환절기 건강관리")\n${catRule}\n- 2~4어절, 과장·낚시 금지\n${excl?`- ⛔ 아래 최근 14일간 이미 쓴 키워드는 절대 포함 금지: ${excl}`:""}${hotHint}\nJSON 배열만 반환.`;
+    const text=await callAI(prompt,signal);
+    const usedSet=new Set(used.map(u=>u.replace(/\s+/g,"")));
+    const seen=new Set<string>();
+    const arr=parseArr(text).map(s=>s.trim()).filter(Boolean).filter(k=>{const key=k.replace(/\s+/g,""); if(!key||usedSet.has(key)||seen.has(key))return false; seen.add(key); return true;});
+    return arr.slice(0,count);
+  }
   async function runOneTouch(){
     if(otRunning)return;
-    const kws=otKeywords.split(/[\n,]+/).map(s=>s.trim()).filter(Boolean);
-    if(!kws.length){showToast("키워드를 한 줄에 하나씩 넣어주세요","error");return;}
     if(!pubAccId){showToast("발행할 네이버 계정을 먼저 선택해주세요","error");return;}
     const termMin=otCustomTerm.trim()?Math.max(1,parseInt(otCustomTerm,10)||otTermMin):otTermMin;
     otStopRef.current=false;setOtRunning(true);setOtNextAt(null);
@@ -2978,6 +3001,18 @@ POST3: (제목)|(이유)
     const liveLines:string[]=[];
     setOtLiveLog(prev=>[...prev,`━━━━━ ${new Date().toLocaleString("ko-KR")} 원터치 시작 ━━━━━`].slice(-300));
     const otLive=(t:string,running=true)=>{const line=`[${new Date().toLocaleTimeString("ko-KR")}] ${t}`; liveLines.push(line); setOtLiveLog(prev=>[...prev,line].slice(-300)); try{pushLiveLog(user.id,{name:user.name,email:user.email,context:"⚡ 원터치 발행",text:liveLines.slice(-80).join("\n"),running});}catch{}};
+    // ── 키워드 결정: AI 자동추천이면 정한 수만큼 생성(14일 중복제외), 아니면 입력칸 ──
+    let kws:string[];
+    if(otAiKw){
+      otLive(`🤖 AI 자동추천 키워드 ${otAiKwCount}개 생성 중(핫이슈+SEO·14일 중복 제외)`);
+      try{ kws=await otGenKeywords(otAiKwCount); }catch(e:any){ otLive(`❌ 키워드 생성 실패: ${e.message||"오류"}`,false); showToast("AI 키워드 생성 실패","error"); setOtRunning(false); return; }
+      if(!kws.length){ otLive(`❌ 생성된 키워드가 없어요(최근 사용분 제외 후 0개). 잠시 후 다시 시도하세요.`,false); showToast("생성된 키워드가 없어요","error"); setOtRunning(false); return; }
+      otLive(`✅ 생성된 키워드 ${kws.length}개: ${kws.join(", ")}`);
+    } else {
+      kws=otKeywords.split(/[\n,]+/).map(s=>s.trim()).filter(Boolean);
+      if(!kws.length){ showToast("키워드를 한 줄에 하나씩 넣거나, AI 자동추천을 켜세요","error"); setOtRunning(false); return; }
+    }
+    otRecordUsedKw(kws);   // 사용한 키워드 14일 기록(다음 AI 생성에서 제외)
     const accId=pubAccId;
     // 회원 실제 카테고리 목록 확보(state 경쟁 방지 위해 직접 fetch)
     let cats:{id:string;name:string}[]=[];
@@ -6445,12 +6480,42 @@ POST3: (제목)|(이유)
 
                 {/* 키워드 입력 */}
                 <div className="card" style={{marginBottom:14,border:`1.5px solid ${OT}33`}}>
-                  <div className="card-title" style={{marginBottom:8,color:OT}}>⌨️ 키워드 <span style={{fontSize:12,fontWeight:600,color:"var(--text3)"}}>· 한 줄에 하나씩 (콤마도 가능)</span></div>
-                  <textarea className="inp" value={otKeywords} onChange={e=>setOtKeywords(e.target.value)} disabled={otRunning}
-                    placeholder={"예)\n원주 맛집\n겨울 제철 음식\n소상공인 정책자금 신청"} rows={6}
-                    style={{width:"100%",resize:"vertical",lineHeight:1.6,fontSize:14}}/>
-                  <div style={{fontSize:12,color:"var(--text2)",marginTop:6}}>지금 <b style={{color:OT}}>{kwList.length}개</b> 키워드 · 오늘 발행 가능 <b>{isUnlim?"무제한":`${remain}건`}</b>
-                    {!isUnlim&&kwList.length>remain&&<span style={{color:"#f59e0b",fontWeight:700}}> · {willRun}개만 발행되고 나머지는 한도 부족 안내가 떠요</span>}</div>
+                  <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,flexWrap:"wrap",marginBottom:8}}>
+                    <div className="card-title" style={{margin:0,color:OT}}>⌨️ 키워드 <span style={{fontSize:12,fontWeight:600,color:"var(--text3)"}}>· {otAiKw?"AI가 자동 생성":"한 줄에 하나씩"}</span></div>
+                    {/* AI 자동추천 토글 */}
+                    <button onClick={()=>{const v=!otAiKw;setOtAiKw(v);localStorage.setItem("publy_ot_aikw",v?"1":"0");}} disabled={otRunning}
+                      style={{display:"flex",alignItems:"center",gap:8,padding:"6px 12px",borderRadius:99,border:`2px solid ${otAiKw?OT:"var(--border)"}`,background:otAiKw?`${OT}16`:"var(--bg)",cursor:otRunning?"default":"pointer",fontFamily:"inherit"}}>
+                      <span style={{fontSize:12.5,fontWeight:800,color:otAiKw?OT:"var(--text2)"}}>🤖 AI 자동추천 키워드</span>
+                      <span style={{width:34,height:20,borderRadius:99,background:otAiKw?OT:"var(--border)",position:"relative",transition:"all .15s",flexShrink:0}}>
+                        <span style={{position:"absolute",top:2,left:otAiKw?16:2,width:16,height:16,borderRadius:99,background:"#fff",transition:"all .15s"}}/>
+                      </span>
+                    </button>
+                  </div>
+                  {otAiKw
+                    ? <div style={{padding:"14px",borderRadius:12,background:`${OT}08`,border:`1.5px dashed ${OT}44`}}>
+                        <div style={{fontSize:13,color:"var(--text2)",lineHeight:1.6,marginBottom:12}}>키워드 고민 없이! <b style={{color:OT}}>핫이슈 + SEO 최적화</b> 키워드를 정한 개수만큼 <b>아주 다양하게 자동 생성</b>해서 발행해요. <b>한 번 쓴 키워드는 14일간 다시 안 나와요.</b></div>
+                        <div style={{fontSize:13,fontWeight:700,marginBottom:6}}>주제 카테고리 <span style={{fontSize:11,fontWeight:600,color:"var(--text3)"}}>· 여러 개 선택 (안 고르면 전체 다양하게)</span></div>
+                        <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:14}}>
+                          {OT_KW_CATS.map(c=>{const on=otAiCats.includes(c);return(
+                            <button key={c} disabled={otRunning} onClick={()=>setOtAiCats(prev=>prev.includes(c)?prev.filter(x=>x!==c):[...prev,c])} style={{padding:"7px 12px",borderRadius:99,border:`1.5px solid ${on?OT:"var(--border)"}`,background:on?`${OT}16`:"var(--bg)",color:on?OT:"var(--text2)",cursor:otRunning?"default":"pointer",fontSize:12.5,fontWeight:700,fontFamily:"inherit"}}>{on?"✓ ":""}{c}</button>
+                          );})}
+                        </div>
+                        <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
+                          <span style={{fontSize:13,fontWeight:700}}>생성 개수</span>
+                          <input className="inp" type="number" min={1} max={30} disabled={otRunning} value={otAiKwCount} onChange={e=>setOtAiKwCount(Math.max(1,Math.min(30,parseInt(e.target.value)||5)))} style={{width:90}}/>
+                          <span style={{fontSize:13,color:"var(--text2)",fontWeight:700}}>개</span>
+                          <button onClick={()=>{localStorage.setItem("publy_ot_aikw_count",String(otAiKwCount));localStorage.setItem("publy_ot_aikw","1");localStorage.setItem("publy_ot_aicats",JSON.stringify(otAiCats));showToast(`✅ 저장! 시작하면 AI가 ${otAiKwCount}개 자동 생성해요${otAiCats.length?` (${otAiCats.length}개 주제)`:""}`,"success");}} disabled={otRunning}
+                            style={{padding:"8px 16px",borderRadius:9,border:"none",background:`linear-gradient(135deg,${OT},#c026d3)`,color:"#fff",cursor:otRunning?"default":"pointer",fontSize:13,fontWeight:800,fontFamily:"inherit"}}>💾 저장</button>
+                        </div>
+                        <div style={{fontSize:11.5,color:"var(--text3)",marginTop:10}}>👉 아래 <b style={{color:OT}}>⚡ 원터치 발행 시작</b>을 누르면 그 순간 {otAiKwCount}개{otAiCats.length?` (${otAiCats.join("·")})`:""}를 생성해서 순서대로 올려요.</div>
+                      </div>
+                    : <>
+                        <textarea className="inp" value={otKeywords} onChange={e=>setOtKeywords(e.target.value)} disabled={otRunning}
+                          placeholder={"예)\n원주 맛집\n겨울 제철 음식\n소상공인 정책자금 신청"} rows={6}
+                          style={{width:"100%",resize:"vertical",lineHeight:1.6,fontSize:14}}/>
+                        <div style={{fontSize:12,color:"var(--text2)",marginTop:6}}>지금 <b style={{color:OT}}>{kwList.length}개</b> 키워드 · 오늘 발행 가능 <b>{isUnlim?"무제한":`${remain}건`}</b>
+                          {!isUnlim&&kwList.length>remain&&<span style={{color:"#f59e0b",fontWeight:700}}> · {willRun}개만 발행되고 나머지는 한도 부족 안내가 떠요</span>}</div>
+                      </>}
                 </div>
 
                 {/* 발행 계정 */}
@@ -6532,7 +6597,9 @@ POST3: (제목)|(이유)
 
                 {/* 시작/멈춤 */}
                 {!otRunning
-                  ? <button onClick={runOneTouch} disabled={!kwList.length||!pubAccId} style={{width:"100%",padding:"16px",borderRadius:14,border:"none",background:kwList.length&&pubAccId?`linear-gradient(135deg,${OT},#c026d3)`:"var(--border)",color:"#fff",fontSize:17,fontWeight:900,fontFamily:"inherit",cursor:kwList.length&&pubAccId?"pointer":"default",boxShadow:kwList.length&&pubAccId?`0 6px 20px ${OT}44`:"none",transition:"all .15s"}}>⚡ 원터치 발행 시작 {kwList.length>0&&`(${willRun}개)`}</button>
+                  ? (()=>{const ready=(otAiKw?otAiKwCount>0:kwList.length>0)&&!!pubAccId; return (
+                    <button onClick={runOneTouch} disabled={!ready} style={{width:"100%",padding:"16px",borderRadius:14,border:"none",background:ready?`linear-gradient(135deg,${OT},#c026d3)`:"var(--border)",color:"#fff",fontSize:17,fontWeight:900,fontFamily:"inherit",cursor:ready?"pointer":"default",boxShadow:ready?`0 6px 20px ${OT}44`:"none",transition:"all .15s"}}>⚡ 원터치 발행 시작 {otAiKw?`(AI ${otAiKwCount}개 자동생성)`:(kwList.length>0?`(${willRun}개)`:"")}</button>
+                  );})()
                   : <button onClick={stopOneTouch} style={{width:"100%",padding:"16px",borderRadius:14,border:"none",background:"linear-gradient(135deg,#ef4444,#f43f5e)",color:"#fff",fontSize:17,fontWeight:900,fontFamily:"inherit",cursor:"pointer"}}>⏹ 멈추기 {otNextAt&&`· 다음 발행까지 ${Math.max(0,Math.ceil((otNextAt-Date.now())/60000))}분`}</button>}
 
                 {/* 로그 — 항상 표시(작업 안 할 때도 지난 기록 확인), 자동 저장 */}
