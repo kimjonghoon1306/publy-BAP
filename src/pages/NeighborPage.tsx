@@ -3263,16 +3263,16 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
                     );
                   })()}
 
-                  {/* 🤖 AEO 형식 진단 — 내 글이 'AI가 인용하기 좋은 형식'인지 체크(도입요약·Q&A·구조화) */}
+                  {/* 📋 AEO 형식 진단 — 내 글이 'AI가 인용하기 좋은 형식'인지 체크(도입요약·Q&A·구조화) */}
                   <div style={{ marginBottom: 20, padding: "16px", borderRadius: 14, background: "linear-gradient(135deg,rgba(124,58,237,.08),rgba(14,165,233,.06))", border: "1.5px solid rgba(124,58,237,.3)" }}>
                     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap", marginBottom: 6 }}>
                       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                        <span style={{ fontSize: 18 }}>🤖</span>
+                        <span style={{ fontSize: 18 }}>📋</span>
                         <div style={{ fontSize: 14, fontWeight: 850, color: "#7c3aed" }}>AI 검색 최적화(AEO) 형식 진단</div>
                       </div>
                       <button onClick={runAeoCheck} disabled={aeoLoading}
                         style={{ padding: "6px 13px", borderRadius: 9, border: "none", background: aeoLoading ? "#8a8a99" : "linear-gradient(135deg,#7c3aed,#0ea5e9)", color: "#fff", fontSize: 12, fontWeight: 800, cursor: aeoLoading ? "default" : "pointer", fontFamily: "inherit" }}>
-                        {aeoLoading ? "진단 중..." : aeoResults.length ? "🔄 다시 진단" : "🤖 내 글 진단하기"}
+                        {aeoLoading ? "진단 중..." : aeoResults.length ? "다시 진단" : "내 글 진단하기"}
                       </button>
                     </div>
                     <div style={{ fontSize: 12, color: "var(--text2)", lineHeight: 1.65, marginBottom: 10, fontWeight: 500 }}>

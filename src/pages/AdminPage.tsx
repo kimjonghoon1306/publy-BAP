@@ -2826,17 +2826,17 @@ POST3: (제목)|(이유)
     }catch{}
   }
   // 🔍 발행/원터치 탭 상단 상태배지(보기 전용) — 실제 켜고 끄기는 계정관리 탭.
-  // 🚀 AEO "대박" 배너 — 회원과 동일. 발행/원터치 상단.
+  // 🔖 AEO 강조 배너 — 회원과 동일. 발행/원터치 상단.
   function renderAeoBanner(){
     return (
-      <div style={{margin:"12px 0 0",padding:"14px 16px",borderRadius:14,background:"linear-gradient(135deg,rgba(124,58,237,.14),rgba(14,165,233,.12))",border:"1.5px solid rgba(124,58,237,.35)",position:"relative",overflow:"hidden"}}>
+      <div style={{margin:"12px 0 0",padding:"14px 16px",borderRadius:14,background:"rgba(124,58,237,.06)",border:"1.5px solid rgba(124,58,237,.3)"}}>
         <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:6}}>
-          <span style={{fontSize:22}}>🚀</span>
-          <div style={{fontSize:14,fontWeight:900,background:"linear-gradient(135deg,#7c3aed,#0ea5e9)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent",backgroundClip:"text"}}>이 글은 'AI가 인용하는 글'로 만들어져요</div>
-          <span style={{fontSize:10,fontWeight:900,color:"#fff",background:"linear-gradient(135deg,#7c3aed,#c026d3)",padding:"3px 8px",borderRadius:20}}>AEO 탑재</span>
+          <span style={{fontSize:20}}>🔖</span>
+          <div style={{fontSize:14,fontWeight:800,color:"#7c3aed"}}>이 글은 'AI가 인용하는 글'로 만들어져요</div>
+          <span style={{fontSize:10,fontWeight:800,color:"#7c3aed",background:"rgba(124,58,237,.12)",padding:"3px 8px",borderRadius:6,border:"1px solid rgba(124,58,237,.3)"}}>AEO 탑재</span>
         </div>
         <div style={{fontSize:12,color:"var(--text2)",lineHeight:1.65,fontWeight:500}}>
-          퍼블리는 <b style={{color:"#7c3aed"}}>제목·본문·Q&amp;A</b>를 <b>네이버 AI 브리핑·Cue:</b>가 답변에 <b>인용하기 좋은 형식(AEO)</b>으로 자동 작성해요. 발행하면 <b style={{color:"#0ea5e9"}}>서치어드바이저에 색인요청까지 자동</b>이라, <b>검색 상위노출 + AI 답변 노출</b>을 동시에 노려요. <span style={{color:"var(--text3)"}}>— 이거, 다른 데는 안 해줘요 👀</span>
+          퍼블리는 <b style={{color:"#7c3aed"}}>제목·본문·Q&amp;A</b>를 <b>네이버 AI 브리핑·Cue:</b>가 답변에 <b>인용하기 좋은 형식(AEO)</b>으로 자동 작성해요. 발행하면 <b style={{color:"#0ea5e9"}}>서치어드바이저에 색인요청까지 자동</b>이라, <b>검색 상위노출 + AI 답변 노출</b>을 동시에 노려요.
         </div>
       </div>
     );
