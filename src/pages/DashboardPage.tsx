@@ -1322,15 +1322,21 @@ Output (JSON object only): {"keyword":"핵심키워드","title":"새 SEO 제목"
   const [hotPage, setHotPage] = useState(0); // 핫이슈 페이지네이션(주제 많아 아래로 길어짐 방지)
   const HOT_PAGE_SIZE = 20;
   const [quickKw, setQuickKw] = useState(""); // 핫이슈로 '바로 글쓰기'용(캘린더 스케줄과 별개 파이프라인)
-  // ⚡ 원터치 발행(BEST): 키워드 여러 개 → 제목→본문→이미지→카테고리 자동→발행, 텀 간격 반복 (v1)
+  // ⚡ 원터치 발행(BEST): 키워드 여러 개 → 제목→본문→이미지→카테고리 자동→발행, 텀 간격 반복
   const [otKeywords,setOtKeywords]=useState("");
   const [otTermMin,setOtTermMin]=useState(60);            // 발행 텀(분): 프리셋 10/30/60/120 + 직접입력
   const [otCustomTerm,setOtCustomTerm]=useState("");
   const [otImgCount,setOtImgCount]=useState(3);
+  const [otImgMode,setOtImgMode]=useState<"flow"|"ai">("flow");   // Flow(무료·봇이 발행중 생성) vs AI(DALL-E/Replicate 유료키)
+  const [otCharMode,setOtCharMode]=useState<"auto"|"manual">("auto");
+  const [otTargetChars,setOtTargetChars]=useState(1500);
+  const [otWriteStyle,setOtWriteStyle]=useState<WriteStyle>("정보글");
   const [otRunning,setOtRunning]=useState(false);
   const otStopRef=useRef(false);
+  const otAbortRef=useRef<AbortController|null>(null);   // 진행 중 즉시 중단용
   const [otNextAt,setOtNextAt]=useState<number|null>(null);
-  const [otLog,setOtLog]=useState<{id:string;kw:string;title?:string;cat?:string;step:string;status:"wait"|"run"|"done"|"fail"|"limit";postUrl?:string;error?:string;at?:string}[]>([]);
+  const [otLog,setOtLog]=useState<{id:string;kw:string;title?:string;cat?:string;step:string;status:"wait"|"run"|"done"|"fail"|"limit";postUrl?:string;error?:string;at?:string}[]>(()=>{try{return JSON.parse(localStorage.getItem("publy_ot_log")||"[]");}catch{return [];}});
+  useEffect(()=>{try{localStorage.setItem("publy_ot_log",JSON.stringify(otLog.slice(0,50)));}catch{}},[otLog]);   // 로그 저장(작업 안 할 때도 항상 확인)
   // 봇 오프라인/웹 미리보기 대비 폴백(카테고리별 무난한 인기 주제) — 빈 화면 방지
   const HOT_FALLBACK: Record<string,string[]> = {
     실시간:["요즘 뜨는 부업","정부지원금 신청","가을 여행지 추천","제철 음식 요리","전기요금 절약법","1인 창업 아이템","연말정산 미리보기","청년 지원 정책","넷플릭스 추천작","다이어트 식단","반려동물 용품","스마트스토어 창업","환절기 건강관리","실내 인테리어 팁","제철 과일 고르는 법","중고거래 꿀팁","캠핑 초보 준비물","홈카페 레시피","가성비 노트북","주말 나들이 코스"],
@@ -2654,6 +2660,19 @@ Output (JSON object only): {"keyword":"핵심키워드","title":"새 SEO 제목"
     return [disclosure,generatedBody.trim()].join("\n\n");
   }
 
+  // ★글자수 하드 캡: AI가 지정 글자수를 무시하고 오버슈트(1500 지정→3000)하는 문제. 목표 125% 초과 시 FAQ는 보존하고 본문 문단을 잘라 목표 근처로 맞춤.
+  function enforceMaxChars(body:string, target:number):string{
+    if(!target||body.length<=Math.round(target*1.25))return body;
+    const faqIdx=body.search(/\[FAQ시작\]|자주\s*묻는\s*질문|(?:^|\n)\s*Q\s*1\s*[:：.]/);
+    const main=faqIdx>0?body.slice(0,faqIdx):body;
+    const tail=faqIdx>0?body.slice(faqIdx):"";
+    if(main.length<=Math.round(target*1.25))return body;
+    const paras=main.split(/\n\n+/);
+    let out="";
+    for(const p of paras){ if(out.length>=target*0.85 && (out+"\n\n"+p).length>target) break; out+=(out?"\n\n":"")+p; }
+    if(!out.trim())out=main.slice(0,target);
+    return (out.trim()+(tail?"\n\n"+tail.trim():"")).trim();
+  }
   async function handleGenerate(){
     if(!selectedTitle&&!keyword){alert("키워드와 제목을 먼저 선택해주세요");return;}
     const title=selectedTitle||keyword;
@@ -2815,7 +2834,8 @@ POST3: (제목)|(이유)
       const generatedBody=ensureQuestionHeadings(bm?bm[1].trim():cleaned,keyword||title);
       const body0=onPartnerItems.length>0?placeOnPartnerProduct(generatedBody,onPartnerItems.map(it=>it.product)):generatedBody.trim();
       // ★키워드 완성: 입력 형태 그대로 최소 5회 보장(형태통일→부족시 AI재요청→최후 문장보충). 상위노출의 핵심.
-      const body=await ensureKeywordCount(body0,keyword||title,5);
+      const bodyRaw=await ensureKeywordCount(body0,keyword||title,5);
+      const body=charMode==="manual"?enforceMaxChars(bodyRaw,targetChars):bodyRaw;   // 직접 지정 글자수면 오버슈트 방지
       setGenContent(body);setQualityScore(calcQualityScore(body,keyword));
       setPendingPromo(null);   // 홍보 삽입 1회용 → 사용 후 해제(다음 글에 안 남게)
       // 비동기 글 생성 도중 직접입력으로 바뀌었으면 추천값으로 절대 덮지 않는다.
@@ -2876,15 +2896,17 @@ POST3: (제목)|(이유)
     return arr.slice().sort((a:string,b:string)=>calcTitleScore(b)-calcTitleScore(a))[0]; // 점수 최고 제목 선택
   }
   async function otGenPost(kw:string,title:string,signal:AbortSignal):Promise<{content:string;tags:string}>{
-    const chars=calcTargetChars();
+    const chars=otCharMode==="manual"?otTargetChars:calcTargetChars();   // 글자수 직접 지정 or 자동
     const catGuide=getCatGuide(kw,title);
-    const prompt=`당신은 대한민국 최고의 블로그 작가입니다.\n키워드: "${kw}"  제목: "${title}"\n목표 글자수: ${chars}자 내외(±100자)\n\n${catGuide}\n\n=== 절대 규칙 ===\n⛔ ## 및 ** * - + 마크다운 기호 전부 금지(소제목도 순수 텍스트)\n⛔ 한자·중국어·일본어·영어단어 금지(브랜드명 제외)\n⛔ AI 상투어 금지(~해보겠습니다/살펴보겠습니다/결론적으로/다양한/효과적인) → 실제 사람 말투(~해요, ~거든요, ~더라고요)\n✅ ★핵심 키워드 "${kw}"를 본문에 띄어쓰기·글자 그대로 정확히 5~6번 반복(검색 노출 핵심)\n✅ 구체적 수치·가격·기간·경험담 포함, 과장·거짓 금지\n✅ 본문을 4~6개 구간으로 나누고 각 구간 앞에 짧은 소제목(10~30자, ## 없이)\n✅ 소제목 일부에 검색요소(왜/어떻게/추천/가격/후기/비교/주의점)\n✅ 모든 단락 사이 빈 줄 하나(엔터 두 번), 한 단락 2~4문장(모바일 가독성)\n\n=== 출력 형식 ===\n태그: 태그1, 태그2, 태그3, 태그4, 태그5\n\n(본문 ${chars}자 내외 순수 텍스트)\n\n[FAQ시작]\nQ1: (질문)\nA1: (답변)\nQ2: (질문)\nA2: (답변)\nQ3: (질문)\nA3: (답변)\n[FAQ끝]`;
+    const styleGuide=WRITE_STYLE_GUIDE[otWriteStyle]||"";                  // 글 패턴(감성일기/정보글/맛집후기/여행기)
+    const prompt=`당신은 대한민국 최고의 블로그 작가입니다.\n키워드: "${kw}"  제목: "${title}"\n목표 글자수: ${chars}자 내외(±100자, 반드시 이 범위)\n\n${catGuide}\n\n${styleGuide?"★ 아래 [글의 방향]을 최우선으로 따를 것:\n"+styleGuide+"\n":""}\n=== 절대 규칙 ===\n⛔ ## 및 ** * - + 마크다운 기호 전부 금지(소제목도 순수 텍스트)\n⛔ 한자·중국어·일본어·영어단어 금지(브랜드명 제외)\n⛔ AI 상투어 금지(~해보겠습니다/살펴보겠습니다/결론적으로/다양한/효과적인) → 실제 사람 말투(~해요, ~거든요, ~더라고요)\n✅ ★핵심 키워드 "${kw}"를 본문에 띄어쓰기·글자 그대로 정확히 5~6번 반복(검색 노출 핵심)\n✅ 구체적 수치·가격·기간·경험담 포함, 과장·거짓 금지\n✅ 본문을 4~6개 구간으로 나누고 각 구간 앞에 짧은 소제목(10~30자, ## 없이)\n✅ 소제목 일부에 검색요소(왜/어떻게/추천/가격/후기/비교/주의점)\n✅ 모든 단락 사이 빈 줄 하나(엔터 두 번), 한 단락 2~4문장(모바일 가독성)\n\n=== 출력 형식 ===\n태그: 태그1, 태그2, 태그3, 태그4, 태그5\n\n(본문 ${chars}자 내외 순수 텍스트)\n\n[FAQ시작]\nQ1: (질문)\nA1: (답변)\nQ2: (질문)\nA2: (답변)\nQ3: (질문)\nA3: (답변)\n[FAQ끝]`;
     const text=await callAI(prompt,signal);
     const cleaned=stripMarkdown(text);
     const tgm=cleaned.match(/태그[:\s]*([^\n]+)/);
     const bm=cleaned.match(/태그[^\n]*\n([\s\S]+)/);
     const body0=ensureQuestionHeadings(bm?bm[1].trim():cleaned,kw);
-    const body=await ensureKeywordCount(body0,kw,5);   // 키워드 최소 5회 보장
+    const bodyRaw=await ensureKeywordCount(body0,kw,5);   // 키워드 최소 5회 보장
+    const body=otCharMode==="manual"?enforceMaxChars(bodyRaw,otTargetChars):bodyRaw;   // 지정 글자수 오버슈트 방지
     return {content:body,tags:tgm?tgm[1].trim():""};
   }
   // 회원 실제 네이버 카테고리 목록 ↔ 글 주제 AI 매칭 → 가장 맞는 카테고리 자동 선택
@@ -2899,12 +2921,13 @@ POST3: (제목)|(이유)
     }catch{}
     return cats[0];
   }
-  async function otPublishItem(kw:string,title:string,content:string,tags:string[],images:string[],categoryId:string|undefined,accId:string):Promise<string>{
+  // flowN>0 → 무료 Flow: 이미지를 미리 안 만들고 봇이 발행 중 생성·삽입(일반 발행의 useFlow와 동일). images는 빈 배열.
+  async function otPublishItem(kw:string,title:string,content:string,tags:string[],images:string[],categoryId:string|undefined,accId:string,flowN:number=0):Promise<string>{
     const acc=connAccs.find(a=>a.id===accId);
     const blocks:any[]=[];
-    if(images[0])blocks.push({type:"image",src:images[0],alt:""});   // 썸네일 alt는 항상 비움(본문 유실 방지)
+    if(!flowN&&images[0])blocks.push({type:"image",src:images[0],alt:""});   // 썸네일 alt는 항상 비움(본문 유실 방지)
     const paras=content.split(/\n\n+/).map(s=>s.trim()).filter(Boolean);
-    const rest=images.slice(1);
+    const rest=flowN?[]:images.slice(1);
     const every=rest.length?Math.max(1,Math.floor(paras.length/(rest.length+1))):0;
     let ri=0;
     paras.forEach((p,i)=>{
@@ -2912,16 +2935,23 @@ POST3: (제목)|(이유)
       if(every&&ri<rest.length&&(i+1)%every===0){blocks.push({type:"image",src:rest[ri],alt:`${kw} 사진 ${ri+2}`});ri++;}
     });
     while(ri<rest.length){blocks.push({type:"image",src:rest[ri],alt:`${kw} 사진 ${ri+2}`});ri++;}
-    const payload={userId:user.id,platform:"naver",title,content,
+    const payload:any={userId:user.id,platform:"naver",title,content,
       naverId:acc?.username||undefined,pubScope,tags,
-      imageUrl:images[0]||undefined,categoryId:categoryId||undefined,visibility,blocks};
+      imageUrl:(!flowN&&images[0])||undefined,categoryId:categoryId||undefined,visibility,blocks};
+    if(flowN){   // 무료 Flow: 봇이 발행 중 flowN장 생성. 본문 구간별 프롬프트 + 캡션 전달(일반 발행과 동일).
+      const lines=content.split("\n").filter((l:string)=>l.trim().length>5);
+      const step=Math.max(1,Math.floor(lines.length/flowN));
+      payload.useFlow=true; payload.flowImgCount=flowN;
+      payload.flowPrompts=Array.from({length:flowN},(_,i)=>{const seg=lines.slice(i*step,(i+1)*step).join(" ").slice(0,150);return buildFlowPrompt(kw,title,seg,i);});
+      payload.flowCaptions=buildCaptions(kw,flowN,content);
+    }
     const r=await botFetch(`${BOT}/api/publish-full`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});
     const d=await r.json().catch(()=>({}));
     if(r.status===401)throw new Error("세션 만료 — 계정 관리에서 재연결해주세요");
     if(!r.ok)throw new Error(d.error||"발행 실패");
     return d.postUrl||"";
   }
-  function stopOneTouch(){otStopRef.current=true;setOtRunning(false);setOtNextAt(null);showToast("원터치를 멈췄어요","info");}
+  function stopOneTouch(){otStopRef.current=true;try{otAbortRef.current?.abort();}catch{};setOtRunning(false);setOtNextAt(null);showToast("원터치를 멈췄어요 — 진행 중이던 작업도 중단","info");}
   async function runOneTouch(){
     if(otRunning)return;
     const kws=otKeywords.split(/[\n,]+/).map(s=>s.trim()).filter(Boolean);
@@ -2949,18 +2979,23 @@ POST3: (제목)|(이유)
         showToast(`오늘 발행 한도(${q.limit}건)를 다 썼어요. 남은 키워드는 등급을 올리면 발행돼요`,"info");
         break;
       }
-      const signal=new AbortController().signal;
+      const ctrl=new AbortController(); otAbortRef.current=ctrl; const signal=ctrl.signal;
+      const n=Math.min(6,Math.max(1,otImgCount));
+      const flowN=otImgMode==="flow"?n:0;   // Flow=봇이 발행 중 생성, AI=미리 생성
       try{
         upd({step:"제목 생성 중",status:"run"}); otLive(`▶ [${i+1}/${kws.length}] "${kw}" 제목 생성 중`); const title=await otGenTitleBest(kw,signal); upd({title}); otLive(`  ✅ 제목 선택: ${title}`);
-        upd({step:"본문 생성 중"}); otLive(`  ✍️ 본문 생성 중(키워드 5~6회 삽입)`); const {content,tags}=await otGenPost(kw,title,signal); otLive(`  ✅ 본문 완성 (${content.length}자)`);
-        upd({step:"이미지 생성 중"}); const n=Math.min(6,Math.max(1,otImgCount)); const imgs:string[]=[]; otLive(`  🖼️ 이미지 ${n}장 생성 중`);
-        for(let k=0;k<n;k++){ if(otStopRef.current)break; try{imgs.push(await generateOneImage(kw,signal,k));}catch{} }
-        otLive(`  ✅ 이미지 ${imgs.length}/${n}장`);
+        upd({step:"본문 생성 중"}); otLive(`  ✍️ 본문 생성 중(${otCharMode==="manual"?otTargetChars+"자·":""}${otWriteStyle}·키워드 5~6회)`); const {content,tags}=await otGenPost(kw,title,signal); otLive(`  ✅ 본문 완성 (${content.length}자)`);
+        const imgs:string[]=[];
+        if(flowN){ otLive(`  🖼️ 이미지 ${flowN}장 = 발행 시 자동 생성(무료 Flow)`); }
+        else { upd({step:"이미지 생성 중"}); otLive(`  🖼️ 이미지 ${n}장 생성 중(AI)`);
+          for(let k=0;k<n;k++){ if(otStopRef.current)break; try{imgs.push(await generateOneImage(kw,signal,k));}catch(ie:any){otLive(`  ⚠️ 이미지 ${k+1} 실패: ${ie.message||"오류"}`);} }
+          otLive(`  ✅ 이미지 ${imgs.length}/${n}장`);
+        }
         upd({step:"카테고리 매칭 중"}); const cat=await otPickCategory(title,content,cats,signal); upd({cat:cat.name||"기본"}); otLive(`  📂 카테고리 자동 선택: ${cat.name||"기본"}`);
         const ok=await useQuota(user.id); if(!ok){upd({step:"발행 건수 초과",status:"limit"});otLive(`  ⛔ 발행 건수 초과`,false);break;}
-        upd({step:"발행 중"}); otLive(`  🚀 네이버 발행 중...`);
+        upd({step:flowN?"발행+이미지 생성 중":"발행 중"}); otLive(`  🚀 네이버 발행 중${flowN?"(이미지 자동 생성 포함)":""}...`);
         let postUrl="";
-        try{ postUrl=await otPublishItem(kw,title,content,tags.split(",").map(t=>t.replace("#","").trim()).filter(Boolean),imgs,cat.id,accId); }
+        try{ postUrl=await otPublishItem(kw,title,content,tags.split(",").map(t=>t.replace("#","").trim()).filter(Boolean),imgs,cat.id,accId,flowN); }
         catch(e:any){ await refundQuota(user.id); throw e; }
         await incrementDailyPublish(user.id); setDailyPublishUsed(p=>p+1);
         await addHistory({user_id:user.id,platform:"naver",title,post_url:postUrl,status:"success"}).catch(()=>{});
@@ -6397,6 +6432,31 @@ POST3: (제목)|(이유)
                     ))}
                 </div>
 
+                {/* 글·이미지 설정 */}
+                <div className="card" style={{marginBottom:14}}>
+                  <div className="card-title" style={{marginBottom:10}}>✍️ 글·이미지 설정</div>
+                  <div style={{fontSize:13,fontWeight:700,marginBottom:6}}>글 패턴</div>
+                  <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:14}}>
+                    {WRITE_STYLES.map(s=>{const on=otWriteStyle===s.id;return(
+                      <button key={s.id} disabled={otRunning} onClick={()=>setOtWriteStyle(s.id)} style={{padding:"9px 14px",borderRadius:10,border:`2px solid ${on?OT:"var(--border)"}`,background:on?`${OT}16`:"var(--bg)",color:on?OT:"var(--text2)",cursor:otRunning?"default":"pointer",fontSize:13,fontWeight:800,fontFamily:"inherit"}}>{s.i} {s.id}</button>
+                    );})}
+                  </div>
+                  <div style={{fontSize:13,fontWeight:700,marginBottom:6}}>글자수</div>
+                  <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center",marginBottom:14}}>
+                    {(["auto","manual"] as const).map(m=>{const on=otCharMode===m;return(
+                      <button key={m} disabled={otRunning} onClick={()=>setOtCharMode(m)} style={{padding:"9px 14px",borderRadius:10,border:`2px solid ${on?OT:"var(--border)"}`,background:on?`${OT}16`:"var(--bg)",color:on?OT:"var(--text2)",cursor:otRunning?"default":"pointer",fontSize:13,fontWeight:800,fontFamily:"inherit"}}>{m==="auto"?"✨ 자동":"✍️ 직접"}</button>
+                    );})}
+                    {otCharMode==="manual"&&<><input className="inp" type="number" min={500} max={5000} step={100} disabled={otRunning} value={otTargetChars} onChange={e=>setOtTargetChars(Math.max(500,Math.min(5000,parseInt(e.target.value)||1500)))} style={{width:100}}/><span style={{fontSize:13,color:"var(--text2)",fontWeight:700}}>자</span></>}
+                  </div>
+                  <div style={{fontSize:13,fontWeight:700,marginBottom:6}}>이미지 방식</div>
+                  <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                    {([["flow","🆓 Flow (무료)"],["ai","🎨 AI (유료 키)"]] as const).map(([m,l])=>{const on=otImgMode===m;return(
+                      <button key={m} disabled={otRunning} onClick={()=>setOtImgMode(m)} style={{padding:"9px 14px",borderRadius:10,border:`2px solid ${on?OT:"var(--border)"}`,background:on?`${OT}16`:"var(--bg)",color:on?OT:"var(--text2)",cursor:otRunning?"default":"pointer",fontSize:13,fontWeight:800,fontFamily:"inherit"}}>{l}</button>
+                    );})}
+                  </div>
+                  <div style={{marginTop:8,fontSize:12,color:"var(--text3)",lineHeight:1.5}}>{otImgMode==="flow"?"무료 Flow는 발행할 때 봇이 자동으로 이미지를 만들어 넣어요. (Google 로그인 필요 — 계정 관리에서 연결)":"AI 이미지는 설정 탭에 OpenAI/Replicate 키가 있어야 해요. 키가 없으면 이미지 없이 글만 올라가요."}</div>
+                </div>
+
                 {/* 텀 + 이미지 + 카테고리 */}
                 <div className="card" style={{marginBottom:14}}>
                   <div className="card-title" style={{marginBottom:10}}>⏱️ 발행 텀 <span style={{fontSize:12,fontWeight:600,color:"var(--text3)"}}>· 글 하나 올리고 다음까지 기다리는 시간</span></div>
@@ -6426,11 +6486,15 @@ POST3: (제목)|(이유)
                   ? <button onClick={runOneTouch} disabled={!kwList.length||!pubAccId} style={{width:"100%",padding:"16px",borderRadius:14,border:"none",background:kwList.length&&pubAccId?`linear-gradient(135deg,${OT},#c026d3)`:"var(--border)",color:"#fff",fontSize:17,fontWeight:900,fontFamily:"inherit",cursor:kwList.length&&pubAccId?"pointer":"default",boxShadow:kwList.length&&pubAccId?`0 6px 20px ${OT}44`:"none",transition:"all .15s"}}>⚡ 원터치 발행 시작 {kwList.length>0&&`(${willRun}개)`}</button>
                   : <button onClick={stopOneTouch} style={{width:"100%",padding:"16px",borderRadius:14,border:"none",background:"linear-gradient(135deg,#ef4444,#f43f5e)",color:"#fff",fontSize:17,fontWeight:900,fontFamily:"inherit",cursor:"pointer"}}>⏹ 멈추기 {otNextAt&&`· 다음 발행까지 ${Math.max(0,Math.ceil((otNextAt-Date.now())/60000))}분`}</button>}
 
-                {/* 로그 */}
-                {otLog.length>0&&(
-                  <div className="card" style={{marginTop:14}}>
-                    <div className="card-title" style={{marginBottom:10}}>📋 원터치 로그</div>
-                    {otLog.map((r,i)=>(
+                {/* 로그 — 항상 표시(작업 안 할 때도 지난 기록 확인), 자동 저장 */}
+                <div className="card" style={{marginTop:14}}>
+                  <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,marginBottom:10}}>
+                    <div className="card-title" style={{margin:0}}>📋 진행 상황 · 로그 {otRunning&&<span style={{fontSize:11,fontWeight:800,color:"#fff",background:OT,padding:"2px 9px",borderRadius:99,marginLeft:6}}><span className="spinner" style={{marginRight:4}}/>작업 중</span>}</div>
+                    {otLog.length>0&&!otRunning&&<button onClick={()=>{setOtLog([]);try{localStorage.removeItem("publy_ot_log");}catch{}}} style={{fontSize:11,padding:"5px 10px",borderRadius:8,border:"1px solid var(--border)",background:"var(--card2)",color:"var(--text3)",cursor:"pointer",fontWeight:700,fontFamily:"inherit"}}>🗑 기록 지우기</button>}
+                  </div>
+                  {otLog.length===0
+                    ? <div style={{fontSize:12.5,color:"var(--text3)",padding:"14px 0",textAlign:"center"}}>아직 작업 기록이 없어요. 위에서 키워드를 넣고 <b style={{color:OT}}>원터치 발행 시작</b>을 누르면 여기에 단계별 진행이 실시간으로 쌓여요.</div>
+                    : otLog.map((r,i)=>(
                       <div key={r.id} style={{display:"flex",alignItems:"center",gap:10,padding:"11px 12px",borderRadius:10,marginBottom:6,background:"var(--bg)",border:`1px solid ${r.status==="done"?"#00b48733":r.status==="fail"?"#e5397f33":r.status==="limit"?"#f59e0b33":"var(--border)"}`}}>
                         <div style={{width:24,height:24,borderRadius:99,flexShrink:0,display:"flex",alignItems:"center",justifyContent:"center",fontSize:12,fontWeight:800,background:`${stepColor(r.step,r.status)}1a`,color:stepColor(r.step,r.status)}}>{i+1}</div>
                         <div style={{flex:1,minWidth:0}}>
@@ -6444,7 +6508,6 @@ POST3: (제목)|(이유)
                       </div>
                     ))}
                   </div>
-                )}
               </div>
               );
             })()}

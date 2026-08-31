@@ -869,10 +869,28 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
   const [otTermMin,setOtTermMin]=useState(60);
   const [otCustomTerm,setOtCustomTerm]=useState("");
   const [otImgCount,setOtImgCount]=useState(3);
+  const [otImgMode,setOtImgMode]=useState<"flow"|"ai">("flow");
+  const [otCharMode,setOtCharMode]=useState<"auto"|"manual">("auto");
+  const [otTargetChars,setOtTargetChars]=useState(1500);
+  const [otWriteStyle,setOtWriteStyle]=useState<WriteStyle>("정보글");
   const [otRunning,setOtRunning]=useState(false);
   const otStopRef=useRef(false);
   const [otNextAt,setOtNextAt]=useState<number|null>(null);
-  const [otLog,setOtLog]=useState<{id:string;kw:string;title?:string;cat?:string;step:string;status:"wait"|"run"|"done"|"fail"|"limit";postUrl?:string;error?:string;at?:string}[]>([]);
+  const [otLog,setOtLog]=useState<{id:string;kw:string;title?:string;cat?:string;step:string;status:"wait"|"run"|"done"|"fail"|"limit";postUrl?:string;error?:string;at?:string}[]>(()=>{try{return JSON.parse(localStorage.getItem("publy_adm_ot_log")||"[]");}catch{return [];}});
+  useEffect(()=>{try{localStorage.setItem("publy_adm_ot_log",JSON.stringify(otLog.slice(0,50)));}catch{}},[otLog]);
+  // ★글자수 하드 캡: AI 오버슈트(1500 지정→3000) 방지. 목표 125% 초과 시 FAQ 보존하고 본문 문단을 잘라 목표 근처로.
+  function enforceMaxChars(body:string, target:number):string{
+    if(!target||body.length<=Math.round(target*1.25))return body;
+    const faqIdx=body.search(/\[FAQ시작\]|자주\s*묻는\s*질문|(?:^|\n)\s*Q\s*1\s*[:：.]/);
+    const main=faqIdx>0?body.slice(0,faqIdx):body;
+    const tail=faqIdx>0?body.slice(faqIdx):"";
+    if(main.length<=Math.round(target*1.25))return body;
+    const paras=main.split(/\n\n+/);
+    let out="";
+    for(const p of paras){ if(out.length>=target*0.85 && (out+"\n\n"+p).length>target) break; out+=(out?"\n\n":"")+p; }
+    if(!out.trim())out=main.slice(0,target);
+    return (out.trim()+(tail?"\n\n"+tail.trim():"")).trim();
+  }
   // ══ ⚡ 원터치 엔진(관리자 무제한 · 회원과 동일 흐름) ══
   async function otGenTitleBest(kw:string):Promise<string>{
     const text=await callAI(`당신은 대한민국 최고의 네이버 블로그 SEO 제목 전문가입니다.\n키워드: "${kw}"\n\n네이버 검색 상위노출이 잘 되는 제목 15개를 JSON 배열로만 반환하세요.\n- 키워드 "${kw}"를 제목 앞부분에 자연스럽게 포함\n- 20~35자, 실제 검색어 형태(추천/후기/방법/가격/비교/고르는법)\n- 과장·낚시 감탄사(대박/충격/1등/미쳤다) 금지, 물음표·느낌표 남발 금지\nJSON 배열만.`);
@@ -881,12 +899,14 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
     return arr[0];
   }
   async function otGenPost(kw:string,title:string):Promise<{content:string;tags:string}>{
-    const chars=calcTargetChars();
-    const text=await callAI(`당신은 대한민국 최고의 블로그 작가입니다.\n키워드: "${kw}"  제목: "${title}"\n목표 글자수: ${chars}자 내외(±100자)\n\n=== 절대 규칙 ===\n⛔ ## 및 ** * - + 마크다운 기호 전부 금지(소제목도 순수 텍스트)\n⛔ 한자·중국어·일본어·영어단어 금지(브랜드명 제외)\n⛔ AI 상투어 금지(~해보겠습니다/살펴보겠습니다/결론적으로/다양한/효과적인) → 실제 사람 말투(~해요, ~거든요, ~더라고요)\n✅ ★핵심 키워드 "${kw}"를 본문에 띄어쓰기·글자 그대로 정확히 5~6번 반복(검색 노출 핵심)\n✅ 구체적 수치·가격·기간·경험담 포함, 과장·거짓 금지\n✅ 본문을 4~6개 구간으로 나누고 각 구간 앞에 짧은 소제목(10~30자, ## 없이)\n✅ 모든 단락 사이 빈 줄 하나(엔터 두 번), 한 단락 2~4문장(모바일 가독성)\n\n=== 출력 형식 ===\n태그: 태그1, 태그2, 태그3, 태그4, 태그5\n\n(본문 ${chars}자 내외 순수 텍스트)\n\n[FAQ시작]\nQ1: (질문)\nA1: (답변)\nQ2: (질문)\nA2: (답변)\nQ3: (질문)\nA3: (답변)\n[FAQ끝]`);
+    const chars=otCharMode==="manual"?otTargetChars:calcTargetChars();
+    const styleGuide=WRITE_STYLE_GUIDE[otWriteStyle]||"";
+    const text=await callAI(`당신은 대한민국 최고의 블로그 작가입니다.\n키워드: "${kw}"  제목: "${title}"\n목표 글자수: ${chars}자 내외(±100자, 반드시 이 범위)\n\n${styleGuide?"★ 아래 [글의 방향]을 최우선으로:\n"+styleGuide+"\n\n":""}=== 절대 규칙 ===\n⛔ ## 및 ** * - + 마크다운 기호 전부 금지(소제목도 순수 텍스트)\n⛔ 한자·중국어·일본어·영어단어 금지(브랜드명 제외)\n⛔ AI 상투어 금지(~해보겠습니다/살펴보겠습니다/결론적으로/다양한/효과적인) → 실제 사람 말투(~해요, ~거든요, ~더라고요)\n✅ ★핵심 키워드 "${kw}"를 본문에 띄어쓰기·글자 그대로 정확히 5~6번 반복(검색 노출 핵심)\n✅ 구체적 수치·가격·기간·경험담 포함, 과장·거짓 금지\n✅ 본문을 4~6개 구간으로 나누고 각 구간 앞에 짧은 소제목(10~30자, ## 없이)\n✅ 모든 단락 사이 빈 줄 하나(엔터 두 번), 한 단락 2~4문장(모바일 가독성)\n\n=== 출력 형식 ===\n태그: 태그1, 태그2, 태그3, 태그4, 태그5\n\n(본문 ${chars}자 내외 순수 텍스트)\n\n[FAQ시작]\nQ1: (질문)\nA1: (답변)\nQ2: (질문)\nA2: (답변)\nQ3: (질문)\nA3: (답변)\n[FAQ끝]`);
     const cleaned=stripMarkdown(text);
     const tgm=cleaned.match(/태그[:\s]*([^\n]+)/);
     const bm=cleaned.match(/태그[^\n]*\n([\s\S]+)/);
-    const body=await ensureKeywordCount(bm?bm[1].trim():cleaned,kw,5);
+    const bodyRaw=await ensureKeywordCount(bm?bm[1].trim():cleaned,kw,5);
+    const body=otCharMode==="manual"?enforceMaxChars(bodyRaw,otTargetChars):bodyRaw;
     return {content:body,tags:tgm?tgm[1].trim():""};
   }
   async function otPickCategory(title:string,content:string,cats:{id:string;name:string}[]):Promise<{id?:string;name?:string}>{
@@ -897,14 +917,21 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
       const m=t.match(/\d+/); const idx=m?parseInt(m[0],10)-1:-1; if(idx>=0&&idx<cats.length)return cats[idx]; }catch{}
     return cats[0];
   }
-  async function otPublishItem(kw:string,title:string,content:string,tags:string[],images:string[],categoryId:string|undefined,acc:PublyAccount|undefined):Promise<string>{
+  async function otPublishItem(kw:string,title:string,content:string,tags:string[],images:string[],categoryId:string|undefined,acc:PublyAccount|undefined,flowN:number=0):Promise<string>{
     const blocks:any[]=[];
-    if(images[0])blocks.push({type:"image",src:images[0],alt:""});
+    if(!flowN&&images[0])blocks.push({type:"image",src:images[0],alt:""});
     const paras=content.split(/\n\n+/).map(s=>s.trim()).filter(Boolean);
-    const rest=images.slice(1); const every=rest.length?Math.max(1,Math.floor(paras.length/(rest.length+1))):0; let ri=0;
+    const rest=flowN?[]:images.slice(1); const every=rest.length?Math.max(1,Math.floor(paras.length/(rest.length+1))):0; let ri=0;
     paras.forEach((p,i)=>{ blocks.push({type:"text",content:p}); if(every&&ri<rest.length&&(i+1)%every===0){blocks.push({type:"image",src:rest[ri],alt:`${kw} 사진 ${ri+2}`});ri++;} });
     while(ri<rest.length){blocks.push({type:"image",src:rest[ri],alt:`${kw} 사진 ${ri+2}`});ri++;}
-    const payload={userId:ADM_UID,platform:"naver",title,content,naverId:acc?.username||undefined,pubScope,tags,imageUrl:images[0]||undefined,categoryId:categoryId||undefined,visibility,blocks};
+    const payload:any={userId:ADM_UID,platform:"naver",title,content,naverId:acc?.username||undefined,pubScope,tags,imageUrl:(!flowN&&images[0])||undefined,categoryId:categoryId||undefined,visibility,blocks};
+    if(flowN){   // 무료 Flow: 봇이 발행 중 생성
+      const lines=content.split("\n").filter((l:string)=>l.trim().length>5);
+      const step=Math.max(1,Math.floor(lines.length/flowN));
+      payload.useFlow=true; payload.flowImgCount=flowN;
+      payload.flowPrompts=Array.from({length:flowN},(_,i)=>{const seg=lines.slice(i*step,(i+1)*step).join(" ").slice(0,150);return buildAdmFlowPrompt(kw,title,seg,i);});
+      payload.flowCaptions=buildCaptions(kw,flowN,content);
+    }
     const r=await botFetch(`${BOT}/api/publish-full`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});
     const d=await r.json().catch(()=>({}));
     if(r.status===401)throw new Error("세션 만료 — 계정 재연결 필요");
@@ -927,14 +954,18 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
     for(let i=0;i<kws.length;i++){
       if(otStopRef.current)break;
       const kw=kws[i]; const upd=(patch:any)=>setOtLog(prev=>prev.map((r,j)=>j===i?{...r,...patch}:r));
+      const n=Math.min(6,Math.max(1,otImgCount));
+      const flowN=otImgMode==="flow"?n:0;
       try{
         upd({step:"제목 생성 중",status:"run"}); const title=await otGenTitleBest(kw); upd({title});
         upd({step:"본문 생성 중"}); const {content,tags}=await otGenPost(kw,title);
-        upd({step:"이미지 생성 중"}); const n=Math.min(6,Math.max(1,otImgCount)); const imgs:string[]=[];
-        for(let k=0;k<n;k++){ if(otStopRef.current)break; try{imgs.push(await generateImage(kw,title,k));}catch{} }
+        const imgs:string[]=[];
+        if(!flowN){ upd({step:"이미지 생성 중"});
+          for(let k=0;k<n;k++){ if(otStopRef.current)break; try{imgs.push(await generateImage(kw,title,k));}catch{} }
+        }
         upd({step:"카테고리 매칭 중"}); const cat=await otPickCategory(title,content,cats); upd({cat:cat.name||"기본"});
-        upd({step:"발행 중"});
-        const postUrl=await otPublishItem(kw,title,content,tags.split(",").map(t=>t.replace("#","").trim()).filter(Boolean),imgs,cat.id,acc);
+        upd({step:flowN?"발행+이미지 생성 중":"발행 중"});
+        const postUrl=await otPublishItem(kw,title,content,tags.split(",").map(t=>t.replace("#","").trim()).filter(Boolean),imgs,cat.id,acc,flowN);
         await addHistory({user_id:ADM_UID,platform:"naver",title,post_url:postUrl,status:"success"}).catch(()=>{});
         upd({step:"발행 완료",status:"done",postUrl,at:new Date().toLocaleTimeString("ko-KR",{hour:"2-digit",minute:"2-digit"})});
       }catch(e:any){
@@ -2413,7 +2444,8 @@ POST3: (제목)|(이유)
       const bm = cleaned.match(/태그[^\n]*\n([\s\S]+)/);
       setGenTitle(title);
       if (tgm) setGenTags(tgm[1].trim());
-      const body = await ensureKeywordCount(bm ? bm[1].trim() : cleaned, keyword||title, 5);
+      const bodyRaw = await ensureKeywordCount(bm ? bm[1].trim() : cleaned, keyword||title, 5);
+      const body = charMode==="manual" ? enforceMaxChars(bodyRaw, targetChars) : bodyRaw;   // 지정 글자수 오버슈트 방지
       setGenContent(body);
       setQualityScore(calcQualityScore(body,keyword));
       const recCount = imgCountManual ?? recommendImageCount(body);
@@ -4352,6 +4384,31 @@ POST3: (제목)|(이유)
                     ))}
                 </div>
 
+                {/* 글·이미지 설정 */}
+                <div className="card" style={{marginBottom:14}}>
+                  <div style={{fontSize:15,fontWeight:800,marginBottom:10}}>✍️ 글·이미지 설정</div>
+                  <div style={{fontSize:13,fontWeight:700,marginBottom:6}}>글 패턴</div>
+                  <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:14}}>
+                    {WRITE_STYLES.map(s=>{const on=otWriteStyle===s.id;return(
+                      <button key={s.id} disabled={otRunning} onClick={()=>setOtWriteStyle(s.id)} style={{padding:"9px 14px",borderRadius:10,border:`2px solid ${on?OT:"var(--border)"}`,background:on?`${OT}16`:"var(--bg)",color:on?OT:"var(--text2)",cursor:otRunning?"default":"pointer",fontSize:13,fontWeight:800,fontFamily:"inherit"}}>{s.i} {s.id}</button>
+                    );})}
+                  </div>
+                  <div style={{fontSize:13,fontWeight:700,marginBottom:6}}>글자수</div>
+                  <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center",marginBottom:14}}>
+                    {(["auto","manual"] as const).map(m=>{const on=otCharMode===m;return(
+                      <button key={m} disabled={otRunning} onClick={()=>setOtCharMode(m)} style={{padding:"9px 14px",borderRadius:10,border:`2px solid ${on?OT:"var(--border)"}`,background:on?`${OT}16`:"var(--bg)",color:on?OT:"var(--text2)",cursor:otRunning?"default":"pointer",fontSize:13,fontWeight:800,fontFamily:"inherit"}}>{m==="auto"?"✨ 자동":"✍️ 직접"}</button>
+                    );})}
+                    {otCharMode==="manual"&&<><input type="number" min={500} max={5000} step={100} disabled={otRunning} value={otTargetChars} onChange={e=>setOtTargetChars(Math.max(500,Math.min(5000,parseInt(e.target.value)||1500)))} style={{width:100,padding:"8px",borderRadius:8,border:"1px solid var(--border)",background:"var(--bg)",color:"var(--text)",fontFamily:"inherit"}}/><span style={{fontSize:13,color:"var(--text2)",fontWeight:700}}>자</span></>}
+                  </div>
+                  <div style={{fontSize:13,fontWeight:700,marginBottom:6}}>이미지 방식</div>
+                  <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                    {([["flow","🆓 Flow (무료)"],["ai","🎨 AI (유료 키)"]] as const).map(([m,l])=>{const on=otImgMode===m;return(
+                      <button key={m} disabled={otRunning} onClick={()=>setOtImgMode(m)} style={{padding:"9px 14px",borderRadius:10,border:`2px solid ${on?OT:"var(--border)"}`,background:on?`${OT}16`:"var(--bg)",color:on?OT:"var(--text2)",cursor:otRunning?"default":"pointer",fontSize:13,fontWeight:800,fontFamily:"inherit"}}>{l}</button>
+                    );})}
+                  </div>
+                  <div style={{marginTop:8,fontSize:12,color:"var(--text3)",lineHeight:1.5}}>{otImgMode==="flow"?"무료 Flow는 발행할 때 봇이 자동으로 이미지를 만들어 넣어요.":"AI 이미지는 OpenAI/Replicate 키가 있어야 해요."}</div>
+                </div>
+
                 {/* 텀 + 이미지 + 카테고리 */}
                 <div className="card" style={{marginBottom:14}}>
                   <div style={{fontSize:15,fontWeight:800,marginBottom:10}}>⏱️ 발행 텀 <span style={{fontSize:12,fontWeight:600,color:"var(--text3)"}}>· 글 하나 올리고 다음까지 기다리는 시간</span></div>
@@ -4379,10 +4436,15 @@ POST3: (제목)|(이유)
                   ? <button onClick={runOneTouch} disabled={!kwList.length||!pubAccId||!botOnline} style={{width:"100%",padding:"16px",borderRadius:14,border:"none",background:kwList.length&&pubAccId&&botOnline?`linear-gradient(135deg,${OT},#c026d3)`:"var(--border)",color:"#fff",fontSize:17,fontWeight:900,fontFamily:"inherit",cursor:kwList.length&&pubAccId&&botOnline?"pointer":"default",boxShadow:kwList.length&&pubAccId&&botOnline?`0 6px 20px ${OT}44`:"none"}}>⚡ 원터치 발행 시작 {kwList.length>0&&`(${kwList.length}개)`}</button>
                   : <button onClick={stopOneTouch} style={{width:"100%",padding:"16px",borderRadius:14,border:"none",background:"linear-gradient(135deg,#ef4444,#f43f5e)",color:"#fff",fontSize:17,fontWeight:900,fontFamily:"inherit",cursor:"pointer"}}>⏹ 멈추기 {otNextAt&&`· 다음 발행까지 ${Math.max(0,Math.ceil((otNextAt-Date.now())/60000))}분`}</button>}
 
-                {otLog.length>0&&(
-                  <div className="card" style={{marginTop:14}}>
-                    <div style={{fontSize:15,fontWeight:800,marginBottom:10}}>📋 원터치 로그</div>
-                    {otLog.map((r,i)=>(
+                {/* 로그 — 항상 표시 + 저장 */}
+                <div className="card" style={{marginTop:14}}>
+                  <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,marginBottom:10}}>
+                    <div style={{fontSize:15,fontWeight:800}}>📋 진행 상황 · 로그 {otRunning&&<span style={{fontSize:11,fontWeight:800,color:"#fff",background:OT,padding:"2px 9px",borderRadius:99,marginLeft:6}}>작업 중</span>}</div>
+                    {otLog.length>0&&!otRunning&&<button onClick={()=>{setOtLog([]);try{localStorage.removeItem("publy_adm_ot_log");}catch{}}} style={{fontSize:11,padding:"5px 10px",borderRadius:8,border:"1px solid var(--border)",background:"var(--card2)",color:"var(--text3)",cursor:"pointer",fontWeight:700,fontFamily:"inherit"}}>🗑 기록 지우기</button>}
+                  </div>
+                  {otLog.length===0
+                    ? <div style={{fontSize:12.5,color:"var(--text3)",padding:"14px 0",textAlign:"center"}}>아직 작업 기록이 없어요. 키워드를 넣고 <b style={{color:OT}}>원터치 발행 시작</b>을 누르면 여기에 단계별 진행이 쌓여요.</div>
+                    : otLog.map((r,i)=>(
                       <div key={r.id} style={{display:"flex",alignItems:"center",gap:10,padding:"11px 12px",borderRadius:10,marginBottom:6,background:"var(--bg)",border:`1px solid ${r.status==="done"?"#00b48733":r.status==="fail"?"#e5397f33":r.status==="limit"?"#f59e0b33":"var(--border)"}`}}>
                         <div style={{width:24,height:24,borderRadius:99,flexShrink:0,display:"flex",alignItems:"center",justifyContent:"center",fontSize:12,fontWeight:800,background:`${stepColor(r.status)}1a`,color:stepColor(r.status)}}>{i+1}</div>
                         <div style={{flex:1,minWidth:0}}>
@@ -4393,7 +4455,6 @@ POST3: (제목)|(이유)
                       </div>
                     ))}
                   </div>
-                )}
               </div>
               );
             })()}
