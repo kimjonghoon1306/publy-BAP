@@ -4464,7 +4464,8 @@ POST3: (제목)|(이유)
                     const rLabel = actRange==="year"?"최근 1년":actRange==="month"?"최근 30일":"이번 주";
                     const rDesc = actRange==="year"?"최근 12개월간 자동화가 처리한 작업이에요. 매달 이어질수록 블로그가 커집니다.":actRange==="month"?"최근 30일간 퍼블리가 자동으로 처리한 작업이에요.":"최근 7일간 퍼블리가 자동으로 처리한 작업이에요. 여러 기능이 합쳐져 블로그를 키웁니다.";
                     // 연속: 일별(week/month)=연속 활동일, 년=활동한 달 수
-                    const streak=(()=>{let s=0;for(let i=wk.length-1;i>=0;i--){if(wk[i].total>0)s++;else break;}return s;})();
+                    // ★오늘(마지막 칸)이 아직 0이면 '진행 중'으로 보고 건너뜀 → 자정 지났다고 어제까지 쌓은 연속이 0으로 리셋되지 않게(GitHub/듀오링고식).
+                    const streak=(()=>{let i=wk.length-1;if(i>=0&&wk[i].total===0)i--;let s=0;for(;i>=0;i--){if(wk[i].total>0)s++;else break;}return s;})();
                     return (
                   <section className="ct-section">
                     <div className="ct-sec-head" style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:12,flexWrap:"wrap"}}>
