@@ -733,14 +733,16 @@ ipcMain.handle("flow-launch-chrome", async (_e, slot: number = 0) => {
   const profileDir = flowProfileDir(slot);
   const flowUrl = "https://labs.google/fx/ko/tools/flow";
 
-  // Windows Chrome singleton은 같은 프로필의 두 번째 실행 요청을 기존의 최소화/후면 창으로
-  // 넘길 수 있다. 준비 버튼을 다시 누르면 새 창 요청을 기존 인스턴스에 전달해 사용자가 볼 수 있게 한다.
+  // 이미 살아있으면(로그인 유지됨) 그 계정 창을 앞으로 띄워 사용자가 눈으로 확인하게 한다.
+  // 같은 프로필로 --new-window를 다시 요청하면 기존 크롬 인스턴스가 새 창을 앞에 띄운다(맥·윈도우 공통).
+  // ★맥에서 이 처리를 안 하면 '전체 연결'을 눌러도 창이 안 떠서 "안 된다"고 느낀다(테리 지적).
   if (await flowChromeHealthy(slot)) {
-    if (process.platform === "win32") {
-      try {
-        const reveal = spawn(chromePath, [`--user-data-dir=${profileDir}`, "--new-window", flowUrl], { detached: true, stdio: "ignore" });
-        reveal.unref();
-      } catch {}
+    try {
+      const reveal = spawn(chromePath, [`--user-data-dir=${profileDir}`, "--new-window", flowUrl], { detached: true, stdio: "ignore" });
+      reveal.unref();
+    } catch {}
+    if (process.platform === "darwin") {   // 맥은 앱 자체를 앞으로(activate) 확실히
+      try { spawn("open", ["-a", "Google Chrome"], { detached: true, stdio: "ignore" }).unref(); } catch {}
     }
     return { ok: true, already: true, slot, port };
   }

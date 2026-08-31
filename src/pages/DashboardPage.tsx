@@ -1354,6 +1354,7 @@ Output (JSON object only): {"keyword":"핵심키워드","title":"새 SEO 제목"
   const [otRunning,setOtRunning]=useState(false);
   const otStopRef=useRef(false);
   const otAbortRef=useRef<AbortController|null>(null);   // 진행 중 즉시 중단용
+  const otFlowExhaustedRef=useRef<Set<number>>(new Set());   // 이번 실행에서 크레딧 소진된 Flow 슬롯(자동 전환용)
   const [otNextAt,setOtNextAt]=useState<number|null>(null);
   const [otPaused,setOtPaused]=useState<{idx:number;kws:string[];reason?:"credit"|"stopped"}|null>(null);   // 일시정지(크레딧부족) 또는 사용자 중단 → 이어가기 지점
   const [otLog,setOtLog]=useState<{id:string;kw:string;title?:string;cat?:string;step:string;status:"wait"|"run"|"done"|"fail"|"limit";postUrl?:string;error?:string;at?:string}[]>(()=>{try{return JSON.parse(localStorage.getItem("publy_ot_log")||"[]");}catch{return [];}});
@@ -3029,7 +3030,7 @@ POST3: (제목)|(이유)
     if(otRunning)return;
     if(!pubAccId){showToast("발행할 네이버 계정을 먼저 선택해주세요","error");return;}
     const termMin=otCustomTerm.trim()?Math.max(1,parseInt(otCustomTerm,10)||otTermMin):otTermMin;
-    otStopRef.current=false;setOtRunning(true);setOtNextAt(null);setOtPaused(null);
+    otStopRef.current=false;setOtRunning(true);setOtNextAt(null);setOtPaused(null);otFlowExhaustedRef.current.clear();
     // 📡 모든 단계를 라이브 로그로 → 회원 본인도, 관리자도 실시간 확인. (관리자 '라이브 로그' 탭에서 회원별로 보임)
     const liveLines:string[]=[];
     setOtLiveLog(prev=>[...prev,`━━━━━ ${new Date().toLocaleString("ko-KR")} 원터치 ${resume?`이어가기(${resume.idx+1}번째부터)`:"시작"} ━━━━━`].slice(-300));
@@ -3078,17 +3079,34 @@ POST3: (제목)|(이유)
           const flines=content.split("\n").filter((l:string)=>l.trim().length>5); const fstep=Math.max(1,Math.floor(flines.length/n));
           const fprompts=Array.from({length:n},(_,k)=>{const seg=flines.slice(k*fstep,(k+1)*fstep).join(" ").slice(0,150);return buildFlowPrompt(kw,title,seg,k);});
           const fcaptions=buildCaptions(kw,n,content);
-          try{ const fr=await botFetch(`${BOT}/api/flow-generate`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({prompts:fprompts,captions:fcaptions,cdpPort:9222+(flowSlot||0)}),signal});
-            const fd=await fr.json().catch(()=>({}));
-            if(fr.status===402||fd.code==="FLOW_NO_CREDIT"){   // ★크레딧 부족 → 글도 안 올리고 자동 일시정지(이어가기 대기)
-              upd({step:"⏸ Flow 크레딧 부족 — 계정 변경 후 이어가기",status:"limit"});
-              otLive(`  ⏸ Flow 무료 크레딧이 떨어졌어요. 이 글은 올리지 않고 여기서 멈췄어요 → Flow 계정을 바꿔 연결한 뒤 아래 '이어가기'를 누르면 이 키워드부터 계속돼요.`,false);
-              showToast("Flow 크레딧 부족 — 계정 변경 후 '이어가기'","info");
-              setOtPaused({idx:i,kws,reason:"credit"}); setOtRunning(false); setOtNextAt(null); return;
+          // ★크레딧이 떨어지면 미리 로그인해둔 다음 슬롯으로 자동 전환하며 이어감(자리 비워도 OK). 소진 슬롯은 otFlowExhaustedRef에 기록.
+          // 시도 순서: 현재 슬롯 먼저, 그다음 소진 안 된 나머지 슬롯들.
+          const trySlots=[flowSlot,...flowSlots.map(s=>s.id).filter(id=>id!==flowSlot)].filter(id=>!otFlowExhaustedRef.current.has(id));
+          let flowHandled=false;   // 성공 또는 '이미지 없이 진행'으로 매듭지어졌나
+          for(const slotId of trySlots){
+            if(otStopRef.current)break;
+            if(slotId!==flowSlot){   // 다른 계정으로 자동 전환
+              const nm=flowSlots.find(s=>s.id===slotId)?.name||`슬롯${slotId+1}`;
+              otLive(`  🔄 '${nm}' 계정으로 자동 전환해서 계속해요(미리 로그인돼 있어요)`); setFlowSlot(slotId);
+              if(!flowSlotReady[slotId]){ try{ await handleFlowLaunchChrome(slotId); }catch{} }
             }
-            else if(fr.ok&&Array.isArray(fd.images)&&fd.images.length){ imgs.push(...fd.images.map((im:any)=>im.src).filter(Boolean)); otLive(`  ✅ Flow 이미지 ${imgs.length}/${n}장${imgs.length<n?` (${n-imgs.length}장은 생성 실패해 빠졌어요)`:""}`); }
-            else { otLive(`  ⚠️ Flow 이미지 실패: ${fd.error||("HTTP "+fr.status)} — 위 '🎬 Flow 준비'로 먼저 연결하세요. 이번 글은 이미지 없이 올려요`); }
-          }catch(e:any){ otLive(`  ⚠️ Flow 이미지 오류: ${e.message}`); }
+            try{ const fr=await botFetch(`${BOT}/api/flow-generate`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({prompts:fprompts,captions:fcaptions,cdpPort:9222+(slotId||0)}),signal});
+              const fd=await fr.json().catch(()=>({}));
+              if(fr.status===402||fd.code==="FLOW_NO_CREDIT"){   // 이 계정 크레딧 소진 → 기록하고 다음 계정
+                otFlowExhaustedRef.current.add(slotId);
+                otLive(`  ⏸ 이 계정 크레딧이 떨어졌어요 — 다음 계정 확인 중...`);
+                continue;
+              }
+              else if(fr.ok&&Array.isArray(fd.images)&&fd.images.length){ imgs.push(...fd.images.map((im:any)=>im.src).filter(Boolean)); otLive(`  ✅ Flow 이미지 ${imgs.length}/${n}장${imgs.length<n?` (${n-imgs.length}장은 생성 실패해 빠졌어요)`:""}`); flowHandled=true; break; }
+              else { otLive(`  ⚠️ Flow 이미지 실패: ${fd.error||("HTTP "+fr.status)} — 위 '🎬 Flow 준비'로 먼저 연결하세요. 이번 글은 이미지 없이 올려요`); flowHandled=true; break; }
+            }catch(e:any){ otLive(`  ⚠️ Flow 이미지 오류: ${e.message}`); flowHandled=true; break; }
+          }
+          if(!flowHandled&&!otStopRef.current){   // 등록된 모든 Flow 계정 크레딧 소진 → 그때만 사람 호출
+            upd({step:"⏸ 모든 Flow 계정 크레딧 소진 — 계정 추가 후 이어가기",status:"limit"});
+            otLive(`  ⏸ 등록된 Flow 계정이 모두 크레딧이 떨어졌어요. 새 계정을 연결한 뒤 '이어가기'를 누르면 이 키워드부터 계속돼요.`,false);
+            showToast("모든 Flow 계정 크레딧 소진 — 계정 추가 후 '이어가기'","info");
+            setOtPaused({idx:i,kws,reason:"credit"}); setOtRunning(false); setOtNextAt(null); return;
+          }
         }
         if(otStopRef.current){ upd({step:"⏹ 중단됨 — 이 글은 발행하지 않았어요",status:"limit"}); otLive(`  ⏹ 중단 — 발행 전이라 이 글은 올리지 않았어요`,false); break; }   // ★전체 중단: 발행 전이면 글도 안 올림
         upd({step:"카테고리 매칭 중"}); const cat=await otPickCategory(title,content,cats,signal); upd({cat:cat.name||"기본"}); otLive(`  📂 카테고리 자동 선택: ${cat.name||"기본"}`);
@@ -3174,7 +3192,7 @@ POST3: (제목)|(이유)
         try{ const r=await (window as any).electron.flowLaunchChrome(s.id); if(r.ok)setFlowSlotReady(p=>({...p,[s.id]:true})); }catch{}
         await new Promise(r=>setTimeout(r,1500));
       }
-      showToast(`✅ ${flowSlots.length}개 계정 창을 모두 열었어요. 각 창에서 로그인해 주세요(최초 1회).`,"success");
+      showToast(`✅ ${flowSlots.length}개 계정 창을 순서대로 열었어요. 이미 로그인된 계정은 그대로 두고, 풀린 계정만 다시 로그인해 주세요.`,"success");
     } finally { setFlowLaunching(false); }
   }
   // Flow 선택 시 준비 상태 폴링 (이미지 탭 + 원터치 탭 공용). 원터치는 활성 슬롯 기준.
@@ -6773,7 +6791,7 @@ POST3: (제목)|(이유)
                     </div>}
                     <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
                       <button onClick={()=>runOneTouch(otPaused)} style={{flex:1,minWidth:160,padding:"13px",borderRadius:11,border:"none",background:"linear-gradient(135deg,#f59e0b,#f97316)",color:"#fff",fontSize:15,fontWeight:900,fontFamily:"inherit",cursor:"pointer"}}>▶ 이어가기 ({otPaused.kws.length-otPaused.idx}개 남음)</button>
-                      <button onClick={()=>{setOtPaused(null);setOtLiveLog(prev=>[...prev,`[${new Date().toLocaleTimeString("ko-KR")}] 이어가기 취소`].slice(-300));}} style={{padding:"13px 18px",borderRadius:11,border:"1px solid var(--border)",background:"var(--bg)",color:"var(--text3)",fontSize:13,fontWeight:700,fontFamily:"inherit",cursor:"pointer"}}>취소</button>
+                      <button onClick={()=>{setOtPaused(null);setOtLiveLog(prev=>[...prev,`[${new Date().toLocaleTimeString("ko-KR")}] 이어가기 안 함 — 새 키워드로 다시 시작할 수 있어요`].slice(-300));}} style={{padding:"13px 18px",borderRadius:11,border:"1px solid var(--border)",background:"var(--bg)",color:"var(--text3)",fontSize:13,fontWeight:700,fontFamily:"inherit",cursor:"pointer"}}>취소 (이어가기 안 함)</button>
                     </div>
                   </div>
                 )}
