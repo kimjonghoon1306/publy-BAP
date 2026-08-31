@@ -1350,7 +1350,7 @@ Output (JSON object only): {"keyword":"핵심키워드","title":"새 SEO 제목"
   const [otImgMode,setOtImgMode]=useState<"flow"|"ai">("flow");   // Flow(무료·봇이 발행중 생성) vs AI(DALL-E/Replicate 유료키)
   const [otCharMode,setOtCharMode]=useState<"auto"|"manual">("auto");
   const [otTargetChars,setOtTargetChars]=useState(1500);
-  const [otWriteStyle,setOtWriteStyle]=useState<WriteStyle>("정보글");
+  const [otWriteStyle,setOtWriteStyle]=useState<WriteStyle|"자동">(()=>{ const v=localStorage.getItem("publy_ot_style"); return (v==="자동"||v==="감성일기"||v==="정보글"||v==="맛집후기"||v==="여행기")?v as any:"자동"; });   // 기본=자동(키워드마다 AI가 패턴 선택)
   const [otRunning,setOtRunning]=useState(false);
   const otStopRef=useRef(false);
   const otAbortRef=useRef<AbortController|null>(null);   // 진행 중 즉시 중단용
@@ -2936,10 +2936,20 @@ POST3: (제목)|(이유)
       }).join("\n\n");
     }).filter(Boolean).join("\n\n");
   }
-  async function otGenPost(kw:string,title:string,signal:AbortSignal):Promise<{content:string;tags:string}>{
+  // 🎨 글 패턴 자동: 키워드에 가장 어울리는 패턴 하나를 AI가 고름(맛집→맛집후기, 여행→여행기 등). 실패 시 정보글.
+  async function otPickStyle(kw:string,title:string,signal:AbortSignal):Promise<WriteStyle>{
+    try{
+      const t=await callAI(`아래 블로그 글감에 가장 어울리는 글 패턴 하나만 골라 그 단어만 답해. 다른 말 절대 금지.\n선택지: 감성일기 / 정보글 / 맛집후기 / 여행기\n기준: 음식·카페·식당·맛집이면 맛집후기, 여행·여행지·숙소·관광이면 여행기, 개인 경험·감정·일상이면 감성일기, 그 외 정보·방법·가격·비교·추천은 정보글.\n\n키워드: "${kw}"\n제목: "${title}"`,signal);
+      const s=(t||"").replace(/[^가-힣]/g,"");
+      const hit=(["맛집후기","여행기","감성일기","정보글"] as WriteStyle[]).find(x=>s.includes(x));
+      return hit||"정보글";
+    }catch{ return "정보글"; }
+  }
+  async function otGenPost(kw:string,title:string,signal:AbortSignal,styleOverride?:WriteStyle):Promise<{content:string;tags:string}>{
     const chars=otCharMode==="manual"?otTargetChars:calcTargetChars();   // 글자수 직접 지정 or 자동
     const catGuide=getCatGuide(kw,title);
-    const styleGuide=WRITE_STYLE_GUIDE[otWriteStyle]||"";                  // 글 패턴(감성일기/정보글/맛집후기/여행기)
+    const effStyle:WriteStyle=styleOverride||(otWriteStyle==="자동"?"정보글":otWriteStyle);   // 자동인데 override 없으면 정보글 폴백
+    const styleGuide=WRITE_STYLE_GUIDE[effStyle]||"";                  // 글 패턴(감성일기/정보글/맛집후기/여행기)
     const prompt=`당신은 대한민국 최고의 블로그 작가입니다.\n키워드: "${kw}"  제목: "${title}"\n목표 글자수: ${chars}자 내외(±100자, 반드시 이 범위)\n\n${catGuide}\n\n${styleGuide?"★ 아래 [글의 방향]을 최우선으로 따를 것:\n"+styleGuide+"\n":""}\n=== 절대 규칙 ===\n⛔ ## 및 ** * - + 마크다운 기호 전부 금지(소제목도 순수 텍스트)\n⛔ 한자·중국어·일본어·영어단어 금지(브랜드명 제외)\n⛔ AI 상투어 금지(~해보겠습니다/살펴보겠습니다/결론적으로/다양한/효과적인) → 실제 사람 말투(~해요, ~거든요, ~더라고요)\n✅ ★핵심 키워드 "${kw}"를 본문에 띄어쓰기·글자 그대로 정확히 5~6번 반복(검색 노출 핵심)\n✅ 구체적 수치·가격·기간·경험담 포함, 과장·거짓 금지\n✅ 본문을 4~6개 구간으로 나누고 각 구간 앞에 짧은 소제목(10~30자, ## 없이)\n✅ 소제목 일부에 검색요소(왜/어떻게/추천/가격/후기/비교/주의점)\n✅ 모든 단락 사이 빈 줄 하나(엔터 두 번), 한 단락 2~4문장(모바일 가독성)\n\n${AEO_RULES}\n\n=== 출력 형식 ===\n태그: 태그1, 태그2, 태그3, 태그4, 태그5\n\n(본문 ${chars}자 내외 순수 텍스트. ★맨 첫 문단은 AEO 규칙대로 '핵심 요약' 2~3문장으로 시작)\n\n${AEO_FAQ_FORMAT}`;
     const text=await callAI(prompt,signal);
     const cleaned=stripMarkdown(text);
@@ -3054,6 +3064,9 @@ POST3: (제목)|(이유)
     try{ const cr=await botFetch(`${BOT}/api/naver/categories/${user.id}`,{method:"GET",signal:AbortSignal.timeout(30000)} as any); const cd=await cr.json().catch(()=>({})); if(cd.categories&&cd.categories.length)cats=cd.categories; }catch{}
     if(!cats.length)cats=(accCats[accId]||[]).map((c,i)=>({id:String(i),name:c}));
     if(!resume) setOtLog(kws.map(kw=>({id:uid(),kw,step:"대기",status:"wait" as const})));
+    // ★이어가기 지점 = '발행 성공한 다음 글'. 발행 전(제목·본문·이미지 생성 중)에 중단되면 그 글부터 다시(건너뛰지 않음).
+    //   otLog(state)는 비동기라 실시간이 아님 → 발행 성공을 로컬 변수로 직접 추적(테리: 중단된 글은 다시 생성돼야).
+    let nextResumeIdx=startIdx;
     for(let i=startIdx;i<kws.length;i++){
       if(otStopRef.current)break;
       const kw=kws[i]; const upd=(patch:any)=>setOtLog(prev=>prev.map((r,j)=>j===i?{...r,...patch}:r));
@@ -3069,7 +3082,9 @@ POST3: (제목)|(이유)
       const n=Math.min(6,Math.max(1,otImgCount));
       try{
         upd({step:"제목 생성 중",status:"run"}); otLive(`▶ [${i+1}/${kws.length}] "${kw}" 제목 생성 중`); const title=await otGenTitleBest(kw,signal); upd({title}); otLive(`  ✅ 제목 선택: ${title}`);
-        upd({step:"본문 생성 중"}); otLive(`  ✍️ 본문 생성 중(${otCharMode==="manual"?otTargetChars+"자·":""}${otWriteStyle}·키워드 5~6회)`); const {content,tags}=await otGenPost(kw,title,signal); otLive(`  ✅ 본문 완성 (${content.length}자)`);
+        let effStyle:WriteStyle=otWriteStyle==="자동"?"정보글":otWriteStyle;
+        if(otWriteStyle==="자동"){ effStyle=await otPickStyle(kw,title,signal); otLive(`  🎨 글 패턴 자동 선택: ${effStyle}`); }
+        upd({step:"본문 생성 중"}); otLive(`  ✍️ 본문 생성 중(${otCharMode==="manual"?otTargetChars+"자·":""}${effStyle}·키워드 5~6회)`); const {content,tags}=await otGenPost(kw,title,signal,effStyle); otLive(`  ✅ 본문 완성 (${content.length}자)`);
         const imgs:string[]=[];
         if(otImgMode==="ai"){ upd({step:"이미지 생성 중"}); otLive(`  🖼️ 이미지 ${n}장 생성 중(AI)`);
           for(let k=0;k<n;k++){ if(otStopRef.current)break; try{imgs.push(await generateOneImage(kw,signal,k));}catch(ie:any){otLive(`  ⚠️ 이미지 ${k+1} 실패: ${ie.message||"오류"}`);} }
@@ -3121,6 +3136,7 @@ POST3: (제목)|(이유)
           await incrementDailyPublish(user.id); setDailyPublishUsed(p=>p+1);
           await addHistory({user_id:user.id,platform:"naver",title,post_url:postUrl,status:"success"}).catch(()=>{});
           upd({step:"발행 완료",status:"done",postUrl,at});
+          nextResumeIdx=i+1;   // ★이 글 발행 성공 → 이어가기는 다음 글부터
           otLive(`  ✅ 발행 완료! ${postUrl}`);
           await autoRequestSearchAdvisor(postUrl, otLive);   // 🔍 발행 직후 서치어드바이저 자동 색인요청(순차라 로그로 보임)
         } else {
@@ -3147,11 +3163,11 @@ POST3: (제목)|(이유)
       }
     }
     // ★중단됐고 남은 키워드가 있으면 '이어가기' 지점을 저장 → 텀을 바꾼 뒤 '이어가기'를 누르면 그 키워드부터 이어감(AI/수동 무관)
+    //   nextResumeIdx = 발행 성공한 다음 글. 발행 전 중단된 글은 그 글부터 다시(테리 확정: 중단된 글은 다시 생성).
     if(otStopRef.current){
-      const doneCount=otLog.filter(r=>r.status==="done").length;
-      const remain=kws.slice(doneCount);
+      const remain=kws.slice(nextResumeIdx);
       if(remain.length){
-        setOtPaused({idx:doneCount,kws,reason:"stopped"});   // 이어가기 배너가 뜸(텀 변경 후 이어가기 가능)
+        setOtPaused({idx:nextResumeIdx,kws,reason:"stopped"});   // 이어가기 배너가 뜸(텀 변경 후 이어가기 가능)
         if(!otAiKw){ setOtKeywords(remain.join("\n")); }      // 수동 모드는 입력칸에도 되돌려 둠(기존 동작 유지)
         otLive(`⏹ 중단 — 남은 ${remain.length}개는 아래 '이어가기'로 계속할 수 있어요. 발행 텀을 바꾸고 싶으면 위에서 바꾼 뒤 이어가기를 누르세요.`,false);
       } else {
@@ -3905,8 +3921,9 @@ ${segList}`;
     const needN=naverAccs.length-verifiedN;
     return (
       <div onClick={()=>setTab("accounts")} title="서치어드바이저 자동 색인요청 설정으로 이동"
-        style={{cursor:"pointer",margin:"12px 16px 0",padding:"11px 14px",borderRadius:12,border:`1.5px solid ${saAuto?"#0ea5e9":"var(--border)"}`,background:saAuto?"rgba(14,165,233,.08)":"var(--card2)",display:"flex",alignItems:"center",gap:10,transition:"all .15s"}}
+        style={{cursor:"pointer",margin:"12px 16px 0",padding:"11px 14px",borderRadius:12,border:`1.5px solid ${saAuto?"#ff2d78":"var(--border)"}`,background:saAuto?"rgba(255,45,120,.06)":"var(--card2)",display:"flex",alignItems:"center",gap:10,transition:"all .15s"}}
         onMouseEnter={e=>e.currentTarget.style.transform="translateY(-1px)"} onMouseLeave={e=>e.currentTarget.style.transform="translateY(0)"}>
+        {saAuto&&<span title="자동 색인 작동 중" style={{width:9,height:9,borderRadius:"50%",background:"#ff2d78",boxShadow:"0 0 7px #ff2d78",flexShrink:0,animation:"pulse 1.3s ease-in-out infinite"}}/>}
         <span style={{fontSize:18,flexShrink:0}}>🔍</span>
         <div style={{flex:1,minWidth:0}}>
           <div style={{fontSize:12.5,fontWeight:800,color:saAuto?"#0ea5e9":"var(--text3)"}}>발행하면 서치어드바이저에 자동 색인요청 · {saAuto?"ON":"OFF"}</div>
@@ -6706,11 +6723,15 @@ POST3: (제목)|(이유)
                   <div style={{display:"flex",gap:18,flexWrap:"wrap",alignItems:"flex-start"}}>
                     <div style={{flex:"1 1 320px",minWidth:0}}>
                       <div style={{fontSize:13,fontWeight:700,marginBottom:6}}>글 패턴</div>
-                      <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:14}}>
+                      <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:6}}>
+                        {(()=>{const on=otWriteStyle==="자동";return(
+                          <button disabled={otRunning} onClick={()=>{setOtWriteStyle("자동");localStorage.setItem("publy_ot_style","자동");}} style={{padding:"9px 14px",borderRadius:10,border:`2px solid ${on?OT:"var(--border)"}`,background:on?`${OT}16`:"var(--bg)",color:on?OT:"var(--text2)",cursor:otRunning?"default":"pointer",fontSize:13,fontWeight:800,fontFamily:"inherit"}}>✨ 자동(키워드마다 AI가 선택)</button>
+                        );})()}
                         {WRITE_STYLES.map(s=>{const on=otWriteStyle===s.id;return(
-                          <button key={s.id} disabled={otRunning} onClick={()=>setOtWriteStyle(s.id)} style={{padding:"9px 14px",borderRadius:10,border:`2px solid ${on?OT:"var(--border)"}`,background:on?`${OT}16`:"var(--bg)",color:on?OT:"var(--text2)",cursor:otRunning?"default":"pointer",fontSize:13,fontWeight:800,fontFamily:"inherit"}}>{s.i} {s.id}</button>
+                          <button key={s.id} disabled={otRunning} onClick={()=>{setOtWriteStyle(s.id);localStorage.setItem("publy_ot_style",s.id);}} style={{padding:"9px 14px",borderRadius:10,border:`2px solid ${on?OT:"var(--border)"}`,background:on?`${OT}16`:"var(--bg)",color:on?OT:"var(--text2)",cursor:otRunning?"default":"pointer",fontSize:13,fontWeight:800,fontFamily:"inherit"}}>{s.i} {s.id}</button>
                         );})}
                       </div>
+                      <div style={{fontSize:11,color:"var(--text3)",marginBottom:14,lineHeight:1.5}}>{otWriteStyle==="자동"?"키워드 성격에 맞춰 맛집후기·여행기·감성일기·정보글 중 알아서 골라 써요.":"모든 키워드를 이 패턴으로 통일해서 써요."}</div>
                       <div style={{fontSize:13,fontWeight:700,marginBottom:6}}>글자수</div>
                       <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center",marginBottom:14}}>
                         {(["auto","manual"] as const).map(m=>{const on=otCharMode===m;return(
