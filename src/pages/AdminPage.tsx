@@ -886,6 +886,7 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
   const [otRunning,setOtRunning]=useState(false);
   const otStopRef=useRef(false);
   const [otNextAt,setOtNextAt]=useState<number|null>(null);
+  const [otPaused,setOtPaused]=useState<{idx:number;kws:string[]}|null>(null);
   const [otLog,setOtLog]=useState<{id:string;kw:string;title?:string;cat?:string;step:string;status:"wait"|"run"|"done"|"fail"|"limit";postUrl?:string;error?:string;at?:string}[]>(()=>{try{return JSON.parse(localStorage.getItem("publy_adm_ot_log")||"[]");}catch{return [];}});
   useEffect(()=>{try{localStorage.setItem("publy_adm_ot_log",JSON.stringify(otLog.slice(0,50)));}catch{}},[otLog]);
   const [otLiveLog,setOtLiveLog]=useState<string[]>(()=>{try{return JSON.parse(localStorage.getItem("publy_adm_ot_livelog")||"[]");}catch{return [];}});
@@ -1006,16 +1007,17 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
     const usedSet=new Set(used.map(u=>u.replace(/\s+/g,""))); const seen=new Set<string>();
     return parseArr(text).map(s=>s.trim()).filter(Boolean).filter(k=>{const key=k.replace(/\s+/g,""); if(!key||usedSet.has(key)||seen.has(key))return false; seen.add(key); return true;}).slice(0,count);
   }
-  async function runOneTouch(){
+  async function runOneTouch(resume?:{idx:number;kws:string[]}){
     if(otRunning)return;
     if(!pubAccId){showToast("발행할 네이버 계정을 먼저 선택해주세요","error");return;}
     const acc=connAccs.find(a=>a.id===pubAccId);
     const termMin=otCustomTerm.trim()?Math.max(1,parseInt(otCustomTerm,10)||otTermMin):otTermMin;
-    otStopRef.current=false;setOtRunning(true);setOtNextAt(null);
+    otStopRef.current=false;setOtRunning(true);setOtNextAt(null);setOtPaused(null);
     const otLive=(t:string)=>setOtLiveLog(prev=>[...prev,`[${new Date().toLocaleTimeString("ko-KR")}] ${t}`].slice(-300));
-    setOtLiveLog(prev=>[...prev,`━━━━━ ${new Date().toLocaleString("ko-KR")} 원터치 시작 ━━━━━`].slice(-300));
-    let kws:string[];
-    if(otAiKw){
+    setOtLiveLog(prev=>[...prev,`━━━━━ ${new Date().toLocaleString("ko-KR")} 원터치 ${resume?`이어가기(${resume.idx+1}번째부터)`:"시작"} ━━━━━`].slice(-300));
+    let kws:string[]; let startIdx=0;
+    if(resume){ kws=resume.kws; startIdx=resume.idx; otLive(`▶ ${resume.idx+1}번째 키워드부터 이어서 발행해요`); }
+    else if(otAiKw){
       otLive(`✨ AI 자동추천 키워드 ${otAiKwCount}개 생성 중(핫이슈+SEO·14일 중복 제외)`);
       try{ kws=await otGenKeywords(otAiKwCount); }catch(e:any){ otLive(`❌ 키워드 생성 실패: ${e.message||"오류"}`); showToast("AI 키워드 생성 실패","error"); setOtRunning(false); return; }
       if(!kws.length){ otLive(`❌ 생성된 키워드가 없어요(최근 사용분 제외 후 0개).`); showToast("생성된 키워드가 없어요","error"); setOtRunning(false); return; }
@@ -1024,12 +1026,12 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
       kws=otKeywords.split(/[\n,]+/).map(s=>s.trim()).filter(Boolean);
       if(!kws.length){ showToast("키워드를 넣거나 AI 자동추천을 켜세요","error"); setOtRunning(false); return; }
     }
-    otRecordUsedKw(kws);
+    if(!resume) otRecordUsedKw(kws);
     let cats:{id:string;name:string}[]=[];
     try{ const cr=await botFetch(`${BOT}/api/naver/categories/${ADM_UID}`,{signal:AbortSignal.timeout(30000)} as any); const cd=await cr.json().catch(()=>({})); if(cd.categories&&cd.categories.length)cats=cd.categories; }catch{}
     if(!cats.length)cats=(accCats[pubAccId]||[]).map((c,i)=>({id:String(i),name:c}));
-    setOtLog(kws.map(kw=>({id:uid(),kw,step:"대기",status:"wait" as const})));
-    for(let i=0;i<kws.length;i++){
+    if(!resume) setOtLog(kws.map(kw=>({id:uid(),kw,step:"대기",status:"wait" as const})));
+    for(let i=startIdx;i<kws.length;i++){
       if(otStopRef.current)break;
       const kw=kws[i]; const upd=(patch:any)=>setOtLog(prev=>prev.map((r,j)=>j===i?{...r,...patch}:r));
       const n=Math.min(6,Math.max(1,otImgCount));
@@ -1047,7 +1049,12 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
           const fcaptions=buildCaptions(kw,n,content);
           try{ const fr=await botFetch(`${BOT}/api/flow-generate`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({prompts:fprompts,captions:fcaptions})});
             const fd=await fr.json().catch(()=>({}));
-            if(fr.status===402||fd.code==="FLOW_NO_CREDIT"){ otLive(`  ⛔ Flow 무료 크레딧 부족 — Flow 계정을 바꾸고 재시작하세요. 이번 글은 이미지 없이 올려요`); showToast("Flow 크레딧이 부족해요 — 계정 변경 후 재시작","error"); }
+            if(fr.status===402||fd.code==="FLOW_NO_CREDIT"){
+              upd({step:"⏸ Flow 크레딧 부족 — 계정 변경 후 이어가기",status:"limit"});
+              otLive(`  ⏸ Flow 무료 크레딧이 떨어졌어요. 이 글은 올리지 않고 멈췄어요 → Flow 계정을 바꿔 연결 후 '이어가기'를 누르면 이 키워드부터 계속돼요.`);
+              showToast("Flow 크레딧 부족 — 계정 변경 후 '이어가기'","info");
+              setOtPaused({idx:i,kws}); setOtRunning(false); setOtNextAt(null); return;
+            }
             else if(fr.ok&&Array.isArray(fd.images)&&fd.images.length){ imgs.push(...fd.images.map((im:any)=>im.src).filter(Boolean)); otLive(`  ✅ Flow 이미지 ${imgs.length}/${n}장${imgs.length<n?` (${n-imgs.length}장은 생성 실패해 빠졌어요)`:""}`); }
             else { otLive(`  ⚠️ Flow 이미지 실패: ${fd.error||("HTTP "+fr.status)} — 위 '🎬 Flow 준비'로 먼저 연결하세요. 이번 글은 이미지 없이 올려요`); }
           }catch(e:any){ otLive(`  ⚠️ Flow 이미지 오류: ${e.message}`); }
@@ -4584,9 +4591,19 @@ POST3: (제목)|(이유)
                   <div style={{marginTop:12,padding:"10px 12px",borderRadius:10,background:`${OT}0d`,border:`1px solid ${OT}22`,fontSize:12.5,color:"var(--text2)",lineHeight:1.5}}>📂 <b style={{color:OT}}>카테고리는 자동</b> — 글 주제에 맞는 네이버 카테고리를 AI가 골라 넣어요.</div>
                 </div>
 
+                {otPaused&&!otRunning&&(
+                  <div style={{marginBottom:12,padding:"16px",borderRadius:14,border:"2px solid #f59e0b",background:"rgba(245,158,11,.08)"}}>
+                    <div style={{fontSize:14.5,fontWeight:800,color:"#f59e0b",marginBottom:6}}>⏸ Flow 크레딧 부족으로 멈췄어요 ({otPaused.idx+1}번째 키워드에서)</div>
+                    <div style={{fontSize:12.5,color:"var(--text2)",lineHeight:1.6,marginBottom:12}}>위 <b>🎬 Flow 준비</b>에서 <b>다른 Google 계정으로 다시 연결</b>한 다음, 아래 버튼을 누르면 <b>멈춘 그 키워드부터 이어서</b> 발행돼요.</div>
+                    <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                      <button onClick={()=>runOneTouch(otPaused)} style={{flex:1,minWidth:160,padding:"13px",borderRadius:11,border:"none",background:"linear-gradient(135deg,#f59e0b,#f97316)",color:"#fff",fontSize:15,fontWeight:900,fontFamily:"inherit",cursor:"pointer"}}>▶ 이어가기 ({otPaused.kws.length-otPaused.idx}개 남음)</button>
+                      <button onClick={()=>{setOtPaused(null);setOtLiveLog(prev=>[...prev,`[${new Date().toLocaleTimeString("ko-KR")}] 이어가기 취소`].slice(-300));}} style={{padding:"13px 18px",borderRadius:11,border:"1px solid var(--border)",background:"var(--bg)",color:"var(--text3)",fontSize:13,fontWeight:700,fontFamily:"inherit",cursor:"pointer"}}>취소</button>
+                    </div>
+                  </div>
+                )}
                 {!otRunning
                   ? (()=>{const ready=(otAiKw?otAiKwCount>0:kwList.length>0)&&!!pubAccId&&botOnline; return (
-                    <button onClick={runOneTouch} disabled={!ready} style={{width:"100%",padding:"16px",borderRadius:14,border:"none",background:ready?`linear-gradient(135deg,${OT},#c026d3)`:"var(--border)",color:"#fff",fontSize:17,fontWeight:900,fontFamily:"inherit",cursor:ready?"pointer":"default",boxShadow:ready?`0 6px 20px ${OT}44`:"none"}}>⚡ 원터치 발행 시작 {otAiKw?`(AI ${otAiKwCount}개 자동생성)`:(kwList.length>0?`(${kwList.length}개)`:"")}</button>
+                    <button onClick={()=>runOneTouch()} disabled={!ready} style={{width:"100%",padding:"16px",borderRadius:14,border:"none",background:ready?`linear-gradient(135deg,${OT},#c026d3)`:"var(--border)",color:"#fff",fontSize:17,fontWeight:900,fontFamily:"inherit",cursor:ready?"pointer":"default",boxShadow:ready?`0 6px 20px ${OT}44`:"none"}}>⚡ 원터치 발행 시작 {otAiKw?`(AI ${otAiKwCount}개 자동생성)`:(kwList.length>0?`(${kwList.length}개)`:"")}</button>
                   );})()
                   : <button onClick={stopOneTouch} style={{width:"100%",padding:"16px",borderRadius:14,border:"none",background:"linear-gradient(135deg,#ef4444,#f43f5e)",color:"#fff",fontSize:17,fontWeight:900,fontFamily:"inherit",cursor:"pointer"}}>⏹ 전체 중단 {otNextAt&&`· 다음 발행까지 ${Math.max(0,Math.ceil((otNextAt-Date.now())/60000))}분`}</button>}
 
