@@ -598,6 +598,13 @@ textarea.inp{resize:vertical;line-height:1.75;min-height:80px;}
 .nav-item.nav-onetouch.active{border-color:rgba(124,58,237,.6);}
 .nav-item.nav-onetouch .nav-ico{filter:drop-shadow(0 0 6px rgba(124,58,237,.55));}
 .nav-best{margin-left:auto;font-size:9px;font-weight:900;letter-spacing:.5px;color:#fff;background:linear-gradient(135deg,#7c3aed,#c026d3);padding:2px 7px;border-radius:99px;box-shadow:0 0 8px rgba(124,58,237,.55);animation:navHotGlow 1.7s ease-in-out infinite;}
+/* ⚡ 원터치 로그 — 화면 하단에 넓게 고정. 스크롤 안 해도 항상 보임 */
+.ot-logdock{position:fixed;left:218px;right:16px;bottom:14px;z-index:180;background:var(--card);border:1.5px solid rgba(124,58,237,.42);border-radius:16px;box-shadow:0 12px 46px rgba(0,0,0,.32);display:flex;flex-direction:column;overflow:hidden;}
+.ot-logdock-head{display:flex;align-items:center;gap:8px;padding:11px 15px;border-bottom:1px solid var(--border);background:linear-gradient(135deg,rgba(124,58,237,.14),rgba(192,38,211,.06));flex-wrap:wrap;}
+.ot-logdock-body{overflow-y:auto;padding:14px 17px;font-size:13px;line-height:1.75;white-space:pre-wrap;word-break:break-word;font-family:ui-monospace,'SF Mono',Menlo,monospace;color:var(--text);background:var(--bg);}
+.ot-logdock-btn{font-size:12px;padding:6px 12px;border-radius:9px;border:1px solid var(--border);background:var(--bg2);color:var(--text2);cursor:pointer;font-weight:800;font-family:inherit;transition:all .15s;}
+.ot-logdock-btn:hover{border-color:#7c3aed;color:#7c3aed;}
+@media(max-width:900px){.ot-logdock{left:10px;right:10px;bottom:70px;}}
 @media (max-width:640px){.loop-arrow{display:none!important;}}
 
 .ct{display:flex;flex-direction:column;gap:20px;max-width:1120px;padding-bottom:20px;}
@@ -1341,6 +1348,10 @@ Output (JSON object only): {"keyword":"핵심키워드","title":"새 SEO 제목"
   const [otNextAt,setOtNextAt]=useState<number|null>(null);
   const [otLog,setOtLog]=useState<{id:string;kw:string;title?:string;cat?:string;step:string;status:"wait"|"run"|"done"|"fail"|"limit";postUrl?:string;error?:string;at?:string}[]>(()=>{try{return JSON.parse(localStorage.getItem("publy_ot_log")||"[]");}catch{return [];}});
   useEffect(()=>{try{localStorage.setItem("publy_ot_log",JSON.stringify(otLog.slice(0,50)));}catch{}},[otLog]);   // 로그 저장(작업 안 할 때도 항상 확인)
+  // 🔴화면 어디서든 항상 보이는 실시간 로그(고정 패널). 스크롤 안 해도 진행상황이 눈에 보이게.
+  const [otLiveLog,setOtLiveLog]=useState<string[]>(()=>{try{return JSON.parse(localStorage.getItem("publy_ot_livelog")||"[]");}catch{return [];}});
+  const [otDockOpen,setOtDockOpen]=useState(true);
+  useEffect(()=>{try{localStorage.setItem("publy_ot_livelog",JSON.stringify(otLiveLog.slice(-200)));}catch{}},[otLiveLog]);
   // 봇 오프라인/웹 미리보기 대비 폴백(카테고리별 무난한 인기 주제) — 빈 화면 방지
   const HOT_FALLBACK: Record<string,string[]> = {
     실시간:["요즘 뜨는 부업","정부지원금 신청","가을 여행지 추천","제철 음식 요리","전기요금 절약법","1인 창업 아이템","연말정산 미리보기","청년 지원 정책","넷플릭스 추천작","다이어트 식단","반려동물 용품","스마트스토어 창업","환절기 건강관리","실내 인테리어 팁","제철 과일 고르는 법","중고거래 꿀팁","캠핑 초보 준비물","홈카페 레시피","가성비 노트북","주말 나들이 코스"],
@@ -2965,7 +2976,8 @@ POST3: (제목)|(이유)
     otStopRef.current=false;setOtRunning(true);setOtNextAt(null);
     // 📡 모든 단계를 라이브 로그로 → 회원 본인도, 관리자도 실시간 확인. (관리자 '라이브 로그' 탭에서 회원별로 보임)
     const liveLines:string[]=[];
-    const otLive=(t:string,running=true)=>{liveLines.push(`[${new Date().toLocaleTimeString("ko-KR")}] ${t}`); try{pushLiveLog(user.id,{name:user.name,email:user.email,context:"⚡ 원터치 발행",text:liveLines.slice(-80).join("\n"),running});}catch{}};
+    setOtLiveLog(prev=>[...prev,`━━━━━ ${new Date().toLocaleString("ko-KR")} 원터치 시작 ━━━━━`].slice(-300));
+    const otLive=(t:string,running=true)=>{const line=`[${new Date().toLocaleTimeString("ko-KR")}] ${t}`; liveLines.push(line); setOtLiveLog(prev=>[...prev,line].slice(-300)); try{pushLiveLog(user.id,{name:user.name,email:user.email,context:"⚡ 원터치 발행",text:liveLines.slice(-80).join("\n"),running});}catch{}};
     const accId=pubAccId;
     // 회원 실제 카테고리 목록 확보(state 경쟁 방지 위해 직접 fetch)
     let cats:{id:string;name:string}[]=[];
@@ -6468,7 +6480,13 @@ POST3: (제목)|(이유)
                       <button key={m} disabled={otRunning} onClick={()=>setOtImgMode(m)} style={{padding:"9px 14px",borderRadius:10,border:`2px solid ${on?OT:"var(--border)"}`,background:on?`${OT}16`:"var(--bg)",color:on?OT:"var(--text2)",cursor:otRunning?"default":"pointer",fontSize:13,fontWeight:800,fontFamily:"inherit"}}>{l}</button>
                     );})}
                   </div>
-                  <div style={{marginTop:8,fontSize:12,color:"var(--text3)",lineHeight:1.5}}>{otImgMode==="flow"?"무료 Flow는 발행할 때 봇이 자동으로 이미지를 만들어 넣어요. (Google 로그인 필요 — 계정 관리에서 연결)":"AI 이미지는 설정 탭에 OpenAI/Replicate 키가 있어야 해요. 키가 없으면 이미지 없이 글만 올라가요."}</div>
+                  <div style={{marginTop:8,fontSize:12,color:"var(--text3)",lineHeight:1.5}}>{otImgMode==="flow"?"무료 Flow는 발행할 때 봇이 자동으로 이미지를 만들어 넣어요. 시작 전에 아래에서 Flow를 먼저 연결하세요.":"AI 이미지는 설정 탭에 OpenAI/Replicate 키가 있어야 해요. 키가 없으면 이미지 없이 글만 올라가요."}</div>
+                  {otImgMode==="flow"&&(
+                    <div style={{marginTop:12,padding:"12px 14px",borderRadius:12,border:`1.5px solid ${OT}33`,background:`${OT}08`}}>
+                      <div style={{fontSize:13,fontWeight:800,color:OT,marginBottom:8}}>🎬 Flow 이미지 준비 <span style={{fontSize:11,fontWeight:600,color:"var(--text3)"}}>· 시작 전에 연결하세요(무료 이미지)</span></div>
+                      <GoogleFlowCard botOnline={botOnline} botUrl={BOT} userId={user?.id||""} />
+                    </div>
+                  )}
                 </div>
 
                 {/* 텀 + 이미지 + 카테고리 */}
@@ -6522,9 +6540,34 @@ POST3: (제목)|(이유)
                       </div>
                     ))}
                   </div>
+                {/* 하단 고정 로그창에 가리지 않게 여백 */}
+                <div style={{height:otDockOpen?"46vh":"70px"}}/>
               </div>
               );
             })()}
+
+            {/* ⚡ 원터치 로그 — 화면 하단 넓게 고정. 스크롤 안 해도 항상 보임 + 전체 복사 + 중단 */}
+            {tab==="onetouch"&&(
+              <div className="ot-logdock">
+                <div className="ot-logdock-head">
+                  <span style={{fontSize:14.5,fontWeight:900,color:"#7c3aed"}}>📋 원터치 로그</span>
+                  {otRunning
+                    ? <span style={{fontSize:11,fontWeight:800,color:"#fff",background:"#7c3aed",padding:"3px 10px",borderRadius:99}}><span className="spinner" style={{marginRight:4}}/>작업 중{otNextAt?` · 다음 ${Math.max(0,Math.ceil((otNextAt-Date.now())/60000))}분`:""}</span>
+                    : <span style={{fontSize:11,fontWeight:700,color:"var(--text3)"}}>{otLiveLog.length>0?"대기 중 (지난 기록)":"대기 중"}</span>}
+                  <span style={{marginLeft:"auto",display:"flex",gap:6,flexWrap:"wrap"}}>
+                    <button className="ot-logdock-btn" onClick={()=>{const t=otLiveLog.join("\n"); if(!t){showToast("복사할 로그가 없어요","info");return;} navigator.clipboard.writeText(t).then(()=>showToast("📋 로그 전체를 복사했어요","success")).catch(()=>showToast("복사 실패","error"));}}>📋 전체 복사</button>
+                    {otRunning&&<button className="ot-logdock-btn" style={{borderColor:"#ef4444",color:"#ef4444",fontWeight:900}} onClick={stopOneTouch}>⏹ 중단</button>}
+                    {!otRunning&&otLiveLog.length>0&&<button className="ot-logdock-btn" onClick={()=>{setOtLiveLog([]);try{localStorage.removeItem("publy_ot_livelog");}catch{}}}>🗑 지우기</button>}
+                    <button className="ot-logdock-btn" onClick={()=>setOtDockOpen(v=>!v)}>{otDockOpen?"▽ 접기":"△ 펼치기"}</button>
+                  </span>
+                </div>
+                {otDockOpen&&<div className="ot-logdock-body" style={{height:"40vh"}} ref={el=>{if(el&&otRunning)el.scrollTop=el.scrollHeight;}}>
+                  {otLiveLog.length===0
+                    ? <span style={{color:"var(--text3)"}}>아직 작업 기록이 없어요.{"\n"}위에서 키워드를 넣고 "⚡ 원터치 발행 시작"을 누르면 여기에 제목→본문→이미지→발행까지 모든 진행이 한 줄씩 실시간으로 쌓여요.</span>
+                    : otLiveLog.join("\n")}
+                </div>}
+              </div>
+            )}
 
 
             {/* ===== 발행 기록 ===== */}

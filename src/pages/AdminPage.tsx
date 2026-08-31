@@ -181,6 +181,12 @@ const CSS = `
 
 .layout{flex:1;display:flex;overflow:hidden;min-height:0;padding-left:210px;}
 .sidebar{position:fixed;left:0;top:60px;bottom:0;z-index:50;width:210px;background:var(--bg2);border-right:1px solid var(--border);display:flex;flex-direction:column;padding:12px 8px;gap:2px;overflow-y:auto;}
+.ot-logdock{position:fixed;left:222px;right:16px;bottom:14px;z-index:180;background:var(--card);border:1.5px solid rgba(124,58,237,.42);border-radius:16px;box-shadow:0 12px 46px rgba(0,0,0,.32);display:flex;flex-direction:column;overflow:hidden;}
+.ot-logdock-head{display:flex;align-items:center;gap:8px;padding:11px 15px;border-bottom:1px solid var(--border);background:linear-gradient(135deg,rgba(124,58,237,.14),rgba(192,38,211,.06));flex-wrap:wrap;}
+.ot-logdock-body{overflow-y:auto;padding:14px 17px;font-size:13px;line-height:1.75;white-space:pre-wrap;word-break:break-word;font-family:ui-monospace,'SF Mono',Menlo,monospace;color:var(--text);background:var(--bg);}
+.ot-logdock-btn{font-size:12px;padding:6px 12px;border-radius:9px;border:1px solid var(--border);background:var(--bg2);color:var(--text2);cursor:pointer;font-weight:800;font-family:inherit;transition:all .15s;}
+.ot-logdock-btn:hover{border-color:#7c3aed;color:#7c3aed;}
+@media(max-width:900px){.ot-logdock{left:10px;right:10px;bottom:70px;}}
 .nav-section{font-size:10px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--text3);padding:4px 10px 6px;margin-top:4px;}
 /* 플레이스 세트: 플레이스365+리뷰답글 테두리 묶음 (회원 대시보드와 동일) */
 .nav-box{margin:8px 4px;padding:6px 5px 7px;border:1.5px solid rgba(22,133,107,.35);border-radius:12px;background:linear-gradient(180deg,rgba(22,133,107,.06),rgba(22,133,107,.02));}
@@ -878,6 +884,9 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
   const [otNextAt,setOtNextAt]=useState<number|null>(null);
   const [otLog,setOtLog]=useState<{id:string;kw:string;title?:string;cat?:string;step:string;status:"wait"|"run"|"done"|"fail"|"limit";postUrl?:string;error?:string;at?:string}[]>(()=>{try{return JSON.parse(localStorage.getItem("publy_adm_ot_log")||"[]");}catch{return [];}});
   useEffect(()=>{try{localStorage.setItem("publy_adm_ot_log",JSON.stringify(otLog.slice(0,50)));}catch{}},[otLog]);
+  const [otLiveLog,setOtLiveLog]=useState<string[]>(()=>{try{return JSON.parse(localStorage.getItem("publy_adm_ot_livelog")||"[]");}catch{return [];}});
+  const [otDockOpen,setOtDockOpen]=useState(true);
+  useEffect(()=>{try{localStorage.setItem("publy_adm_ot_livelog",JSON.stringify(otLiveLog.slice(-300)));}catch{}},[otLiveLog]);
   // ★글자수 하드 캡: AI 오버슈트(1500 지정→3000) 방지. 목표 125% 초과 시 FAQ 보존하고 본문 문단을 잘라 목표 근처로.
   function enforceMaxChars(body:string, target:number):string{
     if(!target||body.length<=Math.round(target*1.25))return body;
@@ -938,7 +947,7 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
     if(!r.ok)throw new Error(d.error||"발행 실패");
     return d.postUrl||"";
   }
-  function stopOneTouch(){otStopRef.current=true;setOtRunning(false);setOtNextAt(null);showToast("원터치를 멈췄어요","info");}
+  function stopOneTouch(){otStopRef.current=true;setOtRunning(false);setOtNextAt(null);showToast("원터치를 멈췄어요 — 진행 중이던 작업도 중단","info");}
   async function runOneTouch(){
     if(otRunning)return;
     const kws=otKeywords.split(/[\n,]+/).map(s=>s.trim()).filter(Boolean);
@@ -947,6 +956,8 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
     const acc=connAccs.find(a=>a.id===pubAccId);
     const termMin=otCustomTerm.trim()?Math.max(1,parseInt(otCustomTerm,10)||otTermMin):otTermMin;
     otStopRef.current=false;setOtRunning(true);setOtNextAt(null);
+    const otLive=(t:string)=>setOtLiveLog(prev=>[...prev,`[${new Date().toLocaleTimeString("ko-KR")}] ${t}`].slice(-300));
+    setOtLiveLog(prev=>[...prev,`━━━━━ ${new Date().toLocaleString("ko-KR")} 원터치 시작 ━━━━━`].slice(-300));
     let cats:{id:string;name:string}[]=[];
     try{ const cr=await botFetch(`${BOT}/api/naver/categories/${ADM_UID}`,{signal:AbortSignal.timeout(30000)} as any); const cd=await cr.json().catch(()=>({})); if(cd.categories&&cd.categories.length)cats=cd.categories; }catch{}
     if(!cats.length)cats=(accCats[pubAccId]||[]).map((c,i)=>({id:String(i),name:c}));
@@ -957,25 +968,28 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
       const n=Math.min(6,Math.max(1,otImgCount));
       const flowN=otImgMode==="flow"?n:0;
       try{
-        upd({step:"제목 생성 중",status:"run"}); const title=await otGenTitleBest(kw); upd({title});
-        upd({step:"본문 생성 중"}); const {content,tags}=await otGenPost(kw,title);
+        upd({step:"제목 생성 중",status:"run"}); otLive(`▶ [${i+1}/${kws.length}] "${kw}" 제목 생성 중`); const title=await otGenTitleBest(kw); upd({title}); otLive(`  ✅ 제목 선택: ${title}`);
+        upd({step:"본문 생성 중"}); otLive(`  ✍️ 본문 생성 중(${otCharMode==="manual"?otTargetChars+"자·":""}${otWriteStyle})`); const {content,tags}=await otGenPost(kw,title); otLive(`  ✅ 본문 완성 (${content.length}자)`);
         const imgs:string[]=[];
-        if(!flowN){ upd({step:"이미지 생성 중"});
+        if(flowN){ otLive(`  🖼️ 이미지 ${flowN}장 = 발행 시 자동 생성(무료 Flow)`); }
+        else { upd({step:"이미지 생성 중"}); otLive(`  🖼️ 이미지 ${n}장 생성 중(AI)`);
           for(let k=0;k<n;k++){ if(otStopRef.current)break; try{imgs.push(await generateImage(kw,title,k));}catch{} }
+          otLive(`  ✅ 이미지 ${imgs.length}/${n}장`);
         }
-        upd({step:"카테고리 매칭 중"}); const cat=await otPickCategory(title,content,cats); upd({cat:cat.name||"기본"});
-        upd({step:flowN?"발행+이미지 생성 중":"발행 중"});
+        upd({step:"카테고리 매칭 중"}); const cat=await otPickCategory(title,content,cats); upd({cat:cat.name||"기본"}); otLive(`  📂 카테고리 자동 선택: ${cat.name||"기본"}`);
+        upd({step:flowN?"발행+이미지 생성 중":"발행 중"}); otLive(`  🚀 네이버 발행 중${flowN?"(이미지 자동 생성 포함)":""}...`);
         const postUrl=await otPublishItem(kw,title,content,tags.split(",").map(t=>t.replace("#","").trim()).filter(Boolean),imgs,cat.id,acc,flowN);
         await addHistory({user_id:ADM_UID,platform:"naver",title,post_url:postUrl,status:"success"}).catch(()=>{});
-        upd({step:"발행 완료",status:"done",postUrl,at:new Date().toLocaleTimeString("ko-KR",{hour:"2-digit",minute:"2-digit"})});
+        upd({step:"발행 완료",status:"done",postUrl,at:new Date().toLocaleTimeString("ko-KR",{hour:"2-digit",minute:"2-digit"})}); otLive(`  ✅ 발행 완료! ${postUrl||""}`);
       }catch(e:any){
-        upd({step:"실패: "+(e.message||"오류"),status:"fail",error:e.message});
+        upd({step:"실패: "+(e.message||"오류"),status:"fail",error:e.message}); otLive(`  ❌ 실패: ${e.message||"오류"}`);
         await addHistory({user_id:ADM_UID,platform:"naver",title:kw,status:"fail",error_message:e.message}).catch(()=>{});
       }
       const hasNext=i<kws.length-1&&!otStopRef.current;
-      if(hasNext){ const until=Date.now()+termMin*60000; setOtNextAt(until); while(Date.now()<until){ if(otStopRef.current)break; await new Promise(r=>setTimeout(r,1000)); } setOtNextAt(null); }
+      if(hasNext){ const until=Date.now()+termMin*60000; setOtNextAt(until); otLive(`  ⏱️ 다음 발행까지 ${termMin}분 대기`); while(Date.now()<until){ if(otStopRef.current)break; await new Promise(r=>setTimeout(r,1000)); } setOtNextAt(null); }
     }
     setOtRunning(false);setOtNextAt(null);
+    otLive(otStopRef.current?"⏹ 사용자가 멈춤":"🎉 원터치 발행 전체 완료");
   }
 
   // 글 생성
@@ -4406,7 +4420,13 @@ POST3: (제목)|(이유)
                       <button key={m} disabled={otRunning} onClick={()=>setOtImgMode(m)} style={{padding:"9px 14px",borderRadius:10,border:`2px solid ${on?OT:"var(--border)"}`,background:on?`${OT}16`:"var(--bg)",color:on?OT:"var(--text2)",cursor:otRunning?"default":"pointer",fontSize:13,fontWeight:800,fontFamily:"inherit"}}>{l}</button>
                     );})}
                   </div>
-                  <div style={{marginTop:8,fontSize:12,color:"var(--text3)",lineHeight:1.5}}>{otImgMode==="flow"?"무료 Flow는 발행할 때 봇이 자동으로 이미지를 만들어 넣어요.":"AI 이미지는 OpenAI/Replicate 키가 있어야 해요."}</div>
+                  <div style={{marginTop:8,fontSize:12,color:"var(--text3)",lineHeight:1.5}}>{otImgMode==="flow"?"무료 Flow는 발행할 때 봇이 자동으로 이미지를 만들어 넣어요. 시작 전에 아래에서 Flow를 먼저 연결하세요.":"AI 이미지는 OpenAI/Replicate 키가 있어야 해요."}</div>
+                  {otImgMode==="flow"&&(
+                    <div style={{marginTop:12,padding:"12px 14px",borderRadius:12,border:`1.5px solid ${OT}33`,background:`${OT}08`}}>
+                      <div style={{fontSize:13,fontWeight:800,color:OT,marginBottom:8}}>🎬 Flow 이미지 준비 <span style={{fontSize:11,fontWeight:600,color:"var(--text3)"}}>· 시작 전에 연결하세요(무료 이미지)</span></div>
+                      <GoogleFlowCard botOnline={botOnline} botUrl={BOT} userId={ADM_UID} />
+                    </div>
+                  )}
                 </div>
 
                 {/* 텀 + 이미지 + 카테고리 */}
@@ -4455,9 +4475,33 @@ POST3: (제목)|(이유)
                       </div>
                     ))}
                   </div>
+                <div style={{height:otDockOpen?"46vh":"70px"}}/>
               </div>
               );
             })()}
+
+            {/* ⚡ 관리자 원터치 로그 — 화면 하단 넓게 고정 */}
+            {tab === "onetouch" && (
+              <div className="ot-logdock">
+                <div className="ot-logdock-head">
+                  <span style={{fontSize:14.5,fontWeight:900,color:"#7c3aed"}}>📋 원터치 로그</span>
+                  {otRunning
+                    ? <span style={{fontSize:11,fontWeight:800,color:"#fff",background:"#7c3aed",padding:"3px 10px",borderRadius:99}}>작업 중{otNextAt?` · 다음 ${Math.max(0,Math.ceil((otNextAt-Date.now())/60000))}분`:""}</span>
+                    : <span style={{fontSize:11,fontWeight:700,color:"var(--text3)"}}>{otLiveLog.length>0?"대기 중 (지난 기록)":"대기 중"}</span>}
+                  <span style={{marginLeft:"auto",display:"flex",gap:6,flexWrap:"wrap"}}>
+                    <button className="ot-logdock-btn" onClick={()=>{const t=otLiveLog.join("\n"); if(!t){showToast("복사할 로그가 없어요","info");return;} navigator.clipboard.writeText(t).then(()=>showToast("📋 로그 전체를 복사했어요")).catch(()=>showToast("복사 실패","error"));}}>📋 전체 복사</button>
+                    {otRunning&&<button className="ot-logdock-btn" style={{borderColor:"#ef4444",color:"#ef4444",fontWeight:900}} onClick={stopOneTouch}>⏹ 중단</button>}
+                    {!otRunning&&otLiveLog.length>0&&<button className="ot-logdock-btn" onClick={()=>{setOtLiveLog([]);try{localStorage.removeItem("publy_adm_ot_livelog");}catch{}}}>🗑 지우기</button>}
+                    <button className="ot-logdock-btn" onClick={()=>setOtDockOpen(v=>!v)}>{otDockOpen?"▽ 접기":"△ 펼치기"}</button>
+                  </span>
+                </div>
+                {otDockOpen&&<div className="ot-logdock-body" style={{height:"40vh"}} ref={el=>{if(el&&otRunning)el.scrollTop=el.scrollHeight;}}>
+                  {otLiveLog.length===0
+                    ? <span style={{color:"var(--text3)"}}>아직 작업 기록이 없어요.{"\n"}키워드를 넣고 "⚡ 원터치 발행 시작"을 누르면 여기에 제목→본문→이미지→발행까지 모든 진행이 실시간으로 쌓여요.</span>
+                    : otLiveLog.join("\n")}
+                </div>}
+              </div>
+            )}
 
             {tab === "accounts" && (
               <div style={{animation:"fadeUp .25s ease both"}}>
