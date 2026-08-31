@@ -2129,18 +2129,35 @@ export async function generateFlowImagesCDP(params: {
       const enterDeadline = enterStart + 12000;
       let triedRecover = false;
       while (!entered && Date.now() < enterDeadline) {
-        const editables = await page.$$("[contenteditable=true], textarea");
-        for (const el of editables) {
+        // ★프롬프트 입력칸을 '정확히' 고른다(테리: 프롬프트가 엉뚱한 곳으로 밀려감).
+        //   Flow 화면엔 상단 검색창·프로젝트명 편집칸 등 다른 편집요소가 있어, 무조건 첫 요소를 잡으면
+        //   거기에 타이핑돼 밀린다. → placeholder('무엇을 만들' 등)로 진짜 입력칸을 우선 찾고,
+        //   없으면 '화면 최하단에 있는' 편집요소를 프롬프트칸으로 본다. 검색/제목 계열은 제외.
+        const target = await page.evaluateHandle(() => {
+          const visible = (el: Element) => { const r = el.getBoundingClientRect(); const s = getComputedStyle(el); return r.width > 0 && r.height > 0 && s.visibility !== "hidden" && s.display !== "none"; };
+          const all = [...document.querySelectorAll("[contenteditable=true], textarea")].filter(visible) as HTMLElement[];
+          if (!all.length) return null;
+          const ph = (el: HTMLElement) => (el.getAttribute("placeholder") || el.getAttribute("aria-label") || el.getAttribute("data-placeholder") || "").toLowerCase();
+          const isSearch = (el: HTMLElement) => /검색|search|제목|title|이름|name/.test(ph(el));
+          // 1순위: '무엇을 만들' 류 placeholder
+          const byPh = all.find(el => /무엇을\s*만들|만들고\s*싶|describe|prompt|생성할/.test(ph(el)));
+          if (byPh) return byPh;
+          // 2순위: 검색/제목 아닌 것 중 화면 최하단(입력창은 보통 맨 아래)
+          const cands = all.filter(el => !isSearch(el));
+          const pool = cands.length ? cands : all;
+          return pool.sort((a, b) => b.getBoundingClientRect().top - a.getBoundingClientRect().top)[0];
+        });
+        const el = target.asElement();
+        if (el) {
           try {
-            if (!(await el.isVisible())) continue;
-            // 업로드/첨부용 숨은 입력이 아니라 실제 프롬프트 입력칸인지 대략 확인(편집 가능 + 화면 하단쪽)
             await el.click();
             await page.waitForTimeout(400);
             await page.keyboard.press(process.platform === "darwin" ? "Meta+A" : "Control+A");
             await page.keyboard.press("Backspace");
             await page.keyboard.type(prompt, { delay: 15 });
-            entered = true;
-            break;
+            // 입력 검증: 방금 친 프롬프트가 그 칸에 실제로 들어갔는지 확인(엉뚱한 곳이면 재시도)
+            const ok = await el.evaluate((node: any, p: string) => (node instanceof HTMLTextAreaElement ? node.value : (node.textContent || "")).includes(p.slice(0, 20)), prompt).catch(() => false);
+            if (ok) entered = true;
           } catch {}
         }
         if (!entered) {
