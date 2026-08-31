@@ -892,25 +892,36 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
   const [otLiveLog,setOtLiveLog]=useState<string[]>(()=>{try{return JSON.parse(localStorage.getItem("publy_adm_ot_livelog")||"[]");}catch{return [];}});
   const [otDockOpen,setOtDockOpen]=useState(true);
   useEffect(()=>{try{localStorage.setItem("publy_adm_ot_livelog",JSON.stringify(otLiveLog.slice(-300)));}catch{}},[otLiveLog]);
-  // Flow 준비(이미지 탭과 동일 방식 — 디버깅 크롬 9222 공유)
+  // Flow 준비 + 계정 슬롯(여러 구글 계정 — 각자 프로필/포트)
   const [flowReady,setFlowReady]=useState(false);
   const [flowLaunching,setFlowLaunching]=useState(false);
-  async function handleFlowLaunchChrome(){
+  const [flowSlots,setFlowSlots]=useState<{id:number;name:string}[]>(()=>{try{const s=JSON.parse(localStorage.getItem("publy_adm_flow_slots")||"[]");return Array.isArray(s)&&s.length?s:[{id:0,name:"기본 계정"}];}catch{return [{id:0,name:"기본 계정"}];}});
+  const [flowSlot,setFlowSlot]=useState<number>(()=>{const n=parseInt(localStorage.getItem("publy_adm_flow_slot")||"0");return isNaN(n)?0:n;});
+  const [flowSlotReady,setFlowSlotReady]=useState<Record<number,boolean>>({});
+  useEffect(()=>{try{localStorage.setItem("publy_adm_flow_slots",JSON.stringify(flowSlots));}catch{}},[flowSlots]);
+  useEffect(()=>{try{localStorage.setItem("publy_adm_flow_slot",String(flowSlot));}catch{}},[flowSlot]);
+  async function handleFlowLaunchChrome(slot:number=flowSlot){
     if(!(window as any).electron?.flowLaunchChrome){ showToast("PC 앱에서만 Flow 준비가 가능해요. Publy 앱을 실행해주세요.","error"); return; }
     setFlowLaunching(true);
-    try{ const r=await (window as any).electron.flowLaunchChrome();
-      if(r.ok){ setFlowReady(true); showToast(r.already?"✅ Flow 크롬이 이미 준비돼 있어요!":"✅ Flow 크롬을 열었어요! 크롬 창에서 Google 로그인만 해주세요 (최초 1회)"); }
+    try{ const r=await (window as any).electron.flowLaunchChrome(slot);
+      if(r.ok){ setFlowSlot(slot); setFlowReady(true); setFlowSlotReady(p=>({...p,[slot]:true})); const nm=flowSlots.find(s=>s.id===slot)?.name||`계정 ${slot+1}`; showToast(r.already?`✅ '${nm}' Flow 크롬이 준비돼 있어요!`:`✅ '${nm}' Flow 크롬을 열었어요! 로그인만 해주세요 (최초 1회)`); }
       else showToast("❌ "+(r.error||"Flow 준비 실패"),"error");
     }catch(e:any){ showToast("❌ Flow 준비 실패: "+e.message,"error"); }
     finally{ setFlowLaunching(false); }
   }
+  async function handleFlowConnectAll(){
+    if(!(window as any).electron?.flowLaunchChrome){ showToast("PC 앱에서만 가능해요.","error"); return; }
+    setFlowLaunching(true);
+    try{ for(const s of flowSlots){ try{ const r=await (window as any).electron.flowLaunchChrome(s.id); if(r.ok)setFlowSlotReady(p=>({...p,[s.id]:true})); }catch{} await new Promise(r=>setTimeout(r,1500)); } showToast(`✅ ${flowSlots.length}개 계정 창을 모두 열었어요. 각 창에서 로그인해 주세요(최초 1회).`); }
+    finally { setFlowLaunching(false); }
+  }
   useEffect(()=>{
     if(!(tab==="onetouch"&&otImgMode==="flow")||!(window as any).electron?.flowStatus)return;
     let alive=true;
-    const check=async()=>{ try{ const s=await (window as any).electron.flowStatus(); if(alive)setFlowReady(!!s.ready); }catch{} };
+    const check=async()=>{ try{ const s=await (window as any).electron.flowStatus(flowSlot); if(alive){setFlowReady(!!s.ready);setFlowSlotReady(p=>({...p,[flowSlot]:!!s.ready}));} }catch{} };
     check(); const iv=setInterval(check,5000);
     return ()=>{ alive=false; clearInterval(iv); };
-  },[tab,otImgMode]);
+  },[tab,otImgMode,flowSlot]);
   // ★절전 방지: 원터치(텀 대기 포함)·발행 중엔 화면/시스템 안 꺼지게
   useEffect(()=>{
     const busy = otRunning || publishing;
@@ -1005,7 +1016,13 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
       : `- 분야를 최대한 골고루 섞기: 맛집·여행·재테크·건강·육아·뷰티·인테리어·IT/가전·정책자금·반려동물·패션·자기계발 등`;
     const text=await callAI(`당신은 네이버 블로그 SEO·트렌드 전문가입니다.\n지금 검색이 잘 되고 사람들이 많이 찾는, 서로 겹치지 않는 다양한 블로그 키워드 ${count}개를 JSON 배열로만 생성하세요.\n[규칙]\n- 실제 검색량 많은 자연스러운 형태(예: "원주 맛집", "겨울 제철 음식", "소상공인 정책자금 신청")\n${catRule}\n- 2~4어절, 과장·낚시 금지\n${excl?`- ⛔ 최근 14일간 이미 쓴 키워드는 절대 포함 금지: ${excl}`:""}${hotHint}\nJSON 배열만 반환.`);
     const usedSet=new Set(used.map(u=>u.replace(/\s+/g,""))); const seen=new Set<string>();
-    return parseArr(text).map(s=>s.trim()).filter(Boolean).filter(k=>{const key=k.replace(/\s+/g,""); if(!key||usedSet.has(key)||seen.has(key))return false; seen.add(key); return true;}).slice(0,count);
+    const arr=parseArr(text).map(s=>s.trim()).filter(Boolean).filter(k=>{const key=k.replace(/\s+/g,""); if(!key||usedSet.has(key)||seen.has(key))return false; seen.add(key); return true;});
+    let tries=0;
+    while(arr.length<count && tries<2){ tries++; const need=count-arr.length; const exclAll=[...used,...arr].slice(0,150).join(", ");
+      try{ const more=await callAI(`위와 같은 조건으로 네이버 블로그 SEO 키워드 ${need}개를 JSON 배열로만 더 생성하세요.\n${catRule}\n- ⛔ 아래 키워드는 절대 포함 금지(14일 내 사용 + 방금 뽑은 것): ${exclAll}\n- 2~4어절, 과장·낚시 금지\nJSON 배열만.`);
+        for(const k of parseArr(more).map(s=>s.trim()).filter(Boolean)){ const key=k.replace(/\s+/g,""); if(key&&!usedSet.has(key)&&!seen.has(key)){seen.add(key);arr.push(k);} if(arr.length>=count)break; }
+      }catch{break;} }
+    return arr.slice(0,count);
   }
   async function runOneTouch(resume?:{idx:number;kws:string[]}){
     if(otRunning)return;
@@ -1047,7 +1064,7 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
           const flines=content.split("\n").filter((l:string)=>l.trim().length>5); const fstep=Math.max(1,Math.floor(flines.length/n));
           const fprompts=Array.from({length:n},(_,k)=>{const seg=flines.slice(k*fstep,(k+1)*fstep).join(" ").slice(0,150);return buildAdmFlowPrompt(kw,title,seg,k);});
           const fcaptions=buildCaptions(kw,n,content);
-          try{ const fr=await botFetch(`${BOT}/api/flow-generate`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({prompts:fprompts,captions:fcaptions})});
+          try{ const fr=await botFetch(`${BOT}/api/flow-generate`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({prompts:fprompts,captions:fcaptions,cdpPort:9222+(flowSlot||0)})});
             const fd=await fr.json().catch(()=>({}));
             if(fr.status===402||fd.code==="FLOW_NO_CREDIT"){
               upd({step:"⏸ Flow 크레딧 부족 — 계정 변경 후 이어가기",status:"limit"});
@@ -4556,13 +4573,28 @@ POST3: (제목)|(이유)
                       <div style={{marginTop:8,fontSize:12,color:"var(--text3)",lineHeight:1.5}}>{otImgMode==="flow"?"무료 Flow는 옆의 'Flow 준비'를 먼저 눌러 연결하세요.":"AI 이미지는 OpenAI/Replicate 키가 있어야 해요."}</div>
                     </div>
                     {otImgMode==="flow"&&(
-                      <div style={{flex:"1 1 280px",minWidth:250,maxWidth:400,padding:"14px 16px",borderRadius:12,border:`1.5px solid ${flowReady?"rgba(0,200,120,.45)":`${OT}33`}`,background:flowReady?"rgba(0,200,120,.06)":`${OT}08`}}>
-                        <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
-                          <span style={{fontSize:20}}>{flowReady?"✅":"🎬"}</span>
-                          <div style={{fontSize:13,fontWeight:800,color:flowReady?"var(--success)":OT}}>{flowReady?"Flow 준비 완료!":"Flow 준비가 필요해요"}</div>
+                      <div style={{flex:"1 1 300px",minWidth:260,maxWidth:440,padding:"14px 16px",borderRadius:12,border:`1.5px solid ${OT}33`,background:`${OT}08`}}>
+                        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,marginBottom:8,flexWrap:"wrap"}}>
+                          <div style={{fontSize:13,fontWeight:800,color:OT}}>🎬 Flow 계정 <span style={{fontSize:11,fontWeight:600,color:"var(--text3)"}}>· 크레딧 떨어지면 전환</span></div>
+                          <div style={{display:"flex",gap:6}}>
+                            <button onClick={handleFlowConnectAll} disabled={flowLaunching} style={{fontSize:11,fontWeight:800,padding:"5px 10px",borderRadius:8,border:`1px solid ${OT}55`,background:"var(--bg)",color:OT,cursor:flowLaunching?"wait":"pointer",fontFamily:"inherit"}}>전체 연결</button>
+                            <button onClick={()=>{const id=(flowSlots.reduce((m,s)=>Math.max(m,s.id),-1))+1; setFlowSlots(p=>[...p,{id,name:`계정 ${id+1}`}]);}} disabled={flowLaunching} style={{fontSize:11,fontWeight:800,padding:"5px 10px",borderRadius:8,border:`1px solid ${OT}55`,background:"var(--bg)",color:OT,cursor:"pointer",fontFamily:"inherit"}}>➕ 계정 추가</button>
+                          </div>
                         </div>
-                        <div style={{fontSize:11.5,color:"var(--text3)",lineHeight:1.55,marginBottom:10}}>{flowReady?"이미지 생성·글 생성과 같은 크롬을 써요. 이제 시작하면 이미지가 자동으로 들어가요.":"버튼을 누르면 크롬이 열려요 → Google 로그인 1회 → 이미지 생성·글 생성과 같은 창을 그대로 공유해요."}</div>
-                        {!flowReady&&<button onClick={handleFlowLaunchChrome} disabled={flowLaunching} style={{width:"100%",padding:"11px",borderRadius:10,border:"none",background:"linear-gradient(135deg,#a855f7,#7c3aed)",color:"#fff",cursor:flowLaunching?"wait":"pointer",fontSize:13.5,fontWeight:800,fontFamily:"inherit",opacity:flowLaunching?.7:1}}>{flowLaunching?"준비 중...":"🚀 여기 눌러 Flow 준비 (크롬 열림)"}</button>}
+                        <div style={{fontSize:11,color:"var(--text3)",lineHeight:1.5,marginBottom:10}}>계정마다 <b>최초 1회</b> [로그인] → 이후 [전환]으로 바로 사용.</div>
+                        <div style={{display:"flex",flexDirection:"column",gap:6}}>
+                          {flowSlots.map(s=>{const active=flowSlot===s.id; const ready=!!flowSlotReady[s.id]; return(
+                            <div key={s.id} style={{display:"flex",alignItems:"center",gap:8,padding:"9px 11px",borderRadius:10,background:active?`${OT}14`:"var(--bg)",border:`2px solid ${active?OT:"var(--border)"}`}}>
+                              <span style={{fontSize:15}}>{ready?"✅":"⚪"}</span>
+                              <input value={s.name} onChange={e=>setFlowSlots(p=>p.map(x=>x.id===s.id?{...x,name:e.target.value}:x))} disabled={otRunning} style={{flex:1,minWidth:0,fontSize:12.5,fontWeight:700,padding:"4px 6px",borderRadius:6,border:"1px solid var(--border)",background:"var(--card)",color:"var(--text)",fontFamily:"inherit"}}/>
+                              {active
+                                ? <span style={{fontSize:10.5,fontWeight:800,color:OT,padding:"3px 7px",borderRadius:99,background:`${OT}18`}}>사용 중</span>
+                                : <button onClick={()=>{setFlowSlot(s.id);handleFlowLaunchChrome(s.id);}} disabled={flowLaunching} style={{fontSize:11,fontWeight:800,padding:"5px 9px",borderRadius:7,border:`1px solid ${OT}55`,background:"var(--card)",color:OT,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>전환</button>}
+                              <button onClick={()=>handleFlowLaunchChrome(s.id)} disabled={flowLaunching} style={{fontSize:11,fontWeight:800,padding:"5px 9px",borderRadius:7,border:"none",background:"linear-gradient(135deg,#a855f7,#7c3aed)",color:"#fff",cursor:flowLaunching?"wait":"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>{ready?"열기":"로그인"}</button>
+                              {flowSlots.length>1&&<button onClick={()=>{setFlowSlots(p=>p.filter(x=>x.id!==s.id)); if(flowSlot===s.id)setFlowSlot(flowSlots.find(x=>x.id!==s.id)?.id||0);}} disabled={otRunning} style={{fontSize:13,padding:"2px 6px",borderRadius:6,border:"none",background:"transparent",color:"var(--text3)",cursor:"pointer"}}>✕</button>}
+                            </div>
+                          );})}
+                        </div>
                       </div>
                     )}
                   </div>
@@ -4594,7 +4626,12 @@ POST3: (제목)|(이유)
                 {otPaused&&!otRunning&&(
                   <div style={{marginBottom:12,padding:"16px",borderRadius:14,border:"2px solid #f59e0b",background:"rgba(245,158,11,.08)"}}>
                     <div style={{fontSize:14.5,fontWeight:800,color:"#f59e0b",marginBottom:6}}>⏸ Flow 크레딧 부족으로 멈췄어요 ({otPaused.idx+1}번째 키워드에서)</div>
-                    <div style={{fontSize:12.5,color:"var(--text2)",lineHeight:1.6,marginBottom:12}}>위 <b>🎬 Flow 준비</b>에서 <b>다른 Google 계정으로 다시 연결</b>한 다음, 아래 버튼을 누르면 <b>멈춘 그 키워드부터 이어서</b> 발행돼요.</div>
+                    <div style={{fontSize:12.5,color:"var(--text2)",lineHeight:1.6,marginBottom:10}}>다른 Flow 계정으로 <b>전환</b>한 뒤 <b>이어가기</b>를 누르면 <b>멈춘 그 키워드부터</b> 계속돼요.</div>
+                    <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:10}}>
+                      {flowSlots.map(s=>{const active=flowSlot===s.id;return(
+                        <button key={s.id} onClick={()=>{setFlowSlot(s.id);handleFlowLaunchChrome(s.id);}} disabled={flowLaunching} style={{fontSize:12,fontWeight:800,padding:"7px 12px",borderRadius:8,border:`2px solid ${active?"#f59e0b":"var(--border)"}`,background:active?"rgba(245,158,11,.14)":"var(--bg)",color:active?"#f59e0b":"var(--text2)",cursor:"pointer",fontFamily:"inherit"}}>{flowSlotReady[s.id]?"✅ ":""}{s.name}{active?" ·사용중":""}</button>
+                      );})}
+                    </div>
                     <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
                       <button onClick={()=>runOneTouch(otPaused)} style={{flex:1,minWidth:160,padding:"13px",borderRadius:11,border:"none",background:"linear-gradient(135deg,#f59e0b,#f97316)",color:"#fff",fontSize:15,fontWeight:900,fontFamily:"inherit",cursor:"pointer"}}>▶ 이어가기 ({otPaused.kws.length-otPaused.idx}개 남음)</button>
                       <button onClick={()=>{setOtPaused(null);setOtLiveLog(prev=>[...prev,`[${new Date().toLocaleTimeString("ko-KR")}] 이어가기 취소`].slice(-300));}} style={{padding:"13px 18px",borderRadius:11,border:"1px solid var(--border)",background:"var(--bg)",color:"var(--text3)",fontSize:13,fontWeight:700,fontFamily:"inherit",cursor:"pointer"}}>취소</button>

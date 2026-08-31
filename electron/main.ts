@@ -610,19 +610,23 @@ ipcMain.handle("unregister-user", async (_event, userId: string) => {
    Flow 이미지를 봇이 조작하려면 사용자 크롬이 디버깅 포트(9222)로 떠 있어야 한다.
    이 핸들러가 OS별 크롬 경로를 찾아 별도 프로필로 디버깅 크롬을 띄우고 Flow 페이지를 연다.
    별도 프로필이라 사용자의 평소 크롬과 분리되고, 로그인은 그 프로필에 유지된다. */
-let flowChromeProc: ChildProcess | null = null;
-const FLOW_CDP_PORT = 9222;
-function flowProfileDir() { return path.join(app.getPath("home"), ".publy-flow-chrome"); }
+// 슬롯별 Flow 크롬 프로세스(여러 구글 계정을 각자 프로필·포트로 분리 유지)
+const flowChromeProcs: Record<number, ChildProcess | null> = {};
+const FLOW_CDP_BASE = 9222;
+function flowCdpPort(slot = 0) { return FLOW_CDP_BASE + (slot || 0); }
+// slot 0은 기존 폴더(.publy-flow-chrome) 그대로 → 기존 로그인 유지. 1↑는 -N 붙임.
+function flowProfileDir(slot = 0) { return path.join(app.getPath("home"), slot ? `.publy-flow-chrome-${slot}` : ".publy-flow-chrome"); }
 
 /* ── Flow 크롬 "건강검진" ──
    좀비 크롬은 /json/version(포트)엔 응답해도 실제 조작할 페이지 타겟이 0개라
    봇의 Playwright가 못 붙는다(Browser context management is not supported).
    그래서 단순 포트 확인이 아니라 "쓸 수 있는 page 타겟이 실제로 있는지"까지 확인한다. */
-async function flowChromeHealthy(): Promise<boolean> {
+async function flowChromeHealthy(slot = 0): Promise<boolean> {
+  const port = flowCdpPort(slot);
   try {
-    const v = await fetch(`http://localhost:${FLOW_CDP_PORT}/json/version`, { signal: AbortSignal.timeout(1500) });
+    const v = await fetch(`http://localhost:${port}/json/version`, { signal: AbortSignal.timeout(1500) });
     if (!v.ok) return false;
-    const listRes = await fetch(`http://localhost:${FLOW_CDP_PORT}/json`, { signal: AbortSignal.timeout(1500) });
+    const listRes = await fetch(`http://localhost:${port}/json`, { signal: AbortSignal.timeout(1500) });
     if (!listRes.ok) return false;
     const targets = await listRes.json();
     return Array.isArray(targets) && targets.some((t: any) => t && t.type === "page");
@@ -630,21 +634,22 @@ async function flowChromeHealthy(): Promise<boolean> {
 }
 
 /* ── 좀비/잔여 Flow 크롬 강제 정리 ── (재실행 전에 깨끗이 청소) */
-async function killStaleFlowChrome() {
-  const dir = flowProfileDir();
+async function killStaleFlowChrome(slot = 0) {
+  const dir = flowProfileDir(slot);
+  const proc = flowChromeProcs[slot];
   try {
-    if (flowChromeProc?.pid) {
-      if (process.platform === "win32") await execAsync(`taskkill /PID ${flowChromeProc.pid} /T /F`);
+    if (proc?.pid) {
+      if (process.platform === "win32") await execAsync(`taskkill /PID ${proc.pid} /T /F`);
       else {
         // ★먼저 정상종료(SIGTERM)로 크롬이 세션·쿠키를 디스크에 안전하게 쓰고 닫게 한다 → 프로필 손상으로
         //   인한 불필요한 구글 재로그인 방지. 안 죽으면 그때 강제종료(SIGKILL).
-        try { process.kill(-flowChromeProc.pid, "SIGTERM"); } catch {} try { flowChromeProc.kill("SIGTERM"); } catch {}
+        try { process.kill(-proc.pid, "SIGTERM"); } catch {} try { proc.kill("SIGTERM"); } catch {}
         await new Promise(r => setTimeout(r, 1500));
-        try { process.kill(-flowChromeProc.pid, "SIGKILL"); } catch {} try { flowChromeProc.kill("SIGKILL"); } catch {}
+        try { process.kill(-proc.pid, "SIGKILL"); } catch {} try { proc.kill("SIGKILL"); } catch {}
       }
     }
   } catch {}
-  flowChromeProc = null;
+  flowChromeProcs[slot] = null;
   try {
     if (process.platform === "win32") {
       // WMIC은 최신 Windows에서 제거됐다. 인자를 Base64로 전달해 사용자 경로의 따옴표/특수문자도
@@ -667,8 +672,9 @@ async function killStaleFlowChrome() {
   await new Promise(r => setTimeout(r, 800));
 }
 
-ipcMain.handle("flow-launch-chrome", async () => {
+ipcMain.handle("flow-launch-chrome", async (_e, slot: number = 0) => {
   const fs = await import("fs");
+  const port = flowCdpPort(slot);
 
   // OS별 크롬 실행 파일 경로 후보
   const candidates = process.platform === "darwin"
@@ -686,28 +692,28 @@ ipcMain.handle("flow-launch-chrome", async () => {
     return { ok: false, error: "크롬을 찾을 수 없어요. Google Chrome을 먼저 설치해주세요." };
   }
 
-  // 전용 프로필 폴더(사용자 평소 크롬과 분리, 로그인 유지됨)
-  const profileDir = flowProfileDir();
+  // 전용 프로필 폴더(사용자 평소 크롬과 분리, 로그인 유지됨) — 슬롯별로 분리해 여러 구글 계정 동시 보유
+  const profileDir = flowProfileDir(slot);
   const flowUrl = "https://labs.google/fx/ko/tools/flow";
 
   // Windows Chrome singleton은 같은 프로필의 두 번째 실행 요청을 기존의 최소화/후면 창으로
   // 넘길 수 있다. 준비 버튼을 다시 누르면 새 창 요청을 기존 인스턴스에 전달해 사용자가 볼 수 있게 한다.
-  if (await flowChromeHealthy()) {
+  if (await flowChromeHealthy(slot)) {
     if (process.platform === "win32") {
       try {
         const reveal = spawn(chromePath, [`--user-data-dir=${profileDir}`, "--new-window", flowUrl], { detached: true, stdio: "ignore" });
         reveal.unref();
       } catch {}
     }
-    return { ok: true, already: true };
+    return { ok: true, already: true, slot, port };
   }
 
   // 포트는 응답해도 좀비(타겟 0개)이거나 죽은 크롬일 수 있음 → 깨끗이 정리 후 새로 띄운다
-  await killStaleFlowChrome();
+  await killStaleFlowChrome(slot);
 
   try {
-    flowChromeProc = spawn(chromePath, [
-      `--remote-debugging-port=${FLOW_CDP_PORT}`,
+    flowChromeProcs[slot] = spawn(chromePath, [
+      `--remote-debugging-port=${port}`,
       "--remote-allow-origins=*",
       `--user-data-dir=${profileDir}`,
       "--no-first-run",
@@ -716,7 +722,7 @@ ipcMain.handle("flow-launch-chrome", async () => {
       "--new-window",
       flowUrl,
     ], { detached: true, stdio: "ignore" });
-    flowChromeProc.unref();
+    flowChromeProcs[slot]?.unref();
   } catch (e: any) {
     return { ok: false, error: "크롬 실행 실패: " + e.message };
   }
@@ -724,12 +730,12 @@ ipcMain.handle("flow-launch-chrome", async () => {
   // 단순 포트 응답이 아니라 "실제 쓸 수 있는(page 타겟 존재)" 상태가 될 때까지 대기(최대 20초)
   for (let i = 0; i < 20; i++) {
     await new Promise(r => setTimeout(r, 1000));
-    if (await flowChromeHealthy()) return { ok: true, launched: true };
+    if (await flowChromeHealthy(slot)) return { ok: true, launched: true, slot, port };
   }
   return { ok: false, error: "크롬은 실행됐지만 준비 확인에 실패했어요. 잠시 후 다시 시도해주세요." };
 });
 
 /* ── Flow 준비 상태 확인 ── 포트만 보지 않고 "봇이 실제로 붙을 수 있는지"까지 확인(좀비 방지) */
-ipcMain.handle("flow-status", async () => {
-  return { ready: await flowChromeHealthy() };
+ipcMain.handle("flow-status", async (_e, slot: number = 0) => {
+  return { ready: await flowChromeHealthy(slot), slot, port: flowCdpPort(slot) };
 });

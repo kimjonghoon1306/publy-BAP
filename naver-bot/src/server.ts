@@ -468,7 +468,7 @@ app.get("/api/flow/status", async (_req, res) => {
 
 /* ── Google Flow 이미지 생성 (CDP 방식) ── */
 app.post("/api/flow-generate", async (req, res) => {
-  const { prompts, captions } = req.body;
+  const { prompts, captions, cdpPort } = req.body;
   if (!Array.isArray(prompts) || prompts.length === 0)
     return res.status(400).json({ error: "prompts 배열 필요" });
   // ★요청 받자마자 즉시 로그(테리 요청): 사용자가 버튼 누른 걸 인식했다는 신호를 바로 보여준다.
@@ -478,7 +478,7 @@ app.post("/api/flow-generate", async (req, res) => {
     const images = await generateFlowImagesCDP({
       prompts,
       captions: Array.isArray(captions) ? captions : [],
-      cdpPort: 9222,
+      cdpPort: (typeof cdpPort === "number" && cdpPort >= 9222 && cdpPort <= 9299) ? cdpPort : 9222,   // 슬롯별 포트
       onLog: (m) => console.log(m),
     });
     if (images.length === 0) {
