@@ -492,6 +492,7 @@ app.post("/api/flow-generate", async (req, res) => {
     console.error(`[server] Flow 생성 핸들러 오류 (프로세스 유지): ${msg}`);
     if (msg.includes("CDP_CONNECT_FAIL")) return res.status(503).json({ error: "Flow 준비가 안 됐어요. 'Flow 준비' 버튼으로 크롬을 먼저 열어주세요.", code: "CDP_CONNECT_FAIL" });
     if (msg.includes("FLOW_NOT_LOGGED_IN")) return res.status(401).json({ error: "크롬에서 Google Flow에 먼저 로그인해주세요.", code: "FLOW_NOT_LOGGED_IN" });
+    if (msg.includes("FLOW_NO_CREDIT")) return res.status(402).json({ error: "Flow 무료 크레딧이 부족해요 — Flow 계정을 바꾸거나 크레딧 충전 후 다시 해주세요.", code: "FLOW_NO_CREDIT" });
     res.status(500).json({ error: msg });
   }
 });

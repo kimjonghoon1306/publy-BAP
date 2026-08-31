@@ -2249,6 +2249,29 @@ export async function generateFlowImagesCDP(params: {
         continue;
       }
 
+      // ★크레딧 승인창 자동 처리 + 크레딧 소진 감지 (테리 실측: "크레딧 15개를 사용하여 생성할까요? [승인]"이
+      //   반복해서 뜨고 이미지가 안 나옴). 승인창이 뜨면 '승인, 다시 묻지 않음'을 눌러 진행하고,
+      //   '크레딧이 부족'류 문구가 뜨면 아무리 기다려도 안 되므로 즉시 전체 실패로 끝낸다(무한반복 방지).
+      const creditState = await page.evaluate(() => {
+        const body = document.body.innerText || "";
+        const noCredit = /크레딧이?\s*(부족|없|모자|소진)|충분한?\s*크레딧|크레딧을?\s*모두|out of credits|not enough credits|insufficient credit|no credits|한도.*초과|일일.*한도/i.test(body);
+        // 크레딧 사용 승인 다이얼로그(예: "크레딧 15개를 사용하여 …생성을 시작할까요?")
+        const needApprove = /크레딧\s*\d+\s*개를?\s*사용|크레딧을?\s*사용하여|사용하여\s*\d+개/i.test(body);
+        let approved = false;
+        if (needApprove) {
+          const btns = [...document.querySelectorAll("button,[role=button]")] as HTMLElement[];
+          // '승인, 다시 묻지 않음' 우선 → 없으면 '승인'
+          const pref = btns.find(b => /승인,?\s*다시\s*묻지\s*않음|승인,?\s*don'?t\s*ask/i.test(b.textContent || ""))
+                    || btns.find(b => /^\s*승인\s*$|^\s*approve\s*$/i.test(b.textContent || ""));
+          if (pref) { pref.click(); approved = true; }
+        }
+        return { noCredit, needApprove, approved };
+      }).catch(() => ({ noCredit: false, needApprove: false, approved: false }));
+      if (creditState.noCredit) {
+        log(`[Flow] ⛔ Flow 무료 크레딧이 부족해요 — 이미지를 만들 수 없어요. Flow 계정을 바꾸거나 크레딧이 충전된 뒤 다시 해주세요.`);
+        throw new Error("FLOW_NO_CREDIT: Flow 크레딧 부족 — 계정 변경 또는 충전 후 재시도");
+      }
+      if (creditState.approved) { log(`[Flow] ✅ 크레딧 사용 승인(다시 묻지 않음) — 생성을 진행해요`); await page.waitForTimeout(1500); }
       // 생성 대기(최대 165초): Flow는 한 번에 여러 후보를 순차적으로 렌더할 수 있다.
       // 첫 이미지에서 즉시 끝내지 말고, 생성 표시가 끝나고 후보 개수가 안정될 때까지 수집한다.
       log(`[Flow]    ⏳ 그림이 그려지길 기다리는 중이에요 (보통 1~2분 걸려요)`);
@@ -2277,8 +2300,11 @@ export async function generateFlowImagesCDP(params: {
           // ★구글이 프롬프트를 "정책 위반"으로 거부한 경우 감지(테리 실측: "이 생성은 구글 정책을 위반할
           //   수 있습니다. 다른 프롬프트를 사용해 보거나 의견을 보내주세요"). 이러면 같은 프롬프트론 계속 거부됨.
           const policyBlocked = /정책을?\s*위반|정책\s*위반|다른\s*프롬프트를?\s*사용|violat|policy|not\s*allowed|can'?t\s*(help|generate|create)|무언가\s*잘못/i.test(document.body.innerText);
-          return { fresh: [...bySrc.values()], generating, policyBlocked };
+          const noCredit = /크레딧이?\s*(부족|없|모자|소진)|충분한?\s*크레딧|크레딧을?\s*모두|out of credits|not enough credits|insufficient credit|no credits/i.test(document.body.innerText);
+          return { fresh: [...bySrc.values()], generating, policyBlocked, noCredit };
         }, beforeSrcs);
+        // 생성 중 크레딧 소진 감지 → 무한 대기 방지 위해 전체 실패로 끝낸다.
+        if ((snap as any).noCredit && snap.fresh.length === 0) { throw new Error("FLOW_NO_CREDIT: Flow 크레딧 부족 — 계정 변경 또는 충전 후 재시도"); }
         // 정책 거부가 뜨면 이 프롬프트로는 아무리 기다려도 안 되므로 즉시 대기 종료한다.
         if (snap.policyBlocked && snap.fresh.length === 0) { policyBlocked = true; break; }
         // ★상태를 눈으로 볼 수 있게(테리: "Flow가 맘대로 움직일 때 알아야 한다"):

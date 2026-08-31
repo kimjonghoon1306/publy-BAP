@@ -2915,6 +2915,20 @@ POST3: (제목)|(이유)
     if(!arr.length)throw new Error("제목 생성 실패");
     return arr.slice().sort((a:string,b:string)=>calcTitleScore(b)-calcTitleScore(a))[0]; // 점수 최고 제목 선택
   }
+  // 모바일 가독성: FAQ/구조 마커는 그대로 두고, 긴 문단(3문장↑ 또는 120자↑)을 2문장마다 쪼개 빈 줄로 분리.
+  function otSpaceParagraphs(text:string):string{
+    const isMarker=(s:string)=>/\[(FAQ|관련글|참고자료)(시작|끝)\]|^Q\d|^A\d/.test(s.trim());
+    return text.split(/\n\n+/).map(block=>{
+      const b=block.trim(); if(!b||isMarker(b))return b;
+      return b.split(/\n/).map(line=>{
+        const l=line.trim(); if(!l||isMarker(l))return l;
+        const sents=l.match(/[^.!?。]*[.!?。]+['")\]]*\s*|[^.!?。]+$/g)||[l];
+        if(sents.length<=2 && l.length<=120) return l;
+        const out:string[]=[]; for(let i=0;i<sents.length;i+=2) out.push(sents.slice(i,i+2).join("").trim());
+        return out.filter(Boolean).join("\n\n");
+      }).join("\n\n");
+    }).filter(Boolean).join("\n\n");
+  }
   async function otGenPost(kw:string,title:string,signal:AbortSignal):Promise<{content:string;tags:string}>{
     const chars=otCharMode==="manual"?otTargetChars:calcTargetChars();   // 글자수 직접 지정 or 자동
     const catGuide=getCatGuide(kw,title);
@@ -2926,7 +2940,8 @@ POST3: (제목)|(이유)
     const bm=cleaned.match(/태그[^\n]*\n([\s\S]+)/);
     const body0=ensureQuestionHeadings(bm?bm[1].trim():cleaned,kw);
     const bodyRaw=await ensureKeywordCount(body0,kw,5);   // 키워드 최소 5회 보장
-    const body=enforceMaxChars(bodyRaw,chars);   // 자동·직접 모두 목표 글자수 근처로 캡(오버슈트 방지: 3187자 같은 과다 차단)
+    const bodyCap=enforceMaxChars(bodyRaw,chars);   // 자동·직접 모두 목표 글자수 근처로 캡(오버슈트 방지)
+    const body=otSpaceParagraphs(bodyCap);   // 모바일 가독성: 긴 문단을 2~3문장마다 쪼개 빈 줄로 분리
     return {content:body,tags:tgm?tgm[1].trim():""};
   }
   // 회원 실제 네이버 카테고리 목록 ↔ 글 주제 AI 매칭 → 가장 맞는 카테고리 자동 선택
@@ -2935,7 +2950,8 @@ POST3: (제목)|(이유)
     if(cats.length===1)return cats[0];
     const names=cats.map((c,i)=>`${i+1}. ${c.name}`).join("\n");
     try{
-      const t=await callAI(`아래 블로그 글에 가장 잘 맞는 카테고리 하나를 고르세요.\n제목: ${title}\n요약: ${content.slice(0,200)}\n\n카테고리 목록:\n${names}\n\n가장 잘 맞는 카테고리의 번호만 숫자로 답하세요(설명·다른 말 금지).`,signal);
+      // ★글 전체를 읽고 주제를 판단해 매칭(200자만 보던 것 개선). AI가 다 쓴 글이니 주제를 모를 리 없음.
+      const t=await callAI(`아래 블로그 글 전체를 읽고, 이 글의 핵심 주제에 가장 잘 맞는 카테고리 하나를 고르세요.\n제목: ${title}\n\n본문:\n${content.slice(0,2500)}\n\n카테고리 목록:\n${names}\n\n글의 주제를 먼저 파악한 뒤, 위 목록에서 가장 잘 맞는 카테고리의 번호만 숫자로 답하세요(설명·다른 말 금지). 애매하면 1번.`,signal);
       const m=t.match(/\d+/); const idx=m?parseInt(m[0],10)-1:-1;
       if(idx>=0&&idx<cats.length)return cats[idx];
     }catch{}
@@ -3046,11 +3062,14 @@ POST3: (제목)|(이유)
           const fcaptions=buildCaptions(kw,n,content);
           try{ const fr=await botFetch(`${BOT}/api/flow-generate`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({prompts:fprompts,captions:fcaptions}),signal});
             const fd=await fr.json().catch(()=>({}));
-            if(fr.ok&&Array.isArray(fd.images)&&fd.images.length){ imgs.push(...fd.images.map((im:any)=>im.src).filter(Boolean)); otLive(`  ✅ Flow 이미지 ${imgs.length}/${n}장`); }
+            if(fr.status===402||fd.code==="FLOW_NO_CREDIT"){ otLive(`  ⛔ Flow 무료 크레딧 부족 — Flow 계정을 바꾸고 재시작하세요. 이번 글은 이미지 없이 올려요`); showToast("Flow 크레딧이 부족해요 — 계정 변경 후 재시작","error"); }
+            else if(fr.ok&&Array.isArray(fd.images)&&fd.images.length){ imgs.push(...fd.images.map((im:any)=>im.src).filter(Boolean)); otLive(`  ✅ Flow 이미지 ${imgs.length}/${n}장${imgs.length<n?` (${n-imgs.length}장은 생성 실패해 빠졌어요)`:""}`); }
             else { otLive(`  ⚠️ Flow 이미지 실패: ${fd.error||("HTTP "+fr.status)} — 위 '🎬 Flow 준비'로 먼저 연결하세요. 이번 글은 이미지 없이 올려요`); }
           }catch(e:any){ otLive(`  ⚠️ Flow 이미지 오류: ${e.message}`); }
         }
+        if(otStopRef.current){ upd({step:"⏹ 중단됨 — 이 글은 발행하지 않았어요",status:"limit"}); otLive(`  ⏹ 중단 — 발행 전이라 이 글은 올리지 않았어요`,false); break; }   // ★전체 중단: 발행 전이면 글도 안 올림
         upd({step:"카테고리 매칭 중"}); const cat=await otPickCategory(title,content,cats,signal); upd({cat:cat.name||"기본"}); otLive(`  📂 카테고리 자동 선택: ${cat.name||"기본"}`);
+        if(otStopRef.current){ upd({step:"⏹ 중단됨 — 이 글은 발행하지 않았어요",status:"limit"}); otLive(`  ⏹ 중단 — 발행 전이라 이 글은 올리지 않았어요`,false); break; }
         const ok=await useQuota(user.id); if(!ok){upd({step:"발행 건수 초과",status:"limit"});otLive(`  ⛔ 발행 건수 초과`,false);break;}
         upd({step:"발행 중"}); otLive(`  🚀 네이버 발행 중...`);
         let postUrl="";
@@ -3073,15 +3092,28 @@ POST3: (제목)|(이유)
         otLive(`  ❌ 실패: ${e.message||"오류"}`);
         await addHistory({user_id:user.id,platform:"naver",title:kw,status:"fail",error_message:e.message}).catch(()=>{});
       }
-      const hasNext=i<kws.length-1&&!otStopRef.current;
+      if(otStopRef.current) break;
+      const hasNext=i<kws.length-1;
       if(hasNext){
-        const until=Date.now()+termMin*60000; setOtNextAt(until); otLive(`  ⏱️ 다음 발행까지 ${termMin}분 대기`);
+        const until=Date.now()+termMin*60000; setOtNextAt(until);
+        const hhmm=(d:number)=>new Date(d).toLocaleTimeString("ko-KR",{hour:"2-digit",minute:"2-digit"});
+        otLive(`  ⏱️ ${termMin}분 대기 (지금 ${hhmm(Date.now())} → ${hhmm(until)}에 다음 글 시작)`);
         while(Date.now()<until){ if(otStopRef.current)break; await new Promise(r=>setTimeout(r,1000)); }
         setOtNextAt(null);
+        if(otStopRef.current) break;
+        otLive(`  ▶ ${hhmm(Date.now())} 대기 끝 — 다음 글 시작`);
       }
     }
+    // ★중단됐고 남은 키워드가 있으면 입력칸에 되돌려 → Flow 재연결 후 '재시작'하면 그 키워드부터 이어감
+    if(otStopRef.current){
+      const doneCount=otLog.filter(r=>r.status==="done").length;
+      const remain=kws.slice(doneCount);
+      if(remain.length && !otAiKw){ setOtKeywords(remain.join("\n")); setOtAiKw(false); }
+      otLive(`⏹ 전체 중단${remain.length&&!otAiKw?` — 남은 ${remain.length}개는 키워드칸에 담아뒀어요. Flow 재연결 후 다시 '시작'하면 이어서 발행돼요`:""}`,false);
+    } else {
+      otLive("🎉 원터치 발행 전체 완료",false);
+    }
     setOtRunning(false);setOtNextAt(null);
-    otLive(otStopRef.current?"⏹ 사용자가 멈춤":"🎉 원터치 발행 전체 완료",false);
     void loadHistory();
   }
 
@@ -6508,13 +6540,17 @@ POST3: (제목)|(이유)
                             <button key={c} disabled={otRunning} onClick={()=>setOtAiCats(prev=>prev.includes(c)?prev.filter(x=>x!==c):[...prev,c])} style={{padding:"7px 12px",borderRadius:99,border:`1.5px solid ${on?OT:"var(--border)"}`,background:on?`${OT}16`:"var(--bg)",color:on?OT:"var(--text2)",cursor:otRunning?"default":"pointer",fontSize:12.5,fontWeight:700,fontFamily:"inherit"}}>{on?"✓ ":""}{c}</button>
                           );})}
                         </div>
-                        <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
-                          <span style={{fontSize:13,fontWeight:700}}>생성 개수</span>
-                          <input className="inp" type="number" min={1} max={30} disabled={otRunning} value={otAiKwCount} onChange={e=>setOtAiKwCount(Math.max(1,Math.min(30,parseInt(e.target.value)||5)))} style={{width:90}}/>
+                        <div style={{fontSize:13,fontWeight:700,marginBottom:6}}>생성 개수</div>
+                        <div style={{display:"flex",gap:6,flexWrap:"wrap",alignItems:"center",marginBottom:12}}>
+                          {[1,3,5,10,15,20,30].map(n=>{const on=otAiKwCount===n;return(
+                            <button key={n} disabled={otRunning} onClick={()=>setOtAiKwCount(n)} style={{minWidth:40,padding:"8px 10px",borderRadius:9,border:`2px solid ${on?OT:"var(--border)"}`,background:on?`${OT}16`:"var(--bg)",color:on?OT:"var(--text2)",cursor:otRunning?"default":"pointer",fontSize:13.5,fontWeight:800,fontFamily:"inherit"}}>{n}</button>
+                          );})}
+                          <span style={{fontSize:12,color:"var(--text3)",fontWeight:600,marginLeft:2}}>또는 직접</span>
+                          <input className="inp" type="number" min={1} max={30} disabled={otRunning} value={otAiKwCount} onChange={e=>setOtAiKwCount(Math.max(1,Math.min(30,parseInt(e.target.value)||5)))} style={{width:74}}/>
                           <span style={{fontSize:13,color:"var(--text2)",fontWeight:700}}>개</span>
-                          <button onClick={()=>{localStorage.setItem("publy_ot_aikw_count",String(otAiKwCount));localStorage.setItem("publy_ot_aikw","1");localStorage.setItem("publy_ot_aicats",JSON.stringify(otAiCats));showToast(`✅ 저장! 시작하면 AI가 ${otAiKwCount}개 자동 생성해요${otAiCats.length?` (${otAiCats.length}개 주제)`:""}`,"success");}} disabled={otRunning}
-                            style={{padding:"8px 16px",borderRadius:9,border:"none",background:`linear-gradient(135deg,${OT},#c026d3)`,color:"#fff",cursor:otRunning?"default":"pointer",fontSize:13,fontWeight:800,fontFamily:"inherit"}}>💾 저장</button>
                         </div>
+                        <button onClick={()=>{localStorage.setItem("publy_ot_aikw_count",String(otAiKwCount));localStorage.setItem("publy_ot_aikw","1");localStorage.setItem("publy_ot_aicats",JSON.stringify(otAiCats));showToast(`✅ 저장! 시작하면 AI가 ${otAiKwCount}개 자동 생성해요${otAiCats.length?` (${otAiCats.length}개 주제)`:""}`,"success");}} disabled={otRunning}
+                          style={{padding:"9px 18px",borderRadius:9,border:"none",background:`linear-gradient(135deg,${OT},#c026d3)`,color:"#fff",cursor:otRunning?"default":"pointer",fontSize:13,fontWeight:800,fontFamily:"inherit"}}>💾 저장</button>
                         <div style={{fontSize:11.5,color:"var(--text3)",marginTop:10}}>👉 아래 <b style={{color:OT}}>⚡ 원터치 발행 시작</b>을 누르면 그 순간 {otAiKwCount}개{otAiCats.length?` (${otAiCats.join("·")})`:""}를 생성해서 순서대로 올려요.</div>
                       </div>
                     : <>
@@ -6608,7 +6644,7 @@ POST3: (제목)|(이유)
                   ? (()=>{const ready=(otAiKw?otAiKwCount>0:kwList.length>0)&&!!pubAccId; return (
                     <button onClick={runOneTouch} disabled={!ready} style={{width:"100%",padding:"16px",borderRadius:14,border:"none",background:ready?`linear-gradient(135deg,${OT},#c026d3)`:"var(--border)",color:"#fff",fontSize:17,fontWeight:900,fontFamily:"inherit",cursor:ready?"pointer":"default",boxShadow:ready?`0 6px 20px ${OT}44`:"none",transition:"all .15s"}}>⚡ 원터치 발행 시작 {otAiKw?`(AI ${otAiKwCount}개 자동생성)`:(kwList.length>0?`(${willRun}개)`:"")}</button>
                   );})()
-                  : <button onClick={stopOneTouch} style={{width:"100%",padding:"16px",borderRadius:14,border:"none",background:"linear-gradient(135deg,#ef4444,#f43f5e)",color:"#fff",fontSize:17,fontWeight:900,fontFamily:"inherit",cursor:"pointer"}}>⏹ 멈추기 {otNextAt&&`· 다음 발행까지 ${Math.max(0,Math.ceil((otNextAt-Date.now())/60000))}분`}</button>}
+                  : <button onClick={stopOneTouch} style={{width:"100%",padding:"16px",borderRadius:14,border:"none",background:"linear-gradient(135deg,#ef4444,#f43f5e)",color:"#fff",fontSize:17,fontWeight:900,fontFamily:"inherit",cursor:"pointer"}}>⏹ 전체 중단 {otNextAt&&`· 다음 발행까지 ${Math.max(0,Math.ceil((otNextAt-Date.now())/60000))}분`}</button>}
 
                 {/* 로그 — 항상 표시(작업 안 할 때도 지난 기록 확인), 자동 저장 */}
                 <div className="card" style={{marginTop:14}}>
