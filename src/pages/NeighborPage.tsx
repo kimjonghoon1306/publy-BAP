@@ -3098,6 +3098,8 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
                         scRankFilter === "t50" ? inRank(item, 50) :
                         scRankFilter === "t100" ? inRank(item, 100) : true;
                       const filtered = base.filter(rankMatch);
+                      // 🕐 색인 유예: 발행 14일 이내 미노출은 '누락'에서 빼서(색인 대기) 실제 살릴 글만 카운트 — 회진과 기준 통일.
+                      const isIndexing = (x: any) => { if (x.exposed !== false || !x.date) return false; const a = Math.floor((Date.now() - new Date(x.date).getTime()) / 86400000); return Number.isFinite(a) && a >= 0 && a < INDEX_GRACE_DAYS; };
                       // 각 구간 개수(전체 기준 — 버튼에 숫자 표시)
                       const rc = {
                         all: exposureChecks.length,
@@ -3105,7 +3107,8 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
                         t20: exposureChecks.filter(x => inRank(x, 20)).length,
                         t50: exposureChecks.filter(x => inRank(x, 50)).length,
                         t100: exposureChecks.filter(x => inRank(x, 100)).length,
-                        out: exposureChecks.filter(x => x.exposed === false).length,
+                        out: exposureChecks.filter(x => x.exposed === false && !isIndexing(x)).length,
+                        indexing: exposureChecks.filter(isIndexing).length,
                       };
                       const rankTabs: { k: typeof scRankFilter; label: string; n: number; col: string }[] = [
                         { k: "all", label: "전체", n: rc.all, col: "#6b7280" },
@@ -3138,18 +3141,26 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
                           </div>
                           {filtered.length === 0 ? <div style={{ fontSize: 12, color: "var(--text3)", padding: "16px 0", textAlign: "center" }}>검색 결과가 없어요.</div> : (
                             <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
-                              {shown.map((item, i) => <div key={`${item.title}-${page}-${i}`} style={{ display: "grid", gridTemplateColumns: "22px minmax(0,1fr) auto", gap: 7, alignItems: "center", fontSize: 12 }}>
-                                <span>{item.exposed === true ? "✅" : item.exposed === false ? "❌" : "➖"}</span>
+                              {shown.map((item, i) => {
+                                // 🕐 색인 유예: 발행 14일 이내 미노출은 '누락'이 아니라 '색인 대기'(네이버가 아직 읽는 중). 회진과 동일 기준으로 통일.
+                                const ageDays = (item as any).date ? Math.floor((Date.now() - new Date((item as any).date).getTime()) / 86400000) : NaN;
+                                const indexing = item.exposed === false && Number.isFinite(ageDays) && ageDays >= 0 && ageDays < INDEX_GRACE_DAYS;
+                                return (
+                                <div key={`${item.title}-${page}-${i}`} style={{ display: "grid", gridTemplateColumns: "22px minmax(0,1fr) auto", gap: 7, alignItems: "center", fontSize: 12 }}>
+                                <span>{item.exposed === true ? "✅" : indexing ? "🕐" : item.exposed === false ? "❌" : "➖"}</span>
                                 <span title={item.title} style={{ overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis", color: "var(--text2)" }}>{item.title}</span>
                                 <div style={{ display: "flex", alignItems: "center", gap: 7, justifyContent: "flex-end" }}>
-                                  <b style={{ color: item.exposed === false ? "#ef4444" : "var(--text2)", whiteSpace: "nowrap" }}>{item.exposed === true ? `약 ${item.rank}위` : item.exposed === false ? "100위 내 누락" : "확인 불가"}</b>
-                                  {/* 미노출 글은 바로 개선안 받아 살리기(기존 개선안 흐름 재사용) */}
-                                  {item.exposed === false && item.logNo && (
+                                  <b style={{ color: indexing ? "#0ea5e9" : item.exposed === false ? "#ef4444" : "var(--text2)", whiteSpace: "nowrap" }}>{item.exposed === true ? `약 ${item.rank}위` : indexing ? "색인 대기" : item.exposed === false ? "100위 내 누락" : "확인 불가"}</b>
+                                  {/* 미노출 글은 살리기 — 단, 색인 대기(발행 14일 이내)는 아직 판단 이르니 버튼 대신 안내 */}
+                                  {indexing ? (
+                                    <span title={`발행한 지 ${ageDays}일 — 네이버가 아직 색인·순위를 매기는 중이에요. ${INDEX_GRACE_DAYS}일쯤 기다려 주세요.`} style={{ flexShrink: 0, fontSize: 10.5, color: "#0ea5e9", fontWeight: 700, whiteSpace: "nowrap" }}>{INDEX_GRACE_DAYS - ageDays}일 뒤 판단</span>
+                                  ) : item.exposed === false && item.logNo && (
                                     <button onClick={() => handleTrackedRepublish({ title: item.title, logNo: item.logNo, blogId: activeAccount?.blogId }, 0, { status: "needs" })}
                                       style={{ flexShrink: 0, padding: "4px 10px", borderRadius: 7, border: "none", background: "linear-gradient(135deg,#f59e0b,#ef4444)", color: "#fff", fontSize: 11, fontWeight: 800, cursor: "pointer", fontFamily: "inherit" }}>✏️ 살리기</button>
                                   )}
                                 </div>
-                              </div>)}
+                              </div>);
+                              })}
                             </div>
                           )}
                           {totalPages > 1 && (
@@ -3162,7 +3173,7 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
                         </>
                       );
                     })() : <div style={{ fontSize: 12, color: "var(--text3)" }}>위에서 글을 불러와 선택한 뒤 검색노출 확인을 실행하세요.</div>}
-                    <div style={{ marginTop: 10, fontSize: 11, color: "var(--text3)", lineHeight: 1.5 }}>네이버 공식 지수가 아닌, 순환 선택한 글의 제목 검색 결과를 바탕으로 한 퍼블리 자체 진단이에요. 누락만으로 저품질을 확정할 수는 없어요.</div>
+                    <div style={{ marginTop: 10, fontSize: 11, color: "var(--text3)", lineHeight: 1.5 }}>🕐 <b style={{ color: "#0ea5e9" }}>색인 대기</b>=발행한 지 {INDEX_GRACE_DAYS}일이 안 된 글이에요. 네이버가 아직 읽는 중이라 지금 안 떠도 정상이니 <b>살리지 말고 기다리면</b> 돼요(회진의 색인 대기와 같은 기준). / 네이버 공식 지수가 아닌, 순환 선택한 글의 제목 검색 결과를 바탕으로 한 퍼블리 자체 진단이에요.</div>
                   </div>
 
                   {/* 🩺 오늘의 회진 — 제목을 아직 안 바꾼 글만(바꾼 글은 위 '수정 추적'이 담당). 도도가 오늘 뭘 할지 지휘 */}
@@ -3288,16 +3299,26 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
                         {aeoResults.map((r, i) => (
                           <div key={i} style={{ padding: "10px 12px", borderRadius: 10, background: "var(--bg)", border: "1px solid var(--border)" }}>
                             <div style={{ fontSize: 12.5, fontWeight: 700, color: "var(--text)", marginBottom: 6, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.title}</div>
-                            <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                            <div style={{ display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" }}>
                               {r.checks.map(c => (
                                 <span key={c.key} title={c.hint} style={{ fontSize: 11, fontWeight: 700, padding: "4px 9px", borderRadius: 8, background: c.ok ? "rgba(0,168,120,.12)" : "rgba(239,68,68,.1)", color: c.ok ? "#00a878" : "#ef4444", cursor: "help" }}>
                                   {c.ok ? "✅" : "❌"} {c.label}
                                 </span>
                               ))}
+                              {r.passed < 3 && (
+                                <button onClick={() => {
+                                    if (!window.confirm(`"${r.title}"\n\n이 글을 AI가 좋은 품질로 새로 써서 그 글에 덮어쓸까요?\n(제목·본문·이미지가 모두 새로 교체돼요. 좋아요·주소는 유지)\n\n※ 새로 만든 품질이 낮으면 자동으로 덮어쓰기를 멈춰 원본을 지켜요.`)) return;
+                                    window.dispatchEvent(new CustomEvent("publy-revive-post", { detail: { logNo: r.logNo, title: r.title } }));
+                                    alert("원터치 탭에서 '글 살리기'가 진행돼요. 창을 닫지 말고 기다려 주세요.");
+                                  }}
+                                  style={{ marginLeft: "auto", flexShrink: 0, fontSize: 11, fontWeight: 800, color: "#fff", background: "linear-gradient(135deg,#7c3aed,#a855f7)", border: "none", cursor: "pointer", padding: "5px 11px", borderRadius: 8, fontFamily: "inherit" }}>
+                                  ✨ 이 글 살리기
+                                </button>
+                              )}
                             </div>
                           </div>
                         ))}
-                        <div style={{ fontSize: 11, color: "var(--text3)", lineHeight: 1.6, marginTop: 2 }}>❌ 항목에 마우스를 올리면 어떻게 고치는지 알려줘요. 오래된 글은 위 <b>재발행</b>에서 제목·내용을 다시 손볼 때 이 형식으로 바꿔주세요.</div>
+                        <div style={{ fontSize: 11, color: "var(--text3)", lineHeight: 1.6, marginTop: 2 }}>❌ 항목에 마우스를 올리면 어떻게 고치는지 알려줘요. <b style={{ color: "#7c3aed" }}>✨ 이 글 살리기</b>를 누르면 AI가 좋은 품질로 새로 써서 그 글에 덮어써요(제목·본문·이미지 교체, 좋아요·주소 유지). 제목만 손보려면 위 <b>재발행</b>을 쓰세요.</div>
                       </div>
                       );
                     })()}

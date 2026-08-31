@@ -889,6 +889,7 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
   const otFlowExhaustedRef=useRef<Set<number>>(new Set());   // 이번 실행에서 크레딧 소진된 Flow 슬롯(자동 전환용)
   const [otNextAt,setOtNextAt]=useState<number|null>(null);
   const [otPaused,setOtPaused]=useState<{idx:number;kws:string[];reason?:"credit"|"stopped"}|null>(null);
+  const [reviveState,setReviveState]=useState<{logNo:string;title:string;step:string;done?:boolean;fail?:string}|null>(null);   // ✨ 글 살리기 진행상황
   // ⏰ 예약 발행(관리자도 동일): 지정 시각에 원터치 자동 시작 + 예약 대기 중 절전 방지.
   const [otSchedOn,setOtSchedOn]=useState(false);
   const [otSchedTime,setOtSchedTime]=useState(()=>localStorage.getItem("publy_adm_ot_sched_time")||"09:00");
@@ -1016,7 +1017,7 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
       const m=t.match(/\d+/); const idx=m?parseInt(m[0],10)-1:-1; if(idx>=0&&idx<cats.length)return cats[idx]; }catch{}
     return cats[0];
   }
-  async function otPublishItem(kw:string,title:string,content:string,tags:string[],images:string[],categoryId:string|undefined,acc:PublyAccount|undefined,flowN:number=0):Promise<string>{
+  async function otPublishItem(kw:string,title:string,content:string,tags:string[],images:string[],categoryId:string|undefined,acc:PublyAccount|undefined,flowN:number=0,editLogNo?:string):Promise<string>{
     const blocks:any[]=[];
     if(!flowN&&images[0])blocks.push({type:"image",src:images[0],alt:""});
     const paras=content.split(/\n\n+/).map(s=>s.trim()).filter(Boolean);
@@ -1032,7 +1033,7 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
         blocks.splice(at,0,{type:"text",content:g});
       }
     }
-    const payload:any={userId:ADM_UID,platform:"naver",title,content,naverId:acc?.username||undefined,pubScope,tags,imageUrl:(!flowN&&images[0])||undefined,categoryId:categoryId||undefined,visibility,blocks};
+    const payload:any={userId:ADM_UID,platform:"naver",title,content,naverId:acc?.username||undefined,pubScope,tags,imageUrl:(!flowN&&images[0])||undefined,categoryId:categoryId||undefined,visibility,blocks,...(editLogNo?{editLogNo}:{})};
     if(flowN){   // 무료 Flow: 봇이 발행 중 생성
       const lines=content.split("\n").filter((l:string)=>l.trim().length>5);
       const step=Math.max(1,Math.floor(lines.length/flowN));
@@ -1047,6 +1048,45 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
     return d.postUrl||"";
   }
   function stopOneTouch(){otStopRef.current=true;setOtRunning(false);setOtNextAt(null);showToast("원터치를 멈췄어요 — 진행 중이던 작업도 중단","info");}
+
+  /* ✨ 글 살리기(관리자=회원 동일): 부실 글을 원터치 엔진으로 통째 새로 써서 그 글에 덮어쓰기 */
+  async function reviveOnePost(logNo:string, origTitle:string){
+    if(reviveState&&!reviveState.done&&!reviveState.fail){ showToast("이미 글 살리기가 진행 중이에요","error"); return; }
+    if(!pubAccId){ showToast("먼저 발행할 네이버 계정을 선택해주세요(원터치 탭 위)","error"); setTab("onetouch"); return; }
+    const acc=connAccs.find(a=>a.id===pubAccId);
+    const set=(step:string,extra?:any)=>setReviveState({logNo,title:origTitle,step,...extra});
+    set("원본 글 읽는 중...");
+    try{
+      let origBody="";
+      try{ const br=await botFetch(`${BOT}/api/post-body?blogId=${encodeURIComponent(acc?.username||"")}&logNo=${encodeURIComponent(logNo)}`,{signal:AbortSignal.timeout(25000)} as any); const bd=await br.json().catch(()=>({})); if(bd.ok) origBody=String(bd.body||""); }catch{}
+      set("주제 파악 중...");
+      let kw=origTitle.replace(/[\[\]#]/g,"").trim().slice(0,20);
+      try{ const t=await callAI(`아래 블로그 글의 핵심 검색 키워드(2~4어절)만 답해. 다른 말 절대 금지.\n제목: ${origTitle}\n본문: ${origBody.slice(0,600)}`); const k=(t||"").split("\n")[0].replace(/["'`]/g,"").trim(); if(k&&k.length<=25)kw=k; }catch{}
+      set("검색 잘 되는 새 제목 만드는 중...");
+      const newTitle=await otGenTitleBest(kw);
+      if(!newTitle||newTitle.trim().length<8){ set("실패",{fail:"제목 생성 품질 미달 — 덮어쓰기 중단(원본 안전)"}); showToast("새 제목 품질이 낮아 덮어쓰기를 멈췄어요(원본은 그대로)","error"); return; }
+      set("좋은 품질의 새 글 쓰는 중...");
+      const effStyle:WriteStyle=otWriteStyle==="자동"?await otPickStyle(kw,newTitle):(otWriteStyle as WriteStyle);
+      const {content,tags}=await otGenPost(kw,newTitle,effStyle);
+      if(!content||content.replace(/\s/g,"").length<400){ set("실패",{fail:"본문 생성 품질 미달 — 덮어쓰기 중단(원본 안전)"}); showToast("새 글 품질이 낮아 덮어쓰기를 멈췄어요(원본은 그대로)","error"); return; }
+      set("새 이미지 만드는 중...");
+      const n=Math.min(6,Math.max(1,otImgCount)); const imgs:string[]=[]; const useFlow=otImgMode==="flow";
+      if(!useFlow){ for(let k2=0;k2<n;k2++){ try{imgs.push(await generateImage(kw,newTitle,k2));}catch{} } }
+      let cats:{id:string;name:string}[]=[];
+      try{ const cr=await botFetch(`${BOT}/api/naver/categories/${ADM_UID}`,{method:"GET",signal:AbortSignal.timeout(30000)} as any); const cd=await cr.json().catch(()=>({})); if(cd.categories?.length)cats=cd.categories; }catch{}
+      const cat=await otPickCategory(newTitle,content,cats).catch(()=>({} as any));
+      set("그 글에 덮어쓰는 중...(창이 뜨면 닫지 마세요)");
+      const url=await otPublishItem(kw,newTitle,content,tags.split(",").map(t=>t.replace("#","").trim()).filter(Boolean),imgs,cat?.id,acc,useFlow?n:0,logNo);
+      if(url){ set("완료",{done:true}); showToast("✨ 글을 새로 써서 덮어썼어요!","success"); }
+      else { set("실패",{fail:"덮어쓰기 주소를 못 받았어요 — 블로그를 확인하세요"}); }
+    }catch(e:any){ set("실패",{fail:String(e?.message||e).split("\n")[0]}); showToast("글 살리기 실패: "+String(e?.message||e).split("\n")[0],"error"); }
+  }
+  useEffect(()=>{
+    const h=(e:any)=>{ const {logNo,title}=e.detail||{}; if(!logNo)return; setTab("onetouch"); setTimeout(()=>reviveOnePost(String(logNo),String(title||"")),300); };
+    window.addEventListener("publy-revive-post",h as any);
+    return ()=>window.removeEventListener("publy-revive-post",h as any);
+    // eslint-disable-next-line
+  },[pubAccId,otImgMode,otImgCount,otWriteStyle]);
   function otRecentUsedKw():string[]{ try{ const cut=Date.now()-14*86400000; return (JSON.parse(localStorage.getItem("publy_adm_ot_used_kw")||"[]") as any[]).filter(r=>r.at>cut).map(r=>r.kw); }catch{return [];} }
   function otRecordUsedKw(kws:string[]){ try{ const cut=Date.now()-14*86400000; const kept=(JSON.parse(localStorage.getItem("publy_adm_ot_used_kw")||"[]") as any[]).filter(r=>r.at>cut); const now=Date.now(); for(const k of kws) kept.push({kw:k,at:now}); localStorage.setItem("publy_adm_ot_used_kw",JSON.stringify(kept.slice(-800))); }catch{} }
   async function otGenKeywords(count:number):Promise<string[]>{
@@ -4559,6 +4599,17 @@ POST3: (제목)|(이유)
               <div style={{animation:"fadeUp .25s ease both"}}>
                 <UsageGuide theme={theme==="dark"?"dark":"light"} accent={OT} subtitle="키워드만 넣으면 제목·글·이미지·카테고리까지 자동으로 만들어 순서대로 발행해요. (관리자는 무제한)" steps={[{ico:"⌨️",title:"키워드 입력",desc:"한 줄에 하나씩, 몇 개든."},{ico:"⏱️",title:"텀 설정",desc:"발행 간격(넉넉히)."},{ico:"⚡",title:"시작",desc:"봇이 알아서 — 로그로 확인."}]} />
                 {renderAeoBanner()}
+                {reviveState&&(
+                  <div style={{margin:"12px 0",padding:"14px 16px",borderRadius:14,border:`1.5px solid ${reviveState.fail?"#ef4444":reviveState.done?"#00a878":OT}`,background:reviveState.fail?"rgba(239,68,68,.06)":reviveState.done?"rgba(0,168,120,.06)":`${OT}0d`}}>
+                    <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4}}>
+                      {!reviveState.done&&!reviveState.fail&&<span className="spinner"/>}
+                      <span style={{fontSize:13.5,fontWeight:800,color:reviveState.fail?"#ef4444":reviveState.done?"#00a878":OT}}>✨ 글 살리기 {reviveState.done?"완료":reviveState.fail?"실패":"진행 중"}</span>
+                      {(reviveState.done||reviveState.fail)&&<button onClick={()=>setReviveState(null)} style={{marginLeft:"auto",border:0,background:"transparent",color:"var(--text3)",cursor:"pointer",fontSize:16}}>✕</button>}
+                    </div>
+                    <div style={{fontSize:12,color:"var(--text2)",lineHeight:1.5,wordBreak:"break-all"}}>{reviveState.title}</div>
+                    <div style={{fontSize:12,fontWeight:700,color:reviveState.fail?"#ef4444":"var(--text2)",marginTop:4}}>{reviveState.fail||reviveState.step}</div>
+                  </div>
+                )}
                 {!botOnline&&<div className="alert alert-warn" style={{marginBottom:14}}>⚠️ PC에서 Publy 앱을 실행해야 발행이 가능합니다</div>}
 
                 <div style={{marginBottom:14,padding:"12px 14px",borderRadius:12,background:`${OT}0d`,border:`1.5px solid ${OT}33`,fontSize:13,fontWeight:700,color:OT}}>✨ 관리자 계정은 <b>무제한</b> — 발행 한도 없이 원터치로 계속 발행할 수 있어요.</div>
