@@ -6385,7 +6385,8 @@ POST3: (제목)|(이유)
 
                 {/* 발행 계정 */}
                 <div className="card" style={{marginBottom:14}}>
-                  <div className="card-title" style={{marginBottom:8}}>🔗 발행 네이버 계정</div>
+                  <div className="card-title" style={{marginBottom:4}}>🔗 발행 네이버 계정</div>
+                  <div style={{fontSize:12.5,color:"var(--text2)",lineHeight:1.5,marginBottom:10}}>계정은 <b onClick={()=>setTab("accounts")} style={{color:OT,cursor:"pointer",textDecoration:"underline"}}>계정 관리</b>에서 한 번만 연결하면 <b>일반 발행이랑 똑같이</b> 여기 자동으로 떠요. 원터치용으로 따로 로그인할 필요 없어요.</div>
                   {naverAccs.length===0
                     ? <div style={{fontSize:13,color:"var(--text2)"}}>연결된 네이버 계정이 없어요. <b onClick={()=>setTab("accounts")} style={{color:OT,cursor:"pointer",textDecoration:"underline"}}>계정 관리</b>에서 먼저 연결해주세요.</div>
                     : naverAccs.map(a=>(
