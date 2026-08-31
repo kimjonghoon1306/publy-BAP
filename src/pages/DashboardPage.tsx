@@ -7004,24 +7004,31 @@ POST3: (제목)|(이유)
                   <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,flexWrap:"wrap"}}>
                     <div style={{display:"flex",alignItems:"center",gap:8}}>
                       {otSchedOn&&<span style={{width:9,height:9,borderRadius:"50%",background:"#7c3aed",boxShadow:"0 0 7px #7c3aed",animation:"pulse 1.3s ease-in-out infinite"}}/>}
-                      <span style={{fontSize:14,fontWeight:800,color:otSchedOn?"#7c3aed":"var(--text)"}}>⏰ 예약 발행 {otSchedOn?"· 켜짐":""}</span>
+                      <span style={{fontSize:14,fontWeight:800,color:otSchedOn?"#7c3aed":"var(--text)"}}>⏰ 예약 발행</span>
                     </div>
-                    <button onClick={()=>{const v=!otSchedOn; if(v&&!(otAiKw||kwList.length>0)){showToast("먼저 키워드를 넣거나 AI 자동추천을 켜주세요","error");return;} if(v&&!pubAccId){showToast("발행할 네이버 계정을 먼저 선택해주세요","error");return;} setOtSchedOn(v); otSchedFiredRef.current="";}}
-                      style={{flexShrink:0,width:52,height:28,borderRadius:16,border:"none",cursor:"pointer",background:otSchedOn?"#7c3aed":"var(--border)",position:"relative",transition:"all .2s"}}>
-                      <span style={{position:"absolute",top:3,left:otSchedOn?27:3,width:22,height:22,borderRadius:"50%",background:"#fff",transition:"all .2s",boxShadow:"0 1px 3px rgba(0,0,0,.3)"}}/>
-                    </button>
+                    {/* 이 토글이 예약의 ON/OFF 스위치 — 켜야 아래 설정한 시각에 자동 시작 */}
+                    <div style={{display:"flex",alignItems:"center",gap:8}}>
+                      <span style={{fontSize:12.5,fontWeight:800,color:otSchedOn?"#7c3aed":"var(--text3)"}}>{otSchedOn?"켜짐":"꺼짐"}</span>
+                      <button onClick={()=>{const v=!otSchedOn; if(v&&!(otAiKw||kwList.length>0)){showToast("먼저 키워드를 넣거나 AI 자동추천을 켜주세요","error");return;} if(v&&!pubAccId){showToast("발행할 네이버 계정을 먼저 선택해주세요","error");return;} setOtSchedOn(v); otSchedFiredRef.current="";}}
+                        title={otSchedOn?"예약 끄기":"예약 켜기"} style={{flexShrink:0,width:52,height:28,borderRadius:16,border:"none",cursor:"pointer",background:otSchedOn?"#7c3aed":"var(--border)",position:"relative",transition:"all .2s"}}>
+                        <span style={{position:"absolute",top:3,left:otSchedOn?27:3,width:22,height:22,borderRadius:"50%",background:"#fff",transition:"all .2s",boxShadow:"0 1px 3px rgba(0,0,0,.3)"}}/>
+                      </button>
+                    </div>
                   </div>
-                  <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap",marginTop:10}}>
-                    <input type="time" value={otSchedTime} disabled={otSchedOn} onChange={e=>{setOtSchedTime(e.target.value);localStorage.setItem("publy_ot_sched_time",e.target.value);}} style={{padding:"8px 10px",borderRadius:8,border:"1px solid var(--border)",background:"var(--bg)",color:"var(--text)",fontFamily:"inherit",fontSize:14,fontWeight:700}}/>
-                    <label style={{display:"flex",alignItems:"center",gap:6,cursor:"pointer",fontSize:12.5,fontWeight:700,color:"var(--text2)"}}>
-                      <input type="checkbox" checked={otSchedDaily} disabled={otSchedOn} onChange={e=>{setOtSchedDaily(e.target.checked);localStorage.setItem("publy_ot_sched_daily",e.target.checked?"1":"0");}} style={{width:16,height:16,accentColor:"#7c3aed"}}/>
+                  <div style={{display:"flex",alignItems:"center",gap:12,flexWrap:"wrap",marginTop:12}}>
+                    <div style={{display:"flex",flexDirection:"column",gap:4}}>
+                      <span style={{fontSize:11.5,fontWeight:700,color:"var(--text3)"}}>발행 시각</span>
+                      <input type="time" value={otSchedTime} disabled={otSchedOn} onChange={e=>{setOtSchedTime(e.target.value);localStorage.setItem("publy_ot_sched_time",e.target.value);}} style={{padding:"12px 14px",borderRadius:10,border:`2px solid ${otSchedOn?"var(--border)":"#7c3aed55"}`,background:"var(--bg)",color:"var(--text)",fontFamily:"inherit",fontSize:20,fontWeight:800,letterSpacing:1,minWidth:150,opacity:otSchedOn?.6:1}}/>
+                    </div>
+                    <label style={{display:"flex",alignItems:"center",gap:7,cursor:"pointer",fontSize:13,fontWeight:700,color:"var(--text2)",alignSelf:"flex-end",paddingBottom:12}}>
+                      <input type="checkbox" checked={otSchedDaily} disabled={otSchedOn} onChange={e=>{setOtSchedDaily(e.target.checked);localStorage.setItem("publy_ot_sched_daily",e.target.checked?"1":"0");}} style={{width:18,height:18,accentColor:"#7c3aed"}}/>
                       매일 이 시각에 반복
                     </label>
                   </div>
-                  <div style={{fontSize:11.5,color:"var(--text3)",lineHeight:1.55,marginTop:8}}>
+                  <div style={{fontSize:11.5,color:"var(--text3)",lineHeight:1.55,marginTop:10}}>
                     {otSchedOn
-                      ? <><b style={{color:"#7c3aed"}}>{otSchedTime}</b>{otSchedDaily?" 마다":"에"} 지금 설정(키워드·글패턴·이미지·텀)으로 자동 시작해요. <b>노트북을 켜두기만</b> 하면 돼요 — 예약이 켜진 동안은 <b>절전으로 안 꺼지게</b> 막아둬요.</>
-                      : <>지정한 시각에 원터치가 <b>자동으로 시작</b >돼요. 자리에 없어도 돼요(앱은 켜둬야 해요). 켜면 그 시각까지 노트북이 안 꺼지게 막아요.</>}
+                      ? <>✅ 예약 <b style={{color:"#7c3aed"}}>켜짐</b> — <b style={{color:"#7c3aed"}}>{otSchedTime}</b>{otSchedDaily?" 마다":"에"} 지금 설정(키워드·글패턴·이미지·텀)으로 <b>자동 시작</b>해요. <b>노트북만 켜두면</b> 자리에 없어도 돼요 — 그 시각까지 <b>절전으로 안 꺼지게</b> 막아둬요.</>
+                      : <>① 위 <b>시각</b>과 <b>반복</b>을 정하고 → ② 오른쪽 위 <b style={{color:"#7c3aed"}}>토글을 켜야</b> 예약이 작동해요. 켜면 그 시각에 원터치가 자동 시작되고, 노트북이 안 꺼지게 막아요.</>}
                   </div>
                 </div>
                 {/* 시작/멈춤 */}
