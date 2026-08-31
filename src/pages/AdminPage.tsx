@@ -966,19 +966,27 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
       if(otStopRef.current)break;
       const kw=kws[i]; const upd=(patch:any)=>setOtLog(prev=>prev.map((r,j)=>j===i?{...r,...patch}:r));
       const n=Math.min(6,Math.max(1,otImgCount));
-      const flowN=otImgMode==="flow"?n:0;
       try{
         upd({step:"제목 생성 중",status:"run"}); otLive(`▶ [${i+1}/${kws.length}] "${kw}" 제목 생성 중`); const title=await otGenTitleBest(kw); upd({title}); otLive(`  ✅ 제목 선택: ${title}`);
         upd({step:"본문 생성 중"}); otLive(`  ✍️ 본문 생성 중(${otCharMode==="manual"?otTargetChars+"자·":""}${otWriteStyle})`); const {content,tags}=await otGenPost(kw,title); otLive(`  ✅ 본문 완성 (${content.length}자)`);
         const imgs:string[]=[];
-        if(flowN){ otLive(`  🖼️ 이미지 ${flowN}장 = 발행 시 자동 생성(무료 Flow)`); }
-        else { upd({step:"이미지 생성 중"}); otLive(`  🖼️ 이미지 ${n}장 생성 중(AI)`);
+        if(otImgMode==="ai"){ upd({step:"이미지 생성 중"}); otLive(`  🖼️ 이미지 ${n}장 생성 중(AI)`);
           for(let k=0;k<n;k++){ if(otStopRef.current)break; try{imgs.push(await generateImage(kw,title,k));}catch{} }
           otLive(`  ✅ 이미지 ${imgs.length}/${n}장`);
+        } else {   // 무료 Flow: 'Flow 준비'로 연 크롬(9222) 그대로 사용
+          upd({step:"Flow 이미지 생성 중"}); otLive(`  🖼️ Flow 이미지 ${n}장 생성 중(연결된 크롬 사용)`);
+          const flines=content.split("\n").filter((l:string)=>l.trim().length>5); const fstep=Math.max(1,Math.floor(flines.length/n));
+          const fprompts=Array.from({length:n},(_,k)=>{const seg=flines.slice(k*fstep,(k+1)*fstep).join(" ").slice(0,150);return buildAdmFlowPrompt(kw,title,seg,k);});
+          const fcaptions=buildCaptions(kw,n,content);
+          try{ const fr=await botFetch(`${BOT}/api/flow-generate`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({prompts:fprompts,captions:fcaptions})});
+            const fd=await fr.json().catch(()=>({}));
+            if(fr.ok&&Array.isArray(fd.images)&&fd.images.length){ imgs.push(...fd.images.map((im:any)=>im.src).filter(Boolean)); otLive(`  ✅ Flow 이미지 ${imgs.length}/${n}장`); }
+            else { otLive(`  ⚠️ Flow 이미지 실패: ${fd.error||("HTTP "+fr.status)} — 위 '🎬 Flow 준비'로 먼저 연결하세요. 이번 글은 이미지 없이 올려요`); }
+          }catch(e:any){ otLive(`  ⚠️ Flow 이미지 오류: ${e.message}`); }
         }
         upd({step:"카테고리 매칭 중"}); const cat=await otPickCategory(title,content,cats); upd({cat:cat.name||"기본"}); otLive(`  📂 카테고리 자동 선택: ${cat.name||"기본"}`);
-        upd({step:flowN?"발행+이미지 생성 중":"발행 중"}); otLive(`  🚀 네이버 발행 중${flowN?"(이미지 자동 생성 포함)":""}...`);
-        const postUrl=await otPublishItem(kw,title,content,tags.split(",").map(t=>t.replace("#","").trim()).filter(Boolean),imgs,cat.id,acc,flowN);
+        upd({step:"발행 중"}); otLive(`  🚀 네이버 발행 중...`);
+        const postUrl=await otPublishItem(kw,title,content,tags.split(",").map(t=>t.replace("#","").trim()).filter(Boolean),imgs,cat.id,acc,0);
         await addHistory({user_id:ADM_UID,platform:"naver",title,post_url:postUrl,status:"success"}).catch(()=>{});
         upd({step:"발행 완료",status:"done",postUrl,at:new Date().toLocaleTimeString("ko-KR",{hour:"2-digit",minute:"2-digit"})}); otLive(`  ✅ 발행 완료! ${postUrl||""}`);
       }catch(e:any){
