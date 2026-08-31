@@ -635,7 +635,13 @@ async function killStaleFlowChrome() {
   try {
     if (flowChromeProc?.pid) {
       if (process.platform === "win32") await execAsync(`taskkill /PID ${flowChromeProc.pid} /T /F`);
-      else { try { process.kill(-flowChromeProc.pid, "SIGKILL"); } catch {} try { flowChromeProc.kill("SIGKILL"); } catch {} }
+      else {
+        // ★먼저 정상종료(SIGTERM)로 크롬이 세션·쿠키를 디스크에 안전하게 쓰고 닫게 한다 → 프로필 손상으로
+        //   인한 불필요한 구글 재로그인 방지. 안 죽으면 그때 강제종료(SIGKILL).
+        try { process.kill(-flowChromeProc.pid, "SIGTERM"); } catch {} try { flowChromeProc.kill("SIGTERM"); } catch {}
+        await new Promise(r => setTimeout(r, 1500));
+        try { process.kill(-flowChromeProc.pid, "SIGKILL"); } catch {} try { flowChromeProc.kill("SIGKILL"); } catch {}
+      }
     }
   } catch {}
   flowChromeProc = null;
@@ -648,6 +654,8 @@ async function killStaleFlowChrome() {
       const encoded = Buffer.from(script, "utf16le").toString("base64");
       await execAsync(`powershell.exe -NoProfile -NonInteractive -EncodedCommand ${encoded}`);
     } else {
+      try { execSync(`pkill -TERM -f "user-data-dir=${dir}"`, { stdio: "ignore" }); } catch {}
+      await new Promise(r => setTimeout(r, 1200));
       try { execSync(`pkill -9 -f "user-data-dir=${dir}"`, { stdio: "ignore" }); } catch {}
     }
   } catch {}

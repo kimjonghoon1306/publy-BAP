@@ -906,6 +906,12 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
     check(); const iv=setInterval(check,5000);
     return ()=>{ alive=false; clearInterval(iv); };
   },[tab,otImgMode]);
+  // ★절전 방지: 원터치(텀 대기 포함)·발행 중엔 화면/시스템 안 꺼지게
+  useEffect(()=>{
+    const busy = otRunning || publishing;
+    (window as any).electron?.keepAwake?.(busy)?.catch?.(()=>{});
+    return ()=>{ if(busy) (window as any).electron?.keepAwake?.(false)?.catch?.(()=>{}); };
+  },[otRunning, publishing]);
   // ★글자수 하드 캡: AI 오버슈트(1500 지정→3000) 방지. 목표 125% 초과 시 FAQ 보존하고 본문 문단을 잘라 목표 근처로.
   function enforceMaxChars(body:string, target:number):string{
     if(!target||body.length<=Math.round(target*1.25))return body;

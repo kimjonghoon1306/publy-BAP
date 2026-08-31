@@ -1417,10 +1417,10 @@ Output (JSON object only): {"keyword":"핵심키워드","title":"새 SEO 제목"
   // ★절전 방지(테리 요청): 자동 작업(발행·이미지생성·서이추·공감댓글) 중엔 화면/맥이 안 꺼지게(맥·윈도우 공통).
   //   어느 기능이든 하나라도 돌면 keepAwake, 전부 끝나면 자동 해제 → 평소엔 정상 절전. (영화 틀면 안 꺼지는 것과 같은 원리)
   useEffect(()=>{
-    const busy = publishing || genImgLoading || neighborBusy;
+    const busy = publishing || genImgLoading || neighborBusy || otRunning;   // ★원터치 도는 동안(텀 대기 포함) 화면·시스템 안 꺼지게
     window.electron?.keepAwake?.(busy).catch(()=>{});
     return ()=>{ if(busy) window.electron?.keepAwake?.(false).catch(()=>{}); };
-  },[publishing, genImgLoading, neighborBusy]);
+  },[publishing, genImgLoading, neighborBusy, otRunning]);
 
   const liveLogActive = (tab==="publish"&&publishing)||(tab==="image"&&genImgLoading);
   useEffect(()=>{
