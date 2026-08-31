@@ -3178,6 +3178,12 @@ POST3: (제목)|(이유)
     const liveLines:string[]=[];
     setOtLiveLog(prev=>[...prev,`━━━━━ ${new Date().toLocaleString("ko-KR")} 원터치 ${resume?`이어가기(${resume.idx+1}번째부터)`:"시작"} ━━━━━`].slice(-300));
     const otLive=(t:string,running=true)=>{const line=`[${new Date().toLocaleTimeString("ko-KR")}] ${t}`; liveLines.push(line); setOtLiveLog(prev=>[...prev,line].slice(-300)); try{pushLiveLog(user.id,{name:user.name,email:user.email,context:"⚡ 원터치 발행",text:liveLines.slice(-80).join("\n"),running});}catch{}};
+    // ── 발행 계획 요약 한 줄(테리 요청: 몇 시부터·몇 개·몇 분 간격) ──
+    if(!resume){
+      const cntTxt=otAiKw?`AI 자동 ${otAiKwCount}개`:`${otKeywords.split(/[\n,]+/).map(s=>s.trim()).filter(Boolean).length}개`;
+      const bySched=otSchedFiredRef.current===`${new Date().getFullYear()}${new Date().getMonth()}${new Date().getDate()}${String(new Date().getHours()).padStart(2,"0")}${String(new Date().getMinutes()).padStart(2,"0")}`;
+      otLive(`📋 발행 계획: ${bySched?`⏰ 예약(${otSchedTime})으로 지금 시작 · `:""}지금부터 ${cntTxt}를 약 ${termMin}분 간격(±안전 랜덤)으로 순서대로 발행해요`);
+    }
     // ── 키워드 결정: 이어가기면 기존 목록, AI면 생성, 아니면 입력칸 ──
     let kws:string[]; let startIdx=0;
     if(resume){ kws=resume.kws; startIdx=resume.idx; otLive(`▶ ${resume.idx+1}번째 키워드부터 이어서 발행해요`); }

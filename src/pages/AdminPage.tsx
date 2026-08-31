@@ -1116,6 +1116,11 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
     otStopRef.current=false;setOtRunning(true);setOtNextAt(null);setOtPaused(null);otFlowExhaustedRef.current.clear();
     const otLive=(t:string)=>setOtLiveLog(prev=>[...prev,`[${new Date().toLocaleTimeString("ko-KR")}] ${t}`].slice(-300));
     setOtLiveLog(prev=>[...prev,`━━━━━ ${new Date().toLocaleString("ko-KR")} 원터치 ${resume?`이어가기(${resume.idx+1}번째부터)`:"시작"} ━━━━━`].slice(-300));
+    if(!resume){
+      const cntTxt=otAiKw?`AI 자동 ${otAiKwCount}개`:`${otKeywords.split(/[\n,]+/).map(s=>s.trim()).filter(Boolean).length}개`;
+      const bySched=otSchedFiredRef.current===`${new Date().getFullYear()}${new Date().getMonth()}${new Date().getDate()}${String(new Date().getHours()).padStart(2,"0")}${String(new Date().getMinutes()).padStart(2,"0")}`;
+      otLive(`📋 발행 계획: ${bySched?`⏰ 예약(${otSchedTime})으로 지금 시작 · `:""}지금부터 ${cntTxt}를 약 ${termMin}분 간격(±안전 랜덤)으로 순서대로 발행해요`);
+    }
     let kws:string[]; let startIdx=0;
     if(resume){ kws=resume.kws; startIdx=resume.idx; otLive(`▶ ${resume.idx+1}번째 키워드부터 이어서 발행해요`); }
     else if(otAiKw){
