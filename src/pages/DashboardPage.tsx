@@ -2921,7 +2921,7 @@ POST3: (제목)|(이유)
     const bm=cleaned.match(/태그[^\n]*\n([\s\S]+)/);
     const body0=ensureQuestionHeadings(bm?bm[1].trim():cleaned,kw);
     const bodyRaw=await ensureKeywordCount(body0,kw,5);   // 키워드 최소 5회 보장
-    const body=otCharMode==="manual"?enforceMaxChars(bodyRaw,otTargetChars):bodyRaw;   // 지정 글자수 오버슈트 방지
+    const body=enforceMaxChars(bodyRaw,chars);   // 자동·직접 모두 목표 글자수 근처로 캡(오버슈트 방지: 3187자 같은 과다 차단)
     return {content:body,tags:tgm?tgm[1].trim():""};
   }
   // 회원 실제 네이버 카테고리 목록 ↔ 글 주제 AI 매칭 → 가장 맞는 카테고리 자동 선택

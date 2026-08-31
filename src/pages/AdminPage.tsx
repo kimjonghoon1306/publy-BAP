@@ -915,7 +915,7 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
     const tgm=cleaned.match(/태그[:\s]*([^\n]+)/);
     const bm=cleaned.match(/태그[^\n]*\n([\s\S]+)/);
     const bodyRaw=await ensureKeywordCount(bm?bm[1].trim():cleaned,kw,5);
-    const body=otCharMode==="manual"?enforceMaxChars(bodyRaw,otTargetChars):bodyRaw;
+    const body=enforceMaxChars(bodyRaw,chars);   // 자동·직접 모두 목표 근처로 캡(오버슈트 방지)
     return {content:body,tags:tgm?tgm[1].trim():""};
   }
   async function otPickCategory(title:string,content:string,cats:{id:string;name:string}[]):Promise<{id?:string;name?:string}>{
