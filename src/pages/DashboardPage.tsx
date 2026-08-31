@@ -12,7 +12,7 @@ import UsageGuide from "../components/UsageGuide";
 import Daebaekseo, { DAEBAEKSEO_VERSION } from "../components/Daebaekseo";
 import dodoImg from "../assets/dodo.png";
 
-type MainTab = "control" | "keyword" | "write" | "image" | "photo" | "publish" | "manage" | "accounts" | "rank" | "blogscore" | "calendar" | "settings" | "neighbor" | "engage" | "reply" | "pumasi" | "insta_dm" | "crawl" | "place" | "place_reply";
+type MainTab = "control" | "keyword" | "write" | "image" | "photo" | "publish" | "onetouch" | "manage" | "accounts" | "rank" | "blogscore" | "calendar" | "settings" | "neighbor" | "engage" | "reply" | "pumasi" | "insta_dm" | "crawl" | "place" | "place_reply";
 type OnPartnerProduct = {id:string|null;name:string;image:string;price:number|null;available:boolean;partnerUrl:string;shopUrl:string};
 type OnPartnerPlacement = "auto"|"adpost"|"after_first"|"middle"|"before_last"|"bottom";
 type PublishConcept = "full" | "body_faq" | "body_only";
@@ -153,7 +153,7 @@ const NAV_GROUPS = [
     {k:"control",i:"🎛️",l:"컨트롤타워"},
   ]},
   {label:"콘텐츠 만들기",tabs:[
-    {k:"keyword",i:"🔍",l:"키워드/제목"},{k:"write",i:"✍️",l:"글 생성"},{k:"image",i:"🖼️",l:"이미지 생성"},{k:"photo",i:"📷",l:"사진 글쓰기"},{k:"publish",i:"🚀",l:"발행하기"},
+    {k:"keyword",i:"🔍",l:"키워드/제목"},{k:"write",i:"✍️",l:"글 생성"},{k:"image",i:"🖼️",l:"이미지 생성"},{k:"photo",i:"📷",l:"사진 글쓰기"},{k:"publish",i:"🚀",l:"발행하기"},{k:"onetouch",i:"⚡",l:"원터치 발행"},
   ]},
   {label:"블로그 운영",tabs:[
     {k:"calendar",i:"📅",l:"콘텐츠 캘린더",shine:true},{k:"manage",i:"📋",l:"발행 관리"},{k:"blogscore",i:"📈",l:"블로그 지수"},{k:"crawl",i:"🔍",l:"크롤링"},
@@ -588,6 +588,12 @@ textarea.inp{resize:vertical;line-height:1.75;min-height:80px;}
 .nav-item.nav-soon:hover{opacity:.8;}
 .nav-soon-badge{margin-left:auto;font-size:9px;font-weight:800;letter-spacing:.3px;color:var(--text3);background:var(--card2);border:1px solid var(--border);padding:2px 7px;border-radius:99px;}
 .nav-item.nav-control .nav-ico{filter:drop-shadow(0 0 6px var(--accent-30));}
+/* 원터치 발행: 일렉트릭 퍼플 강조 + BEST 배지 */
+.nav-item.nav-onetouch{font-weight:800;background:linear-gradient(100deg,rgba(124,58,237,.10),rgba(168,85,247,.06));border:1px solid rgba(124,58,237,.28);border-radius:10px;}
+.nav-item.nav-onetouch:hover{background:linear-gradient(100deg,rgba(124,58,237,.16),rgba(168,85,247,.10));}
+.nav-item.nav-onetouch.active{border-color:rgba(124,58,237,.6);}
+.nav-item.nav-onetouch .nav-ico{filter:drop-shadow(0 0 6px rgba(124,58,237,.55));}
+.nav-best{margin-left:auto;font-size:9px;font-weight:900;letter-spacing:.5px;color:#fff;background:linear-gradient(135deg,#7c3aed,#c026d3);padding:2px 7px;border-radius:99px;box-shadow:0 0 8px rgba(124,58,237,.55);animation:navHotGlow 1.7s ease-in-out infinite;}
 @media (max-width:640px){.loop-arrow{display:none!important;}}
 
 .ct{display:flex;flex-direction:column;gap:20px;max-width:1120px;padding-bottom:20px;}
@@ -1316,6 +1322,15 @@ Output (JSON object only): {"keyword":"핵심키워드","title":"새 SEO 제목"
   const [hotPage, setHotPage] = useState(0); // 핫이슈 페이지네이션(주제 많아 아래로 길어짐 방지)
   const HOT_PAGE_SIZE = 20;
   const [quickKw, setQuickKw] = useState(""); // 핫이슈로 '바로 글쓰기'용(캘린더 스케줄과 별개 파이프라인)
+  // ⚡ 원터치 발행(BEST): 키워드 여러 개 → 제목→본문→이미지→카테고리 자동→발행, 텀 간격 반복 (v1)
+  const [otKeywords,setOtKeywords]=useState("");
+  const [otTermMin,setOtTermMin]=useState(60);            // 발행 텀(분): 프리셋 10/30/60/120 + 직접입력
+  const [otCustomTerm,setOtCustomTerm]=useState("");
+  const [otImgCount,setOtImgCount]=useState(3);
+  const [otRunning,setOtRunning]=useState(false);
+  const otStopRef=useRef(false);
+  const [otNextAt,setOtNextAt]=useState<number|null>(null);
+  const [otLog,setOtLog]=useState<{id:string;kw:string;title?:string;cat?:string;step:string;status:"wait"|"run"|"done"|"fail"|"limit";postUrl?:string;error?:string;at?:string}[]>([]);
   // 봇 오프라인/웹 미리보기 대비 폴백(카테고리별 무난한 인기 주제) — 빈 화면 방지
   const HOT_FALLBACK: Record<string,string[]> = {
     실시간:["요즘 뜨는 부업","정부지원금 신청","가을 여행지 추천","제철 음식 요리","전기요금 절약법","1인 창업 아이템","연말정산 미리보기","청년 지원 정책","넷플릭스 추천작","다이어트 식단","반려동물 용품","스마트스토어 창업","환절기 건강관리","실내 인테리어 팁","제철 과일 고르는 법","중고거래 꿀팁","캠핑 초보 준비물","홈카페 레시피","가성비 노트북","주말 나들이 코스"],
@@ -2850,6 +2865,116 @@ POST3: (제목)|(이유)
     finally{setGenerating(false);}
   }
 
+  // ══════════ ⚡ 원터치 발행 엔진 (BEST) ══════════
+  // 키워드 목록을 순서대로: 제목(최고점)→본문(키워드 5~6회)→이미지→카테고리 자동매칭→발행, 텀 간격 반복.
+  // 기존 부품 재사용: callAI · generateOneImage · /api/publish-full(검증된 발행). 발행 상태(state) 안 건드림.
+  async function otGenTitleBest(kw:string,signal:AbortSignal):Promise<string>{
+    const prompt=`당신은 대한민국 최고의 네이버 블로그 SEO 제목 전문가입니다.\n키워드: "${kw}"\n\n네이버 검색 상위노출이 잘 되는 제목 20개를 JSON 배열로만 반환하세요.\n- 키워드 "${kw}"를 제목 앞부분에 자연스럽게 포함\n- 20~35자, 실제 검색어 형태(추천/후기/방법/가격/비교/고르는법)\n- 과장·낚시 감탄사(대박/충격/1등/미쳤다) 금지, 물음표·느낌표 남발 금지\nJSON 배열만.`;
+    const text=await callAI(prompt,signal);
+    const arr=parseArr(text).map((t:string)=>enforceExactKeyword(t,kw)).filter(Boolean);
+    if(!arr.length)throw new Error("제목 생성 실패");
+    return arr.slice().sort((a:string,b:string)=>calcTitleScore(b)-calcTitleScore(a))[0]; // 점수 최고 제목 선택
+  }
+  async function otGenPost(kw:string,title:string,signal:AbortSignal):Promise<{content:string;tags:string}>{
+    const chars=calcTargetChars();
+    const catGuide=getCatGuide(kw,title);
+    const prompt=`당신은 대한민국 최고의 블로그 작가입니다.\n키워드: "${kw}"  제목: "${title}"\n목표 글자수: ${chars}자 내외(±100자)\n\n${catGuide}\n\n=== 절대 규칙 ===\n⛔ ## 및 ** * - + 마크다운 기호 전부 금지(소제목도 순수 텍스트)\n⛔ 한자·중국어·일본어·영어단어 금지(브랜드명 제외)\n⛔ AI 상투어 금지(~해보겠습니다/살펴보겠습니다/결론적으로/다양한/효과적인) → 실제 사람 말투(~해요, ~거든요, ~더라고요)\n✅ ★핵심 키워드 "${kw}"를 본문에 띄어쓰기·글자 그대로 정확히 5~6번 반복(검색 노출 핵심)\n✅ 구체적 수치·가격·기간·경험담 포함, 과장·거짓 금지\n✅ 본문을 4~6개 구간으로 나누고 각 구간 앞에 짧은 소제목(10~30자, ## 없이)\n✅ 소제목 일부에 검색요소(왜/어떻게/추천/가격/후기/비교/주의점)\n✅ 모든 단락 사이 빈 줄 하나(엔터 두 번), 한 단락 2~4문장(모바일 가독성)\n\n=== 출력 형식 ===\n태그: 태그1, 태그2, 태그3, 태그4, 태그5\n\n(본문 ${chars}자 내외 순수 텍스트)\n\n[FAQ시작]\nQ1: (질문)\nA1: (답변)\nQ2: (질문)\nA2: (답변)\nQ3: (질문)\nA3: (답변)\n[FAQ끝]`;
+    const text=await callAI(prompt,signal);
+    const cleaned=stripMarkdown(text);
+    const tgm=cleaned.match(/태그[:\s]*([^\n]+)/);
+    const bm=cleaned.match(/태그[^\n]*\n([\s\S]+)/);
+    const body0=ensureQuestionHeadings(bm?bm[1].trim():cleaned,kw);
+    const body=await ensureKeywordCount(body0,kw,5);   // 키워드 최소 5회 보장
+    return {content:body,tags:tgm?tgm[1].trim():""};
+  }
+  // 회원 실제 네이버 카테고리 목록 ↔ 글 주제 AI 매칭 → 가장 맞는 카테고리 자동 선택
+  async function otPickCategory(title:string,content:string,cats:{id:string;name:string}[],signal:AbortSignal):Promise<{id?:string;name?:string}>{
+    if(!cats.length)return {};
+    if(cats.length===1)return cats[0];
+    const names=cats.map((c,i)=>`${i+1}. ${c.name}`).join("\n");
+    try{
+      const t=await callAI(`아래 블로그 글에 가장 잘 맞는 카테고리 하나를 고르세요.\n제목: ${title}\n요약: ${content.slice(0,200)}\n\n카테고리 목록:\n${names}\n\n가장 잘 맞는 카테고리의 번호만 숫자로 답하세요(설명·다른 말 금지).`,signal);
+      const m=t.match(/\d+/); const idx=m?parseInt(m[0],10)-1:-1;
+      if(idx>=0&&idx<cats.length)return cats[idx];
+    }catch{}
+    return cats[0];
+  }
+  async function otPublishItem(kw:string,title:string,content:string,tags:string[],images:string[],categoryId:string|undefined,accId:string):Promise<string>{
+    const acc=connAccs.find(a=>a.id===accId);
+    const blocks:any[]=[];
+    if(images[0])blocks.push({type:"image",src:images[0],alt:""});   // 썸네일 alt는 항상 비움(본문 유실 방지)
+    const paras=content.split(/\n\n+/).map(s=>s.trim()).filter(Boolean);
+    const rest=images.slice(1);
+    const every=rest.length?Math.max(1,Math.floor(paras.length/(rest.length+1))):0;
+    let ri=0;
+    paras.forEach((p,i)=>{
+      blocks.push({type:"text",content:p});
+      if(every&&ri<rest.length&&(i+1)%every===0){blocks.push({type:"image",src:rest[ri],alt:`${kw} 사진 ${ri+2}`});ri++;}
+    });
+    while(ri<rest.length){blocks.push({type:"image",src:rest[ri],alt:`${kw} 사진 ${ri+2}`});ri++;}
+    const payload={userId:user.id,platform:"naver",title,content,
+      naverId:acc?.username||undefined,pubScope,tags,
+      imageUrl:images[0]||undefined,categoryId:categoryId||undefined,visibility,blocks};
+    const r=await botFetch(`${BOT}/api/publish-full`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});
+    const d=await r.json().catch(()=>({}));
+    if(r.status===401)throw new Error("세션 만료 — 계정 관리에서 재연결해주세요");
+    if(!r.ok)throw new Error(d.error||"발행 실패");
+    return d.postUrl||"";
+  }
+  function stopOneTouch(){otStopRef.current=true;setOtRunning(false);setOtNextAt(null);showToast("원터치를 멈췄어요","info");}
+  async function runOneTouch(){
+    if(otRunning)return;
+    const kws=otKeywords.split(/[\n,]+/).map(s=>s.trim()).filter(Boolean);
+    if(!kws.length){showToast("키워드를 한 줄에 하나씩 넣어주세요","error");return;}
+    if(!pubAccId){showToast("발행할 네이버 계정을 먼저 선택해주세요","error");return;}
+    const termMin=otCustomTerm.trim()?Math.max(1,parseInt(otCustomTerm,10)||otTermMin):otTermMin;
+    otStopRef.current=false;setOtRunning(true);setOtNextAt(null);
+    const accId=pubAccId;
+    // 회원 실제 카테고리 목록 확보(state 경쟁 방지 위해 직접 fetch)
+    let cats:{id:string;name:string}[]=[];
+    try{ const cr=await botFetch(`${BOT}/api/naver/categories/${user.id}`,{method:"GET",signal:AbortSignal.timeout(30000)} as any); const cd=await cr.json().catch(()=>({})); if(cd.categories&&cd.categories.length)cats=cd.categories; }catch{}
+    if(!cats.length)cats=(accCats[accId]||[]).map((c,i)=>({id:String(i),name:c}));
+    setOtLog(kws.map(kw=>({id:uid(),kw,step:"대기",status:"wait" as const})));
+    for(let i=0;i<kws.length;i++){
+      if(otStopRef.current)break;
+      const kw=kws[i]; const upd=(patch:any)=>setOtLog(prev=>prev.map((r,j)=>j===i?{...r,...patch}:r));
+      const q=await checkDailyPublishQuota(user.id,user.plan);
+      if(!q.ok){
+        upd({step:`발행 한도(${q.limit}건) 부족 — 등급을 올리면 더 발행돼요`,status:"limit"});
+        setOtLog(prev=>prev.map((r,j)=>j>i?{...r,step:"발행 한도 부족 — 다음날 이어지거나 등급 업",status:"limit" as const}:r));
+        showToast(`오늘 발행 한도(${q.limit}건)를 다 썼어요. 남은 키워드는 등급을 올리면 발행돼요`,"info");
+        break;
+      }
+      const signal=new AbortController().signal;
+      try{
+        upd({step:"제목 생성 중",status:"run"}); const title=await otGenTitleBest(kw,signal); upd({title});
+        upd({step:"본문 생성 중"}); const {content,tags}=await otGenPost(kw,title,signal);
+        upd({step:"이미지 생성 중"}); const n=Math.min(6,Math.max(1,otImgCount)); const imgs:string[]=[];
+        for(let k=0;k<n;k++){ if(otStopRef.current)break; try{imgs.push(await generateOneImage(kw,signal,k));}catch{} }
+        upd({step:"카테고리 매칭 중"}); const cat=await otPickCategory(title,content,cats,signal); upd({cat:cat.name||"기본"});
+        const ok=await useQuota(user.id); if(!ok){upd({step:"발행 건수 초과",status:"limit"});break;}
+        upd({step:"발행 중"});
+        let postUrl="";
+        try{ postUrl=await otPublishItem(kw,title,content,tags.split(",").map(t=>t.replace("#","").trim()).filter(Boolean),imgs,cat.id,accId); }
+        catch(e:any){ await refundQuota(user.id); throw e; }
+        await incrementDailyPublish(user.id); setDailyPublishUsed(p=>p+1);
+        await addHistory({user_id:user.id,platform:"naver",title,post_url:postUrl,status:"success"}).catch(()=>{});
+        upd({step:"발행 완료",status:"done",postUrl,at:new Date().toLocaleTimeString("ko-KR",{hour:"2-digit",minute:"2-digit"})});
+      }catch(e:any){
+        upd({step:"실패: "+(e.message||"오류"),status:"fail",error:e.message});
+        await addHistory({user_id:user.id,platform:"naver",title:kw,status:"fail",error_message:e.message}).catch(()=>{});
+      }
+      const hasNext=i<kws.length-1&&!otStopRef.current;
+      if(hasNext){
+        const until=Date.now()+termMin*60000; setOtNextAt(until);
+        while(Date.now()<until){ if(otStopRef.current)break; await new Promise(r=>setTimeout(r,1000)); }
+        setOtNextAt(null);
+      }
+    }
+    setOtRunning(false);setOtNextAt(null);
+    void loadHistory();
+  }
+
   // ── Flow 준비: 디버깅 크롬 자동 실행 (Electron) ──
   async function handleFlowLaunchChrome(){
     if(!(window as any).electron?.flowLaunchChrome){
@@ -4346,10 +4471,11 @@ POST3: (제목)|(이유)
                     {!enabled && <span className="crawl-tip">🔒 <b>관리자 승인</b>이 필요한 기능이에요</span>}
                   </button>
                 ); })() : (
-                  <button key={t.k} className={`nav-item ${tab===t.k?"active":""} ${t.k==="control"?"nav-control":""} ${t.k==="insta_dm"?"nav-soon":""} ${(t as any).shine?"nav-shine":""}`} onClick={()=>{if(t.k==="insta_dm"){showToast("📱 인스타 DM은 곧 출시됩니다!","info");return;}setTab(t.k);}}>
-                    <span className="nav-ico">{t.i}</span>{t.l}
+                  <button key={t.k} className={`nav-item ${tab===t.k?"active":""} ${t.k==="control"?"nav-control":""} ${t.k==="onetouch"?"nav-onetouch":""} ${t.k==="insta_dm"?"nav-soon":""} ${(t as any).shine?"nav-shine":""}`} onClick={()=>{if(t.k==="insta_dm"){showToast("📱 인스타 DM은 곧 출시됩니다!","info");return;}setTab(t.k);}}>
+                    <span className="nav-ico">{t.i}</span><span style={t.k==="reply"?{color:"#8b5cf6",fontWeight:700}:t.k==="pumasi"?{color:"#e5397f",fontWeight:700}:t.k==="onetouch"?{color:"#7c3aed",fontWeight:800}:undefined}>{t.l}</span>
                     {(t as any).shine&&<span className="nav-hot">HOT</span>}
-                    {(t.k==="control"||t.k==="reply"||t.k==="blogscore"||t.k==="pumasi")&&<span className="nav-new">NEW</span>}
+                    {t.k==="onetouch"&&<span className="nav-best">BEST</span>}
+                    {(t.k==="control"||t.k==="blogscore")&&<span className="nav-new">NEW</span>}
                     {t.k==="insta_dm"&&<span className="nav-soon-badge">곧 출시</span>}
                     {t.k==="keyword"&&titles.length>0&&<span className="nav-badge" title="추출한 제목 수">{titles.length}</span>}
                     {t.k==="manage"&&history.length>0&&<span className="nav-badge" title="발행 이력 수">{history.length}</span>}
@@ -6204,6 +6330,96 @@ POST3: (제목)|(이유)
 
               </div>
             )}
+
+
+            {/* ===== ⚡ 원터치 발행 (BEST) ===== */}
+            {tab==="onetouch"&&(()=>{
+              const OT="#7c3aed";
+              const naverAccs=connAccs.filter(a=>a.platform==="naver");
+              const kwList=otKeywords.split(/[\n,]+/).map(s=>s.trim()).filter(Boolean);
+              const isUnlim=(["unlimited","admin"] as string[]).includes(user.plan);
+              const remain=isUnlim?Infinity:Math.max(0,(PLAN_CONFIG[user.plan]?.dailyPublish??2)-dailyPublishUsed);
+              const willRun=isUnlim?kwList.length:Math.min(kwList.length,remain);
+              const termMin=otCustomTerm.trim()?Math.max(1,parseInt(otCustomTerm,10)||otTermMin):otTermMin;
+              const stepColor=(s:string,st?:string)=>st==="done"?"#00b487":st==="fail"?"#e5397f":st==="limit"?"#f59e0b":st==="run"?OT:"var(--text3)";
+              return (
+              <div className="tab-onetouch" style={{animation:"fadeUp .25s ease both"}}>
+                <UsageGuide theme={theme==="dark"?"dark":"light"} accent={OT} subtitle="키워드만 넣으면 제목·글·이미지·카테고리까지 자동으로 만들어 순서대로 발행해요." steps={[{ico:"⌨️",title:"키워드 입력",desc:"한 줄에 하나씩, 몇 개든 넣어요."},{ico:"⏱️",title:"텀 설정",desc:"발행 간격을 정해요(네이버 안전상 넉넉히)."},{ico:"⚡",title:"시작",desc:"나머지는 봇이 알아서 — 로그로 다 확인돼요."}]} />
+
+                {/* 키워드 입력 */}
+                <div className="card" style={{marginBottom:14,border:`1.5px solid ${OT}33`}}>
+                  <div className="card-title" style={{marginBottom:8,color:OT}}>⌨️ 키워드 <span style={{fontSize:12,fontWeight:600,color:"var(--text3)"}}>· 한 줄에 하나씩 (콤마도 가능)</span></div>
+                  <textarea className="inp" value={otKeywords} onChange={e=>setOtKeywords(e.target.value)} disabled={otRunning}
+                    placeholder={"예)\n원주 맛집\n겨울 제철 음식\n소상공인 정책자금 신청"} rows={6}
+                    style={{width:"100%",resize:"vertical",lineHeight:1.6,fontSize:14}}/>
+                  <div style={{fontSize:12,color:"var(--text2)",marginTop:6}}>지금 <b style={{color:OT}}>{kwList.length}개</b> 키워드 · 오늘 발행 가능 <b>{isUnlim?"무제한":`${remain}건`}</b>
+                    {!isUnlim&&kwList.length>remain&&<span style={{color:"#f59e0b",fontWeight:700}}> · {willRun}개만 발행되고 나머지는 한도 부족 안내가 떠요</span>}</div>
+                </div>
+
+                {/* 발행 계정 */}
+                <div className="card" style={{marginBottom:14}}>
+                  <div className="card-title" style={{marginBottom:8}}>🔗 발행 네이버 계정</div>
+                  {naverAccs.length===0
+                    ? <div style={{fontSize:13,color:"var(--text2)"}}>연결된 네이버 계정이 없어요. <b onClick={()=>setTab("accounts")} style={{color:OT,cursor:"pointer",textDecoration:"underline"}}>계정 관리</b>에서 먼저 연결해주세요.</div>
+                    : naverAccs.map(a=>(
+                      <label key={a.id} onClick={()=>!otRunning&&setPubAccId(a.id)} style={{display:"flex",alignItems:"center",gap:10,padding:"12px 14px",borderRadius:10,cursor:otRunning?"default":"pointer",marginBottom:6,background:pubAccId===a.id?`${OT}14`:"var(--bg)",border:`2px solid ${pubAccId===a.id?OT:"var(--border)"}`,transition:"all .15s"}}>
+                        <div style={{width:18,height:18,borderRadius:99,border:`2px solid ${pubAccId===a.id?OT:"var(--border)"}`,display:"flex",alignItems:"center",justifyContent:"center"}}>{pubAccId===a.id&&<div style={{width:9,height:9,borderRadius:99,background:OT}}/>}</div>
+                        <div><div style={{fontWeight:700,fontSize:14}}>{a.username}</div>{(a as any).name&&<div style={{fontSize:12,color:"var(--text3)"}}>{(a as any).name}</div>}</div>
+                      </label>
+                    ))}
+                </div>
+
+                {/* 텀 + 이미지 + 카테고리 */}
+                <div className="card" style={{marginBottom:14}}>
+                  <div className="card-title" style={{marginBottom:10}}>⏱️ 발행 텀 <span style={{fontSize:12,fontWeight:600,color:"var(--text3)"}}>· 글 하나 올리고 다음까지 기다리는 시간</span></div>
+                  <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:10}}>
+                    {[[10,"10분"],[30,"30분"],[60,"1시간"],[120,"2시간"]].map(([m,l])=>{const on=!otCustomTerm.trim()&&otTermMin===m;return(
+                      <button key={m as number} disabled={otRunning} onClick={()=>{setOtTermMin(m as number);setOtCustomTerm("");}}
+                        style={{padding:"9px 16px",borderRadius:10,border:`2px solid ${on?OT:"var(--border)"}`,background:on?`${OT}16`:"var(--bg)",color:on?OT:"var(--text2)",cursor:otRunning?"default":"pointer",fontSize:14,fontWeight:800,fontFamily:"inherit",transition:"all .15s"}}>{l}</button>
+                    );})}
+                    <div style={{display:"flex",alignItems:"center",gap:6,padding:"0 4px"}}>
+                      <input className="inp" type="number" min={1} disabled={otRunning} value={otCustomTerm} onChange={e=>setOtCustomTerm(e.target.value)} placeholder="직접" style={{width:80}}/>
+                      <span style={{fontSize:13,color:"var(--text2)",fontWeight:700}}>분</span>
+                    </div>
+                  </div>
+                  {termMin<10&&<div style={{fontSize:12,color:"#f59e0b",fontWeight:700,marginBottom:8}}>⚠️ 너무 짧으면 네이버가 스팸으로 볼 수 있어요. 넉넉한 간격을 권장해요.</div>}
+                  <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
+                    <span style={{fontSize:13,fontWeight:700}}>🖼️ 글당 이미지</span>
+                    {[1,2,3,4,5].map(n=>(
+                      <button key={n} disabled={otRunning} onClick={()=>setOtImgCount(n)} style={{width:38,height:38,borderRadius:10,border:`2px solid ${otImgCount===n?OT:"var(--border)"}`,background:otImgCount===n?`${OT}16`:"var(--bg)",color:otImgCount===n?OT:"var(--text2)",cursor:otRunning?"default":"pointer",fontSize:14,fontWeight:800,fontFamily:"inherit"}}>{n}</button>
+                    ))}
+                    <span style={{fontSize:12,color:"var(--text3)"}}>장</span>
+                  </div>
+                  <div style={{marginTop:12,padding:"10px 12px",borderRadius:10,background:`${OT}0d`,border:`1px solid ${OT}22`,fontSize:12.5,color:"var(--text2)",lineHeight:1.5}}>📂 <b style={{color:OT}}>카테고리는 자동</b>이에요 — 글 주제에 맞는 네이버 카테고리를 AI가 골라 넣어요. (실패 시 첫 카테고리)</div>
+                </div>
+
+                {/* 시작/멈춤 */}
+                {!otRunning
+                  ? <button onClick={runOneTouch} disabled={!kwList.length||!pubAccId} style={{width:"100%",padding:"16px",borderRadius:14,border:"none",background:kwList.length&&pubAccId?`linear-gradient(135deg,${OT},#c026d3)`:"var(--border)",color:"#fff",fontSize:17,fontWeight:900,fontFamily:"inherit",cursor:kwList.length&&pubAccId?"pointer":"default",boxShadow:kwList.length&&pubAccId?`0 6px 20px ${OT}44`:"none",transition:"all .15s"}}>⚡ 원터치 발행 시작 {kwList.length>0&&`(${willRun}개)`}</button>
+                  : <button onClick={stopOneTouch} style={{width:"100%",padding:"16px",borderRadius:14,border:"none",background:"linear-gradient(135deg,#ef4444,#f43f5e)",color:"#fff",fontSize:17,fontWeight:900,fontFamily:"inherit",cursor:"pointer"}}>⏹ 멈추기 {otNextAt&&`· 다음 발행까지 ${Math.max(0,Math.ceil((otNextAt-Date.now())/60000))}분`}</button>}
+
+                {/* 로그 */}
+                {otLog.length>0&&(
+                  <div className="card" style={{marginTop:14}}>
+                    <div className="card-title" style={{marginBottom:10}}>📋 원터치 로그</div>
+                    {otLog.map((r,i)=>(
+                      <div key={r.id} style={{display:"flex",alignItems:"center",gap:10,padding:"11px 12px",borderRadius:10,marginBottom:6,background:"var(--bg)",border:`1px solid ${r.status==="done"?"#00b48733":r.status==="fail"?"#e5397f33":r.status==="limit"?"#f59e0b33":"var(--border)"}`}}>
+                        <div style={{width:24,height:24,borderRadius:99,flexShrink:0,display:"flex",alignItems:"center",justifyContent:"center",fontSize:12,fontWeight:800,background:`${stepColor(r.step,r.status)}1a`,color:stepColor(r.step,r.status)}}>{i+1}</div>
+                        <div style={{flex:1,minWidth:0}}>
+                          <div style={{fontSize:13.5,fontWeight:700,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{r.title||r.kw}</div>
+                          <div style={{fontSize:12,color:stepColor(r.step,r.status),fontWeight:600,marginTop:1}}>
+                            {r.status==="run"&&<span className="spinner" style={{marginRight:5}}/>}
+                            {r.step}{r.cat&&r.status!=="fail"&&<span style={{color:"var(--text3)"}}> · 📂 {r.cat}</span>}{r.at&&<span style={{color:"var(--text3)"}}> · {r.at}</span>}
+                          </div>
+                        </div>
+                        {r.postUrl&&<a href={r.postUrl} target="_blank" rel="noreferrer" style={{flexShrink:0,fontSize:12,fontWeight:800,color:OT,textDecoration:"none",padding:"5px 10px",borderRadius:8,border:`1px solid ${OT}44`}}>🔗 보기</a>}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+              );
+            })()}
 
 
             {/* ===== 발행 기록 ===== */}
