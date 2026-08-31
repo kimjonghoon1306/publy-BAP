@@ -23,6 +23,7 @@ interface UserFull {
   payments?: any[]; notes?: any[]; history_count?: number;
 }
 
+import { AEO_RULES, AEO_FAQ_FORMAT, AEO_TITLE_RULE } from "../lib/aeo";
 const BOT = "http://127.0.0.1:3333";
 const INSTA_BOT = "http://127.0.0.1:3335";
 const ADM_UID = "admin-publy";
@@ -946,7 +947,7 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
   }
   // ══ ⚡ 원터치 엔진(관리자 무제한 · 회원과 동일 흐름) ══
   async function otGenTitleBest(kw:string):Promise<string>{
-    const text=await callAI(`당신은 대한민국 최고의 네이버 블로그 SEO 제목 전문가입니다.\n키워드: "${kw}"\n\n네이버 검색 상위노출이 잘 되는 제목 15개를 JSON 배열로만 반환하세요.\n- 키워드 "${kw}"를 제목 앞부분에 자연스럽게 포함\n- 20~35자, 실제 검색어 형태(추천/후기/방법/가격/비교/고르는법)\n- 과장·낚시 감탄사(대박/충격/1등/미쳤다) 금지, 물음표·느낌표 남발 금지\nJSON 배열만.`);
+    const text=await callAI(`당신은 대한민국 최고의 네이버 블로그 SEO 제목 전문가입니다.\n키워드: "${kw}"\n\n네이버 검색 상위노출이 잘 되는 제목 15개를 JSON 배열로만 반환하세요.\n- 키워드 "${kw}"를 제목 앞부분에 자연스럽게 포함\n- 20~35자, 실제 검색어 형태(추천/후기/방법/가격/비교/고르는법)\n- 과장·낚시 감탄사(대박/충격/1등/미쳤다) 금지, 물음표·느낌표 남발 금지\n${AEO_TITLE_RULE}\nJSON 배열만.`);
     const arr=parseArr(text).map((t:string)=>enforceExactKeyword(t,kw)).filter(Boolean);
     if(!arr.length)throw new Error("제목 생성 실패");
     return arr[0];
@@ -967,7 +968,7 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
   async function otGenPost(kw:string,title:string):Promise<{content:string;tags:string}>{
     const chars=otCharMode==="manual"?otTargetChars:calcTargetChars();
     const styleGuide=WRITE_STYLE_GUIDE[otWriteStyle]||"";
-    const text=await callAI(`당신은 대한민국 최고의 블로그 작가입니다.\n키워드: "${kw}"  제목: "${title}"\n목표 글자수: ${chars}자 내외(±100자, 반드시 이 범위)\n\n${styleGuide?"★ 아래 [글의 방향]을 최우선으로:\n"+styleGuide+"\n\n":""}=== 절대 규칙 ===\n⛔ ## 및 ** * - + 마크다운 기호 전부 금지(소제목도 순수 텍스트)\n⛔ 한자·중국어·일본어·영어단어 금지(브랜드명 제외)\n⛔ AI 상투어 금지(~해보겠습니다/살펴보겠습니다/결론적으로/다양한/효과적인) → 실제 사람 말투(~해요, ~거든요, ~더라고요)\n✅ ★핵심 키워드 "${kw}"를 본문에 띄어쓰기·글자 그대로 정확히 5~6번 반복(검색 노출 핵심)\n✅ 구체적 수치·가격·기간·경험담 포함, 과장·거짓 금지\n✅ 본문을 4~6개 구간으로 나누고 각 구간 앞에 짧은 소제목(10~30자, ## 없이)\n✅ 모든 단락 사이 빈 줄 하나(엔터 두 번), 한 단락 2~4문장(모바일 가독성)\n\n=== 출력 형식 ===\n태그: 태그1, 태그2, 태그3, 태그4, 태그5\n\n(본문 ${chars}자 내외 순수 텍스트)\n\n[FAQ시작]\nQ1: (질문)\nA1: (답변)\nQ2: (질문)\nA2: (답변)\nQ3: (질문)\nA3: (답변)\n[FAQ끝]`);
+    const text=await callAI(`당신은 대한민국 최고의 블로그 작가입니다.\n키워드: "${kw}"  제목: "${title}"\n목표 글자수: ${chars}자 내외(±100자, 반드시 이 범위)\n\n${styleGuide?"★ 아래 [글의 방향]을 최우선으로:\n"+styleGuide+"\n\n":""}=== 절대 규칙 ===\n⛔ ## 및 ** * - + 마크다운 기호 전부 금지(소제목도 순수 텍스트)\n⛔ 한자·중국어·일본어·영어단어 금지(브랜드명 제외)\n⛔ AI 상투어 금지(~해보겠습니다/살펴보겠습니다/결론적으로/다양한/효과적인) → 실제 사람 말투(~해요, ~거든요, ~더라고요)\n✅ ★핵심 키워드 "${kw}"를 본문에 띄어쓰기·글자 그대로 정확히 5~6번 반복(검색 노출 핵심)\n✅ 구체적 수치·가격·기간·경험담 포함, 과장·거짓 금지\n✅ 본문을 4~6개 구간으로 나누고 각 구간 앞에 짧은 소제목(10~30자, ## 없이)\n✅ 모든 단락 사이 빈 줄 하나(엔터 두 번), 한 단락 2~4문장(모바일 가독성)\n\n${AEO_RULES}\n\n=== 출력 형식 ===\n태그: 태그1, 태그2, 태그3, 태그4, 태그5\n\n(본문 ${chars}자 내외 순수 텍스트. ★맨 첫 문단은 AEO 규칙대로 '핵심 요약' 2~3문장으로 시작)\n\n${AEO_FAQ_FORMAT}`);
     const cleaned=stripMarkdown(text);
     const tgm=cleaned.match(/태그[:\s]*([^\n]+)/);
     const bm=cleaned.match(/태그[^\n]*\n([\s\S]+)/);
@@ -2542,6 +2543,8 @@ ${catGuide}
 ✅ ★핵심 키워드 "${keyword||title}"를 본문에 **띄어쓰기·글자 그대로 똑같이 정확히 5~6번** 반복 (예: "원주맛집"이면 "원주 맛집"으로 띄우지 말고 "원주맛집" 그대로 — 검색 노출의 핵심)
 ✅ 반드시 ${chars-100}~${chars+100}자 사이로 작성
 
+${AEO_RULES}
+
 === 글 패턴 가이드 (매번 다르게) ===
 인트로: "${intro}"
 소제목 스타일: "${subStyle}"
@@ -2554,16 +2557,9 @@ ${styleGuide}${personaGuide?"\n\n[말투/페르소나]\n"+personaGuide:""}${temp
 === 출력 형식 ===
 태그: 태그1, 태그2, 태그3, 태그4, 태그5
 
-(본문 ${chars}자 내외 - 순수 텍스트)
+(본문 ${chars}자 내외 - 순수 텍스트. ★맨 첫 문단은 위 AEO 규칙대로 '핵심 요약' 2~3문장으로 시작)
 
-[FAQ시작]
-Q1: (질문)
-A1: (답변)
-Q2: (질문)
-A2: (답변)
-Q3: (질문)
-A3: (답변)
-[FAQ끝]
+${AEO_FAQ_FORMAT}
 
 [관련글시작]
 POST1: (제목)|(이유)
@@ -2724,6 +2720,7 @@ POST3: (제목)|(이유)
               </button>
             ))}
           </div>
+          {pubScope==="body"&&<div style={{marginTop:10,padding:"9px 12px",borderRadius:9,background:"rgba(245,158,11,.1)",border:"1px solid rgba(245,158,11,.3)",fontSize:11.5,color:"#f59e0b",lineHeight:1.55,fontWeight:600}}>ℹ️ '본문만' 발행이라 <b>Q&amp;A(자주 묻는 질문)가 빠져요.</b> Q&amp;A는 네이버 AI가 답변에 인용하기 좋은 부분이라, 상위노출·AI 노출을 노린다면 <b>'본문 + FAQ'</b>를 추천해요. (체험단·맛집 글이면 본문만도 괜찮아요)</div>}
         </div>
       <div className="card" style={{padding:"14px 16px"}}>
         <div className="card-title" style={{marginBottom:10}}>👁️ 공개 설정</div>
@@ -2829,6 +2826,21 @@ POST3: (제목)|(이유)
     }catch{}
   }
   // 🔍 발행/원터치 탭 상단 상태배지(보기 전용) — 실제 켜고 끄기는 계정관리 탭.
+  // 🚀 AEO "대박" 배너 — 회원과 동일. 발행/원터치 상단.
+  function renderAeoBanner(){
+    return (
+      <div style={{margin:"12px 0 0",padding:"14px 16px",borderRadius:14,background:"linear-gradient(135deg,rgba(124,58,237,.14),rgba(14,165,233,.12))",border:"1.5px solid rgba(124,58,237,.35)",position:"relative",overflow:"hidden"}}>
+        <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:6}}>
+          <span style={{fontSize:22}}>🚀</span>
+          <div style={{fontSize:14,fontWeight:900,background:"linear-gradient(135deg,#7c3aed,#0ea5e9)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent",backgroundClip:"text"}}>이 글은 'AI가 인용하는 글'로 만들어져요</div>
+          <span style={{fontSize:10,fontWeight:900,color:"#fff",background:"linear-gradient(135deg,#7c3aed,#c026d3)",padding:"3px 8px",borderRadius:20}}>AEO 탑재</span>
+        </div>
+        <div style={{fontSize:12,color:"var(--text2)",lineHeight:1.65,fontWeight:500}}>
+          퍼블리는 <b style={{color:"#7c3aed"}}>제목·본문·Q&amp;A</b>를 <b>네이버 AI 브리핑·Cue:</b>가 답변에 <b>인용하기 좋은 형식(AEO)</b>으로 자동 작성해요. 발행하면 <b style={{color:"#0ea5e9"}}>서치어드바이저에 색인요청까지 자동</b>이라, <b>검색 상위노출 + AI 답변 노출</b>을 동시에 노려요. <span style={{color:"var(--text3)"}}>— 이거, 다른 데는 안 해줘요 👀</span>
+        </div>
+      </div>
+    );
+  }
   function renderSaBadge(){
     const naverAccs=admAccs.filter(a=>a.platform==="naver");
     const verifiedN=naverAccs.filter(a=>saVerified[a.username]).length;
@@ -4241,6 +4253,7 @@ POST3: (제목)|(이유)
               <div style={{animation:"fadeUp .25s ease both"}}>
                 <UsageGuide theme={theme==="dark"?"dark":"light"} subtitle="다 된 글을 블로그에 자동으로 올려줄게요." steps={[{ico:"👤",title:"계정·플랫폼 선택",desc:"네이버/티스토리와 올릴 계정을 골라요."},{ico:"🧩",title:"발행 방식",desc:"전체/본문+FAQ/본문만 중 골라요. 예약 발행도 돼요."},{ico:"🚀",title:"발행",desc:"🚀 발행 버튼을 누르면 블로그에 자동으로 올라가요."}]} />
                 {!botOnline&&<div className="alert alert-danger" style={{margin:"12px 16px 0"}}>⚠️ 봇 오프라인 — PC에서 Publy 앱 실행 시 즉시 발행돼요.</div>}
+                {renderAeoBanner()}
                 {renderSaBadge()}
 
                 {/* ── 발행 준비도 + 설정 스티키 바 ── */}
@@ -4535,6 +4548,7 @@ POST3: (제목)|(이유)
               return (
               <div style={{animation:"fadeUp .25s ease both"}}>
                 <UsageGuide theme={theme==="dark"?"dark":"light"} accent={OT} subtitle="키워드만 넣으면 제목·글·이미지·카테고리까지 자동으로 만들어 순서대로 발행해요. (관리자는 무제한)" steps={[{ico:"⌨️",title:"키워드 입력",desc:"한 줄에 하나씩, 몇 개든."},{ico:"⏱️",title:"텀 설정",desc:"발행 간격(넉넉히)."},{ico:"⚡",title:"시작",desc:"봇이 알아서 — 로그로 확인."}]} />
+                {renderAeoBanner()}
                 {renderSaBadge()}
                 {!botOnline&&<div className="alert alert-warn" style={{marginBottom:14}}>⚠️ PC에서 Publy 앱을 실행해야 발행이 가능합니다</div>}
 

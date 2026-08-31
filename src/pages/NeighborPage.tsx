@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { createPortal } from "react-dom";
 import { botFetch, BotEventStream } from "../lib/botApi";
+import { diagnoseAeo } from "../lib/aeo";
 import { getReplyDailyUsage, REPLY_DAILY_LIMIT, getBlogscoreDailyUsage, incrementBlogscoreQuota, BLOGSCORE_DAILY_LIMIT, PUMASI_ACCOUNT_LIMIT, PUMASI_POSTS_LIMIT, TAB_ACCOUNT_LIMIT, getPumasiDailyUsage, savePostCareChecks, markPrescribed, markTitleChanged, getPostCare, computeCareStatus, PostCare, OBSERVE_DAYS, INDEX_GRACE_DAYS, savePostViews, latestViews, reportError, pushLiveLog } from "../lib/supabase";
 import UsageGuide from "../components/UsageGuide";
 import dodoImg from "../assets/dodo.png";   // 🩺 블로그 주치의 캐릭터(검수자 도도)
@@ -603,6 +604,9 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
   const [scPostMode, setScPostMode] = useState<"period"|"all">("period");
   const [scPeriod, setScPeriod] = useState<7|14|30|"custom">(7);
   const [scCustomDays, setScCustomDays] = useState(7);
+  // 🩺 AEO 형식 진단: 최근 글 본문을 읽어 도입요약·FAQ·구조화를 갖췄는지 체크(logNo→결과)
+  const [aeoResults, setAeoResults] = useState<{ logNo: string; title: string; passed: number; checks: { key:string; label:string; ok:boolean; hint:string }[] }[]>([]);
+  const [aeoLoading, setAeoLoading] = useState(false);
   const [scPosts, setScPosts] = useState<{url:string;title:string;date:string}[]>([]);
   const [scSelectedLogNos, setScSelectedLogNos] = useState<string[]>([]);
   const [scPostsLoading, setScPostsLoading] = useState(false);
@@ -746,6 +750,27 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
   const loadCare = async () => {
     if (!userId || !activeAccount) return;
     try { const rows = await getPostCare(userId, activeAccount.accountId); const m: Record<string, PostCare> = {}; rows.forEach(r => { m[r.post_key] = r; }); setCareMap(m); } catch {}
+  };
+  // 🩺 AEO 형식 진단: 최근 글 본문을 실제로 읽어 도입요약·FAQ·구조화를 갖췄는지 체크(AI 호출 0, 무료). 최대 10개.
+  const runAeoCheck = async () => {
+    const bid = (activeAccount?.blogId || "").trim();
+    if (!bid) { alert("먼저 이 탭에 네이버 계정을 연결하고 글 목록을 불러오세요."); return; }
+    const targets = (scPosts.length ? scPosts : []).slice(0, 10).map(p => ({ logNo: scLogNo(p.url), title: p.title })).filter(t => t.logNo);
+    if (!targets.length) { alert("검사할 글이 없어요. 위에서 '글 불러오기'를 먼저 눌러주세요."); return; }
+    setAeoLoading(true); setAeoResults([]);
+    const out: typeof aeoResults = [];
+    for (const t of targets) {
+      try {
+        const r = await botFetch(`${BOT}/api/post-body?blogId=${encodeURIComponent(bid)}&logNo=${encodeURIComponent(t.logNo)}`, { signal: AbortSignal.timeout(20000) } as any);
+        const d = await r.json();
+        const body = d.ok ? String(d.body || "") : "";
+        const dg = diagnoseAeo(body);
+        out.push({ logNo: t.logNo, title: t.title, passed: dg.passed, checks: dg.checks });
+        setAeoResults([...out]);   // 진행되는 대로 갱신
+      } catch { out.push({ logNo: t.logNo, title: t.title, passed: 0, checks: diagnoseAeo("").checks }); setAeoResults([...out]); }
+      await new Promise(res => setTimeout(res, 300));
+    }
+    setAeoLoading(false);
   };
   useEffect(() => { loadCare(); /* eslint-disable-next-line */ }, [activeAccount?.accountId, userId, rpTick]);
   // 🩺 P1: 블로그지수 탭에서 추적글(제목 바꾼 글)이 로드되면, 계정당 하루 1회 자동으로 순위를 채운다.
@@ -3237,6 +3262,46 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
                       </div>
                     );
                   })()}
+
+                  {/* 🤖 AEO 형식 진단 — 내 글이 'AI가 인용하기 좋은 형식'인지 체크(도입요약·Q&A·구조화) */}
+                  <div style={{ marginBottom: 20, padding: "16px", borderRadius: 14, background: "linear-gradient(135deg,rgba(124,58,237,.08),rgba(14,165,233,.06))", border: "1.5px solid rgba(124,58,237,.3)" }}>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap", marginBottom: 6 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        <span style={{ fontSize: 18 }}>🤖</span>
+                        <div style={{ fontSize: 14, fontWeight: 850, color: "#7c3aed" }}>AI 검색 최적화(AEO) 형식 진단</div>
+                      </div>
+                      <button onClick={runAeoCheck} disabled={aeoLoading}
+                        style={{ padding: "6px 13px", borderRadius: 9, border: "none", background: aeoLoading ? "#8a8a99" : "linear-gradient(135deg,#7c3aed,#0ea5e9)", color: "#fff", fontSize: 12, fontWeight: 800, cursor: aeoLoading ? "default" : "pointer", fontFamily: "inherit" }}>
+                        {aeoLoading ? "진단 중..." : aeoResults.length ? "🔄 다시 진단" : "🤖 내 글 진단하기"}
+                      </button>
+                    </div>
+                    <div style={{ fontSize: 12, color: "var(--text2)", lineHeight: 1.65, marginBottom: 10, fontWeight: 500 }}>
+                      네이버 <b>AI 브리핑·Cue:</b>가 답변에 <b>내 글을 인용</b>하려면 글이 특정 형식이어야 해요. 최근 글이 <b style={{ color: "#7c3aed" }}>①도입부 핵심요약 ②자주 묻는 질문(Q&amp;A) ③목록·구조화</b> 3가지를 갖췄는지 실제 본문을 읽어 체크해요. <span style={{ color: "var(--text3)" }}>(앞으로 퍼블리로 쓰는 글은 이 형식이 자동 적용돼요)</span>
+                    </div>
+                    {aeoResults.length > 0 && (() => {
+                      const avg = Math.round(aeoResults.reduce((s, r) => s + r.passed, 0) / aeoResults.length / 3 * 100);
+                      return (
+                      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                        <div style={{ fontSize: 12, fontWeight: 800, color: avg >= 67 ? "#00a878" : avg >= 34 ? "#f59e0b" : "#ef4444" }}>
+                          평균 AEO 점수 {avg}점 · {aeoResults.length}개 글 진단 {avg < 67 && <span style={{ color: "var(--text3)", fontWeight: 600 }}>— 형식만 손보면 AI 노출 기회가 커져요</span>}
+                        </div>
+                        {aeoResults.map((r, i) => (
+                          <div key={i} style={{ padding: "10px 12px", borderRadius: 10, background: "var(--bg)", border: "1px solid var(--border)" }}>
+                            <div style={{ fontSize: 12.5, fontWeight: 700, color: "var(--text)", marginBottom: 6, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.title}</div>
+                            <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                              {r.checks.map(c => (
+                                <span key={c.key} title={c.hint} style={{ fontSize: 11, fontWeight: 700, padding: "4px 9px", borderRadius: 8, background: c.ok ? "rgba(0,168,120,.12)" : "rgba(239,68,68,.1)", color: c.ok ? "#00a878" : "#ef4444", cursor: "help" }}>
+                                  {c.ok ? "✅" : "❌"} {c.label}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        ))}
+                        <div style={{ fontSize: 11, color: "var(--text3)", lineHeight: 1.6, marginTop: 2 }}>❌ 항목에 마우스를 올리면 어떻게 고치는지 알려줘요. 오래된 글은 위 <b>재발행</b>에서 제목·내용을 다시 손볼 때 이 형식으로 바꿔주세요.</div>
+                      </div>
+                      );
+                    })()}
+                  </div>
 
                   {/* ♻️ 오래된 글 재발행 알림 — 누적 저장분(순환 검사로 며칠에 걸쳐 전체 커버) + 기간 설정 */}
                   {(() => {
