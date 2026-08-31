@@ -3056,10 +3056,18 @@ POST3: (제목)|(이유)
         let postUrl="";
         try{ postUrl=await otPublishItem(kw,title,content,tags.split(",").map(t=>t.replace("#","").trim()).filter(Boolean),imgs,cat.id,accId,0); }
         catch(e:any){ await refundQuota(user.id); throw e; }
-        await incrementDailyPublish(user.id); setDailyPublishUsed(p=>p+1);
-        await addHistory({user_id:user.id,platform:"naver",title,post_url:postUrl,status:"success"}).catch(()=>{});
-        upd({step:"발행 완료",status:"done",postUrl,at:new Date().toLocaleTimeString("ko-KR",{hour:"2-digit",minute:"2-digit"})});
-        otLive(`  ✅ 발행 완료! ${postUrl||""}`);
+        const at=new Date().toLocaleTimeString("ko-KR",{hour:"2-digit",minute:"2-digit"});
+        if(postUrl){   // ★주소를 받았을 때만 '완료' — 주소 없으면 실제로 안 올라갔을 수 있어 '확인 필요'로 정직하게
+          await incrementDailyPublish(user.id); setDailyPublishUsed(p=>p+1);
+          await addHistory({user_id:user.id,platform:"naver",title,post_url:postUrl,status:"success"}).catch(()=>{});
+          upd({step:"발행 완료",status:"done",postUrl,at});
+          otLive(`  ✅ 발행 완료! ${postUrl}`);
+        } else {
+          await refundQuota(user.id);   // 실제 발행 불확실 → 건수 환불
+          upd({step:"⚠️ 발행 주소를 못 받음 — 블로그에 올라갔는지 확인하세요",status:"fail",at});
+          otLive(`  ⚠️ 발행 주소를 못 받았어요(글이 실제로 안 올라갔을 수 있음). 블로그를 확인하세요.`);
+          await addHistory({user_id:user.id,platform:"naver",title,status:"fail",error_message:"발행 주소 미수신(글 미게시 의심)"}).catch(()=>{});
+        }
       }catch(e:any){
         upd({step:"실패: "+(e.message||"오류"),status:"fail",error:e.message});
         otLive(`  ❌ 실패: ${e.message||"오류"}`);

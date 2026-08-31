@@ -1040,8 +1040,15 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
         upd({step:"카테고리 매칭 중"}); const cat=await otPickCategory(title,content,cats); upd({cat:cat.name||"기본"}); otLive(`  📂 카테고리 자동 선택: ${cat.name||"기본"}`);
         upd({step:"발행 중"}); otLive(`  🚀 네이버 발행 중...`);
         const postUrl=await otPublishItem(kw,title,content,tags.split(",").map(t=>t.replace("#","").trim()).filter(Boolean),imgs,cat.id,acc,0);
-        await addHistory({user_id:ADM_UID,platform:"naver",title,post_url:postUrl,status:"success"}).catch(()=>{});
-        upd({step:"발행 완료",status:"done",postUrl,at:new Date().toLocaleTimeString("ko-KR",{hour:"2-digit",minute:"2-digit"})}); otLive(`  ✅ 발행 완료! ${postUrl||""}`);
+        const at=new Date().toLocaleTimeString("ko-KR",{hour:"2-digit",minute:"2-digit"});
+        if(postUrl){
+          await addHistory({user_id:ADM_UID,platform:"naver",title,post_url:postUrl,status:"success"}).catch(()=>{});
+          upd({step:"발행 완료",status:"done",postUrl,at}); otLive(`  ✅ 발행 완료! ${postUrl}`);
+        } else {
+          upd({step:"⚠️ 발행 주소를 못 받음 — 블로그에 올라갔는지 확인하세요",status:"fail",at});
+          otLive(`  ⚠️ 발행 주소를 못 받았어요(글이 실제로 안 올라갔을 수 있음). 블로그를 확인하세요.`);
+          await addHistory({user_id:ADM_UID,platform:"naver",title,status:"fail",error_message:"발행 주소 미수신(글 미게시 의심)"}).catch(()=>{});
+        }
       }catch(e:any){
         upd({step:"실패: "+(e.message||"오류"),status:"fail",error:e.message}); otLive(`  ❌ 실패: ${e.message||"오류"}`);
         await addHistory({user_id:ADM_UID,platform:"naver",title:kw,status:"fail",error_message:e.message}).catch(()=>{});
