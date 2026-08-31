@@ -890,7 +890,7 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
   const [otRunning,setOtRunning]=useState(false);
   const otStopRef=useRef(false);
   const [otNextAt,setOtNextAt]=useState<number|null>(null);
-  const [otPaused,setOtPaused]=useState<{idx:number;kws:string[]}|null>(null);
+  const [otPaused,setOtPaused]=useState<{idx:number;kws:string[];reason?:"credit"|"stopped"}|null>(null);
   const [otLog,setOtLog]=useState<{id:string;kw:string;title?:string;cat?:string;step:string;status:"wait"|"run"|"done"|"fail"|"limit";postUrl?:string;error?:string;at?:string}[]>(()=>{try{return JSON.parse(localStorage.getItem("publy_adm_ot_log")||"[]");}catch{return [];}});
   useEffect(()=>{try{localStorage.setItem("publy_adm_ot_log",JSON.stringify(otLog.slice(0,50)));}catch{}},[otLog]);
   const [otLiveLog,setOtLiveLog]=useState<string[]>(()=>{try{return JSON.parse(localStorage.getItem("publy_adm_ot_livelog")||"[]");}catch{return [];}});
@@ -1074,7 +1074,7 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
               upd({step:"⏸ Flow 크레딧 부족 — 계정 변경 후 이어가기",status:"limit"});
               otLive(`  ⏸ Flow 무료 크레딧이 떨어졌어요. 이 글은 올리지 않고 멈췄어요 → Flow 계정을 바꿔 연결 후 '이어가기'를 누르면 이 키워드부터 계속돼요.`);
               showToast("Flow 크레딧 부족 — 계정 변경 후 '이어가기'","info");
-              setOtPaused({idx:i,kws}); setOtRunning(false); setOtNextAt(null); return;
+              setOtPaused({idx:i,kws,reason:"credit"}); setOtRunning(false); setOtNextAt(null); return;
             }
             else if(fr.ok&&Array.isArray(fd.images)&&fd.images.length){ imgs.push(...fd.images.map((im:any)=>im.src).filter(Boolean)); otLive(`  ✅ Flow 이미지 ${imgs.length}/${n}장${imgs.length<n?` (${n-imgs.length}장은 생성 실패해 빠졌어요)`:""}`); }
             else { otLive(`  ⚠️ Flow 이미지 실패: ${fd.error||("HTTP "+fr.status)} — 위 '🎬 Flow 준비'로 먼저 연결하세요. 이번 글은 이미지 없이 올려요`); }
@@ -1106,8 +1106,11 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
     if(otStopRef.current){
       const doneCount=otLog.filter(r=>r.status==="done").length;
       const remain=kws.slice(doneCount);
-      if(remain.length && !otAiKw){ setOtKeywords(remain.join("\n")); setOtAiKw(false); }
-      otLive(`⏹ 전체 중단${remain.length&&!otAiKw?` — 남은 ${remain.length}개는 키워드칸에 담아뒀어요. Flow 재연결 후 다시 '시작'하면 이어서 발행돼요`:""}`);
+      if(remain.length){
+        setOtPaused({idx:doneCount,kws,reason:"stopped"});
+        if(!otAiKw){ setOtKeywords(remain.join("\n")); }
+        otLive(`⏹ 중단 — 남은 ${remain.length}개는 아래 '이어가기'로 계속할 수 있어요. 텀을 바꾸려면 위에서 바꾼 뒤 이어가기를 누르세요.`);
+      } else { otLive(`⏹ 전체 중단 — 남은 글이 없어요`); }
     } else { otLive("🎉 원터치 발행 전체 완료"); }
     setOtRunning(false);setOtNextAt(null);
   }
@@ -4687,13 +4690,13 @@ POST3: (제목)|(이유)
 
                 {otPaused&&!otRunning&&(
                   <div style={{marginBottom:12,padding:"16px",borderRadius:14,border:"2px solid #f59e0b",background:"rgba(245,158,11,.08)"}}>
-                    <div style={{fontSize:14.5,fontWeight:800,color:"#f59e0b",marginBottom:6}}>⏸ Flow 크레딧 부족으로 멈췄어요 ({otPaused.idx+1}번째 키워드에서)</div>
-                    <div style={{fontSize:12.5,color:"var(--text2)",lineHeight:1.6,marginBottom:10}}>다른 Flow 계정으로 <b>전환</b>한 뒤 <b>이어가기</b>를 누르면 <b>멈춘 그 키워드부터</b> 계속돼요.</div>
-                    <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:10}}>
+                    <div style={{fontSize:14.5,fontWeight:800,color:"#f59e0b",marginBottom:6}}>{otPaused.reason==="stopped"?`⏸ 멈췄어요 — 남은 ${otPaused.kws.length-otPaused.idx}개 (${otPaused.idx+1}번째 키워드부터)`:`⏸ Flow 크레딧 부족으로 멈췄어요 (${otPaused.idx+1}번째 키워드에서)`}</div>
+                    <div style={{fontSize:12.5,color:"var(--text2)",lineHeight:1.6,marginBottom:10}}>{otPaused.reason==="stopped"?<><b>발행 텀을 바꾸려면</b> 위 <b>텀 설정</b>에서 바꾼 뒤 <b>이어가기</b>를 누르면 <b>남은 키워드부터</b> 새 텀으로 계속돼요.</>:<>다른 Flow 계정으로 <b>전환</b>한 뒤 <b>이어가기</b>를 누르면 <b>멈춘 그 키워드부터</b> 계속돼요.</>}</div>
+                    {otPaused.reason!=="stopped"&&<div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:10}}>
                       {flowSlots.map(s=>{const active=flowSlot===s.id;return(
                         <button key={s.id} onClick={()=>{setFlowSlot(s.id);handleFlowLaunchChrome(s.id);}} disabled={flowLaunching} style={{fontSize:12,fontWeight:800,padding:"7px 12px",borderRadius:8,border:`2px solid ${active?"#f59e0b":"var(--border)"}`,background:active?"rgba(245,158,11,.14)":"var(--bg)",color:active?"#f59e0b":"var(--text2)",cursor:"pointer",fontFamily:"inherit"}}>{flowSlotReady[s.id]?"✅ ":""}{s.name}{active?" ·사용중":""}</button>
                       );})}
-                    </div>
+                    </div>}
                     <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
                       <button onClick={()=>runOneTouch(otPaused)} style={{flex:1,minWidth:160,padding:"13px",borderRadius:11,border:"none",background:"linear-gradient(135deg,#f59e0b,#f97316)",color:"#fff",fontSize:15,fontWeight:900,fontFamily:"inherit",cursor:"pointer"}}>▶ 이어가기 ({otPaused.kws.length-otPaused.idx}개 남음)</button>
                       <button onClick={()=>{setOtPaused(null);setOtLiveLog(prev=>[...prev,`[${new Date().toLocaleTimeString("ko-KR")}] 이어가기 취소`].slice(-300));}} style={{padding:"13px 18px",borderRadius:11,border:"1px solid var(--border)",background:"var(--bg)",color:"var(--text3)",fontSize:13,fontWeight:700,fontFamily:"inherit",cursor:"pointer"}}>취소</button>

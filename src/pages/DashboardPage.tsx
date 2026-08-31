@@ -1355,7 +1355,7 @@ Output (JSON object only): {"keyword":"핵심키워드","title":"새 SEO 제목"
   const otStopRef=useRef(false);
   const otAbortRef=useRef<AbortController|null>(null);   // 진행 중 즉시 중단용
   const [otNextAt,setOtNextAt]=useState<number|null>(null);
-  const [otPaused,setOtPaused]=useState<{idx:number;kws:string[]}|null>(null);   // 크레딧 부족 등으로 일시정지 → 이어가기 지점
+  const [otPaused,setOtPaused]=useState<{idx:number;kws:string[];reason?:"credit"|"stopped"}|null>(null);   // 일시정지(크레딧부족) 또는 사용자 중단 → 이어가기 지점
   const [otLog,setOtLog]=useState<{id:string;kw:string;title?:string;cat?:string;step:string;status:"wait"|"run"|"done"|"fail"|"limit";postUrl?:string;error?:string;at?:string}[]>(()=>{try{return JSON.parse(localStorage.getItem("publy_ot_log")||"[]");}catch{return [];}});
   useEffect(()=>{try{localStorage.setItem("publy_ot_log",JSON.stringify(otLog.slice(0,50)));}catch{}},[otLog]);   // 로그 저장(작업 안 할 때도 항상 확인)
   // 🔴화면 어디서든 항상 보이는 실시간 로그(고정 패널). 스크롤 안 해도 진행상황이 눈에 보이게.
@@ -3084,7 +3084,7 @@ POST3: (제목)|(이유)
               upd({step:"⏸ Flow 크레딧 부족 — 계정 변경 후 이어가기",status:"limit"});
               otLive(`  ⏸ Flow 무료 크레딧이 떨어졌어요. 이 글은 올리지 않고 여기서 멈췄어요 → Flow 계정을 바꿔 연결한 뒤 아래 '이어가기'를 누르면 이 키워드부터 계속돼요.`,false);
               showToast("Flow 크레딧 부족 — 계정 변경 후 '이어가기'","info");
-              setOtPaused({idx:i,kws}); setOtRunning(false); setOtNextAt(null); return;
+              setOtPaused({idx:i,kws,reason:"credit"}); setOtRunning(false); setOtNextAt(null); return;
             }
             else if(fr.ok&&Array.isArray(fd.images)&&fd.images.length){ imgs.push(...fd.images.map((im:any)=>im.src).filter(Boolean)); otLive(`  ✅ Flow 이미지 ${imgs.length}/${n}장${imgs.length<n?` (${n-imgs.length}장은 생성 실패해 빠졌어요)`:""}`); }
             else { otLive(`  ⚠️ Flow 이미지 실패: ${fd.error||("HTTP "+fr.status)} — 위 '🎬 Flow 준비'로 먼저 연결하세요. 이번 글은 이미지 없이 올려요`); }
@@ -3128,12 +3128,17 @@ POST3: (제목)|(이유)
         otLive(`  ▶ ${hhmm(Date.now())} 대기 끝 — 다음 글 시작`);
       }
     }
-    // ★중단됐고 남은 키워드가 있으면 입력칸에 되돌려 → Flow 재연결 후 '재시작'하면 그 키워드부터 이어감
+    // ★중단됐고 남은 키워드가 있으면 '이어가기' 지점을 저장 → 텀을 바꾼 뒤 '이어가기'를 누르면 그 키워드부터 이어감(AI/수동 무관)
     if(otStopRef.current){
       const doneCount=otLog.filter(r=>r.status==="done").length;
       const remain=kws.slice(doneCount);
-      if(remain.length && !otAiKw){ setOtKeywords(remain.join("\n")); setOtAiKw(false); }
-      otLive(`⏹ 전체 중단${remain.length&&!otAiKw?` — 남은 ${remain.length}개는 키워드칸에 담아뒀어요. Flow 재연결 후 다시 '시작'하면 이어서 발행돼요`:""}`,false);
+      if(remain.length){
+        setOtPaused({idx:doneCount,kws,reason:"stopped"});   // 이어가기 배너가 뜸(텀 변경 후 이어가기 가능)
+        if(!otAiKw){ setOtKeywords(remain.join("\n")); }      // 수동 모드는 입력칸에도 되돌려 둠(기존 동작 유지)
+        otLive(`⏹ 중단 — 남은 ${remain.length}개는 아래 '이어가기'로 계속할 수 있어요. 발행 텀을 바꾸고 싶으면 위에서 바꾼 뒤 이어가기를 누르세요.`,false);
+      } else {
+        otLive(`⏹ 전체 중단 — 남은 글이 없어요`,false);
+      }
     } else {
       otLive("🎉 원터치 발행 전체 완료",false);
     }
@@ -6759,13 +6764,13 @@ POST3: (제목)|(이유)
                 {/* 일시정지(크레딧 부족 등) → 이어가기 배너 */}
                 {otPaused&&!otRunning&&(
                   <div style={{marginBottom:12,padding:"16px",borderRadius:14,border:"2px solid #f59e0b",background:"rgba(245,158,11,.08)"}}>
-                    <div style={{fontSize:14.5,fontWeight:800,color:"#f59e0b",marginBottom:6}}>⏸ Flow 크레딧 부족으로 멈췄어요 ({otPaused.idx+1}번째 키워드에서)</div>
-                    <div style={{fontSize:12.5,color:"var(--text2)",lineHeight:1.6,marginBottom:10}}>다른 Flow 계정으로 <b>전환</b>한 다음, <b>이어가기</b>를 누르면 <b>멈춘 그 키워드부터</b> 계속돼요. (자리에 없어도 돼요)</div>
-                    <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:10}}>
+                    <div style={{fontSize:14.5,fontWeight:800,color:"#f59e0b",marginBottom:6}}>{otPaused.reason==="stopped"?`⏸ 멈췄어요 — 남은 ${otPaused.kws.length-otPaused.idx}개 (${otPaused.idx+1}번째 키워드부터)`:`⏸ Flow 크레딧 부족으로 멈췄어요 (${otPaused.idx+1}번째 키워드에서)`}</div>
+                    <div style={{fontSize:12.5,color:"var(--text2)",lineHeight:1.6,marginBottom:10}}>{otPaused.reason==="stopped"?<><b>발행 텀을 바꾸려면</b> 위 <b>텀 설정</b>에서 바꾼 다음, 아래 <b>이어가기</b>를 누르면 <b>남은 키워드부터</b> 새 텀으로 계속돼요.</>:<>다른 Flow 계정으로 <b>전환</b>한 다음, <b>이어가기</b>를 누르면 <b>멈춘 그 키워드부터</b> 계속돼요. (자리에 없어도 돼요)</>}</div>
+                    {otPaused.reason!=="stopped"&&<div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:10}}>
                       {flowSlots.map(s=>{const active=flowSlot===s.id;return(
                         <button key={s.id} onClick={()=>{setFlowSlot(s.id);handleFlowLaunchChrome(s.id);}} disabled={flowLaunching} style={{fontSize:12,fontWeight:800,padding:"7px 12px",borderRadius:8,border:`2px solid ${active?"#f59e0b":"var(--border)"}`,background:active?"rgba(245,158,11,.14)":"var(--bg)",color:active?"#f59e0b":"var(--text2)",cursor:"pointer",fontFamily:"inherit"}}>{flowSlotReady[s.id]?"✅ ":""}{s.name}{active?" ·사용중":""}</button>
                       );})}
-                    </div>
+                    </div>}
                     <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
                       <button onClick={()=>runOneTouch(otPaused)} style={{flex:1,minWidth:160,padding:"13px",borderRadius:11,border:"none",background:"linear-gradient(135deg,#f59e0b,#f97316)",color:"#fff",fontSize:15,fontWeight:900,fontFamily:"inherit",cursor:"pointer"}}>▶ 이어가기 ({otPaused.kws.length-otPaused.idx}개 남음)</button>
                       <button onClick={()=>{setOtPaused(null);setOtLiveLog(prev=>[...prev,`[${new Date().toLocaleTimeString("ko-KR")}] 이어가기 취소`].slice(-300));}} style={{padding:"13px 18px",borderRadius:11,border:"1px solid var(--border)",background:"var(--bg)",color:"var(--text3)",fontSize:13,fontWeight:700,fontFamily:"inherit",cursor:"pointer"}}>취소</button>
