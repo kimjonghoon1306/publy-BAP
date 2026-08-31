@@ -161,7 +161,7 @@ app.delete("/api/session/:platform/:userId", (req, res) => {
 /* ── 직접 발행 (앱에서 즉시 발행) ── */
 app.post("/api/publish-full", async (req, res) => {
   const { userId, platform, naverId, title, content, pubScope = "full", tags = [], imageUrl, categoryId, visibility, scheduleTime, blocks,
-    videoUrl, videoPosition,
+    videoUrl, videoPosition, editLogNo,
     useFlow, flowImgCount, flowPrompts, flowCaptions } = req.body;
   if (!userId || !platform || !title || !content) {
     return res.status(400).json({ error: "userId, platform, title, content 필요" });
@@ -229,7 +229,7 @@ app.post("/api/publish-full", async (req, res) => {
         const ok = activateNaverAccount(userId, naverId);
         if (!ok) console.log(`[publish] 계정 세션 없음: ${naverId}`);
       }
-      postUrl = await publishNaver({ userId, title, content, pubScope, tags, imageUrl, categoryId, visibility, scheduleTime, blocks: finalBlocks, videoUrl, videoPosition });
+      postUrl = await publishNaver({ userId, title, content, pubScope, tags, imageUrl, categoryId, visibility, scheduleTime, blocks: finalBlocks, videoUrl, videoPosition, editLogNo });
     } else if (platform === "tistory") {
       postUrl = await publishTistory({ userId, title, content, tags, categoryId, visibility });
     } else {

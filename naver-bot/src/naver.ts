@@ -377,8 +377,10 @@ export async function publishNaver(params: {
   blocks?: Array<{type: string; content?: string; src?: string; alt?: string; link?: string}>;
   videoUrl?: string;
   videoPosition?: "top" | "middle" | "bottom";
+  editLogNo?: string;   // ★있으면 새 글이 아니라 '그 글 편집화면'을 열어 기존 본문 비우고 통째 교체 재발행(주소·좋아요 유지)
 }): Promise<string> {
-  const { userId, title: rawTitle, content, pubScope = "full", tags, imageUrl, categoryId, visibility = "public", scheduleTime, blocks, videoUrl, videoPosition = "middle" } = params;
+  const { userId, title: rawTitle, content, pubScope = "full", tags, imageUrl, categoryId, visibility = "public", scheduleTime, blocks, videoUrl, videoPosition = "middle", editLogNo } = params;
+  const isEdit = !!(editLogNo && /^\d+$/.test(String(editLogNo)));   // 글 살리기(덮어쓰기) 모드
   const title = rawTitle.replace(/\n/g, " ").trim().slice(0, 40);
 
   // pubScope에 따라 블록 필터링 + 마커 제거
@@ -443,8 +445,11 @@ export async function publishNaver(params: {
   });
 
   try {
-    const writeUrl = `https://blog.naver.com/GoBlogWrite.naver?blogId=${blogId}`;
-    console.log(`[naver] 글쓰기 진입: ${writeUrl}`);
+    // ★글 살리기(편집) 모드면 그 글의 편집화면을, 아니면 새 글쓰기 화면을 연다. 에디터는 둘 다 스마트에디터라 이후 로직 공통.
+    const writeUrl = isEdit
+      ? `https://blog.naver.com/PostWriteForm.naver?blogId=${blogId}&logNo=${editLogNo}&Redirect=Update`
+      : `https://blog.naver.com/GoBlogWrite.naver?blogId=${blogId}`;
+    console.log(`[naver] ${isEdit?`글 살리기(편집) 진입 logNo=${editLogNo}`:"글쓰기 진입"}: ${writeUrl}`);
     assertPageOpen("글쓰기 페이지 이동 전");
     await page.goto(writeUrl, { waitUntil: "domcontentloaded", timeout: 60000 });
 
@@ -510,6 +515,13 @@ export async function publishNaver(params: {
       await frame.click(".se-main-container", { timeout: 3000 }).catch(() => {});
     }
     await page.waitForTimeout(500);
+    // ★글 살리기(편집): 기존 제목이 남아있으니 전체선택·삭제 후 새 제목 입력(안 그러면 붙어버림)
+    if (isEdit) {
+      const SEL_A = process.platform === "darwin" ? "Meta+A" : "Control+A";
+      await page.keyboard.press(SEL_A); await page.waitForTimeout(150);
+      await page.keyboard.press("Backspace"); await page.waitForTimeout(300);
+      console.log("[naver] 글살리기: 기존 제목 비움 → 새 제목 입력");
+    }
     await page.keyboard.type(title, { delay: 30 });
     await page.waitForTimeout(600);
 
@@ -541,6 +553,23 @@ export async function publishNaver(params: {
       }
     }
     await page.waitForTimeout(300);
+
+    // ★글 살리기(편집): 본문 영역에 커서가 있는 지금, 기존 본문(글+이미지)을 전체선택·삭제해 비운다.
+    //   이미지가 남을 수 있어 2회 반복. 이후 아래 로직이 빈 에디터에 새 본문·이미지를 채운다(=새 글과 동일).
+    //   ⚠️ 실기기 검증 필요(에디터 구조 따라 Cmd+A 범위가 다를 수 있음) — 로그로 확인.
+    if (isEdit) {
+      const SEL_A = process.platform === "darwin" ? "Meta+A" : "Control+A";
+      for (let z = 0; z < 3; z++) {
+        await page.keyboard.press(SEL_A); await page.waitForTimeout(200);
+        await page.keyboard.press("Backspace"); await page.waitForTimeout(400);
+      }
+      const leftover = await frame.evaluate(() => {
+        const imgs = document.querySelectorAll(".se-component.se-image").length;
+        const txt = (document.querySelector(".se-main-container")?.textContent || "").replace(/\s/g, "").length;
+        return { imgs, txt };
+      }).catch(() => ({ imgs: -1, txt: -1 }));
+      console.log(`[naver] 글살리기: 기존 본문 비움 시도 → 남은 이미지 ${leftover.imgs}개·글자 ${leftover.txt}자`);
+    }
 
     // ── 파일 업로드 헬퍼 (OS 파일 피커 다이얼로그 차단) ──
     const IMG_BTN_SELS = [
