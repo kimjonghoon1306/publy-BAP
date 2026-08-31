@@ -617,6 +617,7 @@ const TABS = [
   {k:"image",           i:"🖼️", l:"이미지 생성"},
   {k:"photo",           i:"📷", l:"사진 글쓰기"},
   {k:"publish",         i:"🚀", l:"발행하기"},
+  {k:"onetouch",        i:"⚡", l:"원터치 발행"},
   {k:"manage",          i:"📋", l:"발행 관리"},
   {k:"blogscore",       i:"📈", l:"블로그 지수"},
   {k:"crawl",           i:"🔍", l:"크롤링"},
@@ -646,7 +647,7 @@ const TABS = [
 ] as const;
 
 export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: Props) {
-  const [tab, setTab] = useState<"keyword"|"write"|"image"|"photo"|"publish"|"manage"|"accounts"|"rank"|"blogscore"|"calendar"|"crawl"|"place"|"place_reply"|"crawl_manage"|"place_manage"|"place_reply_manage"|"neighbor"|"engage"|"reply"|"pumasi"|"neighbor_manage"|"engage_manage"|"reply_manage"|"blogscore_manage"|"insta_dm"|"insta_dm_manage"|"users"|"bug"|"stats"|"live"|"settings"|"proxy">("keyword");
+  const [tab, setTab] = useState<"keyword"|"write"|"image"|"photo"|"publish"|"onetouch"|"manage"|"accounts"|"rank"|"blogscore"|"calendar"|"crawl"|"place"|"place_reply"|"crawl_manage"|"place_manage"|"place_reply_manage"|"neighbor"|"engage"|"reply"|"pumasi"|"neighbor_manage"|"engage_manage"|"reply_manage"|"blogscore_manage"|"insta_dm"|"insta_dm_manage"|"users"|"bug"|"stats"|"live"|"settings"|"proxy">("keyword");
 
   // ── 프록시(계정별 IP) 관리 ──
   const NEIGHBOR_BOT = "http://127.0.0.1:3334";   // 서이추·공감·품앗이 봇(프록시 헬스체크도 여기서 실행)
@@ -863,6 +864,88 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
 
   // 발행
   const [pubTitle, setPubTitle] = useState(""); const [pubContent, setPubContent] = useState(""); const [pubTags, setPubTags] = useState(""); const [pubImg, setPubImg] = useState(""); const [pubAccId, setPubAccId] = useState(""); const [publishing, setPublishing] = useState(false); const [pubMsg, setPubMsg] = useState("");
+  // ⚡ 원터치 발행(관리자 일반 사용 · 무제한) — 회원과 동일 기능
+  const [otKeywords,setOtKeywords]=useState("");
+  const [otTermMin,setOtTermMin]=useState(60);
+  const [otCustomTerm,setOtCustomTerm]=useState("");
+  const [otImgCount,setOtImgCount]=useState(3);
+  const [otRunning,setOtRunning]=useState(false);
+  const otStopRef=useRef(false);
+  const [otNextAt,setOtNextAt]=useState<number|null>(null);
+  const [otLog,setOtLog]=useState<{id:string;kw:string;title?:string;cat?:string;step:string;status:"wait"|"run"|"done"|"fail"|"limit";postUrl?:string;error?:string;at?:string}[]>([]);
+  // ══ ⚡ 원터치 엔진(관리자 무제한 · 회원과 동일 흐름) ══
+  async function otGenTitleBest(kw:string):Promise<string>{
+    const text=await callAI(`당신은 대한민국 최고의 네이버 블로그 SEO 제목 전문가입니다.\n키워드: "${kw}"\n\n네이버 검색 상위노출이 잘 되는 제목 15개를 JSON 배열로만 반환하세요.\n- 키워드 "${kw}"를 제목 앞부분에 자연스럽게 포함\n- 20~35자, 실제 검색어 형태(추천/후기/방법/가격/비교/고르는법)\n- 과장·낚시 감탄사(대박/충격/1등/미쳤다) 금지, 물음표·느낌표 남발 금지\nJSON 배열만.`);
+    const arr=parseArr(text).map((t:string)=>enforceExactKeyword(t,kw)).filter(Boolean);
+    if(!arr.length)throw new Error("제목 생성 실패");
+    return arr[0];
+  }
+  async function otGenPost(kw:string,title:string):Promise<{content:string;tags:string}>{
+    const chars=calcTargetChars();
+    const text=await callAI(`당신은 대한민국 최고의 블로그 작가입니다.\n키워드: "${kw}"  제목: "${title}"\n목표 글자수: ${chars}자 내외(±100자)\n\n=== 절대 규칙 ===\n⛔ ## 및 ** * - + 마크다운 기호 전부 금지(소제목도 순수 텍스트)\n⛔ 한자·중국어·일본어·영어단어 금지(브랜드명 제외)\n⛔ AI 상투어 금지(~해보겠습니다/살펴보겠습니다/결론적으로/다양한/효과적인) → 실제 사람 말투(~해요, ~거든요, ~더라고요)\n✅ ★핵심 키워드 "${kw}"를 본문에 띄어쓰기·글자 그대로 정확히 5~6번 반복(검색 노출 핵심)\n✅ 구체적 수치·가격·기간·경험담 포함, 과장·거짓 금지\n✅ 본문을 4~6개 구간으로 나누고 각 구간 앞에 짧은 소제목(10~30자, ## 없이)\n✅ 모든 단락 사이 빈 줄 하나(엔터 두 번), 한 단락 2~4문장(모바일 가독성)\n\n=== 출력 형식 ===\n태그: 태그1, 태그2, 태그3, 태그4, 태그5\n\n(본문 ${chars}자 내외 순수 텍스트)\n\n[FAQ시작]\nQ1: (질문)\nA1: (답변)\nQ2: (질문)\nA2: (답변)\nQ3: (질문)\nA3: (답변)\n[FAQ끝]`);
+    const cleaned=stripMarkdown(text);
+    const tgm=cleaned.match(/태그[:\s]*([^\n]+)/);
+    const bm=cleaned.match(/태그[^\n]*\n([\s\S]+)/);
+    const body=await ensureKeywordCount(bm?bm[1].trim():cleaned,kw,5);
+    return {content:body,tags:tgm?tgm[1].trim():""};
+  }
+  async function otPickCategory(title:string,content:string,cats:{id:string;name:string}[]):Promise<{id?:string;name?:string}>{
+    if(!cats.length)return {};
+    if(cats.length===1)return cats[0];
+    const names=cats.map((c,i)=>`${i+1}. ${c.name}`).join("\n");
+    try{ const t=await callAI(`아래 블로그 글에 가장 잘 맞는 카테고리 하나를 고르세요.\n제목: ${title}\n요약: ${content.slice(0,200)}\n\n카테고리 목록:\n${names}\n\n가장 잘 맞는 카테고리의 번호만 숫자로 답하세요(설명·다른 말 금지).`);
+      const m=t.match(/\d+/); const idx=m?parseInt(m[0],10)-1:-1; if(idx>=0&&idx<cats.length)return cats[idx]; }catch{}
+    return cats[0];
+  }
+  async function otPublishItem(kw:string,title:string,content:string,tags:string[],images:string[],categoryId:string|undefined,acc:PublyAccount|undefined):Promise<string>{
+    const blocks:any[]=[];
+    if(images[0])blocks.push({type:"image",src:images[0],alt:""});
+    const paras=content.split(/\n\n+/).map(s=>s.trim()).filter(Boolean);
+    const rest=images.slice(1); const every=rest.length?Math.max(1,Math.floor(paras.length/(rest.length+1))):0; let ri=0;
+    paras.forEach((p,i)=>{ blocks.push({type:"text",content:p}); if(every&&ri<rest.length&&(i+1)%every===0){blocks.push({type:"image",src:rest[ri],alt:`${kw} 사진 ${ri+2}`});ri++;} });
+    while(ri<rest.length){blocks.push({type:"image",src:rest[ri],alt:`${kw} 사진 ${ri+2}`});ri++;}
+    const payload={userId:ADM_UID,platform:"naver",title,content,naverId:acc?.username||undefined,pubScope,tags,imageUrl:images[0]||undefined,categoryId:categoryId||undefined,visibility,blocks};
+    const r=await botFetch(`${BOT}/api/publish-full`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});
+    const d=await r.json().catch(()=>({}));
+    if(r.status===401)throw new Error("세션 만료 — 계정 재연결 필요");
+    if(!r.ok)throw new Error(d.error||"발행 실패");
+    return d.postUrl||"";
+  }
+  function stopOneTouch(){otStopRef.current=true;setOtRunning(false);setOtNextAt(null);showToast("원터치를 멈췄어요","info");}
+  async function runOneTouch(){
+    if(otRunning)return;
+    const kws=otKeywords.split(/[\n,]+/).map(s=>s.trim()).filter(Boolean);
+    if(!kws.length){showToast("키워드를 한 줄에 하나씩 넣어주세요","error");return;}
+    if(!pubAccId){showToast("발행할 네이버 계정을 먼저 선택해주세요","error");return;}
+    const acc=connAccs.find(a=>a.id===pubAccId);
+    const termMin=otCustomTerm.trim()?Math.max(1,parseInt(otCustomTerm,10)||otTermMin):otTermMin;
+    otStopRef.current=false;setOtRunning(true);setOtNextAt(null);
+    let cats:{id:string;name:string}[]=[];
+    try{ const cr=await botFetch(`${BOT}/api/naver/categories/${ADM_UID}`,{signal:AbortSignal.timeout(30000)} as any); const cd=await cr.json().catch(()=>({})); if(cd.categories&&cd.categories.length)cats=cd.categories; }catch{}
+    if(!cats.length)cats=(accCats[pubAccId]||[]).map((c,i)=>({id:String(i),name:c}));
+    setOtLog(kws.map(kw=>({id:uid(),kw,step:"대기",status:"wait" as const})));
+    for(let i=0;i<kws.length;i++){
+      if(otStopRef.current)break;
+      const kw=kws[i]; const upd=(patch:any)=>setOtLog(prev=>prev.map((r,j)=>j===i?{...r,...patch}:r));
+      try{
+        upd({step:"제목 생성 중",status:"run"}); const title=await otGenTitleBest(kw); upd({title});
+        upd({step:"본문 생성 중"}); const {content,tags}=await otGenPost(kw,title);
+        upd({step:"이미지 생성 중"}); const n=Math.min(6,Math.max(1,otImgCount)); const imgs:string[]=[];
+        for(let k=0;k<n;k++){ if(otStopRef.current)break; try{imgs.push(await generateImage(kw,title,k));}catch{} }
+        upd({step:"카테고리 매칭 중"}); const cat=await otPickCategory(title,content,cats); upd({cat:cat.name||"기본"});
+        upd({step:"발행 중"});
+        const postUrl=await otPublishItem(kw,title,content,tags.split(",").map(t=>t.replace("#","").trim()).filter(Boolean),imgs,cat.id,acc);
+        await addHistory({user_id:ADM_UID,platform:"naver",title,post_url:postUrl,status:"success"}).catch(()=>{});
+        upd({step:"발행 완료",status:"done",postUrl,at:new Date().toLocaleTimeString("ko-KR",{hour:"2-digit",minute:"2-digit"})});
+      }catch(e:any){
+        upd({step:"실패: "+(e.message||"오류"),status:"fail",error:e.message});
+        await addHistory({user_id:ADM_UID,platform:"naver",title:kw,status:"fail",error_message:e.message}).catch(()=>{});
+      }
+      const hasNext=i<kws.length-1&&!otStopRef.current;
+      if(hasNext){ const until=Date.now()+termMin*60000; setOtNextAt(until); while(Date.now()<until){ if(otStopRef.current)break; await new Promise(r=>setTimeout(r,1000)); } setOtNextAt(null); }
+    }
+    setOtRunning(false);setOtNextAt(null);
+  }
 
   // 글 생성
   const [adType, setAdType] = useState<"adpost"|"adsense">("adpost");
@@ -2911,7 +2994,7 @@ POST3: (제목)|(이유)
               const secStyle = {fontSize:10,fontWeight:800,color:"var(--text3)",padding:"10px 12px 4px",letterSpacing:".08em",borderTop:"1px solid var(--border)",marginTop:6} as const;
               return (<>
                 <div className="nav-section" style={{...secStyle,borderTop:"none",marginTop:0,padding:"8px 12px 4px"}}>콘텐츠 만들기</div>
-                {["keyword","write","image","photo","publish"].map(navBtn)}
+                {["keyword","write","image","photo","publish","onetouch"].map(navBtn)}
                 <div className="nav-section" style={secStyle}>블로그 운영</div>
                 {["calendar","manage","blogscore","crawl"].map(navBtn)}
                 <div className="nav-box">
@@ -4233,6 +4316,86 @@ POST3: (제목)|(이유)
 
               </div>
             )}
+
+            {/* ===== ⚡ 원터치 발행 (관리자 · 무제한) ===== */}
+            {tab === "onetouch" && (()=>{
+              const OT="#7c3aed";
+              const naverAccs=admAccs.filter(a=>a.is_connected&&a.platform==="naver");
+              const kwList=otKeywords.split(/[\n,]+/).map(s=>s.trim()).filter(Boolean);
+              const termMin=otCustomTerm.trim()?Math.max(1,parseInt(otCustomTerm,10)||otTermMin):otTermMin;
+              const stepColor=(st?:string)=>st==="done"?"#00b487":st==="fail"?"#e5397f":st==="limit"?"#f59e0b":st==="run"?OT:"var(--text3)";
+              return (
+              <div style={{animation:"fadeUp .25s ease both"}}>
+                <UsageGuide theme={theme==="dark"?"dark":"light"} accent={OT} subtitle="키워드만 넣으면 제목·글·이미지·카테고리까지 자동으로 만들어 순서대로 발행해요. (관리자는 무제한)" steps={[{ico:"⌨️",title:"키워드 입력",desc:"한 줄에 하나씩, 몇 개든."},{ico:"⏱️",title:"텀 설정",desc:"발행 간격(넉넉히)."},{ico:"⚡",title:"시작",desc:"봇이 알아서 — 로그로 확인."}]} />
+                {!botOnline&&<div className="alert alert-warn" style={{marginBottom:14}}>⚠️ PC에서 Publy 앱을 실행해야 발행이 가능합니다</div>}
+
+                <div style={{marginBottom:14,padding:"12px 14px",borderRadius:12,background:`${OT}0d`,border:`1.5px solid ${OT}33`,fontSize:13,fontWeight:700,color:OT}}>✨ 관리자 계정은 <b>무제한</b> — 발행 한도 없이 원터치로 계속 발행할 수 있어요.</div>
+
+                {/* 키워드 */}
+                <div className="card" style={{marginBottom:14,border:`1.5px solid ${OT}33`}}>
+                  <div style={{fontSize:15,fontWeight:800,marginBottom:8,color:OT}}>⌨️ 키워드 <span style={{fontSize:12,fontWeight:600,color:"var(--text3)"}}>· 한 줄에 하나씩 (콤마도 가능)</span></div>
+                  <textarea value={otKeywords} onChange={e=>setOtKeywords(e.target.value)} disabled={otRunning} placeholder={"예)\n원주 맛집\n겨울 제철 음식\n소상공인 정책자금 신청"} rows={6} style={{width:"100%",resize:"vertical",lineHeight:1.6,fontSize:14,padding:"10px 12px",borderRadius:10,border:"1px solid var(--border)",background:"var(--bg)",color:"var(--text)",fontFamily:"inherit"}}/>
+                  <div style={{fontSize:12,color:"var(--text2)",marginTop:6}}>지금 <b style={{color:OT}}>{kwList.length}개</b> 키워드</div>
+                </div>
+
+                {/* 계정 */}
+                <div className="card" style={{marginBottom:14}}>
+                  <div style={{fontSize:15,fontWeight:800,marginBottom:8}}>🔗 발행 네이버 계정</div>
+                  {naverAccs.length===0
+                    ? <div style={{fontSize:13,color:"var(--text2)"}}>연결된 네이버 계정이 없어요. <b onClick={()=>setTab("accounts")} style={{color:OT,cursor:"pointer",textDecoration:"underline"}}>계정관리</b>에서 먼저 연결해주세요.</div>
+                    : naverAccs.map(a=>(
+                      <label key={a.id} onClick={()=>!otRunning&&setPubAccId(a.id)} style={{display:"flex",alignItems:"center",gap:10,padding:"12px 14px",borderRadius:10,cursor:otRunning?"default":"pointer",marginBottom:6,background:pubAccId===a.id?`${OT}14`:"var(--bg)",border:`2px solid ${pubAccId===a.id?OT:"var(--border)"}`}}>
+                        <div style={{width:18,height:18,borderRadius:99,border:`2px solid ${pubAccId===a.id?OT:"var(--border)"}`,display:"flex",alignItems:"center",justifyContent:"center"}}>{pubAccId===a.id&&<div style={{width:9,height:9,borderRadius:99,background:OT}}/>}</div>
+                        <div><div style={{fontWeight:700,fontSize:14}}>{a.username}</div>{a.blog_name&&<div style={{fontSize:12,color:"var(--text3)"}}>{a.blog_name}</div>}</div>
+                      </label>
+                    ))}
+                </div>
+
+                {/* 텀 + 이미지 + 카테고리 */}
+                <div className="card" style={{marginBottom:14}}>
+                  <div style={{fontSize:15,fontWeight:800,marginBottom:10}}>⏱️ 발행 텀 <span style={{fontSize:12,fontWeight:600,color:"var(--text3)"}}>· 글 하나 올리고 다음까지 기다리는 시간</span></div>
+                  <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:10}}>
+                    {[[10,"10분"],[30,"30분"],[60,"1시간"],[120,"2시간"]].map(([m,l])=>{const on=!otCustomTerm.trim()&&otTermMin===m;return(
+                      <button key={m as number} disabled={otRunning} onClick={()=>{setOtTermMin(m as number);setOtCustomTerm("");}} style={{padding:"9px 16px",borderRadius:10,border:`2px solid ${on?OT:"var(--border)"}`,background:on?`${OT}16`:"var(--bg)",color:on?OT:"var(--text2)",cursor:otRunning?"default":"pointer",fontSize:14,fontWeight:800,fontFamily:"inherit"}}>{l}</button>
+                    );})}
+                    <div style={{display:"flex",alignItems:"center",gap:6,padding:"0 4px"}}>
+                      <input type="number" min={1} disabled={otRunning} value={otCustomTerm} onChange={e=>setOtCustomTerm(e.target.value)} placeholder="직접" style={{width:80,padding:"8px",borderRadius:8,border:"1px solid var(--border)",background:"var(--bg)",color:"var(--text)",fontFamily:"inherit"}}/>
+                      <span style={{fontSize:13,color:"var(--text2)",fontWeight:700}}>분</span>
+                    </div>
+                  </div>
+                  {termMin<10&&<div style={{fontSize:12,color:"#f59e0b",fontWeight:700,marginBottom:8}}>⚠️ 너무 짧으면 네이버가 스팸으로 볼 수 있어요.</div>}
+                  <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
+                    <span style={{fontSize:13,fontWeight:700}}>🖼️ 글당 이미지</span>
+                    {[1,2,3,4,5].map(n=>(
+                      <button key={n} disabled={otRunning} onClick={()=>setOtImgCount(n)} style={{width:38,height:38,borderRadius:10,border:`2px solid ${otImgCount===n?OT:"var(--border)"}`,background:otImgCount===n?`${OT}16`:"var(--bg)",color:otImgCount===n?OT:"var(--text2)",cursor:otRunning?"default":"pointer",fontSize:14,fontWeight:800,fontFamily:"inherit"}}>{n}</button>
+                    ))}
+                    <span style={{fontSize:12,color:"var(--text3)"}}>장</span>
+                  </div>
+                  <div style={{marginTop:12,padding:"10px 12px",borderRadius:10,background:`${OT}0d`,border:`1px solid ${OT}22`,fontSize:12.5,color:"var(--text2)",lineHeight:1.5}}>📂 <b style={{color:OT}}>카테고리는 자동</b> — 글 주제에 맞는 네이버 카테고리를 AI가 골라 넣어요.</div>
+                </div>
+
+                {!otRunning
+                  ? <button onClick={runOneTouch} disabled={!kwList.length||!pubAccId||!botOnline} style={{width:"100%",padding:"16px",borderRadius:14,border:"none",background:kwList.length&&pubAccId&&botOnline?`linear-gradient(135deg,${OT},#c026d3)`:"var(--border)",color:"#fff",fontSize:17,fontWeight:900,fontFamily:"inherit",cursor:kwList.length&&pubAccId&&botOnline?"pointer":"default",boxShadow:kwList.length&&pubAccId&&botOnline?`0 6px 20px ${OT}44`:"none"}}>⚡ 원터치 발행 시작 {kwList.length>0&&`(${kwList.length}개)`}</button>
+                  : <button onClick={stopOneTouch} style={{width:"100%",padding:"16px",borderRadius:14,border:"none",background:"linear-gradient(135deg,#ef4444,#f43f5e)",color:"#fff",fontSize:17,fontWeight:900,fontFamily:"inherit",cursor:"pointer"}}>⏹ 멈추기 {otNextAt&&`· 다음 발행까지 ${Math.max(0,Math.ceil((otNextAt-Date.now())/60000))}분`}</button>}
+
+                {otLog.length>0&&(
+                  <div className="card" style={{marginTop:14}}>
+                    <div style={{fontSize:15,fontWeight:800,marginBottom:10}}>📋 원터치 로그</div>
+                    {otLog.map((r,i)=>(
+                      <div key={r.id} style={{display:"flex",alignItems:"center",gap:10,padding:"11px 12px",borderRadius:10,marginBottom:6,background:"var(--bg)",border:`1px solid ${r.status==="done"?"#00b48733":r.status==="fail"?"#e5397f33":r.status==="limit"?"#f59e0b33":"var(--border)"}`}}>
+                        <div style={{width:24,height:24,borderRadius:99,flexShrink:0,display:"flex",alignItems:"center",justifyContent:"center",fontSize:12,fontWeight:800,background:`${stepColor(r.status)}1a`,color:stepColor(r.status)}}>{i+1}</div>
+                        <div style={{flex:1,minWidth:0}}>
+                          <div style={{fontSize:13.5,fontWeight:700,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{r.title||r.kw}</div>
+                          <div style={{fontSize:12,color:stepColor(r.status),fontWeight:600,marginTop:1}}>{r.step}{r.cat&&r.status!=="fail"&&<span style={{color:"var(--text3)"}}> · 📂 {r.cat}</span>}{r.at&&<span style={{color:"var(--text3)"}}> · {r.at}</span>}</div>
+                        </div>
+                        {r.postUrl&&<a href={r.postUrl} target="_blank" rel="noreferrer" style={{flexShrink:0,fontSize:12,fontWeight:800,color:OT,textDecoration:"none",padding:"5px 10px",borderRadius:8,border:`1px solid ${OT}44`}}>🔗 보기</a>}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+              );
+            })()}
 
             {tab === "accounts" && (
               <div style={{animation:"fadeUp .25s ease both"}}>

@@ -2929,6 +2929,9 @@ POST3: (제목)|(이유)
     if(!pubAccId){showToast("발행할 네이버 계정을 먼저 선택해주세요","error");return;}
     const termMin=otCustomTerm.trim()?Math.max(1,parseInt(otCustomTerm,10)||otTermMin):otTermMin;
     otStopRef.current=false;setOtRunning(true);setOtNextAt(null);
+    // 📡 모든 단계를 라이브 로그로 → 회원 본인도, 관리자도 실시간 확인. (관리자 '라이브 로그' 탭에서 회원별로 보임)
+    const liveLines:string[]=[];
+    const otLive=(t:string,running=true)=>{liveLines.push(`[${new Date().toLocaleTimeString("ko-KR")}] ${t}`); try{pushLiveLog(user.id,{name:user.name,email:user.email,context:"⚡ 원터치 발행",text:liveLines.slice(-80).join("\n"),running});}catch{}};
     const accId=pubAccId;
     // 회원 실제 카테고리 목록 확보(state 경쟁 방지 위해 직접 fetch)
     let cats:{id:string;name:string}[]=[];
@@ -2942,36 +2945,41 @@ POST3: (제목)|(이유)
       if(!q.ok){
         upd({step:`발행 한도(${q.limit}건) 부족 — 등급을 올리면 더 발행돼요`,status:"limit"});
         setOtLog(prev=>prev.map((r,j)=>j>i?{...r,step:"발행 한도 부족 — 다음날 이어지거나 등급 업",status:"limit" as const}:r));
+        otLive(`⛔ 발행 한도(${q.limit}건) 소진 — 남은 ${kws.length-i}개는 등급 업 시 발행`,false);
         showToast(`오늘 발행 한도(${q.limit}건)를 다 썼어요. 남은 키워드는 등급을 올리면 발행돼요`,"info");
         break;
       }
       const signal=new AbortController().signal;
       try{
-        upd({step:"제목 생성 중",status:"run"}); const title=await otGenTitleBest(kw,signal); upd({title});
-        upd({step:"본문 생성 중"}); const {content,tags}=await otGenPost(kw,title,signal);
-        upd({step:"이미지 생성 중"}); const n=Math.min(6,Math.max(1,otImgCount)); const imgs:string[]=[];
+        upd({step:"제목 생성 중",status:"run"}); otLive(`▶ [${i+1}/${kws.length}] "${kw}" 제목 생성 중`); const title=await otGenTitleBest(kw,signal); upd({title}); otLive(`  ✅ 제목 선택: ${title}`);
+        upd({step:"본문 생성 중"}); otLive(`  ✍️ 본문 생성 중(키워드 5~6회 삽입)`); const {content,tags}=await otGenPost(kw,title,signal); otLive(`  ✅ 본문 완성 (${content.length}자)`);
+        upd({step:"이미지 생성 중"}); const n=Math.min(6,Math.max(1,otImgCount)); const imgs:string[]=[]; otLive(`  🖼️ 이미지 ${n}장 생성 중`);
         for(let k=0;k<n;k++){ if(otStopRef.current)break; try{imgs.push(await generateOneImage(kw,signal,k));}catch{} }
-        upd({step:"카테고리 매칭 중"}); const cat=await otPickCategory(title,content,cats,signal); upd({cat:cat.name||"기본"});
-        const ok=await useQuota(user.id); if(!ok){upd({step:"발행 건수 초과",status:"limit"});break;}
-        upd({step:"발행 중"});
+        otLive(`  ✅ 이미지 ${imgs.length}/${n}장`);
+        upd({step:"카테고리 매칭 중"}); const cat=await otPickCategory(title,content,cats,signal); upd({cat:cat.name||"기본"}); otLive(`  📂 카테고리 자동 선택: ${cat.name||"기본"}`);
+        const ok=await useQuota(user.id); if(!ok){upd({step:"발행 건수 초과",status:"limit"});otLive(`  ⛔ 발행 건수 초과`,false);break;}
+        upd({step:"발행 중"}); otLive(`  🚀 네이버 발행 중...`);
         let postUrl="";
         try{ postUrl=await otPublishItem(kw,title,content,tags.split(",").map(t=>t.replace("#","").trim()).filter(Boolean),imgs,cat.id,accId); }
         catch(e:any){ await refundQuota(user.id); throw e; }
         await incrementDailyPublish(user.id); setDailyPublishUsed(p=>p+1);
         await addHistory({user_id:user.id,platform:"naver",title,post_url:postUrl,status:"success"}).catch(()=>{});
         upd({step:"발행 완료",status:"done",postUrl,at:new Date().toLocaleTimeString("ko-KR",{hour:"2-digit",minute:"2-digit"})});
+        otLive(`  ✅ 발행 완료! ${postUrl||""}`);
       }catch(e:any){
         upd({step:"실패: "+(e.message||"오류"),status:"fail",error:e.message});
+        otLive(`  ❌ 실패: ${e.message||"오류"}`);
         await addHistory({user_id:user.id,platform:"naver",title:kw,status:"fail",error_message:e.message}).catch(()=>{});
       }
       const hasNext=i<kws.length-1&&!otStopRef.current;
       if(hasNext){
-        const until=Date.now()+termMin*60000; setOtNextAt(until);
+        const until=Date.now()+termMin*60000; setOtNextAt(until); otLive(`  ⏱️ 다음 발행까지 ${termMin}분 대기`);
         while(Date.now()<until){ if(otStopRef.current)break; await new Promise(r=>setTimeout(r,1000)); }
         setOtNextAt(null);
       }
     }
     setOtRunning(false);setOtNextAt(null);
+    otLive(otStopRef.current?"⏹ 사용자가 멈춤":"🎉 원터치 발행 전체 완료",false);
     void loadHistory();
   }
 
@@ -6345,6 +6353,25 @@ POST3: (제목)|(이유)
               return (
               <div className="tab-onetouch" style={{animation:"fadeUp .25s ease both"}}>
                 <UsageGuide theme={theme==="dark"?"dark":"light"} accent={OT} subtitle="키워드만 넣으면 제목·글·이미지·카테고리까지 자동으로 만들어 순서대로 발행해요." steps={[{ico:"⌨️",title:"키워드 입력",desc:"한 줄에 하나씩, 몇 개든 넣어요."},{ico:"⏱️",title:"텀 설정",desc:"발행 간격을 정해요(네이버 안전상 넉넉히)."},{ico:"⚡",title:"시작",desc:"나머지는 봇이 알아서 — 로그로 다 확인돼요."}]} />
+
+                {/* 등급별 하루 발행 한도 (원터치도 기본 발행 한도에 포함) */}
+                <div className="card" style={{marginBottom:14,border:`1.5px solid ${OT}33`}}>
+                  <div className="card-title" style={{marginBottom:4,color:OT}}>📊 등급별 하루 발행 한도</div>
+                  <div style={{fontSize:12.5,color:"var(--text2)",lineHeight:1.5,marginBottom:12}}>원터치 발행도 <b style={{color:OT}}>기본 발행 한도에 포함</b>돼요. 일반 발행이든 원터치든 <b>합쳐서 하루 이만큼</b>까지예요. (예: 무료는 하루 2건)</div>
+                  <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8}}>
+                    {[["free","무료",2],["basic","베이직",6],["pro","프로",15]].map(([pk,pl,cnt])=>{const cur=user.plan===pk;return(
+                      <div key={pk as string} style={{textAlign:"center",padding:"14px 8px",borderRadius:12,background:cur?`${OT}14`:"var(--bg)",border:`2px solid ${cur?OT:"var(--border)"}`,position:"relative"}}>
+                        {cur&&<div style={{position:"absolute",top:-9,left:"50%",transform:"translateX(-50%)",background:OT,color:"#fff",fontSize:10,fontWeight:900,padding:"2px 9px",borderRadius:99,whiteSpace:"nowrap"}}>내 등급</div>}
+                        <div style={{fontSize:13,fontWeight:800,color:cur?OT:"var(--text2)"}}>{pl as string}</div>
+                        <div style={{fontSize:22,fontWeight:900,color:cur?OT:"var(--text)",marginTop:4,lineHeight:1}}>{cnt as number}<span style={{fontSize:12,fontWeight:700,marginLeft:1}}>건</span></div>
+                        <div style={{fontSize:10.5,color:"var(--text3)",marginTop:3}}>하루 발행</div>
+                      </div>
+                    );})}
+                  </div>
+                  {isUnlim
+                    ? <div style={{marginTop:10,fontSize:12.5,fontWeight:700,color:"#00b487",textAlign:"center"}}>✨ 회원님은 무제한 등급 — 한도 없이 발행할 수 있어요</div>
+                    : <div style={{marginTop:10,fontSize:12,color:"var(--text3)",textAlign:"center"}}>더 많이 발행하려면 등급을 올려주세요 · 오늘 남은 발행 <b style={{color:OT}}>{remain}건</b></div>}
+                </div>
 
                 {/* 키워드 입력 */}
                 <div className="card" style={{marginBottom:14,border:`1.5px solid ${OT}33`}}>
