@@ -892,6 +892,12 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
   const otFlowExhaustedRef=useRef<Set<number>>(new Set());   // 이번 실행에서 크레딧 소진된 Flow 슬롯(자동 전환용)
   const [otNextAt,setOtNextAt]=useState<number|null>(null);
   const [otPaused,setOtPaused]=useState<{idx:number;kws:string[];reason?:"credit"|"stopped"}|null>(null);
+  // ⏰ 예약 발행(관리자도 동일): 지정 시각에 원터치 자동 시작 + 예약 대기 중 절전 방지.
+  const [otSchedOn,setOtSchedOn]=useState(false);
+  const [otSchedTime,setOtSchedTime]=useState(()=>localStorage.getItem("publy_adm_ot_sched_time")||"09:00");
+  const [otSchedDaily,setOtSchedDaily]=useState(()=>localStorage.getItem("publy_adm_ot_sched_daily")!=="0");
+  const otRunRef=useRef<(()=>void)|null>(null);
+  const otSchedFiredRef=useRef<string>("");
   const [otLog,setOtLog]=useState<{id:string;kw:string;title?:string;cat?:string;step:string;status:"wait"|"run"|"done"|"fail"|"limit";postUrl?:string;error?:string;at?:string}[]>(()=>{try{return JSON.parse(localStorage.getItem("publy_adm_ot_log")||"[]");}catch{return [];}});
   useEffect(()=>{try{localStorage.setItem("publy_adm_ot_log",JSON.stringify(otLog.slice(0,50)));}catch{}},[otLog]);
   const [otLiveLog,setOtLiveLog]=useState<string[]>(()=>{try{return JSON.parse(localStorage.getItem("publy_adm_ot_livelog")||"[]");}catch{return [];}});
@@ -929,10 +935,27 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
   },[tab,otImgMode,flowSlot]);
   // ★절전 방지: 원터치(텀 대기 포함)·발행 중엔 화면/시스템 안 꺼지게
   useEffect(()=>{
-    const busy = otRunning || publishing;
+    const busy = otRunning || publishing || otSchedOn;
     (window as any).electron?.keepAwake?.(busy)?.catch?.(()=>{});
     return ()=>{ if(busy) (window as any).electron?.keepAwake?.(false)?.catch?.(()=>{}); };
-  },[otRunning, publishing]);
+  },[otRunning, publishing, otSchedOn]);
+  // ⏰ 예약 감시: 30초마다 예약 시각 확인 → 원터치 자동 시작(중복 방지).
+  useEffect(()=>{ otRunRef.current=()=>runOneTouch(); });
+  useEffect(()=>{
+    if(!otSchedOn) return;
+    const check=()=>{
+      if(otRunning) return;
+      const now=new Date(); const hh=String(now.getHours()).padStart(2,"0"); const mm=String(now.getMinutes()).padStart(2,"0");
+      if(`${hh}:${mm}`!==otSchedTime) return;
+      const stamp=`${now.getFullYear()}${now.getMonth()}${now.getDate()}${hh}${mm}`;
+      if(otSchedFiredRef.current===stamp) return;
+      otSchedFiredRef.current=stamp;
+      otRunRef.current?.();
+      if(!otSchedDaily) setOtSchedOn(false);
+    };
+    const iv=setInterval(check,30000); check();
+    return ()=>clearInterval(iv);
+  },[otSchedOn,otSchedTime,otSchedDaily,otRunning]);
   // ★글자수 하드 캡: AI 오버슈트(1500 지정→3000) 방지. 목표 125% 초과 시 FAQ 보존하고 본문 문단을 잘라 목표 근처로.
   function enforceMaxChars(body:string, target:number):string{
     if(!target||body.length<=Math.round(target*1.25))return body;
@@ -4731,6 +4754,31 @@ POST3: (제목)|(이유)
                     </div>
                   </div>
                 )}
+                {/* ⏰ 예약 발행 */}
+                <div className="card" style={{marginBottom:12,border:`1.5px solid ${otSchedOn?"#7c3aed":"var(--border)"}`,background:otSchedOn?"rgba(124,58,237,.05)":undefined}}>
+                  <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,flexWrap:"wrap"}}>
+                    <div style={{display:"flex",alignItems:"center",gap:8}}>
+                      {otSchedOn&&<span style={{width:9,height:9,borderRadius:"50%",background:"#7c3aed",boxShadow:"0 0 7px #7c3aed",animation:"pulse 1.3s ease-in-out infinite"}}/>}
+                      <span style={{fontSize:14,fontWeight:800,color:otSchedOn?"#7c3aed":"var(--text)"}}>⏰ 예약 발행 {otSchedOn?"· 켜짐":""}</span>
+                    </div>
+                    <button onClick={()=>{const v=!otSchedOn; if(v&&!(otAiKw||kwList.length>0)){showToast("먼저 키워드를 넣거나 AI 자동추천을 켜주세요","error");return;} if(v&&!pubAccId){showToast("발행할 네이버 계정을 먼저 선택해주세요","error");return;} setOtSchedOn(v); otSchedFiredRef.current="";}}
+                      style={{flexShrink:0,width:52,height:28,borderRadius:16,border:"none",cursor:"pointer",background:otSchedOn?"#7c3aed":"var(--border)",position:"relative",transition:"all .2s"}}>
+                      <span style={{position:"absolute",top:3,left:otSchedOn?27:3,width:22,height:22,borderRadius:"50%",background:"#fff",transition:"all .2s",boxShadow:"0 1px 3px rgba(0,0,0,.3)"}}/>
+                    </button>
+                  </div>
+                  <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap",marginTop:10}}>
+                    <input type="time" value={otSchedTime} disabled={otSchedOn} onChange={e=>{setOtSchedTime(e.target.value);localStorage.setItem("publy_adm_ot_sched_time",e.target.value);}} style={{padding:"8px 10px",borderRadius:8,border:"1px solid var(--border)",background:"var(--bg)",color:"var(--text)",fontFamily:"inherit",fontSize:14,fontWeight:700}}/>
+                    <label style={{display:"flex",alignItems:"center",gap:6,cursor:"pointer",fontSize:12.5,fontWeight:700,color:"var(--text2)"}}>
+                      <input type="checkbox" checked={otSchedDaily} disabled={otSchedOn} onChange={e=>{setOtSchedDaily(e.target.checked);localStorage.setItem("publy_adm_ot_sched_daily",e.target.checked?"1":"0");}} style={{width:16,height:16,accentColor:"#7c3aed"}}/>
+                      매일 이 시각에 반복
+                    </label>
+                  </div>
+                  <div style={{fontSize:11.5,color:"var(--text3)",lineHeight:1.55,marginTop:8}}>
+                    {otSchedOn
+                      ? <><b style={{color:"#7c3aed"}}>{otSchedTime}</b>{otSchedDaily?" 마다":"에"} 지금 설정으로 자동 시작해요. <b>노트북을 켜두기만</b> 하면 돼요 — 예약이 켜진 동안은 <b>절전으로 안 꺼지게</b> 막아둬요.</>
+                      : <>지정한 시각에 원터치가 <b>자동 시작</b>돼요. 앱은 켜둬야 해요. 켜면 그 시각까지 노트북이 안 꺼지게 막아요.</>}
+                  </div>
+                </div>
                 {!otRunning
                   ? (()=>{const ready=(otAiKw?otAiKwCount>0:kwList.length>0)&&!!pubAccId&&botOnline; return (
                     <button onClick={()=>runOneTouch()} disabled={!ready} style={{width:"100%",padding:"16px",borderRadius:14,border:"none",background:ready?`linear-gradient(135deg,${OT},#c026d3)`:"var(--border)",color:"#fff",fontSize:17,fontWeight:900,fontFamily:"inherit",cursor:ready?"pointer":"default",boxShadow:ready?`0 6px 20px ${OT}44`:"none"}}>⚡ 원터치 발행 시작 {otAiKw?`(AI ${otAiKwCount}개 자동생성)`:(kwList.length>0?`(${kwList.length}개)`:"")}</button>

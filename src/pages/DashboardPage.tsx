@@ -1357,6 +1357,12 @@ Output (JSON object only): {"keyword":"핵심키워드","title":"새 SEO 제목"
   const otFlowExhaustedRef=useRef<Set<number>>(new Set());   // 이번 실행에서 크레딧 소진된 Flow 슬롯(자동 전환용)
   const [otNextAt,setOtNextAt]=useState<number|null>(null);
   const [otPaused,setOtPaused]=useState<{idx:number;kws:string[];reason?:"credit"|"stopped"}|null>(null);   // 일시정지(크레딧부족) 또는 사용자 중단 → 이어가기 지점
+  // ⏰ 예약 발행: 지정 시각에 원터치 자동 시작. 예약 대기 중엔 노트북 절전 방지(무인 운영).
+  const [otSchedOn,setOtSchedOn]=useState(false);
+  const [otSchedTime,setOtSchedTime]=useState(()=>localStorage.getItem("publy_ot_sched_time")||"09:00");
+  const [otSchedDaily,setOtSchedDaily]=useState(()=>localStorage.getItem("publy_ot_sched_daily")!=="0");   // 매일 반복(기본 ON)
+  const otRunRef=useRef<(()=>void)|null>(null);       // 예약 트리거가 부를 최신 runOneTouch
+  const otSchedFiredRef=useRef<string>("");            // 같은 분에 중복 실행 방지(YYYYMMDDHHMM)
   const [otLog,setOtLog]=useState<{id:string;kw:string;title?:string;cat?:string;step:string;status:"wait"|"run"|"done"|"fail"|"limit";postUrl?:string;error?:string;at?:string}[]>(()=>{try{return JSON.parse(localStorage.getItem("publy_ot_log")||"[]");}catch{return [];}});
   useEffect(()=>{try{localStorage.setItem("publy_ot_log",JSON.stringify(otLog.slice(0,50)));}catch{}},[otLog]);   // 로그 저장(작업 안 할 때도 항상 확인)
   // 🔴화면 어디서든 항상 보이는 실시간 로그(고정 패널). 스크롤 안 해도 진행상황이 눈에 보이게.
@@ -1428,10 +1434,27 @@ Output (JSON object only): {"keyword":"핵심키워드","title":"새 SEO 제목"
   // ★절전 방지(테리 요청): 자동 작업(발행·이미지생성·서이추·공감댓글) 중엔 화면/맥이 안 꺼지게(맥·윈도우 공통).
   //   어느 기능이든 하나라도 돌면 keepAwake, 전부 끝나면 자동 해제 → 평소엔 정상 절전. (영화 틀면 안 꺼지는 것과 같은 원리)
   useEffect(()=>{
-    const busy = publishing || genImgLoading || neighborBusy || otRunning;   // ★원터치 도는 동안(텀 대기 포함) 화면·시스템 안 꺼지게
+    const busy = publishing || genImgLoading || neighborBusy || otRunning || otSchedOn;   // ★원터치·예약 대기 중 화면·시스템 안 꺼지게(예약=지정 시각까지 노트북 살아있게)
     window.electron?.keepAwake?.(busy).catch(()=>{});
     return ()=>{ if(busy) window.electron?.keepAwake?.(false).catch(()=>{}); };
-  },[publishing, genImgLoading, neighborBusy, otRunning]);
+  },[publishing, genImgLoading, neighborBusy, otRunning, otSchedOn]);
+  // ⏰ 예약 감시: 30초마다 현재 시각을 확인해 예약 시각이면 원터치 자동 시작(중복 방지). 매일 반복이면 계속.
+  useEffect(()=>{ otRunRef.current=()=>runOneTouch(); });
+  useEffect(()=>{
+    if(!otSchedOn) return;
+    const check=()=>{
+      if(otRunning) return;
+      const now=new Date(); const hh=String(now.getHours()).padStart(2,"0"); const mm=String(now.getMinutes()).padStart(2,"0");
+      if(`${hh}:${mm}`!==otSchedTime) return;
+      const stamp=`${now.getFullYear()}${now.getMonth()}${now.getDate()}${hh}${mm}`;
+      if(otSchedFiredRef.current===stamp) return;   // 같은 분 중복 실행 방지
+      otSchedFiredRef.current=stamp;
+      otRunRef.current?.();                          // 원터치 시작
+      if(!otSchedDaily) setOtSchedOn(false);          // 1회 예약이면 실행 후 해제
+    };
+    const iv=setInterval(check,30000); check();
+    return ()=>clearInterval(iv);
+  },[otSchedOn,otSchedTime,otSchedDaily,otRunning]);
 
   const liveLogActive = (tab==="publish"&&publishing)||(tab==="image"&&genImgLoading);
   useEffect(()=>{
@@ -6819,6 +6842,31 @@ POST3: (제목)|(이유)
                     </div>
                   </div>
                 )}
+                {/* ⏰ 예약 발행 */}
+                <div className="card" style={{marginBottom:12,border:`1.5px solid ${otSchedOn?"#7c3aed":"var(--border)"}`,background:otSchedOn?"rgba(124,58,237,.05)":undefined}}>
+                  <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,flexWrap:"wrap"}}>
+                    <div style={{display:"flex",alignItems:"center",gap:8}}>
+                      {otSchedOn&&<span style={{width:9,height:9,borderRadius:"50%",background:"#7c3aed",boxShadow:"0 0 7px #7c3aed",animation:"pulse 1.3s ease-in-out infinite"}}/>}
+                      <span style={{fontSize:14,fontWeight:800,color:otSchedOn?"#7c3aed":"var(--text)"}}>⏰ 예약 발행 {otSchedOn?"· 켜짐":""}</span>
+                    </div>
+                    <button onClick={()=>{const v=!otSchedOn; if(v&&!(otAiKw||kwList.length>0)){showToast("먼저 키워드를 넣거나 AI 자동추천을 켜주세요","error");return;} if(v&&!pubAccId){showToast("발행할 네이버 계정을 먼저 선택해주세요","error");return;} setOtSchedOn(v); otSchedFiredRef.current="";}}
+                      style={{flexShrink:0,width:52,height:28,borderRadius:16,border:"none",cursor:"pointer",background:otSchedOn?"#7c3aed":"var(--border)",position:"relative",transition:"all .2s"}}>
+                      <span style={{position:"absolute",top:3,left:otSchedOn?27:3,width:22,height:22,borderRadius:"50%",background:"#fff",transition:"all .2s",boxShadow:"0 1px 3px rgba(0,0,0,.3)"}}/>
+                    </button>
+                  </div>
+                  <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap",marginTop:10}}>
+                    <input type="time" value={otSchedTime} disabled={otSchedOn} onChange={e=>{setOtSchedTime(e.target.value);localStorage.setItem("publy_ot_sched_time",e.target.value);}} style={{padding:"8px 10px",borderRadius:8,border:"1px solid var(--border)",background:"var(--bg)",color:"var(--text)",fontFamily:"inherit",fontSize:14,fontWeight:700}}/>
+                    <label style={{display:"flex",alignItems:"center",gap:6,cursor:"pointer",fontSize:12.5,fontWeight:700,color:"var(--text2)"}}>
+                      <input type="checkbox" checked={otSchedDaily} disabled={otSchedOn} onChange={e=>{setOtSchedDaily(e.target.checked);localStorage.setItem("publy_ot_sched_daily",e.target.checked?"1":"0");}} style={{width:16,height:16,accentColor:"#7c3aed"}}/>
+                      매일 이 시각에 반복
+                    </label>
+                  </div>
+                  <div style={{fontSize:11.5,color:"var(--text3)",lineHeight:1.55,marginTop:8}}>
+                    {otSchedOn
+                      ? <><b style={{color:"#7c3aed"}}>{otSchedTime}</b>{otSchedDaily?" 마다":"에"} 지금 설정(키워드·글패턴·이미지·텀)으로 자동 시작해요. <b>노트북을 켜두기만</b> 하면 돼요 — 예약이 켜진 동안은 <b>절전으로 안 꺼지게</b> 막아둬요.</>
+                      : <>지정한 시각에 원터치가 <b>자동으로 시작</b >돼요. 자리에 없어도 돼요(앱은 켜둬야 해요). 켜면 그 시각까지 노트북이 안 꺼지게 막아요.</>}
+                  </div>
+                </div>
                 {/* 시작/멈춤 */}
                 {!otRunning
                   ? (()=>{const ready=(otAiKw?otAiKwCount>0:kwList.length>0)&&!!pubAccId; return (
