@@ -3004,7 +3004,7 @@ POST3: (제목)|(이유)
     // ── 키워드 결정: AI 자동추천이면 정한 수만큼 생성(14일 중복제외), 아니면 입력칸 ──
     let kws:string[];
     if(otAiKw){
-      otLive(`🤖 AI 자동추천 키워드 ${otAiKwCount}개 생성 중(핫이슈+SEO·14일 중복 제외)`);
+      otLive(`✨ AI 자동추천 키워드 ${otAiKwCount}개 생성 중(핫이슈+SEO·14일 중복 제외)`);
       try{ kws=await otGenKeywords(otAiKwCount); }catch(e:any){ otLive(`❌ 키워드 생성 실패: ${e.message||"오류"}`,false); showToast("AI 키워드 생성 실패","error"); setOtRunning(false); return; }
       if(!kws.length){ otLive(`❌ 생성된 키워드가 없어요(최근 사용분 제외 후 0개). 잠시 후 다시 시도하세요.`,false); showToast("생성된 키워드가 없어요","error"); setOtRunning(false); return; }
       otLive(`✅ 생성된 키워드 ${kws.length}개: ${kws.join(", ")}`);
@@ -3761,7 +3761,7 @@ ${segList}`;
       refreshSessionStatus();
     }catch(e:any){alert("연결 실패: "+e.message);}finally{setConnId(null);}
   }
-  // 🤖 키포인트 AI 자동 제안: 사진을 분석해 글에 쓸 핵심 포인트 초안을 채워줌(초보자·글감 막힘 해소)
+  // ✨ 키포인트 AI 자동 제안: 사진을 분석해 글에 쓸 핵심 포인트 초안을 채워줌(초보자·글감 막힘 해소)
   async function suggestKeypoints() {
     if(photoFiles.length===0){showToast("사진을 먼저 올려주세요","error");return;}
     const geminiKey=localStorage.getItem("publy_gemini_key")||"";
@@ -3795,7 +3795,7 @@ ${segList}`;
       if(!text) throw new Error("사진 분석에 실패했어요. 잠시 후 다시 시도해주세요.");
       const cleaned=text.replace(/```/g,"").trim();
       setPhotoKeypoints(prev=>prev.trim()?prev.trim()+"\n"+cleaned:cleaned);
-      showToast("🤖 키포인트 초안을 채웠어요! 가격·시간 등 아는 정보를 더 다듬으면 글이 훨씬 좋아져요","success");
+      showToast("✨ 키포인트 초안을 채웠어요! 가격·시간 등 아는 정보를 더 다듬으면 글이 훨씬 좋아져요","success");
     }catch(e:any){showToast("❌ "+e.message,"error");}
     finally{setPhotoSuggesting(false);}
   }
@@ -5921,7 +5921,7 @@ POST3: (제목)|(이유)
                     <div style={{display:"flex",gap:7,flexShrink:0}}>
                     <button onClick={suggestKeypoints} disabled={photoSuggesting||photoFiles.length===0} title={photoFiles.length===0?"사진을 먼저 올려주세요":"사진을 분석해 키포인트 초안을 자동으로 채워줘요"}
                       style={{padding:"5px 12px",borderRadius:20,background:(photoSuggesting||photoFiles.length===0)?"var(--card2)":"var(--accent)",color:(photoSuggesting||photoFiles.length===0)?"var(--text3)":"#fff",border:"none",cursor:(photoSuggesting||photoFiles.length===0)?"default":"pointer",fontSize:11,fontWeight:800,fontFamily:"inherit",whiteSpace:"nowrap"}}>
-                      {photoSuggesting?"🤖 분석 중...":"🤖 AI 추천"}
+                      {photoSuggesting?"✨ 분석 중...":"✨ AI 추천"}
                     </button>
                     <button onClick={()=>{const html=`<!DOCTYPE html><html><head><meta charset="utf-8"><title>키포인트 예시</title><style>*{box-sizing:border-box;margin:0;padding:0}body{font-family:'Malgun Gothic',sans-serif;background:#fdf0ff;color:#111}h1{background:linear-gradient(135deg,#f0417a,#ff6fa1);color:#fff;padding:20px 24px;font-size:18px;line-height:1.4}.content{padding:20px}.intro{font-size:14px;color:#555;line-height:1.8;margin-bottom:18px;padding:12px 16px;background:#fff;border-radius:12px;border-left:4px solid #C77DFF}.cat-title{font-size:13px;font-weight:800;color:#FF6B9D;margin:16px 0 8px;padding:4px 10px;background:#FF6B9D11;border-radius:6px;display:inline-block}.bad{background:#fff0f0;border:1px solid #ffcccc;border-radius:10px;padding:10px 14px;margin-bottom:6px;font-size:13px;color:#c00;line-height:1.7}.good{background:#f0fff4;border:1px solid #99ddaa;border-radius:10px;padding:10px 14px;font-size:13px;color:#005c1a;line-height:1.8;margin-bottom:16px}.lbl{font-size:10px;font-weight:800;margin-bottom:3px}.tip{background:linear-gradient(135deg,#FF6B9D11,#C77DFF11);border:1px solid #C77DFF33;border-radius:12px;padding:14px;margin-top:4px;font-size:13px;line-height:1.9}</style></head><body><h1>✏️ 키포인트 이렇게 쓰면 글이 잘 나와요</h1><div class="content"><div class="intro">구체적으로 쓸수록 실제 경험처럼 자연스러운 글이 나옵니다.<br>장소 + 가격 + 시간 + 특징 + 개인 의견을 담아주세요.</div><div class="cat-title">🍽️ 맛집 방문</div><div class="bad"><div class="lbl">❌ 아쉬운 예</div>강원도 맛집, 고기집, 맛있었음</div><div class="good"><div class="lbl">✅ 좋은 예</div>강원도 홍천 태장동 / 한우 소갈비찜 전문점 / 2인 45,000원 / 웨이팅 40분 / 주차 무료 / 반찬 10가지 / 아이 동반 가능 / 재방문 의향 있음</div><div class="cat-title">✈️ 여행 후기</div><div class="bad"><div class="lbl">❌ 아쉬운 예</div>제주도 여행, 경치 좋았다</div><div class="good"><div class="lbl">✅ 좋은 예</div>제주 성산읍 성산일출봉 / 오전 6시 방문 / 입장료 5,000원 / 일출 40분 전 도착 권장 / 주차장에서 도보 10분 / 공항에서 1시간 소요</div><div class="cat-title">☕ 카페 방문</div><div class="bad"><div class="lbl">❌ 아쉬운 예</div>서울 카페, 인테리어 예쁨</div><div class="good"><div class="lbl">✅ 좋은 예</div>서울 성수동 공장 리모델링 카페 / 아메리카노 6,500원 / 대기 없이 입장 / 오전 11시 방문 / 좌석 80개 / 지하철 권장 주차 불가</div><div class="cat-title">📦 제품 리뷰</div><div class="bad"><div class="lbl">❌ 아쉬운 예</div>에어프라이어 구매, 좋음</div><div class="good"><div class="lbl">✅ 좋은 예</div>필립스 에어프라이어 5.6L / 129,000원 / 3인 가족 6개월 사용 / 치킨 20분 바삭 / 세척 쉬움 / 단점: 크기 커서 수납 불편 / 만족도 9점</div><div class="cat-title">💬 체험단 후기</div><div class="bad"><div class="lbl">❌ 아쉬운 예</div>협찬 받은 피부과, 좋았음</div><div class="good"><div class="lbl">✅ 좋은 예</div>[협찬] 강남 청담 피부과 / 리프팅 시술 1회 / 40분 소요 / 붓기 거의 없음 / 직원 친절 / 주차 2시간 무료 / 다음 달 추가 예약</div><div class="tip">💡 핵심: 장소 + 가격 + 소요시간 + 특징 2~3개 + 내 솔직한 의견<br>이렇게만 써도 AI가 훨씬 풍부하고 자연스러운 글을 써드려요!</div></div></body></html>`;setPhotoGuideModal("example");}} style={{padding:"5px 12px",borderRadius:20,background:"linear-gradient(135deg,#f0417a,#ff6fa1)",color:"#fff",border:"none",cursor:"pointer",fontSize:11,fontWeight:800,fontFamily:"inherit",whiteSpace:"nowrap",flexShrink:0}}>📝 예시 보기</button>
                     </div>
@@ -6485,7 +6485,7 @@ POST3: (제목)|(이유)
                     {/* AI 자동추천 토글 */}
                     <button onClick={()=>{const v=!otAiKw;setOtAiKw(v);localStorage.setItem("publy_ot_aikw",v?"1":"0");}} disabled={otRunning}
                       style={{display:"flex",alignItems:"center",gap:8,padding:"6px 12px",borderRadius:99,border:`2px solid ${otAiKw?OT:"var(--border)"}`,background:otAiKw?`${OT}16`:"var(--bg)",cursor:otRunning?"default":"pointer",fontFamily:"inherit"}}>
-                      <span style={{fontSize:12.5,fontWeight:800,color:otAiKw?OT:"var(--text2)"}}>🤖 AI 자동추천 키워드</span>
+                      <span style={{fontSize:12.5,fontWeight:800,color:otAiKw?OT:"var(--text2)"}}>✨ AI 자동추천 키워드</span>
                       <span style={{width:34,height:20,borderRadius:99,background:otAiKw?OT:"var(--border)",position:"relative",transition:"all .15s",flexShrink:0}}>
                         <span style={{position:"absolute",top:2,left:otAiKw?16:2,width:16,height:16,borderRadius:99,background:"#fff",transition:"all .15s"}}/>
                       </span>

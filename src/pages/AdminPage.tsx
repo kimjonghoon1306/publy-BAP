@@ -1002,7 +1002,7 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
     setOtLiveLog(prev=>[...prev,`━━━━━ ${new Date().toLocaleString("ko-KR")} 원터치 시작 ━━━━━`].slice(-300));
     let kws:string[];
     if(otAiKw){
-      otLive(`🤖 AI 자동추천 키워드 ${otAiKwCount}개 생성 중(핫이슈+SEO·14일 중복 제외)`);
+      otLive(`✨ AI 자동추천 키워드 ${otAiKwCount}개 생성 중(핫이슈+SEO·14일 중복 제외)`);
       try{ kws=await otGenKeywords(otAiKwCount); }catch(e:any){ otLive(`❌ 키워드 생성 실패: ${e.message||"오류"}`); showToast("AI 키워드 생성 실패","error"); setOtRunning(false); return; }
       if(!kws.length){ otLive(`❌ 생성된 키워드가 없어요(최근 사용분 제외 후 0개).`); showToast("생성된 키워드가 없어요","error"); setOtRunning(false); return; }
       otLive(`✅ 생성된 키워드 ${kws.length}개: ${kws.join(", ")}`);
@@ -4444,7 +4444,7 @@ POST3: (제목)|(이유)
                     <div style={{fontSize:15,fontWeight:800,color:OT}}>⌨️ 키워드 <span style={{fontSize:12,fontWeight:600,color:"var(--text3)"}}>· {otAiKw?"AI가 자동 생성":"한 줄에 하나씩"}</span></div>
                     <button onClick={()=>{const v=!otAiKw;setOtAiKw(v);localStorage.setItem("publy_adm_ot_aikw",v?"1":"0");}} disabled={otRunning}
                       style={{display:"flex",alignItems:"center",gap:8,padding:"6px 12px",borderRadius:99,border:`2px solid ${otAiKw?OT:"var(--border)"}`,background:otAiKw?`${OT}16`:"var(--bg)",cursor:otRunning?"default":"pointer",fontFamily:"inherit"}}>
-                      <span style={{fontSize:12.5,fontWeight:800,color:otAiKw?OT:"var(--text2)"}}>🤖 AI 자동추천 키워드</span>
+                      <span style={{fontSize:12.5,fontWeight:800,color:otAiKw?OT:"var(--text2)"}}>✨ AI 자동추천 키워드</span>
                       <span style={{width:34,height:20,borderRadius:99,background:otAiKw?OT:"var(--border)",position:"relative",flexShrink:0}}>
                         <span style={{position:"absolute",top:2,left:otAiKw?16:2,width:16,height:16,borderRadius:99,background:"#fff",transition:"all .15s"}}/>
                       </span>
