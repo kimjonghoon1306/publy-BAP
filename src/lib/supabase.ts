@@ -1717,6 +1717,9 @@ export interface PostCare {
 // 완치 기준: 100위 안에 노출되면 완치. / 경과관찰: 제목 수정 후 30일은 "기다리세요"(리서치 근거).
 export const CURE_RANK = 100;
 export const OBSERVE_DAYS = 30;
+// 색인 유예: 발행 후 14일은 미노출이어도 "색인 대기"로 봐서 치료필요/재발행 대상에서 뺀다.
+//  (네이버가 새 글을 색인·순위 매기는 데 보통 1~2주 걸림 → 갓 쓴 글에 "제목 바꿔라" 재촉하면 안 됨)
+export const INDEX_GRACE_DAYS = 14;
 
 // 검사 결과 저장 — 각 글의 오늘 순위를 rank_history에 누적(같은 날 재검사면 갱신).
 // 100위 내면 cured_at을 채우고, '이번에 새로 완치된 글'을 반환(→ 축포 세리머니).
@@ -1821,11 +1824,17 @@ export async function markTitleChanged(userId: string, account: string, postKey:
 }
 
 // 글의 현재 생애 상태를 날짜로 계산(단일 소스 — 상태를 저장하지 않음).
-export type CareStatus = "new" | "needs" | "prescribed" | "observing" | "relapse" | "cured";
+export type CareStatus = "new" | "indexing" | "needs" | "prescribed" | "observing" | "relapse" | "cured";
 export function computeCareStatus(c: PostCare): { status: CareStatus; daysLeft?: number; daysUnexposed?: number } {
   const last = c.rank_history?.[c.rank_history.length - 1];
   const exposed = c.cured_at || (last && last.rank != null && last.rank <= CURE_RANK);
   if (exposed) return { status: "cured" };
+  // 🕐 색인 유예 — 발행한 지 얼마 안 된 글은 미노출이어도 '치료필요'로 몰지 않음(네이버가 아직 읽는 중).
+  //    제목을 아직 안 바꾼 글에만 적용(막 쓴 글이므로). published_at 없는 옛 글은 스킵 → 기존 판정 유지.
+  if (!c.title_changed_at && c.published_at) {
+    const age = Math.floor((Date.now() - new Date(c.published_at).getTime()) / 86400000);
+    if (Number.isFinite(age) && age >= 0 && age < INDEX_GRACE_DAYS) return { status: "indexing", daysLeft: INDEX_GRACE_DAYS - age };
+  }
   if (c.title_changed_at) {
     const days = Math.floor((Date.now() - new Date(c.title_changed_at).getTime()) / 86400000);
     if (days < OBSERVE_DAYS) return { status: "observing", daysLeft: OBSERVE_DAYS - days };

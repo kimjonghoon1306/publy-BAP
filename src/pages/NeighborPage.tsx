@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { createPortal } from "react-dom";
 import { botFetch, BotEventStream } from "../lib/botApi";
-import { getReplyDailyUsage, REPLY_DAILY_LIMIT, getBlogscoreDailyUsage, incrementBlogscoreQuota, BLOGSCORE_DAILY_LIMIT, PUMASI_ACCOUNT_LIMIT, PUMASI_POSTS_LIMIT, TAB_ACCOUNT_LIMIT, getPumasiDailyUsage, savePostCareChecks, markPrescribed, markTitleChanged, getPostCare, computeCareStatus, PostCare, OBSERVE_DAYS, savePostViews, latestViews, reportError, pushLiveLog } from "../lib/supabase";
+import { getReplyDailyUsage, REPLY_DAILY_LIMIT, getBlogscoreDailyUsage, incrementBlogscoreQuota, BLOGSCORE_DAILY_LIMIT, PUMASI_ACCOUNT_LIMIT, PUMASI_POSTS_LIMIT, TAB_ACCOUNT_LIMIT, getPumasiDailyUsage, savePostCareChecks, markPrescribed, markTitleChanged, getPostCare, computeCareStatus, PostCare, OBSERVE_DAYS, INDEX_GRACE_DAYS, savePostViews, latestViews, reportError, pushLiveLog } from "../lib/supabase";
 import UsageGuide from "../components/UsageGuide";
 import dodoImg from "../assets/dodo.png";   // 🩺 블로그 주치의 캐릭터(검수자 도도)
 import boriImg from "../assets/bori.png";   // 🌱 응원단 보리
@@ -457,6 +457,15 @@ const GuideModal = ({ tab, onClose }: { tab: "neighbor"|"engage"|"reply"|"score"
   );
 };
 
+/* ♻️ 재발행 기간 '구간' — 누적(이내)이 아니라 겹치지 않는 구간이라 버튼마다 다른 글이 뜬다.
+   min은 포함, max는 미포함. 발행 14일 이내(INDEX_GRACE_DAYS)는 색인 대기라 어느 구간에도 안 넣는다. */
+const REPUBLISH_BANDS: { k: string; label: string; min: number; max: number }[] = [
+  { k: "15_30", label: "15~30일", min: INDEX_GRACE_DAYS, max: 30 },
+  { k: "30_60", label: "30~60일", min: 30, max: 60 },
+  { k: "60_90", label: "60~90일", min: 60, max: 90 },
+  { k: "90plus", label: "90일 이상", min: 90, max: Infinity },
+];
+
 /* ── 메인 컴포넌트 ── */
 export default function NeighborPage({ theme, userId, plan = "free", initialTab, singleTab, isActive = true, onEngageUsageChange, initialNeighborUsed = 0, initialEngageUsed = 0, onBusyChange }: Props) {
   const [tab, setTab] = useState<"neighbor"|"engage"|"reply"|"score"|"pumasi">(initialTab || "neighbor");
@@ -543,9 +552,8 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
   const [titleEditUsed, setTitleEditUsed] = useState(0);
   const [titleEditLimit, setTitleEditLimit] = useState(3);
   const [titleEditingKey, setTitleEditingKey] = useState<string>("");   // 지금 수정 중인 "logNo|번호"
-  // ★재발행 알림: 기간 설정(기본 30일) + 누적 대상(localStorage). 재설치돼도 발행이력(서버)은 안전, 이 캐시만 재검사로 복구.
-  const [republishDays, setRepublishDays] = useState<number>(()=>{ const v=parseInt(localStorage.getItem("publy_republish_days")||"30",10); return Number.isFinite(v)?v:30; });
-  const [republishAncient, setRepublishAncient] = useState(false);   // "90일 이후"(90일 넘은 오래된 글) 모드
+  // ★재발행 알림: 기간을 '구간'으로 선택(누적 아님 → 15~30/30~60/60~90/90+ 가 서로 안 겹쳐 구분됨). 발행 14일 이내는 색인 대기라 제외.
+  const [republishBand, setRepublishBand] = useState<string>(() => localStorage.getItem("publy_republish_band") || "15_30");
   // 🚀 전체 제목 자동 변경(관찰중 제외 · 제목1·2 랜덤 · 한도 걸리면 업그레이드 팝업)
   const [bulkRunning, setBulkRunning] = useState(false);
   const [bulkProgress, setBulkProgress] = useState({ done: 0, total: 0 });
@@ -571,7 +579,7 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
   const [autoTrackLoading, setAutoTrackLoading] = useState(false);   // 🩺 추적글 순위 자동 일괄검사 중(회원이 버튼 안 눌러도 알아서)
   const [autoViewsLoading, setAutoViewsLoading] = useState(false);   // 🩺 P4: 글별 조회수 자동 수집 중
   const autoViewsStartedRef = useRef<string>("");   // 조회수 자동수집도 계정당 하루 1회
-  const [careListOpen, setCareListOpen] = useState<""|"todo"|"observing"|"cured">("");   // 🩺 회진 칩 클릭 → 해당 글 리스트 펼침
+  const [careListOpen, setCareListOpen] = useState<""|"todo"|"indexing"|"observing"|"cured">("");   // 🩺 회진 칩 클릭 → 해당 글 리스트 펼침
   const autoTrackStartedRef = useRef<string>("");   // `${accountId}:${today}` — 계정당 하루 1회만 자동검사(중복·무한루프 차단)
   const TRACK_PAGE_SIZE = 8;
   // 🎉 블로그지수 웰컴 팝업(진입 시 팡!) — 7일 보지않기(localStorage until)
@@ -3136,12 +3144,13 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
                   {(() => {
                     const notChanged = Object.values(careMap).filter(c => !c.title_changed_at);
                     if (notChanged.length === 0) return null;
-                    const cnt: Record<string, number> = { new: 0, needs: 0, prescribed: 0, observing: 0, relapse: 0, cured: 0 };
+                    const cnt: Record<string, number> = { new: 0, indexing: 0, needs: 0, prescribed: 0, observing: 0, relapse: 0, cured: 0 };
                     // 상태별로 글을 실제로 모아둔다(칩 클릭 시 어떤 글인지 리스트로 보여주려고)
-                    const byStatus: { todo: PostCare[]; observing: PostCare[]; cured: PostCare[] } = { todo: [], observing: [], cured: [] };
+                    const byStatus: { todo: PostCare[]; indexing: PostCare[]; observing: PostCare[]; cured: PostCare[] } = { todo: [], indexing: [], observing: [], cured: [] };
                     notChanged.forEach(c => {
                       const s = computeCareStatus(c).status; cnt[s]++;
                       if (s === "needs" || s === "relapse") byStatus.todo.push(c);
+                      else if (s === "indexing") byStatus.indexing.push(c);
                       else if (s === "observing") byStatus.observing.push(c);
                       else if (s === "cured") byStatus.cured.push(c);
                     });
@@ -3151,7 +3160,7 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
                     // 글의 현재 순위(자동검사로 채워진 실시간값 우선, 없으면 마지막 기록)
                     const rankOf = (c: PostCare) => { const live = liveRanks[c.post_key]; const last = c.rank_history?.[c.rank_history.length - 1]; return live ? live.rank : (last?.rank ?? null); };
                     // 클릭 가능한 칩(누르면 아래에 해당 글 리스트가 열림)
-                    const clickChip = (key: "todo"|"observing"|"cured", bg: string, col: string, txt: string) => (
+                    const clickChip = (key: "todo"|"indexing"|"observing"|"cured", bg: string, col: string, txt: string) => (
                       <button onClick={() => setCareListOpen(o => o === key ? "" : key)}
                         style={{ padding: "5px 12px", borderRadius: 20, background: careListOpen === key ? col : bg, color: careListOpen === key ? "#fff" : col, fontSize: 11.5, fontWeight: 800, whiteSpace: "nowrap", border: `1.5px solid ${col}`, cursor: "pointer", fontFamily: "inherit", transition: "all .15s" }}>
                         {txt} <span style={{ opacity: .8 }}>{careListOpen === key ? "▲" : "▾"}</span>
@@ -3182,23 +3191,30 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
                             <div style={{ fontSize: 14, fontWeight: 850, color: "var(--text)", marginBottom: 3 }}>🩺 오늘의 회진</div>
                             <div style={{ fontSize: 12.5, color: "var(--text2)", lineHeight: 1.55 }}>
                               {todo > 0
-                                ? <>지금 손볼 글이 <b style={{ color: "#f59e0b" }}>{todo}개</b> 있어요{cnt.observing > 0 && <> · <b style={{ color: "#8b5cf6" }}>{cnt.observing}개</b>는 관찰 중이라 기다리면 돼요</>}. 하나씩 개선안을 받아보세요.</>
-                                : cnt.observing > 0
-                                  ? <><b style={{ color: "#8b5cf6" }}>{cnt.observing}개</b>가 관찰 중이에요. 지금은 손대지 말고 기다리면 돼요 🌱</>
-                                  : <>지금 손볼 글이 없어요. 아주 잘 관리되고 있어요 👍</>}
+                                ? <>지금 손볼 글이 <b style={{ color: "#f59e0b" }}>{todo}개</b> 있어요{cnt.indexing > 0 && <> · <b style={{ color: "#0ea5e9" }}>{cnt.indexing}개</b>는 색인 대기라 기다리면 돼요</>}{cnt.observing > 0 && <> · <b style={{ color: "#8b5cf6" }}>{cnt.observing}개</b>는 관찰 중</>}. 하나씩 개선안을 받아보세요.</>
+                                : cnt.indexing > 0
+                                  ? <><b style={{ color: "#0ea5e9" }}>{cnt.indexing}개</b>가 색인 대기 중이에요. 발행한 지 얼마 안 된 글은 네이버가 아직 읽는 중이라, {INDEX_GRACE_DAYS}일쯤 기다리면 돼요 🕐{cnt.observing > 0 && <> · <b style={{ color: "#8b5cf6" }}>{cnt.observing}개</b>는 관찰 중</>}</>
+                                  : cnt.observing > 0
+                                    ? <><b style={{ color: "#8b5cf6" }}>{cnt.observing}개</b>가 관찰 중이에요. 지금은 손대지 말고 기다리면 돼요 🌱</>
+                                    : <>지금 손볼 글이 없어요. 아주 잘 관리되고 있어요 👍</>}
                             </div>
                           </div>
                         </div>
-                        {(todo > 0 || cnt.observing > 0 || cnt.cured > 0) && (
+                        {(todo > 0 || cnt.indexing > 0 || cnt.observing > 0 || cnt.cured > 0) && (
                           <>
                             <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
                               {todo > 0 && clickChip("todo", "rgba(245,158,11,.14)", "#f59e0b", `🚑 치료 필요 ${todo}`)}
+                              {cnt.indexing > 0 && clickChip("indexing", "rgba(14,165,233,.14)", "#0ea5e9", `🕐 색인 대기 ${cnt.indexing}`)}
                               {cnt.observing > 0 && clickChip("observing", "rgba(139,92,246,.14)", "#8b5cf6", `🌱 관찰 중 ${cnt.observing}`)}
                               {cnt.cured > 0 && clickChip("cured", "rgba(0,200,150,.14)", "#00c896", `✅ 완치 ${cnt.cured}`)}
                             </div>
                             <div style={{ fontSize: 10.5, color: "var(--text3)", marginTop: 6 }}>👆 눌러서 어떤 글인지 확인하세요{autoViewsLoading && <span style={{ color: "#0ea5e9", fontWeight: 700 }}> · 🔄 조회수 자동 수집 중…</span>}</div>
                             {/* 클릭한 칩의 글 리스트 */}
                             {careListOpen === "todo" && careList(byStatus.todo, "치료할 글이 없어요 👍", true)}
+                            {careListOpen === "indexing" && <>
+                              <div style={{ fontSize: 10.5, color: "var(--text2)", marginTop: 8, padding: "8px 10px", borderRadius: 9, background: "rgba(14,165,233,.08)", border: "1px solid rgba(14,165,233,.25)", lineHeight: 1.55 }}>🕐 발행한 지 <b>{INDEX_GRACE_DAYS}일이 안 된</b> 글이에요. 네이버가 아직 <b>색인·순위를 매기는 중</b>이라 지금 미노출인 건 정상이에요. <b style={{ color: "#0ea5e9" }}>제목을 바꾸지 말고</b> 조금만 기다려 주세요 — {INDEX_GRACE_DAYS}일이 지나도 안 뜨면 그때 '치료 필요'로 올라와요.</div>
+                              {careList(byStatus.indexing, "색인 대기 중인 글이 없어요")}
+                            </>}
                             {careListOpen === "observing" && careList(byStatus.observing, "관찰 중인 글이 없어요")}
                             {careListOpen === "cured" && <>
                               <div style={{ fontSize: 10.5, color: "var(--text2)", marginTop: 8, padding: "8px 10px", borderRadius: 9, background: "rgba(14,165,233,.08)", border: "1px solid rgba(14,165,233,.25)", lineHeight: 1.55 }}>✅ 완치=검색 100위 안에 뜬다는 뜻이에요. 하지만 <b style={{ color: "#ef4444" }}>조회 0</b>이면 노출돼도 안 읽히는 거예요 — <b>제목·썸네일을 더 끌리게</b> 바꾸면 조회수가 올라요. (100위 진입이 끝이 아니에요!)</div>
@@ -3246,12 +3262,19 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
                       if (c.exposed === false) merged[c.logNo] = { logNo: c.logNo, title: c.title, date: (c as any).date || dateByLogNow[String(c.logNo)] || "", blogId: activeAccount?.blogId || "", at: now };
                       else if (c.exposed === true) delete merged[c.logNo];
                     }
-                    // 기간 필터: 기본=선택 날짜 '이내(미만)' + 날짜 모르면 포함 / '90일 이후' 모드=90일 넘은 것만
+                    // 기간 필터: '구간'(겹치지 않음) — 선택한 밴드 [min, max)에 든 글만. 15~30/30~60/60~90/90+ 가 서로 다른 글을 보여줌.
+                    const band = REPUBLISH_BANDS.find(b => b.k === republishBand) || REPUBLISH_BANDS[0];
+                    // 🕐 색인 대기(발행 14일 이내) 글 수 — 안내용. 아직 판단하지 않는 갓 쓴 글(제목변경 재촉 금지).
+                    const indexingCount = Object.values(merged).filter((t: any) => {
+                      if (!t.date) return false;
+                      const a = (now - new Date(t.date).getTime()) / 86400000;
+                      return Number.isFinite(a) && a >= 0 && a < INDEX_GRACE_DAYS;
+                    }).length;
                     const list = Object.values(merged).filter((t: any) => {
-                        if (!t.date) return !republishAncient;   // 날짜 모르면 '이내' 목록엔 포함, '이후' 목록엔 제외
-                        const ageDays = (now - new Date(t.date).getTime()) / 86400000;
-                        if (!Number.isFinite(ageDays)) return !republishAncient;   // 날짜 파싱 실패도 '이내'에 포함(누락 방지)
-                        return republishAncient ? ageDays > 90 : ageDays < republishDays;
+                        const ageDays = t.date ? (now - new Date(t.date).getTime()) / 86400000 : NaN;
+                        if (!Number.isFinite(ageDays)) return band.k === "90plus";   // 날짜 모르는 옛 글 = '90일 이상' 구간에만(오래된 걸로 간주)
+                        if (ageDays < INDEX_GRACE_DAYS) return false;                 // 🕐 색인 대기는 재발행 목록에서 제외
+                        return ageDays >= band.min && ageDays < band.max;
                       })
                       // ★관찰중(이미 제목 바꿔 지켜보는) 글은 재발행 목록에 안 뜸 → '수정 추적'에서만 다시 변경(테리 확정)
                       .filter((t: any) => { const care = t.logNo ? careMap[t.logNo] : null; return !(care && computeCareStatus(care).status === "observing"); })
@@ -3275,27 +3298,23 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
                               <span style={{ display: "inline-block", transition: "transform .6s", transform: rpSpin ? "rotate(360deg)" : "none" }}>🔄</span> 새로고침
                             </button>
                             <span style={{ fontSize: 10.5, color: "var(--text3)", fontWeight: 700, marginLeft: 4 }}>쓴 지</span>
-                            {[15,30,60,90].map(d => {
-                              const on = !republishAncient && republishDays===d;
+                            {/* 구간 버튼(누적 아님) — 각 버튼이 서로 안 겹치는 구간이라 눌러보면 다른 글이 떠요. */}
+                            {REPUBLISH_BANDS.map(b => {
+                              const on = republishBand === b.k;
                               return (
-                              <button key={d} onClick={() => { setRepublishAncient(false); setRepublishDays(d); localStorage.setItem("publy_republish_days", String(d)); }}
-                                title={`최근 ${d}일 이내에 썼는데도 검색에 안 뜨는(미노출) 글`}
-                                style={{ padding: "3px 8px", borderRadius: 7, border: `1.5px solid ${on?"#f59e0b":"var(--border)"}`, background: on?"rgba(245,158,11,.15)":"transparent", color: on?"#f59e0b":"var(--text3)", cursor: "pointer", fontSize: 10.5, fontWeight: 800, fontFamily: "inherit" }}>{d}일 이내</button>
+                              <button key={b.k} onClick={() => { setRepublishBand(b.k); localStorage.setItem("publy_republish_band", b.k); }}
+                                title={`발행한 지 ${b.label} 된(그 구간의) 미노출 글만 — 다른 구간과 안 겹쳐요`}
+                                style={{ padding: "3px 9px", borderRadius: 7, border: `1.5px solid ${on?"#f59e0b":"var(--border)"}`, background: on?"rgba(245,158,11,.15)":"transparent", color: on?"#f59e0b":"var(--text3)", cursor: "pointer", fontSize: 10.5, fontWeight: 800, fontFamily: "inherit" }}>{b.label}</button>
                             );})}
-                            {/* 직접 기간 설정 — 임의 일수 '이내' */}
-                            <span style={{ display: "inline-flex", alignItems: "center", gap: 3, marginLeft: 2 }}>
-                              <input type="number" min={1} value={republishDays} onChange={e => { const v = Math.max(1, parseInt(e.target.value || "1", 10)); setRepublishAncient(false); setRepublishDays(v); localStorage.setItem("publy_republish_days", String(v)); }}
-                                title="원하는 일수를 직접 입력하세요(예: 45 → 최근 45일 이내)"
-                                style={{ width: 46, padding: "3px 6px", borderRadius: 7, border: `1.5px solid ${(!republishAncient && ![15,30,60,90].includes(republishDays))?"#f59e0b":"var(--border)"}`, background: "transparent", color: (!republishAncient && ![15,30,60,90].includes(republishDays))?"#f59e0b":"var(--text2)", fontSize: 10.5, fontWeight: 800, fontFamily: "inherit", textAlign: "center", outline: "none" }} />
-                              <span style={{ fontSize: 10.5, color: "var(--text3)", fontWeight: 700 }}>일 이내(직접)</span>
-                            </span>
-                            {/* 90일 이후(90일 넘은 오래된 글) 별도 버튼 */}
-                            <button onClick={() => setRepublishAncient(true)}
-                              title="발행한 지 90일이 넘은 오래된 미노출 글 전부"
-                              style={{ padding: "3px 9px", borderRadius: 7, border: `1.5px solid ${republishAncient?"#f59e0b":"var(--border)"}`, background: republishAncient?"rgba(245,158,11,.15)":"transparent", color: republishAncient?"#f59e0b":"var(--text3)", cursor: "pointer", fontSize: 10.5, fontWeight: 800, fontFamily: "inherit", marginLeft: 2 }}>90일 이후</button>
                           </div>
                         </div>
-                        <div style={{ fontSize: 12, color: "var(--text2)", lineHeight: 1.7, marginBottom: 10, fontWeight: 500 }}>{republishAncient ? <><b>발행한 지 90일이 넘었는데도</b> 네이버 검색에 안 나오는 오래된 글이에요.</> : <>최근 <b>{republishDays}일 이내에 썼는데도</b> 네이버 검색에 안 나오는 글이에요.</>} 이런 글은 <b style={{ color: "#f59e0b" }}>제목만 바꿔서 다시 올리면</b> 검색에 뜰 기회가 다시 생겨요.<br/>아래에서 <b>AI가 추천한 새 제목</b>을 받아서 <b>제목 변경하러 가기</b>만 누르면, 알아서 제목을 바꿔 다시 발행해줘요.</div>
+                        <div style={{ fontSize: 12, color: "var(--text2)", lineHeight: 1.7, marginBottom: 10, fontWeight: 500 }}>발행한 지 <b>{band.label}</b> 됐는데도 네이버 검색에 안 나오는 글이에요. 이런 글은 <b style={{ color: "#f59e0b" }}>제목만 바꿔서 다시 올리면</b> 검색에 뜰 기회가 다시 생겨요.<br/>아래에서 <b>AI가 추천한 새 제목</b>을 받아서 <b>제목 변경하러 가기</b>만 누르면, 알아서 제목을 바꿔 다시 발행해줘요.</div>
+                        {/* 🕐 색인 대기 안내 — 갓 쓴 글은 여기 안 뜨고 기다린다고 알림(제목변경 재촉 오해 방지) */}
+                        {indexingCount > 0 && (
+                          <div style={{ fontSize: 11.5, color: "#0ea5e9", lineHeight: 1.6, marginBottom: 10, padding: "9px 12px", borderRadius: 8, background: "rgba(14,165,233,.08)", border: "1px solid rgba(14,165,233,.25)", fontWeight: 600 }}>
+                            🕐 발행한 지 <b>{INDEX_GRACE_DAYS}일이 안 된 글 {indexingCount}개</b>는 여기 안 넣었어요. 네이버가 아직 <b>색인·순위를 매기는 중</b>이라 지금 미노출인 건 정상이에요 — <b>제목 바꾸지 말고</b> 조금만 기다려 주세요.
+                          </div>
+                        )}
                         {/* ★ 미노출 기준 — 디테일 설명(테리 요청) */}
                         <div style={{ fontSize: 11, color: "var(--text3)", lineHeight: 1.65, marginBottom: 12, padding: "9px 12px", borderRadius: 8, background: "rgba(245,158,11,.06)", border: "1px solid rgba(245,158,11,.2)" }}>
                           <b style={{ color: "#f59e0b" }}>🔎 '미노출'이 뭔가요?</b> 이 글의 제목으로 네이버 통합검색(블로그탭)을 돌렸을 때 <b>상위 100위 안에 내 글이 안 나오는</b> 상태예요. 100위 밖이면 사실상 <b>검색 유입이 거의 0</b> — 저품질·누락이 의심돼요. 그래서 여기 모인 글은 <b>제목·키워드를 바꿔 다시 검색 기회를 주는</b> 대상이에요. <span style={{ color: "var(--text2)" }}>(이미 100위 안에 뜨는 글은 여기 안 나와요 — 그건 아래 '제목·키워드 살리기 솔루션'에서 더 위로 올려요.)</span>
@@ -3326,7 +3345,7 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
                           );
                         })()}
                         {list.length === 0
-                          ? <div style={{ fontSize: 12, color: "var(--text3)" }}>{republishAncient ? "90일이 넘은 오래된 미노출 글이 없어요." : `최근 ${republishDays}일 이내에 쓴 미노출 글이 없어요.`} 위에서 <b>검색노출 검사</b>를 하면 미노출 글이 여기 모여요. (다른 기간 버튼도 눌러보세요)</div>
+                          ? <div style={{ fontSize: 12, color: "var(--text3)" }}>발행한 지 <b>{band.label}</b> 된 미노출 글이 없어요. 위에서 <b>검색노출 검사</b>를 하면 미노출 글이 여기 모여요. (<b>다른 기간 버튼</b>도 눌러보세요 — 구간마다 다른 글이 떠요)</div>
                           : <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
                               {list.slice(0, republishShow).map((c: any, i) => {
                                 const days = Math.floor((now - new Date(c.date).getTime())/86400000);
