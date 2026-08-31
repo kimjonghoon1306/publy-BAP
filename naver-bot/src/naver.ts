@@ -1406,6 +1406,12 @@ export async function publishNaver(params: {
     const viewMatch = postUrl.match(/blog\.naver\.com\/[^/]+\/(\d+)/) || postUrl.match(/logNo=(\d+)/);
     if (viewMatch) postUrl = `https://blog.naver.com/${blogId}/${viewMatch[1]}`;
     if (scheduleTime) postUrl = `https://blog.naver.com/${blogId}`;
+    // ★실제 게시 검증: 예약이 아닌데 실제 글 주소(logNo)도 없고 완료문구도 없으면, 레이어만 닫혔을 뿐
+    //   발행이 완료되지 않은 것(카테고리/검증 오류 등). write 페이지 URL을 성공처럼 반환하면 "완료 떴는데 글 없음"이 됨.
+    //   → 가짜 성공을 막기 위해 실패로 처리한다.
+    if (!scheduleTime && !viewMatch && !finalSignal.successText) {
+      throw new Error("발행이 끝까지 완료되지 않았어요(글 주소를 못 받음). 카테고리 선택이나 네트워크 문제일 수 있어요 — 다시 시도해주세요.");
+    }
 
     // 쿠키 갱신
     const newCookies = await context.cookies();
