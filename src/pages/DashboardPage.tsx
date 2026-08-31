@@ -6466,35 +6466,39 @@ POST3: (제목)|(이유)
                     ))}
                 </div>
 
-                {/* 글·이미지 설정 */}
+                {/* 글·이미지 설정 — 2컬럼: 왼쪽 설정 / 오른쪽 Flow 준비(세로 절약) */}
                 <div className="card" style={{marginBottom:14}}>
                   <div className="card-title" style={{marginBottom:10}}>✍️ 글·이미지 설정</div>
-                  <div style={{fontSize:13,fontWeight:700,marginBottom:6}}>글 패턴</div>
-                  <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:14}}>
-                    {WRITE_STYLES.map(s=>{const on=otWriteStyle===s.id;return(
-                      <button key={s.id} disabled={otRunning} onClick={()=>setOtWriteStyle(s.id)} style={{padding:"9px 14px",borderRadius:10,border:`2px solid ${on?OT:"var(--border)"}`,background:on?`${OT}16`:"var(--bg)",color:on?OT:"var(--text2)",cursor:otRunning?"default":"pointer",fontSize:13,fontWeight:800,fontFamily:"inherit"}}>{s.i} {s.id}</button>
-                    );})}
-                  </div>
-                  <div style={{fontSize:13,fontWeight:700,marginBottom:6}}>글자수</div>
-                  <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center",marginBottom:14}}>
-                    {(["auto","manual"] as const).map(m=>{const on=otCharMode===m;return(
-                      <button key={m} disabled={otRunning} onClick={()=>setOtCharMode(m)} style={{padding:"9px 14px",borderRadius:10,border:`2px solid ${on?OT:"var(--border)"}`,background:on?`${OT}16`:"var(--bg)",color:on?OT:"var(--text2)",cursor:otRunning?"default":"pointer",fontSize:13,fontWeight:800,fontFamily:"inherit"}}>{m==="auto"?"✨ 자동":"✍️ 직접"}</button>
-                    );})}
-                    {otCharMode==="manual"&&<><input className="inp" type="number" min={500} max={5000} step={100} disabled={otRunning} value={otTargetChars} onChange={e=>setOtTargetChars(Math.max(500,Math.min(5000,parseInt(e.target.value)||1500)))} style={{width:100}}/><span style={{fontSize:13,color:"var(--text2)",fontWeight:700}}>자</span></>}
-                  </div>
-                  <div style={{fontSize:13,fontWeight:700,marginBottom:6}}>이미지 방식</div>
-                  <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-                    {([["flow","🆓 Flow (무료)"],["ai","🎨 AI (유료 키)"]] as const).map(([m,l])=>{const on=otImgMode===m;return(
-                      <button key={m} disabled={otRunning} onClick={()=>setOtImgMode(m)} style={{padding:"9px 14px",borderRadius:10,border:`2px solid ${on?OT:"var(--border)"}`,background:on?`${OT}16`:"var(--bg)",color:on?OT:"var(--text2)",cursor:otRunning?"default":"pointer",fontSize:13,fontWeight:800,fontFamily:"inherit"}}>{l}</button>
-                    );})}
-                  </div>
-                  <div style={{marginTop:8,fontSize:12,color:"var(--text3)",lineHeight:1.5}}>{otImgMode==="flow"?"무료 Flow는 발행할 때 봇이 자동으로 이미지를 만들어 넣어요. 시작 전에 아래에서 Flow를 먼저 연결하세요.":"AI 이미지는 설정 탭에 OpenAI/Replicate 키가 있어야 해요. 키가 없으면 이미지 없이 글만 올라가요."}</div>
-                  {otImgMode==="flow"&&(
-                    <div style={{marginTop:12,padding:"12px 14px",borderRadius:12,border:`1.5px solid ${OT}33`,background:`${OT}08`}}>
-                      <div style={{fontSize:13,fontWeight:800,color:OT,marginBottom:8}}>🎬 Flow 이미지 준비 <span style={{fontSize:11,fontWeight:600,color:"var(--text3)"}}>· 시작 전에 연결하세요(무료 이미지)</span></div>
-                      <GoogleFlowCard botOnline={botOnline} botUrl={BOT} userId={user?.id||""} />
+                  <div style={{display:"flex",gap:18,flexWrap:"wrap",alignItems:"flex-start"}}>
+                    <div style={{flex:"1 1 320px",minWidth:0}}>
+                      <div style={{fontSize:13,fontWeight:700,marginBottom:6}}>글 패턴</div>
+                      <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:14}}>
+                        {WRITE_STYLES.map(s=>{const on=otWriteStyle===s.id;return(
+                          <button key={s.id} disabled={otRunning} onClick={()=>setOtWriteStyle(s.id)} style={{padding:"9px 14px",borderRadius:10,border:`2px solid ${on?OT:"var(--border)"}`,background:on?`${OT}16`:"var(--bg)",color:on?OT:"var(--text2)",cursor:otRunning?"default":"pointer",fontSize:13,fontWeight:800,fontFamily:"inherit"}}>{s.i} {s.id}</button>
+                        );})}
+                      </div>
+                      <div style={{fontSize:13,fontWeight:700,marginBottom:6}}>글자수</div>
+                      <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center",marginBottom:14}}>
+                        {(["auto","manual"] as const).map(m=>{const on=otCharMode===m;return(
+                          <button key={m} disabled={otRunning} onClick={()=>setOtCharMode(m)} style={{padding:"9px 14px",borderRadius:10,border:`2px solid ${on?OT:"var(--border)"}`,background:on?`${OT}16`:"var(--bg)",color:on?OT:"var(--text2)",cursor:otRunning?"default":"pointer",fontSize:13,fontWeight:800,fontFamily:"inherit"}}>{m==="auto"?"✨ 자동":"✍️ 직접"}</button>
+                        );})}
+                        {otCharMode==="manual"&&<><input className="inp" type="number" min={500} max={5000} step={100} disabled={otRunning} value={otTargetChars} onChange={e=>setOtTargetChars(Math.max(500,Math.min(5000,parseInt(e.target.value)||1500)))} style={{width:100}}/><span style={{fontSize:13,color:"var(--text2)",fontWeight:700}}>자</span></>}
+                      </div>
+                      <div style={{fontSize:13,fontWeight:700,marginBottom:6}}>이미지 방식</div>
+                      <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                        {([["flow","🆓 Flow (무료)"],["ai","🎨 AI (유료 키)"]] as const).map(([m,l])=>{const on=otImgMode===m;return(
+                          <button key={m} disabled={otRunning} onClick={()=>setOtImgMode(m)} style={{padding:"9px 14px",borderRadius:10,border:`2px solid ${on?OT:"var(--border)"}`,background:on?`${OT}16`:"var(--bg)",color:on?OT:"var(--text2)",cursor:otRunning?"default":"pointer",fontSize:13,fontWeight:800,fontFamily:"inherit"}}>{l}</button>
+                        );})}
+                      </div>
+                      <div style={{marginTop:8,fontSize:12,color:"var(--text3)",lineHeight:1.5}}>{otImgMode==="flow"?"무료 Flow는 옆의 'Flow 준비'를 먼저 눌러 연결하세요. 그 창으로 이미지를 만들어 넣어요.":"AI 이미지는 설정 탭에 OpenAI/Replicate 키가 있어야 해요. 키가 없으면 이미지 없이 글만 올라가요."}</div>
                     </div>
-                  )}
+                    {otImgMode==="flow"&&(
+                      <div style={{flex:"1 1 280px",minWidth:250,maxWidth:400,padding:"12px 14px",borderRadius:12,border:`1.5px solid ${OT}33`,background:`${OT}08`}}>
+                        <div style={{fontSize:13,fontWeight:800,color:OT,marginBottom:8}}>🎬 Flow 이미지 준비 <span style={{fontSize:11,fontWeight:600,color:"var(--text3)"}}>· 시작 전 연결</span></div>
+                        <GoogleFlowCard botOnline={botOnline} botUrl={BOT} userId={user?.id||""} />
+                      </div>
+                    )}
+                  </div>
                 </div>
 
                 {/* 텀 + 이미지 + 카테고리 */}
