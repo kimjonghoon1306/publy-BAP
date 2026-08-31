@@ -871,6 +871,9 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
 
   // 발행
   const [pubTitle, setPubTitle] = useState(""); const [pubContent, setPubContent] = useState(""); const [pubTags, setPubTags] = useState(""); const [pubImg, setPubImg] = useState(""); const [pubAccId, setPubAccId] = useState(""); const [publishing, setPublishing] = useState(false); const [pubMsg, setPubMsg] = useState("");
+  // 🔍 서치어드바이저 자동 색인(관리자도 회원과 동일) — 마스터 토글 + 계정별 소유확인 상태
+  const [saAuto, setSaAuto] = useState<boolean>(() => localStorage.getItem("publy_sa_auto_adm") !== "off");
+  const [saVerified, setSaVerified] = useState<Record<string,boolean>>(() => { try { return JSON.parse(localStorage.getItem("publy_sa_verified_adm")||"{}"); } catch { return {}; } });
   // ⚡ 원터치 발행(관리자 일반 사용 · 무제한) — 회원과 동일 기능
   const [otKeywords,setOtKeywords]=useState("");
   const [otAiKw,setOtAiKw]=useState(()=>localStorage.getItem("publy_adm_ot_aikw")==="1");
@@ -1085,6 +1088,7 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
         if(postUrl){
           await addHistory({user_id:ADM_UID,platform:"naver",title,post_url:postUrl,status:"success"}).catch(()=>{});
           upd({step:"발행 완료",status:"done",postUrl,at}); otLive(`  ✅ 발행 완료! ${postUrl}`);
+          await autoRequestSearchAdvisor(postUrl, otLive);   // 🔍 발행 직후 서치어드바이저 자동 색인요청
         } else {
           upd({step:"⚠️ 발행 주소를 못 받음 — 블로그에 올라갔는지 확인하세요",status:"fail",at});
           otLive(`  ⚠️ 발행 주소를 못 받았어요(글이 실제로 안 올라갔을 수 있음). 블로그를 확인하세요.`);
@@ -2639,6 +2643,7 @@ POST3: (제목)|(이유)
         .catch(async()=>{ await addHistory({user_id:ADM_HISTORY_UID, platform, title:pubTitle, post_url:d.postUrl, status:"success"}).catch(()=>{}); });
       getHistory(ADM_HISTORY_UID).then(setHistory).catch(()=>{});
       setPubMsg(scheduleOn?"✅ 예약 완료! 설정한 시간에 자동 발행돼요.":"✅ 발행 완료!");
+      if(platform==="naver"&&!scheduleOn&&d.postUrl) autoRequestSearchAdvisor(d.postUrl);   // 🔍 발행 직후 서치어드바이저 자동 색인요청
       setPubTitle(""); setPubContent(""); setPubTags(""); setPubImg("");
     } catch(e:any) { await addHistory({user_id:ADM_HISTORY_UID, platform, title:pubTitle, status:"fail", error_message:e.message}).catch(()=>{}); setPubMsg("❌ "+e.message+" (오류가 자동 전달됩니다)");logError({user_id:ADM_UID,user_name:"관리자",user_email:"",feature:"관리자 발행",error_message:e.message}).catch(()=>{}); }
     finally { setPublishing(false); }
@@ -2801,8 +2806,49 @@ POST3: (제목)|(이유)
       await supabase.from("publy_accounts").update({is_connected:true,connected_at:new Date().toISOString()}).eq("id",acc.id);
       await upsertAccount({...acc,password_encrypted:"",is_connected:true,connected_at:new Date().toISOString()});
       getAccounts(ADM_UID).then(setAdmAccs);
+      if(acc.platform==="naver") autoVerifySearchAdvisor(acc.username);   // 🔍 연결되면 서치어드바이저 소유확인 자동(1회)
     } catch(e:any) { alert("연결 실패: "+e.message); }
     finally { setConnId(null); }
+  }
+  // 🔍 발행 성공 후 서치어드바이저 자동 수집요청(관리자=회원 동일). 실패해도 발행엔 영향 0.
+  async function autoRequestSearchAdvisor(postUrl:string, log?:(m:string)=>void){
+    if(!saAuto||!postUrl||!/blog\.naver\.com/.test(postUrl))return;
+    try{
+      const r=await botFetch(`${BOT}/api/searchadvisor/request`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({userId:ADM_UID,url:postUrl}),signal:AbortSignal.timeout(90000)});
+      const d=await r.json().catch(()=>({} as any));
+      log?.(d.ok?`  🔍 서치어드바이저 색인요청 완료`:`  🔍 색인요청: ${d.message||"응답 미확인"}`);
+    }catch(e:any){ log?.(`  🔍 색인요청 건너뜀: ${String(e?.message||e).split("\n")[0]}`); }
+  }
+  // 🔍 계정연결 시 서치어드바이저 소유확인(1회). 이미 확인된 계정은 스킵. 네이버 전용.
+  async function autoVerifySearchAdvisor(blogId?:string){
+    if(!saAuto||!blogId||saVerified[blogId])return;
+    try{
+      const r=await botFetch(`${BOT}/api/searchadvisor/verify`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({userId:ADM_UID}),signal:AbortSignal.timeout(120000)});
+      const d=await r.json().catch(()=>({} as any));
+      if(d.ok){ setSaVerified(prev=>{ const n={...prev,[blogId]:true}; localStorage.setItem("publy_sa_verified_adm",JSON.stringify(n)); return n; }); showToast("🔍 서치어드바이저 등록 완료"); }
+    }catch{}
+  }
+  // 🔍 발행/원터치 탭 상단 상태배지(보기 전용) — 실제 켜고 끄기는 계정관리 탭.
+  function renderSaBadge(){
+    const naverAccs=admAccs.filter(a=>a.platform==="naver");
+    const verifiedN=naverAccs.filter(a=>saVerified[a.username]).length;
+    const needN=naverAccs.length-verifiedN;
+    return (
+      <div onClick={()=>setTab("accounts")} title="서치어드바이저 자동 색인요청 설정으로 이동"
+        style={{cursor:"pointer",margin:"12px 0",padding:"11px 14px",borderRadius:12,border:`1.5px solid ${saAuto?"#0ea5e9":"var(--border)"}`,background:saAuto?"rgba(14,165,233,.08)":"var(--card2)",display:"flex",alignItems:"center",gap:10}}>
+        <span style={{fontSize:18,flexShrink:0}}>🔍</span>
+        <div style={{flex:1,minWidth:0}}>
+          <div style={{fontSize:12.5,fontWeight:800,color:saAuto?"#0ea5e9":"var(--text3)"}}>발행하면 서치어드바이저에 자동 색인요청 · {saAuto?"ON":"OFF"}</div>
+          <div style={{fontSize:11,color:"var(--text3)",marginTop:2,lineHeight:1.5}}>
+            {saAuto
+              ? (naverAccs.length===0 ? <>네이버 계정을 연결하면 자동 등록돼요 · 계정관리 ›</>
+                 : needN>0 ? <><span style={{color:"#00a878",fontWeight:800}}>✅ {verifiedN}개 완료</span> · <span style={{color:"#f59e0b",fontWeight:800}}>⚠️ {needN}개 확인필요</span> → 계정연결 다시 ›</>
+                 : <><span style={{color:"#00a878",fontWeight:800}}>✅ {naverAccs.length}개 계정 등록완료</span> · 계정관리에서 변경 ›</>)
+              : <>켜면 발행 글이 네이버에 더 빨리 떠요 · 켜러가기 ›</>}
+          </div>
+        </div>
+      </div>
+    );
   }
 
   async function saveUser(u: UserFull) {
@@ -4195,6 +4241,7 @@ POST3: (제목)|(이유)
               <div style={{animation:"fadeUp .25s ease both"}}>
                 <UsageGuide theme={theme==="dark"?"dark":"light"} subtitle="다 된 글을 블로그에 자동으로 올려줄게요." steps={[{ico:"👤",title:"계정·플랫폼 선택",desc:"네이버/티스토리와 올릴 계정을 골라요."},{ico:"🧩",title:"발행 방식",desc:"전체/본문+FAQ/본문만 중 골라요. 예약 발행도 돼요."},{ico:"🚀",title:"발행",desc:"🚀 발행 버튼을 누르면 블로그에 자동으로 올라가요."}]} />
                 {!botOnline&&<div className="alert alert-danger" style={{margin:"12px 16px 0"}}>⚠️ 봇 오프라인 — PC에서 Publy 앱 실행 시 즉시 발행돼요.</div>}
+                {renderSaBadge()}
 
                 {/* ── 발행 준비도 + 설정 스티키 바 ── */}
                 <div className="pub-sticky-bar">
@@ -4488,6 +4535,7 @@ POST3: (제목)|(이유)
               return (
               <div style={{animation:"fadeUp .25s ease both"}}>
                 <UsageGuide theme={theme==="dark"?"dark":"light"} accent={OT} subtitle="키워드만 넣으면 제목·글·이미지·카테고리까지 자동으로 만들어 순서대로 발행해요. (관리자는 무제한)" steps={[{ico:"⌨️",title:"키워드 입력",desc:"한 줄에 하나씩, 몇 개든."},{ico:"⏱️",title:"텀 설정",desc:"발행 간격(넉넉히)."},{ico:"⚡",title:"시작",desc:"봇이 알아서 — 로그로 확인."}]} />
+                {renderSaBadge()}
                 {!botOnline&&<div className="alert alert-warn" style={{marginBottom:14}}>⚠️ PC에서 Publy 앱을 실행해야 발행이 가능합니다</div>}
 
                 <div style={{marginBottom:14,padding:"12px 14px",borderRadius:12,background:`${OT}0d`,border:`1.5px solid ${OT}33`,fontSize:13,fontWeight:700,color:OT}}>✨ 관리자 계정은 <b>무제한</b> — 발행 한도 없이 원터치로 계속 발행할 수 있어요.</div>
@@ -4694,6 +4742,31 @@ POST3: (제목)|(이유)
             {tab === "accounts" && (
               <div style={{animation:"fadeUp .25s ease both"}}>
                 {!botOnline&&<div className="alert alert-warn">⚠️ PC에서 Publy 앱을 실행해야 계정 연결이 가능합니다</div>}
+                {/* 🔍 서치어드바이저 자동 색인요청 — 마스터 토글(여기서 켜면 발행/원터치 전체 적용) */}
+                <div className="card" style={{marginBottom:14,border:`1.5px solid ${saAuto?"rgba(14,165,233,.4)":"var(--border)"}`,background:saAuto?"rgba(14,165,233,.05)":undefined}}>
+                  <div style={{display:"flex",alignItems:"flex-start",gap:12}}>
+                    <span style={{fontSize:26,flexShrink:0}}>🔍</span>
+                    <div style={{flex:1,minWidth:0}}>
+                      <div style={{fontSize:15,fontWeight:800,color:"var(--text)",marginBottom:3}}>서치어드바이저 자동 색인요청</div>
+                      <div style={{fontSize:12.5,color:"var(--text2)",lineHeight:1.6}}>켜두면 <b>글을 발행할 때마다</b> 네이버 서치어드바이저에 "빨리 색인해줘"를 자동으로 넣어요. 검색에 뜨는 시간을 앞당겨줘요. <b style={{color:"#0ea5e9"}}>일반 발행·원터치 발행 모두</b> 적용돼요.<br/>계정을 <b>연결</b>하면 소유확인(등록)도 자동으로 1회 처리해요.</div>
+                      <div style={{fontSize:11,color:"var(--text3)",marginTop:6}}>· 블로그(계정)당 하루 50개까지 요청돼요. 그 이상은 다음 날 이어서 처리돼요.</div>
+                    </div>
+                    <button onClick={()=>{const v=!saAuto; setSaAuto(v); localStorage.setItem("publy_sa_auto_adm",v?"on":"off");}}
+                      style={{flexShrink:0,width:56,height:30,borderRadius:16,border:"none",cursor:"pointer",background:saAuto?"#0ea5e9":"var(--border)",position:"relative",transition:"all .2s"}}
+                      title={saAuto?"끄기":"켜기"} aria-label="서치어드바이저 자동 색인요청 켜고 끄기">
+                      <span style={{position:"absolute",top:3,left:saAuto?29:3,width:24,height:24,borderRadius:"50%",background:"#fff",transition:"all .2s",boxShadow:"0 1px 3px rgba(0,0,0,.3)"}}/>
+                    </button>
+                  </div>
+                  {(()=>{ const na=admAccs.filter(a=>a.platform==="naver"); if(!na.length)return null; return (
+                    <div style={{marginTop:12,paddingTop:12,borderTop:"1px solid var(--border)",display:"flex",flexWrap:"wrap",gap:8}}>
+                      {na.map(a=>(
+                        <span key={a.id} style={{fontSize:11.5,fontWeight:700,padding:"5px 10px",borderRadius:8,background:saVerified[a.username]?"rgba(0,168,120,.12)":"rgba(245,158,11,.12)",color:saVerified[a.username]?"#00a878":"#f59e0b"}}>
+                          {saVerified[a.username]?"✅":"⚠️"} {a.username} · {saVerified[a.username]?"등록완료":"연결 시 자동등록"}
+                        </span>
+                      ))}
+                    </div>
+                  );})()}
+                </div>
                 <div className="card">
                   <div className="card-title">➕ 계정 추가</div>
                   <div style={{display:"grid",gridTemplateColumns:"100px 1fr 1fr",gap:10,marginBottom:12}}>

@@ -2,7 +2,7 @@ import express from "express";
 import cors from "cors";
 import fs from "fs";
 import path from "path";
-import { saveNaverSession, publishNaver, activateNaverAccount, naverSessionExists, generateFlowImages, generateFlowImagesCDP, getNaverCategories, saveGoogleSession, googleSessionExists, deleteNaverSession, deleteGoogleSession } from "./naver";
+import { saveNaverSession, publishNaver, activateNaverAccount, naverSessionExists, generateFlowImages, generateFlowImagesCDP, getNaverCategories, saveGoogleSession, googleSessionExists, deleteNaverSession, deleteGoogleSession, verifySearchAdvisor, requestSearchAdvisorCrawl } from "./naver";
 import { saveTistorySession, publishTistory, tistorySessionExists, deleteTistorySession } from "./tistory";
 import { fetchPendingJobs, updateJob, claimPendingJob, finishQueuedHistory, useQuota, refundQuota, checkPublishEntitlement, incrementDailyPublish } from "./supabase";
 import { acquireAccountLock } from "./account-lock";
@@ -118,6 +118,30 @@ app.get("/api/naver/categories/:userId", async (req, res) => {
     res.json({ categories });
   } catch (e: any) {
     res.status(500).json({ error: e.message, categories: [] });
+  }
+});
+
+/* ── 🔍 서치어드바이저: 소유확인(계정연결 시 1회) ── */
+app.post("/api/searchadvisor/verify", async (req, res) => {
+  const { userId } = req.body || {};
+  if (!userId) return res.status(400).json({ ok: false, message: "userId 필요" });
+  try {
+    const r = await verifySearchAdvisor(userId, (m) => console.log(m));
+    res.json(r);
+  } catch (e: any) {
+    res.status(500).json({ ok: false, message: e.message });
+  }
+});
+
+/* ── 🔍 서치어드바이저: 웹페이지 수집요청(발행 직후, 하루 50개) ── */
+app.post("/api/searchadvisor/request", async (req, res) => {
+  const { userId, url } = req.body || {};
+  if (!userId || !url) return res.status(400).json({ ok: false, message: "userId·url 필요" });
+  try {
+    const r = await requestSearchAdvisorCrawl(userId, url, (m) => console.log(m));
+    res.json(r);
+  } catch (e: any) {
+    res.status(500).json({ ok: false, message: e.message });
   }
 });
 
