@@ -941,6 +941,9 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
   useEffect(()=>{ otRunRef.current=()=>runOneTouch(); });
   useEffect(()=>{
     if(!otSchedOn) return;
+    const nowArm=new Date();
+    const armStamp=`${nowArm.getFullYear()}${nowArm.getMonth()}${nowArm.getDate()}${String(nowArm.getHours()).padStart(2,"0")}${String(nowArm.getMinutes()).padStart(2,"0")}`;
+    otSchedFiredRef.current=armStamp;   // 켠 순간의 분은 이미 발동 처리 → 켜자마자 실행 차단
     const check=()=>{
       if(otRunning) return;
       const now=new Date(); const hh=String(now.getHours()).padStart(2,"0"); const mm=String(now.getMinutes()).padStart(2,"0");
@@ -951,9 +954,10 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
       otRunRef.current?.();
       if(!otSchedDaily) setOtSchedOn(false);
     };
-    const iv=setInterval(check,30000); check();
+    const iv=setInterval(check,20000);   // 켤 때 즉시 실행 안 함
     return ()=>clearInterval(iv);
-  },[otSchedOn,otSchedTime,otSchedDaily,otRunning]);
+    // eslint-disable-next-line
+  },[otSchedOn,otSchedTime,otSchedDaily]);
   // ★글자수 하드 캡: AI 오버슈트(1500 지정→3000) 방지. 목표 125% 초과 시 FAQ 보존하고 본문 문단을 잘라 목표 근처로.
   function enforceMaxChars(body:string, target:number):string{
     if(!target||body.length<=Math.round(target*1.25))return body;

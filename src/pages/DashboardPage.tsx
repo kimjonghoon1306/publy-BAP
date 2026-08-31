@@ -1441,19 +1441,26 @@ Output (JSON object only): {"keyword":"핵심키워드","title":"새 SEO 제목"
   useEffect(()=>{ otRunRef.current=()=>runOneTouch(); });
   useEffect(()=>{
     if(!otSchedOn) return;
+    // ★안전장치: 토글을 켠 '그 시각(분)'은 절대 실행하지 않는다(켜자마자 발행되는 버그 차단).
+    //   예약을 켠 순간의 분을 armStamp에 도장 → 그 분에는 발동 안 함. 다음에 시각이 정확히 도달할 때만 실행.
+    const nowArm=new Date();
+    const armStamp=`${nowArm.getFullYear()}${nowArm.getMonth()}${nowArm.getDate()}${String(nowArm.getHours()).padStart(2,"0")}${String(nowArm.getMinutes()).padStart(2,"0")}`;
+    otSchedFiredRef.current=armStamp;   // 켠 순간의 분을 이미 '발동함'으로 처리 → 이 분엔 안 돎
     const check=()=>{
-      if(otRunning) return;
+      if(otRunning) return;                               // 이미 발행 중이면 스킵
       const now=new Date(); const hh=String(now.getHours()).padStart(2,"0"); const mm=String(now.getMinutes()).padStart(2,"0");
-      if(`${hh}:${mm}`!==otSchedTime) return;
+      const cur=`${hh}:${mm}`;
+      if(cur!==otSchedTime) return;                       // ★현재 '시:분'이 예약 시각과 정확히 같을 때만
       const stamp=`${now.getFullYear()}${now.getMonth()}${now.getDate()}${hh}${mm}`;
-      if(otSchedFiredRef.current===stamp) return;   // 같은 분 중복 실행 방지
+      if(otSchedFiredRef.current===stamp) return;         // 같은 분 중복(또는 켠 직후 그 분) 실행 방지
       otSchedFiredRef.current=stamp;
-      otRunRef.current?.();                          // 원터치 시작
-      if(!otSchedDaily) setOtSchedOn(false);          // 1회 예약이면 실행 후 해제
+      otRunRef.current?.();                               // 원터치 시작
+      if(!otSchedDaily) setOtSchedOn(false);              // 1회 예약이면 실행 후 해제
     };
-    const iv=setInterval(check,30000); check();
+    const iv=setInterval(check,20000);                    // ★켤 때 즉시 check() 호출 안 함(setInterval만) → 켜자마자 실행 차단
     return ()=>clearInterval(iv);
-  },[otSchedOn,otSchedTime,otSchedDaily,otRunning]);
+    // eslint-disable-next-line
+  },[otSchedOn,otSchedTime,otSchedDaily]);   // ★otRunning 제거: 발행 끝날 때마다 재평가되며 check가 재발동하던 문제 차단
 
   const liveLogActive = (tab==="publish"&&publishing)||(tab==="image"&&genImgLoading);
   useEffect(()=>{
