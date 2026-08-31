@@ -1023,6 +1023,15 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
     const rest=flowN?[]:images.slice(1); const every=rest.length?Math.max(1,Math.floor(paras.length/(rest.length+1))):0; let ri=0;
     paras.forEach((p,i)=>{ blocks.push({type:"text",content:p}); if(every&&ri<rest.length&&(i+1)%every===0){blocks.push({type:"image",src:rest[ri],alt:`${kw} 사진 ${ri+2}`});ri++;} });
     while(ri<rest.length){blocks.push({type:"image",src:rest[ri],alt:`${kw} 사진 ${ri+2}`});ri++;}
+    // ★글쓴이 인사말: 썸네일(첫 이미지) 바로 다음 1회 삽입(발행하기와 동일). 비어있으면 안 넣음.
+    if(greeting.trim()){
+      const g=greeting.trim();
+      if(!blocks.some(b=>b.type==="text"&&(b.content||"").trim()===g)){
+        const firstImgIdx=blocks.findIndex(b=>b.type==="image"||b.type==="image-pair");
+        const at=firstImgIdx>=0?firstImgIdx+1:0;
+        blocks.splice(at,0,{type:"text",content:g});
+      }
+    }
     const payload:any={userId:ADM_UID,platform:"naver",title,content,naverId:acc?.username||undefined,pubScope,tags,imageUrl:(!flowN&&images[0])||undefined,categoryId:categoryId||undefined,visibility,blocks};
     if(flowN){   // 무료 Flow: 봇이 발행 중 생성
       const lines=content.split("\n").filter((l:string)=>l.trim().length>5);
@@ -4663,6 +4672,22 @@ POST3: (제목)|(이유)
                         </div>
                       </div>
                     )}
+                  </div>
+                </div>
+
+                {/* 💬 글쓴이 인사말 (발행하기와 동일 저장소 · 썸네일 바로 밑 자동) */}
+                <div className="card" style={{marginBottom:14}}>
+                  <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+                    <label className="inp-label" style={{marginBottom:0}}>💬 글쓴이 인사말 <span style={{fontWeight:400,color:"var(--text3)"}}>(한 번 저장하면 발행하기·원터치 모두 계속 사용)</span></label>
+                    {savedGreeting && greeting.trim()===savedGreeting
+                      ? <span style={{fontSize:11,fontWeight:800,color:"#2f9e5e",background:"rgba(47,158,94,.12)",borderRadius:99,padding:"2px 9px"}}>✓ 저장됨</span>
+                      : savedGreeting ? <span style={{fontSize:11,fontWeight:800,color:"#e0952f",background:"rgba(224,149,47,.12)",borderRadius:99,padding:"2px 9px"}}>● 저장 안 된 변경</span> : null}
+                  </div>
+                  <div style={{fontSize:11,color:"var(--text3)",lineHeight:1.6,margin:"6px 0"}}>수동이든 예약이든 <b>모든 글의 썸네일 바로 밑</b>에 자동으로 들어가요.</div>
+                  <textarea className="inp" rows={2} placeholder="안녕하세요! 오늘도 유용한 정보를 가지고 왔어요 😊" value={greeting} onChange={e=>setGreeting(e.target.value)} disabled={otRunning} style={{resize:"none",fontSize:13}}/>
+                  <div style={{display:"flex",gap:6,marginTop:6}}>
+                    <button type="button" onClick={saveGreeting} disabled={otRunning||greeting.trim()===savedGreeting} style={{flex:1,padding:"9px",borderRadius:10,border:"none",cursor:greeting.trim()===savedGreeting?"default":"pointer",fontSize:12.5,fontWeight:800,fontFamily:"inherit",background:greeting.trim()===savedGreeting?"var(--card2)":OT,color:greeting.trim()===savedGreeting?"var(--text3)":"#fff",opacity:greeting.trim()===savedGreeting?.7:1}}>💾 인사말 저장하기</button>
+                    {savedGreeting && <button type="button" onClick={()=>{setGreeting("");localStorage.removeItem("publy_adm_greeting");setSavedGreeting("");showToast("저장된 인사말을 비웠어요","success");}} disabled={otRunning} style={{padding:"9px 12px",borderRadius:10,border:"1px solid var(--border)",background:"var(--card)",color:"var(--text3)",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:"inherit"}}>비우기</button>}
                   </div>
                 </div>
 

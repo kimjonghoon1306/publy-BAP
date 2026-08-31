@@ -2995,6 +2995,62 @@ POST3: (제목)|(이유)
     return cats[0];
   }
   // flowN>0 → 무료 Flow: 이미지를 미리 안 만들고 봇이 발행 중 생성·삽입(일반 발행의 useFlow와 동일). images는 빈 배열.
+  /* ★공용 삽입: 온파트너 상품카드 → 내 링크(OG) → 글쓴이 인사글을, 발행하기와 100% 동일한 규칙으로 blocks에 넣는다.
+     원칙: 링크는 '이미지 블록 바로 뒤 + URL만 단독 문단' → 이미지와 링크 사이에 글자가 절대 안 낀다.
+     발행하기(handlePublish)와 원터치(otPublishItem)가 같이 쓴다(중복 제거 + 완전 동일 보장). */
+  function insertLinksAndGreeting(inputBlocks:any[], effTitle:string, keyword:string):any[]{
+    let effectiveBlocks:any[]=inputBlocks.map(b=>({id:b.id||uid(),...b}));
+    // 1) 온파트너 상품카드 (가격 나온 상품카드로 렌더 — partnerUrl만 단독 문단)
+    const partnerForPublish:OnPartnerItem[] = onPartnerItems.length>0 ? onPartnerItems : (onPartnerPreview?[onPartnerPreview]:[]);
+    if(partnerForPublish.length>0){
+      const items=partnerForPublish.filter(it=>it.product.available&&it.product.partnerUrl);
+      const DISCLOSURE="※ 이 글에는 제휴 링크가 포함되어 있으며, 구매 시 작성자에게 일정 수수료가 발생할 수 있습니다.";
+      if(items.length>0 && !effectiveBlocks.some(b=>b.type==="text"&&(b.content||"").includes("제휴 링크가 포함")))
+        effectiveBlocks=[{type:"text",id:uid(),content:DISCLOSURE},...effectiveBlocks];
+      const isBoundary=(b:any)=>b.type==="text"&&/\[FAQ시작\]|\[관련글시작\]|질문\s*답변|Q\s*&\s*A|큐앤에이|해시태그|자주\s*묻는/i.test(b.content||"");
+      let boundaryIdx=effectiveBlocks.findIndex(isBoundary); if(boundaryIdx<0)boundaryIdx=effectiveBlocks.length;
+      const imgIdxs:number[]=[]; for(let i=1;i<boundaryIdx;i++){const t=effectiveBlocks[i].type;if(t==="image"||t==="image-pair")imgIdxs.push(i);}
+      const textIdxs:number[]=[]; for(let i=0;i<boundaryIdx;i++){const b=effectiveBlocks[i];if(b.type==="text"&&(b.content||"").trim().length>=40)textIdxs.push(i);}
+      if(textIdxs.length===0)for(let i=0;i<boundaryIdx;i++)if(effectiveBlocks[i].type==="text")textIdxs.push(i);
+      const anchorIdxs = imgIdxs.length>0 ? imgIdxs : textIdxs;
+      if(items.length>0 && anchorIdxs.length>0){
+        const ratios = items.length===1?[0.6]:items.length===2?[0.45,0.72]:[0.35,0.58,0.8];
+        const used=new Set<number>();
+        const insertAfter=items.map((_,i)=>{ let ai=Math.round(anchorIdxs.length*ratios[i])-1; ai=Math.max(0,Math.min(anchorIdxs.length-1,ai)); while(used.has(anchorIdxs[ai])&&ai<anchorIdxs.length-1)ai++; used.add(anchorIdxs[ai]); return anchorIdxs[ai]; });
+        const withLink:any[]=[];
+        effectiveBlocks.forEach((b,i)=>{ withLink.push(b); items.forEach((it,k)=>{ if(insertAfter[k]===i) withLink.push({type:"text",id:uid(),content:`👇 '${it.product.name}' 지금 바로 확인하기\n${it.product.partnerUrl}`}); }); });
+        effectiveBlocks=withLink;
+      }
+    }
+    // 2) 내 링크 (OG 썸네일 카드 — URL만 단독 문단, 온파트너 붙은 이미지는 앵커 제외)
+    if(myLinks.length>0){
+      const isBoundary2=(b:any)=>b.type==="text"&&/\[FAQ시작\]|\[관련글시작\]|질문\s*답변|Q\s*&\s*A|큐앤에이|해시태그|자주\s*묻는/i.test(b.content||"");
+      let bIdx=effectiveBlocks.findIndex(isBoundary2); if(bIdx<0)bIdx=effectiveBlocks.length;
+      const isLinkBlock=(b?:any)=>!!b&&b.type==="text"&&/https?:\/\//.test(b.content||"");
+      const anchors:number[]=[];
+      for(let i=1;i<bIdx;i++){const t=effectiveBlocks[i].type;if((t==="image"||t==="image-pair")&&!isLinkBlock(effectiveBlocks[i+1]))anchors.push(i);}
+      if(anchors.length===0)for(let i=0;i<bIdx;i++){const b=effectiveBlocks[i];if(b.type==="text"&&(b.content||"").trim().length>=40&&!/https?:\/\//.test(b.content||""))anchors.push(i);}
+      if(anchors.length>0){
+        const ratios = myLinks.length===1?[0.7]:myLinks.length===2?[0.5,0.8]:[0.4,0.62,0.85];
+        const used=new Set<number>();
+        const insAfter=myLinks.map((_,i)=>{ let ai=Math.round(anchors.length*ratios[i])-1; ai=Math.max(0,Math.min(anchors.length-1,ai)); while(used.has(anchors[ai])&&ai<anchors.length-1)ai++; used.add(anchors[ai]); return anchors[ai]; });
+        const withMy:any[]=[];
+        effectiveBlocks.forEach((b,i)=>{ withMy.push(b); myLinks.forEach((url,k)=>{ if(insAfter[k]===i) withMy.push({type:"text",id:uid(),content:url}); }); });
+        effectiveBlocks=withMy;
+      }
+    }
+    // 3) 글쓴이 인사말 (썸네일/제휴문구 바로 다음 1회)
+    if(greeting.trim()){
+      const g=greeting.trim();
+      if(!effectiveBlocks.some(b=>b.type==="text"&&(b.content||"").trim()===g)){
+        const discIdx=effectiveBlocks.findIndex(b=>b.type==="text"&&(b.content||"").includes("제휴 링크가 포함"));
+        const firstImgIdx=effectiveBlocks.findIndex(b=>b.type==="image"||b.type==="image-pair");
+        const at = discIdx>=0 ? discIdx+1 : (firstImgIdx>=0 ? firstImgIdx+1 : 0);
+        effectiveBlocks=[...effectiveBlocks.slice(0,at),{type:"text",id:uid(),content:g},...effectiveBlocks.slice(at)];
+      }
+    }
+    return effectiveBlocks;
+  }
   async function otPublishItem(kw:string,title:string,content:string,tags:string[],images:string[],categoryId:string|undefined,accId:string,flowN:number=0):Promise<string>{
     const acc=connAccs.find(a=>a.id===accId);
     const blocks:any[]=[];
@@ -3008,9 +3064,11 @@ POST3: (제목)|(이유)
       if(every&&ri<rest.length&&(i+1)%every===0){blocks.push({type:"image",src:rest[ri],alt:`${kw} 사진 ${ri+2}`});ri++;}
     });
     while(ri<rest.length){blocks.push({type:"image",src:rest[ri],alt:`${kw} 사진 ${ri+2}`});ri++;}
+    // ★온파트너·내 링크·인사글을 발행하기와 동일 규칙으로 삽입(링크↔이미지 사이 글 안 낌)
+    const finalBlocks=insertLinksAndGreeting(blocks,title,kw);
     const payload:any={userId:user.id,platform:"naver",title,content,
       naverId:acc?.username||undefined,pubScope,tags,
-      imageUrl:(!flowN&&images[0])||undefined,categoryId:categoryId||undefined,visibility,blocks};
+      imageUrl:(!flowN&&images[0])||undefined,categoryId:categoryId||undefined,visibility,blocks:finalBlocks};
     if(flowN){   // 무료 Flow: 봇이 발행 중 flowN장 생성. 본문 구간별 프롬프트 + 캡션 전달(일반 발행과 동일).
       const lines=content.split("\n").filter((l:string)=>l.trim().length>5);
       const step=Math.max(1,Math.floor(lines.length/flowN));
@@ -6749,6 +6807,87 @@ POST3: (제목)|(이유)
                       </div>
                     )}
                   </div>
+                </div>
+
+                {/* 💬 글쓴이 인사말 (발행하기와 동일 저장소 공유 · 저장하면 계속·수정 가능) */}
+                <div className="card" style={{marginBottom:14}}>
+                  <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+                    <label className="inp-label" style={{marginBottom:0}}>💬 글쓴이 인사말 <span style={{fontWeight:400,color:"var(--text3)"}}>(한 번 저장하면 발행하기·원터치 모두 계속 사용)</span></label>
+                    {savedGreeting && greeting.trim()===savedGreeting
+                      ? <span style={{fontSize:11,fontWeight:800,color:"#2f9e5e",background:"rgba(47,158,94,.12)",borderRadius:99,padding:"2px 9px"}}>✓ 저장됨</span>
+                      : savedGreeting ? <span style={{fontSize:11,fontWeight:800,color:"#e0952f",background:"rgba(224,149,47,.12)",borderRadius:99,padding:"2px 9px"}}>● 저장 안 된 변경</span> : null}
+                  </div>
+                  <div style={{fontSize:11,color:"var(--text3)",lineHeight:1.6,margin:"6px 0"}}>수동이든 예약이든 <b>모든 글의 썸네일 바로 밑</b>에 자동으로 들어가요.</div>
+                  <textarea className="inp" rows={2} placeholder="안녕하세요! 오늘도 유용한 정보를 가지고 왔어요 😊" value={greeting} onChange={e=>setGreeting(e.target.value)} disabled={otRunning} style={{resize:"none",fontSize:13}}/>
+                  <div style={{display:"flex",gap:6,marginTop:6}}>
+                    <button type="button" onClick={saveGreeting} disabled={otRunning||greeting.trim()===savedGreeting} style={{flex:1,padding:"9px",borderRadius:10,border:"none",cursor:greeting.trim()===savedGreeting?"default":"pointer",fontSize:12.5,fontWeight:800,fontFamily:"inherit",background:greeting.trim()===savedGreeting?"var(--card2)":OT,color:greeting.trim()===savedGreeting?"var(--text3)":"#fff",opacity:greeting.trim()===savedGreeting?.7:1}}>💾 인사말 저장하기</button>
+                    {savedGreeting && <button type="button" onClick={()=>{setGreeting("");localStorage.removeItem("publy_greeting");setSavedGreeting("");showToast("저장된 인사말을 비웠어요","success");}} disabled={otRunning} style={{padding:"9px 12px",borderRadius:10,border:"1px solid var(--border)",background:"var(--card)",color:"var(--text3)",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:"inherit"}}>비우기</button>}
+                  </div>
+                </div>
+
+                {/* 🌱 온파트너 상품 링크 (발행하기와 동일) */}
+                <div className="card" style={{marginBottom:14,borderColor:onPartnerItems.length>0?"rgba(190,255,0,.38)":undefined}}>
+                  <div className="card-title" style={{marginBottom:6}}>🌱 온파트너 상품 링크 <span style={{fontSize:11,color:"var(--text3)",fontWeight:600}}>({onPartnerItems.length}/{MAX_ONPARTNER})</span></div>
+                  <div style={{fontSize:11,color:"var(--text3)",lineHeight:1.6,marginBottom:10}}>링크 넣고 <b>조회</b> → <b>저장</b>을 <b>최대 {MAX_ONPARTNER}개까지</b> 반복하면, 각 상품이 <b>가격 나온 상품 카드</b>로 이미지 바로 밑에 자동 삽입돼요(Q&A·해시태그 위).</div>
+                  {onPartnerItems.length<MAX_ONPARTNER&&(
+                    <div style={{display:"flex",gap:7,alignItems:"stretch"}}>
+                      <input className="inp" value={onPartnerLink} onChange={e=>{setOnPartnerLink(e.target.value);setOnPartnerError("");setOnPartnerPreview(null);}} onKeyDown={e=>e.key==="Enter"&&loadOnPartnerProduct()} placeholder="https://partner.yuanfnb.com/r/추천코드" style={{flex:1,minWidth:0}}/>
+                      <button className="btn btn-secondary" onClick={loadOnPartnerProduct} disabled={onPartnerLoading} style={{flexShrink:0}}>{onPartnerLoading?<><span className="spinner"/>조회 중</>:"🔍 조회"}</button>
+                    </div>
+                  )}
+                  {onPartnerError&&<div style={{fontSize:11,color:"var(--danger)",marginTop:7}}>⚠️ {onPartnerError}</div>}
+                  {onPartnerPreview&&(
+                    <div style={{marginTop:12,padding:10,borderRadius:11,background:"var(--accent-bg)",border:"1.5px solid var(--accent-border)"}}>
+                      <div style={{display:"flex",gap:12,alignItems:"center"}}>
+                        {onPartnerPreview.product.image?<img src={onPartnerPreview.product.image} alt={onPartnerPreview.product.name} style={{width:56,height:56,borderRadius:9,objectFit:"cover",flexShrink:0}}/>:<div style={{width:56,height:56,borderRadius:9,background:"var(--bg2)",display:"grid",placeItems:"center",fontSize:22,flexShrink:0}}>🌱</div>}
+                        <div style={{minWidth:0,flex:1}}>
+                          <div style={{fontSize:13,fontWeight:800,color:"var(--text)",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{onPartnerPreview.product.name}</div>
+                          <div style={{fontSize:12,fontWeight:800,color:"var(--accent-text)",marginTop:3}}>{onPartnerPreview.product.price?`${onPartnerPreview.product.price.toLocaleString("ko-KR")}원`:"가격은 상품 페이지에서 확인"}</div>
+                          <div style={{fontSize:10,color:onPartnerPreview.product.available?"var(--success)":"var(--danger)",marginTop:3}}>{onPartnerPreview.product.available?"● 판매 중":"● 현재 판매 중지"}</div>
+                        </div>
+                      </div>
+                      <div style={{display:"flex",gap:7,marginTop:10}}>
+                        <button className="btn btn-primary" onClick={addOnPartnerProduct} style={{flex:1,justifyContent:"center"}}>💾 저장 (목록에 추가)</button>
+                        <button className="btn btn-secondary" onClick={()=>{setOnPartnerPreview(null);setOnPartnerLink("");}} style={{flexShrink:0}}>취소</button>
+                      </div>
+                    </div>
+                  )}
+                  {onPartnerItems.map((it,idx)=>(
+                    <div key={it.product.partnerUrl||idx} style={{marginTop:8,padding:"8px 10px",borderRadius:10,background:"var(--card2)",border:"1px solid var(--border)",display:"flex",gap:10,alignItems:"center"}}>
+                      <span style={{fontSize:11,fontWeight:800,color:"var(--accent-text)",flexShrink:0}}>{idx+1}</span>
+                      {it.product.image?<img src={it.product.image} alt={it.product.name} style={{width:50,height:50,borderRadius:7,objectFit:"cover",flexShrink:0}}/>:<div style={{width:50,height:50,borderRadius:7,background:"var(--bg2)",display:"grid",placeItems:"center",fontSize:20,flexShrink:0}}>🌱</div>}
+                      <div style={{minWidth:0,flex:1}}>
+                        <div style={{fontSize:12.5,fontWeight:800,color:"var(--text)",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{it.product.name}</div>
+                        <div style={{fontSize:11,fontWeight:800,color:"var(--accent-text)",marginTop:2}}>{it.product.price?`${it.product.price.toLocaleString("ko-KR")}원`:"가격 상품페이지 확인"}<span style={{fontSize:9,color:"var(--text3)",fontWeight:600,marginLeft:6}}>· 링크 자동삽입</span></div>
+                      </div>
+                      <button type="button" onClick={()=>setOnPartnerItems(prev=>prev.filter((_,i)=>i!==idx))} title="빼기" style={{border:0,background:"transparent",color:"var(--text3)",cursor:"pointer",fontSize:15,flexShrink:0}}>✕</button>
+                    </div>
+                  ))}
+                  {onPartnerItems.length>1&&<div style={{marginTop:8,color:"var(--accent-text)",fontSize:10,fontWeight:800}}>본문에 골고루 분산 배치돼요 (Q&A·해시태그 위).</div>}
+                </div>
+
+                {/* 🔗 내 링크 넣기 (발행하기와 동일 · OG 썸네일 카드) */}
+                <div className="card" style={{marginBottom:14,borderColor:myLinks.length>0?"rgba(0,150,255,.35)":undefined}}>
+                  <div className="card-title" style={{marginBottom:6}}>🔗 내 링크 넣기 <span style={{fontSize:11,color:"var(--text3)",fontWeight:600}}>({myLinks.length}/{MAX_MYLINK})</span></div>
+                  <div style={{fontSize:11,color:"var(--text3)",lineHeight:1.6,marginBottom:10}}>내 사이트·블로그 등 <b>아무 링크</b>나 넣고 <b>추가</b>하면, 발행 시 이미지 바로 밑에 <b>썸네일 카드(OG)</b>로 자동 배치돼요. 온파트너와 안 섞여요. (최대 {MAX_MYLINK}개)</div>
+                  {myLinks.length<MAX_MYLINK&&(
+                    <div style={{display:"flex",gap:7,alignItems:"stretch"}}>
+                      <input className="inp" value={myLinkInput} onChange={e=>{setMyLinkInput(e.target.value);setMyLinkError("");}} onKeyDown={e=>e.key==="Enter"&&addMyLink()} placeholder="https://내사이트.com  (또는 pick.온종일.com)" style={{flex:1,minWidth:0}}/>
+                      <button className="btn btn-secondary" onClick={addMyLink} style={{flexShrink:0}}>＋ 추가</button>
+                    </div>
+                  )}
+                  {myLinkError&&<div style={{fontSize:11,color:"var(--danger)",marginTop:7}}>⚠️ {myLinkError}</div>}
+                  {myLinks.map((url,idx)=>(
+                    <div key={url} style={{marginTop:8,padding:"9px 11px",borderRadius:10,background:"var(--card2)",border:"1px solid var(--border)",display:"flex",gap:10,alignItems:"center"}}>
+                      <span style={{fontSize:14,flexShrink:0}}>🔗</span>
+                      <div style={{minWidth:0,flex:1}}>
+                        <div style={{fontSize:12.5,fontWeight:800,color:"var(--text)",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{url.replace(/^https?:\/\//,"")}</div>
+                        <div style={{fontSize:10,color:"var(--text3)",fontWeight:600,marginTop:2}}>발행 시 썸네일 카드로 자동 삽입</div>
+                      </div>
+                      <button type="button" onClick={()=>setMyLinks(prev=>prev.filter((_,i)=>i!==idx))} title="빼기" style={{border:0,background:"transparent",color:"var(--text3)",cursor:"pointer",fontSize:15,flexShrink:0}}>✕</button>
+                    </div>
+                  ))}
+                  {myLinks.length>1&&<div style={{marginTop:8,color:"#0096ff",fontSize:10,fontWeight:800}}>본문 이미지 밑에 골고루 배치돼요 (Q&A·해시태그 위).</div>}
                 </div>
 
                 {/* 텀 + 이미지 + 카테고리 */}
