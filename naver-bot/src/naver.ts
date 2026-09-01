@@ -1,4 +1,4 @@
-import { chromium, BrowserContext } from "playwright";
+import { chromium, BrowserContext, Frame, Page } from "playwright";
 import fs from "fs";
 import https from "https";
 import http from "http";
@@ -295,7 +295,7 @@ export async function getNaverCategories(
     for (let i = 0; i < 6; i++) {
       if (frame) break;
       await page.waitForTimeout(1000);
-      frame = getFrame();
+      frame = getFrame() as Frame;
     }
     if (!frame) { await browser.close(); return []; }
 
@@ -422,7 +422,7 @@ export async function publishNaver(params: {
   });
   await applyAntiDetection(context);
   await context.addCookies(cookies);
-  const page = await context.newPage();
+  let page = await context.newPage();
   let lastPageAction = "발행 브라우저 초기화";
   let unexpectedPageClose = false;
   const markPageAction = (action: string) => { lastPageAction = action; };
@@ -453,15 +453,102 @@ export async function publishNaver(params: {
 
   try {
     if (signal?.aborted) throw new Error("발행이 취소됐습니다");
-    // ★글 살리기(편집) 모드면 그 글의 편집화면을, 아니면 새 글쓰기 화면을 연다. 에디터는 둘 다 스마트에디터라 이후 로직 공통.
-    const writeUrl = isEdit
-      // 편집 전용 엔드포인트를 직접 사용한다. PostWriteForm+Redirect=Update는 최근 네이버에서
-      // 중간 창을 닫는 리다이렉트가 발생해 이후 waitForTimeout이 closed page를 잡는 경우가 있다.
-      ? `https://blog.naver.com/PostUpdateForm.naver?blogId=${blogId}&logNo=${editLogNo}`
-      : `https://blog.naver.com/GoBlogWrite.naver?blogId=${blogId}`;
-    console.log(`[naver] ${isEdit?`글 살리기(편집) 진입 logNo=${editLogNo}`:"글쓰기 진입"}: ${writeUrl}`);
-    assertPageOpen("글쓰기 페이지 이동 전");
-    await page.goto(writeUrl, { waitUntil: "domcontentloaded", timeout: 60000 });
+    // 편집 성공은 URL이나 mainFrame 이름이 아니라 실제 SE ONE 제목 요소로 판정한다.
+    // 공개 목록/보기에도 blog.naver.com 프레임이 있으므로 그것을 편집기로 오인하면 안 된다.
+    const findEditorFrame = async (targetPage: Page): Promise<Frame | null> => {
+      if (targetPage.isClosed()) return null;
+      for (const candidate of targetPage.frames()) {
+        if (await candidate.locator(".se-section-documentTitle").first().count().catch(() => 0)) return candidate;
+      }
+      return null;
+    };
+    const logEntryState = async (label: string) => {
+      const frames = page.isClosed() ? [] : page.frames();
+      const frameInfo = frames.map(f => `${f.name() || "(unnamed)"}=${f.url()}`).join(" | ");
+      console.log(`[naver] 편집 진입 ${label} 최종 URL: ${page.isClosed() ? "(page closed)" : page.url()}`);
+      console.log(`[naver] 편집 진입 ${label} 프레임(${frames.length}): ${frameInfo || "없음"}`);
+    };
+    const waitForEditor = async (label: string, timeoutMs = 15000): Promise<Frame | null> => {
+      const deadline = Date.now() + timeoutMs;
+      while (Date.now() < deadline && !page.isClosed()) {
+        const found = await findEditorFrame(page);
+        if (found) {
+          console.log(`[naver] ✅ 편집기 확인(${label}): frame=${found.name() || "(unnamed)"}, url=${found.url()}`);
+          return found;
+        }
+        // 잘못된 endpoint의 확정 실패는 15초를 다 기다리지 않는다.
+        if (/PostList\.naver/i.test(page.url())) break;
+        await page.waitForTimeout(500);
+      }
+      await logEntryState(label);
+      return null;
+    };
+
+    let verifiedEditFrame: Frame | null = null;
+    if (isEdit) {
+      const updateUrl = `https://blog.naver.com/PostWriteForm.naver?blogId=${encodeURIComponent(blogId)}&Redirect=Update&logNo=${editLogNo}`;
+      console.log(`[naver] 글 살리기 1차 진입(공식 Update 파라미터): ${updateUrl}`);
+      markPageAction("편집 Update URL 이동");
+      const redirectedPage = context.waitForEvent("page", { timeout: 12000 }).catch(() => null);
+      await page.goto(updateUrl, { waitUntil: "domcontentloaded", timeout: 60000 }).catch(e => {
+        console.log(`[naver] ⚠️ 편집 Update URL 이동 오류(창 전환 가능): ${e instanceof Error ? e.message : String(e)}`);
+      });
+      const replacement = await redirectedPage;
+      if (replacement) {
+        page = replacement;
+        await page.waitForLoadState("domcontentloaded", { timeout: 15000 }).catch(() => {});
+        console.log(`[naver] 편집 리다이렉트 새 페이지 채택: ${page.url()}`);
+      }
+      verifiedEditFrame = await waitForEditor("Update URL");
+
+      if (!verifiedEditFrame) {
+        // 직접 endpoint가 목록으로 튕기거나 창을 닫으면 깨끗한 탭에서 원문을 연 뒤,
+        // 소유자에게만 노출되는 Update 링크/수정 버튼을 사용한다.
+        if (page.isClosed()) page = await context.newPage();
+        const viewUrl = `https://blog.naver.com/PostView.naver?blogId=${encodeURIComponent(blogId)}&logNo=${editLogNo}`;
+        console.log(`[naver] 글 살리기 2차 진입(원문 소유자 수정 버튼): ${viewUrl}`);
+        markPageAction("편집 원문 보기 이동");
+        await page.goto(viewUrl, { waitUntil: "domcontentloaded", timeout: 60000 });
+        await page.waitForLoadState("networkidle", { timeout: 10000 }).catch(() => {});
+        await logEntryState("원문 보기");
+
+        let editControl: { frame: Frame; selector: string } | null = null;
+        const editSelectors = [
+          `a[href*="PostWriteForm.naver"][href*="logNo=${editLogNo}"]`,
+          `a[href*="Redirect=Update"][href*="logNo=${editLogNo}"]`,
+          "a:has-text('수정')",
+          "button:has-text('수정')",
+        ];
+        for (const candidate of page.frames()) {
+          for (const selector of editSelectors) {
+            const locator = candidate.locator(selector).filter({ visible: true }).first();
+            if (await locator.count().catch(() => 0)) { editControl = { frame: candidate, selector }; break; }
+          }
+          if (editControl) break;
+        }
+        if (!editControl) throw new Error(`기존 글의 소유자 수정 버튼을 찾지 못했습니다 (logNo=${editLogNo}, 원본은 변경하지 않음)`);
+        console.log(`[naver] 소유자 수정 컨트롤 클릭: ${editControl.selector}`);
+        markPageAction("소유자 수정 버튼 클릭");
+        const popupPromise = context.waitForEvent("page", { timeout: 12000 }).catch(() => null);
+        await editControl.frame.locator(editControl.selector).filter({ visible: true }).first().click({ timeout: 10000 });
+        const popup = await popupPromise;
+        if (popup) {
+          page = popup;
+          await page.waitForLoadState("domcontentloaded", { timeout: 15000 }).catch(() => {});
+          console.log(`[naver] 수정 버튼 새 페이지 채택: ${page.url()}`);
+        }
+        verifiedEditFrame = await waitForEditor("소유자 수정 버튼", 20000);
+      }
+      if (!verifiedEditFrame) {
+        throw new Error(`스마트에디터 편집 화면 진입에 실패했습니다 (logNo=${editLogNo}, 원본은 변경하지 않음)`);
+      }
+    } else {
+      // 새 글 경로는 기존 동작을 그대로 유지한다.
+      const writeUrl = `https://blog.naver.com/GoBlogWrite.naver?blogId=${blogId}`;
+      console.log(`[naver] 글쓰기 진입: ${writeUrl}`);
+      assertPageOpen("글쓰기 페이지 이동 전");
+      await page.goto(writeUrl, { waitUntil: "domcontentloaded", timeout: 60000 });
+    }
 
     if (page.url().includes("nidlogin") || page.url().includes("login.naver")) {
       deleteSession(naverSessionName(userId), LEGACY_SESSION_DIRS);
@@ -473,16 +560,17 @@ export async function publishNaver(params: {
     await page.waitForTimeout(5000);
 
     const getFrame = () => {
+      if (isEdit) return verifiedEditFrame && !verifiedEditFrame.isDetached() ? verifiedEditFrame : null;
       const frames = page.frames();
       return frames.find(f => f.name() === "mainFrame")
         ?? frames.find(f => f.url().includes("blog.naver.com"))
         ?? frames[1] ?? null;
     };
 
-    let frame = getFrame();
+    let frame: Frame = getFrame() as Frame;
     for (let i = 0; i < 10; i++) {
       await page.waitForTimeout(1000);
-      frame = getFrame();
+      frame = getFrame() as Frame;
       if (frame) break;
     }
     if (!frame) throw new Error("mainFrame을 찾을 수 없습니다");
@@ -492,7 +580,7 @@ export async function publishNaver(params: {
       assertPageOpen(action);
       if (!frame || frame.isDetached()) {
         console.log(`[naver] ⚠️ mainFrame 재탐색 (단계: ${action})`);
-        frame = getFrame();
+        frame = getFrame() as Frame;
         if (!frame) throw new Error(`mainFrame이 분리되었습니다 (단계: ${action})`);
       }
     };
@@ -509,10 +597,14 @@ export async function publishNaver(params: {
       if (helpVisible) await frame.click(".se-help-panel-close-button", { timeout: 2000 });
     } catch {}
 
-    // SE4 로드 완료 대기
-    try {
-      await frame.waitForSelector(".se-section-documentTitle, .se-editor, .se-container", { timeout: 40000 });
-    } catch {}
+    // 편집 모드는 위에서 제목 요소까지 검증했다. 새 글도 기존 셀렉터 로드를 기다린다.
+    if (isEdit) {
+      await frame.waitForSelector(".se-section-documentTitle", { timeout: 5000 });
+    } else {
+      try {
+        await frame.waitForSelector(".se-section-documentTitle, .se-editor, .se-container", { timeout: 40000 });
+      } catch {}
+    }
     await page.waitForTimeout(3000);
 
     // ── 제목 입력 ──
