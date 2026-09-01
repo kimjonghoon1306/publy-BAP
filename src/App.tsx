@@ -110,6 +110,21 @@ export default function App() {
   function toggleTheme() { setTheme(t => t === "dark" ? "light" : "dark"); }
 
   function handleLogin(u: PublyUser) {
+    // ★같은 PC에서 '다른 회원'이 로그인하면 이전 회원의 개인 작업 흔적을 싹 비운다(캐시 잔재로 남 데이터 보이는 버그 방지).
+    //   지우는 대상 = 키워드·제목·원터치 로그/설정·예약·인사말·링크 등 '작업 데이터'. (계정 연결/API키 등 기기 공용 설정은 유지)
+    try {
+      const lastUid = localStorage.getItem("publy_last_uid") || "";
+      if (lastUid && lastUid !== u.id) {
+        const prefixes = ["publy_kws","publy_titles","publy_ot_","publy_greeting","publy_onpartner","publy_mylinks","publy_republish","publy_sa_","publy_calendar","publy_content_calendar"];
+        const toRemove: string[] = [];
+        for (let i = 0; i < localStorage.length; i++) {
+          const k = localStorage.key(i);
+          if (k && prefixes.some(p => k.startsWith(p))) toRemove.push(k);
+        }
+        toRemove.forEach(k => localStorage.removeItem(k));
+      }
+      localStorage.setItem("publy_last_uid", u.id);
+    } catch {}
     localStorage.setItem("publy_user", JSON.stringify(u));
     setUser(u);
     setView("dashboard");
