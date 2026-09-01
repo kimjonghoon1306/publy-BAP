@@ -1367,7 +1367,7 @@ Output (JSON object only): {"keyword":"핵심키워드","title":"새 SEO 제목"
   useEffect(()=>{try{localStorage.setItem("publy_ot_log",JSON.stringify(otLog.slice(0,50)));}catch{}},[otLog]);   // 로그 저장(작업 안 할 때도 항상 확인)
   // 🔴화면 어디서든 항상 보이는 실시간 로그(고정 패널). 스크롤 안 해도 진행상황이 눈에 보이게.
   const [otLiveLog,setOtLiveLog]=useState<string[]>(()=>{try{return JSON.parse(localStorage.getItem("publy_ot_livelog")||"[]");}catch{return [];}});
-  const [otDockOpen,setOtDockOpen]=useState(true);
+  const [otDockOpen,setOtDockOpen]=useState(false);   // 기본 접힘 — 펼치면 화면 절반을 덮어 입력칸(인사말·링크)이 가려 클릭 안 되던 문제
   useEffect(()=>{try{localStorage.setItem("publy_ot_livelog",JSON.stringify(otLiveLog.slice(-200)));}catch{}},[otLiveLog]);
   // 봇 오프라인/웹 미리보기 대비 폴백(카테고리별 무난한 인기 주제) — 빈 화면 방지
   const HOT_FALLBACK: Record<string,string[]> = {
