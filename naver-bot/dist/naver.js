@@ -27,6 +27,55 @@ const LEGACY_SESSION_DIRS = [path_1.default.join(__dirname, "../sessions")];
 const naverSessionName = (userId) => `naver_${userId}`;
 const naverAcctSessionName = (userId, naverId) => `naver_${userId}__${String(naverId).replace(/[^a-zA-Z0-9_-]/g, "")}`;
 const googleSessionName = (userId) => `google_${userId}`;
+// ★공용 blogId 확정("스킬") — 네이버 로그인ID ≠ 블로그주소(예: 로그인 bb9653 / 블로그 system-b)인 계정 대응.
+//   neighbor-bot의 '제목수정(updatePostTitle)'에서 실측·검증된 resolveBlogIdFast를 그대로 이식.
+//   저장된 blogId가 로그인ID로 잘못 박혀 있어도, 실행 시점에 GoBlogWrite 302 Location에서 진짜 blogId를 뽑아 교정한다.
+//   글 편집(PostWriteForm?...&Redirect=Update)은 정확한 blogId 아니면 글목록(PostList)으로 튕기므로 필수.
+const RESOLVE_INVALID = ["PostList", "BlogHome", "FeedList", "neighborPostList", "TagList", "GoBlogWrite", "RedirectWriteView", "PostWriteForm", "MyBlog", "section", "m", "manage", "admin", "GoMyblog", "Write", "fx"];
+async function resolveNaverBlogId(storedBlogId, cookies, userId, log = console.log) {
+    storedBlogId = (storedBlogId || "").split("@")[0].trim(); // 이메일이 blogId로 들어오면 아이디만
+    const pickFrom = (s) => {
+        const m = s.match(/[?&]blogId=([a-zA-Z0-9_-]+)/) || s.match(/blog\.naver\.com\/([a-zA-Z0-9_-]+)/);
+        return (m && m[1] && !RESOLVE_INVALID.includes(m[1])) ? m[1] : "";
+    };
+    try {
+        const cookieHeader = (cookies || []).map((c) => `${c.name}=${c.value}`).join("; ");
+        if (!cookieHeader)
+            return storedBlogId;
+        const headers = { cookie: cookieHeader, "user-agent": UA };
+        let real = "";
+        // 1순위: GoBlogWrite 302 Location에서 blogId
+        try {
+            const r = await fetch("https://blog.naver.com/GoBlogWrite.naver", { headers, redirect: "manual" });
+            const loc = r.headers.get("location") || "";
+            real = pickFrom(loc);
+            if (!real && r.status >= 200 && r.status < 300)
+                real = pickFrom(r.url || "");
+        }
+        catch { }
+        // 2순위: 모바일 내블로그 리다이렉트
+        if (!real)
+            try {
+                const r2 = await fetch("https://m.blog.naver.com/MyBlog.naver", { headers, redirect: "manual" });
+                real = pickFrom(r2.headers.get("location") || "") || pickFrom(r2.url || "");
+            }
+            catch { }
+        if (real && real !== storedBlogId) {
+            log(`[naver] [blogId교정] '${storedBlogId}' → '${real}' (로그인ID와 블로그주소가 달라 자동으로 맞췄어요)`);
+            try {
+                const s = (0, session_store_1.readSession)(naverSessionName(userId), LEGACY_SESSION_DIRS);
+                if (s) {
+                    s.blogId = real;
+                    (0, session_store_1.writeSession)(naverSessionName(userId), s);
+                }
+            }
+            catch { }
+            return real;
+        }
+    }
+    catch { }
+    return storedBlogId;
+}
 function naverSessionExists(userId) {
     return (0, session_store_1.hasSession)(naverSessionName(userId), LEGACY_SESSION_DIRS);
 }
@@ -491,7 +540,10 @@ function cleanContent(text) {
 }
 /* ── 네이버 블로그 자동발행 ── */
 async function publishNaver(params) {
-    const { userId, title: rawTitle, content, pubScope = "full", tags, imageUrl, categoryId, visibility = "public", scheduleTime, blocks, videoUrl, videoPosition = "middle" } = params;
+    const { userId, title: rawTitle, content, pubScope = "full", tags, imageUrl, categoryId, visibility = "public", scheduleTime, blocks, videoUrl, videoPosition = "middle", editLogNo, editBlogId, signal } = params;
+    if (signal?.aborted)
+        throw new Error("발행이 취소됐습니다");
+    const isEdit = !!(editLogNo && /^\d+$/.test(String(editLogNo))); // 글 살리기(덮어쓰기) 모드
     const title = rawTitle.replace(/\n/g, " ").trim().slice(0, 40);
     // pubScope에 따라 블록 필터링 + 마커 제거
     //   ★ "블록 단위"로 마커 포함 블록만 지우면, FAQ/Q&A가 여러 블록으로 쪼개졌을 때
@@ -512,19 +564,34 @@ async function publishNaver(params) {
         console.log(`[naver] 본문설정(${pubScope}): 경계 이후 ${(blocks || []).length - cutIdx}개 블록 제거`);
     const processedBlocks = keptBlocks.map(b => b.type === "text" ? { ...b, content: cleanContent(b.content || "") } : b);
     const cleanedContent = cleanContent(content);
-    const blogId = (0, session_store_1.readSession)(naverSessionName(userId), LEGACY_SESSION_DIRS)?.blogId;
+    const storedBlogId = (0, session_store_1.readSession)(naverSessionName(userId), LEGACY_SESSION_DIRS)?.blogId;
     const cookies = await ensureLiveSessionNaver(userId); // ★세션 만료면 저장된 비번으로 자동 재연결(캡차면 창 모드)
+    // ★실제 blogId 확정(로그인ID≠블로그주소 대응) — 제목수정에서 검증된 공용 로직 재사용.
+    //   특히 글 살리기(편집)는 정확한 blogId 아니면 PostWriteForm이 글목록으로 튕기므로 반드시 교정.
+    const blogId = await resolveNaverBlogId(storedBlogId, cookies, userId, console.log);
+    if (isEdit && editBlogId) {
+        const norm = (v) => String(v || "").trim().toLowerCase().replace(/@naver\.com$/i, "");
+        if (norm(blogId) !== norm(editBlogId)) {
+            throw new Error(`글 주인 계정 불일치: 선택 세션의 블로그는 '${blogId}', 살릴 글의 블로그는 '${editBlogId}'입니다. 원본은 변경하지 않았어요.`);
+        }
+        console.log(`[naver] ✅ 글 주인 계정 확인: ${blogId} (logNo=${editLogNo})`);
+    }
+    let closingExpected = false;
     const browser = await playwright_1.chromium.launch({ headless: false, args: LAUNCH_ARGS });
+    const abortPublish = () => {
+        closingExpected = true;
+        void browser.close().catch(() => { });
+    };
+    signal?.addEventListener("abort", abortPublish, { once: true });
     const context = await browser.newContext({
         userAgent: UA, viewport: { width: 1280, height: 800 },
         locale: "ko-KR", timezoneId: "Asia/Seoul",
     });
     await applyAntiDetection(context);
     await context.addCookies(cookies);
-    const page = await context.newPage();
+    let page = await context.newPage();
     let lastPageAction = "발행 브라우저 초기화";
     let unexpectedPageClose = false;
-    let closingExpected = false;
     const markPageAction = (action) => { lastPageAction = action; };
     const assertPageOpen = (action) => {
         const previousAction = lastPageAction;
@@ -554,10 +621,118 @@ async function publishNaver(params) {
         });
     });
     try {
-        const writeUrl = `https://blog.naver.com/GoBlogWrite.naver?blogId=${blogId}`;
-        console.log(`[naver] 글쓰기 진입: ${writeUrl}`);
-        assertPageOpen("글쓰기 페이지 이동 전");
-        await page.goto(writeUrl, { waitUntil: "domcontentloaded", timeout: 60000 });
+        if (signal?.aborted)
+            throw new Error("발행이 취소됐습니다");
+        // 편집 성공은 URL이나 mainFrame 이름이 아니라 실제 SE ONE 제목 요소로 판정한다.
+        // 공개 목록/보기에도 blog.naver.com 프레임이 있으므로 그것을 편집기로 오인하면 안 된다.
+        const findEditorFrame = async (targetPage) => {
+            if (targetPage.isClosed())
+                return null;
+            for (const candidate of targetPage.frames()) {
+                if (await candidate.locator(".se-section-documentTitle").first().count().catch(() => 0))
+                    return candidate;
+            }
+            return null;
+        };
+        const logEntryState = async (label) => {
+            const frames = page.isClosed() ? [] : page.frames();
+            const frameInfo = frames.map(f => `${f.name() || "(unnamed)"}=${f.url()}`).join(" | ");
+            console.log(`[naver] 편집 진입 ${label} 최종 URL: ${page.isClosed() ? "(page closed)" : page.url()}`);
+            console.log(`[naver] 편집 진입 ${label} 프레임(${frames.length}): ${frameInfo || "없음"}`);
+        };
+        const waitForEditor = async (label, timeoutMs = 15000) => {
+            const deadline = Date.now() + timeoutMs;
+            while (Date.now() < deadline && !page.isClosed()) {
+                const found = await findEditorFrame(page);
+                if (found) {
+                    console.log(`[naver] ✅ 편집기 확인(${label}): frame=${found.name() || "(unnamed)"}, url=${found.url()}`);
+                    return found;
+                }
+                // 잘못된 endpoint의 확정 실패는 15초를 다 기다리지 않는다.
+                if (/PostList\.naver/i.test(page.url()))
+                    break;
+                await page.waitForTimeout(500);
+            }
+            await logEntryState(label);
+            return null;
+        };
+        let verifiedEditFrame = null;
+        if (isEdit) {
+            // ★검증된 제목수정(updatePostTitle) 진입과 동일: logNo를 Redirect 앞에 둔 형태가 실측으로 편집기를 연다.
+            //   Redirect=Update가 logNo보다 앞이거나 categoryNo가 없으면 네이버가 대문(PrologueList)으로 튕긴다(실측 s9653 — 대문형 블로그).
+            //   편집은 새 창을 띄우지 않으므로 같은 탭에서 순차 goto한다(context.waitForEvent('page')로 위젯 팝업을 잘못 채택하던 버그 제거).
+            const editUrls = [
+                `https://blog.naver.com/PostWriteForm.naver?blogId=${encodeURIComponent(blogId)}&logNo=${editLogNo}&Redirect=Update`,
+                `https://blog.naver.com/PostWriteForm.naver?blogId=${encodeURIComponent(blogId)}&Redirect=Update&logNo=${editLogNo}&categoryNo=0`,
+            ];
+            for (let u = 0; u < editUrls.length && !verifiedEditFrame; u++) {
+                console.log(`[naver] 글 살리기 진입(공식 Update, 시도 ${u + 1}/${editUrls.length}): ${editUrls[u]}`);
+                markPageAction("편집 Update URL 이동");
+                await page.goto(editUrls[u], { waitUntil: "domcontentloaded", timeout: 60000 }).catch(e => {
+                    console.log(`[naver] ⚠️ 편집 Update URL 이동 오류: ${e instanceof Error ? e.message : String(e)}`);
+                });
+                if (page.url().includes("nidlogin") || page.url().includes("login.naver")) {
+                    (0, session_store_1.deleteSession)(naverSessionName(userId), LEGACY_SESSION_DIRS);
+                    throw new Error("네이버 세션 만료. 재연결 필요");
+                }
+                verifiedEditFrame = await waitForEditor(`Update URL 시도${u + 1}`, 20000);
+                if (!verifiedEditFrame)
+                    console.log(`[naver] 이 URL로는 편집기가 안 떠서 다음 형태로 재시도`);
+            }
+            if (!verifiedEditFrame) {
+                // 직접 endpoint가 목록으로 튕기거나 창을 닫으면 깨끗한 탭에서 원문을 연 뒤,
+                // 소유자에게만 노출되는 Update 링크/수정 버튼을 사용한다.
+                if (page.isClosed())
+                    page = await context.newPage();
+                const viewUrl = `https://blog.naver.com/PostView.naver?blogId=${encodeURIComponent(blogId)}&logNo=${editLogNo}`;
+                console.log(`[naver] 글 살리기 2차 진입(원문 소유자 수정 버튼): ${viewUrl}`);
+                markPageAction("편집 원문 보기 이동");
+                await page.goto(viewUrl, { waitUntil: "domcontentloaded", timeout: 60000 });
+                await page.waitForLoadState("networkidle", { timeout: 10000 }).catch(() => { });
+                await logEntryState("원문 보기");
+                let editControl = null;
+                const editSelectors = [
+                    `a[href*="PostWriteForm.naver"][href*="logNo=${editLogNo}"]`,
+                    `a[href*="Redirect=Update"][href*="logNo=${editLogNo}"]`,
+                    "a:has-text('수정')",
+                    "button:has-text('수정')",
+                ];
+                for (const candidate of page.frames()) {
+                    for (const selector of editSelectors) {
+                        const locator = candidate.locator(selector).filter({ visible: true }).first();
+                        if (await locator.count().catch(() => 0)) {
+                            editControl = { frame: candidate, selector };
+                            break;
+                        }
+                    }
+                    if (editControl)
+                        break;
+                }
+                if (!editControl)
+                    throw new Error(`기존 글의 소유자 수정 버튼을 찾지 못했습니다 (logNo=${editLogNo}, 원본은 변경하지 않음)`);
+                console.log(`[naver] 소유자 수정 컨트롤 클릭: ${editControl.selector}`);
+                markPageAction("소유자 수정 버튼 클릭");
+                const popupPromise = context.waitForEvent("page", { timeout: 12000 }).catch(() => null);
+                await editControl.frame.locator(editControl.selector).filter({ visible: true }).first().click({ timeout: 10000 });
+                const popup = await popupPromise;
+                if (popup) {
+                    page = popup;
+                    await page.waitForLoadState("domcontentloaded", { timeout: 15000 }).catch(() => { });
+                    console.log(`[naver] 수정 버튼 새 페이지 채택: ${page.url()}`);
+                }
+                verifiedEditFrame = await waitForEditor("소유자 수정 버튼", 20000);
+            }
+            if (!verifiedEditFrame) {
+                throw new Error(`스마트에디터 편집 화면 진입에 실패했습니다 (logNo=${editLogNo}, 원본은 변경하지 않음)`);
+            }
+        }
+        else {
+            // 새 글 경로는 기존 동작을 그대로 유지한다.
+            const writeUrl = `https://blog.naver.com/GoBlogWrite.naver?blogId=${blogId}`;
+            console.log(`[naver] 글쓰기 진입: ${writeUrl}`);
+            assertPageOpen("글쓰기 페이지 이동 전");
+            await page.goto(writeUrl, { waitUntil: "domcontentloaded", timeout: 60000 });
+        }
         if (page.url().includes("nidlogin") || page.url().includes("login.naver")) {
             (0, session_store_1.deleteSession)(naverSessionName(userId), LEGACY_SESSION_DIRS);
             throw new Error("네이버 세션 만료. 재연결 필요");
@@ -566,6 +741,8 @@ async function publishNaver(params) {
         await page.waitForLoadState("networkidle", { timeout: 30000 }).catch(() => { });
         await page.waitForTimeout(5000);
         const getFrame = () => {
+            if (isEdit)
+                return verifiedEditFrame && !verifiedEditFrame.isDetached() ? verifiedEditFrame : null;
             const frames = page.frames();
             return frames.find(f => f.name() === "mainFrame")
                 ?? frames.find(f => f.url().includes("blog.naver.com"))
@@ -603,11 +780,16 @@ async function publishNaver(params) {
                 await frame.click(".se-help-panel-close-button", { timeout: 2000 });
         }
         catch { }
-        // SE4 로드 완료 대기
-        try {
-            await frame.waitForSelector(".se-section-documentTitle, .se-editor, .se-container", { timeout: 40000 });
+        // 편집 모드는 위에서 제목 요소까지 검증했다. 새 글도 기존 셀렉터 로드를 기다린다.
+        if (isEdit) {
+            await frame.waitForSelector(".se-section-documentTitle", { timeout: 5000 });
         }
-        catch { }
+        else {
+            try {
+                await frame.waitForSelector(".se-section-documentTitle, .se-editor, .se-container", { timeout: 40000 });
+            }
+            catch { }
+        }
         await page.waitForTimeout(3000);
         // ── 제목 입력 ──
         console.log("[naver] 제목 입력...");
@@ -620,6 +802,15 @@ async function publishNaver(params) {
             await frame.click(".se-main-container", { timeout: 3000 }).catch(() => { });
         }
         await page.waitForTimeout(500);
+        // ★글 살리기(편집): 기존 제목이 남아있으니 전체선택·삭제 후 새 제목 입력(안 그러면 붙어버림)
+        if (isEdit) {
+            const SEL_A = process.platform === "darwin" ? "Meta+A" : "Control+A";
+            await page.keyboard.press(SEL_A);
+            await page.waitForTimeout(150);
+            await page.keyboard.press("Backspace");
+            await page.waitForTimeout(300);
+            console.log("[naver] 글살리기: 기존 제목 비움 → 새 제목 입력");
+        }
         await page.keyboard.type(title, { delay: 30 });
         await page.waitForTimeout(600);
         // 본문으로 이동 1순위: Enter (SE4 표준 - 제목에서 Enter → 본문 이동)
@@ -650,6 +841,24 @@ async function publishNaver(params) {
             }
         }
         await page.waitForTimeout(300);
+        // ★글 살리기(편집): 본문 영역에 커서가 있는 지금, 기존 본문(글+이미지)을 전체선택·삭제해 비운다.
+        //   이미지가 남을 수 있어 2회 반복. 이후 아래 로직이 빈 에디터에 새 본문·이미지를 채운다(=새 글과 동일).
+        //   ⚠️ 실기기 검증 필요(에디터 구조 따라 Cmd+A 범위가 다를 수 있음) — 로그로 확인.
+        if (isEdit) {
+            const SEL_A = process.platform === "darwin" ? "Meta+A" : "Control+A";
+            for (let z = 0; z < 3; z++) {
+                await page.keyboard.press(SEL_A);
+                await page.waitForTimeout(200);
+                await page.keyboard.press("Backspace");
+                await page.waitForTimeout(400);
+            }
+            const leftover = await frame.evaluate(() => {
+                const imgs = document.querySelectorAll(".se-component.se-image").length;
+                const txt = (document.querySelector(".se-main-container")?.textContent || "").replace(/\s/g, "").length;
+                return { imgs, txt };
+            }).catch(() => ({ imgs: -1, txt: -1 }));
+            console.log(`[naver] 글살리기: 기존 본문 비움 시도 → 남은 이미지 ${leftover.imgs}개·글자 ${leftover.txt}자`);
+        }
         // ── 파일 업로드 헬퍼 (OS 파일 피커 다이얼로그 차단) ──
         const IMG_BTN_SELS = [
             "button[data-type='image']",
@@ -1671,12 +1880,19 @@ async function publishNaver(params) {
             postUrl = `https://blog.naver.com/${blogId}/${viewMatch[1]}`;
         if (scheduleTime)
             postUrl = `https://blog.naver.com/${blogId}`;
+        // ★실제 게시 검증: 예약이 아닌데 실제 글 주소(logNo)도 없고 완료문구도 없으면, 레이어만 닫혔을 뿐
+        //   발행이 완료되지 않은 것(카테고리/검증 오류 등). write 페이지 URL을 성공처럼 반환하면 "완료 떴는데 글 없음"이 됨.
+        //   → 가짜 성공을 막기 위해 실패로 처리한다.
+        if (!scheduleTime && !viewMatch && !finalSignal.successText) {
+            throw new Error("발행이 끝까지 완료되지 않았어요(글 주소를 못 받음). 카테고리 선택이나 네트워크 문제일 수 있어요 — 다시 시도해주세요.");
+        }
         // 쿠키 갱신
         const newCookies = await context.cookies();
         const session = (0, session_store_1.readSession)(naverSessionName(userId), LEGACY_SESSION_DIRS);
         session.cookies = newCookies;
         (0, session_store_1.writeSession)(naverSessionName(userId), session);
         closingExpected = true;
+        signal?.removeEventListener("abort", abortPublish);
         await browser.close();
         console.log(`[naver] ✅ ${scheduleTime ? "예약 완료" : "발행 완료"}: ${postUrl}`);
         return postUrl;
@@ -1694,9 +1910,10 @@ async function publishNaver(params) {
         }
         catch { }
         closingExpected = true;
+        signal?.removeEventListener("abort", abortPublish);
         await browser.close().catch(() => { });
         const pageClosedError = unexpectedPageClose || /Target page, context or browser has been closed|page has been closed|browser has been closed/i.test(String(e?.message || e));
-        if (pageClosedError && !params.__pageCloseRetry) {
+        if (isEdit && !signal?.aborted && pageClosedError && !params.__pageCloseRetry) {
             console.error(`[naver] 🔁 page closed 발행 전체 재시도 1/1 (직전 액션: ${lastPageAction})`);
             return publishNaver({ ...params, __pageCloseRetry: true });
         }
@@ -1779,7 +1996,8 @@ function captionFromPrompt(prompt, idx, total) {
         style = "웨딩 사진";
     else
         style = "관련 사진";
-    return total > 1 ? `${keyword} ${style} (${idx + 1}/${total})` : `${keyword} ${style}`;
+    // ★"사진 1/3" 같은 숫자(순번) 절대 넣지 않는다(테리 지적). 폴백일 때도 숫자 없이.
+    return `${keyword} ${style}`;
 }
 /* ── Google Flow 이미지 생성 ── */
 async function generateFlowImages(params) {
@@ -2127,8 +2345,9 @@ async function generateFlowImages(params) {
             if (!entered)
                 continue;
             await clickGenerate();
-            // 프롬프트 기반 SEO 캡션 생성 (이미지 검색 노출용)
-            const seoCaption = captionFromPrompt(prompts[i], i, prompts.length);
+            // ★캡션 = 앱이 만들어 보낸 flowCaptions(본문 소제목 기반·서로 다름·숫자 없음)를 우선 사용.
+            //   비어 있을 때만 프롬프트 기반 폴백(이 폴백도 이제 "사진 1/3" 같은 숫자 안 붙임).
+            const seoCaption = (captions[i] && captions[i].trim()) ? captions[i].trim() : captionFromPrompt(prompts[i], i, prompts.length);
             await saveGeneratedImage(i, seoCaption);
         }
         await browser.close();
@@ -2428,19 +2647,38 @@ async function generateFlowImagesCDP(params) {
             const enterDeadline = enterStart + 12000;
             let triedRecover = false;
             while (!entered && Date.now() < enterDeadline) {
-                const editables = await page.$$("[contenteditable=true], textarea");
-                for (const el of editables) {
+                // ★프롬프트 입력칸을 '정확히' 고른다(테리: 프롬프트가 엉뚱한 곳으로 밀려감).
+                //   Flow 화면엔 상단 검색창·프로젝트명 편집칸 등 다른 편집요소가 있어, 무조건 첫 요소를 잡으면
+                //   거기에 타이핑돼 밀린다. → placeholder('무엇을 만들' 등)로 진짜 입력칸을 우선 찾고,
+                //   없으면 '화면 최하단에 있는' 편집요소를 프롬프트칸으로 본다. 검색/제목 계열은 제외.
+                const target = await page.evaluateHandle(() => {
+                    const visible = (el) => { const r = el.getBoundingClientRect(); const s = getComputedStyle(el); return r.width > 0 && r.height > 0 && s.visibility !== "hidden" && s.display !== "none"; };
+                    const all = [...document.querySelectorAll("[contenteditable=true], textarea")].filter(visible);
+                    if (!all.length)
+                        return null;
+                    const ph = (el) => (el.getAttribute("placeholder") || el.getAttribute("aria-label") || el.getAttribute("data-placeholder") || "").toLowerCase();
+                    const isSearch = (el) => /검색|search|제목|title|이름|name/.test(ph(el));
+                    // 1순위: '무엇을 만들' 류 placeholder
+                    const byPh = all.find(el => /무엇을\s*만들|만들고\s*싶|describe|prompt|생성할/.test(ph(el)));
+                    if (byPh)
+                        return byPh;
+                    // 2순위: 검색/제목 아닌 것 중 화면 최하단(입력창은 보통 맨 아래)
+                    const cands = all.filter(el => !isSearch(el));
+                    const pool = cands.length ? cands : all;
+                    return pool.sort((a, b) => b.getBoundingClientRect().top - a.getBoundingClientRect().top)[0];
+                });
+                const el = target.asElement();
+                if (el) {
                     try {
-                        if (!(await el.isVisible()))
-                            continue;
-                        // 업로드/첨부용 숨은 입력이 아니라 실제 프롬프트 입력칸인지 대략 확인(편집 가능 + 화면 하단쪽)
                         await el.click();
                         await page.waitForTimeout(400);
                         await page.keyboard.press(process.platform === "darwin" ? "Meta+A" : "Control+A");
                         await page.keyboard.press("Backspace");
                         await page.keyboard.type(prompt, { delay: 15 });
-                        entered = true;
-                        break;
+                        // 입력 검증: 방금 친 프롬프트가 그 칸에 실제로 들어갔는지 확인(엉뚱한 곳이면 재시도)
+                        const ok = await el.evaluate((node, p) => (node instanceof HTMLTextAreaElement ? node.value : (node.textContent || "")).includes(p.slice(0, 20)), prompt).catch(() => false);
+                        if (ok)
+                            entered = true;
                     }
                     catch { }
                 }
@@ -2563,6 +2801,35 @@ async function generateFlowImagesCDP(params) {
                 requeue();
                 continue;
             }
+            // ★크레딧 승인창 자동 처리 + 크레딧 소진 감지 (테리 실측: "크레딧 15개를 사용하여 생성할까요? [승인]"이
+            //   반복해서 뜨고 이미지가 안 나옴). 승인창이 뜨면 '승인, 다시 묻지 않음'을 눌러 진행하고,
+            //   '크레딧이 부족'류 문구가 뜨면 아무리 기다려도 안 되므로 즉시 전체 실패로 끝낸다(무한반복 방지).
+            const creditState = await page.evaluate(() => {
+                const body = document.body.innerText || "";
+                const noCredit = /크레딧이?\s*(부족|없|모자|소진)|충분한?\s*크레딧|크레딧을?\s*모두|out of credits|not enough credits|insufficient credit|no credits|한도.*초과|일일.*한도/i.test(body);
+                // 크레딧 사용 승인 다이얼로그(예: "크레딧 15개를 사용하여 …생성을 시작할까요?")
+                const needApprove = /크레딧\s*\d+\s*개를?\s*사용|크레딧을?\s*사용하여|사용하여\s*\d+개/i.test(body);
+                let approved = false;
+                if (needApprove) {
+                    const btns = [...document.querySelectorAll("button,[role=button]")];
+                    // '승인, 다시 묻지 않음' 우선 → 없으면 '승인'
+                    const pref = btns.find(b => /승인,?\s*다시\s*묻지\s*않음|승인,?\s*don'?t\s*ask/i.test(b.textContent || ""))
+                        || btns.find(b => /^\s*승인\s*$|^\s*approve\s*$/i.test(b.textContent || ""));
+                    if (pref) {
+                        pref.click();
+                        approved = true;
+                    }
+                }
+                return { noCredit, needApprove, approved };
+            }).catch(() => ({ noCredit: false, needApprove: false, approved: false }));
+            if (creditState.noCredit) {
+                log(`[Flow] ⛔ Flow 무료 크레딧이 부족해요 — 이미지를 만들 수 없어요. Flow 계정을 바꾸거나 크레딧이 충전된 뒤 다시 해주세요.`);
+                throw new Error("FLOW_NO_CREDIT: Flow 크레딧 부족 — 계정 변경 또는 충전 후 재시도");
+            }
+            if (creditState.approved) {
+                log(`[Flow] ✅ 크레딧 사용 승인(다시 묻지 않음) — 생성을 진행해요`);
+                await page.waitForTimeout(1500);
+            }
             // 생성 대기(최대 165초): Flow는 한 번에 여러 후보를 순차적으로 렌더할 수 있다.
             // 첫 이미지에서 즉시 끝내지 말고, 생성 표시가 끝나고 후보 개수가 안정될 때까지 수집한다.
             log(`[Flow]    ⏳ 그림이 그려지길 기다리는 중이에요 (보통 1~2분 걸려요)`);
@@ -2591,8 +2858,13 @@ async function generateFlowImagesCDP(params) {
                     // ★구글이 프롬프트를 "정책 위반"으로 거부한 경우 감지(테리 실측: "이 생성은 구글 정책을 위반할
                     //   수 있습니다. 다른 프롬프트를 사용해 보거나 의견을 보내주세요"). 이러면 같은 프롬프트론 계속 거부됨.
                     const policyBlocked = /정책을?\s*위반|정책\s*위반|다른\s*프롬프트를?\s*사용|violat|policy|not\s*allowed|can'?t\s*(help|generate|create)|무언가\s*잘못/i.test(document.body.innerText);
-                    return { fresh: [...bySrc.values()], generating, policyBlocked };
+                    const noCredit = /크레딧이?\s*(부족|없|모자|소진)|충분한?\s*크레딧|크레딧을?\s*모두|out of credits|not enough credits|insufficient credit|no credits/i.test(document.body.innerText);
+                    return { fresh: [...bySrc.values()], generating, policyBlocked, noCredit };
                 }, beforeSrcs);
+                // 생성 중 크레딧 소진 감지 → 무한 대기 방지 위해 전체 실패로 끝낸다.
+                if (snap.noCredit && snap.fresh.length === 0) {
+                    throw new Error("FLOW_NO_CREDIT: Flow 크레딧 부족 — 계정 변경 또는 충전 후 재시도");
+                }
                 // 정책 거부가 뜨면 이 프롬프트로는 아무리 기다려도 안 되므로 즉시 대기 종료한다.
                 if (snap.policyBlocked && snap.fresh.length === 0) {
                     policyBlocked = true;

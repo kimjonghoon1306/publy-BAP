@@ -1032,7 +1032,7 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
       const m=t.match(/\d+/); const idx=m?parseInt(m[0],10)-1:-1; if(idx>=0&&idx<cats.length)return cats[idx]; }catch{}
     return cats[0];
   }
-  async function otPublishItem(kw:string,title:string,content:string,tags:string[],images:string[],categoryId:string|undefined,acc:PublyAccount|undefined,flowN:number=0,editLogNo?:string):Promise<string>{
+  async function otPublishItem(kw:string,title:string,content:string,tags:string[],images:string[],categoryId:string|undefined,acc:PublyAccount|undefined,flowN:number=0,editLogNo?:string,editBlogId?:string):Promise<string>{
     const blocks:any[]=[];
     if(!flowN&&images[0])blocks.push({type:"image",src:images[0],alt:""});
     const paras=content.split(/\n\n+/).map(s=>s.trim()).filter(Boolean);
@@ -1048,7 +1048,7 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
         blocks.splice(at,0,{type:"text",content:g});
       }
     }
-    const payload:any={userId:ADM_UID,platform:"naver",title,content,naverId:acc?.username||undefined,pubScope,tags,imageUrl:(!flowN&&images[0])||undefined,categoryId:categoryId||undefined,visibility,blocks,...(editLogNo?{editLogNo}:{})};
+    const payload:any={userId:ADM_UID,platform:"naver",title,content,naverId:acc?.username||undefined,pubScope,tags,imageUrl:(!flowN&&images[0])||undefined,categoryId:categoryId||undefined,visibility,blocks,...(editLogNo?{editLogNo,editBlogId}:{})};
     if(flowN){   // 무료 Flow: 봇이 발행 중 생성
       const lines=content.split("\n").filter((l:string)=>l.trim().length>5);
       const step=Math.max(1,Math.floor(lines.length/flowN));
@@ -1072,15 +1072,21 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
     const h=(e:any)=>{ const {logNo,title,blogId}=e.detail||{}; if(!logNo)return;
       const target={logNo:String(logNo),origTitle:String(title||""),origBody:"",blogId:String(blogId||"")};
       setTab("onetouch");
-      // ★발행·원터치·불러오기와 동일하게 발행은 user.id 세션으로 한다(봇이 세션에서 실제 blogId를 읽어 그 블로그를 편집).
-      //   username↔blogId 매칭 불필요(로그인ID≠블로그ID여도 됨). 여기선 '네이버 세션 연결 여부'만 확인.
+      // ★원문 blogId로 소유 계정을 고른다. 로그인ID와 블로그ID가 다른 계정도
+      //   blog_name(연결 때 저장한 실제 blogId)으로 정확히 찾는다.
       const naverAccs=admAccs.filter(a=>a.platform==="naver"&&(botOnline?a.is_connected:true));
       const errors:string[]=[];
       if(!naverAccs.length)errors.push("네이버 계정이 연결 안 됐어요 → 계정관리에서 계정을 연결하세요");
+      const norm=(v?:string)=>String(v||"").trim().toLowerCase().replace(/@naver\.com$/i,"");
+      const targetBlogId=norm(target.blogId);
+      const ownerAcc=naverAccs.find(a=>norm(a.blog_name)===targetBlogId)
+        ||naverAccs.find(a=>norm(a.username)===targetBlogId)
+        ||(naverAccs.length===1?naverAccs[0]:undefined);
+      if(naverAccs.length&&!ownerAcc)errors.push(`이 글의 주인 블로그(${target.blogId})와 연결된 계정을 찾지 못했어요 → 해당 네이버 계정을 다시 연결하세요`);
       if(otImgMode==="flow"&&!flowSlotReady[flowSlot])errors.push("Flow가 연결 안 됐어요 → 원터치 발행에서 Flow를 연결 후 다시 시작하세요");
       if(errors.length){e.preventDefault?.();showOneTouchPreflight(errors);return;}
       if(otRunningRef.current){e.preventDefault?.();const fail="다른 원터치 작업이 진행 중이에요. 완료하거나 중단한 뒤 다시 시도해주세요.";setReviveState({...target,title:target.origTitle,step:"실패",fail});showToast(fail,"error");return;}
-      const acc=naverAccs.find(a=>a.id===pubAccId)||naverAccs[0];
+      const acc=ownerAcc!;
       setPubAccId(acc.id);
       otReviveRunRef.current?.({...target,accountId:acc.id});
     };
@@ -1130,6 +1136,11 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
     setOtLiveLog(prev=>[...prev,activeRevive
       ? `━━ 글 살리기 시작 ━━`
       : `━━━━━ ${new Date().toLocaleString("ko-KR")} 원터치 ${resume?`이어가기(${resume.idx+1}번째부터)`:bySched?"예약 자동 시작":"시작"} ━━━━━`].slice(-300));
+    const runAccount=admAccs.find(a=>a.id===runAccId);
+    otLive(`👤 글 작성 계정: ${runAccount?.username||"확인 불가"}${runAccount?.blog_name?` → 블로그 ${runAccount.blog_name}`:""}`);
+    if(activeRevive?.blogId&&activeRevive?.logNo){
+      otLive(`🔗 살릴 글 주소: https://blog.naver.com/${encodeURIComponent(activeRevive.blogId)}/${encodeURIComponent(activeRevive.logNo)}`);
+    }
     if(!resume&&!activeRevive){
       const cntTxt=otAiKw?`AI 자동추천 ${otAiKwCount}개`:`직접 입력 ${otKeywords.split(/[\n,]+/).map(s=>s.trim()).filter(Boolean).length}개`;
       const styleTxt=otWriteStyle==="자동"?"글패턴 자동":`글패턴 ${otWriteStyle}`;
@@ -1216,7 +1227,7 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
         upd({step:"카테고리 매칭 중"}); const cat=await otPickCategory(title,content,cats); upd({cat:cat.name||"기본"}); otLive(`  📂 카테고리 자동 선택: ${cat.name||"기본"}`);
         if(otStopRef.current){ upd({step:"⏹ 중단됨 — 이 글은 발행하지 않았어요",status:"limit"}); otLive(`  ⏹ 중단 — 발행 전이라 이 글은 올리지 않았어요`); break; }
         upd({step:"발행 중"}); otLive(`  🚀 네이버 발행 중...`);
-        const postUrl=await otPublishItem(kw,title,content,tags.split(",").map(t=>t.replace("#","").trim()).filter(Boolean),imgs,cat.id,acc,0,activeRevive?.logNo);
+        const postUrl=await otPublishItem(kw,title,content,tags.split(",").map(t=>t.replace("#","").trim()).filter(Boolean),imgs,cat.id,acc,0,activeRevive?.logNo,activeRevive?.blogId);
         const at=new Date().toLocaleTimeString("ko-KR",{hour:"2-digit",minute:"2-digit"});
         if(postUrl){
           await addHistory({user_id:ADM_UID,platform:"naver",title,post_url:postUrl,status:"success"}).catch(()=>{});

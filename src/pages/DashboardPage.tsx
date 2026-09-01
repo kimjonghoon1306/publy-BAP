@@ -3083,7 +3083,7 @@ POST3: (제목)|(이유)
     }
     return effectiveBlocks;
   }
-  async function otPublishItem(kw:string,title:string,content:string,tags:string[],images:string[],categoryId:string|undefined,accId:string,flowN:number=0,editLogNo?:string):Promise<string>{
+  async function otPublishItem(kw:string,title:string,content:string,tags:string[],images:string[],categoryId:string|undefined,accId:string,flowN:number=0,editLogNo?:string,editBlogId?:string):Promise<string>{
     const acc=connAccs.find(a=>a.id===accId);
     const blocks:any[]=[];
     if(!flowN&&images[0])blocks.push({type:"image",src:images[0],alt:""});   // 썸네일 alt는 항상 비움(본문 유실 방지)
@@ -3103,7 +3103,7 @@ POST3: (제목)|(이유)
     const payload:any={userId:user.id,platform:"naver",title,content,
       naverId:acc?.username||undefined,pubScope,tags,
       imageUrl:(!flowN&&images[0])||undefined,categoryId:categoryId||undefined,visibility,blocks:finalBlocks,
-      ...(editLogNo?{editLogNo}:{})};   // ★글 살리기: 그 글 덮어쓰기
+      ...(editLogNo?{editLogNo,editBlogId}:{})};   // ★글 살리기: 그 글의 소유 블로그까지 검증 후 덮어쓰기
     if(flowN){   // 무료 Flow: 봇이 발행 중 flowN장 생성. 본문 구간별 프롬프트 + 캡션 전달(일반 발행과 동일).
       const lines=content.split("\n").filter((l:string)=>l.trim().length>5);
       const step=Math.max(1,Math.floor(lines.length/flowN));
@@ -3128,17 +3128,23 @@ POST3: (제목)|(이유)
     const h=(e:any)=>{ const {logNo,title,blogId}=e.detail||{}; if(!logNo)return;
       const target={logNo:String(logNo),origTitle:String(title||""),origBody:"",blogId:String(blogId||"")};
       setTab("onetouch");
-      // ★발행·원터치·불러오기와 동일하게 발행은 user.id 세션으로 한다(봇이 세션에서 실제 blogId를 읽어 그 블로그를 편집).
-      //   그래서 username↔blogId 매칭이 필요 없다(로그인ID≠블로그ID여도 됨). 여기선 '네이버 세션 연결 여부'만 확인.
-      //   (예전에 username===blogId 관문을 세워 bb9653≠system-b 같은 경우 막혔음 — 발행과 무관한 관문이라 제거)
+      // ★글 살리기는 반드시 원문 소유 블로그의 로그인 세션을 골라야 한다.
+      //   네이버 로그인ID(bb9653)와 블로그ID(system-b)는 다를 수 있으므로 username이 아니라
+      //   연결 때 저장한 blog_name(실제 blogId)을 우선 비교한다. 현재 원터치 선택계정을 쓰면
+      //   다른 계정(s9653)의 정상 세션을 활성화해 그 블로그에서 편집기를 찾는 사고가 난다.
       const naverAccs=accounts.filter(a=>a.platform==="naver"&&(botOnline?a.is_connected:true));
       const errors:string[]=[];
       if(!naverAccs.length)errors.push("네이버 계정이 연결 안 됐어요 → 계정관리에서 계정을 연결하세요");
+      const norm=(v?:string)=>String(v||"").trim().toLowerCase().replace(/@naver\.com$/i,"");
+      const targetBlogId=norm(target.blogId);
+      const ownerAcc=naverAccs.find(a=>norm(a.blog_name)===targetBlogId)
+        ||naverAccs.find(a=>norm(a.username)===targetBlogId)
+        ||(naverAccs.length===1?naverAccs[0]:undefined);
+      if(naverAccs.length&&!ownerAcc)errors.push(`이 글의 주인 블로그(${target.blogId})와 연결된 계정을 찾지 못했어요 → 해당 네이버 계정을 다시 연결하세요`);
       if(otImgMode==="flow"&&!flowSlotReady[flowSlot])errors.push("Flow가 연결 안 됐어요 → 원터치 발행에서 Flow를 연결 후 다시 시작하세요");
       if(errors.length){e.preventDefault?.();showOneTouchPreflight(errors);return;}
       if(otRunningRef.current){e.preventDefault?.();const fail="다른 원터치 작업이 진행 중이에요. 완료하거나 중단한 뒤 다시 시도해주세요.";setReviveState({...target,title:target.origTitle,step:"실패",fail});showToast(fail,"error");return;}
-      // 관문/카테고리 폴백용 accountId(발행 자체엔 안 쓰임): 선택계정 있으면 유지, 없으면 네이버 첫 계정
-      const acc=naverAccs.find(a=>a.id===pubAccId)||naverAccs[0];
+      const acc=ownerAcc!;
       setPubAccId(acc.id);
       otReviveRunRef.current?.({...target,accountId:acc.id});
     };
@@ -3199,6 +3205,11 @@ POST3: (제목)|(이유)
       ? `━━ 글 살리기 시작 ━━`
       : `━━━━━ ${new Date().toLocaleString("ko-KR")} 원터치 ${resume?`이어가기(${resume.idx+1}번째부터)`:bySched?"예약 자동 시작":"시작"} ━━━━━`].slice(-300));
     const otLive=(t:string,running=true)=>{const line=`[${new Date().toLocaleTimeString("ko-KR")}] ${t}`; liveLines.push(line); setOtLiveLog(prev=>[...prev,line].slice(-300)); try{pushLiveLog(user.id,{name:user.name,email:user.email,context:"⚡ 원터치 발행",text:liveLines.slice(-80).join("\n"),running});}catch{}};
+    const runAcc=accounts.find(a=>a.id===runAccId);
+    otLive(`👤 글 작성 계정: ${runAcc?.username||"확인 불가"}${runAcc?.blog_name?` → 블로그 ${runAcc.blog_name}`:""}`);
+    if(activeRevive?.blogId&&activeRevive?.logNo){
+      otLive(`🔗 살릴 글 주소: https://blog.naver.com/${encodeURIComponent(activeRevive.blogId)}/${encodeURIComponent(activeRevive.logNo)}`);
+    }
     // ── 발행 계획 요약(테리 요청: 예약이면 몇 시 예약·매일반복 여부 / 몇 개 / 몇 분 간격 전부 디테일하게) ──
     if(!resume&&!activeRevive){
       const cntTxt=otAiKw?`AI 자동추천 ${otAiKwCount}개`:`직접 입력 ${otKeywords.split(/[\n,]+/).map(s=>s.trim()).filter(Boolean).length}개`;
@@ -3309,7 +3320,7 @@ POST3: (제목)|(이유)
         const ok=await useQuota(user.id); if(!ok){upd({step:"발행 건수 초과",status:"limit"});otLive(`  ⛔ 발행 건수 초과`,false);break;}
         upd({step:"발행 중"}); otLive(`  🚀 네이버 발행 중...`);
         let postUrl="";
-        try{ postUrl=await otPublishItem(kw,title,content,tags.split(",").map(t=>t.replace("#","").trim()).filter(Boolean),imgs,cat.id,accId,0,activeRevive?.logNo); }
+        try{ postUrl=await otPublishItem(kw,title,content,tags.split(",").map(t=>t.replace("#","").trim()).filter(Boolean),imgs,cat.id,accId,0,activeRevive?.logNo,activeRevive?.blogId); }
         catch(e:any){ await refundQuota(user.id); throw e; }
         const at=new Date().toLocaleTimeString("ko-KR",{hour:"2-digit",minute:"2-digit"});
         if(postUrl){   // ★주소를 받았을 때만 '완료' — 주소 없으면 실제로 안 올라갔을 수 있어 '확인 필요'로 정직하게

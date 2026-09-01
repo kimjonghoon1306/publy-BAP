@@ -415,9 +415,10 @@ export async function publishNaver(params: {
   videoUrl?: string;
   videoPosition?: "top" | "middle" | "bottom";
   editLogNo?: string;   // ★있으면 새 글이 아니라 '그 글 편집화면'을 열어 기존 본문 비우고 통째 교체 재발행(주소·좋아요 유지)
+  editBlogId?: string;  // ★글 살리기 원문 소유 blogId. 활성 세션의 실제 blogId와 다르면 원본 변경 전 안전중단.
   signal?: AbortSignal;
 }): Promise<string> {
-  const { userId, title: rawTitle, content, pubScope = "full", tags, imageUrl, categoryId, visibility = "public", scheduleTime, blocks, videoUrl, videoPosition = "middle", editLogNo, signal } = params;
+  const { userId, title: rawTitle, content, pubScope = "full", tags, imageUrl, categoryId, visibility = "public", scheduleTime, blocks, videoUrl, videoPosition = "middle", editLogNo, editBlogId, signal } = params;
   if (signal?.aborted) throw new Error("발행이 취소됐습니다");
   const isEdit = !!(editLogNo && /^\d+$/.test(String(editLogNo)));   // 글 살리기(덮어쓰기) 모드
   const title = rawTitle.replace(/\n/g, " ").trim().slice(0, 40);
@@ -448,6 +449,13 @@ export async function publishNaver(params: {
   // ★실제 blogId 확정(로그인ID≠블로그주소 대응) — 제목수정에서 검증된 공용 로직 재사용.
   //   특히 글 살리기(편집)는 정확한 blogId 아니면 PostWriteForm이 글목록으로 튕기므로 반드시 교정.
   const blogId = await resolveNaverBlogId(storedBlogId, cookies, userId, console.log);
+  if (isEdit && editBlogId) {
+    const norm = (v: string) => String(v || "").trim().toLowerCase().replace(/@naver\.com$/i, "");
+    if (norm(blogId) !== norm(editBlogId)) {
+      throw new Error(`글 주인 계정 불일치: 선택 세션의 블로그는 '${blogId}', 살릴 글의 블로그는 '${editBlogId}'입니다. 원본은 변경하지 않았어요.`);
+    }
+    console.log(`[naver] ✅ 글 주인 계정 확인: ${blogId} (logNo=${editLogNo})`);
+  }
 
   let closingExpected = false;
   const browser = await chromium.launch({ headless: false, args: LAUNCH_ARGS });
@@ -526,20 +534,26 @@ export async function publishNaver(params: {
 
     let verifiedEditFrame: Frame | null = null;
     if (isEdit) {
-      const updateUrl = `https://blog.naver.com/PostWriteForm.naver?blogId=${encodeURIComponent(blogId)}&Redirect=Update&logNo=${editLogNo}`;
-      console.log(`[naver] 글 살리기 1차 진입(공식 Update 파라미터): ${updateUrl}`);
-      markPageAction("편집 Update URL 이동");
-      const redirectedPage = context.waitForEvent("page", { timeout: 12000 }).catch(() => null);
-      await page.goto(updateUrl, { waitUntil: "domcontentloaded", timeout: 60000 }).catch(e => {
-        console.log(`[naver] ⚠️ 편집 Update URL 이동 오류(창 전환 가능): ${e instanceof Error ? e.message : String(e)}`);
-      });
-      const replacement = await redirectedPage;
-      if (replacement) {
-        page = replacement;
-        await page.waitForLoadState("domcontentloaded", { timeout: 15000 }).catch(() => {});
-        console.log(`[naver] 편집 리다이렉트 새 페이지 채택: ${page.url()}`);
+      // ★검증된 제목수정(updatePostTitle) 진입과 동일: logNo를 Redirect 앞에 둔 형태가 실측으로 편집기를 연다.
+      //   Redirect=Update가 logNo보다 앞이거나 categoryNo가 없으면 네이버가 대문(PrologueList)으로 튕긴다(실측 s9653 — 대문형 블로그).
+      //   편집은 새 창을 띄우지 않으므로 같은 탭에서 순차 goto한다(context.waitForEvent('page')로 위젯 팝업을 잘못 채택하던 버그 제거).
+      const editUrls = [
+        `https://blog.naver.com/PostWriteForm.naver?blogId=${encodeURIComponent(blogId)}&logNo=${editLogNo}&Redirect=Update`,
+        `https://blog.naver.com/PostWriteForm.naver?blogId=${encodeURIComponent(blogId)}&Redirect=Update&logNo=${editLogNo}&categoryNo=0`,
+      ];
+      for (let u = 0; u < editUrls.length && !verifiedEditFrame; u++) {
+        console.log(`[naver] 글 살리기 진입(공식 Update, 시도 ${u + 1}/${editUrls.length}): ${editUrls[u]}`);
+        markPageAction("편집 Update URL 이동");
+        await page.goto(editUrls[u], { waitUntil: "domcontentloaded", timeout: 60000 }).catch(e => {
+          console.log(`[naver] ⚠️ 편집 Update URL 이동 오류: ${e instanceof Error ? e.message : String(e)}`);
+        });
+        if (page.url().includes("nidlogin") || page.url().includes("login.naver")) {
+          deleteSession(naverSessionName(userId), LEGACY_SESSION_DIRS);
+          throw new Error("네이버 세션 만료. 재연결 필요");
+        }
+        verifiedEditFrame = await waitForEditor(`Update URL 시도${u + 1}`, 20000);
+        if (!verifiedEditFrame) console.log(`[naver] 이 URL로는 편집기가 안 떠서 다음 형태로 재시도`);
       }
-      verifiedEditFrame = await waitForEditor("Update URL");
 
       if (!verifiedEditFrame) {
         // 직접 endpoint가 목록으로 튕기거나 창을 닫으면 깨끗한 탭에서 원문을 연 뒤,

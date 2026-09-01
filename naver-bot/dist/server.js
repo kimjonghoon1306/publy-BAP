@@ -209,11 +209,25 @@ app.delete("/api/session/:platform/:userId", (req, res) => {
 });
 /* ── 직접 발행 (앱에서 즉시 발행) ── */
 app.post("/api/publish-full", async (req, res) => {
-    const { userId, platform, naverId, title, content, pubScope = "full", tags = [], imageUrl, categoryId, visibility, scheduleTime, blocks, videoUrl, videoPosition, useFlow, flowImgCount, flowPrompts, flowCaptions } = req.body;
+    const { userId, platform, naverId, title, content, pubScope = "full", tags = [], imageUrl, categoryId, visibility, scheduleTime, blocks, videoUrl, videoPosition, editLogNo, editBlogId, useFlow, flowImgCount, flowPrompts, flowCaptions } = req.body;
     if (!userId || !platform || !title || !content) {
         return res.status(400).json({ error: "userId, platform, title, content 필요" });
     }
+    const publishAbort = new AbortController();
+    const abortFromClient = () => {
+        if (!publishAbort.signal.aborted) {
+            console.log("[publish] 클라이언트 연결 종료 — 진행 중인 발행을 중단합니다");
+            publishAbort.abort();
+        }
+    };
+    req.once("aborted", abortFromClient);
+    res.once("close", () => { if (!res.writableEnded)
+        abortFromClient(); });
     await acquireSlot();
+    if (publishAbort.signal.aborted) {
+        releaseSlot();
+        return;
+    }
     const accountLock = platform === "naver" ? (0, account_lock_1.acquireAccountLock)(String(naverId || userId), "글 발행") : null;
     if (accountLock && !accountLock.ok) {
         releaseSlot();
@@ -268,20 +282,25 @@ app.post("/api/publish-full", async (req, res) => {
                     finalBlocks = result;
                     console.log(`[server] Flow 이미지 ${flowImages.length}장 블록 삽입 완료(경계 위)`);
                 }
+                else
+                    throw new Error("Flow 이미지를 한 장도 만들지 못해 발행을 중단했어요");
             }
             catch (flowErr) {
                 console.error("[server] Flow 이미지 생성 실패:", flowErr.message);
-                // Flow 실패해도 이미지 없이 발행 계속
+                throw new Error(`Flow 이미지 생성 실패 — 이미지 없이 발행하지 않습니다: ${flowErr.message}`);
             }
         }
+        if (publishAbort.signal.aborted)
+            throw new Error("발행이 취소됐습니다");
         let postUrl = "";
         if (platform === "naver") {
             if (naverId) {
                 const ok = (0, naver_1.activateNaverAccount)(userId, naverId);
                 if (!ok)
-                    console.log(`[publish] 계정 세션 없음: ${naverId}`);
+                    throw new Error(`선택한 네이버 계정(${naverId})의 로그인 세션을 찾지 못했어요. 계정 관리에서 다시 연결해주세요.`);
+                console.log(`[publish] 계정 세션 활성화: ${naverId}${editBlogId ? ` (글 주인 blogId=${editBlogId})` : ""}`);
             }
-            postUrl = await (0, naver_1.publishNaver)({ userId, title, content, pubScope, tags, imageUrl, categoryId, visibility, scheduleTime, blocks: finalBlocks, videoUrl, videoPosition });
+            postUrl = await (0, naver_1.publishNaver)({ userId, title, content, pubScope, tags, imageUrl, categoryId, visibility, scheduleTime, blocks: finalBlocks, videoUrl, videoPosition, editLogNo, editBlogId, signal: publishAbort.signal });
         }
         else if (platform === "tistory") {
             postUrl = await (0, tistory_1.publishTistory)({ userId, title, content, tags, categoryId, visibility });
@@ -295,6 +314,8 @@ app.post("/api/publish-full", async (req, res) => {
     }
     catch (e) {
         // 실패 기록도 앱이 저장(이중저장 방지)
+        if (publishAbort.signal.aborted || res.destroyed)
+            return;
         if (e.message?.includes("세션 만료") || e.message?.includes("재연결")) {
             return res.status(401).json({ error: e.message, code: "SESSION_EXPIRED" });
         }
@@ -531,7 +552,7 @@ app.get("/api/flow/status", async (_req, res) => {
 });
 /* ── Google Flow 이미지 생성 (CDP 방식) ── */
 app.post("/api/flow-generate", async (req, res) => {
-    const { prompts, captions } = req.body;
+    const { prompts, captions, cdpPort } = req.body;
     if (!Array.isArray(prompts) || prompts.length === 0)
         return res.status(400).json({ error: "prompts 배열 필요" });
     // ★요청 받자마자 즉시 로그(테리 요청): 사용자가 버튼 누른 걸 인식했다는 신호를 바로 보여준다.
@@ -541,7 +562,7 @@ app.post("/api/flow-generate", async (req, res) => {
         const images = await (0, naver_1.generateFlowImagesCDP)({
             prompts,
             captions: Array.isArray(captions) ? captions : [],
-            cdpPort: 9222,
+            cdpPort: (typeof cdpPort === "number" && cdpPort >= 9222 && cdpPort <= 9299) ? cdpPort : 9222, // 슬롯별 포트
             onLog: (m) => console.log(m),
         });
         if (images.length === 0) {
@@ -558,6 +579,8 @@ app.post("/api/flow-generate", async (req, res) => {
             return res.status(503).json({ error: "Flow 준비가 안 됐어요. 'Flow 준비' 버튼으로 크롬을 먼저 열어주세요.", code: "CDP_CONNECT_FAIL" });
         if (msg.includes("FLOW_NOT_LOGGED_IN"))
             return res.status(401).json({ error: "크롬에서 Google Flow에 먼저 로그인해주세요.", code: "FLOW_NOT_LOGGED_IN" });
+        if (msg.includes("FLOW_NO_CREDIT"))
+            return res.status(402).json({ error: "Flow 무료 크레딧이 부족해요 — Flow 계정을 바꾸거나 크레딧 충전 후 다시 해주세요.", code: "FLOW_NO_CREDIT" });
         res.status(500).json({ error: msg });
     }
 });

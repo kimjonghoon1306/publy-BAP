@@ -161,7 +161,7 @@ app.delete("/api/session/:platform/:userId", (req, res) => {
 /* ── 직접 발행 (앱에서 즉시 발행) ── */
 app.post("/api/publish-full", async (req, res) => {
   const { userId, platform, naverId, title, content, pubScope = "full", tags = [], imageUrl, categoryId, visibility, scheduleTime, blocks,
-    videoUrl, videoPosition, editLogNo,
+    videoUrl, videoPosition, editLogNo, editBlogId,
     useFlow, flowImgCount, flowPrompts, flowCaptions } = req.body;
   if (!userId || !platform || !title || !content) {
     return res.status(400).json({ error: "userId, platform, title, content 필요" });
@@ -240,9 +240,10 @@ app.post("/api/publish-full", async (req, res) => {
     if (platform === "naver") {
       if (naverId) {
         const ok = activateNaverAccount(userId, naverId);
-        if (!ok) console.log(`[publish] 계정 세션 없음: ${naverId}`);
+        if (!ok) throw new Error(`선택한 네이버 계정(${naverId})의 로그인 세션을 찾지 못했어요. 계정 관리에서 다시 연결해주세요.`);
+        console.log(`[publish] 계정 세션 활성화: ${naverId}${editBlogId ? ` (글 주인 blogId=${editBlogId})` : ""}`);
       }
-      postUrl = await publishNaver({ userId, title, content, pubScope, tags, imageUrl, categoryId, visibility, scheduleTime, blocks: finalBlocks, videoUrl, videoPosition, editLogNo, signal: publishAbort.signal });
+      postUrl = await publishNaver({ userId, title, content, pubScope, tags, imageUrl, categoryId, visibility, scheduleTime, blocks: finalBlocks, videoUrl, videoPosition, editLogNo, editBlogId, signal: publishAbort.signal });
     } else if (platform === "tistory") {
       postUrl = await publishTistory({ userId, title, content, tags, categoryId, visibility });
     } else {
