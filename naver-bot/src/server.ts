@@ -167,7 +167,18 @@ app.post("/api/publish-full", async (req, res) => {
     return res.status(400).json({ error: "userId, platform, title, content 필요" });
   }
 
+  const publishAbort = new AbortController();
+  const abortFromClient = () => {
+    if (!publishAbort.signal.aborted) {
+      console.log("[publish] 클라이언트 연결 종료 — 진행 중인 발행을 중단합니다");
+      publishAbort.abort();
+    }
+  };
+  req.once("aborted", abortFromClient);
+  res.once("close", () => { if (!res.writableEnded) abortFromClient(); });
+
   await acquireSlot();
+  if (publishAbort.signal.aborted) { releaseSlot(); return; }
   const accountLock = platform === "naver" ? acquireAccountLock(String(naverId || userId), "글 발행") : null;
   if (accountLock && !accountLock.ok) {
     releaseSlot();
@@ -216,12 +227,14 @@ app.post("/api/publish-full", async (req, res) => {
           while (imgIdx < flowImages.length) { result.push({ type: "image", src: flowImages[imgIdx].src, alt: flowImages[imgIdx].alt }); imgIdx++; }
           finalBlocks = result;
           console.log(`[server] Flow 이미지 ${flowImages.length}장 블록 삽입 완료(경계 위)`);
-        }
+        } else throw new Error("Flow 이미지를 한 장도 만들지 못해 발행을 중단했어요");
       } catch (flowErr: any) {
         console.error("[server] Flow 이미지 생성 실패:", flowErr.message);
-        // Flow 실패해도 이미지 없이 발행 계속
+        throw new Error(`Flow 이미지 생성 실패 — 이미지 없이 발행하지 않습니다: ${flowErr.message}`);
       }
     }
+
+    if (publishAbort.signal.aborted) throw new Error("발행이 취소됐습니다");
 
     let postUrl = "";
     if (platform === "naver") {
@@ -229,7 +242,7 @@ app.post("/api/publish-full", async (req, res) => {
         const ok = activateNaverAccount(userId, naverId);
         if (!ok) console.log(`[publish] 계정 세션 없음: ${naverId}`);
       }
-      postUrl = await publishNaver({ userId, title, content, pubScope, tags, imageUrl, categoryId, visibility, scheduleTime, blocks: finalBlocks, videoUrl, videoPosition, editLogNo });
+      postUrl = await publishNaver({ userId, title, content, pubScope, tags, imageUrl, categoryId, visibility, scheduleTime, blocks: finalBlocks, videoUrl, videoPosition, editLogNo, signal: publishAbort.signal });
     } else if (platform === "tistory") {
       postUrl = await publishTistory({ userId, title, content, tags, categoryId, visibility });
     } else {
@@ -241,6 +254,7 @@ app.post("/api/publish-full", async (req, res) => {
     res.json({ success: true, postUrl });
   } catch (e: any) {
     // 실패 기록도 앱이 저장(이중저장 방지)
+    if (publishAbort.signal.aborted || res.destroyed) return;
     if (e.message?.includes("세션 만료") || e.message?.includes("재연결")) {
       return res.status(401).json({ error: e.message, code: "SESSION_EXPIRED" });
     }

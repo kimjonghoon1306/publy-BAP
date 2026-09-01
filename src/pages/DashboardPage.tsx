@@ -3103,20 +3103,28 @@ POST3: (제목)|(이유)
   }
   function stopOneTouch(){otStopRef.current=true;try{otAbortRef.current?.abort();}catch{};setOtRunning(false);setOtNextAt(null);showToast("원터치를 멈췄어요 — 진행 중이던 작업도 중단","info");}
 
+  function showOneTouchPreflight(errors:string[],title="글 살리기를 시작할 수 없어요"){
+    window.alert(`${title}\n\n${errors.map(v=>`• ${v}`).join("\n")}`);
+  }
+
   // 블로그지수(NeighborPage)에서 '글 살리기' 클릭 → 이벤트로 여기서 실행(원터치 탭으로 이동해 진행상황 표시)
   useEffect(()=>{
     const h=(e:any)=>{ const {logNo,title,blogId}=e.detail||{}; if(!logNo)return;
       const target={logNo:String(logNo),origTitle:String(title||""),origBody:""};
       setTab("onetouch");
       const acc=connAccs.find(a=>String(a.username)===String(blogId||""));
-      if(!acc){const fail=`대상 블로그(${blogId||"알 수 없음"})와 연결된 발행 계정이 없어요. 계정 관리에서 먼저 연결해주세요.`;setReviveState({...target,title:target.origTitle,step:"실패",fail});showToast(fail,"error");return;}
-      if(otRunningRef.current){const fail="다른 원터치 작업이 진행 중이에요. 완료하거나 중단한 뒤 다시 시도해주세요.";setReviveState({...target,title:target.origTitle,step:"실패",fail});showToast(fail,"error");return;}
+      const errors:string[]=[];
+      if(!acc)errors.push("네이버 계정이 연결 안 됐어요 → 계정관리에서 계정을 연결하세요");
+      if(otImgMode==="flow"&&!flowSlotReady[flowSlot])errors.push("Flow가 연결 안 됐어요 → 원터치 발행에서 Flow를 연결 후 다시 시작하세요");
+      if(errors.length){e.preventDefault?.();showOneTouchPreflight(errors);return;}
+      if(!acc)return;
+      if(otRunningRef.current){e.preventDefault?.();const fail="다른 원터치 작업이 진행 중이에요. 완료하거나 중단한 뒤 다시 시도해주세요.";setReviveState({...target,title:target.origTitle,step:"실패",fail});showToast(fail,"error");return;}
       setPubAccId(acc.id);
       otReviveRunRef.current?.({...target,accountId:acc.id});
     };
     window.addEventListener("publy-revive-post",h as any);
     return ()=>window.removeEventListener("publy-revive-post",h as any);
-  },[accounts,platform,botOnline]);
+  },[accounts,platform,botOnline,otImgMode,flowSlot,flowSlotReady]);
   // ── 14일 중복방지: 사용한 키워드 기록/조회 ──
   function otRecentUsedKw():string[]{ try{ const cut=Date.now()-14*86400000; return (JSON.parse(localStorage.getItem("publy_ot_used_kw")||"[]") as any[]).filter(r=>r.at>cut).map(r=>r.kw); }catch{return [];} }
   function otRecordUsedKw(kws:string[]){ try{ const cut=Date.now()-14*86400000; const kept=(JSON.parse(localStorage.getItem("publy_ot_used_kw")||"[]") as any[]).filter(r=>r.at>cut); const now=Date.now(); for(const k of kws) kept.push({kw:k,at:now}); localStorage.setItem("publy_ot_used_kw",JSON.stringify(kept.slice(-800))); }catch{} }
@@ -3153,9 +3161,13 @@ POST3: (제목)|(이유)
     if(otRunningRef.current){if(activeRevive)setReviveState({logNo:activeRevive.logNo,title:activeRevive.origTitle,step:"실패",fail:"다른 원터치 작업이 진행 중이에요."});return;}
     if(otSchedOn&&source!=="schedule"&&!activeRevive){const fail=`예약 대기 중이에요. ${otSchedTime} 예약을 끈 뒤 다시 시도해주세요.`;showToast(fail,"info");return;}
     const runAccId=accountId||pubAccId;
-    if(!runAccId){const fail="발행할 네이버 계정을 찾지 못했어요.";if(reviveTarget)setReviveState({logNo:reviveTarget.logNo,title:reviveTarget.origTitle,step:"실패",fail});showToast(fail,"error");return;}
+    const preflightErrors:string[]=[];
+    if(!runAccId||!connAccs.some(a=>a.id===runAccId))preflightErrors.push("네이버 계정이 연결 안 됐어요 → 계정관리에서 계정을 연결하세요");
+    if(otImgMode==="flow"&&!flowSlotReady[flowSlot])preflightErrors.push("Flow가 연결 안 됐어요 → 원터치 발행에서 Flow를 연결 후 다시 시작하세요");
+    if(preflightErrors.length){showOneTouchPreflight(preflightErrors,activeRevive?undefined:"원터치 발행을 시작할 수 없어요");return;}
     const termMin=otCustomTerm.trim()?Math.max(1,parseInt(otCustomTerm,10)||otTermMin):otTermMin;
     otRunningRef.current=true;otStopRef.current=false;setOtRunning(true);setOtNextAt(null);setOtPaused(null);otFlowExhaustedRef.current.clear();
+    const ctrl=new AbortController();otAbortRef.current=ctrl;const signal=ctrl.signal;
     try{
     // 📡 모든 단계를 라이브 로그로 → 회원 본인도, 관리자도 실시간 확인. (관리자 '라이브 로그' 탭에서 회원별로 보임)
     const liveLines:string[]=[];
@@ -3216,7 +3228,6 @@ POST3: (제목)|(이유)
         showToast(`오늘 발행 한도(${q.limit}건)를 다 썼어요. 남은 키워드는 등급을 올리면 발행돼요`,"info");
         break;
       }
-      const ctrl=new AbortController(); otAbortRef.current=ctrl; const signal=ctrl.signal;
       const n=activeRevive?reviveImageCount:Math.min(6,Math.max(1,otImgCount));
       try{
         upd({step:"제목 생성 중",status:"run"}); otLive(activeRevive?`✏️ 새 제목 생성 중...`:`▶ [${i+1}/${kws.length}] "${kw}" 제목 생성 중`); const title=await otGenTitleBest(kw,signal); upd({title}); otLive(activeRevive?`✏️ 제목 수정: "${activeRevive.origTitle}" → "${title}"`:`  ✅ 제목 선택: ${title}`);
@@ -3255,8 +3266,8 @@ POST3: (제목)|(이유)
                 continue;
               }
               else if(fr.ok&&Array.isArray(fd.images)&&fd.images.length){ imgs.push(...fd.images.map((im:any)=>im.src).filter(Boolean)); otLive(`  ✅ Flow 이미지 ${imgs.length}/${n}장${imgs.length<n?` (${n-imgs.length}장은 생성 실패해 빠졌어요)`:""}`); flowHandled=true; break; }
-              else { otLive(`  ⚠️ Flow 이미지 실패: ${fd.error||("HTTP "+fr.status)} — 위 '🎬 Flow 준비'로 먼저 연결하세요. 이번 글은 이미지 없이 올려요`); flowHandled=true; break; }
-            }catch(e:any){ otLive(`  ⚠️ Flow 이미지 오류: ${e.message}`); flowHandled=true; break; }
+              else { otLive(`  ❌ Flow 이미지 실패: ${fd.error||("HTTP "+fr.status)} — 이미지 없이 발행하지 않고 멈춥니다`); flowHandled=true; break; }
+            }catch(e:any){ if(e?.name==="AbortError")throw e; otLive(`  ❌ Flow 이미지 오류: ${e.message} — 이미지 없이 발행하지 않고 멈춥니다`); flowHandled=true; break; }
           }
           if(!flowHandled&&!otStopRef.current){   // 등록된 모든 Flow 계정 크레딧 소진 → 그때만 사람 호출
             upd({step:"⏸ 모든 Flow 계정 크레딧 소진 — 계정 추가 후 이어가기",status:"limit"});
@@ -3266,6 +3277,7 @@ POST3: (제목)|(이유)
             else setOtPaused({idx:i,kws,reason:"credit"});
             otRunningRef.current=false; setOtRunning(false); setOtNextAt(null); return;
           }
+          if(!otStopRef.current&&imgs.length===0)throw new Error("Flow 이미지를 한 장도 만들지 못해 발행을 중단했어요. Flow 연결 상태를 확인한 후 다시 시작하세요.");
         }
         if(otStopRef.current){ upd({step:"⏹ 중단됨 — 이 글은 발행하지 않았어요",status:"limit"}); otLive(`  ⏹ 중단 — 발행 전이라 이 글은 올리지 않았어요`,false); break; }   // ★전체 중단: 발행 전이면 글도 안 올림
         upd({step:"카테고리 매칭 중"}); const cat=await otPickCategory(title,content,cats,signal); upd({cat:cat.name||"기본"}); otLive(`  📂 카테고리 자동 선택: ${cat.name||"기본"}`);

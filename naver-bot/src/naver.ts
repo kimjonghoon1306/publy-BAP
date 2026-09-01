@@ -378,8 +378,10 @@ export async function publishNaver(params: {
   videoUrl?: string;
   videoPosition?: "top" | "middle" | "bottom";
   editLogNo?: string;   // ★있으면 새 글이 아니라 '그 글 편집화면'을 열어 기존 본문 비우고 통째 교체 재발행(주소·좋아요 유지)
+  signal?: AbortSignal;
 }): Promise<string> {
-  const { userId, title: rawTitle, content, pubScope = "full", tags, imageUrl, categoryId, visibility = "public", scheduleTime, blocks, videoUrl, videoPosition = "middle", editLogNo } = params;
+  const { userId, title: rawTitle, content, pubScope = "full", tags, imageUrl, categoryId, visibility = "public", scheduleTime, blocks, videoUrl, videoPosition = "middle", editLogNo, signal } = params;
+  if (signal?.aborted) throw new Error("발행이 취소됐습니다");
   const isEdit = !!(editLogNo && /^\d+$/.test(String(editLogNo)));   // 글 살리기(덮어쓰기) 모드
   const title = rawTitle.replace(/\n/g, " ").trim().slice(0, 40);
 
@@ -407,7 +409,13 @@ export async function publishNaver(params: {
   const blogId = readSession<any>(naverSessionName(userId), LEGACY_SESSION_DIRS)?.blogId;
   const cookies = await ensureLiveSessionNaver(userId);   // ★세션 만료면 저장된 비번으로 자동 재연결(캡차면 창 모드)
 
+  let closingExpected = false;
   const browser = await chromium.launch({ headless: false, args: LAUNCH_ARGS });
+  const abortPublish = () => {
+    closingExpected = true;
+    void browser.close().catch(() => {});
+  };
+  signal?.addEventListener("abort", abortPublish, { once: true });
   const context = await browser.newContext({
     userAgent: UA, viewport: { width: 1280, height: 800 },
     locale: "ko-KR", timezoneId: "Asia/Seoul",
@@ -417,7 +425,6 @@ export async function publishNaver(params: {
   const page = await context.newPage();
   let lastPageAction = "발행 브라우저 초기화";
   let unexpectedPageClose = false;
-  let closingExpected = false;
   const markPageAction = (action: string) => { lastPageAction = action; };
   const assertPageOpen = (action: string) => {
     const previousAction = lastPageAction;
@@ -445,6 +452,7 @@ export async function publishNaver(params: {
   });
 
   try {
+    if (signal?.aborted) throw new Error("발행이 취소됐습니다");
     // ★글 살리기(편집) 모드면 그 글의 편집화면을, 아니면 새 글쓰기 화면을 연다. 에디터는 둘 다 스마트에디터라 이후 로직 공통.
     const writeUrl = isEdit
       // 편집 전용 엔드포인트를 직접 사용한다. PostWriteForm+Redirect=Update는 최근 네이버에서
@@ -1451,6 +1459,7 @@ export async function publishNaver(params: {
     writeSession(naverSessionName(userId), session);
 
     closingExpected = true;
+    signal?.removeEventListener("abort", abortPublish);
     await browser.close();
     console.log(`[naver] ✅ ${scheduleTime ? "예약 완료" : "발행 완료"}: ${postUrl}`);
     return postUrl;
@@ -1463,9 +1472,10 @@ export async function publishNaver(params: {
       else console.error(`[naver] 스크린샷 불가: page가 이미 닫힘 (직전 액션: ${lastPageAction})`);
     } catch {}
     closingExpected = true;
+    signal?.removeEventListener("abort", abortPublish);
     await browser.close().catch(() => {});
     const pageClosedError = unexpectedPageClose || /Target page, context or browser has been closed|page has been closed|browser has been closed/i.test(String(e?.message || e));
-    if (isEdit && pageClosedError && !(params as any).__pageCloseRetry) {
+    if (isEdit && !signal?.aborted && pageClosedError && !(params as any).__pageCloseRetry) {
       console.error(`[naver] 🔁 page closed 발행 전체 재시도 1/1 (직전 액션: ${lastPageAction})`);
       return publishNaver({ ...params, __pageCloseRetry: true } as any);
     }
