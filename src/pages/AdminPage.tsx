@@ -2371,7 +2371,7 @@ Output (JSON object only): {"keyword":"핵심키워드","title":"새 제목","st
     text = text.replace(/[一-鿿㐀-䶿]/g,"").replace(/[\u3040-\u30FF]/g,"")
       .replace(/[^\uAC00-\uD7A3a-zA-Z0-9\s.,!?;:()\-\'".\[\]%@#&+=/\\~`|<>{}^_$\n]/g,"")
       .replace(/\*{2,}/g,"").replace(/^#{3,}\s+/gm,"").replace(/^[-*]\s+/gm,"")
-      .replace(/^\d+\.\s+/gm,"").replace(/_{2,}/g,"").replace(/ {2,}/g," ").replace(/\n{3,}/g,"\n\n").trim();
+      .replace(/_{2,}/g,"").replace(/ {2,}/g," ").replace(/\n{3,}/g,"\n\n").trim();
     h2s.forEach((line,i) => { text = text.split(`XH2${i}X`).join(line); });
     ph.forEach(([k,v]) => { text = text.split(k).join(v); });
     return text;

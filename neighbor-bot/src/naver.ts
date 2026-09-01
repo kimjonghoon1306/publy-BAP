@@ -4952,11 +4952,22 @@ export async function fetchPostBody(blogId: string, logNo: string): Promise<{ ti
     const body = seg
       .replace(/<script[\s\S]*?<\/script>/gi, " ")
       .replace(/<style[\s\S]*?<\/style>/gi, " ")
+      // AEO 진단은 문단·Q&A·번호 목록의 줄 경계를 사용한다. 태그 제거 전에
+      // 블록 경계를 줄바꿈으로 바꿔야 공개 글의 실제 구조가 보존된다.
+      .replace(/<br\s*\/?\s*>/gi, "\n")
+      .replace(/<\/(?:p|div|li|ul|ol|h[1-6]|blockquote|section)>/gi, "\n")
       .replace(/<[^>]+>/g, " ")
-      .replace(/&nbsp;|&amp;|&quot;|&#39;|&lt;|&gt;/g, " ")
-      .replace(/\s+/g, " ")
+      .replace(/&nbsp;/gi, " ")
+      .replace(/&amp;/gi, "&")
+      .replace(/&quot;/gi, '"')
+      .replace(/&#39;/gi, "'")
+      .replace(/&lt;/gi, "<")
+      .replace(/&gt;/gi, ">")
+      .replace(/[ \t\r\f\v]+/g, " ")
+      .replace(/ *\n */g, "\n")
+      .replace(/\n{3,}/g, "\n\n")
       .trim()
-      .slice(0, 1500);   // AI 프롬프트에 넣을 만큼만
+      .slice(0, 8000);   // 글 아래쪽 FAQ까지 진단할 수 있게 충분히 읽는다
     return { title, body, imageCount };
   } catch { return { title: "", body: "", imageCount: -1 }; }   // -1 = 조회 실패(호출부는 설정값/3장 폴백)
 }

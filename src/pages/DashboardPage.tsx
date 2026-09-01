@@ -2457,7 +2457,6 @@ Output (JSON object only): {"keyword":"핵심키워드","title":"새 SEO 제목"
       .replace(/_{2,}(.*?)_{2,}/g,"$1")
       .replace(/_(.*?)_/g,"$1")
       .replace(/^[-*+]\s+/gm,"")
-      .replace(/^\d+\.\s+/gm,"")
       .replace(/^>\s*/gm,"")
       .replace(/`{3}[\s\S]*?`{3}/g,"")
       .replace(/`([^`]+)`/g,"$1")

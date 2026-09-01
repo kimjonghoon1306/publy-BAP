@@ -5,7 +5,7 @@
 // 본문 규칙에 추가하는 블록 — 도입부 핵심요약 + 구조화(목록/표)로 AI가 발췌하기 쉽게.
 export const AEO_RULES = `=== AI 검색 최적화(AEO) — 네이버 AI 브리핑·Cue: 등 AI 답변에 인용되게(반드시 지킬 것) ===
 ✅ 글 맨 처음(제목 다음 첫 문단)에 "핵심 요약"을 2~3문장으로 먼저 제시 — 서론·인사말 없이 바로 질문의 답부터. 예: "OO은 △△입니다. 핵심은 3가지인데요, ① ~ ② ~ ③ ~ 순서로 정리했어요." (AI가 이 요약을 그대로 답변에 뽑아 씀)
-✅ 정보를 나열할 때는 번호 목록(1. 2. 3. 또는 ① ② ③)이나 항목별로 끊어서 — AI가 파싱하기 쉽게 (긴 줄글 덩어리로 뭉치지 말 것)
+✅ 정보를 나열할 때는 서로 다른 줄에 번호 목록을 최소 3개(1. 2. 3. 또는 ① ② ③) 작성 — AI가 파싱하기 쉽게 (긴 줄글 덩어리로 뭉치지 말 것)
 ✅ 비교·수치·조건이 있으면 "항목: 값" 형태로 또렷하게 (예: "가격: 1만원 / 소요시간: 30분")
 ✅ 각 소제목 아래 첫 문장은 그 구간의 결론부터 (두괄식) — AI가 문단 첫 문장을 근거로 자주 인용함
 ✅ ★현재 년도는 ${new Date().getFullYear()}년. 년도를 쓸 땐 올해(${new Date().getFullYear()}년) 기준으로. 2024·2025 등 지난 년도를 최신처럼 쓰지 말 것`;
@@ -20,6 +20,7 @@ export const AEO_YEAR_RULE = `\n★현재 년도는 ${new Date().getFullYear()}�
 
 // 출력 형식 안내에 붙이는 FAQ 강화(4~5개) — AI가 Q&A를 통째로 발췌하기 좋은 형태.
 export const AEO_FAQ_FORMAT = `[FAQ시작]
+자주 묻는 질문
 Q1: (사람들이 실제로 검색창에 칠 법한 질문)
 A1: (핵심부터 1~2문장으로 또렷하게)
 Q2: (질문)
@@ -42,9 +43,13 @@ export function diagnoseAeo(body: string): { checks: AeoCheck[]; score: number; 
     && !/^(안녕|반갑|오늘은|여러분|이번에|요즘|날씨)/.test(firstPara)
   );
   // ② FAQ / Q&A: 자주 묻는 질문 블록이 있나
-  const hasFaq = /\[FAQ시작\]|자주\s*묻는\s*질문|Q\s*&\s*A|큐앤에이|(?:^|\n)\s*Q\s*\d?\s*[:：.]/i.test(text);
+  // 최신 글은 줄바꿈을 보존해서 읽지만, 예전에 평탄화해 저장한 본문도 Q1/A1 표기를 인식한다.
+  const faqQuestions = text.match(/(?:^|\n|\s)Q\s*\d+\s*[:：.]/gi) || [];
+  const faqAnswers = text.match(/(?:^|\n|\s)A\s*\d+\s*[:：.]/gi) || [];
+  const hasFaq = /\[FAQ시작\]|자주\s*묻는\s*질문|Q\s*&\s*A|큐앤에이/i.test(text)
+    || (faqQuestions.length >= 2 && faqAnswers.length >= 2);
   // ③ 구조화: 번호/기호 목록이나 "항목: 값" 형태가 충분히 있나
-  const listHits = (text.match(/(?:^|\n)\s*(?:\d+[.)]|[①②③④⑤⑥⑦⑧⑨]|[-•▶]|첫째|둘째|셋째)/g) || []).length
+  const listHits = (text.match(/(?:^|\n|\s)(?:\d+[.)]|[①②③④⑤⑥⑦⑧⑨]|[-•▶]|첫째|둘째|셋째)/g) || []).length
     + (text.match(/[^\n]{1,14}\s*[:：]\s*\S/g) || []).length;
   const structured = listHits >= 3;
   const checks: AeoCheck[] = [
