@@ -1136,9 +1136,11 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
     setOtLiveLog(prev=>[...prev,activeRevive
       ? `━━ 글 살리기 시작 ━━`
       : `━━━━━ ${new Date().toLocaleString("ko-KR")} 원터치 ${resume?`이어가기(${resume.idx+1}번째부터)`:bySched?"예약 자동 시작":"시작"} ━━━━━`].slice(-300));
-    const runAccount=admAccs.find(a=>a.id===runAccId);
-    otLive(`👤 글 작성 계정: ${runAccount?.username||"확인 불가"}${runAccount?.blog_name?` → 블로그 ${runAccount.blog_name}`:""}`);
-    if(activeRevive?.blogId&&activeRevive?.logNo){
+    if(activeRevive){
+      const runAccount=admAccs.find(a=>a.id===runAccId);
+      otLive(`👤 글 작성 계정: ${runAccount?.username||"확인 불가"}${runAccount?.blog_name?` → 블로그 ${runAccount.blog_name}`:""}`);
+    }
+    if(activeRevive?.blogId&&activeRevive.logNo){
       otLive(`🔗 살릴 글 주소: https://blog.naver.com/${encodeURIComponent(activeRevive.blogId)}/${encodeURIComponent(activeRevive.logNo)}`);
     }
     if(!resume&&!activeRevive){

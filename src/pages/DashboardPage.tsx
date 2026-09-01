@@ -3205,9 +3205,11 @@ POST3: (제목)|(이유)
       ? `━━ 글 살리기 시작 ━━`
       : `━━━━━ ${new Date().toLocaleString("ko-KR")} 원터치 ${resume?`이어가기(${resume.idx+1}번째부터)`:bySched?"예약 자동 시작":"시작"} ━━━━━`].slice(-300));
     const otLive=(t:string,running=true)=>{const line=`[${new Date().toLocaleTimeString("ko-KR")}] ${t}`; liveLines.push(line); setOtLiveLog(prev=>[...prev,line].slice(-300)); try{pushLiveLog(user.id,{name:user.name,email:user.email,context:"⚡ 원터치 발행",text:liveLines.slice(-80).join("\n"),running});}catch{}};
-    const runAcc=accounts.find(a=>a.id===runAccId);
-    otLive(`👤 글 작성 계정: ${runAcc?.username||"확인 불가"}${runAcc?.blog_name?` → 블로그 ${runAcc.blog_name}`:""}`);
-    if(activeRevive?.blogId&&activeRevive?.logNo){
+    if(activeRevive){
+      const runAcc=accounts.find(a=>a.id===runAccId);
+      otLive(`👤 글 작성 계정: ${runAcc?.username||"확인 불가"}${runAcc?.blog_name?` → 블로그 ${runAcc.blog_name}`:""}`);
+    }
+    if(activeRevive?.blogId&&activeRevive.logNo){
       otLive(`🔗 살릴 글 주소: https://blog.naver.com/${encodeURIComponent(activeRevive.blogId)}/${encodeURIComponent(activeRevive.logNo)}`);
     }
     // ── 발행 계획 요약(테리 요청: 예약이면 몇 시 예약·매일반복 여부 / 몇 개 / 몇 분 간격 전부 디테일하게) ──

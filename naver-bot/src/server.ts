@@ -240,8 +240,10 @@ app.post("/api/publish-full", async (req, res) => {
     if (platform === "naver") {
       if (naverId) {
         const ok = activateNaverAccount(userId, naverId);
-        if (!ok) throw new Error(`선택한 네이버 계정(${naverId})의 로그인 세션을 찾지 못했어요. 계정 관리에서 다시 연결해주세요.`);
-        console.log(`[publish] 계정 세션 활성화: ${naverId}${editBlogId ? ` (글 주인 blogId=${editBlogId})` : ""}`);
+        // 기존 일반 발행은 그대로 유지하고, 다른 계정의 이전 세션으로 원문을 덮을 위험이 있는 글 살리기만 fail-closed.
+        if (!ok && editLogNo) throw new Error(`선택한 네이버 계정(${naverId})의 로그인 세션을 찾지 못했어요. 계정 관리에서 다시 연결해주세요.`);
+        if (!ok) console.log(`[publish] 계정 세션 없음: ${naverId}`);
+        else console.log(`[publish] 계정 세션 활성화: ${naverId}${editBlogId ? ` (글 주인 blogId=${editBlogId})` : ""}`);
       }
       postUrl = await publishNaver({ userId, title, content, pubScope, tags, imageUrl, categoryId, visibility, scheduleTime, blocks: finalBlocks, videoUrl, videoPosition, editLogNo, editBlogId, signal: publishAbort.signal });
     } else if (platform === "tistory") {
