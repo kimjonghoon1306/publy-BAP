@@ -2107,16 +2107,30 @@ Output (JSON object only): {"keyword":"핵심키워드","title":"새 SEO 제목"
   /* ── 글 구간별 캡션 생성 ── */
   function buildCaptions(kw:string, count:number, content?:string):string[]{
     const k = kw || "사진";
-    // 플레이스홀더처럼 보이는 "~이미지" 문구 제거. 자연스러운 짧은 캡션(SEO 키워드 유지).
+    // ★"사진 1/사진 2" 같은 숫자 캡션 금지 + 캡션이 서로 다르게(중복 없이). SEO 키워드는 유지.
+    //   본문(content) 소제목을 우선 캡션으로 쓰고, 부족하면 아래 자연스러운 후보로 채운다(모두 서로 다르게).
     const pool = [
-      `${k}`,
-      `${k} 현장`,
-      `${k} 추천`,
-      `${k} 자세히 보기`,
-      `${k} 실물`,
-      `${k} 정보`,
+      `${k}`, `${k} 현장`, `${k} 실물`, `${k} 자세히 보기`, `${k} 추천`, `${k} 정보`,
+      `${k} 살펴보기`, `${k} 후기`, `${k} 한눈에`, `${k} 미리보기`, `${k} 포인트`, `${k} 상세`,
     ];
-    return Array.from({length:count},(_,i)=>pool[i%pool.length]);
+    // 본문에서 소제목(짧은 줄)을 캡션 후보로 추출 → 글 내용과 맞는 캡션(중복·URL·마커 제외)
+    const fromBody:string[] = [];
+    if(content){
+      for(const line of content.split(/\n+/).map(s=>s.trim())){
+        if(line.length>=4 && line.length<=24 && !/https?:\/\/|\[|Q\d|A\d|태그|해시/.test(line)) fromBody.push(line);
+      }
+    }
+    const seen=new Set<string>();
+    const out:string[]=[];
+    const pick=(s:string)=>{ const t=s.trim(); if(t&&!seen.has(t)){seen.add(t);out.push(t);} };
+    // 1순위 본문 소제목, 2순위 후보 pool — 서로 다른 것만 담아 count개 채움
+    for(const s of fromBody){ if(out.length>=count)break; pick(s); }
+    for(const s of pool){ if(out.length>=count)break; pick(s); }
+    // 그래도 부족하면(후보 소진) 키워드 변형으로 채우되 숫자 대신 서로 다른 접미
+    const extra=["소개","살펴봐요","눈여겨볼 점","참고하세요","체크포인트","활용 팁"];
+    let ei=0;
+    while(out.length<count){ pick(`${k} ${extra[ei%extra.length]}`); ei++; if(ei>extra.length+count)break; }
+    return out.slice(0,count);
   }
 
   // ─── 300+ 키워드 이미지 프롬프트 시스템 ────────────────────
@@ -3075,13 +3089,15 @@ POST3: (제목)|(이유)
     if(!flowN&&images[0])blocks.push({type:"image",src:images[0],alt:""});   // 썸네일 alt는 항상 비움(본문 유실 방지)
     const paras=content.split(/\n\n+/).map(s=>s.trim()).filter(Boolean);
     const rest=flowN?[]:images.slice(1);
+    // ★캡션: "사진 1/사진 2" 숫자 대신 본문 소제목 기반 서로 다른 캡션(중복 없음). 썸네일 제외 rest 장수만큼.
+    const caps=buildCaptions(kw,rest.length,content);
     const every=rest.length?Math.max(1,Math.floor(paras.length/(rest.length+1))):0;
     let ri=0;
     paras.forEach((p,i)=>{
       blocks.push({type:"text",content:p});
-      if(every&&ri<rest.length&&(i+1)%every===0){blocks.push({type:"image",src:rest[ri],alt:`${kw} 사진 ${ri+2}`});ri++;}
+      if(every&&ri<rest.length&&(i+1)%every===0){blocks.push({type:"image",src:rest[ri],alt:caps[ri]||kw});ri++;}
     });
-    while(ri<rest.length){blocks.push({type:"image",src:rest[ri],alt:`${kw} 사진 ${ri+2}`});ri++;}
+    while(ri<rest.length){blocks.push({type:"image",src:rest[ri],alt:caps[ri]||kw});ri++;}
     // ★온파트너·내 링크·인사글을 발행하기와 동일 규칙으로 삽입(링크↔이미지 사이 글 안 낌)
     const finalBlocks=insertLinksAndGreeting(blocks,title,kw);
     const payload:any={userId:user.id,platform:"naver",title,content,

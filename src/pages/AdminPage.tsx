@@ -1036,9 +1036,9 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
     const blocks:any[]=[];
     if(!flowN&&images[0])blocks.push({type:"image",src:images[0],alt:""});
     const paras=content.split(/\n\n+/).map(s=>s.trim()).filter(Boolean);
-    const rest=flowN?[]:images.slice(1); const every=rest.length?Math.max(1,Math.floor(paras.length/(rest.length+1))):0; let ri=0;
-    paras.forEach((p,i)=>{ blocks.push({type:"text",content:p}); if(every&&ri<rest.length&&(i+1)%every===0){blocks.push({type:"image",src:rest[ri],alt:`${kw} 사진 ${ri+2}`});ri++;} });
-    while(ri<rest.length){blocks.push({type:"image",src:rest[ri],alt:`${kw} 사진 ${ri+2}`});ri++;}
+    const rest=flowN?[]:images.slice(1); const caps=buildCaptions(kw,rest.length,content); const every=rest.length?Math.max(1,Math.floor(paras.length/(rest.length+1))):0; let ri=0;
+    paras.forEach((p,i)=>{ blocks.push({type:"text",content:p}); if(every&&ri<rest.length&&(i+1)%every===0){blocks.push({type:"image",src:rest[ri],alt:caps[ri]||kw});ri++;} });
+    while(ri<rest.length){blocks.push({type:"image",src:rest[ri],alt:caps[ri]||kw});ri++;}
     // ★글쓴이 인사말: 썸네일(첫 이미지) 바로 다음 1회 삽입(발행하기와 동일). 비어있으면 안 넣음.
     if(greeting.trim()){
       const g=greeting.trim();
@@ -2470,18 +2470,26 @@ Output (JSON object only): {"keyword":"핵심키워드","title":"새 제목","st
 
   function buildCaptions(kw: string, count: number, content?: string): string[] {
     const k = kw || "사진";
-    // 이미지 검색 SEO를 위해 키워드 기반 설명형 캡션 생성
+    // ★"사진 1/사진 2"·"~이미지" 숫자·플레이스홀더 금지 + 서로 다르게(중복 없음). SEO 키워드 유지.
     const pool = [
-      `${k} 대표 이미지`,
-      `${k} 상세 설명 이미지`,
-      `${k} 실제 예시 이미지`,
-      `${k} 관련 참고 이미지`,
-      `${k} 핵심 내용 이미지`,
-      `${k} 주요 정보 이미지`,
-      `${k} 비교 분석 이미지`,
-      `${k} 활용 예시 이미지`,
+      `${k}`, `${k} 현장`, `${k} 실물`, `${k} 자세히 보기`, `${k} 추천`, `${k} 정보`,
+      `${k} 살펴보기`, `${k} 후기`, `${k} 한눈에`, `${k} 미리보기`, `${k} 포인트`, `${k} 상세`,
     ];
-    return Array.from({length: count}, (_, i) => pool[i % pool.length]);
+    const fromBody: string[] = [];
+    if (content) {
+      for (const line of content.split(/\n+/).map(s => s.trim())) {
+        if (line.length >= 4 && line.length <= 24 && !/https?:\/\/|\[|Q\d|A\d|태그|해시/.test(line)) fromBody.push(line);
+      }
+    }
+    const seen = new Set<string>();
+    const out: string[] = [];
+    const pick = (s: string) => { const t = s.trim(); if (t && !seen.has(t)) { seen.add(t); out.push(t); } };
+    for (const s of fromBody) { if (out.length >= count) break; pick(s); }
+    for (const s of pool) { if (out.length >= count) break; pick(s); }
+    const extra = ["소개", "살펴봐요", "눈여겨볼 점", "참고하세요", "체크포인트", "활용 팁"];
+    let ei = 0;
+    while (out.length < count) { pick(`${k} ${extra[ei % extra.length]}`); ei++; if (ei > extra.length + count) break; }
+    return out.slice(0, count);
   }
 
   function calcTargetChars(): number {
