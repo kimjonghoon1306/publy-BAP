@@ -1069,7 +1069,7 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
   }
 
   useEffect(()=>{
-    const h=(e:any)=>{ const {logNo,title,blogId}=e.detail||{}; if(!logNo)return;
+    const h=(e:any)=>{ const {logNo,title,blogId,naverId}=e.detail||{}; if(!logNo)return;
       const target={logNo:String(logNo),origTitle:String(title||""),origBody:"",blogId:String(blogId||"")};
       setTab("onetouch");
       // ★원문 blogId로 소유 계정을 고른다. 로그인ID와 블로그ID가 다른 계정도
@@ -1079,7 +1079,8 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
       if(!naverAccs.length)errors.push("네이버 계정이 연결 안 됐어요 → 계정관리에서 계정을 연결하세요");
       const norm=(v?:string)=>String(v||"").trim().toLowerCase().replace(/@naver\.com$/i,"");
       const targetBlogId=norm(target.blogId);
-      const ownerAcc=naverAccs.find(a=>norm(a.blog_name)===targetBlogId)
+      const ownerAcc=naverAccs.find(a=>norm(a.username)===norm(naverId))
+        ||naverAccs.find(a=>norm(a.blog_name)===targetBlogId)
         ||naverAccs.find(a=>norm(a.username)===targetBlogId)
         ||(naverAccs.length===1?naverAccs[0]:undefined);
       if(naverAccs.length&&!ownerAcc)errors.push(`이 글의 주인 블로그(${target.blogId})와 연결된 계정을 찾지 못했어요 → 해당 네이버 계정을 다시 연결하세요`);

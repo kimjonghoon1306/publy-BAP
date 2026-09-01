@@ -3125,7 +3125,7 @@ POST3: (제목)|(이유)
 
   // 블로그지수(NeighborPage)에서 '글 살리기' 클릭 → 이벤트로 여기서 실행(원터치 탭으로 이동해 진행상황 표시)
   useEffect(()=>{
-    const h=(e:any)=>{ const {logNo,title,blogId}=e.detail||{}; if(!logNo)return;
+    const h=(e:any)=>{ const {logNo,title,blogId,naverId}=e.detail||{}; if(!logNo)return;
       const target={logNo:String(logNo),origTitle:String(title||""),origBody:"",blogId:String(blogId||"")};
       setTab("onetouch");
       // ★글 살리기는 반드시 원문 소유 블로그의 로그인 세션을 골라야 한다.
@@ -3137,7 +3137,9 @@ POST3: (제목)|(이유)
       if(!naverAccs.length)errors.push("네이버 계정이 연결 안 됐어요 → 계정관리에서 계정을 연결하세요");
       const norm=(v?:string)=>String(v||"").trim().toLowerCase().replace(/@naver\.com$/i,"");
       const targetBlogId=norm(target.blogId);
-      const ownerAcc=naverAccs.find(a=>norm(a.blog_name)===targetBlogId)
+      // 1순위는 블로그지수/제목수정에서 이미 검증해 사용한 로그인ID. blog_name 비교는 구버전 이벤트용 폴백.
+      const ownerAcc=naverAccs.find(a=>norm(a.username)===norm(naverId))
+        ||naverAccs.find(a=>norm(a.blog_name)===targetBlogId)
         ||naverAccs.find(a=>norm(a.username)===targetBlogId)
         ||(naverAccs.length===1?naverAccs[0]:undefined);
       if(naverAccs.length&&!ownerAcc)errors.push(`이 글의 주인 블로그(${target.blogId})와 연결된 계정을 찾지 못했어요 → 해당 네이버 계정을 다시 연결하세요`);
