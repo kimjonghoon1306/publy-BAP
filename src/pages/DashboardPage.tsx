@@ -3151,7 +3151,7 @@ POST3: (제목)|(이유)
   async function runOneTouch(resume?:{idx:number;kws:string[];reviveTarget?:{logNo:string;origTitle:string;origBody:string}},reviveTarget?:{logNo:string;origTitle:string;origBody:string},source:"manual"|"schedule"|"revive"="manual",accountId?:string){
     const activeRevive=reviveTarget||resume?.reviveTarget;
     if(otRunningRef.current){if(activeRevive)setReviveState({logNo:activeRevive.logNo,title:activeRevive.origTitle,step:"실패",fail:"다른 원터치 작업이 진행 중이에요."});return;}
-    if(otSchedOn&&source!=="schedule"){const fail=`예약 대기 중이에요. ${otSchedTime} 예약을 끈 뒤 다시 시도해주세요.`;if(activeRevive)setReviveState({logNo:activeRevive.logNo,title:activeRevive.origTitle,step:"실패",fail});showToast(fail,"info");return;}
+    if(otSchedOn&&source!=="schedule"&&!activeRevive){const fail=`예약 대기 중이에요. ${otSchedTime} 예약을 끈 뒤 다시 시도해주세요.`;showToast(fail,"info");return;}
     const runAccId=accountId||pubAccId;
     if(!runAccId){const fail="발행할 네이버 계정을 찾지 못했어요.";if(reviveTarget)setReviveState({logNo:reviveTarget.logNo,title:reviveTarget.origTitle,step:"실패",fail});showToast(fail,"error");return;}
     const termMin=otCustomTerm.trim()?Math.max(1,parseInt(otCustomTerm,10)||otTermMin):otTermMin;
@@ -3160,10 +3160,12 @@ POST3: (제목)|(이유)
     // 📡 모든 단계를 라이브 로그로 → 회원 본인도, 관리자도 실시간 확인. (관리자 '라이브 로그' 탭에서 회원별로 보임)
     const liveLines:string[]=[];
     const bySched=source==="schedule";
-    setOtLiveLog(prev=>[...prev,`━━━━━ ${new Date().toLocaleString("ko-KR")} 원터치 ${resume?`이어가기(${resume.idx+1}번째부터)`:bySched?"예약 자동 시작":"시작"} ━━━━━`].slice(-300));
+    setOtLiveLog(prev=>[...prev,activeRevive
+      ? `━━ 글 살리기 시작 ━━`
+      : `━━━━━ ${new Date().toLocaleString("ko-KR")} 원터치 ${resume?`이어가기(${resume.idx+1}번째부터)`:bySched?"예약 자동 시작":"시작"} ━━━━━`].slice(-300));
     const otLive=(t:string,running=true)=>{const line=`[${new Date().toLocaleTimeString("ko-KR")}] ${t}`; liveLines.push(line); setOtLiveLog(prev=>[...prev,line].slice(-300)); try{pushLiveLog(user.id,{name:user.name,email:user.email,context:"⚡ 원터치 발행",text:liveLines.slice(-80).join("\n"),running});}catch{}};
     // ── 발행 계획 요약(테리 요청: 예약이면 몇 시 예약·매일반복 여부 / 몇 개 / 몇 분 간격 전부 디테일하게) ──
-    if(!resume){
+    if(!resume&&!activeRevive){
       const cntTxt=otAiKw?`AI 자동추천 ${otAiKwCount}개`:`직접 입력 ${otKeywords.split(/[\n,]+/).map(s=>s.trim()).filter(Boolean).length}개`;
       const styleTxt=otWriteStyle==="자동"?"글패턴 자동":`글패턴 ${otWriteStyle}`;
       const imgTxt=otImgMode==="flow"?`무료 Flow 이미지 ${otImgCount}장`:`AI 이미지 ${otImgCount}장`;
@@ -3174,14 +3176,15 @@ POST3: (제목)|(이유)
       otLive(`📋 발행 계획: ${bySched?"예약으로 ":""}지금부터 ${cntTxt} · ${styleTxt} · ${imgTxt} · 발행 텀 약 ${termMin}분 간격(±15% 안전 랜덤)으로 순서대로 발행해요`);
     }
     // ── 키워드 결정: 이어가기면 기존 목록, AI면 생성, 아니면 입력칸 ──
-    let kws:string[]; let startIdx=0;
+    let kws:string[]; let startIdx=0; let reviveImageCount=otImgCount||3; let reviveSucceeded=false;
     if(activeRevive){
+      otLive(`✨ 대상 글: "${activeRevive.origTitle}"`);
       setReviveState({logNo:activeRevive.logNo,title:activeRevive.origTitle,step:"원본 글을 읽고 주제 파악 중..."});
       let origBody=activeRevive.origBody;
-      if(!origBody){ const acc=connAccs.find(a=>a.id===runAccId); try{const br=await botFetch(`${BOT}/api/post-body?blogId=${encodeURIComponent(acc?.username||"")}&logNo=${encodeURIComponent(activeRevive.logNo)}`,{signal:AbortSignal.timeout(25000)} as any);const bd=await br.json().catch(()=>({}));if(bd.ok)origBody=String(bd.body||"");}catch{} }
+      { const acc=connAccs.find(a=>a.id===runAccId); try{const br=await botFetch(`${BOT}/api/post-body?blogId=${encodeURIComponent(acc?.username||"")}&logNo=${encodeURIComponent(activeRevive.logNo)}`,{signal:AbortSignal.timeout(25000)} as any);const bd=await br.json().catch(()=>({}));if(bd.ok){if(!origBody)origBody=String(bd.body||"");const fetchedCount=Number(bd.imageCount);if(Number.isFinite(fetchedCount)&&fetchedCount>=0)reviveImageCount=Math.floor(fetchedCount);}}catch{} }
       let kw=activeRevive.origTitle.replace(/[\[\]#]/g,"").trim().slice(0,20);
       try{const t=await callAI(`아래 블로그 글의 핵심 검색 키워드(2~4어절)만 답해. 다른 말 절대 금지.\n제목: ${activeRevive.origTitle}\n본문: ${origBody.slice(0,600)}`,new AbortController().signal);const k=(t||"").split("\n")[0].replace(/["'`]/g,"").trim();if(k&&k.length<=25)kw=k;}catch{}
-      kws=[kw]; otLive(`✨ 글 살리기 대상의 핵심 키워드: ${kw}`);
+      kws=[kw]; otLive(`📝 주제: ${kw}`);
     } else if(resume){ kws=resume.kws; startIdx=resume.idx; otLive(`▶ ${resume.idx+1}번째 키워드부터 이어서 발행해요`); }
     else if(otAiKw){
       otLive(`✨ AI 자동추천 키워드 ${otAiKwCount}개 생성 중(핫이슈+SEO·14일 중복 제외)`);
@@ -3214,16 +3217,18 @@ POST3: (제목)|(이유)
         break;
       }
       const ctrl=new AbortController(); otAbortRef.current=ctrl; const signal=ctrl.signal;
-      const n=Math.min(6,Math.max(1,otImgCount));
+      const n=activeRevive?reviveImageCount:Math.min(6,Math.max(1,otImgCount));
       try{
-        upd({step:"제목 생성 중",status:"run"}); otLive(`▶ [${i+1}/${kws.length}] "${kw}" 제목 생성 중`); const title=await otGenTitleBest(kw,signal); upd({title}); otLive(`  ✅ 제목 선택: ${title}`);
+        upd({step:"제목 생성 중",status:"run"}); otLive(activeRevive?`✏️ 새 제목 생성 중...`:`▶ [${i+1}/${kws.length}] "${kw}" 제목 생성 중`); const title=await otGenTitleBest(kw,signal); upd({title}); otLive(activeRevive?`✏️ 제목 수정: "${activeRevive.origTitle}" → "${title}"`:`  ✅ 제목 선택: ${title}`);
         if(activeRevive&&title.trim().length<8)throw new Error("제목 생성 품질 미달 — 덮어쓰기 중단(원본 안전)");
         let effStyle:WriteStyle=otWriteStyle==="자동"?"정보글":otWriteStyle;
         if(otWriteStyle==="자동"){ effStyle=await otPickStyle(kw,title,signal); otLive(`  🎨 글 패턴 자동 선택: ${effStyle}`); }
         upd({step:"본문 생성 중"}); otLive(`  ✍️ 본문 생성 중(${otCharMode==="manual"?otTargetChars+"자·":""}${effStyle}·키워드 5~6회)`); const {content,tags}=await otGenPost(kw,title,signal,effStyle); otLive(`  ✅ 본문 완성 (${content.length}자)`);
         if(activeRevive&&content.replace(/\s/g,"").length<400)throw new Error("본문 생성 품질 미달 — 덮어쓰기 중단(원본 안전)");
+        if(activeRevive)otLive(`🖼️ 이미지 ${n}장 · 📄 글자수 ${content.length}자로 덮어쓰기 시작합니다`);
         const imgs:string[]=[];
-        if(otImgMode==="ai"){ upd({step:"이미지 생성 중"}); otLive(`  🖼️ 이미지 ${n}장 생성 중(AI)`);
+        if(n===0){otLive(`  🖼️ 원본 글에 이미지가 없어 이미지 생성은 건너뜁니다`);
+        } else if(otImgMode==="ai"){ upd({step:"이미지 생성 중"}); otLive(`  🖼️ 이미지 ${n}장 생성 중(AI)`);
           for(let k=0;k<n;k++){ if(otStopRef.current)break; try{imgs.push(await generateOneImage(kw,signal,k));}catch(ie:any){otLive(`  ⚠️ 이미지 ${k+1} 실패: ${ie.message||"오류"}`);} }
           otLive(`  ✅ 이미지 ${imgs.length}/${n}장`);
         } else {   // 무료 Flow: 위 'Flow 준비'로 연 크롬(포트 9222)을 그대로 사용 → 재로그인/새창 없음
@@ -3257,8 +3262,9 @@ POST3: (제목)|(이유)
             upd({step:"⏸ 모든 Flow 계정 크레딧 소진 — 계정 추가 후 이어가기",status:"limit"});
             otLive(`  ⏸ 등록된 Flow 계정이 모두 크레딧이 떨어졌어요. 새 계정을 연결한 뒤 '이어가기'를 누르면 이 키워드부터 계속돼요.`,false);
             showToast("모든 Flow 계정 크레딧 소진 — 계정 추가 후 '이어가기'","info");
-            if(activeRevive)setReviveState({logNo:activeRevive.logNo,title:activeRevive.origTitle,step:"실패",fail:"모든 Flow 계정의 크레딧이 소진됐어요. 계정 추가 후 이어가기를 눌러주세요."});
-            setOtPaused({idx:i,kws,reason:"credit",reviveTarget:activeRevive}); otRunningRef.current=false; setOtRunning(false); setOtNextAt(null); return;
+            if(activeRevive){setReviveState({logNo:activeRevive.logNo,title:activeRevive.origTitle,step:"실패",fail:"모든 Flow 계정의 크레딧이 소진됐어요."});otLive("❌ 글 살리기 실패 — 모든 Flow 계정의 크레딧이 소진됐어요",false);}
+            else setOtPaused({idx:i,kws,reason:"credit"});
+            otRunningRef.current=false; setOtRunning(false); setOtNextAt(null); return;
           }
         }
         if(otStopRef.current){ upd({step:"⏹ 중단됨 — 이 글은 발행하지 않았어요",status:"limit"}); otLive(`  ⏹ 중단 — 발행 전이라 이 글은 올리지 않았어요`,false); break; }   // ★전체 중단: 발행 전이면 글도 안 올림
@@ -3276,18 +3282,19 @@ POST3: (제목)|(이유)
           upd({step:"발행 완료",status:"done",postUrl,at});
           nextResumeIdx=i+1;   // ★이 글 발행 성공 → 이어가기는 다음 글부터
           otLive(`  ✅ 발행 완료! ${postUrl}`);
-          if(activeRevive){setReviveState({logNo:activeRevive.logNo,title:activeRevive.origTitle,step:"완료",done:true});showToast("✨ 글을 새로 써서 덮어썼어요!","success");}
+          if(activeRevive){reviveSucceeded=true;setReviveState({logNo:activeRevive.logNo,title:activeRevive.origTitle,step:"완료",done:true});showToast("✨ 글을 새로 써서 덮어썼어요!","success");}
         } else {
           await refundQuota(user.id);   // 실제 발행 불확실 → 건수 환불
           if(activeRevive)setReviveState({logNo:activeRevive.logNo,title:activeRevive.origTitle,step:"실패",fail:"덮어쓰기 주소를 못 받았어요 — 블로그를 확인하세요"});
           upd({step:"⚠️ 발행 주소를 못 받음 — 블로그에 올라갔는지 확인하세요",status:"fail",at});
           otLive(`  ⚠️ 발행 주소를 못 받았어요(글이 실제로 안 올라갔을 수 있음). 블로그를 확인하세요.`);
+          if(activeRevive)otLive(`❌ 글 살리기 실패 — 덮어쓰기 주소를 못 받았어요`,false);
           await addHistory({user_id:user.id,platform:"naver",title,status:"fail",error_message:"발행 주소 미수신(글 미게시 의심)"}).catch(()=>{});
         }
       }catch(e:any){
         if(activeRevive){const fail=String(e?.message||e).split("\n")[0];setReviveState({logNo:activeRevive.logNo,title:activeRevive.origTitle,step:"실패",fail});showToast("글 살리기 실패: "+fail,"error");}
         upd({step:"실패: "+(e.message||"오류"),status:"fail",error:e.message});
-        otLive(`  ❌ 실패: ${e.message||"오류"}`);
+        otLive(activeRevive?`❌ 글 살리기 실패 — ${e.message||"오류"}`:`  ❌ 실패: ${e.message||"오류"}`);
         await addHistory({user_id:user.id,platform:"naver",title:kw,status:"fail",error_message:e.message}).catch(()=>{});
       }
       if(otStopRef.current) break;
@@ -3307,15 +3314,17 @@ POST3: (제목)|(이유)
     // ★중단됐고 남은 키워드가 있으면 '이어가기' 지점을 저장 → 텀을 바꾼 뒤 '이어가기'를 누르면 그 키워드부터 이어감(AI/수동 무관)
     //   nextResumeIdx = 발행 성공한 다음 글. 발행 전 중단된 글은 그 글부터 다시(테리 확정: 중단된 글은 다시 생성).
     if(otStopRef.current){
-      if(activeRevive)setReviveState({logNo:activeRevive.logNo,title:activeRevive.origTitle,step:"실패",fail:"사용자가 작업을 중단했어요. 원본 글은 덮어쓰지 않았습니다."});
+      if(activeRevive){setReviveState({logNo:activeRevive.logNo,title:activeRevive.origTitle,step:"실패",fail:"사용자가 작업을 중단했어요. 원본 글은 덮어쓰지 않았습니다."});otLive("❌ 글 살리기 실패 — 사용자가 작업을 중단했어요",false);}
       const remain=kws.slice(nextResumeIdx);
-      if(remain.length){
-        setOtPaused({idx:nextResumeIdx,kws,reason:"stopped",reviveTarget:activeRevive});   // 이어가기 배너가 뜸(텀 변경 후 이어가기 가능)
+      if(remain.length&&!activeRevive){
+        setOtPaused({idx:nextResumeIdx,kws,reason:"stopped"});   // 일반 원터치만 이어가기 배너 표시
         if(!otAiKw){ setOtKeywords(remain.join("\n")); }      // 수동 모드는 입력칸에도 되돌려 둠(기존 동작 유지)
         otLive(`⏹ 중단 — 남은 ${remain.length}개는 아래 '이어가기'로 계속할 수 있어요. 발행 텀을 바꾸고 싶으면 위에서 바꾼 뒤 이어가기를 누르세요.`,false);
-      } else {
+      } else if(!activeRevive) {
         otLive(`⏹ 전체 중단 — 남은 글이 없어요`,false);
       }
+    } else if(activeRevive) {
+      if(reviveSucceeded)otLive("✅ 글 살리기 완료 — 새 글로 덮어썼어요",false);
     } else {
       otLive("🎉 원터치 발행 전체 완료",false);
     }

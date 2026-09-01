@@ -447,7 +447,9 @@ export async function publishNaver(params: {
   try {
     // ★글 살리기(편집) 모드면 그 글의 편집화면을, 아니면 새 글쓰기 화면을 연다. 에디터는 둘 다 스마트에디터라 이후 로직 공통.
     const writeUrl = isEdit
-      ? `https://blog.naver.com/PostWriteForm.naver?blogId=${blogId}&logNo=${editLogNo}&Redirect=Update`
+      // 편집 전용 엔드포인트를 직접 사용한다. PostWriteForm+Redirect=Update는 최근 네이버에서
+      // 중간 창을 닫는 리다이렉트가 발생해 이후 waitForTimeout이 closed page를 잡는 경우가 있다.
+      ? `https://blog.naver.com/PostUpdateForm.naver?blogId=${blogId}&logNo=${editLogNo}`
       : `https://blog.naver.com/GoBlogWrite.naver?blogId=${blogId}`;
     console.log(`[naver] ${isEdit?`글 살리기(편집) 진입 logNo=${editLogNo}`:"글쓰기 진입"}: ${writeUrl}`);
     assertPageOpen("글쓰기 페이지 이동 전");
@@ -1463,7 +1465,7 @@ export async function publishNaver(params: {
     closingExpected = true;
     await browser.close().catch(() => {});
     const pageClosedError = unexpectedPageClose || /Target page, context or browser has been closed|page has been closed|browser has been closed/i.test(String(e?.message || e));
-    if (pageClosedError && !(params as any).__pageCloseRetry) {
+    if (isEdit && pageClosedError && !(params as any).__pageCloseRetry) {
       console.error(`[naver] 🔁 page closed 발행 전체 재시도 1/1 (직전 액션: ${lastPageAction})`);
       return publishNaver({ ...params, __pageCloseRetry: true } as any);
     }
@@ -2465,4 +2467,3 @@ export async function generateFlowImagesCDP(params: {
     throw e;
   }
 }
-
