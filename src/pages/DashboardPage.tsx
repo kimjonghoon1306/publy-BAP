@@ -2420,6 +2420,11 @@ Output (JSON object only): {"keyword":"핵심키워드","title":"새 SEO 제목"
       [/강아지|고양이|반려동물|pet|puppy|햄스터/, `A charming pet photography for "${title}", expressive animal companion, playful moments, soft bokeh, heartwarming mood`],
       [/결혼|웨딩|신혼|프로포즈|부케|예식|혼수/, `A romantic wedding photography for "${title}", beautifully decorated venue, elegant bridal details, dreamy timeless style`],
     ];
+    // ★제목/키워드에 반려동물이 명시되면 본문의 우연한 단어(예: "카페 활용", "분양")보다 최우선.
+    //   "강아지 무료분양"이 카페→음식, 분양→부동산으로 오인돼 비빔밥 사진이 생성된 실측 버그 방지.
+    if (/강아지|고양이|반려동물|pet|puppy|kitten|햄스터/.test(k)) {
+      return `A charming pet photography for "${title}", adorable real dog or cat as the unmistakable main subject, responsible pet adoption and animal shelter context, playful heartwarming moment, soft bokeh, ${lighting}, ${quality}`;
+    }
     // "인테리어/꾸미기"가 명시되면 음식(카페)보다 인테리어 우선 (홈카페 인테리어 등 오매칭 방지)
     if (/인테리어|꾸미기|홈스타일링|공간연출/.test(k+c)) {
       return `A stunning interior design photography of "${title}", beautifully decorated Korean modern space, warm inviting atmosphere, cozy aspirational aesthetic, ${lighting}, ${quality}`;

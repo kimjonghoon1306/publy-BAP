@@ -2482,6 +2482,9 @@ Output (JSON object only): {"keyword":"핵심키워드","title":"새 제목","st
       [/강아지|고양이|반려동물|pet|puppy/, `A charming pet photography for "${title}", expressive companion, playful moments, soft bokeh`],
       [/결혼|웨딩|신혼|프로포즈|부케|예식|혼수/, `A romantic wedding photography for "${title}", elegant venue, bridal details, dreamy style`],
     ];
+    if (/강아지|고양이|반려동물|pet|puppy|kitten|햄스터/.test(k)) {
+      return `A charming pet photography for "${title}", adorable real dog or cat as the unmistakable main subject, responsible pet adoption and animal shelter context, playful heartwarming moment, soft bokeh, ${lighting}, ${quality}`;
+    }
     for (const [re, prompt] of FLOW_CATS) {
       if (re.test(k+c)) return `${prompt}, ${lighting}, ${quality}`;
     }
