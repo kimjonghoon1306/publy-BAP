@@ -774,6 +774,18 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
     setAeoLoading(false);
   };
   useEffect(() => { loadCare(); /* eslint-disable-next-line */ }, [activeAccount?.accountId, userId, rpTick]);
+  // 원터치 글 살리기 성공 후 같은 글이 즉시 '수정 추적'에 보이도록 진료차트를 다시 읽는다.
+  // 원터치 발행 계정 id와 블로그지수 탭 계정 id가 다르므로 careAccountId가 같은 경우만 갱신한다.
+  useEffect(() => {
+    const onReviveTracked = (e: Event) => {
+      const detail = (e as CustomEvent).detail || {};
+      if (String(detail.careAccountId || "") !== String(activeAccount?.accountId || "")) return;
+      void loadCare();
+    };
+    window.addEventListener("publy-revive-tracked", onReviveTracked);
+    return () => window.removeEventListener("publy-revive-tracked", onReviveTracked);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeAccount?.accountId, userId]);
   // 🩺 P1: 블로그지수 탭에서 추적글(제목 바꾼 글)이 로드되면, 계정당 하루 1회 자동으로 순위를 채운다.
   //    (careMap이 loadCare로 갱신될 때마다 돌지만, 계정+날짜 key로 1회만 실행 → 무한루프 없음)
   useEffect(() => {
@@ -3319,7 +3331,7 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
                                     if (!window.confirm(`"${r.title}"\n\n이 글을 AI가 좋은 품질로 새로 써서 그 글에 덮어쓸까요?\n(제목·본문·이미지가 모두 새로 교체돼요. 좋아요·주소는 유지)\n\n※ 새로 만든 품질이 낮으면 자동으로 덮어쓰기를 멈춰 원본을 지켜요.`)) return;
                                     // 블로그지수/제목수정에서 실제로 사용 중인 정확한 로그인 계정도 함께 넘긴다.
                                     // 네이버 로그인ID(bb9653)와 블로그ID(system-b)가 달라도 글살리기가 같은 계정 세션을 그대로 사용한다.
-                                    const accepted = window.dispatchEvent(new CustomEvent("publy-revive-post", { cancelable: true, detail: { logNo: r.logNo, title: r.title, blogId: activeAccount?.blogId, naverId: activeAccount?.id } }));
+                                    const accepted = window.dispatchEvent(new CustomEvent("publy-revive-post", { cancelable: true, detail: { logNo: r.logNo, title: r.title, blogId: activeAccount?.blogId, naverId: activeAccount?.id, careAccountId: activeAccount?.accountId } }));
                                     if (accepted) alert("원터치 탭에서 '글 살리기'가 진행돼요. 창을 닫지 말고 기다려 주세요.");
                                   }}
                                   style={{ marginLeft: "auto", flexShrink: 0, fontSize: 11, fontWeight: 800, color: "#fff", background: "linear-gradient(135deg,#7c3aed,#a855f7)", border: "none", cursor: "pointer", padding: "5px 11px", borderRadius: 8, fontFamily: "inherit" }}>

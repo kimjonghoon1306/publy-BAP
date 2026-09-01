@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from "react";
 import GoogleFlowCard from "../GoogleFlowCard";
 import { PublyUser, getQuota, getHistory, getAccounts, PublyQuota, PublyHistory, PublyAccount, upsertAccount, useQuota, refundQuota, addHistory, getHistoryContent, deleteHistory, deleteAllHistory, deleteFailedHistory, changeUserPassword, getNaverApiKeys, saveNaverApiKeys, NaverApiKeys, checkNaverQuota, incrementNaverQuota, getNaverDailyUsage, NAVER_DAILY_LIMIT, getUserNaverApiKeys, logError, PLAN_CONFIG, checkDailyPublishQuota, incrementDailyPublish, getDailyPublishUsage, getNeighborDailyUsage, NEIGHBOR_DAILY_LIMIT, getEngageDailyUsage, ENGAGE_DAILY_LIMIT, InstaDmTarget, InstaDmHistory, InstaDmQuota, getInstaDmTargets, addInstaDmTarget, deleteInstaDmTarget, getInstaDmHistory, addInstaDmHistory, getInstaDmQuota, upsertInstaDmQuota, incrementInstaDmUsage, INSTA_DM_DAILY_LIMIT, getReplyDailyUsage, REPLY_DAILY_LIMIT, pushLiveLog, getWeeklyActivity, WeeklyActivity, getActivityByRange, ActivityRange } from "../lib/supabase";
 import { supabase, submitBugReportRow, getMyResolvedBugAlerts, markBugNotified, PublyBugReport, getPlace360Access } from "../lib/supabase";
+import { markTitleChanged } from "../lib/supabase";
 import NeighborPage from "./NeighborPage";
 import CrawlCenter from "../components/CrawlCenter";
 import Place360 from "../components/Place360";
@@ -1361,7 +1362,7 @@ Output (JSON object only): {"keyword":"핵심키워드","title":"새 SEO 제목"
   const [otSchedTime,setOtSchedTime]=useState(()=>localStorage.getItem("publy_ot_sched_time")||"09:00");
   const [otSchedDaily,setOtSchedDaily]=useState(()=>localStorage.getItem("publy_ot_sched_daily")!=="0");   // 매일 반복(기본 ON)
   const otRunRef=useRef<(()=>void)|null>(null);       // 예약 트리거가 부를 최신 runOneTouch
-  const otReviveRunRef=useRef<((target:{logNo:string;origTitle:string;origBody:string;blogId:string;accountId?:string})=>void)|null>(null);
+  const otReviveRunRef=useRef<((target:{logNo:string;origTitle:string;origBody:string;blogId:string;accountId?:string;careAccountId?:string})=>void)|null>(null);
   // ✨ 글 살리기: 블로그지수에서 부실 글을 원터치 엔진으로 통째 새로 써서 그 글에 덮어쓰기
   const [reviveState,setReviveState]=useState<{logNo:string;title:string;step:string;done?:boolean;fail?:string}|null>(null);
   const [otLog,setOtLog]=useState<{id:string;kw:string;title?:string;cat?:string;step:string;status:"wait"|"run"|"done"|"fail"|"limit";postUrl?:string;error?:string;at?:string}[]>(()=>{try{return JSON.parse(localStorage.getItem("publy_ot_log")||"[]");}catch{return [];}});
@@ -3130,8 +3131,8 @@ POST3: (제목)|(이유)
 
   // 블로그지수(NeighborPage)에서 '글 살리기' 클릭 → 이벤트로 여기서 실행(원터치 탭으로 이동해 진행상황 표시)
   useEffect(()=>{
-    const h=(e:any)=>{ const {logNo,title,blogId,naverId}=e.detail||{}; if(!logNo)return;
-      const target={logNo:String(logNo),origTitle:String(title||""),origBody:"",blogId:String(blogId||"")};
+    const h=(e:any)=>{ const {logNo,title,blogId,naverId,careAccountId}=e.detail||{}; if(!logNo)return;
+      const target={logNo:String(logNo),origTitle:String(title||""),origBody:"",blogId:String(blogId||""),careAccountId:String(careAccountId||"")};
       setTab("onetouch");
       // ★글 살리기는 반드시 원문 소유 블로그의 로그인 세션을 골라야 한다.
       //   네이버 로그인ID(bb9653)와 블로그ID(system-b)는 다를 수 있으므로 username이 아니라
@@ -3189,7 +3190,7 @@ POST3: (제목)|(이유)
     }
     return arr.slice(0,count);
   }
-  async function runOneTouch(resume?:{idx:number;kws:string[];reviveTarget?:{logNo:string;origTitle:string;origBody:string;blogId?:string}},reviveTarget?:{logNo:string;origTitle:string;origBody:string;blogId?:string},source:"manual"|"schedule"|"revive"="manual",accountId?:string){
+  async function runOneTouch(resume?:{idx:number;kws:string[];reviveTarget?:{logNo:string;origTitle:string;origBody:string;blogId?:string;careAccountId?:string}},reviveTarget?:{logNo:string;origTitle:string;origBody:string;blogId?:string;careAccountId?:string},source:"manual"|"schedule"|"revive"="manual",accountId?:string){
     const activeRevive=reviveTarget||resume?.reviveTarget;
     if(otRunningRef.current){if(activeRevive)setReviveState({logNo:activeRevive.logNo,title:activeRevive.origTitle,step:"실패",fail:"다른 원터치 작업이 진행 중이에요."});return;}
     if(otSchedOn&&source!=="schedule"&&!activeRevive){const fail=`예약 대기 중이에요. ${otSchedTime} 예약을 끈 뒤 다시 시도해주세요.`;showToast(fail,"info");return;}
@@ -3338,7 +3339,17 @@ POST3: (제목)|(이유)
           upd({step:"발행 완료",status:"done",postUrl,at});
           nextResumeIdx=i+1;   // ★이 글 발행 성공 → 이어가기는 다음 글부터
           otLive(`  ✅ 발행 완료! ${postUrl}`);
-          if(activeRevive){reviveSucceeded=true;setReviveState({logNo:activeRevive.logNo,title:activeRevive.origTitle,step:"완료",done:true});showToast("✨ 글을 새로 써서 덮어썼어요!","success");}
+          if(activeRevive){
+            reviveSucceeded=true;
+            if(activeRevive.careAccountId){
+              const tracked=await markTitleChanged(user.id,activeRevive.careAccountId,activeRevive.logNo,title);
+              if(tracked){
+                otLive(`  🩺 수정추적 등록 완료: ${activeRevive.logNo}`);
+                window.dispatchEvent(new CustomEvent("publy-revive-tracked",{detail:{logNo:activeRevive.logNo,careAccountId:activeRevive.careAccountId}}));
+              }else otLive(`  ⚠️ 발행은 완료됐지만 수정추적 저장에 실패했어요`,false);
+            }
+            setReviveState({logNo:activeRevive.logNo,title:activeRevive.origTitle,step:"완료",done:true});showToast("✨ 글을 새로 써서 덮어썼어요!","success");
+          }
         } else {
           await refundQuota(user.id);   // 실제 발행 불확실 → 건수 환불
           if(activeRevive)setReviveState({logNo:activeRevive.logNo,title:activeRevive.origTitle,step:"실패",fail:"덮어쓰기 주소를 못 받았어요 — 블로그를 확인하세요"});

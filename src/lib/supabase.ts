@@ -1816,11 +1816,12 @@ export async function markPrescribed(userId: string, account: string, postKey: s
 }
 
 // 제목 수정한 날 기록(자동 변경 실행과 별개 — 성공 후 호출)
-export async function markTitleChanged(userId: string, account: string, postKey: string, newTitle?: string): Promise<void> {
+export async function markTitleChanged(userId: string, account: string, postKey: string, newTitle?: string): Promise<boolean> {
   const patch: any = { user_id: userId, account, post_key: postKey, title_changed_at: new Date().toISOString(), updated_at: new Date().toISOString() };
   if (newTitle) patch.title = newTitle;
   const { error } = await supabase.from("publy_post_care").upsert(patch, { onConflict: "user_id,account,post_key" });
   if (error) console.warn("[post_care] 수정 기록 실패:", error.message);
+  return !error;
 }
 
 // 글의 현재 생애 상태를 날짜로 계산(단일 소스 — 상태를 저장하지 않음).

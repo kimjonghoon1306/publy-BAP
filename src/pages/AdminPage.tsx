@@ -9,6 +9,7 @@ import { supabase, getAccounts, upsertAccount, PublyAccount, getHistory, getHist
 import NeighborPage from "./NeighborPage";
 import { botFetch, BotEventStream } from "../lib/botApi";
 import { PLACE360_RANK_DAILY_LIMIT, PLACE_DETAIL_DAILY_LIMIT } from "../lib/supabase";
+import { markTitleChanged } from "../lib/supabase";
 
 interface Props {
   onBack: () => void;
@@ -897,7 +898,7 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
   const [otSchedTime,setOtSchedTime]=useState(()=>localStorage.getItem("publy_adm_ot_sched_time")||"09:00");
   const [otSchedDaily,setOtSchedDaily]=useState(()=>localStorage.getItem("publy_adm_ot_sched_daily")!=="0");
   const otRunRef=useRef<(()=>void)|null>(null);
-  const otReviveRunRef=useRef<((target:{logNo:string;origTitle:string;origBody:string;blogId:string;accountId?:string})=>void)|null>(null);
+  const otReviveRunRef=useRef<((target:{logNo:string;origTitle:string;origBody:string;blogId:string;accountId?:string;careAccountId?:string})=>void)|null>(null);
   const [otLog,setOtLog]=useState<{id:string;kw:string;title?:string;cat?:string;step:string;status:"wait"|"run"|"done"|"fail"|"limit";postUrl?:string;error?:string;at?:string}[]>(()=>{try{return JSON.parse(localStorage.getItem("publy_adm_ot_log")||"[]");}catch{return [];}});
   useEffect(()=>{try{localStorage.setItem("publy_adm_ot_log",JSON.stringify(otLog.slice(0,50)));}catch{}},[otLog]);
   const [otLiveLog,setOtLiveLog]=useState<string[]>(()=>{try{return JSON.parse(localStorage.getItem("publy_adm_ot_livelog")||"[]");}catch{return [];}});
@@ -1069,8 +1070,8 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
   }
 
   useEffect(()=>{
-    const h=(e:any)=>{ const {logNo,title,blogId,naverId}=e.detail||{}; if(!logNo)return;
-      const target={logNo:String(logNo),origTitle:String(title||""),origBody:"",blogId:String(blogId||"")};
+    const h=(e:any)=>{ const {logNo,title,blogId,naverId,careAccountId}=e.detail||{}; if(!logNo)return;
+      const target={logNo:String(logNo),origTitle:String(title||""),origBody:"",blogId:String(blogId||""),careAccountId:String(careAccountId||"")};
       setTab("onetouch");
       // ★원문 blogId로 소유 계정을 고른다. 로그인ID와 블로그ID가 다른 계정도
       //   blog_name(연결 때 저장한 실제 blogId)으로 정확히 찾는다.
@@ -1115,7 +1116,7 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
       }catch{break;} }
     return arr.slice(0,count);
   }
-  async function runOneTouch(resume?:{idx:number;kws:string[];reviveTarget?:{logNo:string;origTitle:string;origBody:string;blogId?:string}},reviveTarget?:{logNo:string;origTitle:string;origBody:string;blogId?:string},source:"manual"|"schedule"|"revive"="manual",accountId?:string){
+  async function runOneTouch(resume?:{idx:number;kws:string[];reviveTarget?:{logNo:string;origTitle:string;origBody:string;blogId?:string;careAccountId?:string}},reviveTarget?:{logNo:string;origTitle:string;origBody:string;blogId?:string;careAccountId?:string},source:"manual"|"schedule"|"revive"="manual",accountId?:string){
     const activeRevive=reviveTarget||resume?.reviveTarget;
     if(otRunningRef.current){if(activeRevive)setReviveState({logNo:activeRevive.logNo,title:activeRevive.origTitle,step:"실패",fail:"다른 원터치 작업이 진행 중이에요."});return;}
     if(otSchedOn&&source!=="schedule"&&!activeRevive){const fail=`예약 대기 중이에요. ${otSchedTime} 예약을 끈 뒤 다시 시도해주세요.`;showToast(fail,"info");return;}
@@ -1235,7 +1236,17 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
         if(postUrl){
           await addHistory({user_id:ADM_UID,platform:"naver",title,post_url:postUrl,status:"success"}).catch(()=>{});
           upd({step:"발행 완료",status:"done",postUrl,at}); nextResumeIdx=i+1; otLive(`  ✅ 발행 완료! ${postUrl}`);
-          if(activeRevive){reviveSucceeded=true;setReviveState({logNo:activeRevive.logNo,title:activeRevive.origTitle,step:"완료",done:true});showToast("✨ 글을 새로 써서 덮어썼어요!","success");}
+          if(activeRevive){
+            reviveSucceeded=true;
+            if(activeRevive.careAccountId){
+              const tracked=await markTitleChanged(ADM_HISTORY_UID,activeRevive.careAccountId,activeRevive.logNo,title);
+              if(tracked){
+                otLive(`  🩺 수정추적 등록 완료: ${activeRevive.logNo}`);
+                window.dispatchEvent(new CustomEvent("publy-revive-tracked",{detail:{logNo:activeRevive.logNo,careAccountId:activeRevive.careAccountId}}));
+              }else otLive(`  ⚠️ 발행은 완료됐지만 수정추적 저장에 실패했어요`);
+            }
+            setReviveState({logNo:activeRevive.logNo,title:activeRevive.origTitle,step:"완료",done:true});showToast("✨ 글을 새로 써서 덮어썼어요!","success");
+          }
         } else {
           if(activeRevive)setReviveState({logNo:activeRevive.logNo,title:activeRevive.origTitle,step:"실패",fail:"덮어쓰기 주소를 못 받았어요 — 블로그를 확인하세요"});
           upd({step:"⚠️ 발행 주소를 못 받음 — 블로그에 올라갔는지 확인하세요",status:"fail",at});
