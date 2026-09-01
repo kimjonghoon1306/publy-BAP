@@ -12,6 +12,43 @@ const naverSessionName = (userId: string) => `naver_${userId}`;
 const naverAcctSessionName = (userId: string, naverId: string) => `naver_${userId}__${String(naverId).replace(/[^a-zA-Z0-9_-]/g, "")}`;
 const googleSessionName = (userId: string) => `google_${userId}`;
 
+// ★공용 blogId 확정("스킬") — 네이버 로그인ID ≠ 블로그주소(예: 로그인 bb9653 / 블로그 system-b)인 계정 대응.
+//   neighbor-bot의 '제목수정(updatePostTitle)'에서 실측·검증된 resolveBlogIdFast를 그대로 이식.
+//   저장된 blogId가 로그인ID로 잘못 박혀 있어도, 실행 시점에 GoBlogWrite 302 Location에서 진짜 blogId를 뽑아 교정한다.
+//   글 편집(PostWriteForm?...&Redirect=Update)은 정확한 blogId 아니면 글목록(PostList)으로 튕기므로 필수.
+const RESOLVE_INVALID = ["PostList", "BlogHome", "FeedList", "neighborPostList", "TagList", "GoBlogWrite", "RedirectWriteView", "PostWriteForm", "MyBlog", "section", "m", "manage", "admin", "GoMyblog", "Write", "fx"];
+async function resolveNaverBlogId(storedBlogId: string, cookies: any[], userId: string, log: (m: string) => void = console.log): Promise<string> {
+  storedBlogId = (storedBlogId || "").split("@")[0].trim();   // 이메일이 blogId로 들어오면 아이디만
+  const pickFrom = (s: string): string => {
+    const m = s.match(/[?&]blogId=([a-zA-Z0-9_-]+)/) || s.match(/blog\.naver\.com\/([a-zA-Z0-9_-]+)/);
+    return (m && m[1] && !RESOLVE_INVALID.includes(m[1])) ? m[1] : "";
+  };
+  try {
+    const cookieHeader = (cookies || []).map((c: any) => `${c.name}=${c.value}`).join("; ");
+    if (!cookieHeader) return storedBlogId;
+    const headers = { cookie: cookieHeader, "user-agent": UA } as any;
+    let real = "";
+    // 1순위: GoBlogWrite 302 Location에서 blogId
+    try {
+      const r = await fetch("https://blog.naver.com/GoBlogWrite.naver", { headers, redirect: "manual" as any });
+      const loc = r.headers.get("location") || "";
+      real = pickFrom(loc);
+      if (!real && r.status >= 200 && r.status < 300) real = pickFrom((r as any).url || "");
+    } catch {}
+    // 2순위: 모바일 내블로그 리다이렉트
+    if (!real) try {
+      const r2 = await fetch("https://m.blog.naver.com/MyBlog.naver", { headers, redirect: "manual" as any });
+      real = pickFrom(r2.headers.get("location") || "") || pickFrom((r2 as any).url || "");
+    } catch {}
+    if (real && real !== storedBlogId) {
+      log(`[naver] [blogId교정] '${storedBlogId}' → '${real}' (로그인ID와 블로그주소가 달라 자동으로 맞췄어요)`);
+      try { const s = readSession<any>(naverSessionName(userId), LEGACY_SESSION_DIRS); if (s) { s.blogId = real; writeSession(naverSessionName(userId), s); } } catch {}
+      return real;
+    }
+  } catch {}
+  return storedBlogId;
+}
+
 export function naverSessionExists(userId: string): boolean {
   return hasSession(naverSessionName(userId), LEGACY_SESSION_DIRS);
 }
@@ -406,8 +443,11 @@ export async function publishNaver(params: {
   ) as typeof blocks;
 
   const cleanedContent = cleanContent(content);
-  const blogId = readSession<any>(naverSessionName(userId), LEGACY_SESSION_DIRS)?.blogId;
+  const storedBlogId = readSession<any>(naverSessionName(userId), LEGACY_SESSION_DIRS)?.blogId;
   const cookies = await ensureLiveSessionNaver(userId);   // ★세션 만료면 저장된 비번으로 자동 재연결(캡차면 창 모드)
+  // ★실제 blogId 확정(로그인ID≠블로그주소 대응) — 제목수정에서 검증된 공용 로직 재사용.
+  //   특히 글 살리기(편집)는 정확한 blogId 아니면 PostWriteForm이 글목록으로 튕기므로 반드시 교정.
+  const blogId = await resolveNaverBlogId(storedBlogId, cookies, userId, console.log);
 
   let closingExpected = false;
   const browser = await chromium.launch({ headless: false, args: LAUNCH_ARGS });
@@ -1642,7 +1682,8 @@ function captionFromPrompt(prompt: string, idx: number, total: number): string {
   else if (p.includes("education") || p.includes("study") || p.includes("book")) style = "교육 컨셉 사진";
   else if (p.includes("wedding") || p.includes("couple") || p.includes("romance")) style = "웨딩 사진";
   else style = "관련 사진";
-  return total > 1 ? `${keyword} ${style} (${idx + 1}/${total})` : `${keyword} ${style}`;
+  // ★"사진 1/3" 같은 숫자(순번) 절대 넣지 않는다(테리 지적). 폴백일 때도 숫자 없이.
+  return `${keyword} ${style}`;
 }
 
 /* ── Google Flow 이미지 생성 ── */
@@ -1984,8 +2025,9 @@ export async function generateFlowImages(params: {
       if (!entered) continue;
 
       await clickGenerate();
-      // 프롬프트 기반 SEO 캡션 생성 (이미지 검색 노출용)
-      const seoCaption = captionFromPrompt(prompts[i], i, prompts.length);
+      // ★캡션 = 앱이 만들어 보낸 flowCaptions(본문 소제목 기반·서로 다름·숫자 없음)를 우선 사용.
+      //   비어 있을 때만 프롬프트 기반 폴백(이 폴백도 이제 "사진 1/3" 같은 숫자 안 붙임).
+      const seoCaption = (captions[i] && captions[i].trim()) ? captions[i].trim() : captionFromPrompt(prompts[i], i, prompts.length);
       await saveGeneratedImage(i, seoCaption);
     }
 
