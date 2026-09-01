@@ -3128,9 +3128,16 @@ POST3: (제목)|(이유)
     const h=(e:any)=>{ const {logNo,title,blogId}=e.detail||{}; if(!logNo)return;
       const target={logNo:String(logNo),origTitle:String(title||""),origBody:""};
       setTab("onetouch");
-      // ★계정 = 원터치와 똑같이 pubAccId(선택된 계정). 없으면 연결된 네이버 첫 계정. (blogId 매칭 안 함 — 원터치 방식 그대로)
-      const acc=connAccs.find(a=>a.id===pubAccId&&a.platform==="naver")||connAccs.find(a=>a.platform==="naver");
+      // ★계정 = 살릴 글의 '주인 계정'이어야 한다(봇은 로그인된 세션의 블로그를 편집하므로, 주인이 아니면 편집화면 대신 글목록으로 튕김).
+      //   네이버는 로그인ID=블로그ID → username과 blogId를 매칭(대소문자·@naver.com 무시). 계정이 하나면 그게 주인.
+      //   연결 여부는 platform 상태와 무관하게 accounts 전체에서 확인(예전엔 connAccs가 선택 플랫폼으로 걸러져 매칭 실패→무한반복).
+      const norm=(s:any)=>String(s||"").trim().toLowerCase().replace(/@naver\.com$/,"");
+      const naverAccs=accounts.filter(a=>a.platform==="naver"&&(botOnline?a.is_connected:true));
+      const bid=norm(blogId);
+      const acc=naverAccs.find(a=>norm(a.username)===bid)
+                || (naverAccs.length===1?naverAccs[0]:undefined);
       const errors:string[]=[];
+      if(!acc&&naverAccs.length>1)errors.push(`살릴 글의 블로그(${blogId||"?"})와 같은 네이버 계정을 계정관리에서 연결해주세요`);
       if(!acc)errors.push("네이버 계정이 연결 안 됐어요 → 계정관리에서 계정을 연결하세요");
       if(otImgMode==="flow"&&!flowSlotReady[flowSlot])errors.push("Flow가 연결 안 됐어요 → 원터치 발행에서 Flow를 연결 후 다시 시작하세요");
       if(errors.length){e.preventDefault?.();showOneTouchPreflight(errors);return;}
