@@ -1072,7 +1072,8 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
     const h=(e:any)=>{ const {logNo,title,blogId}=e.detail||{}; if(!logNo)return;
       const target={logNo:String(logNo),origTitle:String(title||""),origBody:""};
       setTab("onetouch");
-      const acc=connAccs.find(a=>String(a.username)===String(blogId||""));
+      // ★계정 = 원터치와 똑같이 pubAccId(선택된 계정). 없으면 연결된 네이버 첫 계정. (blogId 매칭 안 함 — 원터치 방식 그대로)
+      const acc=connAccs.find(a=>a.id===pubAccId&&a.platform==="naver")||connAccs.find(a=>a.platform==="naver");
       const errors:string[]=[];
       if(!acc)errors.push("네이버 계정이 연결 안 됐어요 → 계정관리에서 계정을 연결하세요");
       if(otImgMode==="flow"&&!flowSlotReady[flowSlot])errors.push("Flow가 연결 안 됐어요 → 원터치 발행에서 Flow를 연결 후 다시 시작하세요");
