@@ -9,7 +9,7 @@ import { supabase, getAccounts, upsertAccount, PublyAccount, getHistory, getHist
 import NeighborPage from "./NeighborPage";
 import { botFetch, BotEventStream } from "../lib/botApi";
 import { PLACE360_RANK_DAILY_LIMIT, PLACE_DETAIL_DAILY_LIMIT } from "../lib/supabase";
-import { markTitleChanged } from "../lib/supabase";
+import { markTitleChanged, REVIVE_DAILY_LIMIT, checkReviveQuota, incrementReviveQuota } from "../lib/supabase";
 
 interface Props {
   onBack: () => void;
@@ -1120,6 +1120,10 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
     const activeRevive=reviveTarget||resume?.reviveTarget;
     if(otRunningRef.current){if(activeRevive)setReviveState({logNo:activeRevive.logNo,title:activeRevive.origTitle,step:"실패",fail:"다른 원터치 작업이 진행 중이에요."});return;}
     if(otSchedOn&&source!=="schedule"&&!activeRevive){const fail=`예약 대기 중이에요. ${otSchedTime} 예약을 끈 뒤 다시 시도해주세요.`;showToast(fail,"info");return;}
+    if(activeRevive){
+      const rq=await checkReviveQuota(ADM_HISTORY_UID,"admin");
+      if(!rq.ok){const fail=`오늘 이 글 살리기 한도(${rq.limit}회)를 모두 사용했어요. 자정에 다시 사용할 수 있어요.`;setReviveState({logNo:activeRevive.logNo,title:activeRevive.origTitle,step:"실패",fail});showToast(fail,"info");return;}
+    }
     const runAccId=accountId||pubAccId;
     const preflightErrors:string[]=[];
     // 관문 = '연결된 네이버 계정이 있나'(발행은 user.id 세션으로 하므로 계정 매칭 불필요). revive는 platform 상태와 무관하게 통과해야 하니 admAccs 전체에서 확인.
@@ -1238,6 +1242,7 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
           upd({step:"발행 완료",status:"done",postUrl,at}); nextResumeIdx=i+1; otLive(`  ✅ 발행 완료! ${postUrl}`);
           if(activeRevive){
             reviveSucceeded=true;
+            await incrementReviveQuota(ADM_HISTORY_UID);
             if(activeRevive.careAccountId){
               const tracked=await markTitleChanged(ADM_HISTORY_UID,activeRevive.careAccountId,activeRevive.logNo,title);
               if(tracked){
@@ -5150,6 +5155,7 @@ POST3: (제목)|(이유)
                                   {label:"❤️ 공감·댓글",val:`${fmt(ENGAGE_DAILY_LIMIT[pl]??10)}건/일`},
                                   {label:"💬 답방",val:`${fmt(REPLY_DAILY_LIMIT[pl]??10)}건/일`},
                                   {label:"📈 블로그 지수 진단",val:`${fmt(BLOGSCORE_DAILY_LIMIT[pl]??1)}회/일`},
+                                  {label:"✨ 이 글 살리기",val:`${fmt(REVIVE_DAILY_LIMIT[pl]??1)}회/일`},
                                   {label:"🔍 크롤링 발굴",val:`${fmt(CRAWL_DAILY_LIMIT[pl]??5)}명/일`},
                                   {label:"✉️ 크롤링 이메일",val:`${fmt(EMAIL_DAILY_LIMIT[pl]??5)}통/일`},
                                   {label:"💬 크롤링 댓글",val:`${fmt(COMMENT_DAILY_LIMIT[pl]??3)}개/일`},

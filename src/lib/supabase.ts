@@ -980,6 +980,32 @@ export async function incrementEmailQuota(userId: string, by = 1): Promise<void>
 export const BLOGSCORE_DAILY_LIMIT: Record<string, number> = {
   free: 1, basic: 5, pro: 20, unlimited: 999999, admin: 9999,
 };
+
+// ── 이 글 살리기 일일 한도 ──
+// 제목만 바꾸는 titleedit와 별도 집계한다. 날짜가 키에 포함돼 한국 자정이 지나면 자동으로 0부터 시작한다.
+export const REVIVE_DAILY_LIMIT: Record<string, number> = {
+  free: 1, basic: 3, pro: 5, unlimited: 999999, admin: 999999,
+};
+function reviveQuotaKey(userId: string): string {
+  return `revive_daily_${userId}_${koreaDateKey()}`;
+}
+export async function getReviveDailyUsage(userId: string): Promise<number> {
+  try {
+    const { data } = await supabase.from("publy_settings").select("value").eq("key", reviveQuotaKey(userId)).maybeSingle();
+    return data?.value ? parseInt(data.value) || 0 : 0;
+  } catch { return 0; }
+}
+export async function checkReviveQuota(userId: string, plan: string): Promise<{ ok: boolean; used: number; limit: number }> {
+  const limit = REVIVE_DAILY_LIMIT[plan] ?? REVIVE_DAILY_LIMIT.free;
+  const used = await getReviveDailyUsage(userId);
+  return { ok: used < limit, used, limit };
+}
+export async function incrementReviveQuota(userId: string): Promise<void> {
+  const key = reviveQuotaKey(userId);
+  const used = await getReviveDailyUsage(userId);
+  const { error } = await supabase.from("publy_settings").upsert({ key, value: String(used + 1) }, { onConflict: "key" });
+  if (error) throw new Error(`글 살리기 사용량 저장 실패: ${error.message}`);
+}
 function blogscoreQuotaKey(userId: string): string {
   return `blogscore_daily_${userId}_${koreaDateKey()}`;
 }
@@ -1026,11 +1052,11 @@ export async function incrementPumasiQuota(userId: string, by = 1): Promise<void
 
 // ── 관리자용: 전체 회원의 "오늘" 기능별 사용량 한 번에 집계 ──
 //    모든 사용량이 publy_settings의 `{기능}_daily_{userId}_{날짜}` 키로 저장되므로 오늘 날짜로 끝나는 키를 통째로 조회해 집계.
-export interface DailyUsageRow { userId: string; publish: number; neighbor: number; engage: number; reply: number; blogscore: number; total: number; }
+export interface DailyUsageRow { userId: string; publish: number; neighbor: number; engage: number; reply: number; blogscore: number; revive: number; total: number; }
 export async function getAllDailyUsageToday(): Promise<DailyUsageRow[]> {
   const today = koreaDateKey();
   const map: Record<string, DailyUsageRow> = {};
-  const ensure = (uid: string) => (map[uid] ||= { userId: uid, publish: 0, neighbor: 0, engage: 0, reply: 0, blogscore: 0, total: 0 });
+  const ensure = (uid: string) => (map[uid] ||= { userId: uid, publish: 0, neighbor: 0, engage: 0, reply: 0, blogscore: 0, revive: 0, total: 0 });
   try {
     const { data } = await supabase.from("publy_settings").select("key,value").like("key", `%_daily_%_${today}`);
     for (const row of (data || [])) {
@@ -1038,7 +1064,7 @@ export async function getAllDailyUsageToday(): Promise<DailyUsageRow[]> {
       const m = String(row.key).match(/^([a-z]+)_daily_(.+)_(\d{4}-\d{2}-\d{2})$/);
       if (!m) continue;
       const [, feature, uid] = m;
-      if (!["publish", "neighbor", "engage", "reply", "blogscore"].includes(feature)) continue; // naver 등 기타 키 제외
+      if (!["publish", "neighbor", "engage", "reply", "blogscore", "revive"].includes(feature)) continue; // naver 등 기타 키 제외
       const val = parseInt(row.value) || 0;
       const r = ensure(uid);
       if (feature === "publish") r.publish += val;
@@ -1046,8 +1072,9 @@ export async function getAllDailyUsageToday(): Promise<DailyUsageRow[]> {
       else if (feature === "engage") r.engage += val;
       else if (feature === "reply") r.reply += val;
       else if (feature === "blogscore") r.blogscore += val;
+      else if (feature === "revive") r.revive += val;
     }
-    for (const uid in map) map[uid].total = map[uid].publish + map[uid].neighbor + map[uid].engage + map[uid].reply + map[uid].blogscore;
+    for (const uid in map) map[uid].total = map[uid].publish + map[uid].neighbor + map[uid].engage + map[uid].reply + map[uid].blogscore + map[uid].revive;
   } catch { /* 조회 실패 시 빈 배열 */ }
   return Object.values(map).sort((a, b) => b.total - a.total);
 }

@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from "react";
 import GoogleFlowCard from "../GoogleFlowCard";
 import { PublyUser, getQuota, getHistory, getAccounts, PublyQuota, PublyHistory, PublyAccount, upsertAccount, useQuota, refundQuota, addHistory, getHistoryContent, deleteHistory, deleteAllHistory, deleteFailedHistory, changeUserPassword, getNaverApiKeys, saveNaverApiKeys, NaverApiKeys, checkNaverQuota, incrementNaverQuota, getNaverDailyUsage, NAVER_DAILY_LIMIT, getUserNaverApiKeys, logError, PLAN_CONFIG, checkDailyPublishQuota, incrementDailyPublish, getDailyPublishUsage, getNeighborDailyUsage, NEIGHBOR_DAILY_LIMIT, getEngageDailyUsage, ENGAGE_DAILY_LIMIT, InstaDmTarget, InstaDmHistory, InstaDmQuota, getInstaDmTargets, addInstaDmTarget, deleteInstaDmTarget, getInstaDmHistory, addInstaDmHistory, getInstaDmQuota, upsertInstaDmQuota, incrementInstaDmUsage, INSTA_DM_DAILY_LIMIT, getReplyDailyUsage, REPLY_DAILY_LIMIT, pushLiveLog, getWeeklyActivity, WeeklyActivity, getActivityByRange, ActivityRange } from "../lib/supabase";
 import { supabase, submitBugReportRow, getMyResolvedBugAlerts, markBugNotified, PublyBugReport, getPlace360Access } from "../lib/supabase";
-import { markTitleChanged } from "../lib/supabase";
+import { markTitleChanged, checkReviveQuota, incrementReviveQuota } from "../lib/supabase";
 import NeighborPage from "./NeighborPage";
 import CrawlCenter from "../components/CrawlCenter";
 import Place360 from "../components/Place360";
@@ -3194,6 +3194,10 @@ POST3: (제목)|(이유)
     const activeRevive=reviveTarget||resume?.reviveTarget;
     if(otRunningRef.current){if(activeRevive)setReviveState({logNo:activeRevive.logNo,title:activeRevive.origTitle,step:"실패",fail:"다른 원터치 작업이 진행 중이에요."});return;}
     if(otSchedOn&&source!=="schedule"&&!activeRevive){const fail=`예약 대기 중이에요. ${otSchedTime} 예약을 끈 뒤 다시 시도해주세요.`;showToast(fail,"info");return;}
+    if(activeRevive){
+      const rq=await checkReviveQuota(user.id,user.plan);
+      if(!rq.ok){const fail=`오늘 이 글 살리기 한도(${rq.limit}회)를 모두 사용했어요. 자정에 다시 사용할 수 있어요.`;setReviveState({logNo:activeRevive.logNo,title:activeRevive.origTitle,step:"실패",fail});showToast(fail,"info");return;}
+    }
     const runAccId=accountId||pubAccId;
     const preflightErrors:string[]=[];
     // 관문 = '연결된 네이버 계정이 있나'(발행은 user.id 세션으로 하므로 계정 매칭 불필요). revive는 platform 상태와 무관하게 통과해야 하니 accounts 전체에서 확인.
@@ -3341,6 +3345,7 @@ POST3: (제목)|(이유)
           otLive(`  ✅ 발행 완료! ${postUrl}`);
           if(activeRevive){
             reviveSucceeded=true;
+            await incrementReviveQuota(user.id);
             if(activeRevive.careAccountId){
               const tracked=await markTitleChanged(user.id,activeRevive.careAccountId,activeRevive.logNo,title);
               if(tracked){

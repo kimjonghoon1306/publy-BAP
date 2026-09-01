@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from "react";
 import { createPortal } from "react-dom";
 import { botFetch, BotEventStream } from "../lib/botApi";
 import { diagnoseAeo } from "../lib/aeo";
-import { getReplyDailyUsage, REPLY_DAILY_LIMIT, getBlogscoreDailyUsage, incrementBlogscoreQuota, BLOGSCORE_DAILY_LIMIT, PUMASI_ACCOUNT_LIMIT, PUMASI_POSTS_LIMIT, TAB_ACCOUNT_LIMIT, getPumasiDailyUsage, savePostCareChecks, markPrescribed, markTitleChanged, getPostCare, computeCareStatus, PostCare, OBSERVE_DAYS, INDEX_GRACE_DAYS, savePostViews, latestViews, reportError, pushLiveLog } from "../lib/supabase";
+import { getReplyDailyUsage, REPLY_DAILY_LIMIT, getBlogscoreDailyUsage, incrementBlogscoreQuota, BLOGSCORE_DAILY_LIMIT, REVIVE_DAILY_LIMIT, getReviveDailyUsage, PUMASI_ACCOUNT_LIMIT, PUMASI_POSTS_LIMIT, TAB_ACCOUNT_LIMIT, getPumasiDailyUsage, savePostCareChecks, markPrescribed, markTitleChanged, getPostCare, computeCareStatus, PostCare, OBSERVE_DAYS, INDEX_GRACE_DAYS, savePostViews, latestViews, reportError, pushLiveLog } from "../lib/supabase";
 import UsageGuide from "../components/UsageGuide";
 import dodoImg from "../assets/dodo.png";   // 🩺 블로그 주치의 캐릭터(검수자 도도)
 import boriImg from "../assets/bori.png";   // 🌱 응원단 보리
@@ -617,6 +617,8 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
   const replyLimit = REPLY_DAILY_LIMIT[plan] ?? REPLY_DAILY_LIMIT.free;
   const [scUsed, setScUsed] = useState(0);
   const scLimit = BLOGSCORE_DAILY_LIMIT[plan] ?? BLOGSCORE_DAILY_LIMIT.free;
+  const [reviveUsed, setReviveUsed] = useState(0);
+  const reviveLimit = REVIVE_DAILY_LIMIT[plan] ?? REVIVE_DAILY_LIMIT.free;
   // ── 품앗이 상태 ──
   const pumasiAccountLimit = PUMASI_ACCOUNT_LIMIT[plan] ?? PUMASI_ACCOUNT_LIMIT.free;  // 등록 가능한 계정 수
   // ★이 탭에 연결 가능한 계정 수 한도(품앗이는 넉넉, 단탭은 무료1·베2·프3·무∞)
@@ -646,9 +648,9 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
     );
     if (tabKey === "score") return (
       <TierTable myPlan={myKey} accent="#00c896" title="등급별 지수 한도" desc="내 등급에서 진단·검색노출 검사·제목 수정을 하루에 얼마나 쓸 수 있는지 보여줘요."
-        cols={["등급", "연결 계정", "하루 진단", "검색노출", "제목 수정"]}
-        rows={[{ key: "free", name: "무료", vals: ["1개", "1회", "5개", "3회"] }, { key: "basic", name: "베이직", vals: ["2개", "5회", "10개", "10회"] }, { key: "pro", name: "프로", vals: ["3개", "20회", "20개", "30회"] }]}
-        note="진단=지표 수집 횟수, 검색노출=한 번에 검사할 글 수, 제목 수정=개선 제목으로 실제 변경한 수예요. 모두 자정 초기화." />
+        cols={["등급", "연결 계정", "하루 진단", "검색노출", "제목 수정", "이 글 살리기"]}
+        rows={[{ key: "free", name: "무료", vals: ["1개", "1회", "5개", "3회", "1회"] }, { key: "basic", name: "베이직", vals: ["2개", "5회", "10개", "10회", "3회"] }, { key: "pro", name: "프로", vals: ["3개", "20회", "20개", "30회", "5회"] }]}
+        note="진단·검색노출·제목 수정·이 글 살리기는 각각 별도 한도이며 모두 자정에 초기화돼요." />
     );
     return null;
   })();
@@ -781,6 +783,7 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
       const detail = (e as CustomEvent).detail || {};
       if (String(detail.careAccountId || "") !== String(activeAccount?.accountId || "")) return;
       void loadCare();
+      if (userId) void getReviveDailyUsage(userId).then(setReviveUsed).catch(() => {});
     };
     window.addEventListener("publy-revive-tracked", onReviveTracked);
     return () => window.removeEventListener("publy-revive-tracked", onReviveTracked);
@@ -1620,6 +1623,7 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
   useEffect(() => {
     if (tab === "score" && userId) botFetch(`${BOT}/api/title-edit-quota/${userId}`).then(r => r.json())
       .then(d => { if (d.ok) { setTitleEditUsed(d.used); setTitleEditLimit(d.limit); } }).catch(() => {});
+    if (tab === "score" && userId) getReviveDailyUsage(userId).then(setReviveUsed).catch(() => {});
   }, [tab, userId]);
 
   /* 재발행 목록에서 '지금 바로' 개선안 받기 — 그 글 하나만 AI로 제목1·2 + 진단·키워드·본문팁 생성 →
@@ -3327,15 +3331,16 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
                                 </span>
                               ))}
                               {r.passed < 3 && (
-                                <button onClick={() => {
+                                <button disabled={!isUnlimitedPlan && reviveUsed >= reviveLimit} onClick={() => {
+                                    if (!isUnlimitedPlan && reviveUsed >= reviveLimit) return alert(`오늘 이 글 살리기 한도(${reviveLimit}회)를 모두 사용했어요. 자정에 다시 사용할 수 있어요.`);
                                     if (!window.confirm(`"${r.title}"\n\n이 글을 AI가 좋은 품질로 새로 써서 그 글에 덮어쓸까요?\n(제목·본문·이미지가 모두 새로 교체돼요. 좋아요·주소는 유지)\n\n※ 새로 만든 품질이 낮으면 자동으로 덮어쓰기를 멈춰 원본을 지켜요.`)) return;
                                     // 블로그지수/제목수정에서 실제로 사용 중인 정확한 로그인 계정도 함께 넘긴다.
                                     // 네이버 로그인ID(bb9653)와 블로그ID(system-b)가 달라도 글살리기가 같은 계정 세션을 그대로 사용한다.
                                     const accepted = window.dispatchEvent(new CustomEvent("publy-revive-post", { cancelable: true, detail: { logNo: r.logNo, title: r.title, blogId: activeAccount?.blogId, naverId: activeAccount?.id, careAccountId: activeAccount?.accountId } }));
                                     if (accepted) alert("원터치 탭에서 '글 살리기'가 진행돼요. 창을 닫지 말고 기다려 주세요.");
                                   }}
-                                  style={{ marginLeft: "auto", flexShrink: 0, fontSize: 11, fontWeight: 800, color: "#fff", background: "linear-gradient(135deg,#7c3aed,#a855f7)", border: "none", cursor: "pointer", padding: "5px 11px", borderRadius: 8, fontFamily: "inherit" }}>
-                                  ✨ 이 글 살리기
+                                  style={{ marginLeft: "auto", flexShrink: 0, fontSize: 11, fontWeight: 800, color: "#fff", background: !isUnlimitedPlan && reviveUsed >= reviveLimit ? "#8a8a99" : "linear-gradient(135deg,#7c3aed,#a855f7)", border: "none", cursor: !isUnlimitedPlan && reviveUsed >= reviveLimit ? "not-allowed" : "pointer", padding: "5px 11px", borderRadius: 8, fontFamily: "inherit", opacity: !isUnlimitedPlan && reviveUsed >= reviveLimit ? .65 : 1 }}>
+                                  {!isUnlimitedPlan && reviveUsed >= reviveLimit ? `🔒 오늘 ${reviveLimit}회 사용` : `✨ 이 글 살리기 (${isUnlimitedPlan ? "무제한" : `${reviveUsed}/${reviveLimit}`})`}
                                 </button>
                               )}
                             </div>
