@@ -897,7 +897,7 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
   const [otSchedTime,setOtSchedTime]=useState(()=>localStorage.getItem("publy_adm_ot_sched_time")||"09:00");
   const [otSchedDaily,setOtSchedDaily]=useState(()=>localStorage.getItem("publy_adm_ot_sched_daily")!=="0");
   const otRunRef=useRef<(()=>void)|null>(null);
-  const otReviveRunRef=useRef<((target:{logNo:string;origTitle:string;origBody:string})=>void)|null>(null);
+  const otReviveRunRef=useRef<((target:{logNo:string;origTitle:string;origBody:string;accountId:string})=>void)|null>(null);
   const [otLog,setOtLog]=useState<{id:string;kw:string;title?:string;cat?:string;step:string;status:"wait"|"run"|"done"|"fail"|"limit";postUrl?:string;error?:string;at?:string}[]>(()=>{try{return JSON.parse(localStorage.getItem("publy_adm_ot_log")||"[]");}catch{return [];}});
   useEffect(()=>{try{localStorage.setItem("publy_adm_ot_log",JSON.stringify(otLog.slice(0,50)));}catch{}},[otLog]);
   const [otLiveLog,setOtLiveLog]=useState<string[]>(()=>{try{return JSON.parse(localStorage.getItem("publy_adm_ot_livelog")||"[]");}catch{return [];}});
@@ -942,7 +942,7 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
   // ⏰ 예약 감시: 30초마다 예약 시각 확인 → 원터치 자동 시작(중복 방지).
   useEffect(()=>{
     otRunRef.current=()=>runOneTouch(undefined,undefined,"schedule");
-    otReviveRunRef.current=(target)=>runOneTouch(undefined,target,"revive");
+    otReviveRunRef.current=(target)=>runOneTouch(undefined,target,"revive",target.accountId);
   });
   // ⏰ 예약 감시 — '다음 목표 시각'을 계산해 그 시각이 실제로 지나야만 실행. 켜자마자 절대 안 돎.
   const otSchedTargetRef=useRef<number>(0);
@@ -1065,15 +1065,18 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
   function stopOneTouch(){otStopRef.current=true;try{otAbortRef.current?.abort();}catch{};setOtRunning(false);setOtNextAt(null);showToast("원터치를 멈췄어요 — 진행 중이던 작업도 중단","info");}
 
   useEffect(()=>{
-    let timer:ReturnType<typeof setTimeout>|null=null;
     const h=(e:any)=>{ const {logNo,title,blogId}=e.detail||{}; if(!logNo)return;
-      const selected=connAccs.find(a=>a.id===pubAccId)?.username||"";
-      if(blogId&&selected&&String(blogId)!==selected){showToast("글 살리기 대상 블로그와 발행 계정이 달라서 중단했어요. 같은 계정을 선택한 뒤 다시 시도하세요.","error");return;}
-      setTab("onetouch"); timer=setTimeout(()=>otReviveRunRef.current?.({logNo:String(logNo),origTitle:String(title||""),origBody:""}),300);
+      const target={logNo:String(logNo),origTitle:String(title||""),origBody:""};
+      setTab("onetouch");
+      const acc=connAccs.find(a=>String(a.username)===String(blogId||""));
+      if(!acc){const fail=`대상 블로그(${blogId||"알 수 없음"})와 연결된 발행 계정이 없어요. 계정 관리에서 먼저 연결해주세요.`;setReviveState({...target,title:target.origTitle,step:"실패",fail});showToast(fail,"error");return;}
+      if(otRunningRef.current){const fail="다른 원터치 작업이 진행 중이에요. 완료하거나 중단한 뒤 다시 시도해주세요.";setReviveState({...target,title:target.origTitle,step:"실패",fail});showToast(fail,"error");return;}
+      setPubAccId(acc.id);
+      otReviveRunRef.current?.({...target,accountId:acc.id});
     };
     window.addEventListener("publy-revive-post",h as any);
-    return ()=>{window.removeEventListener("publy-revive-post",h as any);if(timer)clearTimeout(timer);};
-  });
+    return ()=>window.removeEventListener("publy-revive-post",h as any);
+  },[admAccs,platform]);
   function otRecentUsedKw():string[]{ try{ const cut=Date.now()-14*86400000; return (JSON.parse(localStorage.getItem("publy_adm_ot_used_kw")||"[]") as any[]).filter(r=>r.at>cut).map(r=>r.kw); }catch{return [];} }
   function otRecordUsedKw(kws:string[]){ try{ const cut=Date.now()-14*86400000; const kept=(JSON.parse(localStorage.getItem("publy_adm_ot_used_kw")||"[]") as any[]).filter(r=>r.at>cut); const now=Date.now(); for(const k of kws) kept.push({kw:k,at:now}); localStorage.setItem("publy_adm_ot_used_kw",JSON.stringify(kept.slice(-800))); }catch{} }
   async function otGenKeywords(count:number):Promise<string[]>{
@@ -1095,14 +1098,16 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
       }catch{break;} }
     return arr.slice(0,count);
   }
-  async function runOneTouch(resume?:{idx:number;kws:string[];reviveTarget?:{logNo:string;origTitle:string;origBody:string}},reviveTarget?:{logNo:string;origTitle:string;origBody:string},source:"manual"|"schedule"|"revive"="manual"){
-    if(otRunningRef.current)return;
-    if(otSchedOn&&source!=="schedule"){showToast(`예약 대기 중이에요. ${otSchedTime} 전에는 원터치를 시작하지 않아요. 예약을 끄면 수동 시작할 수 있어요.`,"info");return;}
-    if(!pubAccId){showToast("발행할 네이버 계정을 먼저 선택해주세요","error");return;}
+  async function runOneTouch(resume?:{idx:number;kws:string[];reviveTarget?:{logNo:string;origTitle:string;origBody:string}},reviveTarget?:{logNo:string;origTitle:string;origBody:string},source:"manual"|"schedule"|"revive"="manual",accountId?:string){
     const activeRevive=reviveTarget||resume?.reviveTarget;
-    const acc=connAccs.find(a=>a.id===pubAccId);
+    if(otRunningRef.current){if(activeRevive)setReviveState({logNo:activeRevive.logNo,title:activeRevive.origTitle,step:"실패",fail:"다른 원터치 작업이 진행 중이에요."});return;}
+    if(otSchedOn&&source!=="schedule"){const fail=`예약 대기 중이에요. ${otSchedTime} 예약을 끈 뒤 다시 시도해주세요.`;if(activeRevive)setReviveState({logNo:activeRevive.logNo,title:activeRevive.origTitle,step:"실패",fail});showToast(fail,"info");return;}
+    const runAccId=accountId||pubAccId;
+    if(!runAccId){const fail="발행할 네이버 계정을 찾지 못했어요.";if(reviveTarget)setReviveState({logNo:reviveTarget.logNo,title:reviveTarget.origTitle,step:"실패",fail});showToast(fail,"error");return;}
+    const acc=connAccs.find(a=>a.id===runAccId);
     const termMin=otCustomTerm.trim()?Math.max(1,parseInt(otCustomTerm,10)||otTermMin):otTermMin;
     otRunningRef.current=true;otStopRef.current=false;setOtRunning(true);setOtNextAt(null);setOtPaused(null);otFlowExhaustedRef.current.clear();
+    try{
     const otLive=(t:string)=>setOtLiveLog(prev=>[...prev,`[${new Date().toLocaleTimeString("ko-KR")}] ${t}`].slice(-300));
     const bySched=source==="schedule";
     setOtLiveLog(prev=>[...prev,`━━━━━ ${new Date().toLocaleString("ko-KR")} 원터치 ${resume?`이어가기(${resume.idx+1}번째부터)`:bySched?"예약 자동 시작":"시작"} ━━━━━`].slice(-300));
@@ -1137,7 +1142,7 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
     if(!resume&&!activeRevive) otRecordUsedKw(kws);
     let cats:{id:string;name:string}[]=[];
     try{ const cr=await botFetch(`${BOT}/api/naver/categories/${ADM_UID}`,{signal:AbortSignal.timeout(30000)} as any); const cd=await cr.json().catch(()=>({})); if(cd.categories&&cd.categories.length)cats=cd.categories; }catch{}
-    if(!cats.length)cats=(accCats[pubAccId]||[]).map((c,i)=>({id:String(i),name:c}));
+    if(!cats.length)cats=(accCats[runAccId]||[]).map((c,i)=>({id:String(i),name:c}));
     if(!resume) setOtLog(kws.map(kw=>({id:uid(),kw,step:"대기",status:"wait" as const})));
     // ★이어가기 지점 = 발행 성공한 다음 글. 발행 전 중단된 글은 그 글부터 다시(테리 확정).
     let nextResumeIdx=startIdx;
@@ -1179,6 +1184,7 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
             upd({step:"⏸ 모든 Flow 계정 크레딧 소진 — 계정 추가 후 이어가기",status:"limit"});
             otLive(`  ⏸ 등록된 Flow 계정이 모두 크레딧이 떨어졌어요. 새 계정을 연결한 뒤 '이어가기'를 누르면 이 키워드부터 계속돼요.`);
             showToast("모든 Flow 계정 크레딧 소진 — 계정 추가 후 '이어가기'","info");
+            if(activeRevive)setReviveState({logNo:activeRevive.logNo,title:activeRevive.origTitle,step:"실패",fail:"모든 Flow 계정의 크레딧이 소진됐어요. 계정 추가 후 이어가기를 눌러주세요."});
             setOtPaused({idx:i,kws,reason:"credit",reviveTarget:activeRevive}); otRunningRef.current=false; setOtRunning(false); setOtNextAt(null); return;
           }
         }
@@ -1208,6 +1214,7 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
       if(hasNext){ const jitter=0.85+Math.random()*0.3; const actualMin=Math.max(1,Math.round(termMin*jitter)); const until=Date.now()+actualMin*60000; setOtNextAt(until); const hhmm=(d:number)=>new Date(d).toLocaleTimeString("ko-KR",{hour:"2-digit",minute:"2-digit"}); otLive(`  ⏱️ 약 ${actualMin}분 대기 (설정 ${termMin}분 ±안전 랜덤 · ${hhmm(Date.now())} → ${hhmm(until)}에 다음 글)`); while(Date.now()<until){ if(otStopRef.current)break; await new Promise(r=>setTimeout(r,1000)); } setOtNextAt(null); if(otStopRef.current)break; otLive(`  ▶ ${hhmm(Date.now())} 대기 끝 — 다음 글 시작`); }
     }
     if(otStopRef.current){
+      if(activeRevive)setReviveState({logNo:activeRevive.logNo,title:activeRevive.origTitle,step:"실패",fail:"사용자가 작업을 중단했어요. 원본 글은 덮어쓰지 않았습니다."});
       const remain=kws.slice(nextResumeIdx);
       if(remain.length){
         setOtPaused({idx:nextResumeIdx,kws,reason:"stopped",reviveTarget:activeRevive});
@@ -1215,7 +1222,13 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
         otLive(`⏹ 중단 — 남은 ${remain.length}개는 아래 '이어가기'로 계속할 수 있어요. 텀을 바꾸려면 위에서 바꾼 뒤 이어가기를 누르세요.`);
       } else { otLive(`⏹ 전체 중단 — 남은 글이 없어요`); }
     } else { otLive("🎉 원터치 발행 전체 완료"); }
-    otRunningRef.current=false;otAbortRef.current=null;setOtRunning(false);setOtNextAt(null);
+    }catch(e:any){
+      const fail=String(e?.message||e||"알 수 없는 오류").split("\n")[0];
+      if(activeRevive){setReviveState({logNo:activeRevive.logNo,title:activeRevive.origTitle,step:"실패",fail});showToast("글 살리기 실패: "+fail,"error");}
+      else showToast("원터치 실행 실패: "+fail,"error");
+    }finally{
+      otRunningRef.current=false;otAbortRef.current=null;setOtRunning(false);setOtNextAt(null);
+    }
   }
 
   // 글 생성
