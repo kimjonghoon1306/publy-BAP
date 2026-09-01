@@ -3104,9 +3104,8 @@ POST3: (제목)|(이유)
     while(ri<rest.length){blocks.push({type:"image",src:rest[ri],alt:caps[ri]||kw});ri++;}
     // ★온파트너·내 링크·인사글을 발행하기와 동일 규칙으로 삽입(링크↔이미지 사이 글 안 낌)
     const finalBlocks=insertLinksAndGreeting(blocks,title,kw);
-    const effectivePubScope = editLogNo ? "full" : pubScope;   // 글 살리기는 AEO 보완 목적이므로 FAQ까지 반드시 발행
     const payload:any={userId:user.id,platform:"naver",title,content,
-      naverId:acc?.username||undefined,pubScope:effectivePubScope,tags,
+      naverId:acc?.username||undefined,pubScope,tags,
       imageUrl:(!flowN&&images[0])||undefined,categoryId:categoryId||undefined,visibility,blocks:finalBlocks,
       ...(editLogNo?{editLogNo,editBlogId}:{})};   // ★글 살리기: 그 글의 소유 블로그까지 검증 후 덮어쓰기
     if(flowN){   // 무료 Flow: 봇이 발행 중 flowN장 생성. 본문 구간별 프롬프트 + 캡션 전달(일반 발행과 동일).

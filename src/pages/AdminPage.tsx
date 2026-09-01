@@ -1048,8 +1048,7 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
         blocks.splice(at,0,{type:"text",content:g});
       }
     }
-    const effectivePubScope = editLogNo ? "full" : pubScope;   // 글 살리기는 AEO 보완 목적이므로 FAQ까지 반드시 발행
-    const payload:any={userId:ADM_UID,platform:"naver",title,content,naverId:acc?.username||undefined,pubScope:effectivePubScope,tags,imageUrl:(!flowN&&images[0])||undefined,categoryId:categoryId||undefined,visibility,blocks,...(editLogNo?{editLogNo,editBlogId}:{})};
+    const payload:any={userId:ADM_UID,platform:"naver",title,content,naverId:acc?.username||undefined,pubScope,tags,imageUrl:(!flowN&&images[0])||undefined,categoryId:categoryId||undefined,visibility,blocks,...(editLogNo?{editLogNo,editBlogId}:{})};
     if(flowN){   // 무료 Flow: 봇이 발행 중 생성
       const lines=content.split("\n").filter((l:string)=>l.trim().length>5);
       const step=Math.max(1,Math.floor(lines.length/flowN));

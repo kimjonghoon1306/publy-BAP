@@ -46,8 +46,16 @@ export function diagnoseAeo(body: string): { checks: AeoCheck[]; score: number; 
   // 최신 글은 줄바꿈을 보존해서 읽지만, 예전에 평탄화해 저장한 본문도 Q1/A1 표기를 인식한다.
   const faqQuestions = text.match(/(?:^|\n|\s)Q\s*\d+\s*[:：.]/gi) || [];
   const faqAnswers = text.match(/(?:^|\n|\s)A\s*\d+\s*[:：.]/gi) || [];
+  // 체험단·감성 후기 패턴은 별도 FAQ를 끝에 붙이지 않고, 본문 중간에
+  // "왜 좋았을까요?" 같은 질문형 소제목과 바로 다음 답변 문단을 배치한다.
+  const lines = text.split(/\n+/).map(line => line.trim()).filter(Boolean);
+  const embeddedQuestionAnswers = lines.filter((line, index) =>
+    line.length >= 5 && line.length <= 80 && /[?？]$/.test(line)
+    && !!lines[index + 1] && !/[?？]$/.test(lines[index + 1])
+  ).length;
   const hasFaq = /\[FAQ시작\]|자주\s*묻는\s*질문|Q\s*&\s*A|큐앤에이/i.test(text)
-    || (faqQuestions.length >= 2 && faqAnswers.length >= 2);
+    || (faqQuestions.length >= 2 && faqAnswers.length >= 2)
+    || embeddedQuestionAnswers >= 2;
   // ③ 구조화: 번호/기호 목록이나 "항목: 값" 형태가 충분히 있나
   const numberedHits = (text.match(/(?:^|\n|\s)(?:\d+[.)]|[①②③④⑤⑥⑦⑧⑨]|[-•▶]|첫째|둘째|셋째)/g) || []).length;
   // Q1:/A1:은 FAQ 점수에만 반영한다. 이를 항목 목록으로 중복 계산하면 FAQ만 있는 글이 구조화까지 통과한다.
@@ -58,7 +66,7 @@ export function diagnoseAeo(body: string): { checks: AeoCheck[]; score: number; 
   const structured = listHits >= 3;
   const checks: AeoCheck[] = [
     { key: "intro", label: "도입부 핵심 요약", ok: introSummary, hint: "글 첫 문단을 인사말 대신 '핵심 요약'으로 시작하면 AI가 그 문장을 답변에 뽑아 써요." },
-    { key: "faq", label: "자주 묻는 질문(Q&A)", ok: hasFaq, hint: "글 아래 Q&A를 넣으면 AI가 질문-답변을 통째로 인용하기 좋아요." },
+    { key: "faq", label: "자주 묻는 질문(Q&A)", ok: hasFaq, hint: "글 아래 Q&A 또는 본문 중간의 질문형 소제목+답변 문단을 넣으면 AI가 인용하기 좋아요." },
     { key: "structure", label: "목록·구조화", ok: structured, hint: "정보를 번호 목록이나 '항목: 값'으로 정리하면 AI가 파싱하기 쉬워요." },
   ];
   const passed = checks.filter(c => c.ok).length;
