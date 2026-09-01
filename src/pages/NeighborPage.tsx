@@ -532,7 +532,7 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
   const [scLoading, setScLoading] = useState(false);
   const [scResult, setScResult] = useState<null | {
     blogId: string; totalPosts: number; neighbors: number; recentDates: string[];
-    exposureChecks?: { title: string; exposed: boolean | null; rank: number | null; postUrl?: string; logNo?: string; date?: string }[];
+    exposureChecks?: { title: string; exposed: boolean | null; rank: number | null; indexed?: boolean; status?: "exposed" | "low" | "missing"; postUrl?: string; logNo?: string; date?: string }[];
     lowQualitySuspected?: boolean | null;
     visitorDays?: { date: string; visitors: number }[];
     inflowKeywords?: { keyword: string; count?: number }[];
@@ -598,7 +598,7 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
   const [scSolSearch, setScSolSearch] = useState(""); // AI 팁 원래 제목 검색
   const [scExpPage, setScExpPage] = useState(0);   // 검색노출 결과 페이지네이션(30개 단위)
   const [scExpSearch, setScExpSearch] = useState(""); // 검색노출 결과 제목 검색
-  const [scRankFilter, setScRankFilter] = useState<"all"|"t10"|"t20"|"t50"|"t100"|"out">("all");   // 순위 구간 필터(10/20/50/100위 이내·100위 밖)
+  const [scRankFilter, setScRankFilter] = useState<"all"|"t10"|"t20"|"t50"|"t100"|"out"|"missing">("all");   // 순위 구간 필터(10/20/50/100위 이내·100위 밖·색인 누락)
   const [scPostPage, setScPostPage] = useState(0);    // 검사할 글 목록 페이지네이션(30개 단위)
   const [scPostSearch, setScPostSearch] = useState(""); // 검사할 글 제목 검색
   const [scPostMode, setScPostMode] = useState<"period"|"all">("period");
@@ -3082,7 +3082,7 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
                         {scResult.lowQualitySuspected === true ? "🔴 저품질 의심" : checkedExposure.length ? `${exposedCount}/${checkedExposure.length}개 노출` : "확인 불가"}
                       </div>
                     </div>
-                    <HelpLine>내 글 제목으로 네이버 통합검색(블로그탭)을 실제로 돌려서 <b>내 글이 100위 안에 뜨는지</b> 확인해요. <b style={{ color: "#00c896" }}>노출</b>=100위 안에 뜸 / <b style={{ color: "#ef4444" }}>미노출</b>=100위 밖(검색 유입 거의 0). 미노출이 많으면 저품질 조기경보예요.</HelpLine>
+                    <HelpLine>내 글 제목으로 네이버 통합검색(블로그탭)을 실제로 돌려서 <b>내 글이 100위 안에 뜨는지</b> 확인해요. <b style={{ color: "#00c896" }}>노출</b>=100위 안 / <b style={{ color: "#f59e0b" }}>미노출</b>=색인은 됐지만 100위 밖 / <b style={{ color: "#ef4444" }}>색인 누락</b>=검색 데이터베이스에 글 자체가 없음이에요.</HelpLine>
                     <div style={{ marginBottom: 10, padding: "8px 10px", borderRadius: 9, background: "rgba(0,184,212,.08)", color: "var(--text2)", fontSize: 11.5, fontWeight: 650, lineHeight: 1.5 }}>
                       오늘 {(scResult.checkedTodayCount || 0).toLocaleString()}개 검사 · 전체 {(scResult.totalPostsForExposure || 0).toLocaleString()}개 중 {(scResult.exposureCompletedCount || 0).toLocaleString()}개 완료
                       {scResult.exposureLimit == null ? " (무제한 등급)" : ` (등급 한도 ${scResult.exposureLimit.toLocaleString()}개/일)`}
@@ -3095,6 +3095,7 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
                       const rankMatch = (item: any) =>
                         scRankFilter === "all" ? true :
                         scRankFilter === "out" ? item.exposed === false :
+                        scRankFilter === "missing" ? item.status === "missing" :
                         scRankFilter === "t10" ? inRank(item, 10) :
                         scRankFilter === "t20" ? inRank(item, 20) :
                         scRankFilter === "t50" ? inRank(item, 50) :
@@ -3110,6 +3111,7 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
                         t50: exposureChecks.filter(x => inRank(x, 50)).length,
                         t100: exposureChecks.filter(x => inRank(x, 100)).length,
                         out: exposureChecks.filter(x => x.exposed === false && !isIndexing(x)).length,
+                        missing: exposureChecks.filter(x => x.status === "missing").length,
                         indexing: exposureChecks.filter(isIndexing).length,
                       };
                       const rankTabs: { k: typeof scRankFilter; label: string; n: number; col: string }[] = [
@@ -3118,7 +3120,8 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
                         { k: "t20", label: "20위 이내", n: rc.t20, col: "#0ea5e9" },
                         { k: "t50", label: "50위 이내", n: rc.t50, col: "#8b5cf6" },
                         { k: "t100", label: "100위 이내", n: rc.t100, col: "#f59e0b" },
-                        { k: "out", label: "100위 밖(누락)", n: rc.out, col: "#ef4444" },
+                        { k: "out", label: "100위 밖", n: rc.out, col: "#f59e0b" },
+                        { k: "missing", label: "🔴 색인 누락", n: rc.missing, col: "#dc2626" },
                       ];
                       const PER = 30; const totalPages = Math.max(1, Math.ceil(filtered.length / PER));
                       const page = Math.min(scExpPage, totalPages - 1);
@@ -3147,12 +3150,13 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
                                 // 🕐 색인 유예: 발행 14일 이내 미노출은 '누락'이 아니라 '색인 대기'(네이버가 아직 읽는 중). 회진과 동일 기준으로 통일.
                                 const ageDays = (item as any).date ? Math.floor((Date.now() - new Date((item as any).date).getTime()) / 86400000) : NaN;
                                 const indexing = item.exposed === false && Number.isFinite(ageDays) && ageDays >= 0 && ageDays < INDEX_GRACE_DAYS;
+                                const indexMissing = !indexing && item.status === "missing";
                                 return (
-                                <div key={`${item.title}-${page}-${i}`} style={{ display: "grid", gridTemplateColumns: "22px minmax(0,1fr) auto", gap: 7, alignItems: "center", fontSize: 12 }}>
-                                <span>{item.exposed === true ? "✅" : indexing ? "🕐" : item.exposed === false ? "❌" : "➖"}</span>
+                                <div key={`${item.title}-${page}-${i}`} title={indexMissing ? "이 글은 네이버 검색 데이터베이스에 아예 없어요. 저품질·누락 의심이라 제목만 바꿔선 안 뜰 수 있어요. 아래 '살리기'로 글을 통째로 새로 써서 덮어쓰면 회복 기회가 생겨요." : undefined} style={{ display: "grid", gridTemplateColumns: "22px minmax(0,1fr) auto", gap: 7, alignItems: "center", fontSize: 12, padding: indexMissing ? "8px 9px" : undefined, borderRadius: indexMissing ? 9 : undefined, background: indexMissing ? "rgba(220,38,38,.08)" : undefined, border: indexMissing ? "1px solid rgba(220,38,38,.28)" : undefined }}>
+                                <span>{item.exposed === true ? "✅" : indexing ? "🕐" : indexMissing ? "🔴" : item.exposed === false ? "❌" : "➖"}</span>
                                 <span title={item.title} style={{ overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis", color: "var(--text2)" }}>{item.title}</span>
                                 <div style={{ display: "flex", alignItems: "center", gap: 7, justifyContent: "flex-end" }}>
-                                  <b style={{ color: indexing ? "#0ea5e9" : item.exposed === false ? "#ef4444" : "var(--text2)", whiteSpace: "nowrap" }}>{item.exposed === true ? `약 ${item.rank}위` : indexing ? "색인 대기" : item.exposed === false ? "100위 내 누락" : "확인 불가"}</b>
+                                  <b style={{ color: indexing ? "#0ea5e9" : indexMissing ? "#dc2626" : item.exposed === false ? "#f59e0b" : "var(--text2)", whiteSpace: "nowrap" }}>{item.exposed === true ? `약 ${item.rank}위` : indexing ? "색인 대기" : indexMissing ? "🔴 심각 — 색인 누락(검색에 아예 없음)" : item.exposed === false ? (item.indexed === true ? "100위 밖(색인됨)" : "100위 밖(미노출)") : "확인 불가"}</b>
                                   {/* 미노출 글은 살리기 — 단, 색인 대기(발행 14일 이내)는 아직 판단 이르니 버튼 대신 안내 */}
                                   {indexing ? (
                                     <span title={`발행한 지 ${ageDays}일 — 네이버가 아직 색인·순위를 매기는 중이에요. ${INDEX_GRACE_DAYS}일쯤 기다려 주세요.`} style={{ flexShrink: 0, fontSize: 10.5, color: "#0ea5e9", fontWeight: 700, whiteSpace: "nowrap" }}>{INDEX_GRACE_DAYS - ageDays}일 뒤 판단</span>
@@ -3175,7 +3179,7 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
                         </>
                       );
                     })() : <div style={{ fontSize: 12, color: "var(--text3)" }}>위에서 글을 불러와 선택한 뒤 검색노출 확인을 실행하세요.</div>}
-                    <div style={{ marginTop: 10, fontSize: 11, color: "var(--text3)", lineHeight: 1.5 }}>🕐 <b style={{ color: "#0ea5e9" }}>색인 대기</b>=발행한 지 {INDEX_GRACE_DAYS}일이 안 된 글이에요. 네이버가 아직 읽는 중이라 지금 안 떠도 정상이니 <b>살리지 말고 기다리면</b> 돼요(회진의 색인 대기와 같은 기준). / 네이버 공식 지수가 아닌, 순환 선택한 글의 제목 검색 결과를 바탕으로 한 퍼블리 자체 진단이에요.</div>
+                    <div style={{ marginTop: 10, fontSize: 11, color: "var(--text3)", lineHeight: 1.5 }}>🔴 <b style={{ color: "#dc2626" }}>색인 누락</b>=네이버 검색 데이터베이스에 글 자체가 없어 제목만 바꿔선 안 뜰 수 있어요. <b>살리기</b>로 글을 통째로 새로 써서 덮어쓰면 회복 기회가 생겨요. / 🕐 <b style={{ color: "#0ea5e9" }}>색인 대기</b>=발행한 지 {INDEX_GRACE_DAYS}일이 안 된 글이라 지금 안 떠도 정상이니 살리지 말고 기다리면 돼요. / 네이버 공식 지수가 아닌 퍼블리 자체 진단이에요.</div>
                   </div>
 
                   {/* 🩺 오늘의 회진 — 제목을 아직 안 바꾼 글만(바꾼 글은 위 '수정 추적'이 담당). 도도가 오늘 뭘 할지 지휘 */}

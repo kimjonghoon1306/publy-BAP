@@ -2560,6 +2560,8 @@ export type BlogExposureCheck = {
   title: string;
   exposed: boolean | null;
   rank: number | null;
+  indexed?: boolean;
+  status?: "exposed" | "low" | "missing";
   postUrl?: string;
 };
 
@@ -2763,11 +2765,12 @@ export type BlogStats = {
   exposureLimit: number | null;
 };
 
-type ExposurePost = { logNo: string; title: string };
+type ExposurePost = { logNo: string; title: string; date?: string; dateMs?: number };
 type ExposureHistory = { dailyDate: string; dailyCount: number; lastChecked: Record<string, number> };
 type ExposureProgress = { checks: BlogExposureCheck[]; checkedTodayCount: number; completedCount: number; limit: number | null };
 
 const EXPOSURE_DAILY_LIMIT: Record<string, number | null> = { free: 5, basic: 10, pro: 20, unlimited: null, admin: null };
+const INDEX_GRACE_DAYS = 14;
 
 function exposureToday(): string {
   try { return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Seoul", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date()); }
@@ -2895,6 +2898,42 @@ async function searchRealRank(context: BrowserContext, blogId: string, logNo: st
   } finally { await page.close().catch(() => {}); }
 }
 
+function isTargetBlogSearchItem(item: any, blogId: string, logNo: string): boolean {
+  const wanted = blogId.toLowerCase();
+  const link = String(item?.link || "").replace(/&amp;/gi, "&").toLowerCase();
+  const bloggerLink = String(item?.bloggerlink || "").toLowerCase();
+  try {
+    const parsed = new URL(link);
+    const linkBlogId = (parsed.searchParams.get("blogId") || "").toLowerCase();
+    const linkLogNo = parsed.searchParams.get("logNo") || parsed.pathname.match(/\/(\d{6,})(?:\/)?$/)?.[1] || "";
+    const pathOwner = parsed.pathname.split("/").filter(Boolean)[0]?.toLowerCase() || "";
+    const profileOwner = bloggerLink.replace(/\/$/, "").split("/").pop() || "";
+    return (linkBlogId === wanted || pathOwner === wanted || profileOwner === wanted) && linkLogNo === String(logNo);
+  } catch {
+    return link.includes(`blog.naver.com/${wanted}/${logNo}`)
+      || (link.includes(`blogid=${wanted}`) && link.includes(`logno=${logNo}`));
+  }
+}
+
+async function searchBlogApiItems(query: string, keys: { clientId: string; clientSecret: string }): Promise<any[] | null> {
+  const url = `https://openapi.naver.com/v1/search/blog.json?query=${encodeURIComponent(query)}&display=100&start=1&sort=sim`;
+  const response = await fetch(url, { headers: { "X-Naver-Client-Id": keys.clientId, "X-Naver-Client-Secret": keys.clientSecret } });
+  if (!response.ok) return null;
+  const json: any = await response.json();
+  return Array.isArray(json?.items) ? json.items : [];
+}
+
+/* 순위 검색에서 못 찾은 오래된 글만 보수적으로 색인 여부를 재확인한다.
+   제목 전체와 site 한정 검색이 모두 정상 응답한 경우에만 '없음'을 확정한다. */
+async function checkBlogPostIndexed(blogId: string, logNo: string, title: string, keys: { clientId: string; clientSecret: string }): Promise<boolean | undefined> {
+  const exactTitle = title.replace(/\s+/g, " ").trim().slice(0, 200);
+  if (!exactTitle) return undefined;
+  const queries = [exactTitle, `site:blog.naver.com/${blogId} ${exactTitle}`];
+  const results = await Promise.all(queries.map(query => searchBlogApiItems(query, keys)));
+  if (results.some(items => items?.some(item => isTargetBlogSearchItem(item, blogId, logNo)))) return true;
+  return results.every(items => items !== null) ? false : undefined;
+}
+
 async function checkBlogExposure(blogId: string, posts: ExposurePost[], plan: string, log: (msg: string) => void, searchContext?: BrowserContext): Promise<ExposureProgress> {
   const normalizedPlan = Object.prototype.hasOwnProperty.call(EXPOSURE_DAILY_LIMIT, plan) ? plan : "free";
   const limit = EXPOSURE_DAILY_LIMIT[normalizedPlan];
@@ -2933,25 +2972,21 @@ async function checkBlogExposure(blogId: string, posts: ExposurePost[], plan: st
         if (response.ok) {
           const json: any = await response.json();
           const items: any[] = Array.isArray(json?.items) ? json.items : [];
-          const wanted = blogId.toLowerCase();
-          const index = items.findIndex(item => {
-            const link = String(item?.link || "").replace(/&amp;/gi, "&").toLowerCase();
-            const bloggerLink = String(item?.bloggerlink || "").toLowerCase();
-            try {
-              const parsed = new URL(link);
-              const linkBlogId = (parsed.searchParams.get("blogId") || "").toLowerCase();
-              const linkLogNo = parsed.searchParams.get("logNo") || parsed.pathname.match(/\/(\d{6,})(?:\/)?$/)?.[1] || "";
-              const pathOwner = parsed.pathname.split("/").filter(Boolean)[0]?.toLowerCase() || "";
-              const profileOwner = bloggerLink.replace(/\/$/, "").split("/").pop() || "";
-              return (linkBlogId === wanted || pathOwner === wanted || profileOwner === wanted) && (!linkLogNo || linkLogNo === logNo);
-            } catch {
-              return link.includes(`blog.naver.com/${wanted}/${logNo}`) || bloggerLink.replace(/\/$/, "").endsWith(`/` + wanted);
-            }
-          });
+          const index = items.findIndex(item => isTargetBlogSearchItem(item, blogId, logNo));
           if (index >= 0 && !via) { rank = index + 1; exposed = true; via = "API참고"; }
         }
       }
-      checks.push({ logNo, title, exposed, rank, postUrl: undefined });
+      let indexed: boolean | undefined = exposed ? true : undefined;
+      let status: BlogExposureCheck["status"] = exposed ? "exposed" : undefined;
+      const publishedMs = post.dateMs || (post.date ? new Date(`${post.date}T00:00:00+09:00`).getTime() : 0);
+      const ageDays = publishedMs > 0 ? Math.floor((Date.now() - publishedMs) / 86400000) : NaN;
+      if (!exposed && Number.isFinite(ageDays) && ageDays >= INDEX_GRACE_DAYS) {
+        indexed = await checkBlogPostIndexed(blogId, logNo, title, keys);
+        if (indexed === true) status = "low";
+        else if (indexed === false) status = "missing";
+        log(`[검색노출] 색인 2차 확인 · ${indexed === true ? "색인됨(순위 낮음)" : indexed === false ? "색인 누락" : "확인 불가"} · ${title.slice(0, 24)}`);
+      }
+      checks.push({ logNo, title, exposed, rank, indexed, status, postUrl: undefined });
       log(`[검색노출] "${query}" → ${rank !== null ? `${rank}위(${via})` : `노출 안됨(${via || "확인불가"})`} · ${title.slice(0, 24)}`);
     } catch (e: any) {
       log(`[검색노출] 확인 실패 · ${title.slice(0, 28)} (${e.message})`);
@@ -2980,7 +3015,7 @@ export async function checkSelectedBlogExposure(params: {
   const wanted = new Set((Array.isArray(params.logNos) ? params.logNos : []).map(String).filter(value => /^\d+$/.test(value)));
   if (!wanted.size) throw new Error("검색노출을 확인할 글을 선택해주세요");
   const list = await fetchNaverPostList({ blogId, cookies, maxCount: null, log });
-  const selected = list.posts.filter(post => wanted.has(post.logNo)).map(post => ({ logNo: post.logNo, title: post.title }));
+  const selected = list.posts.filter(post => wanted.has(post.logNo)).map(post => ({ logNo: post.logNo, title: post.title, date: post.date, dateMs: post.dateMs }));
   if (!selected.length) throw new Error("선택한 글 정보를 다시 찾지 못했어요. 글 목록을 새로 불러와주세요");
   log(`[검색노출] 선택 ${selected.length}개 · ${plan} 등급 한도 적용 · 실제 통합검색 순위 확인`);
   // ★실제 통합검색 순위 확인용 browser context(세션 쿠키). 개발자 API보다 실제 노출 순위에 맞다.
