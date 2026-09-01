@@ -885,7 +885,9 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
   const [otTargetChars,setOtTargetChars]=useState(1500);
   const [otWriteStyle,setOtWriteStyle]=useState<WriteStyle|"자동">(()=>{ const v=localStorage.getItem("publy_adm_ot_style"); return (v==="자동"||v==="감성일기"||v==="정보글"||v==="맛집후기"||v==="여행기")?v as any:"자동"; });
   const [otRunning,setOtRunning]=useState(false);
+  const otRunningRef=useRef(false);
   const otStopRef=useRef(false);
+  const otAbortRef=useRef<AbortController|null>(null);
   const otFlowExhaustedRef=useRef<Set<number>>(new Set());   // 이번 실행에서 크레딧 소진된 Flow 슬롯(자동 전환용)
   const [otNextAt,setOtNextAt]=useState<number|null>(null);
   const [otPaused,setOtPaused]=useState<{idx:number;kws:string[];reason?:"credit"|"stopped";reviveTarget?:{logNo:string;origTitle:string;origBody:string}}|null>(null);
@@ -895,7 +897,7 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
   const [otSchedTime,setOtSchedTime]=useState(()=>localStorage.getItem("publy_adm_ot_sched_time")||"09:00");
   const [otSchedDaily,setOtSchedDaily]=useState(()=>localStorage.getItem("publy_adm_ot_sched_daily")!=="0");
   const otRunRef=useRef<(()=>void)|null>(null);
-  const otSchedFiredRef=useRef<string>("");
+  const otReviveRunRef=useRef<((target:{logNo:string;origTitle:string;origBody:string})=>void)|null>(null);
   const [otLog,setOtLog]=useState<{id:string;kw:string;title?:string;cat?:string;step:string;status:"wait"|"run"|"done"|"fail"|"limit";postUrl?:string;error?:string;at?:string}[]>(()=>{try{return JSON.parse(localStorage.getItem("publy_adm_ot_log")||"[]");}catch{return [];}});
   useEffect(()=>{try{localStorage.setItem("publy_adm_ot_log",JSON.stringify(otLog.slice(0,50)));}catch{}},[otLog]);
   const [otLiveLog,setOtLiveLog]=useState<string[]>(()=>{try{return JSON.parse(localStorage.getItem("publy_adm_ot_livelog")||"[]");}catch{return [];}});
@@ -938,7 +940,10 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
     return ()=>{ if(busy) (window as any).electron?.keepAwake?.(false)?.catch?.(()=>{}); };
   },[otRunning, publishing, otSchedOn]);
   // ⏰ 예약 감시: 30초마다 예약 시각 확인 → 원터치 자동 시작(중복 방지).
-  useEffect(()=>{ otRunRef.current=()=>runOneTouch(); });
+  useEffect(()=>{
+    otRunRef.current=()=>runOneTouch(undefined,undefined,"schedule");
+    otReviveRunRef.current=(target)=>runOneTouch(undefined,target,"revive");
+  });
   // ⏰ 예약 감시 — '다음 목표 시각'을 계산해 그 시각이 실제로 지나야만 실행. 켜자마자 절대 안 돎.
   const otSchedTargetRef=useRef<number>(0);
   useEffect(()=>{
@@ -953,12 +958,11 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
     };
     otSchedTargetRef.current=computeTarget();
     const check=()=>{
-      if(otRunning) return;
+      if(otRunningRef.current) return;
       const tgt=otSchedTargetRef.current;
       if(!tgt || Date.now()<tgt) return;
       if(otSchedDaily){ const n=new Date(tgt); n.setDate(n.getDate()+1); otSchedTargetRef.current=n.getTime(); }
       else { otSchedTargetRef.current=0; setOtSchedOn(false); }
-      otSchedFiredRef.current="fired";
       otRunRef.current?.();
     };
     const iv=setInterval(check,20000);
@@ -1052,18 +1056,23 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
       payload.flowPrompts=Array.from({length:flowN},(_,i)=>{const seg=lines.slice(i*step,(i+1)*step).join(" ").slice(0,150);return buildAdmFlowPrompt(kw,title,seg,i);});
       payload.flowCaptions=buildCaptions(kw,flowN,content);
     }
-    const r=await botFetch(`${BOT}/api/publish-full`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});
+    const r=await botFetch(`${BOT}/api/publish-full`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload),signal:otAbortRef.current?.signal});
     const d=await r.json().catch(()=>({}));
     if(r.status===401)throw new Error("세션 만료 — 계정 재연결 필요");
     if(!r.ok)throw new Error(d.error||"발행 실패");
     return d.postUrl||"";
   }
-  function stopOneTouch(){otStopRef.current=true;setOtRunning(false);setOtNextAt(null);showToast("원터치를 멈췄어요 — 진행 중이던 작업도 중단","info");}
+  function stopOneTouch(){otStopRef.current=true;try{otAbortRef.current?.abort();}catch{};setOtRunning(false);setOtNextAt(null);showToast("원터치를 멈췄어요 — 진행 중이던 작업도 중단","info");}
 
   useEffect(()=>{
-    const h=(e:any)=>{ const {logNo,title}=e.detail||{}; if(!logNo)return; setTab("onetouch"); setTimeout(()=>runOneTouch(undefined,{logNo:String(logNo),origTitle:String(title||""),origBody:""}),300); };
+    let timer:ReturnType<typeof setTimeout>|null=null;
+    const h=(e:any)=>{ const {logNo,title,blogId}=e.detail||{}; if(!logNo)return;
+      const selected=connAccs.find(a=>a.id===pubAccId)?.username||"";
+      if(blogId&&selected&&String(blogId)!==selected){showToast("글 살리기 대상 블로그와 발행 계정이 달라서 중단했어요. 같은 계정을 선택한 뒤 다시 시도하세요.","error");return;}
+      setTab("onetouch"); timer=setTimeout(()=>otReviveRunRef.current?.({logNo:String(logNo),origTitle:String(title||""),origBody:""}),300);
+    };
     window.addEventListener("publy-revive-post",h as any);
-    return ()=>window.removeEventListener("publy-revive-post",h as any);
+    return ()=>{window.removeEventListener("publy-revive-post",h as any);if(timer)clearTimeout(timer);};
   });
   function otRecentUsedKw():string[]{ try{ const cut=Date.now()-14*86400000; return (JSON.parse(localStorage.getItem("publy_adm_ot_used_kw")||"[]") as any[]).filter(r=>r.at>cut).map(r=>r.kw); }catch{return [];} }
   function otRecordUsedKw(kws:string[]){ try{ const cut=Date.now()-14*86400000; const kept=(JSON.parse(localStorage.getItem("publy_adm_ot_used_kw")||"[]") as any[]).filter(r=>r.at>cut); const now=Date.now(); for(const k of kws) kept.push({kw:k,at:now}); localStorage.setItem("publy_adm_ot_used_kw",JSON.stringify(kept.slice(-800))); }catch{} }
@@ -1086,15 +1095,16 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
       }catch{break;} }
     return arr.slice(0,count);
   }
-  async function runOneTouch(resume?:{idx:number;kws:string[];reviveTarget?:{logNo:string;origTitle:string;origBody:string}},reviveTarget?:{logNo:string;origTitle:string;origBody:string}){
-    if(otRunning)return;
+  async function runOneTouch(resume?:{idx:number;kws:string[];reviveTarget?:{logNo:string;origTitle:string;origBody:string}},reviveTarget?:{logNo:string;origTitle:string;origBody:string},source:"manual"|"schedule"|"revive"="manual"){
+    if(otRunningRef.current)return;
+    if(otSchedOn&&source!=="schedule"){showToast(`예약 대기 중이에요. ${otSchedTime} 전에는 원터치를 시작하지 않아요. 예약을 끄면 수동 시작할 수 있어요.`,"info");return;}
     if(!pubAccId){showToast("발행할 네이버 계정을 먼저 선택해주세요","error");return;}
     const activeRevive=reviveTarget||resume?.reviveTarget;
     const acc=connAccs.find(a=>a.id===pubAccId);
     const termMin=otCustomTerm.trim()?Math.max(1,parseInt(otCustomTerm,10)||otTermMin):otTermMin;
-    otStopRef.current=false;setOtRunning(true);setOtNextAt(null);setOtPaused(null);otFlowExhaustedRef.current.clear();
+    otRunningRef.current=true;otStopRef.current=false;setOtRunning(true);setOtNextAt(null);setOtPaused(null);otFlowExhaustedRef.current.clear();
     const otLive=(t:string)=>setOtLiveLog(prev=>[...prev,`[${new Date().toLocaleTimeString("ko-KR")}] ${t}`].slice(-300));
-    const bySched=otSchedFiredRef.current==="fired"; otSchedFiredRef.current="";
+    const bySched=source==="schedule";
     setOtLiveLog(prev=>[...prev,`━━━━━ ${new Date().toLocaleString("ko-KR")} 원터치 ${resume?`이어가기(${resume.idx+1}번째부터)`:bySched?"예약 자동 시작":"시작"} ━━━━━`].slice(-300));
     if(!resume){
       const cntTxt=otAiKw?`AI 자동추천 ${otAiKwCount}개`:`직접 입력 ${otKeywords.split(/[\n,]+/).map(s=>s.trim()).filter(Boolean).length}개`;
@@ -1117,12 +1127,12 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
     } else if(resume){ kws=resume.kws; startIdx=resume.idx; otLive(`▶ ${resume.idx+1}번째 키워드부터 이어서 발행해요`); }
     else if(otAiKw){
       otLive(`✨ AI 자동추천 키워드 ${otAiKwCount}개 생성 중(핫이슈+SEO·14일 중복 제외)`);
-      try{ kws=await otGenKeywords(otAiKwCount); }catch(e:any){ otLive(`❌ 키워드 생성 실패: ${e.message||"오류"}`); showToast("AI 키워드 생성 실패","error"); setOtRunning(false); return; }
-      if(!kws.length){ otLive(`❌ 생성된 키워드가 없어요(최근 사용분 제외 후 0개).`); showToast("생성된 키워드가 없어요","error"); setOtRunning(false); return; }
+      try{ kws=await otGenKeywords(otAiKwCount); }catch(e:any){ otLive(`❌ 키워드 생성 실패: ${e.message||"오류"}`); showToast("AI 키워드 생성 실패","error"); otRunningRef.current=false;setOtRunning(false); return; }
+      if(!kws.length){ otLive(`❌ 생성된 키워드가 없어요(최근 사용분 제외 후 0개).`); showToast("생성된 키워드가 없어요","error"); otRunningRef.current=false;setOtRunning(false); return; }
       otLive(`✅ 생성된 키워드 ${kws.length}개: ${kws.join(", ")}`);
     } else {
       kws=otKeywords.split(/[\n,]+/).map(s=>s.trim()).filter(Boolean);
-      if(!kws.length){ showToast("키워드를 넣거나 AI 자동추천을 켜세요","error"); setOtRunning(false); return; }
+      if(!kws.length){ showToast("키워드를 넣거나 AI 자동추천을 켜세요","error"); otRunningRef.current=false;setOtRunning(false); return; }
     }
     if(!resume&&!activeRevive) otRecordUsedKw(kws);
     let cats:{id:string;name:string}[]=[];
@@ -1134,6 +1144,7 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
     for(let i=startIdx;i<kws.length;i++){
       if(otStopRef.current)break;
       const kw=kws[i]; const upd=(patch:any)=>setOtLog(prev=>prev.map((r,j)=>j===i?{...r,...patch}:r));
+      const ctrl=new AbortController(); otAbortRef.current=ctrl;
       const n=Math.min(6,Math.max(1,otImgCount));
       try{
         upd({step:"제목 생성 중",status:"run"}); otLive(`▶ [${i+1}/${kws.length}] "${kw}" 제목 생성 중`); const title=await otGenTitleBest(kw); upd({title}); otLive(`  ✅ 제목 선택: ${title}`);
@@ -1157,7 +1168,7 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
           for(const slotId of trySlots){
             if(otStopRef.current)break;
             if(slotId!==flowSlot){ const nm=flowSlots.find(s=>s.id===slotId)?.name||`슬롯${slotId+1}`; otLive(`  🔄 '${nm}' 계정으로 자동 전환해서 계속해요(미리 로그인돼 있어요)`); setFlowSlot(slotId); if(!flowSlotReady[slotId]){ try{ await handleFlowLaunchChrome(slotId); }catch{} } }
-            try{ const fr=await botFetch(`${BOT}/api/flow-generate`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({prompts:fprompts,captions:fcaptions,cdpPort:9222+(slotId||0)})});
+            try{ const fr=await botFetch(`${BOT}/api/flow-generate`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({prompts:fprompts,captions:fcaptions,cdpPort:9222+(slotId||0)}),signal:ctrl.signal});
               const fd=await fr.json().catch(()=>({}));
               if(fr.status===402||fd.code==="FLOW_NO_CREDIT"){ otFlowExhaustedRef.current.add(slotId); otLive(`  ⏸ 이 계정 크레딧이 떨어졌어요 — 다음 계정 확인 중...`); continue; }
               else if(fr.ok&&Array.isArray(fd.images)&&fd.images.length){ imgs.push(...fd.images.map((im:any)=>im.src).filter(Boolean)); otLive(`  ✅ Flow 이미지 ${imgs.length}/${n}장${imgs.length<n?` (${n-imgs.length}장은 생성 실패해 빠졌어요)`:""}`); flowHandled=true; break; }
@@ -1168,7 +1179,7 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
             upd({step:"⏸ 모든 Flow 계정 크레딧 소진 — 계정 추가 후 이어가기",status:"limit"});
             otLive(`  ⏸ 등록된 Flow 계정이 모두 크레딧이 떨어졌어요. 새 계정을 연결한 뒤 '이어가기'를 누르면 이 키워드부터 계속돼요.`);
             showToast("모든 Flow 계정 크레딧 소진 — 계정 추가 후 '이어가기'","info");
-            setOtPaused({idx:i,kws,reason:"credit",reviveTarget:activeRevive}); setOtRunning(false); setOtNextAt(null); return;
+            setOtPaused({idx:i,kws,reason:"credit",reviveTarget:activeRevive}); otRunningRef.current=false; setOtRunning(false); setOtNextAt(null); return;
           }
         }
         if(otStopRef.current){ upd({step:"⏹ 중단됨 — 이 글은 발행하지 않았어요",status:"limit"}); otLive(`  ⏹ 중단 — 발행 전이라 이 글은 올리지 않았어요`); break; }
@@ -1204,7 +1215,7 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
         otLive(`⏹ 중단 — 남은 ${remain.length}개는 아래 '이어가기'로 계속할 수 있어요. 텀을 바꾸려면 위에서 바꾼 뒤 이어가기를 누르세요.`);
       } else { otLive(`⏹ 전체 중단 — 남은 글이 없어요`); }
     } else { otLive("🎉 원터치 발행 전체 완료"); }
-    setOtRunning(false);setOtNextAt(null);
+    otRunningRef.current=false;otAbortRef.current=null;setOtRunning(false);setOtNextAt(null);
   }
 
   // 글 생성

@@ -1349,6 +1349,7 @@ Output (JSON object only): {"keyword":"핵심키워드","title":"새 SEO 제목"
   const [otTargetChars,setOtTargetChars]=useState(1500);
   const [otWriteStyle,setOtWriteStyle]=useState<WriteStyle|"자동">(()=>{ const v=localStorage.getItem("publy_ot_style"); return (v==="자동"||v==="감성일기"||v==="정보글"||v==="맛집후기"||v==="여행기")?v as any:"자동"; });   // 기본=자동(키워드마다 AI가 패턴 선택)
   const [otRunning,setOtRunning]=useState(false);
+  const otRunningRef=useRef(false);                       // state 반영 전 동시 재진입까지 차단
   const otStopRef=useRef(false);
   const otAbortRef=useRef<AbortController|null>(null);   // 진행 중 즉시 중단용
   const otFlowExhaustedRef=useRef<Set<number>>(new Set());   // 이번 실행에서 크레딧 소진된 Flow 슬롯(자동 전환용)
@@ -1359,7 +1360,7 @@ Output (JSON object only): {"keyword":"핵심키워드","title":"새 SEO 제목"
   const [otSchedTime,setOtSchedTime]=useState(()=>localStorage.getItem("publy_ot_sched_time")||"09:00");
   const [otSchedDaily,setOtSchedDaily]=useState(()=>localStorage.getItem("publy_ot_sched_daily")!=="0");   // 매일 반복(기본 ON)
   const otRunRef=useRef<(()=>void)|null>(null);       // 예약 트리거가 부를 최신 runOneTouch
-  const otSchedFiredRef=useRef<string>("");            // 같은 분에 중복 실행 방지(YYYYMMDDHHMM)
+  const otReviveRunRef=useRef<((target:{logNo:string;origTitle:string;origBody:string})=>void)|null>(null);
   // ✨ 글 살리기: 블로그지수에서 부실 글을 원터치 엔진으로 통째 새로 써서 그 글에 덮어쓰기
   const [reviveState,setReviveState]=useState<{logNo:string;title:string;step:string;done?:boolean;fail?:string}|null>(null);
   const [otLog,setOtLog]=useState<{id:string;kw:string;title?:string;cat?:string;step:string;status:"wait"|"run"|"done"|"fail"|"limit";postUrl?:string;error?:string;at?:string}[]>(()=>{try{return JSON.parse(localStorage.getItem("publy_ot_log")||"[]");}catch{return [];}});
@@ -1438,7 +1439,10 @@ Output (JSON object only): {"keyword":"핵심키워드","title":"새 SEO 제목"
     return ()=>{ if(busy) window.electron?.keepAwake?.(false).catch(()=>{}); };
   },[publishing, genImgLoading, neighborBusy, otRunning, otSchedOn]);
   // ⏰ 예약 감시: 30초마다 현재 시각을 확인해 예약 시각이면 원터치 자동 시작(중복 방지). 매일 반복이면 계속.
-  useEffect(()=>{ otRunRef.current=()=>runOneTouch(); });
+  useEffect(()=>{
+    otRunRef.current=()=>runOneTouch(undefined,undefined,"schedule");
+    otReviveRunRef.current=(target)=>runOneTouch(undefined,target,"revive");
+  });
   // ⏰ 예약 감시 — '다음 목표 시각(timestamp)'을 계산해 그 시각이 실제로 지나야만 실행. 켜자마자 절대 안 돎.
   const otSchedTargetRef=useRef<number>(0);   // 다음 예약 발동 목표 시각(ms). 0=미설정
   useEffect(()=>{
@@ -1454,13 +1458,12 @@ Output (JSON object only): {"keyword":"핵심키워드","title":"새 SEO 제목"
     };
     otSchedTargetRef.current=computeTarget();   // 켤 때 무조건 '미래' 시각 → 켜자마자 실행 불가
     const check=()=>{
-      if(otRunning) return;
+      if(otRunningRef.current) return;
       const tgt=otSchedTargetRef.current;
       if(!tgt || Date.now()<tgt) return;         // ★목표 시각 도래 전이면 절대 실행 안 함
       // 도래: 실행하고, 매일 반복이면 다음 목표(내일)로 재설정, 1회면 예약 종료
       if(otSchedDaily){ const n=new Date(tgt); n.setDate(n.getDate()+1); otSchedTargetRef.current=n.getTime(); }
       else { otSchedTargetRef.current=0; setOtSchedOn(false); }
-      otSchedFiredRef.current="fired";   // ★이번 실행이 '예약'발임을 표시 → 로그에 예약 정보 상세 출력
       otRunRef.current?.();
     };
     const iv=setInterval(check,20000);   // 20초마다 목표 시각 도래 확인(켤 때 즉시 호출 안 함)
@@ -3092,7 +3095,7 @@ POST3: (제목)|(이유)
       payload.flowPrompts=Array.from({length:flowN},(_,i)=>{const seg=lines.slice(i*step,(i+1)*step).join(" ").slice(0,150);return buildFlowPrompt(kw,title,seg,i);});
       payload.flowCaptions=buildCaptions(kw,flowN,content);
     }
-    const r=await botFetch(`${BOT}/api/publish-full`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});
+    const r=await botFetch(`${BOT}/api/publish-full`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload),signal:otAbortRef.current?.signal});
     const d=await r.json().catch(()=>({}));
     if(r.status===401)throw new Error("세션 만료 — 계정 관리에서 재연결해주세요");
     if(!r.ok)throw new Error(d.error||"발행 실패");
@@ -3102,9 +3105,14 @@ POST3: (제목)|(이유)
 
   // 블로그지수(NeighborPage)에서 '글 살리기' 클릭 → 이벤트로 여기서 실행(원터치 탭으로 이동해 진행상황 표시)
   useEffect(()=>{
-    const h=(e:any)=>{ const {logNo,title}=e.detail||{}; if(!logNo)return; setTab("onetouch"); setTimeout(()=>runOneTouch(undefined,{logNo:String(logNo),origTitle:String(title||""),origBody:""}),300); };
+    let timer:ReturnType<typeof setTimeout>|null=null;
+    const h=(e:any)=>{ const {logNo,title,blogId}=e.detail||{}; if(!logNo)return;
+      const selected=connAccs.find(a=>a.id===pubAccId)?.username||"";
+      if(blogId&&selected&&String(blogId)!==selected){showToast("글 살리기 대상 블로그와 발행 계정이 달라서 중단했어요. 같은 계정을 선택한 뒤 다시 시도하세요.","error");return;}
+      setTab("onetouch"); timer=setTimeout(()=>otReviveRunRef.current?.({logNo:String(logNo),origTitle:String(title||""),origBody:""}),300);
+    };
     window.addEventListener("publy-revive-post",h as any);
-    return ()=>window.removeEventListener("publy-revive-post",h as any);
+    return ()=>{window.removeEventListener("publy-revive-post",h as any);if(timer)clearTimeout(timer);};
   });
   // ── 14일 중복방지: 사용한 키워드 기록/조회 ──
   function otRecentUsedKw():string[]{ try{ const cut=Date.now()-14*86400000; return (JSON.parse(localStorage.getItem("publy_ot_used_kw")||"[]") as any[]).filter(r=>r.at>cut).map(r=>r.kw); }catch{return [];} }
@@ -3137,15 +3145,16 @@ POST3: (제목)|(이유)
     }
     return arr.slice(0,count);
   }
-  async function runOneTouch(resume?:{idx:number;kws:string[];reviveTarget?:{logNo:string;origTitle:string;origBody:string}},reviveTarget?:{logNo:string;origTitle:string;origBody:string}){
-    if(otRunning)return;
+  async function runOneTouch(resume?:{idx:number;kws:string[];reviveTarget?:{logNo:string;origTitle:string;origBody:string}},reviveTarget?:{logNo:string;origTitle:string;origBody:string},source:"manual"|"schedule"|"revive"="manual"){
+    if(otRunningRef.current)return;
+    if(otSchedOn&&source!=="schedule"){showToast(`예약 대기 중이에요. ${otSchedTime} 전에는 원터치를 시작하지 않아요. 예약을 끄면 수동 시작할 수 있어요.`,"info");return;}
     if(!pubAccId){showToast("발행할 네이버 계정을 먼저 선택해주세요","error");return;}
     const activeRevive=reviveTarget||resume?.reviveTarget;
     const termMin=otCustomTerm.trim()?Math.max(1,parseInt(otCustomTerm,10)||otTermMin):otTermMin;
-    otStopRef.current=false;setOtRunning(true);setOtNextAt(null);setOtPaused(null);otFlowExhaustedRef.current.clear();
+    otRunningRef.current=true;otStopRef.current=false;setOtRunning(true);setOtNextAt(null);setOtPaused(null);otFlowExhaustedRef.current.clear();
     // 📡 모든 단계를 라이브 로그로 → 회원 본인도, 관리자도 실시간 확인. (관리자 '라이브 로그' 탭에서 회원별로 보임)
     const liveLines:string[]=[];
-    const bySched=otSchedFiredRef.current==="fired"; otSchedFiredRef.current="";   // 예약발 여부 확인 후 플래그 소비
+    const bySched=source==="schedule";
     setOtLiveLog(prev=>[...prev,`━━━━━ ${new Date().toLocaleString("ko-KR")} 원터치 ${resume?`이어가기(${resume.idx+1}번째부터)`:bySched?"예약 자동 시작":"시작"} ━━━━━`].slice(-300));
     const otLive=(t:string,running=true)=>{const line=`[${new Date().toLocaleTimeString("ko-KR")}] ${t}`; liveLines.push(line); setOtLiveLog(prev=>[...prev,line].slice(-300)); try{pushLiveLog(user.id,{name:user.name,email:user.email,context:"⚡ 원터치 발행",text:liveLines.slice(-80).join("\n"),running});}catch{}};
     // ── 발행 계획 요약(테리 요청: 예약이면 몇 시 예약·매일반복 여부 / 몇 개 / 몇 분 간격 전부 디테일하게) ──
@@ -3171,12 +3180,12 @@ POST3: (제목)|(이유)
     } else if(resume){ kws=resume.kws; startIdx=resume.idx; otLive(`▶ ${resume.idx+1}번째 키워드부터 이어서 발행해요`); }
     else if(otAiKw){
       otLive(`✨ AI 자동추천 키워드 ${otAiKwCount}개 생성 중(핫이슈+SEO·14일 중복 제외)`);
-      try{ kws=await otGenKeywords(otAiKwCount); }catch(e:any){ otLive(`❌ 키워드 생성 실패: ${e.message||"오류"}`,false); showToast("AI 키워드 생성 실패","error"); setOtRunning(false); return; }
-      if(!kws.length){ otLive(`❌ 생성된 키워드가 없어요(최근 사용분 제외 후 0개). 잠시 후 다시 시도하세요.`,false); showToast("생성된 키워드가 없어요","error"); setOtRunning(false); return; }
+      try{ kws=await otGenKeywords(otAiKwCount); }catch(e:any){ otLive(`❌ 키워드 생성 실패: ${e.message||"오류"}`,false); showToast("AI 키워드 생성 실패","error"); otRunningRef.current=false;setOtRunning(false); return; }
+      if(!kws.length){ otLive(`❌ 생성된 키워드가 없어요(최근 사용분 제외 후 0개). 잠시 후 다시 시도하세요.`,false); showToast("생성된 키워드가 없어요","error"); otRunningRef.current=false;setOtRunning(false); return; }
       otLive(`✅ 생성된 키워드 ${kws.length}개: ${kws.join(", ")}`);
     } else {
       kws=otKeywords.split(/[\n,]+/).map(s=>s.trim()).filter(Boolean);
-      if(!kws.length){ showToast("키워드를 한 줄에 하나씩 넣거나, AI 자동추천을 켜세요","error"); setOtRunning(false); return; }
+      if(!kws.length){ showToast("키워드를 한 줄에 하나씩 넣거나, AI 자동추천을 켜세요","error"); otRunningRef.current=false;setOtRunning(false); return; }
     }
     if(!resume&&!activeRevive) otRecordUsedKw(kws);   // 사용한 키워드 14일 기록(이어가기는 이미 기록됨)
     const accId=pubAccId;
@@ -3243,7 +3252,7 @@ POST3: (제목)|(이유)
             upd({step:"⏸ 모든 Flow 계정 크레딧 소진 — 계정 추가 후 이어가기",status:"limit"});
             otLive(`  ⏸ 등록된 Flow 계정이 모두 크레딧이 떨어졌어요. 새 계정을 연결한 뒤 '이어가기'를 누르면 이 키워드부터 계속돼요.`,false);
             showToast("모든 Flow 계정 크레딧 소진 — 계정 추가 후 '이어가기'","info");
-            setOtPaused({idx:i,kws,reason:"credit",reviveTarget:activeRevive}); setOtRunning(false); setOtNextAt(null); return;
+            setOtPaused({idx:i,kws,reason:"credit",reviveTarget:activeRevive}); otRunningRef.current=false; setOtRunning(false); setOtNextAt(null); return;
           }
         }
         if(otStopRef.current){ upd({step:"⏹ 중단됨 — 이 글은 발행하지 않았어요",status:"limit"}); otLive(`  ⏹ 중단 — 발행 전이라 이 글은 올리지 않았어요`,false); break; }   // ★전체 중단: 발행 전이면 글도 안 올림
@@ -3303,7 +3312,7 @@ POST3: (제목)|(이유)
     } else {
       otLive("🎉 원터치 발행 전체 완료",false);
     }
-    setOtRunning(false);setOtNextAt(null);
+    otRunningRef.current=false;otAbortRef.current=null;setOtRunning(false);setOtNextAt(null);
     void loadHistory();
   }
 

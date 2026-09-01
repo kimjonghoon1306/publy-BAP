@@ -3310,7 +3310,7 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
                               {r.passed < 3 && (
                                 <button onClick={() => {
                                     if (!window.confirm(`"${r.title}"\n\n이 글을 AI가 좋은 품질로 새로 써서 그 글에 덮어쓸까요?\n(제목·본문·이미지가 모두 새로 교체돼요. 좋아요·주소는 유지)\n\n※ 새로 만든 품질이 낮으면 자동으로 덮어쓰기를 멈춰 원본을 지켜요.`)) return;
-                                    window.dispatchEvent(new CustomEvent("publy-revive-post", { detail: { logNo: r.logNo, title: r.title } }));
+                                    window.dispatchEvent(new CustomEvent("publy-revive-post", { detail: { logNo: r.logNo, title: r.title, blogId: activeAccount?.blogId } }));
                                     alert("원터치 탭에서 '글 살리기'가 진행돼요. 창을 닫지 말고 기다려 주세요.");
                                   }}
                                   style={{ marginLeft: "auto", flexShrink: 0, fontSize: 11, fontWeight: 800, color: "#fff", background: "linear-gradient(135deg,#7c3aed,#a855f7)", border: "none", cursor: "pointer", padding: "5px 11px", borderRadius: 8, fontFamily: "inherit" }}>
