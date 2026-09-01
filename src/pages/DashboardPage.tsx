@@ -1360,7 +1360,7 @@ Output (JSON object only): {"keyword":"핵심키워드","title":"새 SEO 제목"
   const [otSchedTime,setOtSchedTime]=useState(()=>localStorage.getItem("publy_ot_sched_time")||"09:00");
   const [otSchedDaily,setOtSchedDaily]=useState(()=>localStorage.getItem("publy_ot_sched_daily")!=="0");   // 매일 반복(기본 ON)
   const otRunRef=useRef<(()=>void)|null>(null);       // 예약 트리거가 부를 최신 runOneTouch
-  const otReviveRunRef=useRef<((target:{logNo:string;origTitle:string;origBody:string;accountId:string})=>void)|null>(null);
+  const otReviveRunRef=useRef<((target:{logNo:string;origTitle:string;origBody:string;blogId:string;accountId?:string})=>void)|null>(null);
   // ✨ 글 살리기: 블로그지수에서 부실 글을 원터치 엔진으로 통째 새로 써서 그 글에 덮어쓰기
   const [reviveState,setReviveState]=useState<{logNo:string;title:string;step:string;done?:boolean;fail?:string}|null>(null);
   const [otLog,setOtLog]=useState<{id:string;kw:string;title?:string;cat?:string;step:string;status:"wait"|"run"|"done"|"fail"|"limit";postUrl?:string;error?:string;at?:string}[]>(()=>{try{return JSON.parse(localStorage.getItem("publy_ot_log")||"[]");}catch{return [];}});
@@ -3126,23 +3126,19 @@ POST3: (제목)|(이유)
   // 블로그지수(NeighborPage)에서 '글 살리기' 클릭 → 이벤트로 여기서 실행(원터치 탭으로 이동해 진행상황 표시)
   useEffect(()=>{
     const h=(e:any)=>{ const {logNo,title,blogId}=e.detail||{}; if(!logNo)return;
-      const target={logNo:String(logNo),origTitle:String(title||""),origBody:""};
+      const target={logNo:String(logNo),origTitle:String(title||""),origBody:"",blogId:String(blogId||"")};
       setTab("onetouch");
-      // ★계정 = 살릴 글의 '주인 계정'이어야 한다(봇은 로그인된 세션의 블로그를 편집하므로, 주인이 아니면 편집화면 대신 글목록으로 튕김).
-      //   네이버는 로그인ID=블로그ID → username과 blogId를 매칭(대소문자·@naver.com 무시). 계정이 하나면 그게 주인.
-      //   연결 여부는 platform 상태와 무관하게 accounts 전체에서 확인(예전엔 connAccs가 선택 플랫폼으로 걸러져 매칭 실패→무한반복).
-      const norm=(s:any)=>String(s||"").trim().toLowerCase().replace(/@naver\.com$/,"");
+      // ★발행·원터치·불러오기와 동일하게 발행은 user.id 세션으로 한다(봇이 세션에서 실제 blogId를 읽어 그 블로그를 편집).
+      //   그래서 username↔blogId 매칭이 필요 없다(로그인ID≠블로그ID여도 됨). 여기선 '네이버 세션 연결 여부'만 확인.
+      //   (예전에 username===blogId 관문을 세워 bb9653≠system-b 같은 경우 막혔음 — 발행과 무관한 관문이라 제거)
       const naverAccs=accounts.filter(a=>a.platform==="naver"&&(botOnline?a.is_connected:true));
-      const bid=norm(blogId);
-      const acc=naverAccs.find(a=>norm(a.username)===bid)
-                || (naverAccs.length===1?naverAccs[0]:undefined);
       const errors:string[]=[];
-      if(!acc&&naverAccs.length>1)errors.push(`살릴 글의 블로그(${blogId||"?"})와 같은 네이버 계정을 계정관리에서 연결해주세요`);
-      if(!acc)errors.push("네이버 계정이 연결 안 됐어요 → 계정관리에서 계정을 연결하세요");
+      if(!naverAccs.length)errors.push("네이버 계정이 연결 안 됐어요 → 계정관리에서 계정을 연결하세요");
       if(otImgMode==="flow"&&!flowSlotReady[flowSlot])errors.push("Flow가 연결 안 됐어요 → 원터치 발행에서 Flow를 연결 후 다시 시작하세요");
       if(errors.length){e.preventDefault?.();showOneTouchPreflight(errors);return;}
-      if(!acc)return;
       if(otRunningRef.current){e.preventDefault?.();const fail="다른 원터치 작업이 진행 중이에요. 완료하거나 중단한 뒤 다시 시도해주세요.";setReviveState({...target,title:target.origTitle,step:"실패",fail});showToast(fail,"error");return;}
+      // 관문/카테고리 폴백용 accountId(발행 자체엔 안 쓰임): 선택계정 있으면 유지, 없으면 네이버 첫 계정
+      const acc=naverAccs.find(a=>a.id===pubAccId)||naverAccs[0];
       setPubAccId(acc.id);
       otReviveRunRef.current?.({...target,accountId:acc.id});
     };
@@ -3180,13 +3176,16 @@ POST3: (제목)|(이유)
     }
     return arr.slice(0,count);
   }
-  async function runOneTouch(resume?:{idx:number;kws:string[];reviveTarget?:{logNo:string;origTitle:string;origBody:string}},reviveTarget?:{logNo:string;origTitle:string;origBody:string},source:"manual"|"schedule"|"revive"="manual",accountId?:string){
+  async function runOneTouch(resume?:{idx:number;kws:string[];reviveTarget?:{logNo:string;origTitle:string;origBody:string;blogId?:string}},reviveTarget?:{logNo:string;origTitle:string;origBody:string;blogId?:string},source:"manual"|"schedule"|"revive"="manual",accountId?:string){
     const activeRevive=reviveTarget||resume?.reviveTarget;
     if(otRunningRef.current){if(activeRevive)setReviveState({logNo:activeRevive.logNo,title:activeRevive.origTitle,step:"실패",fail:"다른 원터치 작업이 진행 중이에요."});return;}
     if(otSchedOn&&source!=="schedule"&&!activeRevive){const fail=`예약 대기 중이에요. ${otSchedTime} 예약을 끈 뒤 다시 시도해주세요.`;showToast(fail,"info");return;}
     const runAccId=accountId||pubAccId;
     const preflightErrors:string[]=[];
-    if(!runAccId||!connAccs.some(a=>a.id===runAccId))preflightErrors.push("네이버 계정이 연결 안 됐어요 → 계정관리에서 계정을 연결하세요");
+    // 관문 = '연결된 네이버 계정이 있나'(발행은 user.id 세션으로 하므로 계정 매칭 불필요). revive는 platform 상태와 무관하게 통과해야 하니 accounts 전체에서 확인.
+    const hasNaverAcc=accounts.some(a=>a.platform==="naver"&&(botOnline?a.is_connected:true));
+    const runAccOk=!!runAccId&&(connAccs.some(a=>a.id===runAccId)||accounts.some(a=>a.id===runAccId));
+    if(activeRevive?!hasNaverAcc:(!runAccOk))preflightErrors.push("네이버 계정이 연결 안 됐어요 → 계정관리에서 계정을 연결하세요");
     if(otImgMode==="flow"&&!flowSlotReady[flowSlot])preflightErrors.push("Flow가 연결 안 됐어요 → 원터치 발행에서 Flow를 연결 후 다시 시작하세요");
     if(preflightErrors.length){showOneTouchPreflight(preflightErrors,activeRevive?undefined:"원터치 발행을 시작할 수 없어요");return;}
     const termMin=otCustomTerm.trim()?Math.max(1,parseInt(otCustomTerm,10)||otTermMin):otTermMin;
@@ -3217,7 +3216,8 @@ POST3: (제목)|(이유)
       otLive(`✨ 대상 글: "${activeRevive.origTitle}"`);
       setReviveState({logNo:activeRevive.logNo,title:activeRevive.origTitle,step:"원본 글을 읽고 주제 파악 중..."});
       let origBody=activeRevive.origBody;
-      { const acc=connAccs.find(a=>a.id===runAccId); try{const br=await botFetch(`${BOT}/api/post-body?blogId=${encodeURIComponent(acc?.username||"")}&logNo=${encodeURIComponent(activeRevive.logNo)}`,{signal:AbortSignal.timeout(25000)} as any);const bd=await br.json().catch(()=>({}));if(bd.ok){if(!origBody)origBody=String(bd.body||"");const fetchedCount=Number(bd.imageCount);if(Number.isFinite(fetchedCount)&&fetchedCount>=0)reviveImageCount=Math.floor(fetchedCount);}}catch{} }
+      // ★원본 글 읽기 = 실제 blogId(예: system-b)로. 예전엔 계정 username(bb9653)을 blogId 자리에 넣어 다른 블로그를 읽으려다 실패했음.
+      { const readBlogId=activeRevive.blogId||""; try{const br=await botFetch(`${BOT}/api/post-body?blogId=${encodeURIComponent(readBlogId)}&logNo=${encodeURIComponent(activeRevive.logNo)}`,{signal:AbortSignal.timeout(25000)} as any);const bd=await br.json().catch(()=>({}));if(bd.ok){if(!origBody)origBody=String(bd.body||"");const fetchedCount=Number(bd.imageCount);if(Number.isFinite(fetchedCount)&&fetchedCount>=0)reviveImageCount=Math.floor(fetchedCount);}}catch{} }
       let kw=activeRevive.origTitle.replace(/[\[\]#]/g,"").trim().slice(0,20);
       try{const t=await callAI(`아래 블로그 글의 핵심 검색 키워드(2~4어절)만 답해. 다른 말 절대 금지.\n제목: ${activeRevive.origTitle}\n본문: ${origBody.slice(0,600)}`,new AbortController().signal);const k=(t||"").split("\n")[0].replace(/["'`]/g,"").trim();if(k&&k.length<=25)kw=k;}catch{}
       kws=[kw]; otLive(`📝 주제: ${kw}`);
