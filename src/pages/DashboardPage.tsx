@@ -3104,8 +3104,9 @@ POST3: (제목)|(이유)
     while(ri<rest.length){blocks.push({type:"image",src:rest[ri],alt:caps[ri]||kw});ri++;}
     // ★온파트너·내 링크·인사글을 발행하기와 동일 규칙으로 삽입(링크↔이미지 사이 글 안 낌)
     const finalBlocks=insertLinksAndGreeting(blocks,title,kw);
+    const effectivePubScope = editLogNo ? "full" : pubScope;   // 글 살리기는 AEO 보완 목적이므로 FAQ까지 반드시 발행
     const payload:any={userId:user.id,platform:"naver",title,content,
-      naverId:acc?.username||undefined,pubScope,tags,
+      naverId:acc?.username||undefined,pubScope:effectivePubScope,tags,
       imageUrl:(!flowN&&images[0])||undefined,categoryId:categoryId||undefined,visibility,blocks:finalBlocks,
       ...(editLogNo?{editLogNo,editBlogId}:{})};   // ★글 살리기: 그 글의 소유 블로그까지 검증 후 덮어쓰기
     if(flowN){   // 무료 Flow: 봇이 발행 중 flowN장 생성. 본문 구간별 프롬프트 + 캡션 전달(일반 발행과 동일).
@@ -4201,6 +4202,8 @@ ${personaGuide?`
 [말투]
 ${personaGuide}`:""}
 
+${AEO_RULES}
+
 === 출력 형식 (반드시 준수) ===
 제목: (SEO 최적화 제목, 15~25자)
 제목후보: 후보1 | 후보2 | 후보3 (서로 다른 각도의 SEO 제목 3개, 검색어를 앞에 배치, 과장·낚시 금지)
@@ -4214,14 +4217,7 @@ ${personaGuide}`:""}
 
 ... (첨부한 ${photoCount}장 전부, 사진마다 마커+문단)
 
-[FAQ시작]
-Q1: (질문)
-A1: (답변)
-Q2: (질문)
-A2: (답변)
-Q3: (질문)
-A3: (답변)
-[FAQ끝]
+${AEO_FAQ_FORMAT}
 
 [관련글시작]
 POST1: (제목)|(이유)

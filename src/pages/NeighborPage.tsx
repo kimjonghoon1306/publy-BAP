@@ -605,7 +605,7 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
   const [scPeriod, setScPeriod] = useState<7|14|30|"custom">(7);
   const [scCustomDays, setScCustomDays] = useState(7);
   // 🩺 AEO 형식 진단: 최근 글 본문을 읽어 도입요약·FAQ·구조화를 갖췄는지 체크(logNo→결과)
-  const [aeoResults, setAeoResults] = useState<{ logNo: string; title: string; passed: number; checks: { key:string; label:string; ok:boolean; hint:string }[] }[]>([]);
+  const [aeoResults, setAeoResults] = useState<{ logNo: string; title: string; passed: number; checks: { key:string; label:string; ok:boolean; hint:string }[]; error?: string }[]>([]);
   const [aeoLoading, setAeoLoading] = useState(false);
   const [scPosts, setScPosts] = useState<{url:string;title:string;date:string}[]>([]);
   const [scSelectedLogNos, setScSelectedLogNos] = useState<string[]>([]);
@@ -763,11 +763,12 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
       try {
         const r = await botFetch(`${BOT}/api/post-body?blogId=${encodeURIComponent(bid)}&logNo=${encodeURIComponent(t.logNo)}`, { signal: AbortSignal.timeout(20000) } as any);
         const d = await r.json();
-        const body = d.ok ? String(d.body || "") : "";
+        if (!r.ok || !d.ok || !String(d.body || "").trim()) throw new Error(d.error || "본문 조회 실패");
+        const body = String(d.body || "");
         const dg = diagnoseAeo(body);
         out.push({ logNo: t.logNo, title: t.title, passed: dg.passed, checks: dg.checks });
         setAeoResults([...out]);   // 진행되는 대로 갱신
-      } catch { out.push({ logNo: t.logNo, title: t.title, passed: 0, checks: diagnoseAeo("").checks }); setAeoResults([...out]); }
+      } catch (e) { out.push({ logNo: t.logNo, title: t.title, passed: 0, checks: [], error: e instanceof Error ? e.message : "본문 조회 실패" }); setAeoResults([...out]); }
       await new Promise(res => setTimeout(res, 300));
     }
     setAeoLoading(false);
@@ -3296,15 +3297,17 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
                       네이버 <b>AI 브리핑·Cue:</b>가 답변에 <b>내 글을 인용</b>하려면 글이 특정 형식이어야 해요. 최근 글이 <b style={{ color: "#7c3aed" }}>①도입부 핵심요약 ②자주 묻는 질문(Q&amp;A) ③목록·구조화</b> 3가지를 갖췄는지 실제 본문을 읽어 체크해요. <span style={{ color: "var(--text3)" }}>(앞으로 퍼블리로 쓰는 글은 이 형식이 자동 적용돼요)</span>
                     </div>
                     {aeoResults.length > 0 && (() => {
-                      const avg = Math.round(aeoResults.reduce((s, r) => s + r.passed, 0) / aeoResults.length / 3 * 100);
+                      const diagnosed = aeoResults.filter(r => !r.error);
+                      const avg = diagnosed.length ? Math.round(diagnosed.reduce((s, r) => s + r.passed, 0) / diagnosed.length / 3 * 100) : 0;
                       return (
                       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                         <div style={{ fontSize: 12, fontWeight: 800, color: avg >= 67 ? "#00a878" : avg >= 34 ? "#f59e0b" : "#ef4444" }}>
-                          평균 AEO 점수 {avg}점 · {aeoResults.length}개 글 진단 {avg < 67 && <span style={{ color: "var(--text3)", fontWeight: 600 }}>— 형식만 손보면 AI 노출 기회가 커져요</span>}
+                          {diagnosed.length ? <>평균 AEO 점수 {avg}점 · {diagnosed.length}개 글 진단 {avg < 67 && <span style={{ color: "var(--text3)", fontWeight: 600 }}>— 형식만 손보면 AI 노출 기회가 커져요</span>}</> : "진단할 본문을 읽지 못했어요"}
                         </div>
                         {aeoResults.map((r, i) => (
                           <div key={i} style={{ padding: "10px 12px", borderRadius: 10, background: "var(--bg)", border: "1px solid var(--border)" }}>
                             <div style={{ fontSize: 12.5, fontWeight: 700, color: "var(--text)", marginBottom: 6, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.title}</div>
+                            {r.error ? <div style={{ fontSize: 11, fontWeight: 700, color: "#f59e0b" }}>⚠️ 본문 조회 실패 — 잠시 후 다시 진단해주세요.</div> :
                             <div style={{ display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" }}>
                               {r.checks.map(c => (
                                 <span key={c.key} title={c.hint} style={{ fontSize: 11, fontWeight: 700, padding: "4px 9px", borderRadius: 8, background: c.ok ? "rgba(0,168,120,.12)" : "rgba(239,68,68,.1)", color: c.ok ? "#00a878" : "#ef4444", cursor: "help" }}>
@@ -3324,6 +3327,7 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
                                 </button>
                               )}
                             </div>
+                            }
                           </div>
                         ))}
                         <div style={{ fontSize: 11, color: "var(--text3)", lineHeight: 1.6, marginTop: 2 }}>❌ 항목에 마우스를 올리면 어떻게 고치는지 알려줘요. <b style={{ color: "#7c3aed" }}>✨ 이 글 살리기</b>를 누르면 AI가 좋은 품질로 새로 써서 그 글에 덮어써요(제목·본문·이미지 교체, 좋아요·주소 유지). 제목만 손보려면 위 <b>재발행</b>을 쓰세요.</div>

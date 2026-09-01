@@ -4938,6 +4938,7 @@ export async function fetchPostBody(blogId: string, logNo: string): Promise<{ ti
   const MUA = "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1";
   try {
     const r = await fetch(`https://m.blog.naver.com/${encodeURIComponent(blogId)}/${encodeURIComponent(logNo)}`, { headers: { "User-Agent": MUA } });
+    if (!r.ok) throw new Error(`네이버 공개 글 조회 실패(HTTP ${r.status})`);
     const html = await r.text();
     // 제목
     let title = "";
@@ -4968,8 +4969,11 @@ export async function fetchPostBody(blogId: string, logNo: string): Promise<{ ti
       .replace(/\n{3,}/g, "\n\n")
       .trim()
       .slice(0, 8000);   // 글 아래쪽 FAQ까지 진단할 수 있게 충분히 읽는다
+    if (body.length < 20) throw new Error("네이버 공개 글 본문을 읽지 못했어요");
     return { title, body, imageCount };
-  } catch { return { title: "", body: "", imageCount: -1 }; }   // -1 = 조회 실패(호출부는 설정값/3장 폴백)
+  } catch (e) {
+    throw e instanceof Error ? e : new Error("네이버 공개 글 조회 실패");
+  }
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════

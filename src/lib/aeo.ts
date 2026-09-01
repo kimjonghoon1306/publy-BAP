@@ -49,8 +49,12 @@ export function diagnoseAeo(body: string): { checks: AeoCheck[]; score: number; 
   const hasFaq = /\[FAQ시작\]|자주\s*묻는\s*질문|Q\s*&\s*A|큐앤에이/i.test(text)
     || (faqQuestions.length >= 2 && faqAnswers.length >= 2);
   // ③ 구조화: 번호/기호 목록이나 "항목: 값" 형태가 충분히 있나
-  const listHits = (text.match(/(?:^|\n|\s)(?:\d+[.)]|[①②③④⑤⑥⑦⑧⑨]|[-•▶]|첫째|둘째|셋째)/g) || []).length
-    + (text.match(/[^\n]{1,14}\s*[:：]\s*\S/g) || []).length;
+  const numberedHits = (text.match(/(?:^|\n|\s)(?:\d+[.)]|[①②③④⑤⑥⑦⑧⑨]|[-•▶]|첫째|둘째|셋째)/g) || []).length;
+  // Q1:/A1:은 FAQ 점수에만 반영한다. 이를 항목 목록으로 중복 계산하면 FAQ만 있는 글이 구조화까지 통과한다.
+  const fieldHits = text.split(/\n+/).filter(line =>
+    !/^\s*[QA]\s*\d+\s*[:：.]/i.test(line) && /[^\n]{1,14}\s*[:：]\s*\S/.test(line)
+  ).length;
+  const listHits = numberedHits + fieldHits;
   const structured = listHits >= 3;
   const checks: AeoCheck[] = [
     { key: "intro", label: "도입부 핵심 요약", ok: introSummary, hint: "글 첫 문단을 인사말 대신 '핵심 요약'으로 시작하면 AI가 그 문장을 답변에 뽑아 써요." },
