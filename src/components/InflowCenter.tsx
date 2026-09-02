@@ -156,6 +156,9 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
   // 🥊 경쟁사 추적
   const [compLoading, setCompLoading] = useState(false);
   const [comp, setComp] = useState<{ top: { rank: number; name: string; category: string; review: number; blog: number; isMine: boolean }[]; myRank: number | null } | null>(null);
+  // 🔎 키워드 발굴
+  const [kwLoading, setKwLoading] = useState(false);
+  const [kwSuggest, setKwSuggest] = useState<string[]>([]);
   // ⏰ 예약 실행
   const [schedEnabled, setSchedEnabled] = useState(false);
   const [schedTime, setSchedTime] = useState("10:00");
@@ -203,6 +206,27 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
       else { setDiag(j); toast(`최적화 점수 ${j.score}점`, "success"); }
     } catch { toast("진단 실패 — 봇 서버(3334)를 확인하세요", "error"); }
     finally { setDiagLoading(false); }
+  };
+
+  // 🔎 키워드 발굴 — 입력한 키워드 seed로 숨은 키워드 추천
+  const runKeywordSuggest = async () => {
+    const seeds = keywords.split(/[,\n]/).map(k=>k.trim()).filter(Boolean).slice(0, 3);
+    if (!seeds.length) { toast("먼저 키워드를 1개 이상 입력하세요(예: 횡성한우)", "error"); return; }
+    setKwLoading(true); setKwSuggest([]);
+    try {
+      const r = await fetch(`${BOT}/api/place/keywords?seeds=${encodeURIComponent(JSON.stringify(seeds))}`);
+      const j = await r.json();
+      if (!j.ok) { toast(j.error || "추천 실패", "error"); return; }
+      const already = new Set(keywords.split(/[,\n]/).map(k=>k.trim()));
+      const list = (j.keywords || []).map((k: any)=>k.keyword).filter((k: string)=>k && !already.has(k)).slice(0, 24);
+      if (!list.length) { toast("새로운 추천 키워드가 없어요", "info"); }
+      setKwSuggest(list);
+    } catch { toast("키워드 추천 실패 — 봇 서버(3334) 확인", "error"); }
+    finally { setKwLoading(false); }
+  };
+  const addSuggestedKeyword = (k: string) => {
+    setKeywords(prev => { const list = prev.split(/[,\n]/).map(x=>x.trim()).filter(Boolean); if (list.includes(k)) return prev; return [...list, k].join(", "); });
+    setKwSuggest(prev => prev.filter(x => x !== k));
   };
 
   // 🥊 경쟁사 추적 — 내 키워드 상위 경쟁사 vs 나
@@ -676,8 +700,21 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
         </div>
 
         <div>
-          <label style={labelStyle}>검색 키워드 <span style={{ color: C.sub, fontWeight: 600 }}>(여러 개 — 쉼표·줄바꿈으로 구분, 돌아가며 검색)</span></label>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
+            <label style={{ ...labelStyle, margin: 0 }}>검색 키워드 <span style={{ color: C.sub, fontWeight: 600 }}>(여러 개 — 돌아가며 검색)</span></label>
+            <button onClick={runKeywordSuggest} disabled={kwLoading} style={{ marginLeft: "auto", padding: "6px 12px", borderRadius: 8, border: `1.5px solid ${C.accent}`, background: C.panel2, color: C.accent, fontSize: 12.5, fontWeight: 800, cursor: kwLoading?"default":"pointer", fontFamily: "inherit", opacity: kwLoading?0.6:1 }}>{kwLoading ? "찾는 중…" : "🔎 키워드 추천"}</button>
+          </div>
           <textarea value={keywords} onChange={(e) => setKeywords(e.target.value)} placeholder={"예) 강남 맛집, 강남역 삼겹살, 역삼동 고깃집"} rows={2} style={{ ...inputStyle, resize: "vertical", lineHeight: 1.6 }} />
+          {kwSuggest.length > 0 && (
+            <div style={{ marginTop: 8, padding: 12, borderRadius: 12, background: C.panel2, border: `1px solid ${C.line}` }}>
+              <div style={{ fontSize: 12, fontWeight: 800, color: C.sub, marginBottom: 8 }}>💡 이런 키워드도 있어요 (눌러서 추가)</div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                {kwSuggest.map((k) => (
+                  <button key={k} onClick={() => addSuggestedKeyword(k)} style={{ padding: "6px 12px", borderRadius: 999, border: `1px solid ${C.line2}`, background: C.panel, color: C.ink, fontSize: 12.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>+ {k}</button>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
 
         {/* 기기 */}
