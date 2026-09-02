@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from "react";
 import { BotEventStream, botFetch } from "../lib/botApi";
 import UsageGuide from "./UsageGuide";
 import SproutAssistant from "./SproutAssistant";
-import { INFLOW_DAILY_LIMIT, PLAN_CONFIG, getInflowDailyUsage, getInflowUsageHistory, getAccounts, PublyAccount, getAutopilot, saveAutopilot, getRankHistory, AutopilotConfig, getInflowSchedule, saveInflowSchedule, inflowScheduleRanToday, markInflowScheduleRan, getPerfReport, PerfReport, recordRankPoint, getMemberSessionToken } from "../lib/supabase";
+import { INFLOW_DAILY_LIMIT, PLAN_CONFIG, getInflowDailyUsage, getInflowUsageHistory, getAccounts, PublyAccount, getAutopilot, saveAutopilot, getRankHistory, AutopilotConfig, getInflowSchedule, saveInflowSchedule, inflowScheduleRanToday, markInflowScheduleRan, getPerfReport, PerfReport, recordRankPoint, getMemberSessionToken, getInflowTargets, saveInflowTargets } from "../lib/supabase";
 
 const BOT = "http://127.0.0.1:3334"; // neighbor-bot
 
@@ -111,7 +111,11 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
   const private0: any = (() => { try { return JSON.parse(localStorage.getItem(privateKey) || "{}"); } catch { return {}; } })();
   const [placeUrl, setPlaceUrl] = useState<string>(private0.placeUrl ?? saved0.placeUrl ?? "");
   const [blogUrl, setBlogUrl] = useState<string>(private0.blogUrl ?? saved0.blogUrl ?? "");
-  const [keywords, setKeywords] = useState<string>(saved0.keywords ?? "");
+  // 🔑 키워드는 플레이스/블로그가 완전히 별개(서로 섞이면 안 됨). 각각 저장하고, 현재 대상 것만 표시·수정.
+  const [keywordsPlace, setKeywordsPlace] = useState<string>(saved0.keywordsPlace ?? (saved0.targetType !== "blog" ? saved0.keywords : "") ?? "");
+  const [keywordsBlog, setKeywordsBlog] = useState<string>(saved0.keywordsBlog ?? (saved0.targetType === "blog" ? saved0.keywords : "") ?? "");
+  const keywords = targetType === "place" ? keywordsPlace : keywordsBlog;
+  const setKeywords = targetType === "place" ? setKeywordsPlace : setKeywordsBlog;
   const [rounds, setRounds] = useState<number>(saved0.rounds ?? 10);
   const [termMin, setTermMin] = useState<number>(saved0.termMin ?? 30);
   const [termMax, setTermMax] = useState<number>(saved0.termMax ?? 90);
@@ -139,7 +143,12 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
   const savedTargetsKey = `publy_inflow_saved_targets_${userId || "guest"}`;
   const [savedTargets, setSavedTargets] = useState<SavedTarget[]>(() => { try { return JSON.parse(localStorage.getItem(savedTargetsKey) || localStorage.getItem("publy_inflow_saved_targets") || "[]"); } catch { return []; } });
   const [savingName, setSavingName] = useState("");
-  const persistSavedTargets = (list: SavedTarget[]) => { setSavedTargets(list); try { localStorage.setItem(savedTargetsKey, JSON.stringify(list)); } catch {} };
+  const persistSavedTargets = (list: SavedTarget[]) => {
+    setSavedTargets(list);
+    try { localStorage.setItem(savedTargetsKey, JSON.stringify(list)); } catch {}
+    // 🏪 서버 영구저장 — 앱 재설치·다른 기기에서도 유지(회원 데이터 보존)
+    if (userId) saveInflowTargets(userId, list).catch(() => {});
+  };
   const [advOpen, setAdvOpen] = useState(false);       // ⚙️ 고급 설정 펼침
   const [kwWeights, setKwWeights] = useState<Record<string, number>>(saved0.kwWeights ?? {}); // 키워드별 비중
   const [visible, setVisible] = useState(false); // 🪟 창 보기(테스트) — 저장 안 함(안전상 매번 꺼짐)
@@ -229,6 +238,16 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
       const legacyTargets = localStorage.getItem("publy_inflow_saved_targets");
       const migratedTargets = JSON.parse(scopedTargets || legacyTargets || "[]");
       localStorage.setItem(savedTargetsKey, JSON.stringify(migratedTargets)); setSavedTargets(migratedTargets);
+      // 🏪 서버가 소스오브트루스: 서버에 저장된 매장이 있으면 그걸 사용(재설치·다른 기기에서도 복원),
+      //    서버가 비었고 로컬에만 있으면 서버로 백필(기존 회원 데이터 자동 이전)
+      getInflowTargets(userId).then((server) => {
+        if (server && server.length) {
+          setSavedTargets(server as SavedTarget[]);
+          try { localStorage.setItem(savedTargetsKey, JSON.stringify(server)); } catch {}
+        } else if (migratedTargets.length) {
+          saveInflowTargets(userId, migratedTargets).catch(() => {});
+        }
+      }).catch(() => {});
 
       delete legacyForm.placeUrl; delete legacyForm.blogUrl; delete legacyForm.extraTargets;
       localStorage.setItem("publy_inflow_form", JSON.stringify(legacyForm));
@@ -459,12 +478,12 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
     if (skipPrivateSaveRef.current) { skipPrivateSaveRef.current = false; return; }
     try {
       localStorage.setItem(formKey, JSON.stringify({
-        targetType, keywords, rounds, termMin, termMax, device,
+        targetType, keywordsPlace, keywordsBlog, rounds, termMin, termMax, device,
         doSave, doShare, doDir, doCall, doBook, doTalk, doLike, funnel, spread, spreadHours, doReview, reviewText, auto, actionRate, intensity, maxDwellSec, kwWeights,
       }));
       localStorage.setItem(privateKey, JSON.stringify({ placeUrl, blogUrl, extraTargets }));
     } catch {}
-  }, [formKey, privateKey, targetType, placeUrl, blogUrl, keywords, rounds, termMin, termMax, device, doSave, doShare, doDir, doCall, doBook, doTalk, doLike, funnel, spread, spreadHours, doReview, reviewText, auto, actionRate, intensity, maxDwellSec, extraTargets, kwWeights]);
+  }, [formKey, privateKey, targetType, placeUrl, blogUrl, keywordsPlace, keywordsBlog, rounds, termMin, termMax, device, doSave, doShare, doDir, doCall, doBook, doTalk, doLike, funnel, spread, spreadHours, doReview, reviewText, auto, actionRate, intensity, maxDwellSec, extraTargets, kwWeights]);
 
   // 🔔 앱 내 자동 알림 — 날짜/주차 마커로 중복을 막고, 다음 실행 때 놓친 알림도 알림함에 쌓는다.
   useEffect(() => {
@@ -1185,13 +1204,13 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
           <span style={{ fontSize: 12, color: C.sub, fontWeight: 600, flex: 1, minWidth: 180 }}>매일 지정 시각에 위 설정으로 자동 유입해요(앱이 켜져 있을 때).</span>
         </div>
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
-          <div style={{ minWidth: 120 }}>
+          <div style={{ flex: "1 1 190px", minWidth: 190 }}>
             <label style={labelStyle}>매일 실행 시각</label>
-            <input type="time" value={schedTime} onChange={(e) => setSchedTime(e.target.value)} style={{ ...inputStyle, textAlign: "center" }} />
+            <input type="time" value={schedTime} onChange={(e) => setSchedTime(e.target.value)} style={{ ...inputStyle, textAlign: "center", minWidth: 0, width: "100%" }} />
           </div>
-          <div style={{ minWidth: 100 }}>
+          <div style={{ flex: "0 1 120px", minWidth: 100 }}>
             <label style={labelStyle}>방문 횟수</label>
-            <input type="number" min={1} value={schedRounds} onChange={(e) => setSchedRounds(Math.max(1, Number(e.target.value)))} style={{ ...inputStyle, textAlign: "center" }} />
+            <input type="number" min={1} value={schedRounds} onChange={(e) => setSchedRounds(Math.max(1, Number(e.target.value)))} style={{ ...inputStyle, textAlign: "center", minWidth: 0, width: "100%" }} />
           </div>
           <button onClick={() => saveSched(!schedEnabled)} style={{ padding: "13px 20px", borderRadius: 12, border: schedEnabled ? `2px solid ${C.accent}` : "none", background: schedEnabled ? C.panel2 : `linear-gradient(135deg,${C.accent},${C.cyan})`, color: schedEnabled ? C.accent : "#fff", fontSize: 15, fontWeight: 900, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}>{schedEnabled ? "예약 해제" : "⏰ 예약"}</button>
         </div>

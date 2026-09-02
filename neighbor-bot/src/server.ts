@@ -1110,7 +1110,12 @@ app.post("/api/inflow", async (req, res) => {
   const { userId, accountId, keywords, targetType, placeUrl, blogId, logNo, rounds, termMin, termMax, doSave, doLike, doShare, doDir, doCall, doBook, doTalk, device, fullFunnel, spreadHours, doReview, reviewText, visible, actionRate, intensity, maxDwellSec, extraTargets, keywordWeights } = req.body as Record<string, string>;
   if (!keywords || !targetType) return res.status(400).json({ error: "keywords·targetType 필요" });
   const memberToken = String(req.get("X-Publy-Session") || "");
-  if (!userId || !await verifyInflowSession(memberToken, userId)) return res.status(401).json({ error: "회원 세션이 올바르지 않습니다" });
+  // 관리자·무제한 플랜은 회원 세션토큰(publy_session_token)을 발급받지 않는다(관리자는 별도 admin 토큰 체계).
+  // 봇 전역 Authorization(로컬 앱만 아는 botAuthToken)이 이미 1차 방어선이고,
+  // checkInflowQuota/checkMembershipAccess가 plan(admin/unlimited)으로 관리자를 인정하는 것과 동일하게 세션 검증을 건너뛴다.
+  const inflowPlan = userId ? await getUserPlan(userId) : "free";
+  const privileged = userId === "admin-publy" || inflowPlan === "admin" || inflowPlan === "unlimited";
+  if (!privileged && (!userId || !await verifyInflowSession(memberToken, userId))) return res.status(401).json({ error: "회원 세션이 올바르지 않습니다" });
   sseSetup(res);
   let releaseAccount = () => {};
   try {
@@ -1119,9 +1124,8 @@ app.post("/api/inflow", async (req, res) => {
     if (!release) return;
     releaseAccount = release;
 
-    let plan = "free";
+    let plan = inflowPlan;
     if (userId) {
-      plan = await getUserPlan(userId);
       const quota = await checkInflowQuota(userId, plan);
       if (!quota.ok) { sseSend(res, { type: "quota_exceeded", used: quota.used, limit: quota.limit }); res.end(); return; }
       sseSend(res, { type: "quota_info", used: quota.used, limit: quota.limit, remaining: quota.limit - quota.used });

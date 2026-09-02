@@ -809,6 +809,21 @@ export async function saveInflowSchedule(userId: string, sched: InflowSchedule):
   const { error } = await supabase.from("publy_settings").upsert({ key: inflowSchedKey(userId), value: JSON.stringify(sched) }, { onConflict: "key" });
   if (error) throw new Error(`예약 저장 실패: ${error.message}`);
 }
+
+/* 🏪 내 플레이스/블로그 저장 목록 — 서버 영구저장(publy_settings key-value, 스키마 변경 없음).
+   기존엔 localStorage에만 있어 앱 재설치 시 회원 데이터가 날아갔음 → Supabase로 영구화. */
+export type InflowSavedTarget = { id: string; name: string; url: string; type: "place" | "blog" };
+function inflowTargetsKey(userId: string): string { return `inflow_targets_${userId}`; }
+export async function getInflowTargets(userId: string): Promise<InflowSavedTarget[] | null> {
+  try {
+    const { data } = await supabase.from("publy_settings").select("value").eq("key", inflowTargetsKey(userId)).maybeSingle();
+    return data?.value ? (JSON.parse(data.value) as InflowSavedTarget[]) : null;
+  } catch { return null; }
+}
+export async function saveInflowTargets(userId: string, targets: InflowSavedTarget[]): Promise<void> {
+  const { error } = await supabase.from("publy_settings").upsert({ key: inflowTargetsKey(userId), value: JSON.stringify(targets) }, { onConflict: "key" });
+  if (error) throw new Error(`매장 저장 실패: ${error.message}`);
+}
 // 오늘 이미 예약 실행했는지(중복 방지) — 실행 후 날짜 마킹
 export async function inflowScheduleRanToday(userId: string): Promise<boolean> {
   try {

@@ -11,6 +11,7 @@ exports.saveNaverSession = saveNaverSession;
 exports.reloginNaverSilent = reloginNaverSilent;
 exports.ensureLiveSessionNaver = ensureLiveSessionNaver;
 exports.getNaverCategories = getNaverCategories;
+exports.cleanContent = cleanContent;
 exports.publishNaver = publishNaver;
 exports.googleSessionExists = googleSessionExists;
 exports.saveGoogleSession = saveGoogleSession;
@@ -525,9 +526,9 @@ async function getNaverCategories(userId) {
 /* ── 마커 및 영문 섞임 텍스트 정리 ── */
 function cleanContent(text) {
     return text
-        .replace(/\[FAQ시작\][\s\S]*?\[FAQ끝\]/g, "")
-        .replace(/\[참고자료시작\][\s\S]*?\[참고자료끝\]/g, "")
-        .replace(/\[관련글시작\][\s\S]*?\[관련글끝\]/g, "")
+        // 구간 내용은 보존하고 앱 내부용 시작·끝 마커만 제거한다.
+        // pubScope별 구간 제외는 아래의 블록/원문 필터가 담당한다.
+        .replace(/\[(?:FAQ|참고자료|관련글)(?:시작|끝)\]/g, "")
         .replace(/\[[^\]]*\]/g, "") // 나머지 [마커] 제거
         // 자주 쓰이는 영문 → 한국어 표기 변환
         .replace(/\bQ(\d+)\s*:/g, "Q$1.") // Q1: → Q1.
@@ -563,12 +564,29 @@ async function publishNaver(params) {
     if (cutIdx >= 0)
         console.log(`[naver] 본문설정(${pubScope}): 경계 이후 ${(blocks || []).length - cutIdx}개 블록 제거`);
     const processedBlocks = keptBlocks.map(b => b.type === "text" ? { ...b, content: cleanContent(b.content || "") } : b);
-    const cleanedContent = cleanContent(content);
+    // 블록이 없는 예외 발행도 pubScope를 동일하게 지킨다.
+    const scopedContent = pubScope === "body"
+        ? content
+            .replace(/\[FAQ시작\][\s\S]*?\[FAQ끝\]/g, "")
+            .replace(/\[참고자료시작\][\s\S]*?\[참고자료끝\]/g, "")
+            .replace(/\[관련글시작\][\s\S]*?\[관련글끝\]/g, "")
+        : pubScope === "faq"
+            ? content
+                .replace(/\[참고자료시작\][\s\S]*?\[참고자료끝\]/g, "")
+                .replace(/\[관련글시작\][\s\S]*?\[관련글끝\]/g, "")
+            : content;
+    const cleanedContent = cleanContent(scopedContent);
     const storedBlogId = (0, session_store_1.readSession)(naverSessionName(userId), LEGACY_SESSION_DIRS)?.blogId;
     const cookies = await ensureLiveSessionNaver(userId); // ★세션 만료면 저장된 비번으로 자동 재연결(캡차면 창 모드)
     // ★실제 blogId 확정(로그인ID≠블로그주소 대응) — 제목수정에서 검증된 공용 로직 재사용.
     //   특히 글 살리기(편집)는 정확한 blogId 아니면 PostWriteForm이 글목록으로 튕기므로 반드시 교정.
     const blogId = await resolveNaverBlogId(storedBlogId, cookies, userId, console.log);
+    // ★작업 시작 요약 — 어떤 계정으로 어디로 보내는지(로그인 아이디·실제 블로그·대상 글 주소)를 맨 앞에 남긴다(테리 지시: 제대로 인식하는지 확인용).
+    console.log(`[naver] ━━━━━ 작업 시작 ━━━━━`);
+    console.log(`[naver] 로그인 계정: ${storedBlogId || "(세션 없음)"}${blogId && blogId !== storedBlogId ? ` → 실제 블로그: ${blogId}` : ""}`);
+    console.log(isEdit
+        ? `[naver] 작업 종류: 글 살리기(덮어쓰기) · 대상 글 https://blog.naver.com/${blogId}/${editLogNo}`
+        : `[naver] 작업 종류: 새 글 발행 · 블로그 https://blog.naver.com/${blogId}`);
     if (isEdit && editBlogId) {
         const norm = (v) => String(v || "").trim().toLowerCase().replace(/@naver\.com$/i, "");
         if (norm(blogId) !== norm(editBlogId)) {
