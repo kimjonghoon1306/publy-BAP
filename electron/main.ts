@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, shell, powerSaveBlocker } from "electron";
+import { app, BrowserWindow, ipcMain, shell, powerSaveBlocker, dialog } from "electron";
 import path from "path";
 import { spawn, exec as _exec, execSync, ChildProcess } from "child_process";
 import { randomBytes } from "crypto";
@@ -628,6 +628,29 @@ ipcMain.handle("open-preview", async (_event, html: string) => {
   } catch (e) {
     // 폴백: 파일 실패 시 기존 data URL 방식
     preview.loadURL("data:text/html;charset=utf-8," + encodeURIComponent(html));
+  }
+});
+
+ipcMain.handle("save-report-pdf", async (_event, html: string, filename: string) => {
+  const safeName = String(filename || "퍼블리-플레이스365-보고서.pdf").replace(/[\\/:*?"<>|]/g, "-");
+  const result = await dialog.showSaveDialog({ title: "플레이스365 보고서 저장", defaultPath: safeName.endsWith(".pdf") ? safeName : `${safeName}.pdf`, filters: [{ name: "PDF", extensions: ["pdf"] }] });
+  if (result.canceled || !result.filePath) return { ok: false, canceled: true };
+  const preview = new BrowserWindow({ show: false, webPreferences: { contextIsolation: true, nodeIntegration: false, webSecurity: false } });
+  let tmp = "";
+  try {
+    const fs = await import("fs");
+    const os = await import("os");
+    tmp = path.join(os.tmpdir(), `publy-report-${Date.now()}.html`);
+    fs.writeFileSync(tmp, html.replace(/<script>window\.onload=[\s\S]*?<\/script>/, ""), "utf-8");
+    await preview.loadFile(tmp);
+    const pdf = await preview.webContents.printToPDF({ printBackground: true, pageSize: "A4", margins: { top: 0.35, bottom: 0.35, left: 0.35, right: 0.35 } });
+    fs.writeFileSync(result.filePath, pdf);
+    return { ok: true, path: result.filePath };
+  } catch (error: any) {
+    return { ok: false, error: error?.message || "PDF 저장 실패" };
+  } finally {
+    preview.destroy();
+    if (tmp) { try { const fs = await import("fs"); fs.unlinkSync(tmp); } catch {} }
   }
 });
 

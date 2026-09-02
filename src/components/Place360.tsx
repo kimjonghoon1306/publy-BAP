@@ -598,6 +598,8 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
       { key: "desc", icon: "📖", label: "매장 소개글", status: (src.description && src.description.length >= 20) ? "good" : "bad", value: src.description ? `${src.description.length}자` : "비어 있음", why: "소개글은 검색·네이버 AI가 '어떤 집인지' 이해하는 근거예요. 대표 키워드가 들어가면 관련 검색에 더 잘 걸려요.", how: (!src.description || src.description.length < 20) ? "누가·무엇을·어떤 특징인지 2~3문장으로 쓰고, 노리는 지역 키워드를 자연스럽게 넣으세요." : "잘 작성됐어요. 노리는 키워드가 들어갔는지 확인하세요.", action: "고객 화면 보기", go: "discovery" },
       { key: "ai_briefing", icon: "✨", label: "AI 브리핑 참여", status: "input", value: "직접 확인", why: "2025년부터 AI 브리핑 참여 업체는 리뷰 기반 요약 등 새로운 탐색 화면에 노출될 기회가 생겼어요.", how: "스마트플레이스에서 AI 브리핑 참여 설정과 요약 내용이 실제 매장과 맞는지 확인하세요.", action: "고객 화면 보기", go: "discovery" },
       { key: "category_photo", icon: "🖼️", label: "업종별 대표 사진", status: photos >= 10 ? "good" : "warn", value: photos ? `${photos}장 수집` : "확인 필요", why: "2026년 검색 화면은 업종에 맞는 업체·방문자 리뷰 사진을 더 적극적으로 보여줘요.", how: "최근 1년 사진 중 외관·공간·대표 메뉴처럼 업종을 분명히 보여주는 고화질 사진을 우선 보강하세요.", action: "고객 화면 보기", go: "discovery" },
+      { key: "special_info", icon: "🧩", label: "2026 업종 특화정보", status: conv >= 4 ? "good" : "input", value: "직접 확인", why: "콜키지·대관·좌석·키즈메뉴·반려동물·인근 주차장 같은 상세정보가 검색과 상세 화면에 새로 강조돼요.", how: "내 업종에 해당하는 특화정보를 빠짐없이 켜고 조건·가격까지 정확히 적으세요.", action: "고객 화면 보기", go: "discovery" },
+      { key: "place_plus", icon: "➕", label: "Place+·시간대 노출", status: "input", value: "대상 업종 확인", why: "2026년에는 Place+ 전용 필터와 평일 점심·금요일 저녁 등 요일·시간대 추천 영역이 생겼어요.", how: "식당이라면 POS 연동·Place+ 대상 여부를 확인하고, 점심·저녁별 인기 메뉴와 영업정보를 최신으로 유지하세요.", action: "고객 화면 보기", go: "discovery" },
     ];
 
     // D. 키워드
@@ -1017,7 +1019,7 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
     return <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} style={{ flexShrink: 0 }}><polyline points={pts} fill="none" stroke={up ? colors.green : colors.pink} strokeWidth={1.6} strokeLinejoin="round" strokeLinecap="round" /></svg>;
   };
   // 📄 PDF 보고서 — 진단 전체를 깔끔한 새 창으로 열어 인쇄(PDF로 저장). 앱 크롬 없이 보고서만.
-  const downloadReport = () => {
+  const downloadReport = async () => {
     if (!placeReport) { showToast?.("먼저 매장 링크로 분석을 실행해 주세요", "info"); return; }
     const esc = (s: string) => String(s).replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c] || c));
     const rows = placeReport.groups.map(g => `<h3>${esc(g.title)} <small>${esc(g.subtitle)}</small></h3>` + g.items.map(it => {
@@ -1043,6 +1045,22 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
     // 🎯 다음 액션 — 시급/보완 항목 상위 3개를 '이렇게 하세요'로
     const todo = placeReport.groups.flatMap(g => g.items).filter(it => it.status === "bad" || it.status === "warn").slice(0, 3);
     const todoBlock = todo.length ? `<h2>🎯 지금 해야 할 3가지</h2><ol class="todo">${todo.map(it => `<li><b>${esc(it.icon + " " + it.label)}</b> — ${esc(it.how)}</li>`).join("")}</ol>` : "";
+    const measuredAt = currentRank?.measuredAt || livePlace?.collectedAt || new Date().toISOString();
+    const nextCheck = new Date(new Date(measuredAt).getTime() + 7 * 86400000);
+    const nextCheckText = nextCheck.toLocaleDateString("ko-KR", { year: "numeric", month: "long", day: "numeric" });
+    const primaryAction = todo[0]?.how || "현재 정보를 유지하고 같은 조건으로 7일 뒤 다시 측정하세요.";
+    const decisionBlock = `<section class="decision"><h2>사장님이 궁금한 세 가지 결론</h2>
+      <div><b>1. 상위노출은 어떻게?</b><p>${esc(primaryAction)}</p></div>
+      <div><b>2. 성과는 언제?</b><p><strong>${esc(nextCheckText)}</strong> 첫 재측정 · 14일 추세 판정 · 30일 종합 판정</p></div>
+      <div><b>3. 그래서 오늘 뭘 해야 하나?</b><p>${esc(todo[0]?.label || "같은 조건 재측정")}부터 하나만 완료하세요.</p></div></section>`;
+    const evidenceBlock = `<section class="evidence"><h2>데이터 출처와 측정 증거</h2><table class="rtbl"><tbody>
+      <tr><th>데이터 출처</th><td>네이버 플레이스 공개정보 · 네이버 지도 PC 검색결과</td></tr>
+      <tr><th>측정 키워드</th><td>${esc(currentRank?.query || "대표 키워드 미측정")}</td></tr>
+      <tr><th>측정 시각</th><td>${new Date(measuredAt).toLocaleString("ko-KR")}</td></tr>
+      <tr><th>검색 조건</th><td>${esc(currentRank?.surface || "네이버 지도 PC")} · 비로그인 자동 측정</td></tr>
+      <tr><th>확인 범위</th><td>상위 ${currentRank?.checkedCount || 0}곳</td></tr>
+      <tr><th>진단 근거 충족도</th><td>${diagnosisCoverage.percent}% · 자동수집/실측/직접입력 구분</td></tr>
+      </tbody></table><p class="notice">검색 위치·시간·로그인·개인화에 따라 순서는 달라질 수 있습니다. 퍼블리는 동일한 측정 환경의 반복 결과로 상승·하락 추이를 판정합니다. 본 점수는 네이버 공식 순위 점수가 아닙니다.</p></section>`;
     let reportBlock = "";
     if (report.hasData) {
       const kwr = report.kwRows.slice(0, 8).map(k => `<tr><td>${esc(k.keyword)}</td><td>${k.last != null ? k.last + "위" : "상위밖"}</td><td class="${k.change == null ? "" : k.change > 0 ? "up" : k.change < 0 ? "dn" : ""}">${k.change == null ? "기준" : k.change > 0 ? "▲ " + k.change : k.change < 0 ? "▼ " + Math.abs(k.change) : "— 유지"}</td></tr>`).join("");
@@ -1073,22 +1091,26 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
     .logo{width:34px;height:34px;border-radius:9px;background:linear-gradient(135deg,#00c896,#ff5fa2);color:#fff;font-weight:900;font-size:18px;display:flex;align-items:center;justify-content:center}
     .btag{font-size:11px;font-weight:900;letter-spacing:.12em;color:#00a884}.bttl{font-size:20px;font-weight:900}
     .todo{margin:8px 0;padding-left:20px}.todo li{margin:6px 0;font-size:13px}
+    .decision{border:3px solid #00c896;border-radius:14px;padding:14px 17px;margin:16px 0;background:#f5fffb}.decision h2{margin:0 0 8px}.decision div{border-top:1px solid #d6ede3;padding:8px 0}.decision p{margin:2px 0;font-size:13px}.decision strong{color:#00a884}.evidence{break-inside:avoid}.notice{font-size:10.5px;color:#5c8478;background:#f5f7f6;padding:9px;border-radius:8px}
     @media print{body{margin:0}}</style></head><body>
     <div class="brand"><div class="logo">P</div><div><div class="btag">PUBLY PLACE 365 · 상위노출 성과·진단 보고서</div><div class="bttl">🏪 ${esc(profile.name || "내 매장")}</div></div><div style="margin-left:auto;text-align:right;font-size:11px;color:#5c8478">발행일<br/><b style="color:#0f2b23;font-size:13px">${new Date().toLocaleDateString("ko-KR")}</b></div></div>
     <div class="top"><div class="stars">${"★".repeat(Math.round(placeReport.overallStars))}${"☆".repeat(5 - Math.round(placeReport.overallStars))} ${placeReport.overallStars} / 5.0</div>
     <div>${esc([profile.region, profile.category].filter(Boolean).join(" · "))} · ${placeReport.totalCount}개 항목 중 ${placeReport.goodCount}개 양호${currentRank ? ` · 대표 키워드 “${esc(currentRank.query)}” ${currentRank.rank ? currentRank.rank + "위" : "상위 밖"}` : ""}</div></div>
+    ${decisionBlock}
+    ${evidenceBlock}
     ${todoBlock}
     ${chartSvg}
     ${reportBlock}
     ${compBlock}
     <h2>🔎 항목별 진단</h2>
     ${rows}
-    <div class="foot">본 보고서는 네이버 플레이스 공개 데이터와 상위노출 알고리즘(저장·리뷰·행동 신호) 기준으로 <b>퍼블리 플레이스 365</b>가 자동 생성했습니다. 부족 항목은 퍼블리 블로그 글쓰기·리뷰어 섭외로 채울 수 있습니다. · publy.blogautopro.com</div>
+    <div class="foot">본 보고서는 네이버 플레이스 공개 데이터·동일 환경 검색 측정·사장님 입력자료를 구분해 <b>퍼블리 플레이스 365</b>가 자동 생성했습니다. 네이버의 공식 순위 점수나 상위노출 보증이 아니며, 반복 측정한 변화와 실제 예약·방문 성과를 함께 판단해야 합니다. · publy.blogautopro.com</div>
     <script>window.onload=()=>{setTimeout(()=>window.print(),400)}</script></body></html>`;
     const electron = (window as any).electron;
-    if (electron?.openPreview) {
-      void electron.openPreview(html);
-      showToast?.("보고서를 열었어요. 인쇄 창에서 PDF로 저장하세요", "success");
+    if (electron?.saveReportPdf) {
+      const saved = await electron.saveReportPdf(html, `퍼블리-플레이스365-${profile.name || "매장"}-${new Date().toISOString().slice(0, 10)}.pdf`);
+      if (saved?.ok) showToast?.("PDF 보고서를 저장했어요", "success");
+      else if (!saved?.canceled) showToast?.(saved?.error || "PDF를 저장하지 못했어요", "error");
       return;
     }
     // 웹 실행에서도 팝업 권한을 요구하지 않도록 숨은 iframe에서 인쇄한다.

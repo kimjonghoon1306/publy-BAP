@@ -7,6 +7,7 @@ contextBridge.exposeInMainWorld("electron", {
   registerUser:    (userId: string) => ipcRenderer.invoke("register-user", userId),
   unregisterUser:  (userId: string) => ipcRenderer.invoke("unregister-user", userId),
   openPreview:     (html: string) => ipcRenderer.invoke("open-preview", html),
+  saveReportPdf:   (html: string, filename: string) => ipcRenderer.invoke("save-report-pdf", html, filename),
   flowLaunchChrome: (slot?: number) => ipcRenderer.invoke("flow-launch-chrome", slot ?? 0),
   flowStatus:       (slot?: number) => ipcRenderer.invoke("flow-status", slot ?? 0),
   checkAppUpdate:   () => ipcRenderer.invoke("check-app-update"),
