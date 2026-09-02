@@ -47,6 +47,7 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
   const [termMax, setTermMax] = useState(90);
   const [doSave, setDoSave] = useState(true);
   const [doLike, setDoLike] = useState(true);
+  const [doShare, setDoShare] = useState(false);
   const [auto, setAuto] = useState(false); // 자동=오늘 남은 한도까지 알아서 / 수동=지정 횟수만
   const [accountId, setAccountId] = useState("");
   const [accounts, setAccounts] = useState<PublyAccount[]>([]);
@@ -85,7 +86,7 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
     const params = new URLSearchParams({
       targetType, keywords: kwList.join(","), rounds: String(n),
       termMin: String(termMin), termMax: String(termMax),
-      doSave: String(doSave), doLike: String(doLike), device,
+      doSave: String(doSave), doLike: String(doLike), doShare: String(doShare), device,
     });
     if (userId) params.set("userId", userId);
     if (accountId) params.set("accountId", accountId);
@@ -228,6 +229,9 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
               <input type="checkbox" checked={doLike} onChange={(e) => setDoLike(e.target.checked)} style={{ width: 18, height: 18, accentColor: C.accent }} />공감하기
             </label>
           )}
+          <label style={{ display: "flex", alignItems: "center", gap: 7, cursor: "pointer", fontSize: 14, fontWeight: 700 }}>
+            <input type="checkbox" checked={doShare} onChange={(e) => setDoShare(e.target.checked)} style={{ width: 18, height: 18, accentColor: C.accent }} />공유하기
+          </label>
           <label style={{ display: "flex", alignItems: "center", gap: 7, cursor: "pointer", fontSize: 14, fontWeight: 700 }}>
             <input type="checkbox" checked={auto} onChange={(e) => setAuto(e.target.checked)} style={{ width: 18, height: 18, accentColor: C.accent }} />자동(오늘 한도까지)
           </label>

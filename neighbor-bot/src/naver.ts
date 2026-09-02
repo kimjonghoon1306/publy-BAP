@@ -5244,6 +5244,11 @@ async function inflowActions(page: any, target: InflowTarget, actions: { save?: 
       const likeSel = ['a.u_likeit_list_btn', 'a[class*="like"]', 'button[class*="sympathy"]', 'a:has-text("공감")'];
       for (const sl of likeSel) { const b = await page.$(sl).catch(() => null); if (b) { await b.click().catch(() => {}); log("  💚 블로그 공감"); break; } }
     }
+    // 🔗 공유 — 플레이스·블로그 공통(공유 버튼 클릭). 실기기 셀렉터 교정 필요할 수 있음.
+    if (actions.share) {
+      const shareSel = ['button:has-text("공유")', 'a:has-text("공유")', 'button[aria-label*="공유"]', 'a[aria-label*="공유"]', '[class*="share"] button', '[class*="share"] a'];
+      for (const sl of shareSel) { const b = await page.$(sl).catch(() => null); if (b) { await b.click().catch(() => {}); log("  🔗 공유"); break; } }
+    }
   } catch (e: any) {
     log(`  ⚠️ 액션 실패(무시): ${e?.message || e} (실기기 셀렉터 교정 필요)`);
   }
