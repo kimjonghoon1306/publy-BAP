@@ -171,12 +171,14 @@ export async function incrementInflowQuota(userId: string): Promise<void> {
   if (error) throw new Error(`검색유입 사용량 저장 실패: ${error.message}`);
 }
 
-// ✍️ 리뷰 자동작성 권한 — 기본 잠금. 관리자(admin-publy) 또는 inflow_review_enabled=true인 회원만.
+// ✍️ 리뷰 자동작성 권한 — 기본 잠금. 관리자·무제한 플랜은 항상 허용, 그 외엔 inflow_review_enabled=true인 회원만.
 export async function inflowReviewAllowed(userId?: string | null): Promise<boolean> {
   if (!userId) return false;
   if (userId === "admin-publy") return true;
   try {
-    const { data } = await supabase.from("publy_users").select("inflow_review_enabled").eq("id", userId).maybeSingle();
+    const { data } = await supabase.from("publy_users").select("plan,inflow_review_enabled").eq("id", userId).maybeSingle();
+    const plan = (data as any)?.plan;
+    if (plan === "admin" || plan === "unlimited") return true;   // 관리자·무제한은 락 없음
     return (data as any)?.inflow_review_enabled === true;
   } catch { return false; }
 }

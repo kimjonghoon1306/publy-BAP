@@ -81,29 +81,32 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
   const unlimited = plan === "admin" || plan === "unlimited";
   const limit = INFLOW_DAILY_LIMIT[plan] ?? INFLOW_DAILY_LIMIT.free;
 
-  const [targetType, setTargetType] = useState<"place" | "blog">("place");
-  const [placeUrl, setPlaceUrl] = useState("");
-  const [blogUrl, setBlogUrl] = useState("");
-  const [keywords, setKeywords] = useState("");
-  const [rounds, setRounds] = useState(10);
-  const [termMin, setTermMin] = useState(30);
-  const [termMax, setTermMax] = useState(90);
-  const [device, setDevice] = useState<"mobile" | "pc" | "mix">("mobile");
+  // 🔁 탭을 옮겨도 입력값이 사라지지 않게 — 폼 상태를 localStorage에 저장/복원
+  const formKey = `publy_inflow_form_${userId || "guest"}`;
+  const saved0: any = (() => { try { return JSON.parse(localStorage.getItem(`publy_inflow_form_${userId || "guest"}`) || "{}"); } catch { return {}; } })();
+  const [targetType, setTargetType] = useState<"place" | "blog">(saved0.targetType ?? "place");
+  const [placeUrl, setPlaceUrl] = useState<string>(saved0.placeUrl ?? "");
+  const [blogUrl, setBlogUrl] = useState<string>(saved0.blogUrl ?? "");
+  const [keywords, setKeywords] = useState<string>(saved0.keywords ?? "");
+  const [rounds, setRounds] = useState<number>(saved0.rounds ?? 10);
+  const [termMin, setTermMin] = useState<number>(saved0.termMin ?? 30);
+  const [termMax, setTermMax] = useState<number>(saved0.termMax ?? 90);
+  const [device, setDevice] = useState<"mobile" | "pc" | "mix">(saved0.device ?? "mobile");
   // 액션
-  const [doSave, setDoSave] = useState(true);
-  const [doShare, setDoShare] = useState(false);
-  const [doDir, setDoDir] = useState(true);
-  const [doCall, setDoCall] = useState(false);
-  const [doBook, setDoBook] = useState(false);
-  const [doTalk, setDoTalk] = useState(false);
-  const [doLike, setDoLike] = useState(true);
-  const [funnel, setFunnel] = useState(false);
-  const [spread, setSpread] = useState(false);   // ⏱️ 시간 분산
-  const [spreadHours, setSpreadHours] = useState(3);
-  const [doReview, setDoReview] = useState(false); // ✍️ 리뷰(관리자 락)
-  const [reviewText, setReviewText] = useState("");
-  const [auto, setAuto] = useState(false);
-  const [visible, setVisible] = useState(false); // 🪟 창 보기(테스트)
+  const [doSave, setDoSave] = useState(saved0.doSave ?? true);
+  const [doShare, setDoShare] = useState(saved0.doShare ?? false);
+  const [doDir, setDoDir] = useState(saved0.doDir ?? true);
+  const [doCall, setDoCall] = useState(saved0.doCall ?? false);
+  const [doBook, setDoBook] = useState(saved0.doBook ?? false);
+  const [doTalk, setDoTalk] = useState(saved0.doTalk ?? false);
+  const [doLike, setDoLike] = useState(saved0.doLike ?? true);
+  const [funnel, setFunnel] = useState(saved0.funnel ?? false);
+  const [spread, setSpread] = useState(saved0.spread ?? false);   // ⏱️ 시간 분산
+  const [spreadHours, setSpreadHours] = useState<number>(saved0.spreadHours ?? 3);
+  const [doReview, setDoReview] = useState<boolean>(saved0.doReview ?? false); // ✍️ 리뷰(관리자 락)
+  const [reviewText, setReviewText] = useState<string>(saved0.reviewText ?? "");
+  const [auto, setAuto] = useState(saved0.auto ?? false);
+  const [visible, setVisible] = useState(false); // 🪟 창 보기(테스트) — 저장 안 함(안전상 매번 꺼짐)
   const [accountId, setAccountId] = useState("");
   const [accounts, setAccounts] = useState<PublyAccount[]>([]);
   const [running, setRunning] = useState(false);
@@ -187,6 +190,16 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
     catch (e: any) { toast(e.message, "error"); }
   };
   useEffect(() => { logBoxRef.current?.scrollTo({ top: logBoxRef.current.scrollHeight, behavior: "smooth" }); }, [logs]);
+
+  // 🔁 폼 입력값 저장(탭 이동해도 유지). 무거운 것(로그·계정목록)은 제외.
+  useEffect(() => {
+    try {
+      localStorage.setItem(formKey, JSON.stringify({
+        targetType, placeUrl, blogUrl, keywords, rounds, termMin, termMax, device,
+        doSave, doShare, doDir, doCall, doBook, doTalk, doLike, funnel, spread, spreadHours, doReview, reviewText, auto,
+      }));
+    } catch {}
+  }, [formKey, targetType, placeUrl, blogUrl, keywords, rounds, termMin, termMax, device, doSave, doShare, doDir, doCall, doBook, doTalk, doLike, funnel, spread, spreadHours, doReview, reviewText, auto]);
 
   const copyLogs = () => {
     if (!logs.length) return;
