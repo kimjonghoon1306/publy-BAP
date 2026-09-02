@@ -5419,6 +5419,57 @@ async function inflowFullFunnel(page: any, target: InflowTarget, log: (m: string
   }
 }
 
+/* 🩺 플레이스 최적화 진단 — 상세페이지를 읽어 "순위 오르려면 뭘 채워야 하는지" 항목별 점검.
+   ★순위는 트래픽만으로 안 오름: 리뷰·정보완성·사진·소식·방문의도수단이 종합 점수. 이걸 실측해 처방.
+   반환: 항목별 ok/값 + 100점 만점 점수 + 부족항목(처방). */
+export async function diagnosePlace(params: { placeUrl: string; onLog?: (m: string) => void }): Promise<{
+  score: number; items: { key: string; label: string; ok: boolean; value: string; tip: string }[];
+} | { error: string }> {
+  const log = params.onLog || (() => {});
+  const parsed = await resolvePlaceUrl(params.placeUrl);
+  if (!parsed) return { error: "플레이스 주소를 인식하지 못했어요" };
+  let browser: any = null;
+  try {
+    browser = await launchBrowser("", { headless: true, feature: "inflow", log });
+    const ctx = await browser.newContext({ userAgent: INFLOW_MOBILE_UA, viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, locale: "ko-KR" });
+    await ctx.addInitScript(ANTI_DETECTION_SCRIPT);
+    const page = await ctx.newPage();
+    await page.goto(`https://m.place.naver.com/${parsed.domain}/${parsed.placeId}/home`, { waitUntil: "domcontentloaded", timeout: 25000 });
+    await page.waitForTimeout(inflowRndInt(2000, 3200));
+    const raw = await page.evaluate(() => {
+      const t = document.body.innerText || "";
+      const num = (re: RegExp) => { const m = t.match(re); return m ? parseInt(m[1].replace(/,/g, "")) : 0; };
+      return {
+        review: num(/리뷰\s*([\d,]+)/),
+        blogReview: num(/블로그리뷰\s*([\d,]+)/),
+        hasHours: /영업시간|영업 중|영업종료|영업 종료/.test(t),
+        photos: document.querySelectorAll("img").length,
+        hasNews: /소식|공지/.test(t),
+        hasBooking: /예약/.test(t),
+        hasTalk: /톡톡|문의/.test(t),
+        hasDir: /길찾기/.test(t),
+      };
+    });
+    // 항목별 점검(각 배점) — 리뷰가 순위에 가장 강함
+    const items = [
+      { key: "review", label: "방문자 리뷰", ok: raw.review >= 50, value: `${raw.review}개`, tip: raw.review >= 50 ? "충분해요" : "리뷰가 적어요 — 방문 손님께 리뷰를 부탁하거나 리뷰 이벤트를 여세요(순위에 가장 큼).", w: 30 },
+      { key: "info", label: "영업정보", ok: raw.hasHours, value: raw.hasHours ? "등록됨" : "미흡", tip: raw.hasHours ? "잘 채워졌어요" : "영업시간·주소 등 기본정보를 채우세요.", w: 15 },
+      { key: "photo", label: "사진", ok: raw.photos >= 15, value: `${raw.photos}장 노출`, tip: raw.photos >= 15 ? "풍부해요" : "대표사진·메뉴사진을 더 올리세요(첫인상=클릭률).", w: 15 },
+      { key: "news", label: "소식", ok: raw.hasNews, value: raw.hasNews ? "있음" : "없음", tip: raw.hasNews ? "최신 소식 좋아요" : "소식을 주기적으로 올리면 활성 매장으로 평가돼요.", w: 15 },
+      { key: "booking", label: "예약", ok: raw.hasBooking, value: raw.hasBooking ? "가능" : "미설정", tip: raw.hasBooking ? "방문의도 신호 확보" : "네이버 예약을 켜면 예약 클릭이 순위 신호가 돼요.", w: 10 },
+      { key: "talk", label: "톡톡", ok: raw.hasTalk, value: raw.hasTalk ? "가능" : "미설정", tip: raw.hasTalk ? "문의 채널 확보" : "톡톡을 켜면 문의가 순위 신호가 돼요.", w: 8 },
+      { key: "dir", label: "위치/길찾기", ok: raw.hasDir, value: raw.hasDir ? "정상" : "확인필요", tip: raw.hasDir ? "정상" : "주소를 정확히 등록하세요.", w: 7 },
+    ];
+    const score = items.reduce((s, it) => s + (it.ok ? it.w : 0), 0);
+    log(`🩺 진단 완료 — 최적화 점수 ${score}/100`);
+    return { score, items: items.map(({ w, ...rest }) => rest) };
+  } catch (e: any) {
+    return { error: e?.message || "진단 실패" };
+  } finally {
+    if (browser) await browser.close().catch(() => {});
+  }
+}
+
 export async function searchInflow(params: {
   accountId: string;
   ownerUserId?: string;
