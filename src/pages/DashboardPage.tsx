@@ -168,8 +168,8 @@ const NAV_GROUPS = [
   {label:"블로그 운영",tabs:[
     {k:"calendar",i:"📅",l:"콘텐츠 캘린더",shine:true},{k:"manage",i:"📋",l:"발행 관리"},{k:"blogscore",i:"📈",l:"블로그 지수"},{k:"crawl",i:"🔍",l:"크롤링"},
   ]},
-  {label:"트래픽",boxed:true,tabs:[
-    {k:"inflow",i:"🆕",l:"NEW 트래픽 유입"},
+  {label:"NEW 트래픽",boxed:true,tabs:[
+    {k:"inflow",i:"🆕",l:"트래픽 유입"},
   ]},
   {label:"플레이스",boxed:true,tabs:[
     {k:"place",i:"🏪",l:"플레이스 365"},{k:"place_reply",i:"🗣️",l:"플레이스 리뷰답글"},

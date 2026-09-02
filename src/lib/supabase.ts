@@ -688,9 +688,9 @@ export const PLAN_CONFIG: Record<string, {
   dailyInflow: number;   // 검색유입 하루 방문 횟수(아이엠마케터 24h 200~400 기준, 무제한=999999). 락 해제는 관리자만.
   trialDays: number;
 }> = {
-  free:  { label: "FREE",  maxAccounts: 1, dailyPublish: 2,  dailyCrawl: 5,  dailyEmail: 5,  dailyComment: 3,  dailyInflow: 30,  trialDays: 7  },
-  basic: { label: "BASIC", maxAccounts: 2, dailyPublish: 6,  dailyCrawl: 20, dailyEmail: 20, dailyComment: 5,  dailyInflow: 150, trialDays: 30 },
-  pro:   { label: "PRO",   maxAccounts: 3, dailyPublish: 15, dailyCrawl: 50, dailyEmail: 50, dailyComment: 8,  dailyInflow: 400, trialDays: 30 },
+  free:  { label: "FREE",  maxAccounts: 1, dailyPublish: 2,  dailyCrawl: 5,  dailyEmail: 5,  dailyComment: 3,  dailyInflow: 20,  trialDays: 7  },
+  basic: { label: "BASIC", maxAccounts: 2, dailyPublish: 6,  dailyCrawl: 20, dailyEmail: 20, dailyComment: 5,  dailyInflow: 50,  trialDays: 30 },
+  pro:   { label: "PRO",   maxAccounts: 3, dailyPublish: 15, dailyCrawl: 50, dailyEmail: 50, dailyComment: 8,  dailyInflow: 100, trialDays: 30 },
   unlimited: { label: "무제한", maxAccounts: 999, dailyPublish: 999999, dailyCrawl: 999999, dailyEmail: 999999, dailyComment: 999999, dailyInflow: 999999, trialDays: 99999 },
   admin: { label: "ADMIN", maxAccounts: 99, dailyPublish: 9999, dailyCrawl: 999999, dailyEmail: 999999, dailyComment: 999999, dailyInflow: 999999, trialDays: 9999 },
 };

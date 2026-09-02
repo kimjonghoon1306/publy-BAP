@@ -631,7 +631,7 @@ const TABS = [
   {k:"manage",          i:"📋", l:"발행 관리"},
   {k:"blogscore",       i:"📈", l:"블로그 지수"},
   {k:"crawl",           i:"🔍", l:"크롤링"},
-  {k:"inflow",          i:"🆕", l:"NEW 트래픽 유입"},
+  {k:"inflow",          i:"🆕", l:"트래픽 유입"},
   {k:"place",           i:"🏪", l:"플레이스 365"},
   {k:"place_reply",     i:"🗣️", l:"플레이스 리뷰답글"},
   {k:"accounts",        i:"🔗", l:"계정관리"},

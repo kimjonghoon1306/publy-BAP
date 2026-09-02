@@ -155,7 +155,7 @@ export async function incrementPlaceDetailQuota(userId: string): Promise<void> {
 }
 
 /* ══ 검색유입(트래픽) 하루 한도 — 관리자/무제한만 락 해제(999999) ══ */
-export const INFLOW_DAILY_LIMIT: Record<string, number> = { free: 30, basic: 150, pro: 400, unlimited: 999999, admin: 999999 };
+export const INFLOW_DAILY_LIMIT: Record<string, number> = { free: 20, basic: 50, pro: 100, unlimited: 999999, admin: 999999 };
 function inflowQuotaKey(userId: string): string { return `inflow_daily_${userId}_${koreaDateKey()}`; }
 export async function checkInflowQuota(userId: string, plan: string): Promise<{ ok: boolean; used: number; limit: number }> {
   const limit = INFLOW_DAILY_LIMIT[plan] ?? INFLOW_DAILY_LIMIT.free;
