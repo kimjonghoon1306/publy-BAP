@@ -15,7 +15,20 @@ const THEMES = {
   dark: { bg: "#0f141b", surf: "#1a212b", surf2: "#222b37", ink: "#eef3fa", sub: "#9fb0c4", line: "#2c3846", line2: "#3a4756", accent: "#5b9bff", accentSoft: "#22304a", logBg: "#080c12", logInk: "#a9bccf" },
 };
 
-const PLAN_ORDER = ["free", "basic", "pro", "unlimited"] as const;
+// ⚖️ 등급 사용표엔 무제한 안 넣음 — 무제한은 관리자 고유 기능(회원용 표엔 free/basic/pro만)
+const PLAN_ORDER = ["free", "basic", "pro"] as const;
+
+// 블로그 글 주소 → { blogId, logNo }. 직접 안 넣고 주소만 붙여넣으면 자동 인식.
+function parseBlogUrl(input: string): { blogId: string; logNo: string } | null {
+  const s = (input || "").trim();
+  if (!s) return null;
+  if (/blogId=/i.test(s)) { const b = s.match(/blogId=([A-Za-z0-9_-]+)/i)?.[1]; const l = s.match(/logNo=(\d+)/i)?.[1]; if (b) return { blogId: b, logNo: l || "" }; }
+  const m = s.match(/blog\.naver\.com\/([A-Za-z0-9_-]+)(?:\/(\d+))?/i);
+  if (m) return { blogId: m[1], logNo: m[2] || "" };
+  const plain = s.match(/^([A-Za-z0-9_-]+)(?:\/(\d+))?$/);
+  if (plain) return { blogId: plain[1], logNo: plain[2] || "" };
+  return null;
+}
 
 export default function InflowCenter({ showToast, theme: extTheme, userId, plan = "free" }: { showToast?: (m: string, t?: any) => void; theme?: "dark" | "light"; userId?: string; plan?: string }) {
   const toast = (m: string, t?: string) => showToast?.(m, t);
@@ -26,8 +39,8 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
 
   const [targetType, setTargetType] = useState<"place" | "blog">("place");
   const [placeUrl, setPlaceUrl] = useState("");
-  const [blogId, setBlogId] = useState("");
-  const [logNo, setLogNo] = useState("");
+  const [blogUrl, setBlogUrl] = useState("");
+  const [device, setDevice] = useState<"mobile" | "pc" | "mix">("mobile");
   const [keywords, setKeywords] = useState("");
   const [rounds, setRounds] = useState(10);
   const [termMin, setTermMin] = useState(30);
@@ -63,7 +76,8 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
     const kwList = keywords.split(/[,\n]/).map((k) => k.trim()).filter(Boolean);
     if (!kwList.length) { toast("검색 키워드를 1개 이상 입력하세요", "error"); return; }
     if (targetType === "place" && !placeUrl.trim()) { toast("플레이스 주소(지도/플레이스 링크)를 입력하세요", "error"); return; }
-    if (targetType === "blog" && !blogId.trim()) { toast("블로그 아이디를 입력하세요", "error"); return; }
+    const parsedBlog = targetType === "blog" ? parseBlogUrl(blogUrl) : null;
+    if (targetType === "blog" && !parsedBlog) { toast("블로그 글 주소를 붙여넣어 주세요", "error"); return; }
     if (!unlimited && used >= limit) { toast(`오늘 유입 한도(${limit}회)를 다 썼어요. 자정에 초기화돼요.`, "error"); return; }
     const n = auto ? (unlimited ? 999 : Math.max(1, limit - used)) : Math.max(1, rounds);
 
@@ -71,12 +85,12 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
     const params = new URLSearchParams({
       targetType, keywords: kwList.join(","), rounds: String(n),
       termMin: String(termMin), termMax: String(termMax),
-      doSave: String(doSave), doLike: String(doLike),
+      doSave: String(doSave), doLike: String(doLike), device,
     });
     if (userId) params.set("userId", userId);
     if (accountId) params.set("accountId", accountId);
     if (targetType === "place") params.set("placeUrl", placeUrl.trim());
-    else { params.set("blogId", blogId.trim().replace(/.*blog\.naver\.com\//, "").split(/[/?]/)[0]); if (logNo.trim()) params.set("logNo", logNo.trim()); }
+    else if (parsedBlog) { params.set("blogId", parsedBlog.blogId); if (parsedBlog.logNo) params.set("logNo", parsedBlog.logNo); }
 
     pushLog(`🚀 NEW 트래픽 유입 시작 — ${targetType === "place" ? "플레이스" : "블로그"}, 키워드 ${kwList.length}개, ${n}회 방문, 텀 ${termMin}~${termMax}초`);
     const es = new BotEventStream(`${BOT}/api/inflow?${params.toString()}`);
@@ -110,13 +124,13 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
       </div>
       <p style={{ margin: "0 0 18px", fontSize: 14, color: C.sub, fontWeight: 600, lineHeight: 1.6 }}>
         키워드로 <b style={{ color: C.ink }}>검색 → 내 플레이스·블로그 클릭 → 글 전체 읽는 체류 → 저장·공감</b> 까지, 실제 사람처럼 유입시켜요.<br />
-        방문마다 <b style={{ color: C.accent }}>IP를 바꾸고</b>, <b style={{ color: C.accent }}>안전 한도 안에서만</b> 돌아가요.
+        방문마다 <b style={{ color: C.accent }}>프록시로 IP를 자동으로 바꾸고</b>, <b style={{ color: C.accent }}>안전 한도 안에서만</b> 돌아가요.
       </p>
 
       {/* 등급 사용표 */}
       <div style={{ background: C.surf, border: `1px solid ${C.line}`, borderRadius: 16, padding: 16, marginBottom: 18 }}>
         <div style={{ fontSize: 14, fontWeight: 800, marginBottom: 10 }}>📊 등급별 하루 유입 한도</div>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 8 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 8 }}>
           {PLAN_ORDER.map((pk) => {
             const cfg = PLAN_CONFIG[pk];
             const cur = pk === plan;
@@ -164,15 +178,9 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
             <input value={placeUrl} onChange={(e) => setPlaceUrl(e.target.value)} placeholder="지도/플레이스 링크 붙여넣기 (m.place.naver.com/… 또는 map.naver.com/…)" style={inputStyle} />
           </div>
         ) : (
-          <div style={{ display: "flex", gap: 10 }}>
-            <div style={{ flex: 2 }}>
-              <label style={labelStyle}>블로그 아이디</label>
-              <input value={blogId} onChange={(e) => setBlogId(e.target.value)} placeholder="blog.naver.com/아이디" style={inputStyle} />
-            </div>
-            <div style={{ flex: 1 }}>
-              <label style={labelStyle}>글 번호(선택)</label>
-              <input value={logNo} onChange={(e) => setLogNo(e.target.value)} placeholder="logNo" style={inputStyle} />
-            </div>
+          <div>
+            <label style={labelStyle}>내 블로그 글 주소</label>
+            <input value={blogUrl} onChange={(e) => setBlogUrl(e.target.value)} placeholder="글 주소만 붙여넣으세요 (blog.naver.com/아이디/글번호) — 아이디·글번호 자동 인식" style={inputStyle} />
           </div>
         )}
 
@@ -195,6 +203,16 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
           <div style={{ flex: 1, minWidth: 200 }}>
             <label style={labelStyle}>방문 횟수</label>
             <input type="number" min={1} value={rounds} disabled={auto} onChange={(e) => setRounds(Math.max(1, Number(e.target.value)))} style={{ ...inputStyle, textAlign: "center", opacity: auto ? 0.5 : 1 }} />
+          </div>
+        </div>
+
+        {/* 접속 기기 — 안 골라도 기본 모바일 */}
+        <div>
+          <label style={labelStyle}>접속 기기 <span style={{ color: C.sub, fontWeight: 600 }}>(기본 모바일 — 안 바꿔도 돼요)</span></label>
+          <div style={{ display: "flex", gap: 8 }}>
+            {([["mobile", "📱 모바일"], ["pc", "🖥️ PC"], ["mix", "🔀 혼합(랜덤)"]] as const).map(([k, lb]) => (
+              <button key={k} onClick={() => setDevice(k)} style={{ flex: 1, padding: "11px", borderRadius: 12, border: `2px solid ${device === k ? C.accent : C.line2}`, background: device === k ? C.accentSoft : C.surf2, color: device === k ? C.accent : C.sub, fontSize: 14, fontWeight: 800, cursor: "pointer", fontFamily: "inherit" }}>{lb}</button>
+            ))}
           </div>
         </div>
 

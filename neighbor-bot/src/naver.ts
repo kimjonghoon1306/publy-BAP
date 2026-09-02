@@ -5173,6 +5173,8 @@ export type InflowTarget =
 
 const INFLOW_MOBILE_UA =
   "Mozilla/5.0 (iPhone; CPU iPhone OS 17_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.1 Mobile/15E148 Safari/604.1";
+const INFLOW_PC_UA =
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
 const inflowSleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 const inflowRnd = (a: number, b: number) => a + Math.random() * (b - a);
 const inflowRndInt = (a: number, b: number) => Math.floor(inflowRnd(a, b + 1));
@@ -5253,6 +5255,7 @@ export async function searchInflow(params: {
   keywords: string[];              // 여러 키워드 로테이션
   target: InflowTarget;            // 플레이스 or 블로그
   rounds: number;                  // 이번 실행 방문 횟수(한도 내)
+  device?: "mobile" | "pc" | "mix"; // 접속 기기(기본 모바일, mix=방문마다 랜덤)
   intervalSec?: [number, number];  // 방문 사이 텀(사용자 임의 지정, 랜덤)
   actions?: { save?: boolean; like?: boolean; share?: boolean };
   requireLogin?: boolean;          // 저장/공감 등 로그인 필요 액션 시
@@ -5285,15 +5288,19 @@ export async function searchInflow(params: {
     let browser: any = null;
     try {
       browser = await launchBrowser(params.accountId, { headless: true, feature: "inflow", ownerUserId: params.ownerUserId, log });
-      const context = await browser.newContext({
-        userAgent: INFLOW_MOBILE_UA, viewport: { width: 390, height: 844 },
-        isMobile: true, hasTouch: true, deviceScaleFactor: 3, locale: "ko-KR",
-      });
+      // 접속 기기 결정 — mix면 방문마다 랜덤(사람처럼 모바일/PC 섞임)
+      const dev = params.device === "mix" ? (Math.random() < 0.5 ? "pc" : "mobile") : (params.device === "pc" ? "pc" : "mobile");
+      const context = await browser.newContext(
+        dev === "pc"
+          ? { userAgent: INFLOW_PC_UA, viewport: { width: 1280, height: 800 }, locale: "ko-KR" }
+          : { userAgent: INFLOW_MOBILE_UA, viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, deviceScaleFactor: 3, locale: "ko-KR" }
+      );
       if (cookies) await context.addCookies(cookies).catch(() => {});
       const page = await context.newPage();
 
-      await page.goto(`https://m.search.naver.com/search.naver?query=${encodeURIComponent(kw)}`, { waitUntil: "domcontentloaded", timeout: 25000 });
-      log(`  📱 검색결과 로드 완료 — 결과 탐색 중…`);
+      const searchBase = dev === "pc" ? "https://search.naver.com/search.naver" : "https://m.search.naver.com/search.naver";
+      await page.goto(`${searchBase}?query=${encodeURIComponent(kw)}`, { waitUntil: "domcontentloaded", timeout: 25000 });
+      log(`  ${dev === "pc" ? "🖥️ PC" : "📱 모바일"} 검색결과 로드 완료 — 결과 탐색 중…`);
       await page.waitForTimeout(inflowRndInt(1200, 2600));
 
       const entered = await inflowFindAndEnter(page, target, log);

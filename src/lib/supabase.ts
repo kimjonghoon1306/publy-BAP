@@ -1684,6 +1684,7 @@ export const PROXY_FEATURES = [
   { k: "pumasi",   l: "품앗이" },
   { k: "reply",    l: "답방" },
   { k: "crawl",    l: "크롤링" },
+  { k: "inflow",   l: "트래픽 유입" },
 ] as const;
 export const ALL_PROXY_FEATURES = PROXY_FEATURES.map(f => f.k) as string[];
 
