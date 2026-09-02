@@ -178,6 +178,7 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
   // 엔터 한 번 = 통째로 수집. 진행 로그 1→100% 빠짐없이 표시
   const [scanPct, setScanPct] = useState(0);
   const [scanLog, setScanLog] = useState<string[]>([]);
+  const [oneClickPending, setOneClickPending] = useState(false);
   const [posOpen, setPosOpen] = useState(false);   // 포스 자료 입력 접이식
   const [discoveryOpen, setDiscoveryOpen] = useState(false);   // 역추적·업체찾기 탭(기본 닫힘)
   const [tileModal, setTileModal] = useState<{ i: string; l: string; c: string; key: string; act: string } | null>(null);   // 타일 클릭 팝업(행위→이유→성과)
@@ -339,6 +340,25 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
     const done = checks.filter(item => item.ok).length;
     return { checks, done, percent: Math.round(done / checks.length * 100) };
   }, [collectedPlaces.length, livePlace?.placeId, metricsSavedAt, rankHistory.length, snapshots.length]);
+  const oneClickKit = useMemo(() => {
+    if (!livePlace) return null;
+    const region = profile.region || draft.region;
+    const category = profile.category || draft.category || livePlace.category || "매장";
+    const menus = (livePlace.menus || []).slice(0, 3).map(m => m.name).filter(Boolean);
+    const priority = keywordOpportunities.filter(k => k.tier === "우선 공략");
+    const keywords = (priority.length ? priority : keywordOpportunities).slice(0, 5).map(k => k.keyword);
+    const intro = `${region ? `${region}에서 ` : ""}${menus.length ? menus.join("·") : category}을 찾는 분을 위한 ${livePlace.name || profile.name}입니다. ${livePlace.bookingAvailable ? "네이버 예약으로 편하게 방문할 수 있고, " : ""}영업시간·메뉴·방문 전 필요한 정보를 정확하게 안내합니다.`;
+    const photos = ["외관·찾아오는 길", "입구·주차 위치", menus[0] ? `${menus[0]} 대표 사진` : "대표 상품·서비스", menus[1] ? `${menus[1]} 가격 포함 사진` : "가격표·메뉴판", "내부 공간·좌석", "최근 분위기·계절 사진"];
+    const actions = [
+      (!livePlace.description || livePlace.description.length < 20) && "오늘: 자동 소개글 초안을 스마트플레이스에 반영",
+      (livePlace.imageUrls?.length || 0) < 10 && "1일차: 사진 등록 순서대로 최신 사진 10장 보강",
+      (livePlace.menus?.length || 0) < 5 && "2일차: 대표 메뉴·가격·사진을 5개 이상 등록",
+      !livePlace.bookingAvailable && "3일차: 네이버 예약·주문 또는 톡톡 연결 검토",
+      "7일차: 같은 키워드·같은 검색 화면으로 순위 재측정",
+      "30일차: 순위·리뷰 증가·예약·길찾기 변화를 함께 판정",
+    ].filter(Boolean) as string[];
+    return { keywords, intro, photos, actions };
+  }, [draft.category, draft.region, keywordOpportunities, livePlace, profile.category, profile.name, profile.region]);
   const csvInputRef = useRef<HTMLInputElement | null>(null);
   useEffect(() => {
     const localMissions = loadCompletedMissions(userId, storeKey);
@@ -490,7 +510,7 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
     if (checkingKeyword || rankQueue.length === 0) return;
     const [next, ...rest] = rankQueue;
     setRankQueue(rest);
-    if (next && !rankHistory.some(r => r.keyword === next)) { if (!trackedKeywords.includes(next)) persistKeywords([...trackedKeywords, next]); void checkKeywordRank(next); }
+    if (next) { if (!trackedKeywords.includes(next)) persistKeywords([...trackedKeywords, next]); void checkKeywordRank(next); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [checkingKeyword, rankQueue]);
 
@@ -781,10 +801,10 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
   // 🔎 플레이스 주소만 붙여넣으면 이름·업종·지역을 봇이 공개 페이지에서 바로 당겨온다(로그인 불필요).
   const pushLog = (pct: number, msg: string) => { setScanPct(pct); setScanLog(prev => [...prev, `${pct}% · ${msg}`]); };
   // 🎯 자동 키워드 발굴(자동완성+연관검색) — 지역·업종·상호를 시드로 봇 공개 엔드포인트 호출
-  const loadAutoKeywords = async () => {
-    const reg = (profile.region || draft.region || "").trim();
-    const cat = (profile.category || draft.category || "").trim();
-    const nm = (profile.name || draft.name || "").trim();
+  const loadAutoKeywords = async (override?: Partial<StoreProfile>) => {
+    const reg = (override?.region || profile.region || draft.region || "").trim();
+    const cat = (override?.category || profile.category || draft.category || "").trim();
+    const nm = (override?.name || profile.name || draft.name || "").trim();
     // 업종별 '상황어'를 붙여 롱테일 시드 확장(대행사식: 역명+메뉴+상황). 감지 안 되면 범용어.
     const blob = `${cat} ${nm}`;
     const situ = /식당|맛집|고기|한우|횟집|족발|치킨|국밥|분식|밥집|중식|일식|한식|양식|해산물|음식/.test(blob) ? ["맛집", "회식", "데이트", "가족모임", "혼밥", "포장", "예약"]
@@ -819,7 +839,7 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
   const resolveFromUrl = async () => {
     const url = draft.placeUrl.trim();
     if (!url) { showToast?.("먼저 네이버 플레이스 주소를 붙여넣어 주세요", "info"); return; }
-    setResolving(true); setScanLog([]); setScanPct(0);
+    setResolving(true); setOneClickPending(true); setScanLog([]); setScanPct(0);
     try {
       pushLog(8, "플레이스 주소 확인 중…");
       pushLog(20, "매장 기본정보·사진·메뉴 수집 중…");
@@ -828,19 +848,21 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
       if (!res.ok || !data?.ok || !data?.detail) {
         pushLog(100, "실패 — 주소를 확인해 주세요");
         showToast?.(data?.error || "매장 정보를 불러오지 못했어요. 주소를 확인해 주세요", "error");
-        return;
+        setOneClickPending(false); return;
       }
       const d = data.detail as LivePlaceDetail;
       pushLog(50, `저장·리뷰·평점 수집 완료 (방문자 ${(d.visitorReviewCount||0).toLocaleString()} · 블로그 ${(d.blogReviewCount||0).toLocaleString()})`);
       setLivePlace(d);   // ★리뷰·영업시간·전화·메뉴·편의시설·사진·저장수·평점·키워드까지 전체를 한 번에 보관
       const regionHint = String(d.address || "").match(/([가-힣]+(?:동|읍|면|리|가|로|구|시))/)?.[1] || "";
-      setDraft(v => ({ ...v, name: d.name?.trim() || v.name, category: d.category?.trim() || v.category, region: v.region.trim() || regionHint, placeUrl: d.placeUrl?.trim() || url }));
+      const resolved = { ...draft, name: d.name?.trim() || draft.name, category: d.category?.trim() || draft.category, region: draft.region.trim() || regionHint, placeUrl: d.placeUrl?.trim() || url };
+      setDraft(resolved);
       pushLog(75, "🎯 노릴 키워드 자동 발굴 중…");
-      void loadAutoKeywords();   // 자동완성·연관검색 키워드 병행 수집
+      void loadAutoKeywords(resolved);   // 방금 수집한 값으로 자동완성·연관검색 키워드 병행 수집
       pushLog(90, "종합 별점 산출 중…");
       pushLog(100, "완료 — 상위노출 진단표가 준비됐어요");
       showToast?.(`'${d.name || "매장"}' 전체 분석 완료`, "success");
     } catch {
+      setOneClickPending(false);
       pushLog(100, "봇 연결 실패 — 앱 실행 확인");
       showToast?.("봇 서버에 연결하지 못했어요. 퍼블리 앱이 실행 중인지 확인해 주세요", "error");
     } finally {
@@ -903,6 +925,15 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
       setTab("diagnosis");
     }
   };
+  // 링크를 한 번 검사하면 별도 저장 버튼 없이 매장 저장→스냅샷→첫 순위 측정까지 이어간다.
+  useEffect(() => {
+    if (!oneClickPending || resolving || !livePlace || !draft.name.trim()) return;
+    setOneClickPending(false);
+    pushLog(100, "💾 매장 저장·기준선 기록·100위권 측정을 자동 시작해요");
+    void saveStore();
+    // saveStore는 상태 기반 원클릭 파이프라인의 마지막 단계이며 이 조건에서 한 번만 실행된다.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [oneClickPending, resolving, livePlace, draft.name]);
   const selectStore = (next: StoreProfile) => {
     setProfile(next); setDraft(next); setEditingStoreKey(place360StoreKey(next.name, next.region));
     localStorage.setItem(profileKey(userId), JSON.stringify(next));
@@ -1173,7 +1204,7 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
             <label style={{ display: "block", fontSize: 11.5, fontWeight: 800, marginBottom: 6, color: M.sub }}>네이버 플레이스 주소</label>
             <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 7, marginBottom: 8 }}>
               <input value={draft.placeUrl} onChange={e => setDraft(v => ({ ...v, placeUrl: e.target.value }))} onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); void resolveFromUrl(); } }} placeholder="https://naver.me/xxxx" className="p360-in" />
-              <button className="p360-btn" disabled={resolving} onClick={() => void resolveFromUrl()} style={{ background: M.rose, color: "#fff", whiteSpace: "nowrap", opacity: resolving ? .6 : 1 }}>{resolving ? "검사 중…" : "🔎 불러오기·검사"}</button>
+              <button className="p360-btn" disabled={resolving || oneClickPending} onClick={() => void resolveFromUrl()} style={{ background: `linear-gradient(135deg,${M.rose},${M.purple})`, color: "#fff", whiteSpace: "nowrap", opacity: (resolving || oneClickPending) ? .6 : 1 }}>{resolving || oneClickPending ? "자동 실행 중…" : "🚀 원클릭 전체 솔루션"}</button>
             </div>
             {(!hasStore || storeFormOpen) && <div style={{ display: "grid", gap: 7, marginBottom: 8 }}>
               <input value={draft.name} onChange={e => setDraft(v => ({ ...v, name: e.target.value }))} placeholder="매장 이름(필수)" className="p360-in" />
@@ -1368,6 +1399,17 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
               <p style={{ color: M.sub, fontSize: 10.8, lineHeight: 1.55, margin: "5px 0 10px" }}>이 값은 네이버 순위 점수가 아니라 <b style={{ color: M.text }}>진단에 실제 근거가 얼마나 채워졌는지</b>예요. 검색 위치·시간·개인화에 따라 노출 순서는 달라질 수 있어요.</p>
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(145px,1fr))", gap: 6 }}>{diagnosisCoverage.checks.map(item => <div key={item.label} style={{ padding: "8px 9px", borderRadius: 9, background: M.soft, border: `1px solid ${item.ok ? `${M.green}55` : M.line}`, fontSize: 10.5 }}><b style={{ color: item.ok ? M.green : M.sub }}>{item.ok ? "✓" : "○"} {item.label}</b><div style={{ color: M.sub, marginTop: 2 }}>{item.ok ? item.kind : "아직 미측정"}</div></div>)}</div>
             </section>
+            {oneClickKit && <section className="p360-card" style={{ padding: 16, border: `2px solid ${M.purple}55`, background: `linear-gradient(135deg,${M.card},${M.purple}08)` }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}><b style={{ fontSize: 14 }}>🚀 원클릭 적용 꾸러미</b><span style={{ marginLeft: "auto", fontSize: 10, fontWeight: 900, color: M.purple }}>자동 완성</span></div>
+              <p style={{ color: M.sub, fontSize: 10.8, lineHeight: 1.55, margin: "0 0 10px" }}>진단만 보여주지 않고 스마트플레이스에 바로 옮길 수 있는 문구·키워드·사진 순서를 만들었어요.</p>
+              <div style={{ display: "grid", gap: 8 }}>
+                <div style={{ padding: 10, borderRadius: 10, background: M.soft }}><b style={{ fontSize: 11.5 }}>소개글 초안</b><p style={{ margin: "5px 0", fontSize: 11, lineHeight: 1.55 }}>{oneClickKit.intro}</p><button className="p360-btn" onClick={() => { void navigator.clipboard.writeText(oneClickKit.intro); showToast?.("소개글을 복사했어요", "success"); }} style={{ minHeight: 30, padding: "4px 9px", fontSize: 10.5, background: M.purple, color: "#fff" }}>복사</button></div>
+                <div style={{ padding: 10, borderRadius: 10, background: M.soft }}><b style={{ fontSize: 11.5 }}>우선 공략 키워드</b><div style={{ display: "flex", gap: 5, flexWrap: "wrap", marginTop: 6 }}>{oneClickKit.keywords.length ? oneClickKit.keywords.map(k => <span key={k} style={{ padding: "4px 7px", borderRadius: 99, background: `${M.green}16`, color: M.green, fontSize: 10.5, fontWeight: 800 }}>{k}</span>) : <span style={{ color: M.sub, fontSize: 10.5 }}>키워드 수집이 끝나면 자동으로 채워져요</span>}</div></div>
+                <div style={{ padding: 10, borderRadius: 10, background: M.soft }}><b style={{ fontSize: 11.5 }}>사진 등록 순서</b><div style={{ marginTop: 6, fontSize: 10.8, lineHeight: 1.7, color: M.sub }}>{oneClickKit.photos.map((p, i) => <span key={p} style={{ marginRight: 8 }}><b style={{ color: M.text }}>{i + 1}.</b> {p}</span>)}</div></div>
+                <div style={{ padding: 10, borderRadius: 10, background: M.soft }}><b style={{ fontSize: 11.5 }}>자동 실행 일정</b><div style={{ marginTop: 6, display: "grid", gap: 4 }}>{oneClickKit.actions.map(a => <span key={a} style={{ fontSize: 10.8, color: M.sub }}>✓ {a}</span>)}</div></div>
+                <button className="p360-btn" onClick={() => { const all = [`[소개글]`, oneClickKit.intro, ``, `[우선 키워드]`, oneClickKit.keywords.join(", "), ``, `[사진 순서]`, oneClickKit.photos.map((p, i) => `${i + 1}. ${p}`).join("\n"), ``, `[실행 일정]`, oneClickKit.actions.join("\n")].join("\n"); void navigator.clipboard.writeText(all); showToast?.("원클릭 적용 꾸러미 전체를 복사했어요", "success"); }} style={{ background: `linear-gradient(135deg,${M.purple},${M.rose})`, color: "#fff" }}>📋 적용 꾸러미 전체 복사</button>
+              </div>
+            </section>}
             {placeReport.groups.map(g => <section key={g.title} className="p360-card" style={{ padding: 16 }}>
               <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap", marginBottom: 9 }}><b style={{ fontSize: 13.5 }}>{g.title}</b><span style={{ fontSize: 10, color: M.sub }}>{g.subtitle}</span><span style={{ marginLeft: "auto", fontSize: 9.5, fontWeight: 900, color: M.rose, background: `${M.rose}12`, borderRadius: 99, padding: "2px 8px" }}>{g.weight}</span></div>
               <div style={{ display: "grid", gap: 8 }}>{g.items.map(it => { const st = placeReport.itemStar(it); const sc = it.status === "good" ? M.green : it.status === "warn" ? M.amber : it.status === "input" ? M.sub : M.pink; return <article key={it.key} style={{ padding: 12, borderRadius: 12, background: M.soft, borderLeft: `5px solid ${sc}` }}><div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}><span style={{ fontSize: 18 }}>{it.icon}</span><b style={{ fontSize: 13 }}>{it.label}</b><span style={{ fontSize: 11, color: M.text, fontWeight: 800 }}>{it.value}</span><span style={{ marginLeft: "auto", fontSize: 12.5, color: M.amber }}>{"★".repeat(st)}{"☆".repeat(5 - st)}</span></div><p style={{ margin: "7px 0 0", color: M.sub, fontSize: 11, lineHeight: 1.55 }}><b style={{ color: M.text }}>왜?</b> {it.why}</p><p style={{ margin: "4px 0 0", color: M.text, fontSize: 11, lineHeight: 1.55 }}><b>👉</b> {it.how}</p></article>; })}</div>
