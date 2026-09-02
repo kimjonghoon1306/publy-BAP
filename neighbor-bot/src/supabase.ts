@@ -177,6 +177,16 @@ export async function verifyInflowSession(token: string, claimedUserId: string):
   return !error && String(data?.user?.id || "") === claimedUserId;
 }
 
+// 🔐 관리자 세션 검증 — 관리자는 회원 세션토큰이 없고 별도 관리자 토큰(publy_admin_session_get)을 쓴다.
+//   body의 userId 자기신고를 믿지 않고, 검증된 관리자 토큰이 있을 때만 관리자 권한을 부여한다.
+export async function verifyAdminSession(token: string): Promise<boolean> {
+  if (!token) return false;
+  try {
+    const { data, error } = await supabase.rpc("publy_admin_session_get", { p_token: token });
+    return !error && data === true;
+  } catch { return false; }
+}
+
 // DB 함수가 배포된 환경에서는 검증과 한도 차감을 한 트랜잭션으로 처리한다.
 const inflowQuotaLocks = new Map<string, Promise<void>>();
 export async function consumeInflowQuota(token: string, userId: string, limit: number): Promise<{ ok: boolean; used: number; limit: number }> {

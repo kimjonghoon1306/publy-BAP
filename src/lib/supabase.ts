@@ -308,6 +308,11 @@ export function getMemberSessionToken(): string {
   return localStorage.getItem(MEMBER_SESSION_KEY) || "";
 }
 
+// 관리자 세션토큰 — 봇이 관리자 권한을 검증(publy_admin_session_get)할 때 헤더로 전달.
+export function getAdminSessionToken(): string {
+  return sessionStorage.getItem(ADMIN_SESSION_KEY) || "";
+}
+
 export async function signUp(email: string, password: string, name: string, phone?: string, referredBy?: string) {
   const { data, error } = await supabase.rpc("publy_signup", {
     p_email: email, p_password: password, p_name: name, p_phone: phone || null,

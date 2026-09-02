@@ -1,7 +1,7 @@
 import express from "express";
 import cors from "cors";
 import { saveSession, sessionExists, removeSession, crawlBlogIds, crawlBuddyPosts, analyzeBuddyKeywords, addNeighbors, NeighborResult, donePath, engageBlogs, EngageResult, engageDonePath, crawlMyPosts, replyToComments, crawlPlaceReviews, generatePlaceReviewReply, replyToPlaceReviews, crawlBlogStats, checkSelectedBlogExposure, pumasiEngage, crawlPumasiReport, pumasiPreview, updatePostTitle, checkProxy, analyzeBlogAuthenticity, fetchPostBody, crawlPostViews, sendWebmail, sendBlogComments, crawlPlaces, crawlPlaceBloggers, crawlPlaceDetail, crawlPlaceByUrl, suggestPlaceKeywords, parsePlaceUrl, resolvePlaceUrl, searchInflow, diagnosePlace, measurePlaceRank, collectPlaceReviews, InflowTarget } from "./naver";
-import { checkNeighborQuota, incrementNeighborQuota, getNeighborDailyUsage, incrementEngageQuota, getEngageDailyUsage, getUserPlan, checkMembershipAccess, NEIGHBOR_DAILY_LIMIT, ENGAGE_DAILY_LIMIT, REPLY_DAILY_LIMIT, getReplyDailyUsage, incrementReplyQuota, PLACE_REPLY_DAILY_LIMIT, getPlaceReplyDailyUsage, incrementPlaceReplyQuota, addNeighborHistory, addReplyHistory, addPlaceReplyHistory, addBlogscoreHistory, incrementPumasiQuota, TITLE_EDIT_DAILY_LIMIT, getTitleEditDailyUsage, incrementTitleEditQuota, getProxyForAccount, supabase, getOutreachSender, getOutreachSentToday, addOutreachLog, checkPlaceDetailQuota, incrementPlaceDetailQuota, checkInflowQuota, inflowReviewAllowed, verifyInflowSession, consumeInflowQuota, INFLOW_DAILY_LIMIT } from "./supabase";
+import { checkNeighborQuota, incrementNeighborQuota, getNeighborDailyUsage, incrementEngageQuota, getEngageDailyUsage, getUserPlan, checkMembershipAccess, NEIGHBOR_DAILY_LIMIT, ENGAGE_DAILY_LIMIT, REPLY_DAILY_LIMIT, getReplyDailyUsage, incrementReplyQuota, PLACE_REPLY_DAILY_LIMIT, getPlaceReplyDailyUsage, incrementPlaceReplyQuota, addNeighborHistory, addReplyHistory, addPlaceReplyHistory, addBlogscoreHistory, incrementPumasiQuota, TITLE_EDIT_DAILY_LIMIT, getTitleEditDailyUsage, incrementTitleEditQuota, getProxyForAccount, supabase, getOutreachSender, getOutreachSentToday, addOutreachLog, checkPlaceDetailQuota, incrementPlaceDetailQuota, checkInflowQuota, inflowReviewAllowed, verifyInflowSession, verifyAdminSession, consumeInflowQuota, INFLOW_DAILY_LIMIT } from "./supabase";
 import nodemailer from "nodemailer";
 import fs from "fs";
 import { acquireAccountLock } from "./account-lock";
@@ -1110,12 +1110,14 @@ app.post("/api/inflow", async (req, res) => {
   const { userId, accountId, keywords, targetType, placeUrl, blogId, logNo, rounds, termMin, termMax, doSave, doLike, doShare, doDir, doCall, doBook, doTalk, device, fullFunnel, spreadHours, doReview, reviewText, visible, actionRate, intensity, maxDwellSec, extraTargets, keywordWeights } = req.body as Record<string, string>;
   if (!keywords || !targetType) return res.status(400).json({ error: "keywords·targetType 필요" });
   const memberToken = String(req.get("X-Publy-Session") || "");
-  // 관리자·무제한 플랜은 회원 세션토큰(publy_session_token)을 발급받지 않는다(관리자는 별도 admin 토큰 체계).
-  // 봇 전역 Authorization(로컬 앱만 아는 botAuthToken)이 이미 1차 방어선이고,
-  // checkInflowQuota/checkMembershipAccess가 plan(admin/unlimited)으로 관리자를 인정하는 것과 동일하게 세션 검증을 건너뛴다.
-  const inflowPlan = userId ? await getUserPlan(userId) : "free";
-  const privileged = userId === "admin-publy" || inflowPlan === "admin" || inflowPlan === "unlimited";
-  if (!privileged && (!userId || !await verifyInflowSession(memberToken, userId))) return res.status(401).json({ error: "회원 세션이 올바르지 않습니다" });
+  const adminToken = String(req.get("X-Publy-Admin-Session") || "");
+  // 🔐 권한은 반드시 "검증된 세션"에서만 도출한다(body의 userId 자기신고를 신뢰하지 않음).
+  //   - 관리자: 별도 관리자 세션토큰(publy_admin_session_get)으로 검증돼야 세션검증을 건너뛴다.
+  //   - 일반/무제한 회원: verifyInflowSession으로 본인 세션임을 확인(무제한이어도 사칭 불가).
+  //   plan만 보고 우회하면 회원이 admin/unlimited userId를 사칭해 권한상승할 수 있어 금지.
+  const isVerifiedAdmin = adminToken ? await verifyAdminSession(adminToken) : false;
+  if (!isVerifiedAdmin && (!userId || !await verifyInflowSession(memberToken, userId))) return res.status(401).json({ error: "회원 세션이 올바르지 않습니다" });
+  const inflowPlan = isVerifiedAdmin ? "admin" : (userId ? await getUserPlan(userId) : "free");
   sseSetup(res);
   let releaseAccount = () => {};
   try {

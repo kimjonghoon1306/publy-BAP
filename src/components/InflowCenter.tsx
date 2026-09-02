@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from "react";
 import { BotEventStream, botFetch } from "../lib/botApi";
 import UsageGuide from "./UsageGuide";
 import SproutAssistant from "./SproutAssistant";
-import { INFLOW_DAILY_LIMIT, PLAN_CONFIG, getInflowDailyUsage, getInflowUsageHistory, getAccounts, PublyAccount, getAutopilot, saveAutopilot, getRankHistory, AutopilotConfig, getInflowSchedule, saveInflowSchedule, inflowScheduleRanToday, markInflowScheduleRan, getPerfReport, PerfReport, recordRankPoint, getMemberSessionToken, getInflowTargets, saveInflowTargets } from "../lib/supabase";
+import { INFLOW_DAILY_LIMIT, PLAN_CONFIG, getInflowDailyUsage, getInflowUsageHistory, getAccounts, PublyAccount, getAutopilot, saveAutopilot, getRankHistory, AutopilotConfig, getInflowSchedule, saveInflowSchedule, inflowScheduleRanToday, markInflowScheduleRan, getPerfReport, PerfReport, recordRankPoint, getMemberSessionToken, getAdminSessionToken, getInflowTargets, saveInflowTargets } from "../lib/supabase";
 
 const BOT = "http://127.0.0.1:3334"; // neighbor-bot
 
@@ -605,7 +605,7 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
     pushLog(`🚀 트래픽 유입 시작 — ${targetType === "place" ? "플레이스" : "블로그"}, 키워드 ${kwList.length}개, ${n}회 방문, 텀 ${termMin}~${termMax}초, ${device === "pc" ? "PC" : device === "mix" ? "혼합" : "모바일"}`);
     const es = new BotEventStream(`${BOT}/api/inflow`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", "X-Publy-Session": getMemberSessionToken() },
+      headers: { "Content-Type": "application/json", "X-Publy-Session": getMemberSessionToken(), "X-Publy-Admin-Session": getAdminSessionToken() },
       body: JSON.stringify(Object.fromEntries(params.entries())),
     });
     esRef.current = es;
