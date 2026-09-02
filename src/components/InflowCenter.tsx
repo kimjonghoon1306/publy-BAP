@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { BotEventStream } from "../lib/botApi";
-import { INFLOW_DAILY_LIMIT, PLAN_CONFIG, getInflowDailyUsage, getInflowUsageHistory, getAccounts, PublyAccount } from "../lib/supabase";
+import { INFLOW_DAILY_LIMIT, PLAN_CONFIG, getInflowDailyUsage, getInflowUsageHistory, getAccounts, PublyAccount, getAutopilot, saveAutopilot, getRankHistory, AutopilotConfig } from "../lib/supabase";
 
 const BOT = "http://127.0.0.1:3334"; // neighbor-bot
 
@@ -54,6 +54,26 @@ function AreaChart({ data, C }: { data: { label: string; count: number }[]; C: a
   );
 }
 
+// 📉 순위 변동 그래프 — 위로 갈수록 상위(순위는 작을수록 좋음, y축 반전). 결측(null)은 이어붙임.
+function RankChart({ data, goal, C }: { data: { label: string; rank: number | null }[]; goal: number; C: any }) {
+  const W = 100, H = 44, pad = 4;
+  const vals = data.map((d) => d.rank).filter((r): r is number => r != null);
+  if (vals.length === 0) return <div style={{ height: 120, display: "flex", alignItems: "center", justifyContent: "center", color: C.sub, fontSize: 12.5, fontWeight: 600 }}>순위가 측정되면 그래프가 그려져요</div>;
+  const maxR = Math.max(goal + 2, ...vals), minR = Math.min(1, ...vals);
+  const n = data.length, step = n > 1 ? (W - pad * 2) / (n - 1) : 0;
+  const y = (r: number) => pad + ((r - minR) / Math.max(1, maxR - minR)) * (H - pad * 2); // 순위 클수록 아래
+  const pts = data.map((d, i) => d.rank == null ? null : [pad + i * step, y(d.rank)] as [number, number]).filter(Boolean) as [number, number][];
+  const line = pts.map((p) => `${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(" ");
+  const goalY = y(goal);
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" style={{ width: "100%", height: 120, display: "block" }}>
+      <line x1="0" y1={goalY} x2={W} y2={goalY} stroke={C.cyan} strokeWidth="0.6" strokeDasharray="2 2" opacity="0.7" />
+      <polyline points={line} fill="none" stroke="#16a34a" strokeWidth="1.4" strokeLinejoin="round" strokeLinecap="round" />
+      {pts.map((p, i) => <circle key={i} cx={p[0]} cy={p[1]} r="1.3" fill="#16a34a" />)}
+    </svg>
+  );
+}
+
 export default function InflowCenter({ showToast, theme: extTheme, userId, plan = "free" }: { showToast?: (m: string, t?: any) => void; theme?: "dark" | "light"; userId?: string; plan?: string }) {
   const toast = (m: string, t?: string) => showToast?.(m, t);
   const theme: "dark" | "light" = extTheme === "dark" ? "dark" : "light";
@@ -87,6 +107,12 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
   const [progress, setProgress] = useState(0);
   const [sessOk, setSessOk] = useState(0); // 이번 실행 성공 수
   const [history, setHistory] = useState<{ label: string; count: number }[]>([]);
+  // 🎯 오토파일럿
+  const [apEnabled, setApEnabled] = useState(false);
+  const [apGoal, setApGoal] = useState(5);
+  const [apKeyword, setApKeyword] = useState("");
+  const [apLastRank, setApLastRank] = useState<number | null>(null);
+  const [rankHist, setRankHist] = useState<{ label: string; rank: number | null }[]>([]);
   const esRef = useRef<BotEventStream | null>(null);
   const logBoxRef = useRef<HTMLDivElement | null>(null);
 
@@ -95,11 +121,24 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
     if (!userId) return;
     getInflowDailyUsage(userId).then(setUsed).catch(() => {});
     getInflowUsageHistory(userId, 7).then(setHistory).catch(() => {});
+    getRankHistory(userId, 7).then(setRankHist).catch(() => {});
   };
   useEffect(() => {
     refreshStats();
-    if (userId) getAccounts(userId).then((a) => setAccounts(a.filter((x) => x.platform === "naver"))).catch(() => {});
+    if (!userId) return;
+    getAccounts(userId).then((a) => setAccounts(a.filter((x) => x.platform === "naver"))).catch(() => {});
+    getAutopilot(userId).then((ap) => { if (ap) { setApEnabled(ap.enabled); setApGoal(ap.goal_rank); setApKeyword(ap.keyword || ""); setApLastRank(ap.last_rank ?? null); } }).catch(() => {});
   }, [userId]);
+
+  const saveAp = async (nextEnabled: boolean) => {
+    if (!userId) return;
+    if (nextEnabled && !apKeyword.trim()) { toast("순위를 추적할 키워드를 입력하세요", "error"); return; }
+    if (nextEnabled && targetType === "place" && !placeUrl.trim()) { toast("먼저 플레이스 주소를 입력하세요", "error"); return; }
+    if (nextEnabled && targetType === "blog" && !blogUrl.trim()) { toast("먼저 블로그 글 주소를 입력하세요", "error"); return; }
+    const cfg: AutopilotConfig = { user_id: userId, target_type: targetType, target_ref: targetType === "place" ? placeUrl.trim() : blogUrl.trim(), keyword: apKeyword.trim(), goal_rank: apGoal, enabled: nextEnabled, last_rank: apLastRank };
+    try { await saveAutopilot(cfg); setApEnabled(nextEnabled); toast(nextEnabled ? `🎯 오토파일럿 ON — ${apKeyword} ${apGoal}위 목표로 자동 관리` : "오토파일럿 OFF", "success"); }
+    catch (e: any) { toast(e.message, "error"); }
+  };
   useEffect(() => { logBoxRef.current?.scrollTo({ top: logBoxRef.current.scrollHeight, behavior: "smooth" }); }, [logs]);
 
   const copyLogs = () => {
@@ -177,9 +216,9 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
       {/* ── KPI 카드 ── */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(140px,1fr))", gap: 12, marginBottom: 14 }}>
         {[
-          { k: "오늘 유입", v: unlimited ? `${used}` : `${used}`, sub: unlimited ? "무제한" : `/ ${limit}회`, col: C.accent },
+          { k: "오늘 유입", v: `${used}`, sub: unlimited ? "무제한" : `/ ${limit}회`, col: C.accent },
+          { k: "현재 순위", v: apLastRank != null ? `${apLastRank}` : "—", sub: apEnabled ? `목표 ${apGoal}위` : "위", col: "#16a34a" },
           { k: "최근 7일", v: `${weekTotal}`, sub: "누적 방문", col: C.cyan },
-          { k: "이번 성공", v: `${sessOk}`, sub: "회", col: "#16a34a" },
           { k: "남은 한도", v: unlimited ? "∞" : `${Math.max(0, limit - used)}`, sub: unlimited ? "무제한" : "회", col: "#f59e0b" },
         ].map((kp) => (
           <div key={kp.k} style={{ background: C.kpiBg, border: `1px solid ${C.line}`, borderRadius: 16, padding: "14px 16px", boxShadow: `0 4px 14px ${C.glow}` }}>
@@ -192,8 +231,9 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
         ))}
       </div>
 
-      {/* ── 7일 유입 그래프 ── */}
-      <div style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 16, padding: "14px 16px 8px", marginBottom: 14 }}>
+      {/* ── 그래프 2단: 유입 추이 + 순위 변동 ── */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(280px,1fr))", gap: 12, marginBottom: 14 }}>
+      <div style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 16, padding: "14px 16px 8px" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
           <span style={{ fontSize: 13.5, fontWeight: 800 }}>📈 최근 7일 유입 추이</span>
           <span style={{ fontSize: 11.5, fontWeight: 700, color: C.sub }}>총 {weekTotal}회</span>
@@ -202,6 +242,39 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
         <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: C.sub, fontWeight: 700, padding: "0 2px" }}>
           {history.map((d) => <span key={d.label}>{d.label}</span>)}
         </div>
+      </div>
+      {/* 순위 변동 */}
+      <div style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 16, padding: "14px 16px 8px" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+          <span style={{ fontSize: 13.5, fontWeight: 800 }}>📉 순위 변동 <span style={{ color: C.sub, fontWeight: 600, fontSize: 11 }}>(위=상위)</span></span>
+          {apEnabled && <span style={{ fontSize: 11.5, fontWeight: 800, color: C.cyan }}>목표 {apGoal}위 ---</span>}
+        </div>
+        <RankChart data={rankHist} goal={apGoal} C={C} />
+        <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: C.sub, fontWeight: 700, padding: "0 2px" }}>
+          {rankHist.map((d) => <span key={d.label}>{d.label}</span>)}
+        </div>
+      </div>
+      </div>
+
+      {/* ── 🎯 오토파일럿 ── */}
+      <div style={{ background: apEnabled ? `linear-gradient(135deg,${C.glow},transparent)` : C.panel, border: `2px solid ${apEnabled ? C.accent : C.line}`, borderRadius: 16, padding: 16, marginBottom: 14 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: apEnabled || true ? 12 : 0, flexWrap: "wrap" }}>
+          <span style={{ fontSize: 15, fontWeight: 900 }}>🎯 순위 오토파일럿</span>
+          <span style={{ fontSize: 10, fontWeight: 800, background: apEnabled ? "#16a34a" : C.sub, color: "#fff", padding: "2px 8px", borderRadius: 6 }}>{apEnabled ? "가동 중" : "꺼짐"}</span>
+          <span style={{ fontSize: 12, color: C.sub, fontWeight: 600, flex: 1, minWidth: 180 }}>목표 순위만 정해두면, 순위가 떨어질 때 자동으로 유입을 채워 지켜줘요.</span>
+        </div>
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+          <div style={{ flex: 2, minWidth: 180 }}>
+            <label style={labelStyle}>추적 키워드</label>
+            <input value={apKeyword} onChange={(e) => setApKeyword(e.target.value)} placeholder="순위를 지킬 대표 키워드" style={inputStyle} />
+          </div>
+          <div style={{ flex: 1, minWidth: 110 }}>
+            <label style={labelStyle}>목표 순위</label>
+            <input type="number" min={1} value={apGoal} onChange={(e) => setApGoal(Math.max(1, Number(e.target.value)))} style={{ ...inputStyle, textAlign: "center" }} />
+          </div>
+          <button onClick={() => saveAp(!apEnabled)} style={{ padding: "13px 20px", borderRadius: 12, border: apEnabled ? `2px solid ${C.accent}` : "none", background: apEnabled ? C.panel2 : `linear-gradient(135deg,${C.accent},${C.cyan})`, color: apEnabled ? C.accent : "#fff", fontSize: 15, fontWeight: 900, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}>{apEnabled ? "끄기" : "🎯 켜기"}</button>
+        </div>
+        <p style={{ margin: "10px 0 0", fontSize: 11, color: C.sub, fontWeight: 600, lineHeight: 1.5 }}>※ 위 실행 패널의 대상(플레이스/블로그 주소)을 기준으로 추적해요. 달성하면 유입을 줄여 한도를 아끼고, 떨어지면 다시 밀어 올려요.</p>
       </div>
 
       {/* ── 실행 패널 ── */}

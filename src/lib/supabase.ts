@@ -754,6 +754,48 @@ export async function resetInflowQuota(userId: string): Promise<void> {
   await supabase.from("publy_settings").upsert({ key: inflowQuotaKey(userId), value: "0" }, { onConflict: "key" });
 }
 
+/* ══ 🎯 순위 오토파일럿 — 목표 순위 정하면 유입을 자동 조절(낮으면↑ 달성하면↓). publy_autopilot 테이블. ══ */
+export type AutopilotConfig = {
+  user_id: string;
+  target_type: "place" | "blog";
+  target_ref: string;        // 플레이스 URL 또는 블로그 글 주소
+  keyword: string;           // 순위 추적할 대표 키워드
+  goal_rank: number;         // 목표 순위(예: 5)
+  enabled: boolean;
+  last_rank?: number | null; // 최근 측정 순위
+  last_run?: string | null;  // 마지막 실행(ISO)
+  updated_at?: string;
+};
+export async function getAutopilot(userId: string): Promise<AutopilotConfig | null> {
+  try {
+    const { data } = await supabase.from("publy_autopilot").select("*").eq("user_id", userId).maybeSingle();
+    return (data as AutopilotConfig) || null;
+  } catch { return null; }
+}
+export async function saveAutopilot(cfg: AutopilotConfig): Promise<void> {
+  const { error } = await supabase.from("publy_autopilot")
+    .upsert({ ...cfg, updated_at: new Date().toISOString() }, { onConflict: "user_id" });
+  if (error) throw new Error(`오토파일럿 저장 실패: ${error.message}`);
+}
+// 순위 이력(그래프용) — publy_settings key-value 재사용. 하루 1값(최신 덮어씀).
+export async function recordRankPoint(userId: string, rank: number): Promise<void> {
+  const key = `inflow_rank_${userId}_${koreaDateKey()}`;
+  await supabase.from("publy_settings").upsert({ key, value: String(rank) }, { onConflict: "key" });
+}
+export async function getRankHistory(userId: string, days = 7): Promise<{ label: string; rank: number | null }[]> {
+  const metas: { key: string; label: string }[] = [];
+  const now = Date.now();
+  for (let i = days - 1; i >= 0; i--) {
+    const ymd = koreaDateKey(new Date(now - i * 86400000));
+    metas.push({ key: `inflow_rank_${userId}_${ymd}`, label: ymd.slice(5) });
+  }
+  try {
+    const { data } = await supabase.from("publy_settings").select("key,value").in("key", metas.map(m => m.key));
+    const map = new Map((data || []).map((r: any) => [r.key, parseInt(r.value) || null]));
+    return metas.map(m => ({ label: m.label, rank: (map.get(m.key) as number) ?? null }));
+  } catch { return metas.map(m => ({ label: m.label, rank: null })); }
+}
+
 /* 📈 컨트롤타워 그래프용 — 최근 N일 일별 유입 수(publy_settings에서 날짜별 키를 한 번에 조회) */
 export async function getInflowUsageHistory(userId: string, days = 7): Promise<{ label: string; count: number }[]> {
   const metas: { key: string; label: string }[] = [];
