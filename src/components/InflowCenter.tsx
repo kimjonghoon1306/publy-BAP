@@ -149,6 +149,9 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
   // 📊 성과 리포트(주간/월간)
   const [reportPeriod, setReportPeriod] = useState<"week" | "month">("week");
   const [report, setReport] = useState<PerfReport | null>(null);
+  // 🩺 플레이스 최적화 진단
+  const [diagLoading, setDiagLoading] = useState(false);
+  const [diag, setDiag] = useState<{ score: number; items: { key: string; label: string; ok: boolean; value: string; tip: string }[] } | null>(null);
   // ⏰ 예약 실행
   const [schedEnabled, setSchedEnabled] = useState(false);
   const [schedTime, setSchedTime] = useState("10:00");
@@ -184,6 +187,19 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
   }, [userId]);
   // 주간/월간 토글 바뀌면 리포트 다시 로드
   useEffect(() => { if (userId) getPerfReport(userId, reportPeriod).then(setReport).catch(() => {}); }, [userId, reportPeriod]);
+
+  // 🩺 플레이스 최적화 진단 실행(현재 입력된 플레이스 주소 기준)
+  const runDiagnose = async () => {
+    if (targetType !== "place" || !placeUrl.trim()) { toast("먼저 플레이스 주소를 입력하세요", "error"); return; }
+    setDiagLoading(true); setDiag(null);
+    try {
+      const r = await fetch(`${BOT}/api/place-diagnose?placeUrl=${encodeURIComponent(placeUrl.trim())}`);
+      const j = await r.json();
+      if (j.error) { toast(j.error, "error"); }
+      else { setDiag(j); toast(`최적화 점수 ${j.score}점`, "success"); }
+    } catch { toast("진단 실패 — 봇 서버(3334)를 확인하세요", "error"); }
+    finally { setDiagLoading(false); }
+  };
 
   // 📄 성과 리포트를 PDF로 저장(플레이스365와 동일한 electron.saveReportPdf 재사용)
   const downloadReportPdf = async () => {
@@ -456,6 +472,45 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
         </div>
         );
       })()}
+
+      {/* ── 🩺 플레이스 최적화 진단 (순위 오르려면 뭘 채워야 하나) ── */}
+      {targetType === "place" && (
+        <div style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 16, padding: 18, marginBottom: 14 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4, flexWrap: "wrap" }}>
+            <span style={{ fontSize: 16, fontWeight: 900 }}>🩺 플레이스 최적화 진단</span>
+            <button onClick={runDiagnose} disabled={diagLoading} style={{ marginLeft: "auto", padding: "9px 18px", borderRadius: 10, border: "none", background: `linear-gradient(135deg,${C.accent},${C.cyan})`, color: "#fff", fontSize: 13.5, fontWeight: 800, cursor: diagLoading?"default":"pointer", fontFamily: "inherit", opacity: diagLoading?0.6:1 }}>{diagLoading ? "진단 중…" : "🩺 내 플레이스 진단하기"}</button>
+          </div>
+          <p style={{ margin: "0 0 14px", fontSize: 12.5, color: C.sub, fontWeight: 600, lineHeight: 1.6 }}>순위는 트래픽만으로 오르지 않아요. 리뷰·정보·사진·소식·예약이 <b style={{color:C.ink}}>종합 점수</b>예요. 지금 내 플레이스의 부족한 곳을 찾아 처방해 드려요.</p>
+          {diag ? (
+            <div>
+              {/* 점수 게이지 */}
+              <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 14 }}>
+                <div style={{ fontSize: 40, fontWeight: 900, color: diag.score>=80?"#16a34a":diag.score>=60?"#f59e0b":"#dc2626" }}>{diag.score}<span style={{fontSize:18,color:C.sub}}>/100</span></div>
+                <div style={{ flex: 1 }}>
+                  <div style={{ height: 12, borderRadius: 7, background: C.panel2, overflow: "hidden", border: `1px solid ${C.line}` }}>
+                    <div style={{ height: "100%", width: `${diag.score}%`, background: `linear-gradient(90deg,${diag.score>=80?"#16a34a":diag.score>=60?"#f59e0b":"#dc2626"},${C.cyan})`, transition: "width .5s" }} />
+                  </div>
+                  <div style={{ fontSize: 12.5, fontWeight: 700, color: C.sub, marginTop: 5 }}>{diag.score>=80?"최적화가 잘 돼 있어요 👍":diag.score>=60?"조금만 더 채우면 순위가 올라요":"부족한 항목이 많아요 — 아래부터 채우세요"}</div>
+                </div>
+              </div>
+              {/* 항목별 체크리스트 */}
+              <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
+                {diag.items.map((it) => (
+                  <div key={it.key} style={{ display: "flex", alignItems: "flex-start", gap: 10, padding: "10px 12px", borderRadius: 10, background: it.ok?C.panel2:"rgba(220,38,38,.06)", border: `1px solid ${it.ok?C.line:"#dc262633"}` }}>
+                    <span style={{ fontSize: 16, flexShrink: 0 }}>{it.ok?"✅":"⚠️"}</span>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontSize: 13.5, fontWeight: 800 }}>{it.label} <span style={{ color: C.sub, fontWeight: 600 }}>· {it.value}</span></div>
+                      {!it.ok && <div style={{ fontSize: 12.5, fontWeight: 600, color: "#dc2626", marginTop: 2, lineHeight: 1.5 }}>{it.tip}</div>}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : !diagLoading && (
+            <div style={{ padding: "20px", textAlign: "center", color: C.sub, fontSize: 13, fontWeight: 600 }}>위 버튼을 눌러 내 플레이스가 순위 오르기에 뭐가 부족한지 확인하세요.</div>
+          )}
+        </div>
+      )}
 
       {/* ── 그래프 2단: 유입 추이 + 순위 변동 ── */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(280px,1fr))", gap: 12, marginBottom: 14 }}>
