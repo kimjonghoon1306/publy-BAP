@@ -171,11 +171,21 @@ export async function incrementInflowQuota(userId: string): Promise<void> {
   if (error) throw new Error(`검색유입 사용량 저장 실패: ${error.message}`);
 }
 
+// ✍️ 리뷰 자동작성 권한 — 기본 잠금. 관리자(admin-publy) 또는 inflow_review_enabled=true인 회원만.
+export async function inflowReviewAllowed(userId?: string | null): Promise<boolean> {
+  if (!userId) return false;
+  if (userId === "admin-publy") return true;
+  try {
+    const { data } = await supabase.from("publy_users").select("inflow_review_enabled").eq("id", userId).maybeSingle();
+    return (data as any)?.inflow_review_enabled === true;
+  } catch { return false; }
+}
+
 export async function checkMembershipAccess(userId: string, feature?: "crawl" | "place360" | "inflow"): Promise<{ ok: boolean; plan: string; reason?: string }> {
   if (userId === "admin-publy") return { ok: true, plan: "admin" };
   try {
     const [{ data: user }, { data: quota }] = await Promise.all([
-      supabase.from("publy_users").select("plan,is_active,crawl_enabled,place360_enabled,inflow_enabled").eq("id", userId).maybeSingle(),
+      supabase.from("publy_users").select("plan,is_active,crawl_enabled,place360_enabled,inflow_enabled,inflow_review_enabled").eq("id", userId).maybeSingle(),
       supabase.from("publy_quotas").select("reset_date").eq("user_id", userId).maybeSingle(),
     ]);
     const plan = user?.plan || "free";

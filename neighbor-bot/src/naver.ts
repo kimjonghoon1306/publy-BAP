@@ -5234,7 +5234,7 @@ async function inflowDwellRead(page: any, log: (m: string) => void, shouldStop?:
 }
 
 // 저장/공감 등 액션(로그인 필요). 셀렉터는 방어적 — 실패해도 유입 자체는 유효.
-type InflowActions = { save?: boolean; like?: boolean; share?: boolean; directions?: boolean; call?: boolean; booking?: boolean; talk?: boolean };
+type InflowActions = { save?: boolean; like?: boolean; share?: boolean; directions?: boolean; call?: boolean; booking?: boolean; talk?: boolean; review?: boolean; reviewText?: string };
 async function inflowActions(page: any, target: InflowTarget, actions: InflowActions, log: (m: string) => void): Promise<void> {
   const clickFirst = async (sels: string[], label: string) => {
     for (const sl of sels) {
@@ -5251,6 +5251,20 @@ async function inflowActions(page: any, target: InflowTarget, actions: InflowAct
       if (actions.call)       await clickFirst(['a:has-text("전화")', 'a[href^="tel:"]', 'button:has-text("전화")', '[class*="call"] a'], "  📞 전화");
       if (actions.booking)    await clickFirst(['a:has-text("예약")', 'button:has-text("예약")', '[class*="booking"] a'], "  📅 예약");
       if (actions.talk)       await clickFirst(['a:has-text("톡톡")', 'a:has-text("문의")', '[class*="talk"] a'], "  💬 톡톡 문의");
+      // ✍️ 리뷰 작성(관리자 락 기본잠금 — 가짜리뷰 밴 위험). 리뷰탭→작성 진입 후 텍스트 입력·등록.
+      if (actions.review && actions.reviewText) {
+        try {
+          await clickFirst(['a:has-text("리뷰")', '[class*="review"] a', 'a:has-text("리뷰쓰기")', 'button:has-text("리뷰")'], "  ✍️ 리뷰 탭 진입");
+          await page.waitForTimeout(inflowRndInt(1200, 2400));
+          const box = await page.$('textarea, [contenteditable="true"]').catch(() => null);
+          if (box) {
+            await box.click().catch(() => {});
+            await page.keyboard.type(actions.reviewText, { delay: inflowRndInt(40, 110) }).catch(() => {});
+            await page.waitForTimeout(inflowRndInt(600, 1400));
+            await clickFirst(['button:has-text("등록")', 'button:has-text("완료")', 'button[type="submit"]'], "  ✍️ 리뷰 등록");
+          } else { log("  ⚠️ 리뷰 입력창 못 찾음(실기기 셀렉터 교정 필요)"); }
+        } catch (er: any) { log(`  ⚠️ 리뷰 작성 건너뜀: ${er?.message || er}`); }
+      }
     }
     if (target.type === "blog" && actions.like) {
       await clickFirst(['a.u_likeit_list_btn', 'a[class*="like"]', 'button[class*="sympathy"]', 'a:has-text("공감")'], "  💚 블로그 공감");
@@ -5322,7 +5336,8 @@ export async function searchInflow(params: {
   rounds: number;                  // 이번 실행 방문 횟수(한도 내)
   device?: "mobile" | "pc" | "mix"; // 접속 기기(기본 모바일, mix=방문마다 랜덤)
   intervalSec?: [number, number];  // 방문 사이 텀(사용자 임의 지정, 랜덤)
-  actions?: InflowActions;         // 저장·공감·공유·길찾기·전화·예약·톡톡
+  spreadHours?: number;            // ⏱️ 이 시간에 걸쳐 자연 분산(0=텀 그대로). 설정 시 텀 자동계산
+  actions?: InflowActions;         // 저장·공감·공유·길찾기·전화·예약·톡톡·리뷰
   fullFunnel?: boolean;            // 🌀 풀퍼널(여러 글·탭 둘러보기 + 이웃)
   requireLogin?: boolean;          // 저장/공감 등 로그인 필요 액션 시
   onLog?: (m: string) => void;
@@ -5332,8 +5347,16 @@ export async function searchInflow(params: {
 }): Promise<{ done: number; success: number }> {
   const log = params.onLog || (() => {});
   const { keywords, target, rounds } = params;
-  const [tmin, tmax] = params.intervalSec || [30, 90];
-  let done = 0, success = 0;
+  let [tmin, tmax] = params.intervalSec || [30, 90];
+  // ⏱️ 시간 분산 — spreadHours에 걸쳐 rounds회를 자연스럽게 흘려보냄(평균 텀=총시간/횟수, ±40% 랜덤)
+  if (params.spreadHours && params.spreadHours > 0 && rounds > 1) {
+    const avg = (params.spreadHours * 3600) / rounds;
+    tmin = Math.max(20, Math.round(avg * 0.6));
+    tmax = Math.round(avg * 1.4);
+    log(`⏱️ 시간 분산 ON — ${params.spreadHours}시간에 걸쳐 자연스럽게(평균 텀 ~${Math.round(avg)}초)`);
+  }
+  let done = 0, success = 0, failStreak = 0;
+  const FAIL_BRAKE = 5; // 🛡️ 연속 실패 임계 — 초과 시 자동 정지(계정 보호)
 
   // 저장/공감 액션용 로그인 쿠키(없으면 체류만)
   let cookies: any[] | null = null;
@@ -5372,20 +5395,26 @@ export async function searchInflow(params: {
       const entered = await inflowFindAndEnter(page, target, log);
       if (!entered) {
         log(`  ⚠️ "${kw}" 결과에서 대상을 못 찾음(현재 노출 순위가 낮음). 이번 방문 건너뜀`);
-        done++; params.onProgress?.(done, rounds);
+        done++; failStreak++; params.onProgress?.(done, rounds);
       } else {
         await inflowDwellRead(entered, log, params.shouldStop);
         await inflowActions(entered, target, params.actions || {}, log);
         if (params.fullFunnel) await inflowFullFunnel(entered, target, log, params.shouldStop);
-        success++; done++;
+        success++; done++; failStreak = 0;
         log(`  ✅ 유입 완료 (${kw}) — 누적 성공 ${success}회`);
         params.onProgress?.(done, rounds);
       }
     } catch (e: any) {
       log(`  ❌ 방문 오류: ${e?.message || e}`);
-      done++; params.onProgress?.(done, rounds);
+      done++; failStreak++; params.onProgress?.(done, rounds);
     } finally {
       if (browser) await browser.close().catch(() => {});
+    }
+
+    // 🛡️ 안전 브레이크 — 연속 실패가 임계를 넘으면 계정 보호를 위해 자동 정지
+    if (failStreak >= FAIL_BRAKE) {
+      log(`\n🛡️ 안전 브레이크 — ${FAIL_BRAKE}회 연속 실패(대상 못 찾음/차단 의심). 계정 보호를 위해 자동 정지합니다.`);
+      break;
     }
 
     // 방문 텀(사용자 지정 랜덤) — 마지막 회차 뒤엔 생략, 정지 반응 위해 1초 단위 분할

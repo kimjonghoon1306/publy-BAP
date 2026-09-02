@@ -98,6 +98,10 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
   const [doTalk, setDoTalk] = useState(false);
   const [doLike, setDoLike] = useState(true);
   const [funnel, setFunnel] = useState(false);
+  const [spread, setSpread] = useState(false);   // ⏱️ 시간 분산
+  const [spreadHours, setSpreadHours] = useState(3);
+  const [doReview, setDoReview] = useState(false); // ✍️ 리뷰(관리자 락)
+  const [reviewText, setReviewText] = useState("");
   const [auto, setAuto] = useState(false);
   const [accountId, setAccountId] = useState("");
   const [accounts, setAccounts] = useState<PublyAccount[]>([]);
@@ -163,6 +167,8 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
       doSave: String(doSave), doLike: String(doLike), doShare: String(doShare),
       doDir: String(doDir), doCall: String(doCall), doBook: String(doBook), doTalk: String(doTalk), device,
       fullFunnel: String(funnel),
+      spreadHours: spread ? String(spreadHours) : "0",
+      doReview: String(doReview), reviewText: doReview ? reviewText : "",
     });
     if (userId) params.set("userId", userId);
     if (accountId) params.set("accountId", accountId);
@@ -350,6 +356,33 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
             <ActionChk v={auto} set={setAuto} label="⚙️ 자동(오늘 한도까지)" />
           </div>
         </div>
+
+        {/* ⏱️ 시간 분산 */}
+        <label style={{ display: "flex", alignItems: "center", gap: 12, cursor: "pointer", padding: "12px 16px", borderRadius: 14, border: `2px solid ${spread ? C.accent : C.line2}`, background: spread ? C.glow : C.panel2, flexWrap: "wrap" }}>
+          <input type="checkbox" checked={spread} onChange={(e) => setSpread(e.target.checked)} style={{ width: 19, height: 19, accentColor: C.accent, flexShrink: 0 }} />
+          <div style={{ flex: 1, minWidth: 160 }}>
+            <div style={{ fontSize: 14.5, fontWeight: 900, color: spread ? C.accent : C.ink }}>⏱️ 시간 분산 <span style={{ fontSize: 10, background: "#16a34a", color: "#fff", padding: "2px 6px", borderRadius: 6, marginLeft: 4 }}>봇 티 제거</span></div>
+            <div style={{ fontSize: 12, fontWeight: 600, color: C.sub, marginTop: 3 }}>한 번에 몰지 않고 여러 시간에 걸쳐 자연스럽게 흘려보내요(진짜 손님 곡선)</div>
+          </div>
+          {spread && <div style={{ display: "flex", alignItems: "center", gap: 6 }} onClick={(e) => e.preventDefault()}>
+            <input type="number" min={1} max={24} value={spreadHours} onChange={(e) => setSpreadHours(Math.min(24, Math.max(1, Number(e.target.value))))} style={{ width: 64, padding: "9px", borderRadius: 10, border: `1.5px solid ${C.line2}`, background: C.panel, color: C.ink, fontSize: 15, fontWeight: 800, textAlign: "center", fontFamily: "inherit" }} />
+            <span style={{ fontSize: 13, fontWeight: 700, color: C.sub }}>시간에 걸쳐</span>
+          </div>}
+        </label>
+
+        {/* ✍️ 리뷰 자동작성 — 관리자 락(플레이스 전용) */}
+        {targetType === "place" && (
+          <div style={{ padding: "12px 16px", borderRadius: 14, border: `2px solid ${doReview ? "#dc2626" : C.line2}`, background: doReview ? "rgba(220,38,38,.06)" : C.panel2 }}>
+            <label style={{ display: "flex", alignItems: "center", gap: 12, cursor: "pointer" }}>
+              <input type="checkbox" checked={doReview} onChange={(e) => setDoReview(e.target.checked)} style={{ width: 19, height: 19, accentColor: "#dc2626", flexShrink: 0 }} />
+              <div>
+                <div style={{ fontSize: 14.5, fontWeight: 900, color: doReview ? "#dc2626" : C.ink }}>✍️ 리뷰 자동작성 <span style={{ fontSize: 10, background: "#dc2626", color: "#fff", padding: "2px 6px", borderRadius: 6, marginLeft: 4 }}>🔒 관리자 승인</span></div>
+                <div style={{ fontSize: 12, fontWeight: 600, color: C.sub, marginTop: 3, lineHeight: 1.5 }}>계정 밴 위험이 있어 관리자 승인을 받은 계정만 작동해요. 신중히 사용하세요.</div>
+              </div>
+            </label>
+            {doReview && <textarea value={reviewText} onChange={(e) => setReviewText(e.target.value)} placeholder="등록할 리뷰 내용을 입력하세요" rows={2} style={{ ...inputStyle, marginTop: 10, resize: "vertical" }} />}
+          </div>
+        )}
 
         {/* 🌀 풀퍼널 모드 — 킬러 */}
         <label style={{ display: "flex", alignItems: "center", gap: 12, cursor: "pointer", padding: "14px 16px", borderRadius: 14, border: `2px solid ${funnel ? C.accent : C.line2}`, background: funnel ? C.glow : C.panel2 }}>

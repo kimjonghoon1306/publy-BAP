@@ -1,7 +1,7 @@
 import express from "express";
 import cors from "cors";
 import { saveSession, sessionExists, removeSession, crawlBlogIds, crawlBuddyPosts, analyzeBuddyKeywords, addNeighbors, NeighborResult, donePath, engageBlogs, EngageResult, engageDonePath, crawlMyPosts, replyToComments, crawlPlaceReviews, generatePlaceReviewReply, replyToPlaceReviews, crawlBlogStats, checkSelectedBlogExposure, pumasiEngage, crawlPumasiReport, pumasiPreview, updatePostTitle, checkProxy, analyzeBlogAuthenticity, fetchPostBody, crawlPostViews, sendWebmail, sendBlogComments, crawlPlaces, crawlPlaceBloggers, crawlPlaceDetail, crawlPlaceByUrl, suggestPlaceKeywords, parsePlaceUrl, searchInflow, InflowTarget } from "./naver";
-import { checkNeighborQuota, incrementNeighborQuota, getNeighborDailyUsage, incrementEngageQuota, getEngageDailyUsage, getUserPlan, checkMembershipAccess, NEIGHBOR_DAILY_LIMIT, ENGAGE_DAILY_LIMIT, REPLY_DAILY_LIMIT, getReplyDailyUsage, incrementReplyQuota, PLACE_REPLY_DAILY_LIMIT, getPlaceReplyDailyUsage, incrementPlaceReplyQuota, addNeighborHistory, addReplyHistory, addPlaceReplyHistory, addBlogscoreHistory, incrementPumasiQuota, TITLE_EDIT_DAILY_LIMIT, getTitleEditDailyUsage, incrementTitleEditQuota, getProxyForAccount, supabase, getOutreachSender, getOutreachSentToday, addOutreachLog, checkPlaceDetailQuota, incrementPlaceDetailQuota, checkInflowQuota, incrementInflowQuota } from "./supabase";
+import { checkNeighborQuota, incrementNeighborQuota, getNeighborDailyUsage, incrementEngageQuota, getEngageDailyUsage, getUserPlan, checkMembershipAccess, NEIGHBOR_DAILY_LIMIT, ENGAGE_DAILY_LIMIT, REPLY_DAILY_LIMIT, getReplyDailyUsage, incrementReplyQuota, PLACE_REPLY_DAILY_LIMIT, getPlaceReplyDailyUsage, incrementPlaceReplyQuota, addNeighborHistory, addReplyHistory, addPlaceReplyHistory, addBlogscoreHistory, incrementPumasiQuota, TITLE_EDIT_DAILY_LIMIT, getTitleEditDailyUsage, incrementTitleEditQuota, getProxyForAccount, supabase, getOutreachSender, getOutreachSentToday, addOutreachLog, checkPlaceDetailQuota, incrementPlaceDetailQuota, checkInflowQuota, incrementInflowQuota, inflowReviewAllowed } from "./supabase";
 import nodemailer from "nodemailer";
 import fs from "fs";
 import { acquireAccountLock } from "./account-lock";
@@ -1107,7 +1107,7 @@ app.get("/api/post-body", async (req, res) => {
 
 /* ── 🆕 NEW 트래픽 유입 (검색유입, SSE) — 기본 잠금(관리자가 켠 회원만), 관리자=락 해제 ── */
 app.get("/api/inflow", async (req, res) => {
-  const { userId, accountId, keywords, targetType, placeUrl, blogId, logNo, rounds, termMin, termMax, doSave, doLike, doShare, doDir, doCall, doBook, doTalk, device, fullFunnel } = req.query as Record<string, string>;
+  const { userId, accountId, keywords, targetType, placeUrl, blogId, logNo, rounds, termMin, termMax, doSave, doLike, doShare, doDir, doCall, doBook, doTalk, device, fullFunnel, spreadHours, doReview, reviewText } = req.query as Record<string, string>;
   if (!keywords || !targetType) return res.status(400).json({ error: "keywords·targetType 필요" });
   sseSetup(res);
   let releaseAccount = () => {};
@@ -1144,6 +1144,10 @@ app.get("/api/inflow", async (req, res) => {
     let stopped = false;
     req.on("close", () => { stopped = true; });
 
+    // ✍️ 리뷰 자동작성은 관리자 락(기본 잠금) — 권한 없으면 안내 후 리뷰만 건너뜀
+    const reviewOk = doReview === "true" ? await inflowReviewAllowed(userId) : false;
+    if (doReview === "true" && !reviewOk) sseSend(res, { type: "log", msg: "🔒 리뷰 자동작성은 관리자 승인이 필요해요 — 리뷰는 건너뛰고 진행합니다" });
+
     const result = await searchInflow({
       accountId: accountId || "",
       ownerUserId: userId || undefined,
@@ -1152,9 +1156,10 @@ app.get("/api/inflow", async (req, res) => {
       rounds: n,
       device: (device === "pc" || device === "mix") ? device : "mobile",
       intervalSec: [tmin, tmax],
-      actions: { save: doSave === "true", like: doLike === "true", share: doShare === "true", directions: doDir === "true", call: doCall === "true", booking: doBook === "true", talk: doTalk === "true" },
+      actions: { save: doSave === "true", like: doLike === "true", share: doShare === "true", directions: doDir === "true", call: doCall === "true", booking: doBook === "true", talk: doTalk === "true", review: doReview === "true" && reviewOk, reviewText: reviewText || "" },
       fullFunnel: fullFunnel === "true",
-      requireLogin: doSave === "true" || doLike === "true" || doShare === "true" || doBook === "true" || doTalk === "true",
+      spreadHours: spreadHours ? Math.max(0, parseFloat(spreadHours)) : 0,
+      requireLogin: doSave === "true" || doLike === "true" || doShare === "true" || doBook === "true" || doTalk === "true" || reviewOk,
       onLog: (msg) => sseSend(res, { type: "log", msg }),
       onProgress: (done, total) => sseSend(res, { type: "progress", done, total }),
       shouldStop: () => stopped,
