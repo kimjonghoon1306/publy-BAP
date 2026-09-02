@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { BotEventStream } from "../lib/botApi";
+import UsageGuide from "./UsageGuide";
 import { INFLOW_DAILY_LIMIT, PLAN_CONFIG, getInflowDailyUsage, getInflowUsageHistory, getAccounts, PublyAccount, getAutopilot, saveAutopilot, getRankHistory, AutopilotConfig, getInflowSchedule, saveInflowSchedule, inflowScheduleRanToday, markInflowScheduleRan, getPerfReport, PerfReport } from "../lib/supabase";
 
 const BOT = "http://127.0.0.1:3334"; // neighbor-bot
@@ -383,6 +384,16 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
       <p style={{ margin: "0 0 16px", fontSize: 13.5, color: C.sub, fontWeight: 600, lineHeight: 1.6 }}>
         실행 횟수와 실제 고객 성과를 분리해 확인해요. 최종 성과는 <b style={{color:C.accent}}>순위·전화·예약·톡톡·쿠폰</b>으로 판정합니다.
       </p>
+
+      {/* 👣 사용방법 안내 */}
+      <UsageGuide theme={theme} accent={C.accent}
+        subtitle="펄리예요! 키워드로 검색해 내 플레이스·블로그로 진짜 손님처럼 유입시키고, 순위가 오르려면 뭘 채워야 하는지 진단까지 해드려요."
+        steps={[
+          { ico: "📍", title: "대상·키워드 넣기", desc: "내 플레이스(지도/naver.me) 또는 블로그 글 주소를 붙여넣고, 검색 키워드를 여러 개 적어요(자동으로 인식돼요)." },
+          { ico: "🎛️", title: "옵션 고르기", desc: "방문 횟수·텀·기기(모바일/PC)·할 행동(저장·길찾기·전화 등)을 정해요. 시간분산·액션확률로 더 자연스럽게." },
+          { ico: "🚀", title: "유입 시작", desc: "‘유입 시작’을 누르면 방문마다 IP를 바꿔 안전 한도 안에서 돌아요. 라이브 로그로 전 과정을 볼 수 있어요." },
+          { ico: "🩺", title: "성과·진단 확인", desc: "성과 리포트(주간/월간)로 순위·유입 변화를 보고, ‘플레이스 진단’으로 부족한 곳을 찾아 채우면 순위가 더 잘 올라요." },
+        ]} />
 
       {/* ── KPI 카드 ── */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(140px,1fr))", gap: 12, marginBottom: 14 }}>
