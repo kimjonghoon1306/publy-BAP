@@ -1257,8 +1257,15 @@ app.get("/api/place-diagnose", async (req, res) => {
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
-app.listen(PORT, "127.0.0.1", () => {
+const server = app.listen(PORT, "127.0.0.1", () => {
   console.log(`[neighbor-bot] 서버 시작 → http://localhost:${PORT}`);
+});
+server.on("error", (error: NodeJS.ErrnoException) => {
+  if (error.code === "EADDRINUSE") {
+    console.warn(`[neighbor-bot] 포트 ${PORT}가 이미 사용 중입니다. 실행 중인 앱 봇을 유지하고 새 서버 시작을 건너뜁니다.`);
+    return;
+  }
+  throw error;
 });
 
 export default app;

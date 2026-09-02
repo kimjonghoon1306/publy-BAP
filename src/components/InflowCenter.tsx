@@ -172,16 +172,13 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
   const [schedEnabled, setSchedEnabled] = useState(false);
   const [schedTime, setSchedTime] = useState("10:00");
   const [schedRounds, setSchedRounds] = useState(10);
-  type ConversionSnapshot={date:string;source:string;keyword:string;rank:number|null;calls:number;bookings:number;talks:number;coupons:number;memo:string};
-  const conversionKey=`publy_inflow_conversions_${userId||"guest"}`;
-  const [campaignSource,setCampaignSource]=useState("네이버 블로그");
-  const [calls,setCalls]=useState(0);
-  const [bookings,setBookings]=useState(0);
-  const [talks,setTalks]=useState(0);
-  const [coupons,setCoupons]=useState(0);
-  const [conversionMemo,setConversionMemo]=useState("");
-  const [snapshots,setSnapshots]=useState<ConversionSnapshot[]>(()=>{try{return JSON.parse(localStorage.getItem(`publy_inflow_conversions_${userId||"guest"}`)||"[]");}catch{return[];}});
-  const [weeklyPlan,setWeeklyPlan]=useState<string[]>([]);
+  type InflowNotification = { id: string; message: string; createdAt: string };
+  const notificationKey = `publy_inflow_notifications_${userId || "guest"}`;
+  const [notifications, setNotifications] = useState<InflowNotification[]>(() => {
+    try { return JSON.parse(localStorage.getItem(`publy_inflow_notifications_${userId || "guest"}`) || "[]"); }
+    catch { return []; }
+  });
+  const automationRunningRef = useRef(false);
   const esRef = useRef<BotEventStream | null>(null);
   const startRef = useRef<() => void>(() => {});
   // 🎯 오토파일럿 자동 순위 체크(목표 달성 여부) — 최신 값 참조용 ref
@@ -404,6 +401,10 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
     catch (e: any) { toast(e.message, "error"); }
   };
   useEffect(() => { logBoxRef.current?.scrollTo({ top: logBoxRef.current.scrollHeight, behavior: "smooth" }); }, [logs]);
+  useEffect(() => () => {
+    esRef.current?.close();
+    esRef.current = null;
+  }, []);
 
   // 🔁 폼 입력값 저장(탭 이동해도 유지). 무거운 것(로그·계정목록)은 제외.
   useEffect(() => {
@@ -415,35 +416,86 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
     } catch {}
   }, [formKey, targetType, placeUrl, blogUrl, keywords, rounds, termMin, termMax, device, doSave, doShare, doDir, doCall, doBook, doTalk, doLike, funnel, spread, spreadHours, doReview, reviewText, auto, actionRate, intensity, extraTargets, kwWeights]);
 
+  // 🔔 앱 내 자동 알림 — 날짜/주차 마커로 중복을 막고, 다음 실행 때 놓친 알림도 알림함에 쌓는다.
+  useEffect(() => {
+    try { setNotifications(JSON.parse(localStorage.getItem(notificationKey) || "[]")); }
+    catch { setNotifications([]); }
+  }, [notificationKey]);
+
+  useEffect(() => {
+    if (!userId) return;
+    const markerPrefix = `publy_inflow_auto_${userId}`;
+    const addNotification = (message: string) => {
+      const item: InflowNotification = { id: `${Date.now()}_${Math.random().toString(36).slice(2, 7)}`, message, createdAt: new Date().toISOString() };
+      setNotifications((current) => {
+        const next = [item, ...current].slice(0, 50);
+        try { localStorage.setItem(notificationKey, JSON.stringify(next)); } catch {}
+        return next;
+      });
+      showToast?.(message, "info");
+    };
+    const hasRun = (kind: string, period: string) => localStorage.getItem(`${markerPrefix}_${kind}`) === period;
+    const markRun = (kind: string, period: string) => localStorage.setItem(`${markerPrefix}_${kind}`, period);
+    const tick = async () => {
+      if (automationRunningRef.current) return;
+      automationRunningRef.current = true;
+      try {
+        const now = new Date();
+        const day = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Seoul", year: "numeric", month: "2-digit", day: "2-digit" }).format(now);
+        const hhmm = new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Seoul", hour: "2-digit", minute: "2-digit", hour12: false }).format(now);
+        const monday = new Date(now); monday.setHours(0, 0, 0, 0); monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7));
+        const week = monday.toISOString().slice(0, 10);
+        const keyword = (apKeyword || keywords.split(/[,\n]/)[0] || "").trim();
+        const place = placeUrl.trim();
+
+        if (hhmm >= "09:00" && !hasRun("report", day)) {
+          const dailyReport = await getPerfReport(userId, "week");
+          const yesterdayInflow = dailyReport.daily.at(-2)?.count ?? 0;
+          addNotification(`매일 리포트 · 어제 순위 ${dailyReport.rankNow != null ? `${dailyReport.rankNow}위` : "미측정"} · 유입 ${yesterdayInflow}명`);
+          markRun("report", day);
+        }
+        if (targetType === "place" && place && keyword && !hasRun("rank", day)) {
+          const response = await fetch(`${BOT}/api/place-rank?keyword=${encodeURIComponent(keyword)}&placeUrl=${encodeURIComponent(place)}`);
+          const result = await response.json();
+          if (!result.error && result.rank != null) {
+            const previous = Number(localStorage.getItem(`${markerPrefix}_last_rank`));
+            if (previous > 0 && result.rank > previous) addNotification(`${keyword} 순위 ${previous}위→${result.rank}위 하락, 유입 보강 권장`);
+            localStorage.setItem(`${markerPrefix}_last_rank`, String(result.rank));
+            setApLastRank(result.rank);
+            await recordRankPoint(userId, result.rank);
+          }
+          markRun("rank", day);
+        }
+        if (targetType === "place" && place && keyword && !hasRun("competitor", day)) {
+          const response = await fetch(`${BOT}/api/competitors?query=${encodeURIComponent(keyword)}&myPlaceUrl=${encodeURIComponent(place)}`);
+          const result = await response.json();
+          const mine = result.mine as { rank: number; review: number } | null | undefined;
+          const leader = mine && result.top?.find((entry: any) => !entry.isMine && entry.rank < mine.rank);
+          if (mine && leader) addNotification(`${leader.name}이 앞질렀어요, 리뷰 ${Math.abs((leader.review || 0) - (mine.review || 0)).toLocaleString()}개 차이`);
+          markRun("competitor", day);
+        }
+        if (targetType === "place" && place && !hasRun("diagnose", week)) {
+          const response = await fetch(`${BOT}/api/place-diagnose?placeUrl=${encodeURIComponent(place)}`);
+          const result = await response.json();
+          if (!result.error) {
+            setDiag(result);
+            const weak = result.items?.find((item: any) => !item.ok);
+            if (weak) addNotification(`${weak.label} 아직 미설정 · 플레이스 진단에서 확인해 주세요`);
+          }
+          markRun("diagnose", week);
+        }
+      } catch {
+        // 자동 점검 실패는 기존 기능을 방해하지 않고 다음 폴링/앱 실행 때 다시 시도한다.
+      } finally { automationRunningRef.current = false; }
+    };
+    tick();
+    const id = window.setInterval(tick, 60_000);
+    return () => window.clearInterval(id);
+  }, [apKeyword, keywords, notificationKey, placeUrl, showToast, targetType, userId]);
+
   const copyLogs = () => {
     if (!logs.length) return;
     navigator.clipboard.writeText(logs.join("\n")).then(() => toast("로그 전체를 복사했어요", "success")).catch(() => toast("복사 실패", "error"));
-  };
-
-  const totalConversions=calls+bookings+talks+coupons;
-  const previousSnapshot=snapshots.length>1?snapshots[snapshots.length-2]:null;
-  const latestSnapshot=snapshots.length?snapshots[snapshots.length-1]:null;
-  const primaryKeyword=()=>String(apKeyword||keywords.split(",")[0]||"").trim();
-  const makeWeeklyPlan=()=>{
-    const mainKeyword=primaryKeyword();
-    const target=targetType==="place"?placeUrl.trim():blogUrl.trim();
-    if(!mainKeyword||!target){toast("대상 주소와 대표 키워드를 먼저 입력하세요","error");return;}
-    const next:string[]=[];
-    if(apLastRank==null)next.push(`오늘 '${mainKeyword}' 실제 순위를 먼저 측정해 기준점을 저장하세요.`);
-    else if(apLastRank>apGoal)next.push(`현재 ${apLastRank}위 → 목표 ${apGoal}위: 검색 의도에 맞는 제목·대표 이미지를 우선 개선하세요.`);
-    else next.push("목표 순위 달성 중: 제목을 자주 바꾸지 말고 전화·예약 전환 안내를 보강하세요.");
-    next.push(totalConversions===0?"전화·예약·톡톡 중 가장 중요한 행동 하나를 본문과 첫 화면에 또렷하게 안내하세요.":`확인된 실제 전환 ${totalConversions}건: 가장 많이 발생한 행동을 다음 콘텐츠의 핵심 안내로 재사용하세요.`);
-    next.push(`7일 뒤 ${new Date(Date.now()+7*86400000).toLocaleDateString("ko-KR")}에 같은 키워드 순위와 실제 전환을 다시 기록하세요.`);
-    setWeeklyPlan(next);toast("이번 주 원클릭 처방을 만들었어요","success");
-  };
-  const saveConversionSnapshot=()=>{
-    const item:ConversionSnapshot={date:new Date().toISOString(),source:campaignSource,keyword:primaryKeyword(),rank:apLastRank,calls,bookings,talks,coupons,memo:conversionMemo.trim()};
-    const next=[...snapshots,item].slice(-52);setSnapshots(next);localStorage.setItem(conversionKey,JSON.stringify(next));
-    toast(`실제 전환 ${totalConversions}건을 기준점으로 저장했어요`,"success");
-  };
-  const copyTrackingLink=()=>{
-    const raw=(targetType==="place"?placeUrl:blogUrl).trim();if(!raw){toast("대상 주소를 먼저 입력하세요","error");return;}
-    try{const u=new URL(raw);u.searchParams.set("utm_source",campaignSource.replace(/\s+/g,"_").toLowerCase());u.searchParams.set("utm_medium","publy");u.searchParams.set("utm_campaign",(primaryKeyword()||"traffic").replace(/\s+/g,"_"));navigator.clipboard.writeText(u.toString());toast("채널 구분용 추적 링크를 복사했어요","success");}catch{toast("올바른 주소를 입력하세요","error");}
   };
 
   const start = () => {
@@ -529,9 +581,16 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
   );
 
   return (
-    <div style={{ fontFamily: "'Pretendard','Apple SD Gothic Neo',sans-serif", color: C.ink }}>
+    <div className="inflow-center" style={{ fontFamily: "'Pretendard','Apple SD Gothic Neo',sans-serif", color: C.ink, display: "flex", flexDirection: "column" }}>
+      <style>{`
+        @keyframes inflowResultIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+        .inflow-card { transition: transform .18s ease, box-shadow .18s ease, border-color .18s ease; }
+        .inflow-card:hover { transform: translateY(-2px); box-shadow: 0 10px 24px rgba(15,23,42,.10); }
+        .inflow-result { animation: inflowResultIn .32s ease-out both; }
+        @media (prefers-reduced-motion: reduce) { .inflow-card, .inflow-result { transition: none; animation: none; } }
+      `}</style>
       {/* ── 헤더 ── */}
-      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 4, flexWrap: "wrap" }}>
+      <div style={{ order: -2, display: "flex", alignItems: "center", gap: 12, marginBottom: 4, flexWrap: "wrap" }}>
         <span style={{ background: `linear-gradient(135deg,${C.accent},${C.cyan})`, color: "#fff", fontSize: 12, fontWeight: 900, padding: "5px 10px", borderRadius: 8, letterSpacing: 0.5 }}>NEW</span>
         <h2 style={{ margin: 0, fontSize: 24, fontWeight: 900 }}>트래픽 유입</h2>
         <span style={{ fontSize: 11, fontWeight: 800, letterSpacing: 2, color: C.sub, border: `1px solid ${C.line2}`, padding: "3px 9px", borderRadius: 6 }}>CONTROL TOWER</span>
@@ -539,12 +598,12 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
           <span style={{ width: 8, height: 8, borderRadius: "50%", background: running ? "#22c55e" : C.sub, boxShadow: running ? "0 0 8px #22c55e" : "none" }} />{running ? "가동 중" : "대기"}
         </span>
       </div>
-      <p style={{ margin: "0 0 16px", fontSize: 13.5, color: C.sub, fontWeight: 600, lineHeight: 1.6 }}>
-        실행 횟수와 실제 고객 성과를 분리해 확인해요. 최종 성과는 <b style={{color:C.accent}}>순위·전화·예약·톡톡·쿠폰</b>으로 판정합니다.
+      <p style={{ order: -1, margin: "0 0 16px", fontSize: 13.5, color: C.sub, fontWeight: 600, lineHeight: 1.6 }}>
+        설정한 유입을 실행하고 자동 측정된 <b style={{color:C.accent}}>순위·방문 추이</b>로 변화를 확인해요.
       </p>
 
       {/* 🌱 새싹 비서 — 오늘의 브리핑 */}
-      <div style={{ display: "flex", alignItems: "center", gap: 14, background: `linear-gradient(135deg,${C.glow},transparent)`, border: `1.5px solid ${C.accent}`, borderRadius: 16, padding: "14px 18px", marginBottom: 16 }}>
+      <div style={{ order: 1, display: "flex", alignItems: "center", gap: 14, background: `linear-gradient(135deg,${C.glow},transparent)`, border: `1.5px solid ${C.accent}`, borderRadius: 16, padding: "14px 18px", marginBottom: 16 }}>
         <div style={{ width: 46, height: 46, borderRadius: 14, background: C.panel, border: `1px solid ${C.line}`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, color: "#16a34a" }}>
           <SproutAssistant size={30} />
         </div>
@@ -555,278 +614,28 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
       </div>
 
       {/* 👣 사용방법 안내 */}
-      <UsageGuide theme={theme} accent={C.accent}
+      <div style={{ order: 2 }}><UsageGuide theme={theme} accent={C.accent}
         subtitle="펄리예요! 키워드로 검색해 내 플레이스·블로그로 진짜 손님처럼 유입시키고, 순위가 오르려면 뭘 채워야 하는지 진단까지 해드려요."
         steps={[
           { ico: "📍", title: "대상·키워드 넣기", desc: "내 플레이스(지도/naver.me) 또는 블로그 글 주소를 붙여넣고, 검색 키워드를 여러 개 적어요(자동으로 인식돼요)." },
           { ico: "🎛️", title: "옵션 고르기", desc: "방문 횟수·텀·기기(모바일/PC)·할 행동(저장·길찾기·전화 등)을 정해요. 시간분산·액션확률로 더 자연스럽게." },
           { ico: "🚀", title: "유입 시작", desc: "‘유입 시작’을 누르면 방문마다 IP를 바꿔 안전 한도 안에서 돌아요. 라이브 로그로 전 과정을 볼 수 있어요." },
           { ico: "🩺", title: "성과·진단 확인", desc: "성과 리포트(주간/월간)로 순위·유입 변화를 보고, ‘플레이스 진단’으로 부족한 곳을 찾아 채우면 순위가 더 잘 올라요." },
-        ]} />
+        ]} /></div>
 
-      {/* ── KPI 카드 ── */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(140px,1fr))", gap: 12, marginBottom: 14 }}>
-        {[
-          { k: "오늘 유입", v: `${used}`, sub: unlimited ? "무제한" : `/ ${limit}회`, col: C.accent },
-          { k: "현재 순위", v: apLastRank != null ? `${apLastRank}` : "—", sub: apEnabled ? `목표 ${apGoal}위` : "위", col: "#16a34a" },
-          { k: "최근 7일", v: `${weekTotal}`, sub: "누적 방문", col: C.cyan },
-          { k: "남은 한도", v: unlimited ? "∞" : `${Math.max(0, limit - used)}`, sub: unlimited ? "무제한" : "회", col: "#f59e0b" },
-        ].map((kp) => (
-          <div key={kp.k} style={{ background: C.kpiBg, border: `1px solid ${C.line}`, borderRadius: 16, padding: "14px 16px", boxShadow: `0 4px 14px ${C.glow}` }}>
-            <div style={{ fontSize: 12, fontWeight: 800, color: C.sub, marginBottom: 6 }}>{kp.k}</div>
-            <div style={{ display: "flex", alignItems: "baseline", gap: 5 }}>
-              <span style={{ fontSize: 28, fontWeight: 900, color: kp.col, lineHeight: 1 }}>{kp.v}</span>
-              <span style={{ fontSize: 12, fontWeight: 700, color: C.sub }}>{kp.sub}</span>
-            </div>
+      {notifications.length > 0 && (
+        <div className="inflow-card inflow-result" style={{ order: 3, background: C.panel, border: "1.5px solid #0ea5e9", borderRadius: 16, padding: "13px 16px", marginBottom: 14 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+            <span style={{ fontSize: 14, fontWeight: 900 }}>🔔 자동 알림함</span>
+            <span style={{ fontSize: 11, color: C.sub }}>{notifications.length}개</span>
+            <button onClick={() => { setNotifications([]); try { localStorage.setItem(notificationKey, "[]"); } catch {} }} style={{ marginLeft: "auto", border: 0, background: "transparent", color: C.sub, cursor: "pointer", fontWeight: 700 }}>모두 확인</button>
           </div>
-        ))}
-      </div>
-
-      {/* ── 실제 성과·전환 센터 ── */}
-      <div style={{background:`linear-gradient(135deg,${C.panel},${C.glow})`,border:`2px solid ${C.accent}`,borderRadius:18,padding:18,marginBottom:14}}>
-        <div style={{display:"flex",alignItems:"center",gap:9,flexWrap:"wrap",marginBottom:12}}><span style={{fontSize:16,fontWeight:900}}>🎯 실제 성과 센터</span><span style={{fontSize:10,fontWeight:900,padding:"3px 8px",borderRadius:8,background:"#16a34a",color:"#fff"}}>방문수와 분리 측정</span><span style={{fontSize:12,color:C.sub}}>7일 전후 순위와 고객 행동으로 효과를 확인해요.</span></div>
-        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(135px,1fr))",gap:8,marginBottom:12}}>
-          <div><label style={labelStyle}>유입 출처</label><select value={campaignSource} onChange={e=>setCampaignSource(e.target.value)} style={inputStyle}>{["네이버 블로그","네이버 플레이스","인스타그램","카카오톡","문자·QR","기타"].map(v=><option key={v}>{v}</option>)}</select></div>
-          {[["전화",calls,setCalls],["예약",bookings,setBookings],["톡톡·문의",talks,setTalks],["쿠폰·구매",coupons,setCoupons]].map(([label,value,setter]:any)=><div key={label}><label style={labelStyle}>{label}</label><input type="number" min={0} value={value} onChange={e=>setter(Math.max(0,Number(e.target.value)))} style={{...inputStyle,textAlign:"center"}}/></div>)}
-        </div>
-        <input value={conversionMemo} onChange={e=>setConversionMemo(e.target.value)} placeholder="매출, 문의 내용, 특이사항을 선택적으로 기록" style={{...inputStyle,marginBottom:10}}/>
-        <div style={{display:"flex",gap:8,flexWrap:"wrap"}}><button onClick={saveConversionSnapshot} style={{padding:"11px 15px",border:0,borderRadius:11,background:C.accent,color:"#fff",fontWeight:900,cursor:"pointer",fontFamily:"inherit"}}>💾 오늘 실제 성과 저장</button><button onClick={copyTrackingLink} style={{padding:"11px 15px",border:`1.5px solid ${C.line2}`,borderRadius:11,background:C.panel,color:C.accent,fontWeight:900,cursor:"pointer",fontFamily:"inherit"}}>🔗 출처 추적 링크 복사</button><button onClick={makeWeeklyPlan} style={{padding:"11px 15px",border:0,borderRadius:11,background:"linear-gradient(135deg,#7c3aed,#2563eb)",color:"#fff",fontWeight:900,cursor:"pointer",fontFamily:"inherit"}}>✨ 이번 주 원클릭 처방</button></div>
-        {(latestSnapshot||weeklyPlan.length>0)&&<div style={{marginTop:12,padding:"12px 14px",borderRadius:12,background:C.panel2,border:`1px solid ${C.line}`}}>
-          {latestSnapshot&&<div style={{fontSize:12.5,fontWeight:800,marginBottom:8}}>최근 기록: {new Date(latestSnapshot.date).toLocaleDateString("ko-KR")} · {latestSnapshot.keyword||"키워드 미입력"} · 실제 전환 {latestSnapshot.calls+latestSnapshot.bookings+latestSnapshot.talks+latestSnapshot.coupons}건 {previousSnapshot?`(이전 대비 ${latestSnapshot.calls+latestSnapshot.bookings+latestSnapshot.talks+latestSnapshot.coupons-(previousSnapshot.calls+previousSnapshot.bookings+previousSnapshot.talks+previousSnapshot.coupons)>=0?"+":""}${latestSnapshot.calls+latestSnapshot.bookings+latestSnapshot.talks+latestSnapshot.coupons-(previousSnapshot.calls+previousSnapshot.bookings+previousSnapshot.talks+previousSnapshot.coupons)}건)`:"(기준점)"}</div>}
-          {weeklyPlan.map((p,i)=><div key={p} style={{fontSize:12,color:C.sub,lineHeight:1.65}}><b style={{color:C.accent}}>{i+1}.</b> {p}</div>)}
-        </div>}
-      </div>
-
-      {/* ── 📊 성과 리포트 (주간/월간, 이번 vs 지난 비교) ── */}
-      {report && (()=>{
-        const rankDelta = (report.rankPrev != null && report.rankNow != null) ? (report.rankPrev - report.rankNow) : null;
-        const infDelta = report.inflowPrev > 0 ? Math.round(((report.inflowNow - report.inflowPrev) / report.inflowPrev) * 100) : null;
-        const per = reportPeriod === "week" ? "주간" : "월간";
-        const mx = Math.max(1, ...report.daily.map(d=>d.count));
-        return (
-        <div style={{ background: `linear-gradient(135deg,${C.glow},transparent)`, border: `2px solid ${C.accent}`, borderRadius: 18, padding: 18, marginBottom: 14 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14, flexWrap: "wrap" }}>
-            <span style={{ fontSize: 17, fontWeight: 900 }}>📊 성과 리포트</span>
-            <div style={{ display: "flex", gap: 4, background: C.panel2, borderRadius: 10, padding: 3 }}>
-              {([["week","주간"],["month","월간"]] as const).map(([k,lb])=>(
-                <button key={k} onClick={()=>setReportPeriod(k)} style={{ padding: "6px 16px", borderRadius: 8, border: "none", background: reportPeriod===k?C.accent:"transparent", color: reportPeriod===k?"#fff":C.sub, fontSize: 13.5, fontWeight: 800, cursor: "pointer", fontFamily: "inherit" }}>{lb}</button>
-              ))}
-            </div>
-            <button onClick={downloadReportPdf} style={{ marginLeft: "auto", padding: "8px 16px", borderRadius: 10, border: `1.5px solid ${C.accent}`, background: C.panel, color: C.accent, fontSize: 13, fontWeight: 800, cursor: "pointer", fontFamily: "inherit" }}>📄 PDF로 저장 · 고객 제출용</button>
-          </div>
-          {/* 비교 KPI 3 */}
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(150px,1fr))", gap: 12, marginBottom: 14 }}>
-            <div style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 14, padding: "14px 16px" }}>
-              <div style={{ fontSize: 12, fontWeight: 800, color: C.sub, marginBottom: 5 }}>현재 순위</div>
-              <div style={{ fontSize: 28, fontWeight: 900, color: "#16a34a" }}>{report.rankNow!=null?`${report.rankNow}위`:"—"}</div>
-              {rankDelta!=null && <div style={{ fontSize: 12.5, fontWeight: 800, color: rankDelta>0?"#16a34a":rankDelta<0?"#dc2626":C.sub, marginTop: 3 }}>{rankDelta>0?`▲ ${rankDelta}계단 상승 🎉`:rankDelta<0?`▼ ${-rankDelta}계단`:"변동 없음"}</div>}
-            </div>
-            <div style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 14, padding: "14px 16px" }}>
-              <div style={{ fontSize: 12, fontWeight: 800, color: C.sub, marginBottom: 5 }}>{per} 유입</div>
-              <div style={{ fontSize: 28, fontWeight: 900, color: C.accent }}>{report.inflowNow.toLocaleString()}<span style={{fontSize:14,color:C.sub}}> 명</span></div>
-              {infDelta!=null && <div style={{ fontSize: 12.5, fontWeight: 800, color: infDelta>=0?"#16a34a":"#dc2626", marginTop: 3 }}>{infDelta>=0?`▲ ${infDelta}% 증가`:`▼ ${-infDelta}% 감소`}</div>}
-            </div>
-            <div style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 14, padding: "14px 16px" }}>
-              <div style={{ fontSize: 12, fontWeight: 800, color: C.sub, marginBottom: 5 }}>지난 {per}</div>
-              <div style={{ fontSize: 28, fontWeight: 900, color: C.sub }}>{report.inflowPrev.toLocaleString()}<span style={{fontSize:14}}> 명</span></div>
-              <div style={{ fontSize: 11.5, fontWeight: 600, color: C.sub, marginTop: 3 }}>비교 기준</div>
-            </div>
-          </div>
-          {/* 미니 막대 그래프 */}
-          <div style={{ display: "flex", alignItems: "flex-end", gap: 3, height: 56 }}>
-            {report.daily.map((d,i)=>(
-              <div key={i} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 2 }}>
-                <div title={`${d.label}: ${d.count}명`} style={{ width: "100%", height: `${Math.max(3,(d.count/mx)*42)}px`, background: `linear-gradient(180deg,${C.accent},${C.cyan})`, borderRadius: 3 }} />
-                {reportPeriod==="week" && <span style={{ fontSize: 9, color: C.sub }}>{d.label}</span>}
-              </div>
-            ))}
-          </div>
-          {/* ✅ 체크포인트 */}
-          <div style={{ marginTop: 14, padding: "12px 14px", borderRadius: 12, background: C.panel, border: `1px solid ${C.line}` }}>
-            <div style={{ fontSize: 12.5, fontWeight: 800, color: C.sub, marginBottom: 6 }}>✅ 이번 {per} 체크포인트</div>
-            {rankDelta!=null && rankDelta>0 && <div style={{ fontSize: 13.5, fontWeight: 700, marginTop: 3 }}>🎉 순위가 <b style={{color:"#16a34a"}}>{rankDelta}계단</b> 올랐어요!</div>}
-            {infDelta!=null && infDelta>0 && <div style={{ fontSize: 13.5, fontWeight: 700, marginTop: 3 }}>📈 유입이 지난 {per}보다 <b style={{color:C.accent}}>{infDelta}%</b> 늘었어요.</div>}
-            {(rankDelta==null && report.rankNow==null) && <div style={{ fontSize: 13, fontWeight: 600, color: C.sub, marginTop: 3 }}>순위는 오토파일럿·순위 측정을 켜면 자동으로 기록돼요.</div>}
-            {(infDelta==null || infDelta<=0) && rankDelta==null && report.inflowNow>0 && <div style={{ fontSize: 13, fontWeight: 600, color: C.sub, marginTop: 3 }}>이번 {per} 유입 {report.inflowNow}명 — 꾸준히 쌓이고 있어요.</div>}
-          </div>
-        </div>
-        );
-      })()}
-
-      {/* ── 🩺 플레이스 최적화 진단 (순위 오르려면 뭘 채워야 하나) ── */}
-      {targetType === "place" && (
-        <div style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 16, padding: 18, marginBottom: 14 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4, flexWrap: "wrap" }}>
-            <span style={{ fontSize: 16, fontWeight: 900 }}>🩺 플레이스 최적화 진단</span>
-            <button onClick={runDiagnose} disabled={diagLoading} style={{ marginLeft: "auto", padding: "9px 18px", borderRadius: 10, border: "none", background: `linear-gradient(135deg,${C.accent},${C.cyan})`, color: "#fff", fontSize: 13.5, fontWeight: 800, cursor: diagLoading?"default":"pointer", fontFamily: "inherit", opacity: diagLoading?0.6:1 }}>{diagLoading ? "진단 중…" : "🩺 내 플레이스 진단하기"}</button>
-          </div>
-          <p style={{ margin: "0 0 14px", fontSize: 12.5, color: C.sub, fontWeight: 600, lineHeight: 1.6 }}>순위는 트래픽만으로 오르지 않아요. 리뷰·정보·사진·소식·예약이 <b style={{color:C.ink}}>종합 점수</b>예요. 지금 내 플레이스의 부족한 곳을 찾아 처방해 드려요.</p>
-          {diag ? (
-            <div>
-              {/* 점수 게이지 */}
-              <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 14 }}>
-                <div style={{ fontSize: 40, fontWeight: 900, color: diag.score>=80?"#16a34a":diag.score>=60?"#f59e0b":"#dc2626" }}>{diag.score}<span style={{fontSize:18,color:C.sub}}>/100</span></div>
-                <div style={{ flex: 1 }}>
-                  <div style={{ height: 12, borderRadius: 7, background: C.panel2, overflow: "hidden", border: `1px solid ${C.line}` }}>
-                    <div style={{ height: "100%", width: `${diag.score}%`, background: `linear-gradient(90deg,${diag.score>=80?"#16a34a":diag.score>=60?"#f59e0b":"#dc2626"},${C.cyan})`, transition: "width .5s" }} />
-                  </div>
-                  <div style={{ fontSize: 12.5, fontWeight: 700, color: C.sub, marginTop: 5 }}>{diag.score>=80?"최적화가 잘 돼 있어요 👍":diag.score>=60?"조금만 더 채우면 순위가 올라요":"부족한 항목이 많아요 — 아래부터 채우세요"}</div>
-                </div>
-              </div>
-              {/* 항목별 체크리스트 */}
-              <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
-                {diag.items.map((it) => (
-                  <div key={it.key} style={{ display: "flex", alignItems: "flex-start", gap: 10, padding: "10px 12px", borderRadius: 10, background: it.ok?C.panel2:"rgba(220,38,38,.06)", border: `1px solid ${it.ok?C.line:"#dc262633"}` }}>
-                    <span style={{ fontSize: 16, flexShrink: 0 }}>{it.ok?"✅":"⚠️"}</span>
-                    <div style={{ flex: 1 }}>
-                      <div style={{ fontSize: 13.5, fontWeight: 800 }}>{it.label} <span style={{ color: C.sub, fontWeight: 600 }}>· {it.value}</span></div>
-                      {!it.ok && <div style={{ fontSize: 12.5, fontWeight: 600, color: "#dc2626", marginTop: 2, lineHeight: 1.5 }}>{it.tip}</div>}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          ) : !diagLoading && (
-            <div style={{ padding: "20px", textAlign: "center", color: C.sub, fontSize: 13, fontWeight: 600 }}>위 버튼을 눌러 내 플레이스가 순위 오르기에 뭐가 부족한지 확인하세요.</div>
-          )}
+          {notifications.slice(0, 3).map((item) => <div key={item.id} style={{ fontSize: 12.5, lineHeight: 1.55, color: C.ink, padding: "5px 0", borderTop: `1px solid ${C.line}` }}>{item.message}</div>)}
         </div>
       )}
-
-      {/* ── 💬 리뷰 감정분석 (손님이 뭘 좋아하고 뭘 불만하나) ── */}
-      {targetType === "place" && (
-        <div style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 16, padding: 18, marginBottom: 14 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4, flexWrap: "wrap" }}>
-            <span style={{ fontSize: 16, fontWeight: 900 }}>💬 리뷰 감정분석</span>
-            <button onClick={runReviewAnalysis} disabled={revLoading} style={{ marginLeft: "auto", padding: "9px 18px", borderRadius: 10, border: "none", background: `linear-gradient(135deg,#8b5cf6,#ec4899)`, color: "#fff", fontSize: 13.5, fontWeight: 800, cursor: revLoading?"default":"pointer", fontFamily: "inherit", opacity: revLoading?0.6:1 }}>{revLoading ? "분석 중…" : "💬 손님 마음 읽기"}</button>
-          </div>
-          <p style={{ margin: "0 0 14px", fontSize: 12.5, color: C.sub, fontWeight: 600, lineHeight: 1.6 }}>손님 리뷰를 읽어 <b style={{color:C.ink}}>뭘 좋아하고 뭘 불만하는지</b> 알려드려요. 칭찬은 소식·홍보에 쓰고, 불만은 바로 개선하세요.</p>
-          {revResult ? (
-            <div>
-              <div style={{ fontSize: 12.5, fontWeight: 700, color: C.sub, marginBottom: 10 }}>리뷰 {revResult.total}개 분석</div>
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(220px,1fr))", gap: 12 }}>
-                <div style={{ background: "rgba(22,163,74,.07)", border: "1px solid #16a34a33", borderRadius: 12, padding: 14 }}>
-                  <div style={{ fontSize: 13.5, fontWeight: 900, color: "#16a34a", marginBottom: 8 }}>👍 손님이 좋아하는 것</div>
-                  {revResult.likes.length ? revResult.likes.map(l => (
-                    <div key={l.word} style={{ display: "flex", justifyContent: "space-between", fontSize: 13, fontWeight: 700, padding: "3px 0" }}><span>{l.word}</span><span style={{ color: "#16a34a" }}>{l.n}회</span></div>
-                  )) : <div style={{ fontSize: 12.5, color: C.sub }}>뚜렷한 칭찬 키워드가 적어요.</div>}
-                </div>
-                <div style={{ background: "rgba(220,38,38,.06)", border: "1px solid #dc262633", borderRadius: 12, padding: 14 }}>
-                  <div style={{ fontSize: 13.5, fontWeight: 900, color: "#dc2626", marginBottom: 8 }}>⚠️ 개선하면 좋을 것</div>
-                  {revResult.dislikes.length ? revResult.dislikes.map(l => (
-                    <div key={l.word} style={{ display: "flex", justifyContent: "space-between", fontSize: 13, fontWeight: 700, padding: "3px 0" }}><span>{l.word}</span><span style={{ color: "#dc2626" }}>{l.n}회</span></div>
-                  )) : <div style={{ fontSize: 12.5, color: C.sub }}>불만 표현이 거의 없어요 — 아주 좋아요! 🎉</div>}
-                </div>
-              </div>
-              {revResult.likes[0] && <p style={{ margin: "12px 0 0", fontSize: 12.5, color: C.sub, fontWeight: 600, lineHeight: 1.5 }}>💡 <b style={{color:C.ink}}>"{revResult.likes[0].word}"</b>을(를) 가장 많이 칭찬해요 — 이 강점을 소식·대표 사진·홍보 문구에 내세우세요.</p>}
-            </div>
-          ) : !revLoading && (
-            <div style={{ padding: "20px", textAlign: "center", color: C.sub, fontSize: 13, fontWeight: 600 }}>버튼을 눌러 손님들이 뭘 좋아하고 뭘 아쉬워하는지 확인하세요.</div>
-          )}
-        </div>
-      )}
-
-      {/* ── 🥊 경쟁사 추적 (내 키워드 상위 경쟁사 vs 나) ── */}
-      {targetType === "place" && (
-        <div style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 16, padding: 18, marginBottom: 14 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4, flexWrap: "wrap" }}>
-            <span style={{ fontSize: 16, fontWeight: 900 }}>🥊 경쟁사 추적</span>
-            <button onClick={runCompetitors} disabled={compLoading} style={{ marginLeft: "auto", padding: "9px 18px", borderRadius: 10, border: "none", background: `linear-gradient(135deg,#f59e0b,#f97316)`, color: "#fff", fontSize: 13.5, fontWeight: 800, cursor: compLoading?"default":"pointer", fontFamily: "inherit", opacity: compLoading?0.6:1 }}>{compLoading ? "조회 중…" : "🥊 옆집 확인하기"}</button>
-          </div>
-          <p style={{ margin: "0 0 14px", fontSize: 12.5, color: C.sub, fontWeight: 600, lineHeight: 1.6 }}>내 대표 키워드로 검색했을 때 <b style={{color:C.ink}}>위에 뜨는 경쟁사</b>들의 리뷰 수를 비교해요. 옆집이 뭘로 앞서는지 보고 따라잡으세요.</p>
-          {comp ? (
-            <div>
-              {comp.myRank && <div style={{ marginBottom: 10, padding: "10px 14px", borderRadius: 10, background: C.glow, border: `1px solid ${C.accent}`, fontSize: 13.5, fontWeight: 800, color: C.accent }}>내 매장은 현재 이 키워드에서 <b>{comp.myRank}위</b> 근처예요.</div>}
-              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                {comp.top.map((c) => (
-                  <div key={c.rank} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", borderRadius: 10, background: c.isMine?C.glow:C.panel2, border: `1px solid ${c.isMine?C.accent:C.line}` }}>
-                    <span style={{ fontSize: 15, fontWeight: 900, color: c.rank<=3?"#f59e0b":C.sub, minWidth: 28 }}>{c.rank}위</span>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: 13.5, fontWeight: 800, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{c.name} {c.isMine && <span style={{color:C.accent}}>· 내 매장</span>}</div>
-                      <div style={{ fontSize: 11.5, color: C.sub, fontWeight: 600 }}>{c.category}</div>
-                    </div>
-                    <div style={{ textAlign: "right", fontSize: 12, fontWeight: 700, color: C.sub, whiteSpace: "nowrap" }}>
-                      방문 <b style={{color:C.ink}}>{c.review.toLocaleString()}</b> · 블로그 <b style={{color:C.ink}}>{c.blog.toLocaleString()}</b>
-                    </div>
-                  </div>
-                ))}
-              </div>
-              <p style={{ margin: "10px 0 0", fontSize: 11.5, color: C.sub, fontWeight: 600, lineHeight: 1.5 }}>※ 상위 경쟁사보다 리뷰가 적으면, 방문 손님 리뷰·블로그 리뷰를 늘리는 게 순위에 가장 효과적이에요.</p>
-            </div>
-          ) : !compLoading && (
-            <div style={{ padding: "20px", textAlign: "center", color: C.sub, fontSize: 13, fontWeight: 600 }}>키워드를 넣고 버튼을 누르면 상위 경쟁사와 내 위치를 비교해요.</div>
-          )}
-        </div>
-      )}
-
-      {/* ── 그래프 2단: 유입 추이 + 순위 변동 ── */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(280px,1fr))", gap: 12, marginBottom: 14 }}>
-      <div style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 16, padding: "14px 16px 8px" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
-          <span style={{ fontSize: 13.5, fontWeight: 800 }}>📈 최근 7일 유입 추이</span>
-          <span style={{ fontSize: 11.5, fontWeight: 700, color: C.sub }}>총 {weekTotal}회</span>
-        </div>
-        {history.length > 0 ? <AreaChart data={history} C={C} /> : <div style={{ height: 120, display: "flex", alignItems: "center", justifyContent: "center", color: C.sub, fontSize: 12.5, fontWeight: 600 }}>데이터가 쌓이면 그래프가 그려져요</div>}
-        <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: C.sub, fontWeight: 700, padding: "0 2px" }}>
-          {history.map((d) => <span key={d.label}>{d.label}</span>)}
-        </div>
-      </div>
-      {/* 순위 변동 */}
-      <div style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 16, padding: "14px 16px 8px" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
-          <span style={{ fontSize: 13.5, fontWeight: 800 }}>📉 순위 변동 <span style={{ color: C.sub, fontWeight: 600, fontSize: 11 }}>(위=상위)</span></span>
-          {apEnabled && <span style={{ fontSize: 11.5, fontWeight: 800, color: C.cyan }}>목표 {apGoal}위 ---</span>}
-        </div>
-        <RankChart data={rankHist} goal={apGoal} C={C} />
-        <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: C.sub, fontWeight: 700, padding: "0 2px" }}>
-          {rankHist.map((d) => <span key={d.label}>{d.label}</span>)}
-        </div>
-      </div>
-      </div>
-
-      {/* ── 🎯 오토파일럿 ── */}
-      <div style={{ background: apEnabled ? `linear-gradient(135deg,${C.glow},transparent)` : C.panel, border: `2px solid ${apEnabled ? C.accent : C.line}`, borderRadius: 16, padding: 16, marginBottom: 14 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: apEnabled || true ? 12 : 0, flexWrap: "wrap" }}>
-          <span style={{ fontSize: 15, fontWeight: 900 }}>🎯 순위 오토파일럿</span>
-          <span style={{ fontSize: 10, fontWeight: 800, background: apEnabled ? "#16a34a" : C.sub, color: "#fff", padding: "2px 8px", borderRadius: 6 }}>{apEnabled ? "가동 중" : "꺼짐"}</span>
-          <span style={{ fontSize: 12, color: C.sub, fontWeight: 600, flex: 1, minWidth: 180 }}>목표 순위만 정해두면, 순위가 떨어질 때 자동으로 유입을 채워 지켜줘요.</span>
-        </div>
-        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
-          <div style={{ flex: 2, minWidth: 180 }}>
-            <label style={labelStyle}>추적 키워드</label>
-            <input value={apKeyword} onChange={(e) => setApKeyword(e.target.value)} placeholder="순위를 지킬 대표 키워드" style={inputStyle} />
-          </div>
-          <div style={{ flex: 1, minWidth: 110 }}>
-            <label style={labelStyle}>목표 순위</label>
-            <input type="number" min={1} value={apGoal} onChange={(e) => setApGoal(Math.max(1, Number(e.target.value)))} style={{ ...inputStyle, textAlign: "center" }} />
-          </div>
-          <button onClick={runMeasureRank} disabled={rankLoading} style={{ padding: "13px 18px", borderRadius: 12, border: `1.5px solid ${C.accent}`, background: C.panel2, color: C.accent, fontSize: 14, fontWeight: 800, cursor: rankLoading?"default":"pointer", fontFamily: "inherit", whiteSpace: "nowrap", opacity: rankLoading?0.6:1 }}>{rankLoading ? "측정 중…" : "📍 지금 순위 측정"}</button>
-          <button onClick={() => saveAp(!apEnabled)} style={{ padding: "13px 20px", borderRadius: 12, border: apEnabled ? `2px solid ${C.accent}` : "none", background: apEnabled ? C.panel2 : `linear-gradient(135deg,${C.accent},${C.cyan})`, color: apEnabled ? C.accent : "#fff", fontSize: 15, fontWeight: 900, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}>{apEnabled ? "끄기" : "🎯 켜기"}</button>
-        </div>
-        <p style={{ margin: "10px 0 0", fontSize: 11, color: C.sub, fontWeight: 600, lineHeight: 1.5 }}>※ 위 실행 패널의 대상(플레이스/블로그 주소)을 기준으로 추적해요. <b style={{color:C.ink}}>📍 지금 순위 측정</b>을 누르면 현재 순위를 기록해 리포트·그래프에 반영돼요. 달성하면 유입을 줄여 한도를 아끼고, 떨어지면 다시 밀어 올려요.</p>
-      </div>
-
-      {/* ── ⏰ 예약 실행 ── */}
-      <div style={{ background: schedEnabled ? `linear-gradient(135deg,${C.glow},transparent)` : C.panel, border: `2px solid ${schedEnabled ? C.accent : C.line}`, borderRadius: 16, padding: 16, marginBottom: 14 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12, flexWrap: "wrap" }}>
-          <span style={{ fontSize: 15, fontWeight: 900 }}>⏰ 예약 실행</span>
-          <span style={{ fontSize: 10, fontWeight: 800, background: schedEnabled ? "#16a34a" : C.sub, color: "#fff", padding: "2px 8px", borderRadius: 6 }}>{schedEnabled ? "예약됨" : "꺼짐"}</span>
-          <span style={{ fontSize: 12, color: C.sub, fontWeight: 600, flex: 1, minWidth: 180 }}>매일 지정 시각에 위 설정으로 자동 유입해요(앱이 켜져 있을 때).</span>
-        </div>
-        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
-          <div style={{ minWidth: 120 }}>
-            <label style={labelStyle}>매일 실행 시각</label>
-            <input type="time" value={schedTime} onChange={(e) => setSchedTime(e.target.value)} style={{ ...inputStyle, textAlign: "center" }} />
-          </div>
-          <div style={{ minWidth: 100 }}>
-            <label style={labelStyle}>방문 횟수</label>
-            <input type="number" min={1} value={schedRounds} onChange={(e) => setSchedRounds(Math.max(1, Number(e.target.value)))} style={{ ...inputStyle, textAlign: "center" }} />
-          </div>
-          <button onClick={() => saveSched(!schedEnabled)} style={{ padding: "13px 20px", borderRadius: 12, border: schedEnabled ? `2px solid ${C.accent}` : "none", background: schedEnabled ? C.panel2 : `linear-gradient(135deg,${C.accent},${C.cyan})`, color: schedEnabled ? C.accent : "#fff", fontSize: 15, fontWeight: 900, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}>{schedEnabled ? "예약 해제" : "⏰ 예약"}</button>
-        </div>
-      </div>
 
       {/* ── 실행 패널 ── */}
-      <div style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 16, padding: 18, marginBottom: 14, display: "flex", flexDirection: "column", gap: 16 }}>
+      <div className="inflow-card" style={{ order: 4, background: C.panel, border: "1.5px solid #2563eb", borderRadius: 16, padding: 18, marginBottom: 14, display: "flex", flexDirection: "column", gap: 16 }}>
         {/* 대상 */}
         <div>
           <label style={labelStyle}>어디로 유입시킬까요?</label>
@@ -1054,7 +863,7 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
       </div>
 
       {/* ── 등급 사용표 + 한도 게이지 ── */}
-      <div style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 16, padding: 16, marginBottom: 14 }}>
+      <div style={{ order: 5, background: C.panel, border: `1px solid ${C.line}`, borderRadius: 16, padding: 16, marginBottom: 14 }}>
         <div style={{ fontSize: 13.5, fontWeight: 800, marginBottom: 10 }}>📊 등급별 하루 유입 한도</div>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 8 }}>
           {PLAN_ORDER.map((pk) => {
@@ -1081,8 +890,255 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
         <p style={{ margin: "10px 0 0", fontSize: 11, color: C.sub, fontWeight: 600 }}>※ 한도는 계정 안전 장치. 락 해제(무제한)는 관리자만.</p>
       </div>
 
+
+      {/* ── KPI 카드 ── */}
+      <div style={{ order: 6, display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(140px,1fr))", gap: 12, marginBottom: 14 }}>
+        {[
+          { k: "오늘 유입", v: `${used}`, sub: unlimited ? "무제한" : `/ ${limit}회`, col: C.accent },
+          { k: "현재 순위", v: apLastRank != null ? `${apLastRank}` : "—", sub: apEnabled ? `목표 ${apGoal}위` : "위", col: "#16a34a" },
+          { k: "최근 7일", v: `${weekTotal}`, sub: "누적 방문", col: C.cyan },
+          { k: "남은 한도", v: unlimited ? "∞" : `${Math.max(0, limit - used)}`, sub: unlimited ? "무제한" : "회", col: "#f59e0b" },
+        ].map((kp) => (
+          <div key={kp.k} style={{ background: C.kpiBg, border: `1px solid ${C.line}`, borderRadius: 16, padding: "14px 16px", boxShadow: `0 4px 14px ${C.glow}` }}>
+            <div style={{ fontSize: 12, fontWeight: 800, color: C.sub, marginBottom: 6 }}>{kp.k}</div>
+            <div style={{ display: "flex", alignItems: "baseline", gap: 5 }}>
+              <span style={{ fontSize: 28, fontWeight: 900, color: kp.col, lineHeight: 1 }}>{kp.v}</span>
+              <span style={{ fontSize: 12, fontWeight: 700, color: C.sub }}>{kp.sub}</span>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* ── 📊 성과 리포트 (주간/월간, 이번 vs 지난 비교) ── */}
+      {report && (()=>{
+        const rankDelta = (report.rankPrev != null && report.rankNow != null) ? (report.rankPrev - report.rankNow) : null;
+        const infDelta = report.inflowPrev > 0 ? Math.round(((report.inflowNow - report.inflowPrev) / report.inflowPrev) * 100) : null;
+        const per = reportPeriod === "week" ? "주간" : "월간";
+        const mx = Math.max(1, ...report.daily.map(d=>d.count));
+        return (
+        <div className="inflow-card inflow-result" style={{ order: 7, background: `linear-gradient(135deg,${C.glow},transparent)`, border: `2px solid ${C.accent}`, borderRadius: 18, padding: 18, marginBottom: 14 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14, flexWrap: "wrap" }}>
+            <span style={{ fontSize: 17, fontWeight: 900 }}>📊 성과 리포트</span>
+            <div style={{ display: "flex", gap: 4, background: C.panel2, borderRadius: 10, padding: 3 }}>
+              {([["week","주간"],["month","월간"]] as const).map(([k,lb])=>(
+                <button key={k} onClick={()=>setReportPeriod(k)} style={{ padding: "6px 16px", borderRadius: 8, border: "none", background: reportPeriod===k?C.accent:"transparent", color: reportPeriod===k?"#fff":C.sub, fontSize: 13.5, fontWeight: 800, cursor: "pointer", fontFamily: "inherit" }}>{lb}</button>
+              ))}
+            </div>
+            <button onClick={downloadReportPdf} style={{ marginLeft: "auto", padding: "8px 16px", borderRadius: 10, border: `1.5px solid ${C.accent}`, background: C.panel, color: C.accent, fontSize: 13, fontWeight: 800, cursor: "pointer", fontFamily: "inherit" }}>📄 PDF로 저장 · 고객 제출용</button>
+          </div>
+          {/* 비교 KPI 3 */}
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(150px,1fr))", gap: 12, marginBottom: 14 }}>
+            <div style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 14, padding: "14px 16px" }}>
+              <div style={{ fontSize: 12, fontWeight: 800, color: C.sub, marginBottom: 5 }}>현재 순위</div>
+              <div style={{ fontSize: 28, fontWeight: 900, color: "#16a34a" }}>{report.rankNow!=null?`${report.rankNow}위`:"—"}</div>
+              {rankDelta!=null && <div style={{ fontSize: 12.5, fontWeight: 800, color: rankDelta>0?"#16a34a":rankDelta<0?"#dc2626":C.sub, marginTop: 3 }}>{rankDelta>0?`▲ ${rankDelta}계단 상승 🎉`:rankDelta<0?`▼ ${-rankDelta}계단`:"변동 없음"}</div>}
+            </div>
+            <div style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 14, padding: "14px 16px" }}>
+              <div style={{ fontSize: 12, fontWeight: 800, color: C.sub, marginBottom: 5 }}>{per} 유입</div>
+              <div style={{ fontSize: 28, fontWeight: 900, color: C.accent }}>{report.inflowNow.toLocaleString()}<span style={{fontSize:14,color:C.sub}}> 명</span></div>
+              {infDelta!=null && <div style={{ fontSize: 12.5, fontWeight: 800, color: infDelta>=0?"#16a34a":"#dc2626", marginTop: 3 }}>{infDelta>=0?`▲ ${infDelta}% 증가`:`▼ ${-infDelta}% 감소`}</div>}
+            </div>
+            <div style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 14, padding: "14px 16px" }}>
+              <div style={{ fontSize: 12, fontWeight: 800, color: C.sub, marginBottom: 5 }}>지난 {per}</div>
+              <div style={{ fontSize: 28, fontWeight: 900, color: C.sub }}>{report.inflowPrev.toLocaleString()}<span style={{fontSize:14}}> 명</span></div>
+              <div style={{ fontSize: 11.5, fontWeight: 600, color: C.sub, marginTop: 3 }}>비교 기준</div>
+            </div>
+          </div>
+          {/* 미니 막대 그래프 */}
+          <div style={{ display: "flex", alignItems: "flex-end", gap: 3, height: 56 }}>
+            {report.daily.map((d,i)=>(
+              <div key={i} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 2 }}>
+                <div title={`${d.label}: ${d.count}명`} style={{ width: "100%", height: `${Math.max(3,(d.count/mx)*42)}px`, background: `linear-gradient(180deg,${C.accent},${C.cyan})`, borderRadius: 3 }} />
+                {reportPeriod==="week" && <span style={{ fontSize: 9, color: C.sub }}>{d.label}</span>}
+              </div>
+            ))}
+          </div>
+          {/* ✅ 체크포인트 */}
+          <div style={{ marginTop: 14, padding: "12px 14px", borderRadius: 12, background: C.panel, border: `1px solid ${C.line}` }}>
+            <div style={{ fontSize: 12.5, fontWeight: 800, color: C.sub, marginBottom: 6 }}>✅ 이번 {per} 체크포인트</div>
+            {rankDelta!=null && rankDelta>0 && <div style={{ fontSize: 13.5, fontWeight: 700, marginTop: 3 }}>🎉 순위가 <b style={{color:"#16a34a"}}>{rankDelta}계단</b> 올랐어요!</div>}
+            {infDelta!=null && infDelta>0 && <div style={{ fontSize: 13.5, fontWeight: 700, marginTop: 3 }}>📈 유입이 지난 {per}보다 <b style={{color:C.accent}}>{infDelta}%</b> 늘었어요.</div>}
+            {(rankDelta==null && report.rankNow==null) && <div style={{ fontSize: 13, fontWeight: 600, color: C.sub, marginTop: 3 }}>순위는 오토파일럿·순위 측정을 켜면 자동으로 기록돼요.</div>}
+            {(infDelta==null || infDelta<=0) && rankDelta==null && report.inflowNow>0 && <div style={{ fontSize: 13, fontWeight: 600, color: C.sub, marginTop: 3 }}>이번 {per} 유입 {report.inflowNow}명 — 꾸준히 쌓이고 있어요.</div>}
+          </div>
+        </div>
+        );
+      })()}
+
+      {/* ── 🩺 플레이스 최적화 진단 (순위 오르려면 뭘 채워야 하나) ── */}
+      {targetType === "place" && (
+        <div className="inflow-card" style={{ order: 8, background: C.panel, border: "1.5px solid #14b8a6", borderRadius: 16, padding: 18, marginBottom: 14 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4, flexWrap: "wrap" }}>
+            <span style={{ fontSize: 16, fontWeight: 900 }}>🩺 플레이스 최적화 진단</span>
+            <button onClick={runDiagnose} disabled={diagLoading} style={{ marginLeft: "auto", padding: "9px 18px", borderRadius: 10, border: "none", background: `linear-gradient(135deg,${C.accent},${C.cyan})`, color: "#fff", fontSize: 13.5, fontWeight: 800, cursor: diagLoading?"default":"pointer", fontFamily: "inherit", opacity: diagLoading?0.6:1 }}>{diagLoading ? "진단 중…" : "🩺 내 플레이스 진단하기"}</button>
+          </div>
+          <p style={{ margin: "0 0 14px", fontSize: 12.5, color: C.sub, fontWeight: 600, lineHeight: 1.6 }}>순위는 트래픽만으로 오르지 않아요. 리뷰·정보·사진·소식·예약이 <b style={{color:C.ink}}>종합 점수</b>예요. 지금 내 플레이스의 부족한 곳을 찾아 처방해 드려요.</p>
+          {diag ? (
+            <div className="inflow-result">
+              {/* 점수 게이지 */}
+              <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 14 }}>
+                <div style={{ fontSize: 40, fontWeight: 900, color: diag.score>=80?"#16a34a":diag.score>=60?"#f59e0b":"#dc2626" }}>{diag.score}<span style={{fontSize:18,color:C.sub}}>/100</span></div>
+                <div style={{ flex: 1 }}>
+                  <div style={{ height: 12, borderRadius: 7, background: C.panel2, overflow: "hidden", border: `1px solid ${C.line}` }}>
+                    <div style={{ height: "100%", width: `${diag.score}%`, background: `linear-gradient(90deg,${diag.score>=80?"#16a34a":diag.score>=60?"#f59e0b":"#dc2626"},${C.cyan})`, transition: "width .5s" }} />
+                  </div>
+                  <div style={{ fontSize: 12.5, fontWeight: 700, color: C.sub, marginTop: 5 }}>{diag.score>=80?"최적화가 잘 돼 있어요 👍":diag.score>=60?"조금만 더 채우면 순위가 올라요":"부족한 항목이 많아요 — 아래부터 채우세요"}</div>
+                </div>
+              </div>
+              {/* 항목별 체크리스트 */}
+              <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
+                {diag.items.map((it) => (
+                  <div key={it.key} style={{ display: "flex", alignItems: "flex-start", gap: 10, padding: "10px 12px", borderRadius: 10, background: it.ok?C.panel2:"rgba(220,38,38,.06)", border: `1px solid ${it.ok?C.line:"#dc262633"}` }}>
+                    <span style={{ fontSize: 16, flexShrink: 0 }}>{it.ok?"✅":"⚠️"}</span>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontSize: 13.5, fontWeight: 800 }}>{it.label} <span style={{ color: C.sub, fontWeight: 600 }}>· {it.value}</span></div>
+                      {!it.ok && <div style={{ fontSize: 12.5, fontWeight: 600, color: "#dc2626", marginTop: 2, lineHeight: 1.5 }}>{it.tip}</div>}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : !diagLoading && (
+            <div style={{ padding: "20px", textAlign: "center", color: C.sub, fontSize: 13, fontWeight: 600 }}>위 버튼을 눌러 내 플레이스가 순위 오르기에 뭐가 부족한지 확인하세요.</div>
+          )}
+        </div>
+      )}
+
+      {/* ── 💬 리뷰 감정분석 (손님이 뭘 좋아하고 뭘 불만하나) ── */}
+      {targetType === "place" && (
+        <div className="inflow-card" style={{ order: 9, background: C.panel, border: "1.5px solid #a855f7", borderRadius: 16, padding: 18, marginBottom: 14 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4, flexWrap: "wrap" }}>
+            <span style={{ fontSize: 16, fontWeight: 900 }}>💬 리뷰 감정분석</span>
+            <button onClick={runReviewAnalysis} disabled={revLoading} style={{ marginLeft: "auto", padding: "9px 18px", borderRadius: 10, border: "none", background: `linear-gradient(135deg,#8b5cf6,#ec4899)`, color: "#fff", fontSize: 13.5, fontWeight: 800, cursor: revLoading?"default":"pointer", fontFamily: "inherit", opacity: revLoading?0.6:1 }}>{revLoading ? "분석 중…" : "💬 손님 마음 읽기"}</button>
+          </div>
+          <p style={{ margin: "0 0 14px", fontSize: 12.5, color: C.sub, fontWeight: 600, lineHeight: 1.6 }}>손님 리뷰를 읽어 <b style={{color:C.ink}}>뭘 좋아하고 뭘 불만하는지</b> 알려드려요. 칭찬은 소식·홍보에 쓰고, 불만은 바로 개선하세요.</p>
+          {revResult ? (
+            <div className="inflow-result">
+              <div style={{ fontSize: 12.5, fontWeight: 700, color: C.sub, marginBottom: 10 }}>리뷰 {revResult.total}개 분석</div>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(220px,1fr))", gap: 12 }}>
+                <div style={{ background: "rgba(22,163,74,.07)", border: "1px solid #16a34a33", borderRadius: 12, padding: 14 }}>
+                  <div style={{ fontSize: 13.5, fontWeight: 900, color: "#16a34a", marginBottom: 8 }}>👍 손님이 좋아하는 것</div>
+                  {revResult.likes.length ? revResult.likes.map(l => (
+                    <div key={l.word} style={{ display: "flex", justifyContent: "space-between", fontSize: 13, fontWeight: 700, padding: "3px 0" }}><span>{l.word}</span><span style={{ color: "#16a34a" }}>{l.n}회</span></div>
+                  )) : <div style={{ fontSize: 12.5, color: C.sub }}>뚜렷한 칭찬 키워드가 적어요.</div>}
+                </div>
+                <div style={{ background: "rgba(220,38,38,.06)", border: "1px solid #dc262633", borderRadius: 12, padding: 14 }}>
+                  <div style={{ fontSize: 13.5, fontWeight: 900, color: "#dc2626", marginBottom: 8 }}>⚠️ 개선하면 좋을 것</div>
+                  {revResult.dislikes.length ? revResult.dislikes.map(l => (
+                    <div key={l.word} style={{ display: "flex", justifyContent: "space-between", fontSize: 13, fontWeight: 700, padding: "3px 0" }}><span>{l.word}</span><span style={{ color: "#dc2626" }}>{l.n}회</span></div>
+                  )) : <div style={{ fontSize: 12.5, color: C.sub }}>불만 표현이 거의 없어요 — 아주 좋아요! 🎉</div>}
+                </div>
+              </div>
+              {revResult.likes[0] && <p style={{ margin: "12px 0 0", fontSize: 12.5, color: C.sub, fontWeight: 600, lineHeight: 1.5 }}>💡 <b style={{color:C.ink}}>"{revResult.likes[0].word}"</b>을(를) 가장 많이 칭찬해요 — 이 강점을 소식·대표 사진·홍보 문구에 내세우세요.</p>}
+            </div>
+          ) : !revLoading && (
+            <div style={{ padding: "20px", textAlign: "center", color: C.sub, fontSize: 13, fontWeight: 600 }}>버튼을 눌러 손님들이 뭘 좋아하고 뭘 아쉬워하는지 확인하세요.</div>
+          )}
+        </div>
+      )}
+
+      {/* ── 🥊 경쟁사 추적 (내 키워드 상위 경쟁사 vs 나) ── */}
+      {targetType === "place" && (
+        <div className="inflow-card" style={{ order: 10, background: C.panel, border: "1.5px solid #f59e0b", borderRadius: 16, padding: 18, marginBottom: 14 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4, flexWrap: "wrap" }}>
+            <span style={{ fontSize: 16, fontWeight: 900 }}>🥊 경쟁사 추적</span>
+            <button onClick={runCompetitors} disabled={compLoading} style={{ marginLeft: "auto", padding: "9px 18px", borderRadius: 10, border: "none", background: `linear-gradient(135deg,#f59e0b,#f97316)`, color: "#fff", fontSize: 13.5, fontWeight: 800, cursor: compLoading?"default":"pointer", fontFamily: "inherit", opacity: compLoading?0.6:1 }}>{compLoading ? "조회 중…" : "🥊 옆집 확인하기"}</button>
+          </div>
+          <p style={{ margin: "0 0 14px", fontSize: 12.5, color: C.sub, fontWeight: 600, lineHeight: 1.6 }}>내 대표 키워드로 검색했을 때 <b style={{color:C.ink}}>위에 뜨는 경쟁사</b>들의 리뷰 수를 비교해요. 옆집이 뭘로 앞서는지 보고 따라잡으세요.</p>
+          {comp ? (
+            <div className="inflow-result">
+              {comp.myRank && <div style={{ marginBottom: 10, padding: "10px 14px", borderRadius: 10, background: C.glow, border: `1px solid ${C.accent}`, fontSize: 13.5, fontWeight: 800, color: C.accent }}>내 매장은 현재 이 키워드에서 <b>{comp.myRank}위</b> 근처예요.</div>}
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                {comp.top.map((c) => (
+                  <div key={c.rank} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", borderRadius: 10, background: c.isMine?C.glow:C.panel2, border: `1px solid ${c.isMine?C.accent:C.line}` }}>
+                    <span style={{ fontSize: 15, fontWeight: 900, color: c.rank<=3?"#f59e0b":C.sub, minWidth: 28 }}>{c.rank}위</span>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 13.5, fontWeight: 800, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{c.name} {c.isMine && <span style={{color:C.accent}}>· 내 매장</span>}</div>
+                      <div style={{ fontSize: 11.5, color: C.sub, fontWeight: 600 }}>{c.category}</div>
+                    </div>
+                    <div style={{ textAlign: "right", fontSize: 12, fontWeight: 700, color: C.sub, whiteSpace: "nowrap" }}>
+                      방문 <b style={{color:C.ink}}>{c.review.toLocaleString()}</b> · 블로그 <b style={{color:C.ink}}>{c.blog.toLocaleString()}</b>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <p style={{ margin: "10px 0 0", fontSize: 11.5, color: C.sub, fontWeight: 600, lineHeight: 1.5 }}>※ 상위 경쟁사보다 리뷰가 적으면, 방문 손님 리뷰·블로그 리뷰를 늘리는 게 순위에 가장 효과적이에요.</p>
+            </div>
+          ) : !compLoading && (
+            <div style={{ padding: "20px", textAlign: "center", color: C.sub, fontSize: 13, fontWeight: 600 }}>키워드를 넣고 버튼을 누르면 상위 경쟁사와 내 위치를 비교해요.</div>
+          )}
+        </div>
+      )}
+
+      {/* ── 그래프 2단: 유입 추이 + 순위 변동 ── */}
+      <div style={{ order: 11, display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(280px,1fr))", gap: 12, marginBottom: 14 }}>
+      <div style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 16, padding: "14px 16px 8px" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+          <span style={{ fontSize: 13.5, fontWeight: 800 }}>📈 최근 7일 유입 추이</span>
+          <span style={{ fontSize: 11.5, fontWeight: 700, color: C.sub }}>총 {weekTotal}회</span>
+        </div>
+        {history.length > 0 ? <AreaChart data={history} C={C} /> : <div style={{ height: 120, display: "flex", alignItems: "center", justifyContent: "center", color: C.sub, fontSize: 12.5, fontWeight: 600 }}>데이터가 쌓이면 그래프가 그려져요</div>}
+        <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: C.sub, fontWeight: 700, padding: "0 2px" }}>
+          {history.map((d) => <span key={d.label}>{d.label}</span>)}
+        </div>
+      </div>
+      {/* 순위 변동 */}
+      <div style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 16, padding: "14px 16px 8px" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+          <span style={{ fontSize: 13.5, fontWeight: 800 }}>📉 순위 변동 <span style={{ color: C.sub, fontWeight: 600, fontSize: 11 }}>(위=상위)</span></span>
+          {apEnabled && <span style={{ fontSize: 11.5, fontWeight: 800, color: C.cyan }}>목표 {apGoal}위 ---</span>}
+        </div>
+        <RankChart data={rankHist} goal={apGoal} C={C} />
+        <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: C.sub, fontWeight: 700, padding: "0 2px" }}>
+          {rankHist.map((d) => <span key={d.label}>{d.label}</span>)}
+        </div>
+      </div>
+      </div>
+
+      {/* ── 🎯 오토파일럿 ── */}
+      <div className="inflow-card" style={{ order: 12, background: apEnabled ? `linear-gradient(135deg,${C.glow},transparent)` : C.panel, border: `2px solid ${apEnabled ? C.accent : "#3b82f6"}`, borderRadius: 16, padding: 16, marginBottom: 14 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: apEnabled || true ? 12 : 0, flexWrap: "wrap" }}>
+          <span style={{ fontSize: 15, fontWeight: 900 }}>🎯 순위 오토파일럿</span>
+          <span style={{ fontSize: 10, fontWeight: 800, background: apEnabled ? "#16a34a" : C.sub, color: "#fff", padding: "2px 8px", borderRadius: 6 }}>{apEnabled ? "가동 중" : "꺼짐"}</span>
+          <span style={{ fontSize: 12, color: C.sub, fontWeight: 600, flex: 1, minWidth: 180 }}>목표 순위만 정해두면, 순위가 떨어질 때 자동으로 유입을 채워 지켜줘요.</span>
+        </div>
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+          <div style={{ flex: 2, minWidth: 180 }}>
+            <label style={labelStyle}>추적 키워드</label>
+            <input value={apKeyword} onChange={(e) => setApKeyword(e.target.value)} placeholder="순위를 지킬 대표 키워드" style={inputStyle} />
+          </div>
+          <div style={{ flex: 1, minWidth: 110 }}>
+            <label style={labelStyle}>목표 순위</label>
+            <input type="number" min={1} value={apGoal} onChange={(e) => setApGoal(Math.max(1, Number(e.target.value)))} style={{ ...inputStyle, textAlign: "center" }} />
+          </div>
+          <button onClick={runMeasureRank} disabled={rankLoading} style={{ padding: "13px 18px", borderRadius: 12, border: `1.5px solid ${C.accent}`, background: C.panel2, color: C.accent, fontSize: 14, fontWeight: 800, cursor: rankLoading?"default":"pointer", fontFamily: "inherit", whiteSpace: "nowrap", opacity: rankLoading?0.6:1 }}>{rankLoading ? "측정 중…" : "📍 지금 순위 측정"}</button>
+          <button onClick={() => saveAp(!apEnabled)} style={{ padding: "13px 20px", borderRadius: 12, border: apEnabled ? `2px solid ${C.accent}` : "none", background: apEnabled ? C.panel2 : `linear-gradient(135deg,${C.accent},${C.cyan})`, color: apEnabled ? C.accent : "#fff", fontSize: 15, fontWeight: 900, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}>{apEnabled ? "끄기" : "🎯 켜기"}</button>
+        </div>
+        <p style={{ margin: "10px 0 0", fontSize: 11, color: C.sub, fontWeight: 600, lineHeight: 1.5 }}>※ 위 실행 패널의 대상(플레이스/블로그 주소)을 기준으로 추적해요. <b style={{color:C.ink}}>📍 지금 순위 측정</b>을 누르면 현재 순위를 기록해 리포트·그래프에 반영돼요. 달성하면 유입을 줄여 한도를 아끼고, 떨어지면 다시 밀어 올려요.</p>
+      </div>
+
+      {/* ── ⏰ 예약 실행 ── */}
+      <div className="inflow-card" style={{ order: 13, background: schedEnabled ? `linear-gradient(135deg,${C.glow},transparent)` : C.panel, border: `2px solid ${schedEnabled ? C.accent : "#06b6d4"}`, borderRadius: 16, padding: 16, marginBottom: 14 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12, flexWrap: "wrap" }}>
+          <span style={{ fontSize: 15, fontWeight: 900 }}>⏰ 예약 실행</span>
+          <span style={{ fontSize: 10, fontWeight: 800, background: schedEnabled ? "#16a34a" : C.sub, color: "#fff", padding: "2px 8px", borderRadius: 6 }}>{schedEnabled ? "예약됨" : "꺼짐"}</span>
+          <span style={{ fontSize: 12, color: C.sub, fontWeight: 600, flex: 1, minWidth: 180 }}>매일 지정 시각에 위 설정으로 자동 유입해요(앱이 켜져 있을 때).</span>
+        </div>
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+          <div style={{ minWidth: 120 }}>
+            <label style={labelStyle}>매일 실행 시각</label>
+            <input type="time" value={schedTime} onChange={(e) => setSchedTime(e.target.value)} style={{ ...inputStyle, textAlign: "center" }} />
+          </div>
+          <div style={{ minWidth: 100 }}>
+            <label style={labelStyle}>방문 횟수</label>
+            <input type="number" min={1} value={schedRounds} onChange={(e) => setSchedRounds(Math.max(1, Number(e.target.value)))} style={{ ...inputStyle, textAlign: "center" }} />
+          </div>
+          <button onClick={() => saveSched(!schedEnabled)} style={{ padding: "13px 20px", borderRadius: 12, border: schedEnabled ? `2px solid ${C.accent}` : "none", background: schedEnabled ? C.panel2 : `linear-gradient(135deg,${C.accent},${C.cyan})`, color: schedEnabled ? C.accent : "#fff", fontSize: 15, fontWeight: 900, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}>{schedEnabled ? "예약 해제" : "⏰ 예약"}</button>
+        </div>
+      </div>
+
       {/* ── 라이브 로그 ── */}
-      <div>
+      <div style={{ order: 14 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
           <span style={{ fontSize: 13.5, fontWeight: 800 }}>📜 전체 진행 로그</span>
           <button onClick={copyLogs} disabled={!logs.length} style={{ padding: "7px 14px", borderRadius: 9, border: `1.5px solid ${C.line2}`, background: C.panel, color: logs.length ? C.accent : C.sub, fontSize: 13, fontWeight: 800, cursor: logs.length ? "pointer" : "default", fontFamily: "inherit" }}>📋 로그 전체복사</button>
