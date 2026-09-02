@@ -1085,8 +1085,18 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
     ${rows}
     <div class="foot">본 보고서는 네이버 플레이스 공개 데이터와 상위노출 알고리즘(저장·리뷰·행동 신호) 기준으로 <b>퍼블리 플레이스 365</b>가 자동 생성했습니다. 부족 항목은 퍼블리 블로그 글쓰기·리뷰어 섭외로 채울 수 있습니다. · publy.blogautopro.com</div>
     <script>window.onload=()=>{setTimeout(()=>window.print(),400)}</script></body></html>`;
-    const w = window.open("", "_blank"); if (!w) { showToast?.("팝업이 차단됐어요. 팝업 허용 후 다시 시도해 주세요", "error"); return; }
-    w.document.write(html); w.document.close();
+    const electron = (window as any).electron;
+    if (electron?.openPreview) {
+      void electron.openPreview(html);
+      showToast?.("보고서를 열었어요. 인쇄 창에서 PDF로 저장하세요", "success");
+      return;
+    }
+    // 웹 실행에서도 팝업 권한을 요구하지 않도록 숨은 iframe에서 인쇄한다.
+    const frame = document.createElement("iframe");
+    frame.style.cssText = "position:fixed;width:1px;height:1px;right:0;bottom:0;border:0;opacity:0;pointer-events:none";
+    frame.srcdoc = html;
+    frame.onload = () => { setTimeout(() => frame.remove(), 3000); };
+    document.body.appendChild(frame);
   };
 
   // 컨트롤타워 정보 타일 — 플레이스에서 가져온 모든 항목 + 각 기능 설명(왜 중요한지). 자동 못 오는 값(공유·길찾기)은 입력값 표시.
