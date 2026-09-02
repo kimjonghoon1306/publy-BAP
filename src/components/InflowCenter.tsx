@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import { BotEventStream } from "../lib/botApi";
 import UsageGuide from "./UsageGuide";
+import SproutAssistant from "./SproutAssistant";
 import { INFLOW_DAILY_LIMIT, PLAN_CONFIG, getInflowDailyUsage, getInflowUsageHistory, getAccounts, PublyAccount, getAutopilot, saveAutopilot, getRankHistory, AutopilotConfig, getInflowSchedule, saveInflowSchedule, inflowScheduleRanToday, markInflowScheduleRan, getPerfReport, PerfReport, recordRankPoint } from "../lib/supabase";
 
 const BOT = "http://127.0.0.1:3334"; // neighbor-bot
@@ -473,6 +474,24 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
 
   const pct = unlimited ? 0 : Math.min(100, (used / Math.max(1, limit)) * 100);
   const weekTotal = history.reduce((s, d) => s + d.count, 0);
+
+  // 🌱 새싹 비서 — 지금 데이터 상태를 보고 "오늘 뭐 하세요" 한마디(우선순위 규칙, AI 키 불필요)
+  const sproutAdvice = (() => {
+    const hasTarget = targetType === "place" ? !!placeUrl.trim() : !!blogUrl.trim();
+    if (!hasTarget) return { tone: "start", msg: "먼저 내 플레이스나 블로그 주소를 넣어주세요. 그럼 순위·경쟁사·리뷰까지 제가 챙겨드릴게요!" };
+    if (!keywords.trim()) return { tone: "start", msg: "검색 키워드를 넣어주세요. ‘🔎 키워드 추천’을 누르면 숨은 키워드도 찾아드려요." };
+    // 진단 결과 있으면 부족 항목 우선
+    if (diag) { const weak = diag.items.find(it => !it.ok); if (weak && diag.score < 90) return { tone: "fix", msg: `진단 점수 ${diag.score}점! ‘${weak.label}’만 채우면 순위가 더 잘 올라요 — ${weak.tip}` }; }
+    // 순위 목표 대비
+    if (apLastRank != null) {
+      if (apLastRank <= apGoal) return { tone: "good", msg: `현재 ${apLastRank}위로 목표(${apGoal}위)를 지키고 있어요. 이 강점을 소식·홍보에 계속 노출하세요!` };
+      return { tone: "push", msg: `현재 ${apLastRank}위 — 목표 ${apGoal}위까지 유입을 조금 더 채우면 좋아요. ‘유입 시작’을 눌러보세요.` };
+    }
+    // 리뷰 분석 있으면 강점 홍보 제안
+    if (revResult && revResult.likes[0]) return { tone: "tip", msg: `손님들이 ‘${revResult.likes[0].word}’을(를) 가장 좋아해요. 이 강점을 대표 사진·소식에 내세우면 클릭률이 올라가요.` };
+    if (weekTotal > 0) return { tone: "good", msg: `이번 주 유입 ${weekTotal}명이 쌓였어요. ‘📍 순위 측정’으로 지금 순위를 확인해볼까요?` };
+    return { tone: "start", msg: "준비 완료! ‘유입 시작’을 누르면 진짜 손님처럼 방문이 쌓이기 시작해요. 무리하지 않게 안전 한도 안에서요." };
+  })();
   const inputStyle: React.CSSProperties = { width: "100%", padding: "13px 14px", borderRadius: 12, border: `1.5px solid ${C.line2}`, background: C.panel2, color: C.ink, fontSize: 15, fontWeight: 600, fontFamily: "inherit", boxSizing: "border-box" };
   const labelStyle: React.CSSProperties = { fontSize: 13.5, fontWeight: 800, color: C.ink, marginBottom: 8, display: "block" };
   const chk: React.CSSProperties = { display: "flex", alignItems: "center", gap: 7, cursor: "pointer", fontSize: 14, fontWeight: 700, color: C.ink, padding: "8px 12px", borderRadius: 10, border: `1px solid ${C.line}`, background: C.panel2 };
@@ -497,6 +516,17 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
       <p style={{ margin: "0 0 16px", fontSize: 13.5, color: C.sub, fontWeight: 600, lineHeight: 1.6 }}>
         실행 횟수와 실제 고객 성과를 분리해 확인해요. 최종 성과는 <b style={{color:C.accent}}>순위·전화·예약·톡톡·쿠폰</b>으로 판정합니다.
       </p>
+
+      {/* 🌱 새싹 비서 — 오늘의 브리핑 */}
+      <div style={{ display: "flex", alignItems: "center", gap: 14, background: `linear-gradient(135deg,${C.glow},transparent)`, border: `1.5px solid ${C.accent}`, borderRadius: 16, padding: "14px 18px", marginBottom: 16 }}>
+        <div style={{ width: 46, height: 46, borderRadius: 14, background: C.panel, border: `1px solid ${C.line}`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, color: "#16a34a" }}>
+          <SproutAssistant size={30} />
+        </div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 12, fontWeight: 800, color: "#16a34a", marginBottom: 2 }}>새싹 비서 · 오늘의 브리핑</div>
+          <div style={{ fontSize: 14, fontWeight: 700, color: C.ink, lineHeight: 1.5 }}>{sproutAdvice.msg}</div>
+        </div>
+      </div>
 
       {/* 👣 사용방법 안내 */}
       <UsageGuide theme={theme} accent={C.accent}
