@@ -1537,15 +1537,15 @@ export async function suggestPlaceKeywords(params: {
     } catch { /* skip */ }
   };
 
-  const baseSeeds = Array.from(new Set(params.seeds.map(s => s.trim()).filter(Boolean))).slice(0, 6);
+  const baseSeeds = Array.from(new Set(params.seeds.map(s => s.trim()).filter(Boolean))).slice(0, 10);
   log(`[키워드] ${baseSeeds.length}개 시드로 발굴 시작…`);
   for (const s of baseSeeds) { add(s, "기본"); await autocomplete(s); await related(s); }
-  // ③ 상위 자동완성 결과를 한 번 더 확장(롱테일 확보) — 과부하 방지 위해 앞쪽 4개만
-  const expand = Array.from(seen.keys()).filter(k => !baseSeeds.includes(k)).slice(0, 4);
-  for (const k of expand) await autocomplete(k);
+  // ③ 자동완성·연관검색 후보를 한 번 더 확장해 지역+업종+상황 롱테일을 확보한다.
+  const expand = Array.from(seen.keys()).filter(k => !baseSeeds.includes(k)).slice(0, 10);
+  for (const k of expand) { await autocomplete(k); await related(k); }
   const out = Array.from(seen, ([keyword, source]) => ({ keyword, source }));
   log(`[키워드] ${out.length}개 발굴 완료`);
-  return out.slice(0, 40);
+  return out.slice(0, 80);
 }
 
 export async function crawlPlaceByUrl(params: {
