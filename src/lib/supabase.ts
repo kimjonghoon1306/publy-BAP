@@ -835,6 +835,49 @@ export async function getInflowUsageHistory(userId: string, days = 7): Promise<{
   } catch { return metas.map(m => ({ label: m.label, count: 0 })); }
 }
 
+/* ══ 📊 성과 리포트 — 주간/월간, 이번 기간 vs 지난 기간 비교 ══
+   일별 키(inflow_daily / inflow_rank)를 기간 합산. 재사용 데이터라 추가 저장 불필요. */
+export type PerfReport = {
+  period: "week" | "month";
+  inflowNow: number; inflowPrev: number;
+  rankNow: number | null; rankPrev: number | null;
+  daily: { label: string; count: number }[];
+  rankDaily: { label: string; rank: number | null }[];
+};
+function ymdOffset(n: number): string { return koreaDateKey(new Date(Date.now() - n * 86400000)); }
+async function sumInflowRange(userId: string, startDaysAgo: number, endDaysAgo: number): Promise<{ total: number; daily: { label: string; count: number }[] }> {
+  const metas: { key: string; label: string }[] = [];
+  for (let i = startDaysAgo; i >= endDaysAgo; i--) { const ymd = ymdOffset(i); metas.push({ key: `inflow_daily_${userId}_${ymd}`, label: ymd.slice(5) }); }
+  try {
+    const { data } = await supabase.from("publy_settings").select("key,value").in("key", metas.map(m => m.key));
+    const map = new Map((data || []).map((r: any) => [r.key, parseInt(r.value) || 0]));
+    const daily = metas.map(m => ({ label: m.label, count: map.get(m.key) || 0 }));
+    return { total: daily.reduce((s, d) => s + d.count, 0), daily };
+  } catch { return { total: 0, daily: metas.map(m => ({ label: m.label, count: 0 })) }; }
+}
+async function lastRankInRange(userId: string, startDaysAgo: number, endDaysAgo: number): Promise<{ last: number | null; daily: { label: string; rank: number | null }[] }> {
+  const metas: { key: string; label: string }[] = [];
+  for (let i = startDaysAgo; i >= endDaysAgo; i--) { const ymd = ymdOffset(i); metas.push({ key: `inflow_rank_${userId}_${ymd}`, label: ymd.slice(5) }); }
+  try {
+    const { data } = await supabase.from("publy_settings").select("key,value").in("key", metas.map(m => m.key));
+    const map = new Map((data || []).map((r: any) => [r.key, parseInt(r.value) || null]));
+    const daily = metas.map(m => ({ label: m.label, rank: (map.get(m.key) as number) ?? null }));
+    let last: number | null = null;
+    for (const d of daily) if (d.rank != null) last = d.rank;
+    return { last, daily };
+  } catch { return { last: null, daily: metas.map(m => ({ label: m.label, rank: null })) }; }
+}
+export async function getPerfReport(userId: string, period: "week" | "month"): Promise<PerfReport> {
+  const span = period === "week" ? 7 : 30;
+  const [nowU, prevU, nowR, prevR] = await Promise.all([
+    sumInflowRange(userId, span - 1, 0),
+    sumInflowRange(userId, span * 2 - 1, span),
+    lastRankInRange(userId, span - 1, 0),
+    lastRankInRange(userId, span * 2 - 1, span),
+  ]);
+  return { period, inflowNow: nowU.total, inflowPrev: prevU.total, rankNow: nowR.last, rankPrev: prevR.last, daily: nowU.daily, rankDaily: nowR.daily };
+}
+
 /* ── 관리자: 오늘 발행 카운트 초기화 ── (실제 한도체크가 읽는 publy_settings 키를 0으로) */
 export async function resetDailyPublish(userId: string): Promise<void> {
   const key = publishQuotaKey(userId);
