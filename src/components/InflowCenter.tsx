@@ -30,6 +30,14 @@ function parseBlogUrl(input: string): { blogId: string; logNo: string } | null {
   return null;
 }
 
+// 🔎 주소만 보고 플레이스/블로그 자동 감지(탭 안 바꿔도 되게)
+function detectTargetType(input: string): "place" | "blog" | null {
+  const s = (input || "").toLowerCase();
+  if (/place\.naver|map\.naver|naver\.me|pcmap|entry\/place/.test(s)) return "place";
+  if (/blog\.naver|blogid=|\/postview/.test(s)) return "blog";
+  return null;
+}
+
 // 📈 7일 유입 추이 — 부드러운 area 라인 SVG(라이브러리 없이)
 function AreaChart({ data, C }: { data: { label: string; count: number }[]; C: any }) {
   const W = 100, H = 44, pad = 3;
@@ -421,12 +429,12 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
         {targetType === "place" ? (
           <div>
             <label style={labelStyle}>내 플레이스 주소</label>
-            <input value={placeUrl} onChange={(e) => setPlaceUrl(e.target.value)} placeholder="지도/플레이스 링크 붙여넣기 (m.place.naver.com/… 또는 map.naver.com/…)" style={inputStyle} />
+            <input value={placeUrl} onChange={(e) => { const v = e.target.value; setPlaceUrl(v); const t = detectTargetType(v); if (t === "blog") { setBlogUrl(v); setTargetType("blog"); toast("블로그 주소로 인식했어요", "info"); } }} placeholder="지도/플레이스/naver.me 링크 붙여넣기 — 붙여넣으면 자동 인식" style={inputStyle} />
           </div>
         ) : (
           <div>
             <label style={labelStyle}>내 블로그 글 주소</label>
-            <input value={blogUrl} onChange={(e) => setBlogUrl(e.target.value)} placeholder="글 주소만 붙여넣으세요 (blog.naver.com/아이디/글번호) — 자동 인식" style={inputStyle} />
+            <input value={blogUrl} onChange={(e) => { const v = e.target.value; setBlogUrl(v); const t = detectTargetType(v); if (t === "place") { setPlaceUrl(v); setTargetType("place"); toast("플레이스 주소로 인식했어요", "info"); } }} placeholder="글 주소/아이디 붙여넣으세요 (blog.naver.com/아이디/글번호) — 자동 인식" style={inputStyle} />
           </div>
         )}
 
