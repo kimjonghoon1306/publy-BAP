@@ -153,6 +153,9 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
   // 🩺 플레이스 최적화 진단
   const [diagLoading, setDiagLoading] = useState(false);
   const [diag, setDiag] = useState<{ score: number; items: { key: string; label: string; ok: boolean; value: string; tip: string }[] } | null>(null);
+  // 🥊 경쟁사 추적
+  const [compLoading, setCompLoading] = useState(false);
+  const [comp, setComp] = useState<{ top: { rank: number; name: string; category: string; review: number; blog: number; isMine: boolean }[]; myRank: number | null } | null>(null);
   // ⏰ 예약 실행
   const [schedEnabled, setSchedEnabled] = useState(false);
   const [schedTime, setSchedTime] = useState("10:00");
@@ -200,6 +203,20 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
       else { setDiag(j); toast(`최적화 점수 ${j.score}점`, "success"); }
     } catch { toast("진단 실패 — 봇 서버(3334)를 확인하세요", "error"); }
     finally { setDiagLoading(false); }
+  };
+
+  // 🥊 경쟁사 추적 — 내 키워드 상위 경쟁사 vs 나
+  const runCompetitors = async () => {
+    const kw = (keywords.split(/[,\n]/).map(k=>k.trim()).filter(Boolean)[0] || "").trim();
+    if (!kw) { toast("먼저 검색 키워드를 입력하세요", "error"); return; }
+    setCompLoading(true); setComp(null);
+    try {
+      const r = await fetch(`${BOT}/api/competitors?query=${encodeURIComponent(kw)}${placeUrl.trim()?`&myPlaceUrl=${encodeURIComponent(placeUrl.trim())}`:""}`);
+      const j = await r.json();
+      if (j.error) toast(j.error, "error");
+      else setComp(j);
+    } catch { toast("경쟁사 조회 실패 — 봇 서버(3334) 확인", "error"); }
+    finally { setCompLoading(false); }
   };
 
   // 📄 성과 리포트를 PDF로 저장(플레이스365와 동일한 electron.saveReportPdf 재사용)
@@ -519,6 +536,39 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
             </div>
           ) : !diagLoading && (
             <div style={{ padding: "20px", textAlign: "center", color: C.sub, fontSize: 13, fontWeight: 600 }}>위 버튼을 눌러 내 플레이스가 순위 오르기에 뭐가 부족한지 확인하세요.</div>
+          )}
+        </div>
+      )}
+
+      {/* ── 🥊 경쟁사 추적 (내 키워드 상위 경쟁사 vs 나) ── */}
+      {targetType === "place" && (
+        <div style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 16, padding: 18, marginBottom: 14 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4, flexWrap: "wrap" }}>
+            <span style={{ fontSize: 16, fontWeight: 900 }}>🥊 경쟁사 추적</span>
+            <button onClick={runCompetitors} disabled={compLoading} style={{ marginLeft: "auto", padding: "9px 18px", borderRadius: 10, border: "none", background: `linear-gradient(135deg,#f59e0b,#f97316)`, color: "#fff", fontSize: 13.5, fontWeight: 800, cursor: compLoading?"default":"pointer", fontFamily: "inherit", opacity: compLoading?0.6:1 }}>{compLoading ? "조회 중…" : "🥊 옆집 확인하기"}</button>
+          </div>
+          <p style={{ margin: "0 0 14px", fontSize: 12.5, color: C.sub, fontWeight: 600, lineHeight: 1.6 }}>내 대표 키워드로 검색했을 때 <b style={{color:C.ink}}>위에 뜨는 경쟁사</b>들의 리뷰 수를 비교해요. 옆집이 뭘로 앞서는지 보고 따라잡으세요.</p>
+          {comp ? (
+            <div>
+              {comp.myRank && <div style={{ marginBottom: 10, padding: "10px 14px", borderRadius: 10, background: C.glow, border: `1px solid ${C.accent}`, fontSize: 13.5, fontWeight: 800, color: C.accent }}>내 매장은 현재 이 키워드에서 <b>{comp.myRank}위</b> 근처예요.</div>}
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                {comp.top.map((c) => (
+                  <div key={c.rank} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", borderRadius: 10, background: c.isMine?C.glow:C.panel2, border: `1px solid ${c.isMine?C.accent:C.line}` }}>
+                    <span style={{ fontSize: 15, fontWeight: 900, color: c.rank<=3?"#f59e0b":C.sub, minWidth: 28 }}>{c.rank}위</span>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 13.5, fontWeight: 800, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{c.name} {c.isMine && <span style={{color:C.accent}}>· 내 매장</span>}</div>
+                      <div style={{ fontSize: 11.5, color: C.sub, fontWeight: 600 }}>{c.category}</div>
+                    </div>
+                    <div style={{ textAlign: "right", fontSize: 12, fontWeight: 700, color: C.sub, whiteSpace: "nowrap" }}>
+                      방문 <b style={{color:C.ink}}>{c.review.toLocaleString()}</b> · 블로그 <b style={{color:C.ink}}>{c.blog.toLocaleString()}</b>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <p style={{ margin: "10px 0 0", fontSize: 11.5, color: C.sub, fontWeight: 600, lineHeight: 1.5 }}>※ 상위 경쟁사보다 리뷰가 적으면, 방문 손님 리뷰·블로그 리뷰를 늘리는 게 순위에 가장 효과적이에요.</p>
+            </div>
+          ) : !compLoading && (
+            <div style={{ padding: "20px", textAlign: "center", color: C.sub, fontSize: 13, fontWeight: 600 }}>키워드를 넣고 버튼을 누르면 상위 경쟁사와 내 위치를 비교해요.</div>
           )}
         </div>
       )}
