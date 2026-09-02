@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { BotEventStream } from "../lib/botApi";
-import { INFLOW_DAILY_LIMIT, PLAN_CONFIG, getInflowDailyUsage, getInflowUsageHistory, getAccounts, PublyAccount, getAutopilot, saveAutopilot, getRankHistory, AutopilotConfig } from "../lib/supabase";
+import { INFLOW_DAILY_LIMIT, PLAN_CONFIG, getInflowDailyUsage, getInflowUsageHistory, getAccounts, PublyAccount, getAutopilot, saveAutopilot, getRankHistory, AutopilotConfig, getInflowSchedule, saveInflowSchedule, inflowScheduleRanToday, markInflowScheduleRan } from "../lib/supabase";
 
 const BOT = "http://127.0.0.1:3334"; // neighbor-bot
 
@@ -117,7 +117,12 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
   const [apKeyword, setApKeyword] = useState("");
   const [apLastRank, setApLastRank] = useState<number | null>(null);
   const [rankHist, setRankHist] = useState<{ label: string; rank: number | null }[]>([]);
+  // ⏰ 예약 실행
+  const [schedEnabled, setSchedEnabled] = useState(false);
+  const [schedTime, setSchedTime] = useState("10:00");
+  const [schedRounds, setSchedRounds] = useState(10);
   const esRef = useRef<BotEventStream | null>(null);
+  const startRef = useRef<() => void>(() => {});
   const logBoxRef = useRef<HTMLDivElement | null>(null);
 
   const pushLog = (m: string) => setLogs((l) => [...l, m]);
@@ -132,7 +137,34 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
     if (!userId) return;
     getAccounts(userId).then((a) => setAccounts(a.filter((x) => x.platform === "naver"))).catch(() => {});
     getAutopilot(userId).then((ap) => { if (ap) { setApEnabled(ap.enabled); setApGoal(ap.goal_rank); setApKeyword(ap.keyword || ""); setApLastRank(ap.last_rank ?? null); } }).catch(() => {});
+    getInflowSchedule(userId).then((s) => { if (s) { setSchedEnabled(s.enabled); setSchedTime(s.time); setSchedRounds(s.rounds); } }).catch(() => {});
   }, [userId]);
+
+  // ⏰ 예약 실행 감시 — 앱이 켜져 있을 때 지정 시각 도달 시 자동 1회 실행(하루 1번)
+  useEffect(() => {
+    if (!schedEnabled || !userId) return;
+    const tick = async () => {
+      if (running) return;
+      const now = new Date();
+      const hhmm = new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Seoul", hour: "2-digit", minute: "2-digit", hour12: false }).format(now);
+      if (hhmm !== schedTime) return;
+      if (await inflowScheduleRanToday(userId)) return;
+      await markInflowScheduleRan(userId);
+      pushLog(`⏰ 예약 시각(${schedTime}) 도달 — 자동 실행 시작`);
+      if (!auto) setRounds(schedRounds);
+      startRef.current();
+    };
+    const id = setInterval(tick, 30000); // 30초마다 시각 확인
+    tick();
+    return () => clearInterval(id);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [schedEnabled, schedTime, schedRounds, userId, running]);
+
+  const saveSched = async (nextEnabled: boolean) => {
+    if (!userId) return;
+    try { await saveInflowSchedule(userId, { enabled: nextEnabled, time: schedTime, rounds: schedRounds }); setSchedEnabled(nextEnabled); toast(nextEnabled ? `⏰ 매일 ${schedTime}에 자동 유입 ${schedRounds}회 예약됨` : "예약 해제", "success"); }
+    catch (e: any) { toast(e.message, "error"); }
+  };
 
   const saveAp = async (nextEnabled: boolean) => {
     if (!userId) return;
@@ -190,6 +222,7 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
     es.onerror = () => { pushLog("❌ 봇 연결 오류 — 봇 서버(포트 3334)가 켜져 있는지 확인해주세요"); toast("봇 연결 오류", "error"); setRunning(false); es.close(); esRef.current = null; };
     es.onclose = () => setRunning(false);
   };
+  startRef.current = start;
   const stop = () => { esRef.current?.close(); esRef.current = null; setRunning(false); pushLog("⏹️ 사용자가 정지했어요"); };
 
   const pct = unlimited ? 0 : Math.min(100, (used / Math.max(1, limit)) * 100);
@@ -281,6 +314,26 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
           <button onClick={() => saveAp(!apEnabled)} style={{ padding: "13px 20px", borderRadius: 12, border: apEnabled ? `2px solid ${C.accent}` : "none", background: apEnabled ? C.panel2 : `linear-gradient(135deg,${C.accent},${C.cyan})`, color: apEnabled ? C.accent : "#fff", fontSize: 15, fontWeight: 900, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}>{apEnabled ? "끄기" : "🎯 켜기"}</button>
         </div>
         <p style={{ margin: "10px 0 0", fontSize: 11, color: C.sub, fontWeight: 600, lineHeight: 1.5 }}>※ 위 실행 패널의 대상(플레이스/블로그 주소)을 기준으로 추적해요. 달성하면 유입을 줄여 한도를 아끼고, 떨어지면 다시 밀어 올려요.</p>
+      </div>
+
+      {/* ── ⏰ 예약 실행 ── */}
+      <div style={{ background: schedEnabled ? `linear-gradient(135deg,${C.glow},transparent)` : C.panel, border: `2px solid ${schedEnabled ? C.accent : C.line}`, borderRadius: 16, padding: 16, marginBottom: 14 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12, flexWrap: "wrap" }}>
+          <span style={{ fontSize: 15, fontWeight: 900 }}>⏰ 예약 실행</span>
+          <span style={{ fontSize: 10, fontWeight: 800, background: schedEnabled ? "#16a34a" : C.sub, color: "#fff", padding: "2px 8px", borderRadius: 6 }}>{schedEnabled ? "예약됨" : "꺼짐"}</span>
+          <span style={{ fontSize: 12, color: C.sub, fontWeight: 600, flex: 1, minWidth: 180 }}>매일 지정 시각에 위 설정으로 자동 유입해요(앱이 켜져 있을 때).</span>
+        </div>
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+          <div style={{ minWidth: 120 }}>
+            <label style={labelStyle}>매일 실행 시각</label>
+            <input type="time" value={schedTime} onChange={(e) => setSchedTime(e.target.value)} style={{ ...inputStyle, textAlign: "center" }} />
+          </div>
+          <div style={{ minWidth: 100 }}>
+            <label style={labelStyle}>방문 횟수</label>
+            <input type="number" min={1} value={schedRounds} onChange={(e) => setSchedRounds(Math.max(1, Number(e.target.value)))} style={{ ...inputStyle, textAlign: "center" }} />
+          </div>
+          <button onClick={() => saveSched(!schedEnabled)} style={{ padding: "13px 20px", borderRadius: 12, border: schedEnabled ? `2px solid ${C.accent}` : "none", background: schedEnabled ? C.panel2 : `linear-gradient(135deg,${C.accent},${C.cyan})`, color: schedEnabled ? C.accent : "#fff", fontSize: 15, fontWeight: 900, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}>{schedEnabled ? "예약 해제" : "⏰ 예약"}</button>
+        </div>
       </div>
 
       {/* ── 실행 패널 ── */}

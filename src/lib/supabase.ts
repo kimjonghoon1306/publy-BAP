@@ -796,6 +796,30 @@ export async function getRankHistory(userId: string, days = 7): Promise<{ label:
   } catch { return metas.map(m => ({ label: m.label, rank: null })); }
 }
 
+/* ⏰ 예약 실행 — 매일 지정 시각(HH:MM, KST)에 자동 유입. publy_settings key-value에 JSON 저장(스키마 변경 불필요). */
+export type InflowSchedule = { enabled: boolean; time: string; rounds: number };
+function inflowSchedKey(userId: string): string { return `inflow_schedule_${userId}`; }
+export async function getInflowSchedule(userId: string): Promise<InflowSchedule | null> {
+  try {
+    const { data } = await supabase.from("publy_settings").select("value").eq("key", inflowSchedKey(userId)).maybeSingle();
+    return data?.value ? JSON.parse(data.value) as InflowSchedule : null;
+  } catch { return null; }
+}
+export async function saveInflowSchedule(userId: string, sched: InflowSchedule): Promise<void> {
+  const { error } = await supabase.from("publy_settings").upsert({ key: inflowSchedKey(userId), value: JSON.stringify(sched) }, { onConflict: "key" });
+  if (error) throw new Error(`예약 저장 실패: ${error.message}`);
+}
+// 오늘 이미 예약 실행했는지(중복 방지) — 실행 후 날짜 마킹
+export async function inflowScheduleRanToday(userId: string): Promise<boolean> {
+  try {
+    const { data } = await supabase.from("publy_settings").select("value").eq("key", `inflow_sched_ran_${userId}`).maybeSingle();
+    return data?.value === koreaDateKey();
+  } catch { return false; }
+}
+export async function markInflowScheduleRan(userId: string): Promise<void> {
+  await supabase.from("publy_settings").upsert({ key: `inflow_sched_ran_${userId}`, value: koreaDateKey() }, { onConflict: "key" });
+}
+
 /* 📈 컨트롤타워 그래프용 — 최근 N일 일별 유입 수(publy_settings에서 날짜별 키를 한 번에 조회) */
 export async function getInflowUsageHistory(userId: string, days = 7): Promise<{ label: string; count: number }[]> {
   const metas: { key: string; label: string }[] = [];
