@@ -177,6 +177,7 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
   });
   const [storeFormOpen, setStoreFormOpen] = useState(() => loadProfiles(userId).length === 0);
   const [resolving, setResolving] = useState(false);
+  const [ratingRefreshing, setRatingRefreshing] = useState(false);
   const [livePlace, setLivePlace] = useState<LivePlaceDetail | null>(null);
   // 엔터 한 번 = 통째로 수집. 진행 로그 1→100% 빠짐없이 표시
   const [scanPct, setScanPct] = useState(0);
@@ -896,6 +897,27 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
     }
   };
 
+  const refreshRatingNow = async () => {
+    const url = (profile.placeUrl || draft.placeUrl).trim();
+    if (!url) { showToast?.("먼저 플레이스 주소를 등록해 주세요", "info"); return; }
+    setRatingRefreshing(true);
+    try {
+      const res = await botFetch(`${BOT}/api/place/resolve?userId=${encodeURIComponent(userId || "")}&placeUrl=${encodeURIComponent(url)}&fresh=${Date.now()}`);
+      const data = await res.json().catch(() => ({}));
+      const d = data?.detail as LivePlaceDetail | undefined;
+      if (!res.ok || !data?.ok || !d) throw new Error(data?.error || "별점을 가져오지 못했어요");
+      setLivePlace(prev => ({ ...(prev || {}), ...d }));
+      if (typeof d.visitorReviewScore === "number" && d.visitorReviewScore > 0) {
+        const point = { score: d.visitorReviewScore, reviewCount: d.visitorReviewCount || 0, measuredAt: new Date().toISOString() };
+        const nextHistory = [point, ...ratingHistory].slice(0, 365);
+        localStorage.setItem(ratingHistoryKey(userId, storeKey), JSON.stringify(nextHistory));
+        setRatingHistory(nextHistory);
+        showToast?.(`네이버 최신 공개 별점 ${d.visitorReviewScore}점을 기록했어요`, "success");
+      } else showToast?.("평균 별점이 미노출 상태이거나 아직 공개되지 않았어요", "info");
+    } catch (error: any) { showToast?.(error?.message || "별점 재측정에 실패했어요", "error"); }
+    finally { setRatingRefreshing(false); }
+  };
+
   const saveStore = async () => {
     if (!draft.name.trim()) {
       showToast?.("먼저 내 매장 이름을 입력해 주세요", "info");
@@ -1252,8 +1274,10 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
           <strong style={{ fontSize: 25, color: M.amber }}>{livePlace.visitorReviewScore ? livePlace.visitorReviewScore.toFixed(2).replace(/0$/, "") : "미노출·미수집"}</strong>
           {ratingTrend.change != null && <span style={{ fontSize: 12, fontWeight: 900, color: ratingTrend.change > 0 ? M.green : ratingTrend.change < 0 ? M.pink : M.sub }}>{ratingTrend.change > 0 ? "▲" : ratingTrend.change < 0 ? "▼" : "—"} {Math.abs(ratingTrend.change).toFixed(2)}</span>}
           <span style={{ marginLeft: "auto", fontSize: 10.5, color: M.sub }}>방문자 리뷰 {(livePlace.visitorReviewCount || 0).toLocaleString()}개 · {ratingTrend.latest ? new Date(ratingTrend.latest.measuredAt).toLocaleString("ko-KR") : "이번 측정"}</span>
+          <button className="p360-btn" disabled={ratingRefreshing} onClick={() => void refreshRatingNow()} style={{ minHeight: 32, padding: "5px 10px", fontSize: 10.5, background: M.amber, color: "#fff", opacity: ratingRefreshing ? .6 : 1 }}>{ratingRefreshing ? "네이버 확인 중…" : "🔄 지금 별점 재측정"}</button>
         </div>
         <p style={{ margin: "6px 0 0", color: M.sub, fontSize: 11, lineHeight: 1.6 }}>고객이 방문 만족도를 빠르게 이해하는 <b style={{ color: M.text }}>보조 지표</b>예요. 퍼블리 순위 점수와 다르며 별점만으로 검색순위 상승을 보장하지 않아요. 새 별점 리뷰가 추가되거나 리뷰가 검토·미노출되면 평균이 오르내릴 수 있으므로 리뷰 수와 함께 추적합니다.</p>
+        <div style={{ marginTop: 8, padding: "10px 11px", borderRadius: 10, background: `${M.amber}12`, fontSize: 11, lineHeight: 1.65 }}><b style={{ color: M.amber }}>별점 올리는 우선 행동</b><div style={{ color: M.text, marginTop: 3 }}>{!livePlace.visitorReviewScore ? "스마트플레이스에서 평균 별점 노출 설정을 확인하고, 실제 방문 고객의 새 별점 리뷰가 쌓이는지 측정하세요." : livePlace.visitorReviewScore < 4 ? "낮은 별점 리뷰의 반복 불만 1가지를 먼저 고치고, 해결 뒤 실제 방문 고객에게 솔직한 리뷰를 요청하세요." : livePlace.visitorReviewScore < 4.5 ? "최근 낮은 별점의 공통 원인을 고친 뒤 결제·예약 완료 고객에게 부담 없이 별점과 구체적인 경험을 남겨달라고 안내하세요." : "높은 만족도를 유지하면서 최근 방문 고객의 사진·구체 경험 리뷰가 꾸준히 이어지게 안내하세요."}</div><div style={{ color: M.sub, marginTop: 3 }}>금지: 별점 대가 지급·허위 영수증·리뷰 구매. 평균을 올리는 정확한 필요 리뷰 수는 네이버가 별점 산정 대상 리뷰 수를 공개하지 않아 임의 계산하지 않아요.</div></div>
         {ratingTrend.previous && <div style={{ marginTop: 8, padding: "8px 10px", borderRadius: 9, background: M.soft, fontSize: 10.8, color: M.sub }}>이전 변화 기준: ⭐ {ratingTrend.previous.score} / 리뷰 {ratingTrend.previous.reviewCount.toLocaleString()}개 → 현재 ⭐ {ratingTrend.latest?.score} / 리뷰 {ratingTrend.latest?.reviewCount.toLocaleString()}개</div>}
       </section>}
 
