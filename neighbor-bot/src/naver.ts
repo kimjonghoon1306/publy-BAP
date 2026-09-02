@@ -5419,6 +5419,43 @@ async function inflowFullFunnel(page: any, target: InflowTarget, log: (m: string
   }
 }
 
+/* 💬 공개 방문자 리뷰 수집 — 로그인 없이 플레이스 리뷰탭에서 리뷰 문장만 긁는다(감정분석용).
+   반환: 리뷰 텍스트 배열(노이즈 필터). AI 분석은 앱(기존 키)에서. */
+export async function collectPlaceReviews(params: { placeUrl: string; limit?: number; onLog?: (m: string) => void }): Promise<{ reviews: string[] } | { error: string }> {
+  const parsed = await resolvePlaceUrl(params.placeUrl);
+  if (!parsed) return { error: "플레이스 주소를 인식하지 못했어요" };
+  const limit = params.limit || 30;
+  let browser: any = null;
+  try {
+    browser = await launchBrowser("", { headless: true, feature: "inflow", log: params.onLog });
+    const ctx = await browser.newContext({ userAgent: INFLOW_MOBILE_UA, viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, locale: "ko-KR" });
+    await ctx.addInitScript(ANTI_DETECTION_SCRIPT);
+    const page = await ctx.newPage();
+    await page.goto(`https://m.place.naver.com/${parsed.domain}/${parsed.placeId}/review/visitor`, { waitUntil: "domcontentloaded", timeout: 25000 });
+    await page.waitForTimeout(inflowRndInt(2500, 4000));
+    // 스크롤로 리뷰 더 로드
+    for (let i = 0; i < 3; i++) { await page.mouse.wheel(0, 1500).catch(() => {}); await page.waitForTimeout(1200); }
+    const reviews: string[] = await page.evaluate(() => {
+      const nodes = Array.from(document.querySelectorAll("div,span,p"));
+      const out: string[] = [];
+      for (const n of nodes) {
+        const t = (n.textContent || "").trim();
+        if (t.length >= 15 && t.length <= 300 && (n as any).children.length <= 1 && /[가-힣]/.test(t)
+          && !/영업|메뉴|예약|길찾기|전화|방문일|인증 수단|더보기|리뷰 쓰기|동영상|숏리뷰|영수증|\d{4}년|키워드를 선택한 인원|명이 선택|이 키워드|팔로워|팔로우|사장님|답글|블로그|\d+명$/.test(t)
+          && /[.!?요다임음죠네까]$|맛|친절|분위기|서비스|추천|만족|재방문/.test(t)) {  // 리뷰스러운 종결·감정 단어 있는 것만
+          out.push(t);
+        }
+      }
+      return Array.from(new Set(out));
+    }).catch(() => []);
+    return { reviews: reviews.slice(0, limit) };
+  } catch (e: any) {
+    return { error: e?.message || "리뷰 수집 실패" };
+  } finally {
+    if (browser) await browser.close().catch(() => {});
+  }
+}
+
 /* 📍 플레이스 순위 측정 — 키워드로 검색해 내 placeId가 몇 위인지. crawlPlaces 재사용.
    반환: rank(1~N, 없으면 null) + 총 스캔 수. 리포트/오토파일럿이 이걸 저장해 추이로 씀. */
 export async function measurePlaceRank(params: { keyword: string; placeUrl: string; accountId?: string; ownerUserId?: string | null; onLog?: (m: string) => void }): Promise<{ rank: number | null; scanned: number } | { error: string }> {
