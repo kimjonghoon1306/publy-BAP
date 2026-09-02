@@ -5419,6 +5419,18 @@ async function inflowFullFunnel(page: any, target: InflowTarget, log: (m: string
   }
 }
 
+/* 📍 플레이스 순위 측정 — 키워드로 검색해 내 placeId가 몇 위인지. crawlPlaces 재사용.
+   반환: rank(1~N, 없으면 null) + 총 스캔 수. 리포트/오토파일럿이 이걸 저장해 추이로 씀. */
+export async function measurePlaceRank(params: { keyword: string; placeUrl: string; accountId?: string; ownerUserId?: string | null; onLog?: (m: string) => void }): Promise<{ rank: number | null; scanned: number } | { error: string }> {
+  const parsed = await resolvePlaceUrl(params.placeUrl);
+  if (!parsed) return { error: "플레이스 주소를 인식하지 못했어요" };
+  try {
+    const list = await crawlPlaces({ accountId: params.accountId || "", query: params.keyword, count: 30, ownerUserId: params.ownerUserId || null, onLog: params.onLog });
+    const idx = list.findIndex((p) => String(p.placeId) === String(parsed.placeId));
+    return { rank: idx >= 0 ? idx + 1 : null, scanned: list.length };
+  } catch (e: any) { return { error: e?.message || "순위 측정 실패" }; }
+}
+
 /* 🩺 플레이스 최적화 진단 — 상세페이지를 읽어 "순위 오르려면 뭘 채워야 하는지" 항목별 점검.
    ★순위는 트래픽만으로 안 오름: 리뷰·정보완성·사진·소식·방문의도수단이 종합 점수. 이걸 실측해 처방.
    반환: 항목별 ok/값 + 100점 만점 점수 + 부족항목(처방). */
