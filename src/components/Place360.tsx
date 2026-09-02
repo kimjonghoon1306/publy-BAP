@@ -96,6 +96,9 @@ function adminRankKey(storeKey: string) { return `publy_place360_admin_rank_v1:$
 function adminMetricsKey(storeKey: string) {
   return `publy_place360_admin_metrics_v1:${storeKey}`;
 }
+function ratingHistoryKey(userId: string | undefined, storeKey: string) {
+  return `publy_place360_rating_history_v1:${userId || "guest"}:${storeKey}`;
+}
 
 function loadCompletedMissions(userId: string | undefined, storeKey: string): string[] {
   if (!storeKey) return [];
@@ -322,6 +325,18 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
     }).sort((a, b) => b.score - a.score || a.keyword.localeCompare(b.keyword, "ko"));
   }, [autoKeywords, livePlace?.menus, livePlace?.name, profile.category, profile.name, profile.region]);
   const storeKey = place360StoreKey(profile.name, profile.region);
+  const [ratingHistory, setRatingHistory] = useState<Array<{ score: number; reviewCount: number; measuredAt: string }>>([]);
+  useEffect(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem(ratingHistoryKey(userId, storeKey)) || "[]");
+      setRatingHistory(Array.isArray(saved) ? saved : []);
+    } catch { setRatingHistory([]); }
+  }, [storeKey, userId]);
+  const ratingTrend = useMemo(() => {
+    const latest = ratingHistory[0];
+    const previous = ratingHistory.find((item, index) => index > 0 && item.score !== latest?.score);
+    return { latest, previous, change: latest && previous ? Number((latest.score - previous.score).toFixed(2)) : null };
+  }, [ratingHistory]);
   const [completedMissions, setCompletedMissions] = useState<string[]>(() => loadCompletedMissions(userId, storeKey));
   const [reviewerHandoffCount, setReviewerHandoffCount] = useState(0);
   const [businessMetrics, setBusinessMetrics] = useState<BusinessMetricDraft>(EMPTY_BUSINESS_METRICS);
@@ -858,6 +873,15 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
       const regionHint = String(d.address || "").match(/([가-힣]+(?:동|읍|면|리|가|로|구|시))/)?.[1] || "";
       const resolved = { ...draft, name: d.name?.trim() || draft.name, category: d.category?.trim() || draft.category, region: draft.region.trim() || regionHint, placeUrl: d.placeUrl?.trim() || url };
       setDraft(resolved);
+      if (typeof d.visitorReviewScore === "number" && d.visitorReviewScore > 0) {
+        const nextStoreKey = place360StoreKey(resolved.name, resolved.region);
+        const point = { score: d.visitorReviewScore, reviewCount: d.visitorReviewCount || 0, measuredAt: new Date().toISOString() };
+        let history: Array<{ score: number; reviewCount: number; measuredAt: string }> = [];
+        try { history = JSON.parse(localStorage.getItem(ratingHistoryKey(userId, nextStoreKey)) || "[]"); } catch {}
+        const nextHistory = [point, ...(Array.isArray(history) ? history : [])].slice(0, 365);
+        localStorage.setItem(ratingHistoryKey(userId, nextStoreKey), JSON.stringify(nextHistory));
+        setRatingHistory(nextHistory);
+      }
       pushLog(75, "🎯 노릴 키워드 자동 발굴 중…");
       void loadAutoKeywords(resolved);   // 방금 수집한 값으로 자동완성·연관검색 키워드 병행 수집
       pushLog(90, "종합 별점 산출 중…");
@@ -1059,8 +1083,9 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
       <tr><th>측정 시각</th><td>${new Date(measuredAt).toLocaleString("ko-KR")}</td></tr>
       <tr><th>검색 조건</th><td>${esc(currentRank?.surface || "네이버 지도 PC")} · 비로그인 자동 측정</td></tr>
       <tr><th>확인 범위</th><td>상위 ${currentRank?.checkedCount || 0}곳</td></tr>
+      <tr><th>네이버 평균 별점</th><td>${livePlace?.visitorReviewScore ? `${livePlace.visitorReviewScore}점 · 방문자 리뷰 ${(livePlace.visitorReviewCount || 0).toLocaleString()}개${ratingTrend.change != null ? ` · 이전 대비 ${ratingTrend.change > 0 ? "+" : ""}${ratingTrend.change}` : ""}` : "미노출 또는 수집되지 않음"}</td></tr>
       <tr><th>진단 근거 충족도</th><td>${diagnosisCoverage.percent}% · 자동수집/실측/직접입력 구분</td></tr>
-      </tbody></table><p class="notice">검색 위치·시간·로그인·개인화에 따라 순서는 달라질 수 있습니다. 퍼블리는 동일한 측정 환경의 반복 결과로 상승·하락 추이를 판정합니다. 본 점수는 네이버 공식 순위 점수가 아닙니다.</p></section>`;
+      </tbody></table><p class="notice">검색 위치·시간·로그인·개인화에 따라 순서는 달라질 수 있습니다. 퍼블리는 동일한 측정 환경의 반복 결과로 상승·하락 추이를 판정합니다. 평균 별점은 과거 별점과 2026년 재수집 별점의 평균이며 새 별점 리뷰 추가·검토·미노출에 따라 변할 수 있습니다. 별점과 퍼블리 진단점수는 네이버 공식 검색 순위 점수가 아닙니다.</p></section>`;
     let reportBlock = "";
     if (report.hasData) {
       const kwr = report.kwRows.slice(0, 8).map(k => `<tr><td>${esc(k.keyword)}</td><td>${k.last != null ? k.last + "위" : "상위밖"}</td><td class="${k.change == null ? "" : k.change > 0 ? "up" : k.change < 0 ? "dn" : ""}">${k.change == null ? "기준" : k.change > 0 ? "▲ " + k.change : k.change < 0 ? "▼ " + Math.abs(k.change) : "— 유지"}</td></tr>`).join("");
@@ -1220,6 +1245,17 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
           <button className="p360-btn" onClick={() => document.getElementById("p360-kit")?.scrollIntoView({ behavior: "smooth", block: "center" })} style={{ width: "100%", background: `linear-gradient(135deg,${M.green},${M.purple})`, color: "#fff", fontSize: 15 }}>✅ 퍼블리가 준비한 것 적용하기</button>
         </>}
       </section>
+
+      {livePlace && <section className="p360-card" style={{ padding: "16px 18px", borderLeft: `6px solid ${M.amber}` }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 9, flexWrap: "wrap" }}>
+          <b style={{ fontSize: 14 }}>⭐ 네이버 가게 평균 별점</b>
+          <strong style={{ fontSize: 25, color: M.amber }}>{livePlace.visitorReviewScore ? livePlace.visitorReviewScore.toFixed(2).replace(/0$/, "") : "미노출·미수집"}</strong>
+          {ratingTrend.change != null && <span style={{ fontSize: 12, fontWeight: 900, color: ratingTrend.change > 0 ? M.green : ratingTrend.change < 0 ? M.pink : M.sub }}>{ratingTrend.change > 0 ? "▲" : ratingTrend.change < 0 ? "▼" : "—"} {Math.abs(ratingTrend.change).toFixed(2)}</span>}
+          <span style={{ marginLeft: "auto", fontSize: 10.5, color: M.sub }}>방문자 리뷰 {(livePlace.visitorReviewCount || 0).toLocaleString()}개 · {ratingTrend.latest ? new Date(ratingTrend.latest.measuredAt).toLocaleString("ko-KR") : "이번 측정"}</span>
+        </div>
+        <p style={{ margin: "6px 0 0", color: M.sub, fontSize: 11, lineHeight: 1.6 }}>고객이 방문 만족도를 빠르게 이해하는 <b style={{ color: M.text }}>보조 지표</b>예요. 퍼블리 순위 점수와 다르며 별점만으로 검색순위 상승을 보장하지 않아요. 새 별점 리뷰가 추가되거나 리뷰가 검토·미노출되면 평균이 오르내릴 수 있으므로 리뷰 수와 함께 추적합니다.</p>
+        {ratingTrend.previous && <div style={{ marginTop: 8, padding: "8px 10px", borderRadius: 9, background: M.soft, fontSize: 10.8, color: M.sub }}>이전 변화 기준: ⭐ {ratingTrend.previous.score} / 리뷰 {ratingTrend.previous.reviewCount.toLocaleString()}개 → 현재 ⭐ {ratingTrend.latest?.score} / 리뷰 {ratingTrend.latest?.reviewCount.toLocaleString()}개</div>}
+      </section>}
 
       {/* ── 진행 스트립: 지금 어디까지 왔는지(회진 칩) ── */}
       {(() => {
