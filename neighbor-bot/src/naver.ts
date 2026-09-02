@@ -5206,6 +5206,24 @@ function estimateReadSec(textLen: number, imgCount: number, intensity = 1): numb
   return Math.min(420, Math.max(10, (readByText + readByImg) * intensity)); // 10초~7분 캡
 }
 
+// 🩺 실패 원인 정밀 진단 — 페이지 상태를 읽어 "왜 안 됐는지" 정확히 로그로.
+//   네이버가 나중에 뭘 바꿔도 이 로그만 보면 원인 즉시 파악(차단/로그인/노출없음/구조변경 등).
+async function inflowDiagnose(page: any, target: InflowTarget, log: (m: string) => void): Promise<void> {
+  try {
+    const body = await page.evaluate(() => (document.body?.innerText || "").slice(0, 500)).catch(() => "");
+    const url = (() => { try { return page.url(); } catch { return ""; } })();
+    if (/접속이 일시적으로 제한|shopping_stop|비정상적인 접근|abusing/i.test(body)) {
+      log("  🚫 [진단] 네이버 봇 감지 차단 — 자동화 접속으로 막혔어요. 속도를 늦추거나(텀↑) 잠시 후 다시. 반복되면 이 IP를 잠시 쉬게 하세요.");
+    } else if (/로그인|nidlogin|아이디 또는 전화번호/i.test(body) && /nid\.naver\.com|login/i.test(url)) {
+      log("  🔑 [진단] 로그인 필요 — 계정을 선택하거나 로그인 세션이 필요해요(저장·찜 등 액션).");
+    } else if (/일시적인 오류|잠시 후 다시|서비스 점검/i.test(body)) {
+      log("  🌐 [진단] 네이버 일시 오류/점검 — 잠시 후 재시도하세요.");
+    } else {
+      log("  🔍 [진단] 검색결과에 대상이 노출되지 않았어요(현재 순위가 낮음). 홈 폴백으로 시도하거나 키워드를 바꿔보세요.");
+    }
+  } catch { log("  ⚠️ [진단] 페이지 상태를 읽지 못했어요(네트워크/타임아웃 가능)."); }
+}
+
 // 검색결과를 스크롤하며 대상(플레이스/블로그) 링크를 찾아 클릭 진입. 성공 시 진입한 page 반환.
 //  ★플레이스는 지도(map)로 새지 않게 "플레이스 상세" 링크를 우선 클릭한다.
 async function inflowFindAndEnter(page: any, target: InflowTarget, log: (m: string) => void): Promise<any | null> {
@@ -5310,8 +5328,8 @@ async function inflowActions(page: any, target: InflowTarget, actions: InflowAct
     if (target.type === "place") {
       // 방문의도 신호(길찾기·전화·예약)가 플레이스 순위에 가장 강함.
       //   ★셀렉터는 m.place.naver.com 실측 기준(2026-09): 텍스트가 정확히 일치하는 a/button을 우선.
-      if (roll(actions.save))       await clickFirst(['a:text-is("저장")', 'button:text-is("저장")', 'a:has-text("저장")', '[class*="save"]'], "  💾 저장");
-      if (roll(actions.directions)) await clickFirst(['a[href*="route"]', 'a[href*="launchApp/route"]', 'a:text-is("길찾기")', 'a:has-text("길찾기")'], "  🧭 길찾기");
+      if (roll(actions.save))       { if (!await clickFirst(['a:text-is("저장")', 'button:text-is("저장")', 'a:has-text("저장")', '[class*="save"]'], "  💾 저장")) log("  ⚙️ [진단] 저장 버튼 못 찾음 — 로그인 필요하거나 네이버가 화면을 바꿨을 수 있어요(개발자 확인)."); }
+      if (roll(actions.directions)) { if (!await clickFirst(['a[href*="route"]', 'a[href*="launchApp/route"]', 'a:text-is("길찾기")', 'a:has-text("길찾기")'], "  🧭 길찾기")) log("  ⚙️ [진단] 길찾기 버튼 못 찾음 — 화면 구조 변경 의심(개발자 확인)."); }
       if (roll(actions.call)) {
         // 전화는 tel: 링크 — 실제 통화 앱을 띄우지 않게 클릭 대신 '표시/포커스'로 관심 신호만.
         const telSel = ['a[href^="tel:"]', 'a:text-is("전화")', 'a:has-text("전화")'];
@@ -5486,7 +5504,7 @@ export async function searchInflow(params: {
 
       const entered = await inflowFindAndEnter(page, curTarget, log);
       if (!entered) {
-        log(`  ⚠️ "${kw}" 결과에서 대상을 못 찾음(현재 노출 순위가 낮음). 이번 방문 건너뜀`);
+        await inflowDiagnose(page, curTarget, log);   // 🩺 왜 안 됐는지 정확히 로그로
         done++; failStreak++; params.onProgress?.(done, rounds);
       } else {
         await inflowDwellRead(entered, log, params.shouldStop, intensity);
