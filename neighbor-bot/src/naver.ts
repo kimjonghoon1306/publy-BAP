@@ -5337,6 +5337,7 @@ export async function searchInflow(params: {
   device?: "mobile" | "pc" | "mix"; // 접속 기기(기본 모바일, mix=방문마다 랜덤)
   intervalSec?: [number, number];  // 방문 사이 텀(사용자 임의 지정, 랜덤)
   spreadHours?: number;            // ⏱️ 이 시간에 걸쳐 자연 분산(0=텀 그대로). 설정 시 텀 자동계산
+  visible?: boolean;               // 🪟 브라우저 창 띄우기(테스트용, 기본 백그라운드)
   actions?: InflowActions;         // 저장·공감·공유·길찾기·전화·예약·톡톡·리뷰
   fullFunnel?: boolean;            // 🌀 풀퍼널(여러 글·탭 둘러보기 + 이웃)
   requireLogin?: boolean;          // 저장/공감 등 로그인 필요 액션 시
@@ -5376,7 +5377,7 @@ export async function searchInflow(params: {
 
     let browser: any = null;
     try {
-      browser = await launchBrowser(params.accountId, { headless: true, feature: "inflow", ownerUserId: params.ownerUserId, log });
+      browser = await launchBrowser(params.accountId, { headless: !params.visible, feature: "inflow", ownerUserId: params.ownerUserId, log });
       // 접속 기기 결정 — mix면 방문마다 랜덤(사람처럼 모바일/PC 섞임)
       const dev = params.device === "mix" ? (Math.random() < 0.5 ? "pc" : "mobile") : (params.device === "pc" ? "pc" : "mobile");
       const context = await browser.newContext(

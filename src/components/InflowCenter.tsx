@@ -103,6 +103,7 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
   const [doReview, setDoReview] = useState(false); // ✍️ 리뷰(관리자 락)
   const [reviewText, setReviewText] = useState("");
   const [auto, setAuto] = useState(false);
+  const [visible, setVisible] = useState(false); // 🪟 창 보기(테스트)
   const [accountId, setAccountId] = useState("");
   const [accounts, setAccounts] = useState<PublyAccount[]>([]);
   const [running, setRunning] = useState(false);
@@ -201,6 +202,7 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
       fullFunnel: String(funnel),
       spreadHours: spread ? String(spreadHours) : "0",
       doReview: String(doReview), reviewText: doReview ? reviewText : "",
+      visible: String(visible),
     });
     if (userId) params.set("userId", userId);
     if (accountId) params.set("accountId", accountId);
@@ -407,6 +409,7 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
               <ActionChk v={doShare} set={setDoShare} label="🔗 공유" />
             </>)}
             <ActionChk v={auto} set={setAuto} label="⚙️ 자동(오늘 한도까지)" />
+            <ActionChk v={visible} set={setVisible} label="🪟 창 보기(테스트)" />
           </div>
         </div>
 
