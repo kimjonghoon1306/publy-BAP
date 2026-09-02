@@ -159,6 +159,9 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
   // 🔎 키워드 발굴
   const [kwLoading, setKwLoading] = useState(false);
   const [kwSuggest, setKwSuggest] = useState<string[]>([]);
+  // 💬 리뷰 감정분석
+  const [revLoading, setRevLoading] = useState(false);
+  const [revResult, setRevResult] = useState<{ total: number; likes: { word: string; n: number }[]; dislikes: { word: string; n: number }[] } | null>(null);
   // ⏰ 예약 실행
   const [schedEnabled, setSchedEnabled] = useState(false);
   const [schedTime, setSchedTime] = useState("10:00");
@@ -270,6 +273,25 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
   const addSuggestedKeyword = (k: string) => {
     setKeywords(prev => { const list = prev.split(/[,\n]/).map(x=>x.trim()).filter(Boolean); if (list.includes(k)) return prev; return [...list, k].join(", "); });
     setKwSuggest(prev => prev.filter(x => x !== k));
+  };
+
+  // 💬 리뷰 감정분석 — 리뷰 수집 후 칭찬·불만 키워드 빈도(AI 키 불필요)
+  const runReviewAnalysis = async () => {
+    if (targetType !== "place" || !placeUrl.trim()) { toast("먼저 플레이스 주소를 입력하세요", "error"); return; }
+    setRevLoading(true); setRevResult(null);
+    try {
+      const r = await fetch(`${BOT}/api/place-reviews?placeUrl=${encodeURIComponent(placeUrl.trim())}`);
+      const j = await r.json();
+      if (j.error) { toast(j.error, "error"); return; }
+      const reviews: string[] = j.reviews || [];
+      if (!reviews.length) { toast("리뷰를 읽지 못했어요", "info"); return; }
+      // 칭찬/불만 사전(자주 쓰는 표현) — 빈도 카운트
+      const LIKE = ["맛있", "친절", "신선", "분위기", "깨끗", "양이 많", "가성비", "재방문", "추천", "정갈", "든든", "빠르", "편안", "만족"];
+      const BAD = ["불친절", "비싸", "느리", "오래 기다", "대기", "주차", "좁", "위생", "별로", "실망", "짜", "불만", "아쉬"];
+      const count = (words: string[]) => words.map(w => ({ word: w, n: reviews.filter(rv => rv.includes(w)).length })).filter(x => x.n > 0).sort((a, b) => b.n - a.n);
+      setRevResult({ total: reviews.length, likes: count(LIKE).slice(0, 6), dislikes: count(BAD).slice(0, 6) });
+    } catch { toast("리뷰 분석 실패 — 봇 서버(3334) 확인", "error"); }
+    finally { setRevLoading(false); }
   };
 
   // 🥊 경쟁사 추적 — 내 키워드 상위 경쟁사 vs 나
@@ -610,6 +632,39 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
             </div>
           ) : !diagLoading && (
             <div style={{ padding: "20px", textAlign: "center", color: C.sub, fontSize: 13, fontWeight: 600 }}>위 버튼을 눌러 내 플레이스가 순위 오르기에 뭐가 부족한지 확인하세요.</div>
+          )}
+        </div>
+      )}
+
+      {/* ── 💬 리뷰 감정분석 (손님이 뭘 좋아하고 뭘 불만하나) ── */}
+      {targetType === "place" && (
+        <div style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 16, padding: 18, marginBottom: 14 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4, flexWrap: "wrap" }}>
+            <span style={{ fontSize: 16, fontWeight: 900 }}>💬 리뷰 감정분석</span>
+            <button onClick={runReviewAnalysis} disabled={revLoading} style={{ marginLeft: "auto", padding: "9px 18px", borderRadius: 10, border: "none", background: `linear-gradient(135deg,#8b5cf6,#ec4899)`, color: "#fff", fontSize: 13.5, fontWeight: 800, cursor: revLoading?"default":"pointer", fontFamily: "inherit", opacity: revLoading?0.6:1 }}>{revLoading ? "분석 중…" : "💬 손님 마음 읽기"}</button>
+          </div>
+          <p style={{ margin: "0 0 14px", fontSize: 12.5, color: C.sub, fontWeight: 600, lineHeight: 1.6 }}>손님 리뷰를 읽어 <b style={{color:C.ink}}>뭘 좋아하고 뭘 불만하는지</b> 알려드려요. 칭찬은 소식·홍보에 쓰고, 불만은 바로 개선하세요.</p>
+          {revResult ? (
+            <div>
+              <div style={{ fontSize: 12.5, fontWeight: 700, color: C.sub, marginBottom: 10 }}>리뷰 {revResult.total}개 분석</div>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(220px,1fr))", gap: 12 }}>
+                <div style={{ background: "rgba(22,163,74,.07)", border: "1px solid #16a34a33", borderRadius: 12, padding: 14 }}>
+                  <div style={{ fontSize: 13.5, fontWeight: 900, color: "#16a34a", marginBottom: 8 }}>👍 손님이 좋아하는 것</div>
+                  {revResult.likes.length ? revResult.likes.map(l => (
+                    <div key={l.word} style={{ display: "flex", justifyContent: "space-between", fontSize: 13, fontWeight: 700, padding: "3px 0" }}><span>{l.word}</span><span style={{ color: "#16a34a" }}>{l.n}회</span></div>
+                  )) : <div style={{ fontSize: 12.5, color: C.sub }}>뚜렷한 칭찬 키워드가 적어요.</div>}
+                </div>
+                <div style={{ background: "rgba(220,38,38,.06)", border: "1px solid #dc262633", borderRadius: 12, padding: 14 }}>
+                  <div style={{ fontSize: 13.5, fontWeight: 900, color: "#dc2626", marginBottom: 8 }}>⚠️ 개선하면 좋을 것</div>
+                  {revResult.dislikes.length ? revResult.dislikes.map(l => (
+                    <div key={l.word} style={{ display: "flex", justifyContent: "space-between", fontSize: 13, fontWeight: 700, padding: "3px 0" }}><span>{l.word}</span><span style={{ color: "#dc2626" }}>{l.n}회</span></div>
+                  )) : <div style={{ fontSize: 12.5, color: C.sub }}>불만 표현이 거의 없어요 — 아주 좋아요! 🎉</div>}
+                </div>
+              </div>
+              {revResult.likes[0] && <p style={{ margin: "12px 0 0", fontSize: 12.5, color: C.sub, fontWeight: 600, lineHeight: 1.5 }}>💡 <b style={{color:C.ink}}>"{revResult.likes[0].word}"</b>을(를) 가장 많이 칭찬해요 — 이 강점을 소식·대표 사진·홍보 문구에 내세우세요.</p>}
+            </div>
+          ) : !revLoading && (
+            <div style={{ padding: "20px", textAlign: "center", color: C.sub, fontSize: 13, fontWeight: 600 }}>버튼을 눌러 손님들이 뭘 좋아하고 뭘 아쉬워하는지 확인하세요.</div>
           )}
         </div>
       )}
