@@ -5200,7 +5200,7 @@ const inflowSleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 const inflowRnd = (a: number, b: number) => a + Math.random() * (b - a);
 const inflowRndInt = (a: number, b: number) => Math.floor(inflowRnd(a, b + 1));
 
-// 글 분량(글자수·이미지수)으로 "전체 읽는" 체류시간(초) 추정. intensity=강도 배수(빠르게0.5/보통1/꼼꼼히1.8)
+// 글 분량(글자수·이미지수)으로 "전체 읽는" 체류시간(초) 추정. intensity=강도 배수(빠르게0.35/보통1/꼼꼼히2.5)
 function estimateReadSec(textLen: number, imgCount: number, intensity = 1): number {
   const charsPerSec = inflowRnd(7, 11); // 사람 읽기 속도(대략 분당 420~660자)
   const readByText = textLen / charsPerSec;
@@ -5295,11 +5295,12 @@ async function inflowFindAndEnter(page: any, target: InflowTarget, log: (m: stri
 }
 
 // 진입한 페이지에서 글 전체를 읽는 것처럼 체류(끝까지 스크롤). intensity=체류 강도 배수
-async function inflowDwellRead(page: any, log: (m: string) => void, shouldStop?: () => boolean, intensity = 1): Promise<void> {
+async function inflowDwellRead(page: any, log: (m: string) => void, shouldStop?: () => boolean, intensity = 1, maxDwellSec = 0): Promise<void> {
   const { textLen, imgCount } = await page
     .evaluate(() => ({ textLen: (document.body?.innerText || "").length, imgCount: document.querySelectorAll("img").length }))
     .catch(() => ({ textLen: 1200, imgCount: 5 }));
-  const sec = estimateReadSec(textLen, imgCount, intensity);
+  const estimatedSec = estimateReadSec(textLen, imgCount, intensity);
+  const sec = maxDwellSec > 0 ? Math.min(estimatedSec, maxDwellSec) : estimatedSec;
   log(`  📖 글 전체 읽는 중… (본문 ${textLen}자·이미지 ${imgCount}장 → 약 ${Math.round(sec)}초 체류)`);
   const steps = Math.max(6, Math.round(sec / inflowRnd(2, 4)));
   const per = (sec * 1000) / steps;
@@ -5342,8 +5343,8 @@ async function inflowActions(page: any, target: InflowTarget, actions: InflowAct
         }
         if (!hit) log("  ⚠️ 전화 버튼 없음(이 가게 미설정)");
       }
-      if (roll(actions.booking))    await clickFirst(['a[href*="booking.naver"]', 'a:text-is("예약")', 'a:has-text("예약")', 'a:has-text("네이버 예약")'], "  📅 예약");
-      if (roll(actions.talk))       await clickFirst(['a[href*="talk.naver"]', 'a[href*="talk"]', 'a:text-is("톡톡")', 'a:has-text("톡톡")', 'a:has-text("문의")'], "  💬 톡톡 문의");
+      if (roll(actions.booking))    { if (!await clickFirst(['a[href*="booking.naver"]', 'a:text-is("예약")', 'a:has-text("예약")', 'a:has-text("네이버 예약")'], "  📅 예약")) log("  ⚙️ [진단] 예약 버튼 못 찾음 — 예약 미설정이거나 네이버 화면 변경 의심."); }
+      if (roll(actions.talk))       { if (!await clickFirst(['a[href*="talk.naver"]', 'a[href*="talk"]', 'a:text-is("톡톡")', 'a:has-text("톡톡")', 'a:has-text("문의")'], "  💬 톡톡 문의")) log("  ⚙️ [진단] 톡톡 버튼 못 찾음 — 톡톡 미설정이거나 네이버 화면 변경 의심."); }
       // ✍️ 리뷰 작성(관리자 락 기본잠금 — 가짜리뷰 밴 위험). 리뷰탭→작성 진입 후 텍스트 입력·등록.
       if (actions.review && actions.reviewText) {
         try {
@@ -5360,11 +5361,11 @@ async function inflowActions(page: any, target: InflowTarget, actions: InflowAct
       }
     }
     if (target.type === "blog" && roll(actions.like)) {
-      await clickFirst(['a.u_likeit_list_btn', 'a[class*="like"]', 'button[class*="sympathy"]', 'a:has-text("공감")'], "  💚 블로그 공감");
+      if (!await clickFirst(['a.u_likeit_list_btn', 'a[class*="like"]', 'button[class*="sympathy"]', 'a:has-text("공감")'], "  💚 블로그 공감")) log("  ⚙️ [진단] 공감 버튼 못 찾음 — 로그인 필요하거나 네이버 화면 변경 의심.");
     }
     // 🔗 공유 — 플레이스·블로그 공통(실측: a.spi_sns_share)
     if (roll(actions.share)) {
-      await clickFirst(['a.spi_sns_share', 'a[class*="spi_sns_share"]', 'a:text-is("공유")', 'a:has-text("공유")', 'button:has-text("공유")', '[class*="share"] a'], "  🔗 공유");
+      if (!await clickFirst(['a.spi_sns_share', 'a[class*="spi_sns_share"]', 'a:text-is("공유")', 'a:has-text("공유")', 'button:has-text("공유")', '[class*="share"] a'], "  🔗 공유")) log("  ⚙️ [진단] 공유 버튼 못 찾음 — 네이버 화면 변경 의심(개발자 확인).");
     }
   } catch (e: any) {
     log(`  ⚠️ 액션 실패(무시): ${e?.message || e} (실기기 셀렉터 교정 필요)`);
@@ -5529,7 +5530,8 @@ export async function searchInflow(params: {
   target: InflowTarget;            // 플레이스 or 블로그(단일)
   targets?: InflowTarget[];        // 여러 대상(있으면 방문마다 로테이션)
   rounds: number;                  // 이번 실행 방문 횟수(한도 내)
-  intensity?: number;              // 체류 강도 배수(0.5 빠르게 /1 보통 /1.8 꼼꼼히)
+  intensity?: number;              // 체류 강도 배수(0.35 빠르게 /1 보통 /2.5 꼼꼼히)
+  maxDwellSec?: number;            // 최대 체류시간(초), 0이면 본문 분량에 따라 자동
   actionRate?: number;             // 액션 발동 확률(0~1). 1=매번
   device?: "mobile" | "pc" | "mix"; // 접속 기기(기본 모바일, mix=방문마다 랜덤)
   intervalSec?: [number, number];  // 방문 사이 텀(사용자 임의 지정, 랜덤)
@@ -5540,6 +5542,7 @@ export async function searchInflow(params: {
   requireLogin?: boolean;          // 저장/공감 등 로그인 필요 액션 시
   onLog?: (m: string) => void;
   onProgress?: (done: number, total: number) => void;
+  onShot?: (caption: string, dataUrl: string) => void; // 📸 단계별 화면 캡처(실제 뭘 하는지 눈으로)
   shouldStop?: () => boolean;
   onQuota?: () => Promise<boolean>; // 회차마다 한도 체크(false면 중단)
 }): Promise<{ done: number; success: number }> {
@@ -5599,19 +5602,32 @@ export async function searchInflow(params: {
       if (cookies) await context.addCookies(cookies).catch(() => {});
       const page = await context.newPage();
 
+      // 📸 화면 캡처 헬퍼 — onShot 있을 때만(용량 위해 축소·jpeg). 실패해도 유입 안 막게 삼킴.
+      const shot = async (pg: any, caption: string) => {
+        if (!params.onShot) return;
+        try {
+          const buf = await pg.screenshot({ type: "jpeg", quality: 45 });
+          params.onShot(caption, `data:image/jpeg;base64,${buf.toString("base64")}`);
+        } catch {}
+      };
+
       const searchBase = dev === "pc" ? "https://search.naver.com/search.naver" : "https://m.search.naver.com/search.naver";
       await page.goto(`${searchBase}?query=${encodeURIComponent(kw)}`, { waitUntil: "domcontentloaded", timeout: 25000 });
       log(`  ${dev === "pc" ? "🖥️ PC" : "📱 모바일"} 검색결과 로드 완료 — 결과 탐색 중…`);
       await page.waitForTimeout(inflowRndInt(1200, 2600));
+      await shot(page, `🔍 "${kw}" 검색결과`);
 
       const entered = await inflowFindAndEnter(page, curTarget, log);
       if (!entered) {
         await inflowDiagnose(page, curTarget, log);   // 🩺 왜 안 됐는지 정확히 로그로
+        await shot(page, "⚠️ 대상 못 찾음");
         done++; failStreak++; params.onProgress?.(done, rounds);
       } else {
-        await inflowDwellRead(entered, log, params.shouldStop, intensity);
+        await shot(entered, "🎯 대상 진입");
+        await inflowDwellRead(entered, log, params.shouldStop, intensity, params.maxDwellSec || 0);
         await inflowActions(entered, curTarget, { ...(params.actions || {}), rate: actionRate }, log);
         if (params.fullFunnel) await inflowFullFunnel(entered, curTarget, log, params.shouldStop);
+        await shot(entered, "✅ 체류·액션 완료");
         success++; done++; failStreak = 0;
         log(`  ✅ 유입 완료 (${kw}) — 누적 성공 ${success}회`);
         params.onProgress?.(done, rounds);

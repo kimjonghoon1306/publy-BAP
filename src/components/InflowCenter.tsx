@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { BotEventStream } from "../lib/botApi";
+import { BotEventStream, botFetch } from "../lib/botApi";
 import UsageGuide from "./UsageGuide";
 import SproutAssistant from "./SproutAssistant";
 import { INFLOW_DAILY_LIMIT, PLAN_CONFIG, getInflowDailyUsage, getInflowUsageHistory, getAccounts, PublyAccount, getAutopilot, saveAutopilot, getRankHistory, AutopilotConfig, getInflowSchedule, saveInflowSchedule, inflowScheduleRanToday, markInflowScheduleRan, getPerfReport, PerfReport, recordRankPoint } from "../lib/supabase";
@@ -130,6 +130,7 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
   const [auto, setAuto] = useState(saved0.auto ?? false);
   const [actionRate, setActionRate] = useState<number>(saved0.actionRate ?? 100); // 🎲 액션 발동 확률(%)
   const [intensity, setIntensity] = useState<"fast" | "normal" | "deep">(saved0.intensity ?? "normal"); // 📖 체류 강도
+  const [maxDwellSec, setMaxDwellSec] = useState<number>(saved0.maxDwellSec ?? 90); // 0=본문 분량에 따라 자동
   const [extraTargets, setExtraTargets] = useState<string[]>(saved0.extraTargets ?? []); // ➕ 추가 대상(주소 목록)
   // 🏪 내 플레이스/블로그 저장 목록(이름+주소) — 여러 개 저장해두고 골라 쓰기
   type SavedTarget = { id: string; name: string; url: string; type: "place" | "blog" };
@@ -208,7 +209,7 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
     if (targetType !== "place" || !placeUrl.trim()) { toast("먼저 플레이스 주소를 입력하세요", "error"); return; }
     setDiagLoading(true); setDiag(null);
     try {
-      const r = await fetch(`${BOT}/api/place-diagnose?placeUrl=${encodeURIComponent(placeUrl.trim())}`);
+      const r = await botFetch(`${BOT}/api/place-diagnose?placeUrl=${encodeURIComponent(placeUrl.trim())}`);
       const j = await r.json();
       if (j.error) { toast(j.error, "error"); }
       else { setDiag(j); toast(`최적화 점수 ${j.score}점`, "success"); }
@@ -224,7 +225,7 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
     if (!kw) { toast("순위를 측정할 키워드를 입력하세요(오토파일럿 키워드 또는 첫 키워드)", "error"); return; }
     setRankLoading(true);
     try {
-      const r = await fetch(`${BOT}/api/place-rank?keyword=${encodeURIComponent(kw)}&placeUrl=${encodeURIComponent(placeUrl.trim())}`);
+      const r = await botFetch(`${BOT}/api/place-rank?keyword=${encodeURIComponent(kw)}&placeUrl=${encodeURIComponent(placeUrl.trim())}`);
       const j = await r.json();
       if (j.error) { toast(j.error, "error"); return; }
       if (j.rank == null) { toast(`"${kw}"에서 30위 밖이에요(노출 순위 낮음). 유입·리뷰로 끌어올리세요.`, "info"); }
@@ -243,7 +244,7 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
     const kw = (apKeyword || keywords.split(/[,\n]/)[0] || "").trim();
     if (!kw) return false;
     try {
-      const r = await fetch(`${BOT}/api/place-rank?keyword=${encodeURIComponent(kw)}&placeUrl=${encodeURIComponent(placeUrl.trim())}`);
+      const r = await botFetch(`${BOT}/api/place-rank?keyword=${encodeURIComponent(kw)}&placeUrl=${encodeURIComponent(placeUrl.trim())}`);
       const j = await r.json();
       if (j.rank != null) {
         setApLastRank(j.rank);
@@ -263,7 +264,7 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
     if (!seeds.length) { toast("먼저 키워드를 1개 이상 입력하세요(예: 횡성한우)", "error"); return; }
     setKwLoading(true); setKwSuggest([]);
     try {
-      const r = await fetch(`${BOT}/api/place/keywords?seeds=${encodeURIComponent(JSON.stringify(seeds))}`);
+      const r = await botFetch(`${BOT}/api/place/keywords?seeds=${encodeURIComponent(JSON.stringify(seeds))}`);
       const j = await r.json();
       if (!j.ok) { toast(j.error || "추천 실패", "error"); return; }
       const already = new Set(keywords.split(/[,\n]/).map(k=>k.trim()));
@@ -304,7 +305,7 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
     if (targetType !== "place" || !placeUrl.trim()) { toast("먼저 플레이스 주소를 입력하세요", "error"); return; }
     setRevLoading(true); setRevResult(null);
     try {
-      const r = await fetch(`${BOT}/api/place-reviews?placeUrl=${encodeURIComponent(placeUrl.trim())}`);
+      const r = await botFetch(`${BOT}/api/place-reviews?placeUrl=${encodeURIComponent(placeUrl.trim())}`);
       const j = await r.json();
       if (j.error) { toast(j.error, "error"); return; }
       const reviews: string[] = j.reviews || [];
@@ -324,7 +325,7 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
     if (!kw) { toast("먼저 검색 키워드를 입력하세요", "error"); return; }
     setCompLoading(true); setComp(null);
     try {
-      const r = await fetch(`${BOT}/api/competitors?query=${encodeURIComponent(kw)}${placeUrl.trim()?`&myPlaceUrl=${encodeURIComponent(placeUrl.trim())}`:""}`);
+      const r = await botFetch(`${BOT}/api/competitors?query=${encodeURIComponent(kw)}${placeUrl.trim()?`&myPlaceUrl=${encodeURIComponent(placeUrl.trim())}`:""}`);
       const j = await r.json();
       if (j.error) toast(j.error, "error");
       else setComp(j);
@@ -405,16 +406,29 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
     esRef.current?.close();
     esRef.current = null;
   }, []);
+  useEffect(() => {
+    if (!running) return;
+    let lock: any = null;
+    let cancelled = false;
+    const keepScreenOn = async () => {
+      try {
+        lock = await (navigator as any).wakeLock?.request("screen");
+        if (cancelled) await lock?.release();
+      } catch {}
+    };
+    void keepScreenOn();
+    return () => { cancelled = true; void lock?.release().catch(() => {}); };
+  }, [running]);
 
   // 🔁 폼 입력값 저장(탭 이동해도 유지). 무거운 것(로그·계정목록)은 제외.
   useEffect(() => {
     try {
       localStorage.setItem(formKey, JSON.stringify({
         targetType, placeUrl, blogUrl, keywords, rounds, termMin, termMax, device,
-        doSave, doShare, doDir, doCall, doBook, doTalk, doLike, funnel, spread, spreadHours, doReview, reviewText, auto, actionRate, intensity, extraTargets, kwWeights,
+        doSave, doShare, doDir, doCall, doBook, doTalk, doLike, funnel, spread, spreadHours, doReview, reviewText, auto, actionRate, intensity, maxDwellSec, extraTargets, kwWeights,
       }));
     } catch {}
-  }, [formKey, targetType, placeUrl, blogUrl, keywords, rounds, termMin, termMax, device, doSave, doShare, doDir, doCall, doBook, doTalk, doLike, funnel, spread, spreadHours, doReview, reviewText, auto, actionRate, intensity, extraTargets, kwWeights]);
+  }, [formKey, targetType, placeUrl, blogUrl, keywords, rounds, termMin, termMax, device, doSave, doShare, doDir, doCall, doBook, doTalk, doLike, funnel, spread, spreadHours, doReview, reviewText, auto, actionRate, intensity, maxDwellSec, extraTargets, kwWeights]);
 
   // 🔔 앱 내 자동 알림 — 날짜/주차 마커로 중복을 막고, 다음 실행 때 놓친 알림도 알림함에 쌓는다.
   useEffect(() => {
@@ -455,7 +469,7 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
           markRun("report", day);
         }
         if (targetType === "place" && place && keyword && !hasRun("rank", day)) {
-          const response = await fetch(`${BOT}/api/place-rank?keyword=${encodeURIComponent(keyword)}&placeUrl=${encodeURIComponent(place)}`);
+          const response = await botFetch(`${BOT}/api/place-rank?keyword=${encodeURIComponent(keyword)}&placeUrl=${encodeURIComponent(place)}`);
           const result = await response.json();
           if (!result.error && result.rank != null) {
             const previous = Number(localStorage.getItem(`${markerPrefix}_last_rank`));
@@ -467,7 +481,7 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
           markRun("rank", day);
         }
         if (targetType === "place" && place && keyword && !hasRun("competitor", day)) {
-          const response = await fetch(`${BOT}/api/competitors?query=${encodeURIComponent(keyword)}&myPlaceUrl=${encodeURIComponent(place)}`);
+          const response = await botFetch(`${BOT}/api/competitors?query=${encodeURIComponent(keyword)}&myPlaceUrl=${encodeURIComponent(place)}`);
           const result = await response.json();
           const mine = result.mine as { rank: number; review: number } | null | undefined;
           const leader = mine && result.top?.find((entry: any) => !entry.isMine && entry.rank < mine.rank);
@@ -475,7 +489,7 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
           markRun("competitor", day);
         }
         if (targetType === "place" && place && !hasRun("diagnose", week)) {
-          const response = await fetch(`${BOT}/api/place-diagnose?placeUrl=${encodeURIComponent(place)}`);
+          const response = await botFetch(`${BOT}/api/place-diagnose?placeUrl=${encodeURIComponent(place)}`);
           const result = await response.json();
           if (!result.error) {
             setDiag(result);
@@ -519,7 +533,8 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
       doReview: String(doReview), reviewText: doReview ? reviewText : "",
       visible: String(visible),
       actionRate: String(Math.max(0, Math.min(1, actionRate / 100))),
-      intensity: intensity === "fast" ? "0.5" : intensity === "deep" ? "1.8" : "1",
+      intensity: intensity === "fast" ? "0.35" : intensity === "deep" ? "2.5" : "1",
+      maxDwellSec: String(Math.max(0, maxDwellSec)),
     });
     if (userId) params.set("userId", userId);
     if (accountId) params.set("accountId", accountId);
@@ -669,11 +684,11 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
             <button onClick={saveCurrentTarget} style={{ padding: "0 22px", borderRadius: 12, border: "none", background: `linear-gradient(135deg,${C.accent},${C.cyan})`, color: "#fff", fontSize: 14.5, fontWeight: 900, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}>💾 저장</button>
           </div>
           {/* 저장된 목록 — 골라 쓰기 */}
-          {savedTargets.length > 0 && (
+          {savedTargets.filter((t) => t.type === targetType).length > 0 && (
             <div style={{ marginTop: 10, padding: 12, borderRadius: 12, background: C.panel2, border: `1px solid ${C.line}` }}>
               <div style={{ fontSize: 12, fontWeight: 800, color: C.sub, marginBottom: 8 }}>🏪 저장한 대상 (눌러서 불러오기)</div>
               <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                {savedTargets.map((t) => {
+                {savedTargets.filter((t) => t.type === targetType).map((t) => {
                   const active = (t.type === "place" ? placeUrl : blogUrl).trim() === t.url && targetType === t.type;
                   return (
                     <div key={t.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 12px", borderRadius: 10, background: active ? C.glow : C.panel, border: `1px solid ${active ? C.accent : C.line}` }}>
@@ -751,10 +766,14 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
           <div style={{ flex: 1, minWidth: 220 }}>
             <label style={labelStyle}>📖 체류 강도 <span style={{ color: C.sub, fontWeight: 600 }}>(글 읽는 시간)</span></label>
             <div style={{ display: "flex", gap: 6 }}>
-              {([["fast", "빠르게"], ["normal", "보통"], ["deep", "꼼꼼히"]] as const).map(([k, lb]) => (
+              {([["fast", "빠르게 ~20초"], ["normal", "보통 ~60초"], ["deep", "꼼꼼히 ~3분"]] as const).map(([k, lb]) => (
                 <button key={k} onClick={() => setIntensity(k)} style={{ flex: 1, padding: "11px", borderRadius: 10, border: `2px solid ${intensity === k ? C.accent : C.line2}`, background: intensity === k ? C.glow : C.panel2, color: intensity === k ? C.accent : C.sub, fontSize: 13.5, fontWeight: 800, cursor: "pointer", fontFamily: "inherit" }}>{lb}</button>
               ))}
             </div>
+          </div>
+          <div style={{ flex: 1, minWidth: 220 }}>
+            <label style={labelStyle}>⏱️ 최대 체류시간(초) <span style={{ color: C.sub, fontWeight: 600 }}>(0=자동)</span></label>
+            <input type="number" min={0} value={maxDwellSec} onChange={(e) => setMaxDwellSec(Math.max(0, Number(e.target.value)))} style={{ ...inputStyle, textAlign: "center" }} />
           </div>
           <div style={{ flex: 1, minWidth: 220 }}>
             <label style={labelStyle}>🎲 액션 확률 <span style={{ color: C.sub, fontWeight: 600 }}>(방문 중 저장·공감 등 실행 비율)</span></label>
@@ -1096,7 +1115,7 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
       </div>
 
       {/* ── 🎯 오토파일럿 ── */}
-      <div className="inflow-card" style={{ order: 12, background: apEnabled ? `linear-gradient(135deg,${C.glow},transparent)` : C.panel, border: `2px solid ${apEnabled ? C.accent : "#3b82f6"}`, borderRadius: 16, padding: 16, marginBottom: 14 }}>
+      {targetType === "place" && (<div className="inflow-card" style={{ order: 12, background: apEnabled ? `linear-gradient(135deg,${C.glow},transparent)` : C.panel, border: `2px solid ${apEnabled ? C.accent : "#3b82f6"}`, borderRadius: 16, padding: 16, marginBottom: 14 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: apEnabled || true ? 12 : 0, flexWrap: "wrap" }}>
           <span style={{ fontSize: 15, fontWeight: 900 }}>🎯 순위 오토파일럿</span>
           <span style={{ fontSize: 10, fontWeight: 800, background: apEnabled ? "#16a34a" : C.sub, color: "#fff", padding: "2px 8px", borderRadius: 6 }}>{apEnabled ? "가동 중" : "꺼짐"}</span>
@@ -1115,7 +1134,7 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
           <button onClick={() => saveAp(!apEnabled)} style={{ padding: "13px 20px", borderRadius: 12, border: apEnabled ? `2px solid ${C.accent}` : "none", background: apEnabled ? C.panel2 : `linear-gradient(135deg,${C.accent},${C.cyan})`, color: apEnabled ? C.accent : "#fff", fontSize: 15, fontWeight: 900, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}>{apEnabled ? "끄기" : "🎯 켜기"}</button>
         </div>
         <p style={{ margin: "10px 0 0", fontSize: 11, color: C.sub, fontWeight: 600, lineHeight: 1.5 }}>※ 위 실행 패널의 대상(플레이스/블로그 주소)을 기준으로 추적해요. <b style={{color:C.ink}}>📍 지금 순위 측정</b>을 누르면 현재 순위를 기록해 리포트·그래프에 반영돼요. 달성하면 유입을 줄여 한도를 아끼고, 떨어지면 다시 밀어 올려요.</p>
-      </div>
+      </div>)}
 
       {/* ── ⏰ 예약 실행 ── */}
       <div className="inflow-card" style={{ order: 13, background: schedEnabled ? `linear-gradient(135deg,${C.glow},transparent)` : C.panel, border: `2px solid ${schedEnabled ? C.accent : "#06b6d4"}`, borderRadius: 16, padding: 16, marginBottom: 14 }}>

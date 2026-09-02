@@ -162,7 +162,7 @@ app.get("/api/crawl", async (req, res) => {
       sseSend(res, { type: "quota_info", used: quota.used, limit: quota.limit, remaining: quota.limit - quota.used });
     }
 
-    const kwList = keywords.split(",").map((k) => k.trim()).filter(Boolean);
+    const kwList = keywords.split(/[,\n]/).map((k) => k.trim()).filter(Boolean);
     const count = parseInt(countPerKeyword || "30", 10);
 
     const results = await crawlBlogIds({
@@ -428,7 +428,7 @@ app.get("/api/engage-crawl", async (req, res) => {
         onLog: (msg) => sseSend(res, { type: "log", msg }),
       });
     } else {
-      const kwList = keywords.split(",").map((k) => k.trim()).filter(Boolean);
+      const kwList = keywords.split(/[,\n]/).map((k) => k.trim()).filter(Boolean);
       results = await crawlBlogIds({
         accountId: "",
         keywords: kwList,
@@ -1107,7 +1107,7 @@ app.get("/api/post-body", async (req, res) => {
 
 /* ── 🆕 NEW 트래픽 유입 (검색유입, SSE) — 기본 잠금(관리자가 켠 회원만), 관리자=락 해제 ── */
 app.get("/api/inflow", async (req, res) => {
-  const { userId, accountId, keywords, targetType, placeUrl, blogId, logNo, rounds, termMin, termMax, doSave, doLike, doShare, doDir, doCall, doBook, doTalk, device, fullFunnel, spreadHours, doReview, reviewText, visible, actionRate, intensity, extraTargets, keywordWeights } = req.query as Record<string, string>;
+  const { userId, accountId, keywords, targetType, placeUrl, blogId, logNo, rounds, termMin, termMax, doSave, doLike, doShare, doDir, doCall, doBook, doTalk, device, fullFunnel, spreadHours, doReview, reviewText, visible, actionRate, intensity, maxDwellSec, extraTargets, keywordWeights } = req.query as Record<string, string>;
   if (!keywords || !targetType) return res.status(400).json({ error: "keywords·targetType 필요" });
   sseSetup(res);
   let releaseAccount = () => {};
@@ -1157,7 +1157,7 @@ app.get("/api/inflow", async (req, res) => {
     let kwWeightsArr: number[] | undefined;
     if (keywordWeights) { try { kwWeightsArr = JSON.parse(keywordWeights); } catch { kwWeightsArr = undefined; } }
 
-    const kwList = keywords.split(",").map((k) => k.trim()).filter(Boolean);
+    const kwList = keywords.split(/[,\n]/).map((k) => k.trim()).filter(Boolean);
     const n = Math.max(1, parseInt(rounds || "10", 10));
     const tmin = Math.max(5, parseInt(termMin || "30", 10));
     const tmax = Math.max(tmin, parseInt(termMax || "90", 10));
@@ -1186,9 +1186,11 @@ app.get("/api/inflow", async (req, res) => {
       visible: visible === "true",
       actionRate: actionRate ? Math.max(0, Math.min(1, parseFloat(actionRate))) : 1,
       intensity: intensity ? Math.max(0.2, parseFloat(intensity)) : 1,
+      maxDwellSec: maxDwellSec ? Math.max(0, parseFloat(maxDwellSec)) : 0,
       requireLogin: doSave === "true" || doLike === "true" || doShare === "true" || doBook === "true" || doTalk === "true" || reviewOk,
       onLog: (msg) => sseSend(res, { type: "log", msg }),
       onProgress: (done, total) => sseSend(res, { type: "progress", done, total }),
+      onShot: (caption, dataUrl) => sseSend(res, { type: "shot", caption, dataUrl }),   // 📸 화면 캡처 전송
       shouldStop: () => stopped,
       onQuota: async () => {
         if (!userId || unlimited) return true;                 // 관리자/무제한 = 락 해제
