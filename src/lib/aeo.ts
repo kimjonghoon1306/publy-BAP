@@ -37,14 +37,32 @@ A4: (답변)
 // 🩺 AEO 형식 진단 — 글 본문(텍스트)을 읽어 AI 인용에 유리한 3요소를 갖췄는지 로컬 판정(AI 호출 0, 무료·즉시).
 //   블로그지수(NeighborPage)에서 내 글이 AEO형인지 체크리스트로 보여줄 때 씀. 단일 소스.
 export interface AeoCheck { key: string; label: string; ok: boolean; hint: string }
+
+// 짧은 소제목을 첫 문단으로 오인하지 않고, 실제 도입 내용 2~3문단까지 살펴본다.
+// AI가 지침을 놓친 경우에는 발행 전에 사실을 지어내지 않는 안전한 요약을 보충한다.
+function hasAeoIntroSummary(body: string): boolean {
+  const paras = (body || "").trim().split(/\n\s*\n/).map(v => v.trim()).filter(Boolean);
+  const meaningful = paras.filter(v => !/^\[(FAQ|관련글|참고자료)/.test(v) && !(v.length <= 32 && !/[.!?。！？]/.test(v))).slice(0, 3);
+  const intro = meaningful.join(" ").slice(0, 650);
+  const sentences = intro.match(/[^.!?。！？]+[.!?。！？]+/g) || [];
+  const summarySignal = /(핵심|정리|요약|결론부터|한마디로|간단히|먼저 알아둘|포인트|기준|세\s*가지|가지는|가지로|순서로|첫째|①|1\.\s)/.test(intro);
+  const answerFirst = /(입니다|이에요|예요|해요|돼요|있어요|없어요|좋아요|필요해요|추천해요)[.!?。！？]/.test(intro);
+  return intro.length >= 55 && sentences.length >= 2 && (summarySignal || answerFirst)
+    && !/^(안녕|반갑|오늘은|여러분|이번에|요즘|날씨)/.test(intro);
+}
+
+export function ensureAeoIntroSummary(body: string, topic: string): string {
+  const clean = (body || "").trim();
+  if (!clean || hasAeoIntroSummary(clean)) return clean;
+  const safeTopic = String(topic || "이 주제").replace(/[\r\n]+/g, " ").trim().slice(0, 55) || "이 주제";
+  const summary = `${safeTopic}에서 먼저 알아둘 핵심을 간단히 정리했어요. 선택 기준과 확인할 점, 실제로 활용하는 순서를 중심으로 아래 내용을 보면 필요한 정보를 빠르게 찾을 수 있어요.`;
+  return `${summary}\n\n${clean}`;
+}
+
 export function diagnoseAeo(body: string): { checks: AeoCheck[]; score: number; passed: number } {
   const text = (body || "").trim();
-  const firstPara = text.split(/\n\s*\n/)[0] || text.slice(0, 200);   // 첫 문단
-  // ① 도입부 핵심 요약: 첫 문단이 서론·인사 없이 결론/핵심을 담았나 (요약 신호어 또는 나열/숫자)
-  const introSummary = firstPara.length >= 40 && (
-    /(핵심|정리|요약|결론부터|한마디로|간단히|세\s*가지|가지는|가지로|순서로|첫째|먼저|①|1\.\s)/.test(firstPara)
-    && !/^(안녕|반갑|오늘은|여러분|이번에|요즘|날씨)/.test(firstPara)
-  );
+  // ① 도입부 핵심 요약: 짧은 소제목은 건너뛰고 실제 도입 문단이 답부터 말하는지 확인한다.
+  const introSummary = hasAeoIntroSummary(text);
   // ② FAQ / Q&A: 자주 묻는 질문 블록이 있나
   // 최신 글은 줄바꿈을 보존해서 읽지만, 예전에 평탄화해 저장한 본문도 Q1/A1 표기를 인식한다.
   const faqQuestions = text.match(/(?:^|\n|\s)Q\s*\d+\s*[:：.]/gi) || [];

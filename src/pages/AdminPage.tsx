@@ -24,7 +24,7 @@ interface UserFull {
   payments?: any[]; notes?: any[]; history_count?: number;
 }
 
-import { AEO_RULES, AEO_FAQ_FORMAT, AEO_TITLE_RULE } from "../lib/aeo";
+import { AEO_RULES, AEO_FAQ_FORMAT, AEO_TITLE_RULE, ensureAeoIntroSummary } from "../lib/aeo";
 const BOT = "http://127.0.0.1:3333";
 const INSTA_BOT = "http://127.0.0.1:3335";
 const ADM_UID = "admin-publy";
@@ -1020,7 +1020,7 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
     const cleaned=stripMarkdown(text);
     const tgm=cleaned.match(/태그[:\s]*([^\n]+)/);
     const bm=cleaned.match(/태그[^\n]*\n([\s\S]+)/);
-    const bodyRaw=await ensureKeywordCount(bm?bm[1].trim():cleaned,kw,5);
+    const bodyRaw=ensureAeoIntroSummary(await ensureKeywordCount(bm?bm[1].trim():cleaned,kw,5),title);
     const bodyCap=enforceMaxChars(bodyRaw,chars);
     const body=otSpaceParagraphs(bodyCap);   // 모바일 가독성: 긴 문단 2~3문장마다 쪼개 빈 줄로
     return {content:body,tags:tgm?tgm[1].trim():""};

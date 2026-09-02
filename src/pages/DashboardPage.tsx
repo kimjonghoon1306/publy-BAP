@@ -26,7 +26,7 @@ const ONPARTNER_PLACEMENT_INFO:Record<OnPartnerPlacement,{label:string;desc:stri
   bottom:{label:"본문 하단 (FAQ·관련글 전)",desc:"글 전체의 맨끝이 아니라 본문이 끝나고 질문답변·관련글·해시태그가 시작되기 직전에 배치해요."}
 };
 
-import { AEO_RULES, AEO_FAQ_FORMAT, AEO_TITLE_RULE } from "../lib/aeo";
+import { AEO_RULES, AEO_FAQ_FORMAT, AEO_TITLE_RULE, ensureAeoIntroSummary } from "../lib/aeo";
 const BOT = "http://127.0.0.1:3333";
 const INSTA_BOT = "http://127.0.0.1:3335";
 const BATCH = 30;
@@ -3014,7 +3014,7 @@ POST3: (제목)|(이유)
     const tgm=cleaned.match(/태그[:\s]*([^\n]+)/);
     const bm=cleaned.match(/태그[^\n]*\n([\s\S]+)/);
     const body0=ensureQuestionHeadings(bm?bm[1].trim():cleaned,kw);
-    const bodyRaw=await ensureKeywordCount(body0,kw,5);   // 키워드 최소 5회 보장
+    const bodyRaw=ensureAeoIntroSummary(await ensureKeywordCount(body0,kw,5),title);   // 키워드 최소 5회 + 도입 핵심요약 보장
     const bodyCap=enforceMaxChars(bodyRaw,chars);   // 자동·직접 모두 목표 글자수 근처로 캡(오버슈트 방지)
     const body=otSpaceParagraphs(bodyCap);   // 모바일 가독성: 긴 문단을 2~3문장마다 쪼개 빈 줄로 분리
     return {content:body,tags:tgm?tgm[1].trim():""};
