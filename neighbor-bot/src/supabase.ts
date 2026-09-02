@@ -154,11 +154,28 @@ export async function incrementPlaceDetailQuota(userId: string): Promise<void> {
   if (error) throw new Error(`고객 화면 사용량 저장 실패: ${error.message}`);
 }
 
-export async function checkMembershipAccess(userId: string, feature?: "crawl" | "place360"): Promise<{ ok: boolean; plan: string; reason?: string }> {
+/* ══ 검색유입(트래픽) 하루 한도 — 관리자/무제한만 락 해제(999999) ══ */
+export const INFLOW_DAILY_LIMIT: Record<string, number> = { free: 30, basic: 150, pro: 400, unlimited: 999999, admin: 999999 };
+function inflowQuotaKey(userId: string): string { return `inflow_daily_${userId}_${koreaDateKey()}`; }
+export async function checkInflowQuota(userId: string, plan: string): Promise<{ ok: boolean; used: number; limit: number }> {
+  const limit = INFLOW_DAILY_LIMIT[plan] ?? INFLOW_DAILY_LIMIT.free;
+  const { data } = await supabase.from("publy_settings").select("value").eq("key", inflowQuotaKey(userId)).maybeSingle();
+  const used = Number.parseInt(data?.value || "0", 10) || 0;
+  return { ok: used < limit, used, limit };
+}
+export async function incrementInflowQuota(userId: string): Promise<void> {
+  const key = inflowQuotaKey(userId);
+  const { data } = await supabase.from("publy_settings").select("value").eq("key", key).maybeSingle();
+  const used = Number.parseInt(data?.value || "0", 10) || 0;
+  const { error } = await supabase.from("publy_settings").upsert({ key, value: String(used + 1) }, { onConflict: "key" });
+  if (error) throw new Error(`검색유입 사용량 저장 실패: ${error.message}`);
+}
+
+export async function checkMembershipAccess(userId: string, feature?: "crawl" | "place360" | "inflow"): Promise<{ ok: boolean; plan: string; reason?: string }> {
   if (userId === "admin-publy") return { ok: true, plan: "admin" };
   try {
     const [{ data: user }, { data: quota }] = await Promise.all([
-      supabase.from("publy_users").select("plan,is_active,crawl_enabled,place360_enabled").eq("id", userId).maybeSingle(),
+      supabase.from("publy_users").select("plan,is_active,crawl_enabled,place360_enabled,inflow_enabled").eq("id", userId).maybeSingle(),
       supabase.from("publy_quotas").select("reset_date").eq("user_id", userId).maybeSingle(),
     ]);
     const plan = user?.plan || "free";
@@ -166,6 +183,8 @@ export async function checkMembershipAccess(userId: string, feature?: "crawl" | 
     if (!quota?.reset_date || new Date(quota.reset_date).getTime() <= Date.now()) return { ok: false, plan, reason: "이용기간 만료" };
     if (feature === "crawl" && user.crawl_enabled === false) return { ok: false, plan, reason: "관리자가 크롤링 사용을 잠시 중지했어요" };
     if (feature === "place360" && user.place360_enabled === false) return { ok: false, plan, reason: "관리자가 플레이스 360 사용을 잠시 중지했어요" };
+    // 🔒 검색유입은 기본 잠금 — 관리자가 명시적으로 켠(inflow_enabled=true) 회원만 허용
+    if (feature === "inflow" && user.inflow_enabled !== true) return { ok: false, plan, reason: "검색유입은 관리자 승인 후 사용할 수 있어요" };
     return { ok: true, plan };
   } catch {
     return { ok: false, plan: "free", reason: "회원정보 확인 실패" };

@@ -685,13 +685,14 @@ export const PLAN_CONFIG: Record<string, {
   dailyCrawl: number;    // 크롤링 하루 발굴 인원(무제한=999999)
   dailyEmail: number;    // 크롤링 아웃리치 하루 이메일 발송(무제한=999999, 계정 안전상 100 권장)
   dailyComment: number;  // 크롤링 아웃리치 하루 댓글 제안(★계정 안전상 매우 낮게 — 도배 감지 위험)
+  dailyInflow: number;   // 검색유입 하루 방문 횟수(아이엠마케터 24h 200~400 기준, 무제한=999999). 락 해제는 관리자만.
   trialDays: number;
 }> = {
-  free:  { label: "FREE",  maxAccounts: 1, dailyPublish: 2,  dailyCrawl: 5,  dailyEmail: 5,  dailyComment: 3,  trialDays: 7  },
-  basic: { label: "BASIC", maxAccounts: 2, dailyPublish: 6,  dailyCrawl: 20, dailyEmail: 20, dailyComment: 5,  trialDays: 30 },
-  pro:   { label: "PRO",   maxAccounts: 3, dailyPublish: 15, dailyCrawl: 50, dailyEmail: 50, dailyComment: 8,  trialDays: 30 },
-  unlimited: { label: "무제한", maxAccounts: 999, dailyPublish: 999999, dailyCrawl: 999999, dailyEmail: 999999, dailyComment: 999999, trialDays: 99999 },
-  admin: { label: "ADMIN", maxAccounts: 99, dailyPublish: 9999, dailyCrawl: 999999, dailyEmail: 999999, dailyComment: 999999, trialDays: 9999 },
+  free:  { label: "FREE",  maxAccounts: 1, dailyPublish: 2,  dailyCrawl: 5,  dailyEmail: 5,  dailyComment: 3,  dailyInflow: 30,  trialDays: 7  },
+  basic: { label: "BASIC", maxAccounts: 2, dailyPublish: 6,  dailyCrawl: 20, dailyEmail: 20, dailyComment: 5,  dailyInflow: 150, trialDays: 30 },
+  pro:   { label: "PRO",   maxAccounts: 3, dailyPublish: 15, dailyCrawl: 50, dailyEmail: 50, dailyComment: 8,  dailyInflow: 400, trialDays: 30 },
+  unlimited: { label: "무제한", maxAccounts: 999, dailyPublish: 999999, dailyCrawl: 999999, dailyEmail: 999999, dailyComment: 999999, dailyInflow: 999999, trialDays: 99999 },
+  admin: { label: "ADMIN", maxAccounts: 99, dailyPublish: 9999, dailyCrawl: 999999, dailyEmail: 999999, dailyComment: 999999, dailyInflow: 999999, trialDays: 9999 },
 };
 
 function publishQuotaKey(userId: string): string {
@@ -725,6 +726,32 @@ export async function incrementDailyPublish(userId: string): Promise<void> {
   await supabase
     .from("publy_settings")
     .upsert({ key, value: String(used + 1) }, { onConflict: "key" });
+}
+
+/* ══ 검색유입(트래픽) 하루 한도 — publy_settings key-value 재사용(DB 스키마 변경 불필요) ══ */
+export const INFLOW_DAILY_LIMIT: Record<string, number> = {
+  free: PLAN_CONFIG.free.dailyInflow, basic: PLAN_CONFIG.basic.dailyInflow, pro: PLAN_CONFIG.pro.dailyInflow,
+  unlimited: PLAN_CONFIG.unlimited.dailyInflow, admin: PLAN_CONFIG.admin.dailyInflow,
+};
+function inflowQuotaKey(userId: string): string { return `inflow_daily_${userId}_${koreaDateKey()}`; }
+export async function getInflowDailyUsage(userId: string): Promise<number> {
+  try {
+    const { data } = await supabase.from("publy_settings").select("value").eq("key", inflowQuotaKey(userId)).maybeSingle();
+    return data?.value ? parseInt(data.value) || 0 : 0;
+  } catch { return 0; }
+}
+export async function checkInflowQuota(userId: string, plan: string): Promise<{ ok: boolean; used: number; limit: number }> {
+  const limit = INFLOW_DAILY_LIMIT[plan] ?? INFLOW_DAILY_LIMIT.free;
+  const used = await getInflowDailyUsage(userId);
+  return { ok: used < limit, used, limit };
+}
+export async function incrementInflowQuota(userId: string, by = 1): Promise<void> {
+  const used = await getInflowDailyUsage(userId);
+  await supabase.from("publy_settings").upsert({ key: inflowQuotaKey(userId), value: String(used + by) }, { onConflict: "key" });
+}
+/* 관리자: 검색유입 카운트 초기화(락 해제 후 재시작용) */
+export async function resetInflowQuota(userId: string): Promise<void> {
+  await supabase.from("publy_settings").upsert({ key: inflowQuotaKey(userId), value: "0" }, { onConflict: "key" });
 }
 
 /* ── 관리자: 오늘 발행 카운트 초기화 ── (실제 한도체크가 읽는 publy_settings 키를 0으로) */

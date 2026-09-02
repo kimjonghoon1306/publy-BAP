@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import GoogleFlowCard from "../GoogleFlowCard";
 import CrawlCenter from "../components/CrawlCenter";
+import InflowCenter from "../components/InflowCenter";
 import Place360 from "../components/Place360";
 import Place360AdminManager from "../components/Place360AdminManager";
 import PlaceReview from "../components/PlaceReview";
@@ -19,7 +20,7 @@ interface Props {
 }
 
 interface UserFull {
-  id:string; email:string; name:string; plan:string; is_active:boolean; crawl_enabled?:boolean; place360_enabled?:boolean; allow_multi_device?:boolean; created_at:string; phone?:string; memo?:string; last_seen?:string;
+  id:string; email:string; name:string; plan:string; is_active:boolean; crawl_enabled?:boolean; place360_enabled?:boolean; inflow_enabled?:boolean; allow_multi_device?:boolean; created_at:string; phone?:string; memo?:string; last_seen?:string;
   quota?: { total_quota:number; used_quota:number; remaining_quota:number; reset_date:string; };
   payments?: any[]; notes?: any[]; history_count?: number;
 }
@@ -630,6 +631,7 @@ const TABS = [
   {k:"manage",          i:"📋", l:"발행 관리"},
   {k:"blogscore",       i:"📈", l:"블로그 지수"},
   {k:"crawl",           i:"🔍", l:"크롤링"},
+  {k:"inflow",          i:"🆕", l:"NEW 트래픽 유입"},
   {k:"place",           i:"🏪", l:"플레이스 365"},
   {k:"place_reply",     i:"🗣️", l:"플레이스 리뷰답글"},
   {k:"accounts",        i:"🔗", l:"계정관리"},
@@ -656,7 +658,7 @@ const TABS = [
 ] as const;
 
 export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: Props) {
-  const [tab, setTab] = useState<"keyword"|"write"|"image"|"photo"|"publish"|"onetouch"|"manage"|"accounts"|"rank"|"blogscore"|"calendar"|"crawl"|"place"|"place_reply"|"crawl_manage"|"place_manage"|"place_reply_manage"|"neighbor"|"engage"|"reply"|"pumasi"|"neighbor_manage"|"engage_manage"|"reply_manage"|"blogscore_manage"|"insta_dm"|"insta_dm_manage"|"users"|"bug"|"stats"|"live"|"settings"|"proxy">("keyword");
+  const [tab, setTab] = useState<"keyword"|"write"|"image"|"photo"|"publish"|"onetouch"|"manage"|"accounts"|"rank"|"blogscore"|"calendar"|"crawl"|"inflow"|"place"|"place_reply"|"crawl_manage"|"place_manage"|"place_reply_manage"|"neighbor"|"engage"|"reply"|"pumasi"|"neighbor_manage"|"engage_manage"|"reply_manage"|"blogscore_manage"|"insta_dm"|"insta_dm_manage"|"users"|"bug"|"stats"|"live"|"settings"|"proxy">("keyword");
 
   // ── 프록시(계정별 IP) 관리 ──
   const NEIGHBOR_BOT = "http://127.0.0.1:3334";   // 서이추·공감·품앗이 봇(프록시 헬스체크도 여기서 실행)
@@ -3064,6 +3066,8 @@ POST3: (제목)|(이유)
   async function toggleActive(u: UserFull) { if (!confirm(`${u.name||u.email} ${u.is_active?"비활성화":"활성화"}?`)) return; try { const next=!u.is_active; const {data,error}=await supabase.from("publy_users").update({is_active:next}).eq("id",u.id).select("id,is_active"); if(error)throw new Error(error.message); if(!data?.[0]||data[0].is_active!==next)throw new Error("권한/RLS로 반영된 행이 없습니다"); await loadUsers(); } catch(e:any){alert("활성 상태 저장 실패 — "+e.message);} }
   // 🔎 크롤링 잠금해제 토글 — 회원 publy_users.crawl_enabled. 반영 검증(.select) 후 목록 갱신.
   async function toggleCrawl(u: UserFull) { try { const cur=u.crawl_enabled!==false; const next=!cur; const {data,error}=await supabase.from("publy_users").update({crawl_enabled:next}).eq("id",u.id).select("id,crawl_enabled"); if(error)throw new Error(error.message); if(!data?.[0]||data[0].crawl_enabled!==next)throw new Error("권한/RLS로 반영된 행이 없습니다"); await loadUsers(); showToast(next?`🔓 ${u.name||u.email} 크롤링 잠금해제`:`🔒 ${u.name||u.email} 크롤링 잠금`, "success"); } catch(e:any){ showToast("크롤링 권한 저장 실패 — "+e.message, "error"); } }
+  // 🆕 트래픽 유입 = 기본 잠금(inflow_enabled===true여야 사용). 관리자가 회원별로 열어줌.
+  async function toggleInflow(u: UserFull) { try { const cur=u.inflow_enabled===true; const next=!cur; const {data,error}=await supabase.from("publy_users").update({inflow_enabled:next}).eq("id",u.id).select("id,inflow_enabled"); if(error)throw new Error(error.message); if(!data?.[0]||data[0].inflow_enabled!==next)throw new Error("권한/RLS로 반영된 행이 없습니다"); await loadUsers(); showToast(next?`🔓 ${u.name||u.email} 트래픽 유입 열림`:`🔒 ${u.name||u.email} 트래픽 유입 잠금`, "success"); } catch(e:any){ showToast("트래픽 유입 권한 저장 실패 — "+e.message, "error"); } }
   async function togglePlace360(u: UserFull) { try { const cur=u.place360_enabled!==false; const next=!cur; const {data,error}=await supabase.from("publy_users").update({place360_enabled:next}).eq("id",u.id).select("id,place360_enabled"); if(error)throw new Error(error.message); if(!data?.[0]||data[0].place360_enabled!==next)throw new Error("권한/RLS로 반영된 행이 없습니다"); await loadUsers(); showToast(next?`🏪 ${u.name||u.email} 플레이스 365 사용 허용`:`🔒 ${u.name||u.email} 플레이스 365 잠금`, "success"); } catch(e:any){ showToast("플레이스 365 권한 저장 실패 — "+e.message, "error"); } }
   // 🔒 기기 잠금 토글 — allow_multi_device. 기본 OFF(한 기기만). ON이면 여러 컴퓨터 동시 로그인 허용.
   //   ON으로 켜면 지금 물려있는 활성 기기도 풀어(active_device_id=null) 즉시 다른 곳에서도 열림.
@@ -3362,7 +3366,7 @@ POST3: (제목)|(이유)
                 <div className="nav-section" style={{...secStyle,borderTop:"none",marginTop:0,padding:"8px 12px 4px"}}>콘텐츠 만들기</div>
                 {["keyword","write","image","photo","publish","onetouch"].map(navBtn)}
                 <div className="nav-section" style={secStyle}>블로그 운영</div>
-                {["calendar","manage","blogscore","crawl"].map(navBtn)}
+                {["calendar","manage","blogscore","crawl","inflow"].map(navBtn)}
                 <div className="nav-box">
                   <div className="nav-box-lbl">플레이스</div>
                   {["place","place_reply"].map(navBtn)}
@@ -3393,6 +3397,11 @@ POST3: (제목)|(이유)
             {/* ───── 🔍 크롤링 (회원과 동일 · 관리자는 잠금 없이 항상 사용) ───── */}
             {tab === "crawl" && (
               <div style={{animation:"fadeUp .25s ease both"}}><CrawlCenter showToast={showToast} theme={theme==="dark"?"dark":"light"} userId={ADM_HISTORY_UID} plan="unlimited" /></div>
+            )}
+
+            {/* ───── 🆕 NEW 트래픽 유입 (회원과 동일 · 관리자는 무제한 = 여기서 테스트) ───── */}
+            {tab === "inflow" && (
+              <div style={{animation:"fadeUp .25s ease both"}}><InflowCenter showToast={showToast} theme={theme==="dark"?"dark":"light"} userId={ADM_HISTORY_UID} plan="unlimited" /></div>
             )}
 
             {/* ───── 🏪 플레이스 365 (회원과 동일 · 관리자는 무제한) ───── */}
@@ -3436,7 +3445,7 @@ POST3: (제목)|(이유)
                                 <div style={{fontSize:14,fontWeight:700,color:"var(--text)",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{u.name||"(이름 없음)"} <span style={{fontSize:11,fontWeight:600,color:"var(--text3)"}}>{u.plan}</span></div>
                                 <div style={{fontSize:11.5,color:"var(--text3)",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{u.email}</div>
                               </div>
-                              {(()=>{ const crawlOn=u.crawl_enabled!==false; const placeOn=u.place360_enabled!==false; const multiOn=u.allow_multi_device===true; return <div style={{display:"flex",gap:6,flexWrap:"wrap",justifyContent:"flex-end"}}><button onClick={()=>toggleCrawl(u)} title={crawlOn?"이 회원은 크롤링을 쓸 수 있어요 — 누르면 잠급니다":"이 회원은 크롤링이 잠겨 있어요 — 누르면 허용합니다"} style={{padding:"8px 12px",borderRadius:99,border:`1.5px solid ${crawlOn?"#2f9e5e":"var(--border)"}`,background:crawlOn?"rgba(47,158,94,.12)":"var(--card)",color:crawlOn?"#2f9e5e":"var(--text3)",cursor:"pointer",fontSize:11.5,fontWeight:800,fontFamily:"inherit",whiteSpace:"nowrap"}}>🔍 크롤링 {crawlOn?"허용됨":"잠김"}</button><button onClick={()=>togglePlace360(u)} title={placeOn?"이 회원은 플레이스 365을 쓸 수 있어요 — 누르면 잠급니다":"이 회원은 플레이스 365이 잠겨 있어요 — 누르면 허용합니다"} style={{padding:"8px 12px",borderRadius:99,border:`1.5px solid ${placeOn?"#d53d73":"var(--border)"}`,background:placeOn?"rgba(213,61,115,.12)":"var(--card)",color:placeOn?"#d53d73":"var(--text3)",cursor:"pointer",fontSize:11.5,fontWeight:800,fontFamily:"inherit",whiteSpace:"nowrap"}}>🏪 플레이스 365 {placeOn?"허용됨":"잠김"}</button><button onClick={()=>toggleMultiDevice(u)} title={multiOn?"여러 컴퓨터에서 동시 로그인 허용 중 — 누르면 한 기기만 허용":"한 기기만 로그인(다른 컴퓨터는 튕김) — 누르면 여러 기기 허용"} style={{padding:"8px 12px",borderRadius:99,border:`1.5px solid ${multiOn?"#e0952f":"var(--border)"}`,background:multiOn?"rgba(224,149,47,.12)":"var(--card)",color:multiOn?"#e0952f":"var(--text3)",cursor:"pointer",fontSize:11.5,fontWeight:800,fontFamily:"inherit",whiteSpace:"nowrap"}}>{multiOn?"🔓 여러기기":"🔒 한기기"}</button></div>; })()}
+                              {(()=>{ const crawlOn=u.crawl_enabled!==false; const placeOn=u.place360_enabled!==false; const multiOn=u.allow_multi_device===true; const inflowOn=u.inflow_enabled===true; return <div style={{display:"flex",gap:6,flexWrap:"wrap",justifyContent:"flex-end"}}><button onClick={()=>toggleCrawl(u)} title={crawlOn?"이 회원은 크롤링을 쓸 수 있어요 — 누르면 잠급니다":"이 회원은 크롤링이 잠겨 있어요 — 누르면 허용합니다"} style={{padding:"8px 12px",borderRadius:99,border:`1.5px solid ${crawlOn?"#2f9e5e":"var(--border)"}`,background:crawlOn?"rgba(47,158,94,.12)":"var(--card)",color:crawlOn?"#2f9e5e":"var(--text3)",cursor:"pointer",fontSize:11.5,fontWeight:800,fontFamily:"inherit",whiteSpace:"nowrap"}}>🔍 크롤링 {crawlOn?"허용됨":"잠김"}</button><button onClick={()=>toggleInflow(u)} title={inflowOn?"이 회원은 트래픽 유입을 쓸 수 있어요 — 누르면 잠급니다":"트래픽 유입이 잠겨 있어요 — 누르면 허용합니다"} style={{padding:"8px 12px",borderRadius:99,border:`1.5px solid ${inflowOn?"#2563eb":"var(--border)"}`,background:inflowOn?"rgba(37,99,235,.12)":"var(--card)",color:inflowOn?"#2563eb":"var(--text3)",cursor:"pointer",fontSize:11.5,fontWeight:800,fontFamily:"inherit",whiteSpace:"nowrap"}}>🆕 트래픽 유입 {inflowOn?"허용됨":"잠김"}</button><button onClick={()=>togglePlace360(u)} title={placeOn?"이 회원은 플레이스 365을 쓸 수 있어요 — 누르면 잠급니다":"이 회원은 플레이스 365이 잠겨 있어요 — 누르면 허용합니다"} style={{padding:"8px 12px",borderRadius:99,border:`1.5px solid ${placeOn?"#d53d73":"var(--border)"}`,background:placeOn?"rgba(213,61,115,.12)":"var(--card)",color:placeOn?"#d53d73":"var(--text3)",cursor:"pointer",fontSize:11.5,fontWeight:800,fontFamily:"inherit",whiteSpace:"nowrap"}}>🏪 플레이스 365 {placeOn?"허용됨":"잠김"}</button><button onClick={()=>toggleMultiDevice(u)} title={multiOn?"여러 컴퓨터에서 동시 로그인 허용 중 — 누르면 한 기기만 허용":"한 기기만 로그인(다른 컴퓨터는 튕김) — 누르면 여러 기기 허용"} style={{padding:"8px 12px",borderRadius:99,border:`1.5px solid ${multiOn?"#e0952f":"var(--border)"}`,background:multiOn?"rgba(224,149,47,.12)":"var(--card)",color:multiOn?"#e0952f":"var(--text3)",cursor:"pointer",fontSize:11.5,fontWeight:800,fontFamily:"inherit",whiteSpace:"nowrap"}}>{multiOn?"🔓 여러기기":"🔒 한기기"}</button></div>; })()}
                             </div>
                           ))}
                          </div>}

@@ -1,7 +1,7 @@
 import express from "express";
 import cors from "cors";
-import { saveSession, sessionExists, removeSession, crawlBlogIds, crawlBuddyPosts, analyzeBuddyKeywords, addNeighbors, NeighborResult, donePath, engageBlogs, EngageResult, engageDonePath, crawlMyPosts, replyToComments, crawlPlaceReviews, generatePlaceReviewReply, replyToPlaceReviews, crawlBlogStats, checkSelectedBlogExposure, pumasiEngage, crawlPumasiReport, pumasiPreview, updatePostTitle, checkProxy, analyzeBlogAuthenticity, fetchPostBody, crawlPostViews, sendWebmail, sendBlogComments, crawlPlaces, crawlPlaceBloggers, crawlPlaceDetail, crawlPlaceByUrl, suggestPlaceKeywords } from "./naver";
-import { checkNeighborQuota, incrementNeighborQuota, getNeighborDailyUsage, incrementEngageQuota, getEngageDailyUsage, getUserPlan, checkMembershipAccess, NEIGHBOR_DAILY_LIMIT, ENGAGE_DAILY_LIMIT, REPLY_DAILY_LIMIT, getReplyDailyUsage, incrementReplyQuota, PLACE_REPLY_DAILY_LIMIT, getPlaceReplyDailyUsage, incrementPlaceReplyQuota, addNeighborHistory, addReplyHistory, addPlaceReplyHistory, addBlogscoreHistory, incrementPumasiQuota, TITLE_EDIT_DAILY_LIMIT, getTitleEditDailyUsage, incrementTitleEditQuota, getProxyForAccount, supabase, getOutreachSender, getOutreachSentToday, addOutreachLog, checkPlaceDetailQuota, incrementPlaceDetailQuota } from "./supabase";
+import { saveSession, sessionExists, removeSession, crawlBlogIds, crawlBuddyPosts, analyzeBuddyKeywords, addNeighbors, NeighborResult, donePath, engageBlogs, EngageResult, engageDonePath, crawlMyPosts, replyToComments, crawlPlaceReviews, generatePlaceReviewReply, replyToPlaceReviews, crawlBlogStats, checkSelectedBlogExposure, pumasiEngage, crawlPumasiReport, pumasiPreview, updatePostTitle, checkProxy, analyzeBlogAuthenticity, fetchPostBody, crawlPostViews, sendWebmail, sendBlogComments, crawlPlaces, crawlPlaceBloggers, crawlPlaceDetail, crawlPlaceByUrl, suggestPlaceKeywords, parsePlaceUrl, searchInflow, InflowTarget } from "./naver";
+import { checkNeighborQuota, incrementNeighborQuota, getNeighborDailyUsage, incrementEngageQuota, getEngageDailyUsage, getUserPlan, checkMembershipAccess, NEIGHBOR_DAILY_LIMIT, ENGAGE_DAILY_LIMIT, REPLY_DAILY_LIMIT, getReplyDailyUsage, incrementReplyQuota, PLACE_REPLY_DAILY_LIMIT, getPlaceReplyDailyUsage, incrementPlaceReplyQuota, addNeighborHistory, addReplyHistory, addPlaceReplyHistory, addBlogscoreHistory, incrementPumasiQuota, TITLE_EDIT_DAILY_LIMIT, getTitleEditDailyUsage, incrementTitleEditQuota, getProxyForAccount, supabase, getOutreachSender, getOutreachSentToday, addOutreachLog, checkPlaceDetailQuota, incrementPlaceDetailQuota, checkInflowQuota, incrementInflowQuota } from "./supabase";
 import nodemailer from "nodemailer";
 import fs from "fs";
 import { acquireAccountLock } from "./account-lock";
@@ -84,7 +84,7 @@ function sseSend(res: express.Response, data: object) {
   res.write(`data: ${JSON.stringify(data)}\n\n`);
 }
 
-async function ensureActiveMember(userId: string | undefined, res: express.Response, feature?: "crawl" | "place360"): Promise<boolean> {
+async function ensureActiveMember(userId: string | undefined, res: express.Response, feature?: "crawl" | "place360" | "inflow"): Promise<boolean> {
   if (!userId) return true;
   const access = await checkMembershipAccess(userId, feature);
   if (access.ok) return true;
@@ -1103,6 +1103,75 @@ app.get("/api/post-body", async (req, res) => {
     const r = await fetchPostBody(blogId, logNo);
     res.json({ ok: true, ...r });
   } catch (e: any) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+/* ── 🆕 NEW 트래픽 유입 (검색유입, SSE) — 기본 잠금(관리자가 켠 회원만), 관리자=락 해제 ── */
+app.get("/api/inflow", async (req, res) => {
+  const { userId, accountId, keywords, targetType, placeUrl, blogId, logNo, rounds, termMin, termMax, doSave, doLike } = req.query as Record<string, string>;
+  if (!keywords || !targetType) return res.status(400).json({ error: "keywords·targetType 필요" });
+  sseSetup(res);
+  let releaseAccount = () => {};
+  try {
+    if (!await ensureActiveMember(userId, res, "inflow")) return;   // 🔒 기본 잠금
+    const release = acquireAccountsOrReport([accountId || ""], "NEW 트래픽 유입", res);
+    if (!release) return;
+    releaseAccount = release;
+
+    let plan = "free";
+    if (userId) {
+      plan = await getUserPlan(userId);
+      const quota = await checkInflowQuota(userId, plan);
+      if (!quota.ok) { sseSend(res, { type: "quota_exceeded", used: quota.used, limit: quota.limit }); res.end(); return; }
+      sseSend(res, { type: "quota_info", used: quota.used, limit: quota.limit, remaining: quota.limit - quota.used });
+    }
+
+    let target: InflowTarget;
+    if (targetType === "place") {
+      const parsed = parsePlaceUrl(placeUrl || "");
+      if (!parsed) { sseSend(res, { type: "error", msg: "플레이스 주소를 인식하지 못했어요(m.place/지도 링크를 붙여주세요)" }); res.end(); return; }
+      target = { type: "place", placeId: parsed.placeId, domain: parsed.domain, placeUrl };
+    } else {
+      if (!blogId) { sseSend(res, { type: "error", msg: "블로그 아이디가 필요해요" }); res.end(); return; }
+      target = { type: "blog", blogId, logNo: logNo || undefined };
+    }
+
+    const kwList = keywords.split(",").map((k) => k.trim()).filter(Boolean);
+    const n = Math.max(1, parseInt(rounds || "10", 10));
+    const tmin = Math.max(5, parseInt(termMin || "30", 10));
+    const tmax = Math.max(tmin, parseInt(termMax || "90", 10));
+    const unlimited = plan === "admin" || plan === "unlimited";
+
+    let stopped = false;
+    req.on("close", () => { stopped = true; });
+
+    const result = await searchInflow({
+      accountId: accountId || "",
+      ownerUserId: userId || undefined,
+      keywords: kwList,
+      target,
+      rounds: n,
+      intervalSec: [tmin, tmax],
+      actions: { save: doSave === "true", like: doLike === "true" },
+      requireLogin: doSave === "true" || doLike === "true",
+      onLog: (msg) => sseSend(res, { type: "log", msg }),
+      onProgress: (done, total) => sseSend(res, { type: "progress", done, total }),
+      shouldStop: () => stopped,
+      onQuota: async () => {
+        if (!userId || unlimited) return true;                 // 관리자/무제한 = 락 해제
+        const q = await checkInflowQuota(userId, plan);
+        if (!q.ok) return false;
+        await incrementInflowQuota(userId);                    // 방문 1회 차감
+        sseSend(res, { type: "quota_info", used: q.used + 1, limit: q.limit, remaining: Math.max(0, q.limit - q.used - 1) });
+        return true;
+      },
+    });
+    sseSend(res, { type: "inflow_done", ...result });
+  } catch (e: any) {
+    sseSend(res, { type: "error", msg: e.message });
+  } finally {
+    releaseAccount();
+  }
+  res.end();
 });
 
 app.listen(PORT, "127.0.0.1", () => {

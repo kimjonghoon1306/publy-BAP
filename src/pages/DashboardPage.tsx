@@ -5,6 +5,7 @@ import { supabase, submitBugReportRow, getMyResolvedBugAlerts, markBugNotified, 
 import { markTitleChanged, checkReviveQuota, incrementReviveQuota } from "../lib/supabase";
 import NeighborPage from "./NeighborPage";
 import CrawlCenter from "../components/CrawlCenter";
+import InflowCenter from "../components/InflowCenter";
 import Place360 from "../components/Place360";
 import PlaceReview from "../components/PlaceReview";
 import { botFetch, BotEventStream } from "../lib/botApi";
@@ -13,7 +14,7 @@ import UsageGuide from "../components/UsageGuide";
 import Daebaekseo, { DAEBAEKSEO_VERSION } from "../components/Daebaekseo";
 import dodoImg from "../assets/dodo.png";
 
-type MainTab = "control" | "keyword" | "write" | "image" | "photo" | "publish" | "onetouch" | "manage" | "accounts" | "rank" | "blogscore" | "calendar" | "settings" | "neighbor" | "engage" | "reply" | "pumasi" | "insta_dm" | "crawl" | "place" | "place_reply";
+type MainTab = "control" | "keyword" | "write" | "image" | "photo" | "publish" | "onetouch" | "manage" | "accounts" | "rank" | "blogscore" | "calendar" | "settings" | "neighbor" | "engage" | "reply" | "pumasi" | "insta_dm" | "crawl" | "inflow" | "place" | "place_reply";
 type OnPartnerProduct = {id:string|null;name:string;image:string;price:number|null;available:boolean;partnerUrl:string;shopUrl:string};
 type OnPartnerPlacement = "auto"|"adpost"|"after_first"|"middle"|"before_last"|"bottom";
 type PublishConcept = "full" | "body_faq" | "body_only";
@@ -166,6 +167,9 @@ const NAV_GROUPS = [
   ]},
   {label:"블로그 운영",tabs:[
     {k:"calendar",i:"📅",l:"콘텐츠 캘린더",shine:true},{k:"manage",i:"📋",l:"발행 관리"},{k:"blogscore",i:"📈",l:"블로그 지수"},{k:"crawl",i:"🔍",l:"크롤링"},
+  ]},
+  {label:"트래픽",boxed:true,tabs:[
+    {k:"inflow",i:"🆕",l:"NEW 트래픽 유입"},
   ]},
   {label:"플레이스",boxed:true,tabs:[
     {k:"place",i:"🏪",l:"플레이스 365"},{k:"place_reply",i:"🗣️",l:"플레이스 리뷰답글"},
@@ -931,6 +935,8 @@ export default function DashboardPage({user, onLogout, onAdminLogin, onThemeTogg
   // 🔍 크롤링 = 기본 오픈(등급별 한도로 이미 제한됨). 관리자가 crawl_enabled=false로 명시 잠금할 때만 잠긴다.
   //   미설정(null/undefined)·true = 사용 가능. false만 잠김. (관리자 표시·토글도 동일 규칙으로 맞춤)
   const crawlEnabled = (user as any)?.crawl_enabled !== false;
+  // 🆕 NEW 트래픽 유입 = 기본 잠금. 관리자가 inflow_enabled=true로 켠 회원만.
+  const inflowEnabled = (user as any)?.inflow_enabled === true;
   const [place360Enabled, setPlace360Enabled] = useState(false);
   useEffect(() => { let active = true; getPlace360Access(user.id).then(enabled => { if (active) setPlace360Enabled(enabled); }); return () => { active = false; }; }, [user.id]);
   const [showCrawlLock, setShowCrawlLock] = useState(false);
@@ -1011,6 +1017,7 @@ export default function DashboardPage({user, onLogout, onAdminLogin, onThemeTogg
   // ★캘린더에서 넘어온 우리 서비스 홍보(글 본문에 자연스럽게 링크 삽입용). 글 생성 후 자동 해제.
   const [pendingPromo, setPendingPromo] = useState<{name:string;url:string;blurb:string}|null>(null);
   const [loadingTitles, setLoadingTitles] = useState(false);
+  const [aiKeywordLoading, setAiKeywordLoading] = useState(false);
   const [kwData, setKwData] = useState<{keyword:string;volume:number;competition:string;cpc:number;clicks:number}[]>([]);
   const [loadingKw, setLoadingKw] = useState(false);
 
@@ -2648,12 +2655,12 @@ Output (JSON object only): {"keyword":"핵심키워드","title":"새 SEO 제목"
   }
 
   // ★제목 점수 = 실제 네이버 상위노출 기준(프롬프트와 일치). 낚시가 아니라 '검색에 잘 잡히는 깨끗한 제목'에 점수.
-  function calcTitleScore(title:string):number{
+  function calcTitleScore(title:string, keywordOverride?:string):number{
     let score=0;
     const t=(title||"").trim();
     const len=t.length;
     // 1) 핵심 키워드가 제목 앞쪽(검색 매칭의 1순위)
-    const kw=(keyword||"").trim();
+    const kw=(keywordOverride||keyword||"").trim();
     if(kw){ const idx=t.replace(/\s/g,"").indexOf(kw.replace(/\s/g,"")); if(idx>=0&&idx<=8)score+=32; else if(idx>=0)score+=16; }
     else score+=16;
     // 2) 적정 길이(25~40자 롱테일)
@@ -2695,6 +2702,20 @@ Output (JSON object only): {"keyword":"핵심키워드","title":"새 SEO 제목"
       });
     }catch(e:any){if(e.name!=="AbortError")alert("제목 생성 실패: "+e.message);}
     finally{setLoadingTitles(false);}
+  }
+
+  async function recommendKeywordsForTitleTab(){
+    setAiKeywordLoading(true);
+    const controller=new AbortController();
+    try{
+      const suggested=await otGenKeywords(30,controller.signal);
+      if(!suggested.length)throw new Error("추천할 새 키워드를 찾지 못했어요");
+      const merged=Array.from(new Set([...suggested,...keywords])).slice(0,MAX_KW);
+      setKeywords(merged);localStorage.setItem("publy_kws",JSON.stringify(merged));
+      setKeyword(suggested[0]);setTitles([]);setSelectedTitle("");
+      showToast(`AI가 핫이슈·검색의도·최근 중복을 검사해 키워드 ${suggested.length}개를 추천했어요`,"success");
+    }catch(e:any){if(e.name!=="AbortError")showToast("키워드 추천 실패: "+(e.message||"오류"),"error");}
+    finally{setAiKeywordLoading(false);}
   }
 
   // ① 조회 — 링크로 상품 정보 불러와 미리보기(onPartnerPreview)만 채운다. 목록엔 아직 안 담김.
@@ -2978,7 +2999,7 @@ POST3: (제목)|(이유)
     const text=await callAI(prompt,signal);
     const arr=parseArr(text).map((t:string)=>enforceExactKeyword(t,kw)).filter(Boolean);
     if(!arr.length)throw new Error("제목 생성 실패");
-    return arr.slice().sort((a:string,b:string)=>calcTitleScore(b)-calcTitleScore(a))[0]; // 점수 최고 제목 선택
+    return arr.slice().sort((a:string,b:string)=>calcTitleScore(b,kw)-calcTitleScore(a,kw))[0]; // 해당 키워드 기준 최고 제목 선택
   }
   // 모바일 가독성: FAQ/구조 마커는 그대로 두고, 긴 문단(3문장↑ 또는 120자↑)을 2문장마다 쪼개 빈 줄로 분리.
   function otSpaceParagraphs(text:string):string{
@@ -4927,7 +4948,7 @@ POST3: (제목)|(이유)
             {NAV_GROUPS.map(group=>(
               <div key={group.label} className={(group as any).boxed?"nav-box":""}>
                 {group.label&&<div className={(group as any).boxed?"nav-box-lbl":"nav-lbl"}>{group.label}</div>}
-                {group.tabs.map(t=> (t.k==="crawl" || t.k==="place" || t.k==="place_reply") ? (() => { const enabled = (t.k === "place" || t.k === "place_reply") ? place360Enabled : crawlEnabled; return (
+                {group.tabs.map(t=> (t.k==="crawl" || t.k==="place" || t.k==="place_reply" || t.k==="inflow") ? (() => { const enabled = (t.k === "place" || t.k === "place_reply") ? place360Enabled : (t.k === "inflow") ? inflowEnabled : crawlEnabled; return (
                   <button key={t.k} className={`nav-item nav-crawl nav-shine ${tab===t.k&&enabled?"active":""} ${enabled?"":"nav-crawl-locked"}`} onClick={()=>{ if(!enabled){ setShowCrawlLock(true); return; } setTab(t.k); }}>
                     <span className="nav-ico">{t.i}</span><span className="nav-crawl-label">{t.l}</span>
                     <span className="nav-hot">HOT</span>
@@ -8109,6 +8130,9 @@ POST3: (제목)|(이유)
             {tab==="crawl" && crawlEnabled && (
               <div><CrawlCenter showToast={showToast} theme={theme==="dark"?"dark":"light"} userId={user.id} plan={user.plan} /></div>
             )}
+            {tab==="inflow" && inflowEnabled && (
+              <div><InflowCenter showToast={showToast} theme={theme==="dark"?"dark":"light"} userId={user.id} plan={user.plan} /></div>
+            )}
             {visitedAutoTabs.has("place") && place360Enabled && (
               <div aria-hidden={tab!=="place"} style={{ display: tab==="place" ? "block" : "none", pointerEvents: tab==="place" ? "auto" : "none" }}><Place360 showToast={showToast} theme={theme==="dark"?"dark":"light"} userId={user.id} plan={user.plan} onOpenCrawl={()=>setTab("crawl")} onOpenReview={()=>setTab("place_reply")} /></div>
             )}
@@ -8294,8 +8318,8 @@ POST3: (제목)|(이유)
           {/* 모바일도 PC 사이드바와 동일한 전체 탭 노출(회원=관리자 동일 원칙). 크롤링·플레이스 365·캘린더·인스타DM·계정관리가 모바일에서 빠져 있던 것 복구.
               잠금(crawl/place)·곧 출시(insta_dm) 게이팅은 데스크탑 사이드바와 동일하게 처리 */}
           {MAIN_TABS.map(t=>{
-            const lbl:Record<string,string>={control:"홈",keyword:"키워드",write:"글쓰기",image:"이미지",photo:"사진글쓰기",publish:"발행",calendar:"캘린더",manage:"발행관리",blogscore:"지수",crawl:"크롤링",place:"플레이스",neighbor:"서이추",engage:"공감댓글",reply:"답방",pumasi:"품앗이",insta_dm:"인스타DM",accounts:"계정관리",settings:"설정"};
-            const locked = (t.k==="crawl"&&!crawlEnabled)||(t.k==="place"&&!place360Enabled);
+            const lbl:Record<string,string>={control:"홈",keyword:"키워드",write:"글쓰기",image:"이미지",photo:"사진글쓰기",publish:"발행",calendar:"캘린더",manage:"발행관리",blogscore:"지수",crawl:"크롤링",inflow:"트래픽유입",place:"플레이스",neighbor:"서이추",engage:"공감댓글",reply:"답방",pumasi:"품앗이",insta_dm:"인스타DM",accounts:"계정관리",settings:"설정"};
+            const locked = (t.k==="crawl"&&!crawlEnabled)||(t.k==="place"&&!place360Enabled)||(t.k==="inflow"&&!inflowEnabled);
             const onClick=()=>{
               if(t.k==="insta_dm"){showToast("📱 인스타 DM은 곧 출시됩니다!","info");return;}
               if(locked){setShowCrawlLock(true);return;}
