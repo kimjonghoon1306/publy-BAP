@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import { BotEventStream } from "../lib/botApi";
 import UsageGuide from "./UsageGuide";
-import { INFLOW_DAILY_LIMIT, PLAN_CONFIG, getInflowDailyUsage, getInflowUsageHistory, getAccounts, PublyAccount, getAutopilot, saveAutopilot, getRankHistory, AutopilotConfig, getInflowSchedule, saveInflowSchedule, inflowScheduleRanToday, markInflowScheduleRan, getPerfReport, PerfReport } from "../lib/supabase";
+import { INFLOW_DAILY_LIMIT, PLAN_CONFIG, getInflowDailyUsage, getInflowUsageHistory, getAccounts, PublyAccount, getAutopilot, saveAutopilot, getRankHistory, AutopilotConfig, getInflowSchedule, saveInflowSchedule, inflowScheduleRanToday, markInflowScheduleRan, getPerfReport, PerfReport, recordRankPoint } from "../lib/supabase";
 
 const BOT = "http://127.0.0.1:3334"; // neighbor-bot
 
@@ -208,6 +208,27 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
     finally { setDiagLoading(false); }
   };
 
+  // 📍 순위 측정 — 대표 키워드로 내 플레이스 순위 측정 후 저장(리포트·그래프에 자동 반영)
+  const [rankLoading, setRankLoading] = useState(false);
+  const runMeasureRank = async () => {
+    if (targetType !== "place" || !placeUrl.trim()) { toast("먼저 플레이스 주소를 입력하세요", "error"); return; }
+    const kw = (apKeyword || keywords.split(/[,\n]/)[0] || "").trim();
+    if (!kw) { toast("순위를 측정할 키워드를 입력하세요(오토파일럿 키워드 또는 첫 키워드)", "error"); return; }
+    setRankLoading(true);
+    try {
+      const r = await fetch(`${BOT}/api/place-rank?keyword=${encodeURIComponent(kw)}&placeUrl=${encodeURIComponent(placeUrl.trim())}`);
+      const j = await r.json();
+      if (j.error) { toast(j.error, "error"); return; }
+      if (j.rank == null) { toast(`"${kw}"에서 30위 밖이에요(노출 순위 낮음). 유입·리뷰로 끌어올리세요.`, "info"); }
+      else {
+        setApLastRank(j.rank);
+        if (userId) { await recordRankPoint(userId, j.rank); getPerfReport(userId, reportPeriod).then(setReport).catch(()=>{}); getRankHistory(userId, 7).then(setRankHist).catch(()=>{}); }
+        toast(`현재 "${kw}" ${j.rank}위 — 기록했어요`, "success");
+      }
+    } catch { toast("순위 측정 실패 — 봇 서버(3334) 확인", "error"); }
+    finally { setRankLoading(false); }
+  };
+
   // 🔎 키워드 발굴 — 입력한 키워드 seed로 숨은 키워드 추천
   const runKeywordSuggest = async () => {
     const seeds = keywords.split(/[,\n]/).map(k=>k.trim()).filter(Boolean).slice(0, 3);
@@ -390,7 +411,7 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
       else if (d.type === "progress") { setProgress(Math.round((d.done / Math.max(1, d.total)) * 100)); }
       else if (d.type === "quota_info") setUsed(d.used);
       else if (d.type === "quota_exceeded") { pushLog("🛑 오늘 유입 한도를 다 썼어요"); toast("오늘 유입 한도 초과", "error"); setRunning(false); es.close(); esRef.current = null; }
-      else if (d.type === "inflow_done") { setSessOk(d.success || 0); pushLog(`🏁 완료 — 총 ${d.done}회 방문, 성공 ${d.success}회`); toast(`유입 완료 · 성공 ${d.success}회`, "success"); setRunning(false); es.close(); esRef.current = null; refreshStats(); }
+      else if (d.type === "inflow_done") { setSessOk(d.success || 0); pushLog(`🏁 완료 — 총 ${d.done}회 방문, 성공 ${d.success}회`); toast(`유입 완료 · 성공 ${d.success}회`, "success"); setRunning(false); es.close(); esRef.current = null; refreshStats(); if (apEnabled && targetType === "place") { pushLog("📍 순위 자동 측정 중…"); runMeasureRank(); } }
       else if (d.type === "error") { pushLog(`❌ ${d.msg}`); toast(d.msg, "error"); setRunning(false); es.close(); esRef.current = null; }
     };
     es.onerror = () => { pushLog("❌ 봇 연결 오류 — 봇 서버(포트 3334)가 켜져 있는지 확인해주세요"); toast("봇 연결 오류", "error"); setRunning(false); es.close(); esRef.current = null; };
@@ -638,9 +659,10 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
             <label style={labelStyle}>목표 순위</label>
             <input type="number" min={1} value={apGoal} onChange={(e) => setApGoal(Math.max(1, Number(e.target.value)))} style={{ ...inputStyle, textAlign: "center" }} />
           </div>
+          <button onClick={runMeasureRank} disabled={rankLoading} style={{ padding: "13px 18px", borderRadius: 12, border: `1.5px solid ${C.accent}`, background: C.panel2, color: C.accent, fontSize: 14, fontWeight: 800, cursor: rankLoading?"default":"pointer", fontFamily: "inherit", whiteSpace: "nowrap", opacity: rankLoading?0.6:1 }}>{rankLoading ? "측정 중…" : "📍 지금 순위 측정"}</button>
           <button onClick={() => saveAp(!apEnabled)} style={{ padding: "13px 20px", borderRadius: 12, border: apEnabled ? `2px solid ${C.accent}` : "none", background: apEnabled ? C.panel2 : `linear-gradient(135deg,${C.accent},${C.cyan})`, color: apEnabled ? C.accent : "#fff", fontSize: 15, fontWeight: 900, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}>{apEnabled ? "끄기" : "🎯 켜기"}</button>
         </div>
-        <p style={{ margin: "10px 0 0", fontSize: 11, color: C.sub, fontWeight: 600, lineHeight: 1.5 }}>※ 위 실행 패널의 대상(플레이스/블로그 주소)을 기준으로 추적해요. 달성하면 유입을 줄여 한도를 아끼고, 떨어지면 다시 밀어 올려요.</p>
+        <p style={{ margin: "10px 0 0", fontSize: 11, color: C.sub, fontWeight: 600, lineHeight: 1.5 }}>※ 위 실행 패널의 대상(플레이스/블로그 주소)을 기준으로 추적해요. <b style={{color:C.ink}}>📍 지금 순위 측정</b>을 누르면 현재 순위를 기록해 리포트·그래프에 반영돼요. 달성하면 유입을 줄여 한도를 아끼고, 떨어지면 다시 밀어 올려요.</p>
       </div>
 
       {/* ── ⏰ 예약 실행 ── */}
