@@ -898,7 +898,7 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
   const [otSchedTime,setOtSchedTime]=useState(()=>localStorage.getItem("publy_adm_ot_sched_time")||"09:00");
   const [otSchedDaily,setOtSchedDaily]=useState(()=>localStorage.getItem("publy_adm_ot_sched_daily")!=="0");
   const otRunRef=useRef<(()=>void)|null>(null);
-  const otReviveRunRef=useRef<((target:{logNo:string;origTitle:string;origBody:string;blogId:string;accountId?:string;careAccountId?:string})=>void)|null>(null);
+  const otReviveRunRef=useRef<((target:{logNo:string;origTitle:string;origBody:string;blogId:string;accountId?:string;careAccountId?:string})=>Promise<void>)|null>(null);
   const [otLog,setOtLog]=useState<{id:string;kw:string;title?:string;cat?:string;step:string;status:"wait"|"run"|"done"|"fail"|"limit";postUrl?:string;error?:string;at?:string}[]>(()=>{try{return JSON.parse(localStorage.getItem("publy_adm_ot_log")||"[]");}catch{return [];}});
   useEffect(()=>{try{localStorage.setItem("publy_adm_ot_log",JSON.stringify(otLog.slice(0,50)));}catch{}},[otLog]);
   const [otLiveLog,setOtLiveLog]=useState<string[]>(()=>{try{return JSON.parse(localStorage.getItem("publy_adm_ot_livelog")||"[]");}catch{return [];}});
@@ -1070,7 +1070,8 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
   }
 
   useEffect(()=>{
-    const h=(e:any)=>{ const {logNo,title,blogId,naverId,careAccountId}=e.detail||{}; if(!logNo)return;
+    const h=async(e:any)=>{ const {logNo,title,blogId,naverId,careAccountId,requestId}=e.detail||{}; if(!logNo)return;
+      const finish=(accepted:boolean)=>window.dispatchEvent(new CustomEvent("publy-revive-request-finished",{detail:{requestId,logNo:String(logNo),accepted}}));
       const target={logNo:String(logNo),origTitle:String(title||""),origBody:"",blogId:String(blogId||""),careAccountId:String(careAccountId||"")};
       setTab("onetouch");
       // ★원문 blogId로 소유 계정을 고른다. 로그인ID와 블로그ID가 다른 계정도
@@ -1086,11 +1087,12 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
         ||(naverAccs.length===1?naverAccs[0]:undefined);
       if(naverAccs.length&&!ownerAcc)errors.push(`이 글의 주인 블로그(${target.blogId})와 연결된 계정을 찾지 못했어요 → 해당 네이버 계정을 다시 연결하세요`);
       if(otImgMode==="flow"&&!flowSlotReady[flowSlot])errors.push("Flow가 연결 안 됐어요 → 원터치 발행에서 Flow를 연결 후 다시 시작하세요");
-      if(errors.length){e.preventDefault?.();showOneTouchPreflight(errors);return;}
-      if(otRunningRef.current){e.preventDefault?.();const fail="다른 원터치 작업이 진행 중이에요. 완료하거나 중단한 뒤 다시 시도해주세요.";setReviveState({...target,title:target.origTitle,step:"실패",fail});showToast(fail,"error");return;}
+      if(errors.length){e.preventDefault?.();showOneTouchPreflight(errors);finish(false);return;}
+      if(otRunningRef.current){e.preventDefault?.();const fail="다른 원터치 작업이 진행 중이에요. 완료하거나 중단한 뒤 다시 시도해주세요.";setReviveState({...target,title:target.origTitle,step:"실패",fail});showToast(fail,"error");finish(false);return;}
       const acc=ownerAcc!;
       setPubAccId(acc.id);
-      otReviveRunRef.current?.({...target,accountId:acc.id});
+      await otReviveRunRef.current?.({...target,accountId:acc.id});
+      finish(true);
     };
     window.addEventListener("publy-revive-post",h as any);
     return ()=>window.removeEventListener("publy-revive-post",h as any);
@@ -1242,6 +1244,7 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
           upd({step:"발행 완료",status:"done",postUrl,at}); nextResumeIdx=i+1; otLive(`  ✅ 발행 완료! ${postUrl}`);
           if(activeRevive){
             reviveSucceeded=true;
+            window.dispatchEvent(new CustomEvent("publy-revive-succeeded",{detail:{logNo:activeRevive.logNo}}));
             await incrementReviveQuota(ADM_HISTORY_UID);
             if(activeRevive.careAccountId){
               const tracked=await markTitleChanged(ADM_HISTORY_UID,activeRevive.careAccountId,activeRevive.logNo,title);

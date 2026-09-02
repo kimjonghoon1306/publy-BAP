@@ -607,6 +607,9 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
   // 🩺 AEO 형식 진단: 최근 글 본문을 읽어 도입요약·FAQ·구조화를 갖췄는지 체크(logNo→결과)
   const [aeoResults, setAeoResults] = useState<{ logNo: string; title: string; passed: number; checks: { key:string; label:string; ok:boolean; hint:string }[]; error?: string }[]>([]);
   const [aeoLoading, setAeoLoading] = useState(false);
+  const [reviveChecked, setReviveChecked] = useState<Set<string>>(new Set());
+  const [reviveBulk, setReviveBulk] = useState<{running:boolean;done:number;total:number;success:number;failed:number;current?:string}>({running:false,done:0,total:0,success:0,failed:0});
+  const reviveBulkStopRef = useRef(false);
   const [scPosts, setScPosts] = useState<{url:string;title:string;date:string}[]>([]);
   const [scSelectedLogNos, setScSelectedLogNos] = useState<string[]>([]);
   const [scPostsLoading, setScPostsLoading] = useState(false);
@@ -774,6 +777,42 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
       await new Promise(res => setTimeout(res, 300));
     }
     setAeoLoading(false);
+  };
+  const runBulkRevive = async () => {
+    const targets = aeoResults.filter(r => reviveChecked.has(r.logNo) && !r.error && r.passed < 3);
+    if (!targets.length) return alert("살릴 글을 먼저 선택해 주세요.");
+    const remaining = isUnlimitedPlan ? targets.length : Math.max(0, reviveLimit - reviveUsed);
+    if (remaining <= 0) return alert(`오늘 이 글 살리기 한도(${reviveLimit}회)를 모두 사용했어요. 자정에 다시 사용할 수 있어요.`);
+    const queue = targets.slice(0, remaining);
+    if (!window.confirm(`선택한 글 ${queue.length}개를 차례대로 자동 살릴까요?\n\n제목·본문·이미지를 새로 만들어 기존 글에 덮어써요. 주소와 좋아요는 유지됩니다.${queue.length < targets.length ? `\n\n※ 오늘 남은 한도 때문에 ${queue.length}개만 진행합니다.` : ""}`)) return;
+    reviveBulkStopRef.current = false;
+    setReviveBulk({running:true,done:0,total:queue.length,success:0,failed:0});
+    let success = 0; let failed = 0;
+    for (let i=0;i<queue.length;i++) {
+      if (reviveBulkStopRef.current) break;
+      const item = queue[i];
+      setReviveBulk({running:true,done:i,total:queue.length,success,failed,current:item.title});
+      const requestId = `bulk-revive-${Date.now()}-${i}-${item.logNo}`;
+      const ok = await new Promise<boolean>(resolve => {
+        let tracked = false;
+        const onSucceeded = (e:Event) => { if (String((e as CustomEvent).detail?.logNo||"") === item.logNo) tracked = true; };
+        const onFinished = (e:Event) => {
+          const d=(e as CustomEvent).detail||{};
+          if(d.requestId!==requestId)return;
+          cleanup(); resolve(Boolean(d.accepted)&&tracked);
+        };
+        const timer=window.setTimeout(()=>{cleanup();resolve(false);},2*60*60*1000);
+        const cleanup=()=>{window.clearTimeout(timer);window.removeEventListener("publy-revive-succeeded",onSucceeded);window.removeEventListener("publy-revive-request-finished",onFinished);};
+        window.addEventListener("publy-revive-succeeded",onSucceeded);
+        window.addEventListener("publy-revive-request-finished",onFinished);
+        const accepted=window.dispatchEvent(new CustomEvent("publy-revive-post",{cancelable:true,detail:{requestId,logNo:item.logNo,title:item.title,blogId:activeAccount?.blogId,naverId:activeAccount?.id,careAccountId:activeAccount?.accountId}}));
+        if(!accepted){cleanup();resolve(false);}
+      });
+      if(ok)success++;else failed++;
+      setReviveChecked(prev=>{const next=new Set(prev);next.delete(item.logNo);return next;});
+      setReviveBulk({running:true,done:i+1,total:queue.length,success,failed,current:item.title});
+    }
+    setReviveBulk(p=>({...p,running:false,current:undefined}));
   };
   useEffect(() => { loadCare(); /* eslint-disable-next-line */ }, [activeAccount?.accountId, userId, rpTick]);
   // 원터치 글 살리기 성공 후 같은 글이 즉시 '수정 추적'에 보이도록 진료차트를 다시 읽는다.
@@ -3320,9 +3359,36 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
                         <div style={{ fontSize: 12, fontWeight: 800, color: avg >= 67 ? "#00a878" : avg >= 34 ? "#f59e0b" : "#ef4444" }}>
                           {diagnosed.length ? <>평균 AEO 점수 {avg}점 · {diagnosed.length}개 글 진단 {avg < 67 && <span style={{ color: "var(--text3)", fontWeight: 600 }}>— 형식만 손보면 AI 노출 기회가 커져요</span>}</> : "진단할 본문을 읽지 못했어요"}
                         </div>
+                        {(() => {
+                          const eligible=aeoResults.filter(r=>!r.error&&r.passed<3);
+                          const allOn=eligible.length>0&&eligible.every(r=>reviveChecked.has(r.logNo));
+                          return eligible.length>0&&(
+                            <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",padding:"10px 12px",borderRadius:10,background:"rgba(124,58,237,.07)",border:"1px solid rgba(124,58,237,.22)"}}>
+                              <label style={{display:"flex",alignItems:"center",gap:6,fontSize:12,fontWeight:800,color:"var(--text2)",cursor:reviveBulk.running?"default":"pointer"}}>
+                                <input type="checkbox" checked={allOn} disabled={reviveBulk.running} onChange={()=>setReviveChecked(allOn?new Set():new Set(eligible.map(r=>r.logNo)))} />
+                                전체 선택 ({eligible.length}개)
+                              </label>
+                              <span style={{fontSize:11,color:"var(--text3)"}}>선택 {reviveChecked.size}개</span>
+                              <button onClick={runBulkRevive} disabled={reviveBulk.running||reviveChecked.size===0}
+                                style={{marginLeft:"auto",padding:"7px 13px",borderRadius:8,border:"none",background:reviveBulk.running||reviveChecked.size===0?"#8a8a99":"linear-gradient(135deg,#7c3aed,#a855f7)",color:"#fff",fontSize:11.5,fontWeight:850,cursor:reviveBulk.running||reviveChecked.size===0?"default":"pointer",fontFamily:"inherit"}}>
+                                {reviveBulk.running?`자동 살리기 ${reviveBulk.done}/${reviveBulk.total}`:`✨ 선택 글 자동 살리기`}
+                              </button>
+                              {reviveBulk.running&&<button onClick={()=>{reviveBulkStopRef.current=true;window.dispatchEvent(new CustomEvent("publy-stop-revive-bulk"));}} style={{padding:"7px 11px",borderRadius:8,border:"1px solid #ef4444",background:"transparent",color:"#ef4444",fontSize:11.5,fontWeight:800,cursor:"pointer",fontFamily:"inherit"}}>현재 글 후 중단</button>}
+                            </div>
+                          );
+                        })()}
+                        {(reviveBulk.total>0)&&(
+                          <div style={{padding:"9px 12px",borderRadius:9,background:reviveBulk.running?"rgba(14,165,233,.08)":reviveBulk.failed?"rgba(245,158,11,.08)":"rgba(0,168,120,.08)",fontSize:11.5,color:"var(--text2)",lineHeight:1.55}}>
+                            <b>{reviveBulk.running?"🔄 자동 살리기 진행 중":"✅ 자동 살리기 작업 종료"}</b> · 처리 {reviveBulk.done}/{reviveBulk.total} · 성공 {reviveBulk.success} · 실패 {reviveBulk.failed}
+                            {reviveBulk.current&&<div style={{marginTop:3,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>현재: {reviveBulk.current}</div>}
+                          </div>
+                        )}
                         {aeoResults.map((r, i) => (
                           <div key={i} style={{ padding: "10px 12px", borderRadius: 10, background: "var(--bg)", border: "1px solid var(--border)" }}>
-                            <div style={{ fontSize: 12.5, fontWeight: 700, color: "var(--text)", marginBottom: 6, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.title}</div>
+                            <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:6}}>
+                              {!r.error&&r.passed<3&&<input type="checkbox" aria-label={`${r.title} 선택`} checked={reviveChecked.has(r.logNo)} disabled={reviveBulk.running} onChange={()=>setReviveChecked(prev=>{const next=new Set(prev);next.has(r.logNo)?next.delete(r.logNo):next.add(r.logNo);return next;})} />}
+                              <div style={{ minWidth:0,fontSize: 12.5, fontWeight: 700, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.title}</div>
+                            </div>
                             {r.error ? <div style={{ fontSize: 11, fontWeight: 700, color: "#f59e0b" }}>⚠️ 본문 조회 실패 — 잠시 후 다시 진단해주세요.</div> :
                             <div style={{ display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" }}>
                               {r.checks.map(c => (

@@ -1362,7 +1362,7 @@ Output (JSON object only): {"keyword":"핵심키워드","title":"새 SEO 제목"
   const [otSchedTime,setOtSchedTime]=useState(()=>localStorage.getItem("publy_ot_sched_time")||"09:00");
   const [otSchedDaily,setOtSchedDaily]=useState(()=>localStorage.getItem("publy_ot_sched_daily")!=="0");   // 매일 반복(기본 ON)
   const otRunRef=useRef<(()=>void)|null>(null);       // 예약 트리거가 부를 최신 runOneTouch
-  const otReviveRunRef=useRef<((target:{logNo:string;origTitle:string;origBody:string;blogId:string;accountId?:string;careAccountId?:string})=>void)|null>(null);
+  const otReviveRunRef=useRef<((target:{logNo:string;origTitle:string;origBody:string;blogId:string;accountId?:string;careAccountId?:string})=>Promise<void>)|null>(null);
   // ✨ 글 살리기: 블로그지수에서 부실 글을 원터치 엔진으로 통째 새로 써서 그 글에 덮어쓰기
   const [reviveState,setReviveState]=useState<{logNo:string;title:string;step:string;done?:boolean;fail?:string}|null>(null);
   const [otLog,setOtLog]=useState<{id:string;kw:string;title?:string;cat?:string;step:string;status:"wait"|"run"|"done"|"fail"|"limit";postUrl?:string;error?:string;at?:string}[]>(()=>{try{return JSON.parse(localStorage.getItem("publy_ot_log")||"[]");}catch{return [];}});
@@ -3131,7 +3131,8 @@ POST3: (제목)|(이유)
 
   // 블로그지수(NeighborPage)에서 '글 살리기' 클릭 → 이벤트로 여기서 실행(원터치 탭으로 이동해 진행상황 표시)
   useEffect(()=>{
-    const h=(e:any)=>{ const {logNo,title,blogId,naverId,careAccountId}=e.detail||{}; if(!logNo)return;
+    const h=async(e:any)=>{ const {logNo,title,blogId,naverId,careAccountId,requestId}=e.detail||{}; if(!logNo)return;
+      const finish=(accepted:boolean)=>window.dispatchEvent(new CustomEvent("publy-revive-request-finished",{detail:{requestId,logNo:String(logNo),accepted}}));
       const target={logNo:String(logNo),origTitle:String(title||""),origBody:"",blogId:String(blogId||""),careAccountId:String(careAccountId||"")};
       setTab("onetouch");
       // ★글 살리기는 반드시 원문 소유 블로그의 로그인 세션을 골라야 한다.
@@ -3150,11 +3151,12 @@ POST3: (제목)|(이유)
         ||(naverAccs.length===1?naverAccs[0]:undefined);
       if(naverAccs.length&&!ownerAcc)errors.push(`이 글의 주인 블로그(${target.blogId})와 연결된 계정을 찾지 못했어요 → 해당 네이버 계정을 다시 연결하세요`);
       if(otImgMode==="flow"&&!flowSlotReady[flowSlot])errors.push("Flow가 연결 안 됐어요 → 원터치 발행에서 Flow를 연결 후 다시 시작하세요");
-      if(errors.length){e.preventDefault?.();showOneTouchPreflight(errors);return;}
-      if(otRunningRef.current){e.preventDefault?.();const fail="다른 원터치 작업이 진행 중이에요. 완료하거나 중단한 뒤 다시 시도해주세요.";setReviveState({...target,title:target.origTitle,step:"실패",fail});showToast(fail,"error");return;}
+      if(errors.length){e.preventDefault?.();showOneTouchPreflight(errors);finish(false);return;}
+      if(otRunningRef.current){e.preventDefault?.();const fail="다른 원터치 작업이 진행 중이에요. 완료하거나 중단한 뒤 다시 시도해주세요.";setReviveState({...target,title:target.origTitle,step:"실패",fail});showToast(fail,"error");finish(false);return;}
       const acc=ownerAcc!;
       setPubAccId(acc.id);
-      otReviveRunRef.current?.({...target,accountId:acc.id});
+      await otReviveRunRef.current?.({...target,accountId:acc.id});
+      finish(true);
     };
     window.addEventListener("publy-revive-post",h as any);
     return ()=>window.removeEventListener("publy-revive-post",h as any);
@@ -3345,6 +3347,7 @@ POST3: (제목)|(이유)
           otLive(`  ✅ 발행 완료! ${postUrl}`);
           if(activeRevive){
             reviveSucceeded=true;
+            window.dispatchEvent(new CustomEvent("publy-revive-succeeded",{detail:{logNo:activeRevive.logNo}}));
             await incrementReviveQuota(user.id);
             if(activeRevive.careAccountId){
               const tracked=await markTitleChanged(user.id,activeRevive.careAccountId,activeRevive.logNo,title);
