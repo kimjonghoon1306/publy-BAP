@@ -5234,20 +5234,30 @@ async function inflowDwellRead(page: any, log: (m: string) => void, shouldStop?:
 }
 
 // 저장/공감 등 액션(로그인 필요). 셀렉터는 방어적 — 실패해도 유입 자체는 유효.
-async function inflowActions(page: any, target: InflowTarget, actions: { save?: boolean; like?: boolean; share?: boolean }, log: (m: string) => void): Promise<void> {
+type InflowActions = { save?: boolean; like?: boolean; share?: boolean; directions?: boolean; call?: boolean; booking?: boolean; talk?: boolean };
+async function inflowActions(page: any, target: InflowTarget, actions: InflowActions, log: (m: string) => void): Promise<void> {
+  const clickFirst = async (sels: string[], label: string) => {
+    for (const sl of sels) {
+      const b = await page.$(sl).catch(() => null);
+      if (b) { await b.click().catch(() => {}); log(label); await page.waitForTimeout(inflowRndInt(800, 1900)); return true; }
+    }
+    return false;
+  };
   try {
-    if (target.type === "place" && actions.save) {
-      const saveSel = ['button:has-text("저장")', 'a:has-text("저장")', '[class*="save"] button', 'button[aria-label*="저장"]'];
-      for (const sl of saveSel) { const b = await page.$(sl).catch(() => null); if (b) { await b.click().catch(() => {}); log("  💾 플레이스 저장"); break; } }
+    if (target.type === "place") {
+      // 방문의도 신호(길찾기·전화·예약)가 플레이스 순위에 가장 강함
+      if (actions.save)       await clickFirst(['button:has-text("저장")', 'a:has-text("저장")', '[class*="save"] button', 'button[aria-label*="저장"]'], "  💾 저장");
+      if (actions.directions) await clickFirst(['a:has-text("길찾기")', 'button:has-text("길찾기")', '[class*="direction"] a', '[class*="route"] a'], "  🧭 길찾기");
+      if (actions.call)       await clickFirst(['a:has-text("전화")', 'a[href^="tel:"]', 'button:has-text("전화")', '[class*="call"] a'], "  📞 전화");
+      if (actions.booking)    await clickFirst(['a:has-text("예약")', 'button:has-text("예약")', '[class*="booking"] a'], "  📅 예약");
+      if (actions.talk)       await clickFirst(['a:has-text("톡톡")', 'a:has-text("문의")', '[class*="talk"] a'], "  💬 톡톡 문의");
     }
     if (target.type === "blog" && actions.like) {
-      const likeSel = ['a.u_likeit_list_btn', 'a[class*="like"]', 'button[class*="sympathy"]', 'a:has-text("공감")'];
-      for (const sl of likeSel) { const b = await page.$(sl).catch(() => null); if (b) { await b.click().catch(() => {}); log("  💚 블로그 공감"); break; } }
+      await clickFirst(['a.u_likeit_list_btn', 'a[class*="like"]', 'button[class*="sympathy"]', 'a:has-text("공감")'], "  💚 블로그 공감");
     }
-    // 🔗 공유 — 플레이스·블로그 공통(공유 버튼 클릭). 실기기 셀렉터 교정 필요할 수 있음.
+    // 🔗 공유 — 플레이스·블로그 공통
     if (actions.share) {
-      const shareSel = ['button:has-text("공유")', 'a:has-text("공유")', 'button[aria-label*="공유"]', 'a[aria-label*="공유"]', '[class*="share"] button', '[class*="share"] a'];
-      for (const sl of shareSel) { const b = await page.$(sl).catch(() => null); if (b) { await b.click().catch(() => {}); log("  🔗 공유"); break; } }
+      await clickFirst(['button:has-text("공유")', 'a:has-text("공유")', 'button[aria-label*="공유"]', 'a[aria-label*="공유"]', '[class*="share"] button', '[class*="share"] a'], "  🔗 공유");
     }
   } catch (e: any) {
     log(`  ⚠️ 액션 실패(무시): ${e?.message || e} (실기기 셀렉터 교정 필요)`);
@@ -5262,7 +5272,7 @@ export async function searchInflow(params: {
   rounds: number;                  // 이번 실행 방문 횟수(한도 내)
   device?: "mobile" | "pc" | "mix"; // 접속 기기(기본 모바일, mix=방문마다 랜덤)
   intervalSec?: [number, number];  // 방문 사이 텀(사용자 임의 지정, 랜덤)
-  actions?: { save?: boolean; like?: boolean; share?: boolean };
+  actions?: InflowActions;         // 저장·공감·공유·길찾기·전화·예약·톡톡
   requireLogin?: boolean;          // 저장/공감 등 로그인 필요 액션 시
   onLog?: (m: string) => void;
   onProgress?: (done: number, total: number) => void;

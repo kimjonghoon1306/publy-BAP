@@ -754,6 +754,21 @@ export async function resetInflowQuota(userId: string): Promise<void> {
   await supabase.from("publy_settings").upsert({ key: inflowQuotaKey(userId), value: "0" }, { onConflict: "key" });
 }
 
+/* 📈 컨트롤타워 그래프용 — 최근 N일 일별 유입 수(publy_settings에서 날짜별 키를 한 번에 조회) */
+export async function getInflowUsageHistory(userId: string, days = 7): Promise<{ label: string; count: number }[]> {
+  const metas: { key: string; label: string }[] = [];
+  const now = Date.now();
+  for (let i = days - 1; i >= 0; i--) {
+    const ymd = koreaDateKey(new Date(now - i * 86400000)); // YYYY-MM-DD (KST)
+    metas.push({ key: `inflow_daily_${userId}_${ymd}`, label: ymd.slice(5) }); // MM-DD
+  }
+  try {
+    const { data } = await supabase.from("publy_settings").select("key,value").in("key", metas.map(m => m.key));
+    const map = new Map((data || []).map((r: any) => [r.key, parseInt(r.value) || 0]));
+    return metas.map(m => ({ label: m.label, count: map.get(m.key) || 0 }));
+  } catch { return metas.map(m => ({ label: m.label, count: 0 })); }
+}
+
 /* ── 관리자: 오늘 발행 카운트 초기화 ── (실제 한도체크가 읽는 publy_settings 키를 0으로) */
 export async function resetDailyPublish(userId: string): Promise<void> {
   const key = publishQuotaKey(userId);
