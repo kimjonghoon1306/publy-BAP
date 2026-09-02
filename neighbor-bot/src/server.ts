@@ -1107,7 +1107,7 @@ app.get("/api/post-body", async (req, res) => {
 
 /* ── 🆕 NEW 트래픽 유입 (검색유입, SSE) — 기본 잠금(관리자가 켠 회원만), 관리자=락 해제 ── */
 app.get("/api/inflow", async (req, res) => {
-  const { userId, accountId, keywords, targetType, placeUrl, blogId, logNo, rounds, termMin, termMax, doSave, doLike, doShare, doDir, doCall, doBook, doTalk, device, fullFunnel, spreadHours, doReview, reviewText, visible, actionRate, intensity } = req.query as Record<string, string>;
+  const { userId, accountId, keywords, targetType, placeUrl, blogId, logNo, rounds, termMin, termMax, doSave, doLike, doShare, doDir, doCall, doBook, doTalk, device, fullFunnel, spreadHours, doReview, reviewText, visible, actionRate, intensity, extraTargets, keywordWeights } = req.query as Record<string, string>;
   if (!keywords || !targetType) return res.status(400).json({ error: "keywords·targetType 필요" });
   sseSetup(res);
   let releaseAccount = () => {};
@@ -1135,6 +1135,28 @@ app.get("/api/inflow", async (req, res) => {
       target = { type: "blog", blogId, logNo: logNo || undefined };
     }
 
+    // ➕ 추가 대상 해석 — 주소 문자열들을 place/blog로 자동 판별해 targets 배열 구성(첫 대상=위 target)
+    const targetsArr: InflowTarget[] = [target];
+    if (extraTargets) {
+      try {
+        const arr: string[] = JSON.parse(extraTargets);
+        for (const raw of arr) {
+          const s = String(raw || "").trim(); if (!s) continue;
+          if (/blog\.naver|blogId=|\/PostView/i.test(s)) {
+            const m = s.match(/blog\.naver\.com\/([A-Za-z0-9_-]+)(?:\/(\d+))?/i) || s.match(/blogId=([A-Za-z0-9_-]+)/i);
+            if (m) targetsArr.push({ type: "blog", blogId: m[1], logNo: (m[2] || (s.match(/logNo=(\d+)/i)?.[1])) || undefined });
+          } else {
+            const p = await resolvePlaceUrl(s);
+            if (p) targetsArr.push({ type: "place", placeId: p.placeId, domain: p.domain, placeUrl: s });
+          }
+        }
+        if (targetsArr.length > 1) sseSend(res, { type: "log", msg: `➕ 대상 ${targetsArr.length}곳을 번갈아 유입해요` });
+      } catch { /* ignore */ }
+    }
+    // 🎯 키워드 비중
+    let kwWeightsArr: number[] | undefined;
+    if (keywordWeights) { try { kwWeightsArr = JSON.parse(keywordWeights); } catch { kwWeightsArr = undefined; } }
+
     const kwList = keywords.split(",").map((k) => k.trim()).filter(Boolean);
     const n = Math.max(1, parseInt(rounds || "10", 10));
     const tmin = Math.max(5, parseInt(termMin || "30", 10));
@@ -1152,7 +1174,9 @@ app.get("/api/inflow", async (req, res) => {
       accountId: accountId || "",
       ownerUserId: userId || undefined,
       keywords: kwList,
+      keywordWeights: kwWeightsArr,
       target,
+      targets: targetsArr.length > 1 ? targetsArr : undefined,
       rounds: n,
       device: (device === "pc" || device === "mix") ? device : "mobile",
       intervalSec: [tmin, tmax],

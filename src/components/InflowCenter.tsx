@@ -116,6 +116,9 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
   const [auto, setAuto] = useState(saved0.auto ?? false);
   const [actionRate, setActionRate] = useState<number>(saved0.actionRate ?? 100); // 🎲 액션 발동 확률(%)
   const [intensity, setIntensity] = useState<"fast" | "normal" | "deep">(saved0.intensity ?? "normal"); // 📖 체류 강도
+  const [extraTargets, setExtraTargets] = useState<string[]>(saved0.extraTargets ?? []); // ➕ 추가 대상(주소 목록)
+  const [advOpen, setAdvOpen] = useState(false);       // ⚙️ 고급 설정 펼침
+  const [kwWeights, setKwWeights] = useState<Record<string, number>>(saved0.kwWeights ?? {}); // 키워드별 비중
   const [visible, setVisible] = useState(false); // 🪟 창 보기(테스트) — 저장 안 함(안전상 매번 꺼짐)
   const [accountId, setAccountId] = useState("");
   const [accounts, setAccounts] = useState<PublyAccount[]>([]);
@@ -206,10 +209,10 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
     try {
       localStorage.setItem(formKey, JSON.stringify({
         targetType, placeUrl, blogUrl, keywords, rounds, termMin, termMax, device,
-        doSave, doShare, doDir, doCall, doBook, doTalk, doLike, funnel, spread, spreadHours, doReview, reviewText, auto, actionRate, intensity,
+        doSave, doShare, doDir, doCall, doBook, doTalk, doLike, funnel, spread, spreadHours, doReview, reviewText, auto, actionRate, intensity, extraTargets, kwWeights,
       }));
     } catch {}
-  }, [formKey, targetType, placeUrl, blogUrl, keywords, rounds, termMin, termMax, device, doSave, doShare, doDir, doCall, doBook, doTalk, doLike, funnel, spread, spreadHours, doReview, reviewText, auto, actionRate, intensity]);
+  }, [formKey, targetType, placeUrl, blogUrl, keywords, rounds, termMin, termMax, device, doSave, doShare, doDir, doCall, doBook, doTalk, doLike, funnel, spread, spreadHours, doReview, reviewText, auto, actionRate, intensity, extraTargets, kwWeights]);
 
   const copyLogs = () => {
     if (!logs.length) return;
@@ -269,6 +272,12 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
     if (accountId) params.set("accountId", accountId);
     if (targetType === "place") params.set("placeUrl", placeUrl.trim());
     else if (parsedBlog) { params.set("blogId", parsedBlog.blogId); if (parsedBlog.logNo) params.set("logNo", parsedBlog.logNo); }
+    // ➕ 추가 대상들(있으면 방문마다 로테이션) — 서버가 targets JSON을 받아 처리
+    const extras = extraTargets.map((s) => s.trim()).filter(Boolean);
+    if (extras.length) params.set("extraTargets", JSON.stringify(extras));
+    // 🎯 키워드 비중(고급) — {키워드:가중치}
+    const weights = kwList.map((k) => Number(kwWeights[k]) || 1);
+    if (weights.some((w) => w !== 1)) params.set("keywordWeights", JSON.stringify(weights));
 
     pushLog(`🚀 트래픽 유입 시작 — ${targetType === "place" ? "플레이스" : "블로그"}, 키워드 ${kwList.length}개, ${n}회 방문, 텀 ${termMin}~${termMax}초, ${device === "pc" ? "PC" : device === "mix" ? "혼합" : "모바일"}`);
     const es = new BotEventStream(`${BOT}/api/inflow?${params.toString()}`);
@@ -438,6 +447,18 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
           </div>
         )}
 
+        {/* ➕ 추가 대상(여러 곳 번갈아 유입) */}
+        <div>
+          <label style={labelStyle}>➕ 추가 대상 <span style={{ color: C.sub, fontWeight: 600 }}>(여러 플레이스·글을 번갈아 — 선택)</span></label>
+          {extraTargets.map((t, i) => (
+            <div key={i} style={{ display: "flex", gap: 8, marginBottom: 6 }}>
+              <input value={t} onChange={(e) => setExtraTargets((arr) => arr.map((x, j) => j === i ? e.target.value : x))} placeholder="플레이스/블로그 주소 붙여넣기" style={{ ...inputStyle, flex: 1 }} />
+              <button onClick={() => setExtraTargets((arr) => arr.filter((_, j) => j !== i))} style={{ padding: "0 14px", borderRadius: 10, border: `1.5px solid ${C.line2}`, background: C.panel2, color: "#dc2626", fontSize: 18, fontWeight: 900, cursor: "pointer" }}>×</button>
+            </div>
+          ))}
+          <button onClick={() => setExtraTargets((arr) => [...arr, ""])} style={{ padding: "9px 14px", borderRadius: 10, border: `1.5px dashed ${C.line2}`, background: "transparent", color: C.accent, fontSize: 13.5, fontWeight: 800, cursor: "pointer", fontFamily: "inherit" }}>＋ 대상 추가</button>
+        </div>
+
         <div>
           <label style={labelStyle}>검색 키워드 <span style={{ color: C.sub, fontWeight: 600 }}>(여러 개 — 쉼표·줄바꿈으로 구분, 돌아가며 검색)</span></label>
           <textarea value={keywords} onChange={(e) => setKeywords(e.target.value)} placeholder={"예) 강남 맛집, 강남역 삼겹살, 역삼동 고깃집"} rows={2} style={{ ...inputStyle, resize: "vertical", lineHeight: 1.6 }} />
@@ -507,6 +528,26 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
             <ActionChk v={auto} set={setAuto} label="⚙️ 자동(오늘 한도까지)" />
             <ActionChk v={visible} set={setVisible} label="🪟 창 보기(테스트)" />
           </div>
+        </div>
+
+        {/* ⚙️ 고급 설정 — 키워드별 비중(자주 안 쓰는 건 접어둠) */}
+        <div>
+          <button onClick={() => setAdvOpen((v) => !v)} style={{ padding: "10px 14px", borderRadius: 10, border: `1.5px solid ${C.line2}`, background: C.panel2, color: C.ink, fontSize: 13.5, fontWeight: 800, cursor: "pointer", fontFamily: "inherit", width: "100%", textAlign: "left" }}>
+            {advOpen ? "▾" : "▸"} ⚙️ 고급 설정 — 키워드별 비중
+          </button>
+          {advOpen && (
+            <div style={{ marginTop: 10, padding: 14, borderRadius: 12, border: `1px solid ${C.line}`, background: C.panel2 }}>
+              <div style={{ fontSize: 12, color: C.sub, fontWeight: 600, marginBottom: 8 }}>키워드마다 방문 비중을 정해요(숫자가 클수록 자주). 비워두면 균등.</div>
+              {keywords.split(/[,\n]/).map((k) => k.trim()).filter(Boolean).map((k) => (
+                <div key={k} style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
+                  <span style={{ flex: 1, fontSize: 13.5, fontWeight: 700 }}>{k}</span>
+                  <input type="range" min={1} max={10} value={kwWeights[k] ?? 1} onChange={(e) => setKwWeights((w) => ({ ...w, [k]: Number(e.target.value) }))} style={{ width: 120, accentColor: C.accent }} />
+                  <span style={{ minWidth: 24, textAlign: "right", fontSize: 14, fontWeight: 900, color: C.accent }}>{kwWeights[k] ?? 1}</span>
+                </div>
+              ))}
+              {!keywords.trim() && <div style={{ fontSize: 12.5, color: C.sub, fontWeight: 600 }}>먼저 위에 키워드를 입력하세요.</div>}
+            </div>
+          )}
         </div>
 
         {/* ⏱️ 시간 분산 */}
