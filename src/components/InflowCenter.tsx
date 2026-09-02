@@ -30,6 +30,18 @@ function parseBlogUrl(input: string): { blogId: string; logNo: string } | null {
   return null;
 }
 
+// 플레이스 주소에서 가게 번호(placeId) 추출 — 인식 확인 배지용. 단축주소(naver.me)는 서버가 펼치므로 여기선 "확인예정".
+function extractPlaceId(input: string): string | null {
+  const s = String(input || "");
+  const m = s.match(/(?:pcmap\.place|m\.place|place)\.naver\.com\/[a-z]+\/(\d{5,})/i)
+    || s.match(/entry\/place\/(\d{5,})/i)
+    || s.match(/\/place\/(\d{5,})/i)
+    || s.match(/[?&]placeId=(\d{5,})/i)
+    || s.match(/^\s*(\d{6,})\s*$/);
+  return m ? m[1] : null;
+}
+const isShortUrl = (s: string) => /naver\.me\/|me2\.do\//i.test(String(s || ""));
+
 // 🔎 주소만 보고 플레이스/블로그 자동 감지(탭 안 바꿔도 되게)
 function detectTargetType(input: string): "place" | "blog" | null {
   const s = (input || "").toLowerCase();

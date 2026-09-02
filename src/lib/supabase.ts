@@ -1758,6 +1758,54 @@ export async function deleteProxy(id: string): Promise<void> {
   if (error) alert("프록시 삭제 실패: " + error.message);
 }
 
+/* ══ 🌐 프록시 사용량 (B: 우리 접속 카운트) — publy_settings key-value 재사용 ══
+   봇이 프록시로 접속할 때마다 오늘 카운트 증가. API 없이도 항상 보임. */
+function proxyUsageKey(): string { return `proxy_usage_${koreaDateKey()}`; }
+export async function getProxyUsageToday(): Promise<number> {
+  try {
+    const { data } = await supabase.from("publy_settings").select("value").eq("key", proxyUsageKey()).maybeSingle();
+    return data?.value ? parseInt(data.value) || 0 : 0;
+  } catch { return 0; }
+}
+// 최근 7일 접속 추이(그래프용)
+export async function getProxyUsageHistory(days = 7): Promise<{ label: string; count: number }[]> {
+  const metas: { key: string; label: string }[] = [];
+  const now = Date.now();
+  for (let i = days - 1; i >= 0; i--) {
+    const ymd = koreaDateKey(new Date(now - i * 86400000));
+    metas.push({ key: `proxy_usage_${ymd}`, label: ymd.slice(5) });
+  }
+  try {
+    const { data } = await supabase.from("publy_settings").select("key,value").in("key", metas.map(m => m.key));
+    const map = new Map((data || []).map((r: any) => [r.key, parseInt(r.value) || 0]));
+    return metas.map(m => ({ label: m.label, count: map.get(m.key) || 0 }));
+  } catch { return metas.map(m => ({ label: m.label, count: 0 })); }
+}
+
+/* ══ 💰 DataImpulse 실잔량 (A: 공식 API) — 관리자가 저장한 토큰으로 조회 ══
+   토큰은 publy_settings에 저장. 없으면 null(껍데기만, B로 대체). */
+export async function saveDataImpulseToken(token: string): Promise<void> {
+  await supabase.from("publy_settings").upsert({ key: "dataimpulse_token", value: token.trim() }, { onConflict: "key" });
+}
+export async function getDataImpulseToken(): Promise<string> {
+  try {
+    const { data } = await supabase.from("publy_settings").select("value").eq("key", "dataimpulse_token").maybeSingle();
+    return data?.value || "";
+  } catch { return ""; }
+}
+// 실제 잔액/트래픽 조회 (토큰 있을 때만). 실패해도 앱 안 죽게 null 반환.
+export async function fetchDataImpulseBalance(): Promise<{ balance?: number; traffic_left_gb?: number; raw?: any } | null> {
+  const token = await getDataImpulseToken();
+  if (!token) return null;
+  try {
+    const r = await fetch("https://api.dataimpulse.com/reseller/user/balance", { headers: { Authorization: `Bearer ${token}` } });
+    if (!r.ok) return null;
+    const j = await r.json();
+    // 응답 형태는 계정마다 다를 수 있어 raw도 함께 반환(화면서 유연 표시)
+    return { balance: j.balance ?? j.money ?? undefined, traffic_left_gb: j.traffic ?? j.traffic_left ?? undefined, raw: j };
+  } catch { return null; }
+}
+
 // 프록시가 적용될 기능 4종(관리자가 계정별로 on/off)
 export const PROXY_FEATURES = [
   { k: "neighbor", l: "서이추" },

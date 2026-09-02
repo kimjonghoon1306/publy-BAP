@@ -6,7 +6,7 @@ import Place360 from "../components/Place360";
 import Place360AdminManager from "../components/Place360AdminManager";
 import PlaceReview from "../components/PlaceReview";
 import UsageGuide from "../components/UsageGuide";
-import { supabase, getAccounts, upsertAccount, PublyAccount, getHistory, getHistoryContent, PublyHistory, addHistory, deleteHistory, deleteAllHistory, setAdminPassword, saveAdminNaverApiKeys, getNaverApiKeys, NaverApiKeys, getNaverDailyUsage, NAVER_DAILY_LIMIT, checkNaverQuota, incrementNaverQuota, getUserNaverApiKeys, getReferrals, getErrorLogs, getUnreadErrorCount, markErrorsAsRead, logError, PLAN_CONFIG, getAllNeighborHistory, NeighborHistory, getAllEngageHistory, EngageHistory, InstaDmTarget, InstaDmHistory, InstaDmQuota, getInstaDmTargets, addInstaDmTarget, updateInstaDmTargetStatus, deleteInstaDmTarget, getInstaDmHistory, addInstaDmHistory, getAllInstaDmHistory, getInstaDmQuota, upsertInstaDmQuota, getAllInstaDmQuotas, INSTA_DM_DAILY_LIMIT, PublyBugReport, getBugReports, updateBugReportStatus, deleteBugReport, resetDailyPublish, getAllDailyUsageToday, DailyUsageRow, getAllReplyHistory, ReplyHistory, getAllPlaceReplyHistory, PlaceReplyHistory, getAllBlogscoreHistory, BlogscoreHistory, NEIGHBOR_DAILY_LIMIT, ENGAGE_DAILY_LIMIT, REPLY_DAILY_LIMIT, PLACE_REPLY_DAILY_LIMIT, BLOGSCORE_DAILY_LIMIT, PUMASI_ACCOUNT_LIMIT, PUMASI_POSTS_LIMIT, CRAWL_DAILY_LIMIT, INFLOW_DAILY_LIMIT, EMAIL_DAILY_LIMIT, COMMENT_DAILY_LIMIT, PLACE_BLOGGER_LIMIT, PLACE360_STORE_LIMIT, PLACE360_DAILY_DIAGNOSIS_LIMIT, PLACE360_HISTORY_DAYS, PublyProxy, getProxies, addProxy, updateProxy, deleteProxy, getProxyAssignments, assignAccountToProxy, unassignAccount, setAccountFeatures, ProxyAssign, PROXY_FEATURES, checkProxyHealth, getLiveLog, getRunningLiveLogs, LiveLogRow } from "../lib/supabase";
+import { supabase, getAccounts, upsertAccount, PublyAccount, getHistory, getHistoryContent, PublyHistory, addHistory, deleteHistory, deleteAllHistory, setAdminPassword, saveAdminNaverApiKeys, getNaverApiKeys, NaverApiKeys, getNaverDailyUsage, NAVER_DAILY_LIMIT, checkNaverQuota, incrementNaverQuota, getUserNaverApiKeys, getReferrals, getErrorLogs, getUnreadErrorCount, markErrorsAsRead, logError, PLAN_CONFIG, getAllNeighborHistory, NeighborHistory, getAllEngageHistory, EngageHistory, InstaDmTarget, InstaDmHistory, InstaDmQuota, getInstaDmTargets, addInstaDmTarget, updateInstaDmTargetStatus, deleteInstaDmTarget, getInstaDmHistory, addInstaDmHistory, getAllInstaDmHistory, getInstaDmQuota, upsertInstaDmQuota, getAllInstaDmQuotas, INSTA_DM_DAILY_LIMIT, PublyBugReport, getBugReports, updateBugReportStatus, deleteBugReport, resetDailyPublish, getAllDailyUsageToday, DailyUsageRow, getAllReplyHistory, ReplyHistory, getAllPlaceReplyHistory, PlaceReplyHistory, getAllBlogscoreHistory, BlogscoreHistory, NEIGHBOR_DAILY_LIMIT, ENGAGE_DAILY_LIMIT, REPLY_DAILY_LIMIT, PLACE_REPLY_DAILY_LIMIT, BLOGSCORE_DAILY_LIMIT, PUMASI_ACCOUNT_LIMIT, PUMASI_POSTS_LIMIT, CRAWL_DAILY_LIMIT, INFLOW_DAILY_LIMIT, EMAIL_DAILY_LIMIT, COMMENT_DAILY_LIMIT, PLACE_BLOGGER_LIMIT, PLACE360_STORE_LIMIT, PLACE360_DAILY_DIAGNOSIS_LIMIT, PLACE360_HISTORY_DAYS, PublyProxy, getProxies, addProxy, updateProxy, deleteProxy, getProxyUsageToday, getProxyUsageHistory, getDataImpulseToken, saveDataImpulseToken, fetchDataImpulseBalance, getProxyAssignments, assignAccountToProxy, unassignAccount, setAccountFeatures, ProxyAssign, PROXY_FEATURES, checkProxyHealth, getLiveLog, getRunningLiveLogs, LiveLogRow } from "../lib/supabase";
 import NeighborPage from "./NeighborPage";
 import { botFetch, BotEventStream } from "../lib/botApi";
 import { PLACE360_RANK_DAILY_LIMIT, PLACE_DETAIL_DAILY_LIMIT } from "../lib/supabase";
@@ -664,6 +664,16 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
   const NEIGHBOR_BOT = "http://127.0.0.1:3334";   // 서이추·공감·품앗이 봇(프록시 헬스체크도 여기서 실행)
   const [proxies, setProxies] = useState<PublyProxy[]>([]);
   const [proxyAssign, setProxyAssign] = useState<Record<string, ProxyAssign[]>>({});
+  // 🌐 프록시 사용량(B: 접속 카운트) + DataImpulse 실잔량(A)
+  const [proxyUsageToday, setProxyUsageToday] = useState(0);
+  const [proxyUsageHist, setProxyUsageHist] = useState<{ label: string; count: number }[]>([]);
+  const [diToken, setDiToken] = useState("");
+  const [diBalance, setDiBalance] = useState<{ balance?: number; traffic_left_gb?: number; raw?: any } | null>(null);
+  const loadProxyUsage = async () => {
+    const [u, h, tok] = await Promise.all([getProxyUsageToday(), getProxyUsageHistory(7), getDataImpulseToken()]);
+    setProxyUsageToday(u); setProxyUsageHist(h); setDiToken(tok);
+    if (tok) fetchDataImpulseBalance().then(setDiBalance).catch(() => {});
+  };
   const [proxyChecking, setProxyChecking] = useState<Record<string,boolean>>({});
   const [proxyAccts, setProxyAccts] = useState<{accountIds:string[]; label:string; search:string}[]>([]);
   const [proxyAcctSearch, setProxyAcctSearch] = useState("");
@@ -707,7 +717,7 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
   }
   async function loadProxies() {
     const [ps, asg] = await Promise.all([getProxies(), getProxyAssignments()]);
-    setProxies(ps); setProxyAssign(asg); loadProxyAccounts();
+    setProxies(ps); setProxyAssign(asg); loadProxyAccounts(); loadProxyUsage();
   }
   useEffect(() => { if (tab==="proxy") loadProxies(); /* eslint-disable-next-line */ }, [tab]);
   async function handleAddProxy() {
@@ -5136,6 +5146,8 @@ POST3: (제목)|(이유)
                               </div>
                               <div style={{marginLeft:"auto",display:"flex",gap:8,flexWrap:"wrap"}}>
                                 <button className="btn btn-secondary btn-sm" onClick={()=>toggleCrawl(u)}>🔍 크롤링 {u.crawl_enabled!==false?"허용됨":"잠김"}</button>
+                                <button className="btn btn-secondary btn-sm" onClick={()=>toggleInflow(u)} style={{borderColor:u.inflow_enabled===true?"#2563eb":undefined,color:u.inflow_enabled===true?"#2563eb":undefined}}>🆕 트래픽 유입 {u.inflow_enabled===true?"허용됨":"잠김"}</button>
+                                <button className="btn btn-secondary btn-sm" onClick={()=>toggleInflowReview(u)} style={{borderColor:u.inflow_review_enabled===true?"#dc2626":undefined,color:u.inflow_review_enabled===true?"#dc2626":undefined}}>✍️ 리뷰작성 {u.inflow_review_enabled===true?"허용됨":"잠김"}</button>
                                 <button className="btn btn-secondary btn-sm" onClick={()=>togglePlace360(u)}>🏪 플레이스 365 {u.place360_enabled!==false?"허용됨":"잠김"}</button>
                                 <button className="btn btn-secondary btn-sm" onClick={()=>toggleActive(u)}>{u.is_active?"비활성화":"활성화"}</button>
                                 <button className="btn btn-secondary btn-sm" onClick={()=>resetQuota(u.id)}>건수 초기화</button>
@@ -6745,6 +6757,44 @@ POST3: (제목)|(이유)
                   <div style={statBox}>등록된 IP <b style={{color:"var(--text)"}}>{proxies.length}</b>개</div>
                   <div style={statBox}>배정된 계정 <b style={{color:"var(--text)"}}>{totalAssigned}</b>개</div>
                   <div style={statBox}>정상 <b style={{color:"var(--success)"}}>{proxies.filter(p=>p.last_ok===true).length}</b> · 실패 <b style={{color:"var(--danger)"}}>{proxies.filter(p=>p.last_ok===false).length}</b></div>
+                </div>
+
+                {/* 🌐 프록시 사용량 실시간 대시보드 (B: 접속 카운트 + A: DataImpulse 실잔량) */}
+                <div style={{background:"var(--card)",border:"1px solid var(--border)",borderRadius:12,padding:16,marginBottom:16}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12,flexWrap:"wrap",gap:8}}>
+                    <span style={{fontSize:15,fontWeight:800}}>📊 프록시 사용량</span>
+                    <button onClick={loadProxyUsage} style={{padding:"6px 12px",borderRadius:8,border:"1px solid var(--border)",background:"var(--bg)",color:"var(--text2)",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>↻ 새로고침</button>
+                  </div>
+                  <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:12}}>
+                    <div style={{background:"var(--bg)",border:"1px solid var(--border)",borderRadius:10,padding:"12px 14px"}}>
+                      <div style={{fontSize:12,color:"var(--text2)",fontWeight:700,marginBottom:4}}>오늘 접속</div>
+                      <div style={{fontSize:24,fontWeight:900,color:"var(--accent-text,#2563eb)"}}>{proxyUsageToday.toLocaleString()}<span style={{fontSize:13,color:"var(--text2)",fontWeight:600}}> 회</span></div>
+                    </div>
+                    <div style={{background:"var(--bg)",border:"1px solid var(--border)",borderRadius:10,padding:"12px 14px"}}>
+                      <div style={{fontSize:12,color:"var(--text2)",fontWeight:700,marginBottom:4}}>최근 7일</div>
+                      <div style={{fontSize:24,fontWeight:900}}>{proxyUsageHist.reduce((s,d)=>s+d.count,0).toLocaleString()}<span style={{fontSize:13,color:"var(--text2)",fontWeight:600}}> 회</span></div>
+                    </div>
+                    <div style={{background:"var(--bg)",border:"1px solid var(--border)",borderRadius:10,padding:"12px 14px"}}>
+                      <div style={{fontSize:12,color:"var(--text2)",fontWeight:700,marginBottom:4}}>💰 남은 잔액(DataImpulse)</div>
+                      <div style={{fontSize:20,fontWeight:900,color:"var(--success)"}}>{diBalance?.balance!=null?`$${diBalance.balance}`:(diToken?"조회 중…":"토큰 미등록")}</div>
+                      {diBalance?.traffic_left_gb!=null && <div style={{fontSize:12,color:"var(--text2)",fontWeight:600,marginTop:2}}>트래픽 {diBalance.traffic_left_gb}GB 남음</div>}
+                    </div>
+                  </div>
+                  {/* 7일 미니 막대 그래프 */}
+                  <div style={{display:"flex",alignItems:"flex-end",gap:4,height:44,marginTop:14}}>
+                    {(()=>{ const mx=Math.max(1,...proxyUsageHist.map(d=>d.count)); return proxyUsageHist.map((d,i)=>(
+                      <div key={i} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",gap:3}}>
+                        <div title={`${d.label}: ${d.count}회`} style={{width:"100%",height:`${Math.max(3,(d.count/mx)*34)}px`,background:"linear-gradient(180deg,#3b82f6,#22d3ee)",borderRadius:3}} />
+                        <span style={{fontSize:9,color:"var(--text3)"}}>{d.label}</span>
+                      </div>
+                    )); })()}
+                  </div>
+                  {/* DataImpulse 토큰 입력(A 활성화) */}
+                  <div style={{display:"flex",gap:8,marginTop:14,flexWrap:"wrap",alignItems:"center"}}>
+                    <input value={diToken} onChange={e=>setDiToken(e.target.value)} placeholder="DataImpulse API 토큰(붙여넣으면 실잔액 표시)" style={{...inputStyle,flex:1,minWidth:220}} />
+                    <button onClick={async()=>{ await saveDataImpulseToken(diToken); const b=await fetchDataImpulseBalance(); setDiBalance(b); showToast(b?"실잔액을 불러왔어요":"토큰 저장됨(응답 확인 필요)", b?"success":"info"); }} style={{padding:"10px 16px",borderRadius:8,border:"none",background:"var(--accent,#2563eb)",color:"#fff",fontSize:13,fontWeight:800,cursor:"pointer",fontFamily:"inherit"}}>저장·조회</button>
+                  </div>
+                  <p style={{fontSize:11,color:"var(--text3)",margin:"8px 0 0",lineHeight:1.5}}>※ '오늘 접속'은 봇이 프록시로 나간 횟수예요. '남은 잔액'은 DataImpulse 대시보드에서 API 토큰을 발급해 넣으면 실시간으로 보여요.</p>
                 </div>
 
                 <div style={{background:"var(--card)",border:"1px solid var(--border)",borderRadius:12,padding:16,marginBottom:20}}>

@@ -193,10 +193,12 @@ export async function checkMembershipAccess(userId: string, feature?: "crawl" | 
     const plan = user?.plan || "free";
     if (!user || user.is_active === false) return { ok: false, plan, reason: "비활성 회원" };
     if (!quota?.reset_date || new Date(quota.reset_date).getTime() <= Date.now()) return { ok: false, plan, reason: "이용기간 만료" };
+    // ★관리자·무제한은 모든 기능 잠금 예외(기본 안 잠김). 아래 개별 잠금은 일반 회원에게만 적용.
+    if (plan === "admin" || plan === "unlimited") return { ok: true, plan };
     if (feature === "crawl" && user.crawl_enabled === false) return { ok: false, plan, reason: "관리자가 크롤링 사용을 잠시 중지했어요" };
     if (feature === "place360" && user.place360_enabled === false) return { ok: false, plan, reason: "관리자가 플레이스 360 사용을 잠시 중지했어요" };
-    // 🔒 검색유입은 기본 잠금 — 관리자·무제한은 항상 허용, 그 외엔 관리자가 켠(inflow_enabled=true) 회원만
-    if (feature === "inflow" && plan !== "admin" && plan !== "unlimited" && user.inflow_enabled !== true) return { ok: false, plan, reason: "검색유입은 관리자 승인 후 사용할 수 있어요" };
+    // 🔒 검색유입은 기본 잠금 — 관리자가 켠(inflow_enabled=true) 회원만
+    if (feature === "inflow" && user.inflow_enabled !== true) return { ok: false, plan, reason: "검색유입은 관리자 승인 후 사용할 수 있어요" };
     return { ok: true, plan };
   } catch {
     return { ok: false, plan: "free", reason: "회원정보 확인 실패" };
@@ -437,7 +439,18 @@ export async function getProxyForAccount(userId?: string | null, feature?: strin
   let proxy: ProxyConfig | null = null;
   if (userId) proxy = await _lookupProxy(userId, feature);
   if (!proxy && ownerUserId && ownerUserId !== userId) proxy = await _lookupProxy(ownerUserId, feature);
+  if (proxy) incrementProxyUsage().catch(() => {});   // 🌐 프록시 접속 카운트(B, 사용량 실시간 체크)
   return proxy;
+}
+
+// 🌐 프록시 사용량 카운트 — 오늘 접속 횟수(관리자 프록시 탭에서 표시). 로깅 실패가 본 로직 안 막게 삼킴.
+export async function incrementProxyUsage(): Promise<void> {
+  try {
+    const key = `proxy_usage_${koreaDateKey()}`;
+    const { data } = await supabase.from("publy_settings").select("value").eq("key", key).maybeSingle();
+    const used = Number.parseInt(data?.value || "0", 10) || 0;
+    await supabase.from("publy_settings").upsert({ key, value: String(used + 1) }, { onConflict: "key" });
+  } catch { /* ignore */ }
 }
 
 export function clearProxyCache(userId?: string): void {

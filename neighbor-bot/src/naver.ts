@@ -27,6 +27,8 @@ const ANTI_DETECTION_SCRIPT = `
   Object.defineProperty(navigator, 'languages', {
     get: () => ['ko-KR','ko','en-US','en']
   });
+  try { Object.defineProperty(navigator, 'hardwareConcurrency', { get: () => 8 }); } catch (e) {}
+  try { Object.defineProperty(navigator, 'deviceMemory', { get: () => 8 }); } catch (e) {}
   const origQuery = window.navigator.permissions?.query;
   if (origQuery) {
     window.navigator.permissions.query = (params) =>
@@ -5473,6 +5475,7 @@ export async function searchInflow(params: {
           ? { userAgent: INFLOW_PC_UA, viewport: { width: 1280, height: 800 }, locale: "ko-KR" }
           : { userAgent: INFLOW_MOBILE_UA, viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, deviceScaleFactor: 3, locale: "ko-KR" }
       );
+      await context.addInitScript(ANTI_DETECTION_SCRIPT);   // 🥷 봇 감지 회피(쇼핑·플레이스 안정성↑)
       if (cookies) await context.addCookies(cookies).catch(() => {});
       const page = await context.newPage();
 
