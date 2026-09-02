@@ -103,9 +103,9 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
   const unlimited = plan === "admin" || plan === "unlimited";
   const limit = INFLOW_DAILY_LIMIT[plan] ?? INFLOW_DAILY_LIMIT.free;
 
-  // 🔁 탭을 옮겨도 입력값이 사라지지 않게 — 폼 상태를 localStorage에 저장/복원
-  const formKey = `publy_inflow_form_${userId || "guest"}`;
-  const saved0: any = (() => { try { return JSON.parse(localStorage.getItem(`publy_inflow_form_${userId || "guest"}`) || "{}"); } catch { return {}; } })();
+  // 🔁 탭을 옮겨도·앱을 껐다 켜도 입력값이 유지되게 — 고정 키(userId 무관, 로그인 로딩중 초기화 방지)
+  const formKey = "publy_inflow_form";
+  const saved0: any = (() => { try { return JSON.parse(localStorage.getItem("publy_inflow_form") || "{}"); } catch { return {}; } })();
   const [targetType, setTargetType] = useState<"place" | "blog">(saved0.targetType ?? "place");
   const [placeUrl, setPlaceUrl] = useState<string>(saved0.placeUrl ?? "");
   const [blogUrl, setBlogUrl] = useState<string>(saved0.blogUrl ?? "");
@@ -131,6 +131,11 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
   const [actionRate, setActionRate] = useState<number>(saved0.actionRate ?? 100); // 🎲 액션 발동 확률(%)
   const [intensity, setIntensity] = useState<"fast" | "normal" | "deep">(saved0.intensity ?? "normal"); // 📖 체류 강도
   const [extraTargets, setExtraTargets] = useState<string[]>(saved0.extraTargets ?? []); // ➕ 추가 대상(주소 목록)
+  // 🏪 내 플레이스/블로그 저장 목록(이름+주소) — 여러 개 저장해두고 골라 쓰기
+  type SavedTarget = { id: string; name: string; url: string; type: "place" | "blog" };
+  const [savedTargets, setSavedTargets] = useState<SavedTarget[]>(() => { try { return JSON.parse(localStorage.getItem("publy_inflow_saved_targets") || "[]"); } catch { return []; } });
+  const [savingName, setSavingName] = useState("");
+  const persistSavedTargets = (list: SavedTarget[]) => { setSavedTargets(list); try { localStorage.setItem("publy_inflow_saved_targets", JSON.stringify(list)); } catch {} };
   const [advOpen, setAdvOpen] = useState(false);       // ⚙️ 고급 설정 펼침
   const [kwWeights, setKwWeights] = useState<Record<string, number>>(saved0.kwWeights ?? {}); // 키워드별 비중
   const [visible, setVisible] = useState(false); // 🪟 창 보기(테스트) — 저장 안 함(안전상 매번 꺼짐)
@@ -275,6 +280,27 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
     setKeywords(prev => { const list = prev.split(/[,\n]/).map(x=>x.trim()).filter(Boolean); if (list.includes(k)) return prev; return [...list, k].join(", "); });
     setKwSuggest(prev => prev.filter(x => x !== k));
   };
+
+  // 🏪 현재 입력한 대상을 이름 붙여 저장
+  const saveCurrentTarget = () => {
+    const url = (targetType === "place" ? placeUrl : blogUrl).trim();
+    if (!url) { toast("먼저 주소를 입력하세요", "error"); return; }
+    const ok = targetType === "place" ? (!!extractPlaceId(url) || isShortUrl(url)) : !!parseBlogUrl(url);
+    if (!ok) { toast("주소를 인식하지 못했어요 — 올바른 링크를 넣어주세요", "error"); return; }
+    const name = savingName.trim() || (targetType === "place" ? (extractPlaceId(url) ? "플레이스 " + extractPlaceId(url) : "내 플레이스") : "내 블로그");
+    const exists = savedTargets.find(t => t.url === url);
+    if (exists) { toast("이미 저장된 주소예요", "info"); return; }
+    const item: SavedTarget = { id: Date.now().toString(36), name, url, type: targetType };
+    persistSavedTargets([item, ...savedTargets]);
+    setSavingName("");
+    toast(`"${name}" 저장되었습니다 ✅`, "success");
+  };
+  const pickSavedTarget = (t: SavedTarget) => {
+    setTargetType(t.type);
+    if (t.type === "place") setPlaceUrl(t.url); else setBlogUrl(t.url);
+    toast(`"${t.name}" 불러왔어요`, "success");
+  };
+  const removeSavedTarget = (id: string) => persistSavedTargets(savedTargets.filter(t => t.id !== id));
 
   // 💬 리뷰 감정분석 — 리뷰 수집 후 칭찬·불만 키워드 빈도(AI 키 불필요)
   const runReviewAnalysis = async () => {
@@ -811,17 +837,49 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
           </div>
         </div>
 
-        {targetType === "place" ? (
-          <div>
-            <label style={labelStyle}>내 플레이스 주소</label>
-            <input value={placeUrl} onChange={(e) => { const v = e.target.value; setPlaceUrl(v); const t = detectTargetType(v); if (t === "blog") { setBlogUrl(v); setTargetType("blog"); toast("블로그 주소로 인식했어요", "info"); } }} placeholder="지도/플레이스/naver.me 링크 붙여넣기 — 붙여넣으면 자동 인식" style={inputStyle} />
+        {/* 대상 입력 + 이름 붙여 저장 */}
+        <div>
+          <label style={labelStyle}>{targetType === "place" ? "내 플레이스 주소" : "내 블로그 글 주소"}</label>
+          <input
+            value={targetType === "place" ? placeUrl : blogUrl}
+            onChange={(e) => { const v = e.target.value; if (targetType === "place") { setPlaceUrl(v); if (detectTargetType(v) === "blog") { setBlogUrl(v); setTargetType("blog"); toast("블로그 주소로 인식했어요", "info"); } } else { setBlogUrl(v); if (detectTargetType(v) === "place") { setPlaceUrl(v); setTargetType("place"); toast("플레이스 주소로 인식했어요", "info"); } } }}
+            placeholder={targetType === "place" ? "지도/플레이스/naver.me 링크 붙여넣기" : "글 주소/아이디 (blog.naver.com/아이디/글번호)"}
+            style={inputStyle} />
+          {/* 인식 배지 */}
+          {targetType === "place" && placeUrl.trim() && (extractPlaceId(placeUrl)
+            ? <div style={{ marginTop: 6, fontSize: 12.5, fontWeight: 700, color: "#16a34a" }}>✅ 인식됨 — 가게번호 {extractPlaceId(placeUrl)}</div>
+            : isShortUrl(placeUrl)
+              ? <div style={{ marginTop: 6, fontSize: 12.5, fontWeight: 700, color: C.accent }}>🔗 단축주소 — 실행할 때 자동으로 풀려요</div>
+              : <div style={{ marginTop: 6, fontSize: 12.5, fontWeight: 700, color: "#dc2626" }}>⚠️ 주소를 못 읽었어요 — 지도 링크(map.naver.com/…/place/숫자)를 붙여넣어 주세요</div>)}
+          {targetType === "blog" && blogUrl.trim() && (parseBlogUrl(blogUrl)
+            ? <div style={{ marginTop: 6, fontSize: 12.5, fontWeight: 700, color: "#16a34a" }}>✅ 인식됨 — {parseBlogUrl(blogUrl)!.blogId}{parseBlogUrl(blogUrl)!.logNo ? " / 글 " + parseBlogUrl(blogUrl)!.logNo : ""}</div>
+            : <div style={{ marginTop: 6, fontSize: 12.5, fontWeight: 700, color: "#dc2626" }}>⚠️ 주소를 못 읽었어요 — blog.naver.com/아이디/글번호 형태로 붙여넣어 주세요</div>)}
+          {/* 이름 + 저장 버튼 */}
+          <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+            <input value={savingName} onChange={(e) => setSavingName(e.target.value)} placeholder={targetType === "place" ? "이 플레이스 이름 (예: 강남점)" : "이 블로그 이름"} style={{ ...inputStyle, flex: 1 }} />
+            <button onClick={saveCurrentTarget} style={{ padding: "0 22px", borderRadius: 12, border: "none", background: `linear-gradient(135deg,${C.accent},${C.cyan})`, color: "#fff", fontSize: 14.5, fontWeight: 900, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}>💾 저장</button>
           </div>
-        ) : (
-          <div>
-            <label style={labelStyle}>내 블로그 글 주소</label>
-            <input value={blogUrl} onChange={(e) => { const v = e.target.value; setBlogUrl(v); const t = detectTargetType(v); if (t === "place") { setPlaceUrl(v); setTargetType("place"); toast("플레이스 주소로 인식했어요", "info"); } }} placeholder="글 주소/아이디 붙여넣으세요 (blog.naver.com/아이디/글번호) — 자동 인식" style={inputStyle} />
-          </div>
-        )}
+          {/* 저장된 목록 — 골라 쓰기 */}
+          {savedTargets.length > 0 && (
+            <div style={{ marginTop: 10, padding: 12, borderRadius: 12, background: C.panel2, border: `1px solid ${C.line}` }}>
+              <div style={{ fontSize: 12, fontWeight: 800, color: C.sub, marginBottom: 8 }}>🏪 저장한 대상 (눌러서 불러오기)</div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                {savedTargets.map((t) => {
+                  const active = (t.type === "place" ? placeUrl : blogUrl).trim() === t.url && targetType === t.type;
+                  return (
+                    <div key={t.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 12px", borderRadius: 10, background: active ? C.glow : C.panel, border: `1px solid ${active ? C.accent : C.line}` }}>
+                      <button onClick={() => pickSavedTarget(t)} style={{ flex: 1, textAlign: "left", background: "transparent", border: "none", cursor: "pointer", fontFamily: "inherit", padding: 0, minWidth: 0 }}>
+                        <div style={{ fontSize: 13.5, fontWeight: 800, color: active ? C.accent : C.ink, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{t.type === "place" ? "🗺️" : "📝"} {t.name} {active && "· 사용 중"}</div>
+                        <div style={{ fontSize: 11, color: C.sub, fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{t.url}</div>
+                      </button>
+                      <button onClick={() => removeSavedTarget(t.id)} style={{ padding: "4px 10px", borderRadius: 8, border: `1px solid ${C.line2}`, background: C.panel2, color: "#dc2626", fontSize: 16, fontWeight: 900, cursor: "pointer", flexShrink: 0 }}>×</button>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </div>
 
         {/* ➕ 추가 대상(여러 곳 번갈아 유입) */}
         <div>
@@ -1029,7 +1087,7 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
           <span style={{ fontSize: 13.5, fontWeight: 800 }}>📜 전체 진행 로그</span>
           <button onClick={copyLogs} disabled={!logs.length} style={{ padding: "7px 14px", borderRadius: 9, border: `1.5px solid ${C.line2}`, background: C.panel, color: logs.length ? C.accent : C.sub, fontSize: 13, fontWeight: 800, cursor: logs.length ? "pointer" : "default", fontFamily: "inherit" }}>📋 로그 전체복사</button>
         </div>
-        <div ref={logBoxRef} style={{ background: C.logBg, color: C.logInk, borderRadius: 14, padding: "14px 16px", height: 340, overflowY: "auto", fontSize: 13, lineHeight: 1.7, fontFamily: "'SF Mono','D2Coding',ui-monospace,monospace", whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
+        <div ref={logBoxRef} style={{ background: C.logBg, color: C.logInk, borderRadius: 14, padding: "16px 18px", height: 520, overflowY: "auto", fontSize: 15, lineHeight: 1.8, fontFamily: "'SF Mono','D2Coding',ui-monospace,monospace", whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
           {logs.length ? logs.map((l, i) => <div key={i}>{l}</div>) : <div style={{ opacity: 0.5 }}>여기에 검색 → 진입 → 체류 → 액션 전 과정이 실시간으로 표시돼요.</div>}
         </div>
       </div>

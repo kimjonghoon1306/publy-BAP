@@ -1513,7 +1513,9 @@ export function parsePlaceUrl(input: string): { domain: string; placeId: string 
   if (m) return { domain: m[1], placeId: m[2] };
   m = s.match(/entry\/place\/(\d{5,})/i);
   if (m) return { domain: "place", placeId: m[1] };
-  m = s.match(/[?&]placeId=(\d{5,})/i) || s.match(/\/(\d{6,})(?:[/?#]|$)/) || s.match(/^\s*(\d{6,})\s*$/);
+  // 단축주소가 앱링크로 풀리는 형태: m.map.naver.com/appLink.naver?...id=1381173387 또는 pinId=...
+  m = s.match(/[?&]placeId=(\d{5,})/i) || s.match(/[?&]pinId=(\d{5,})/i) || s.match(/[?&]id=(\d{5,})/i)
+    || s.match(/\/(\d{6,})(?:[/?#]|$)/) || s.match(/^\s*(\d{6,})\s*$/);
   if (m) return { domain: "place", placeId: m[1] };
   return null;
 }
