@@ -1,9 +1,10 @@
-import { app, BrowserWindow, ipcMain, shell, powerSaveBlocker, dialog } from "electron";
+import { app, BrowserWindow, ipcMain, shell, powerSaveBlocker, dialog, Tray, Menu } from "electron";
 import path from "path";
 import { spawn, exec as _exec, execSync, ChildProcess } from "child_process";
 import { randomBytes } from "crypto";
 
 let mainWindow: BrowserWindow | null = null;
+let tray: Tray | null = null;
 // 봇 서버는 Electron 메인과 분리된 Node 자식 프로세스로 실행한다.
 let botProcess: ChildProcess | null = null;
 let neighborBotProcess: ChildProcess | null = null;
@@ -386,7 +387,26 @@ function createWindow() {
   } else {
     mainWindow.loadFile(path.join(__dirname, "../dist/index.html"));
   }
+  mainWindow.on("close", event => {
+    if (!app.isQuitting) {
+      event.preventDefault();
+      mainWindow?.hide(); // 예약 실행과 봇은 백그라운드에서 계속 유지
+    }
+  });
   mainWindow.on("closed", () => { mainWindow = null; });
+}
+
+function createTray() {
+  if (tray) return;
+  const iconPath = path.join(__dirname, process.platform === "darwin" ? "../dist/icon.icns" : "../dist/icon.ico");
+  tray = new Tray(iconPath);
+  tray.setToolTip("Publy · 예약 실행 중");
+  tray.setContextMenu(Menu.buildFromTemplate([
+    { label: "퍼블리 열기", click: () => { if (!mainWindow) createWindow(); mainWindow?.show(); mainWindow?.focus(); } },
+    { type: "separator" },
+    { label: "완전히 종료", click: () => { app.isQuitting = true; app.quit(); } },
+  ]));
+  tray.on("click", () => { if (!mainWindow) createWindow(); mainWindow?.show(); mainWindow?.focus(); });
 }
 
 declare global { namespace Electron { interface App { isQuitting: boolean; } } }
@@ -417,6 +437,7 @@ app.whenReady().then(async () => {
   await startInstaBotServer();
   startBotWatchdog();            // ★ 봇 서버 자동 감시·복구 시작
   createWindow();
+  createTray();                  // 창을 닫아도 예약 실행은 트레이에서 계속
   app.on("activate", () => { if (!mainWindow) createWindow(); });
 });
 

@@ -57,7 +57,17 @@ async function launchBrowser(
 ) {
   const args = opts.maximized ? [...LAUNCH_ARGS, "--start-maximized"] : LAUNCH_ARGS;
   const proxy = await getProxyForAccount(userId, opts.feature, opts.ownerUserId);
-  if (proxy) opts.log?.(`🔒 프록시 사용: ${proxy.server}`);
+  if (proxy) {
+    const masked = (() => {
+      try {
+        const raw = String(proxy.server);
+        const parsed = new URL(raw.includes("://") ? raw : `http://${raw}`);
+        const head = parsed.hostname.slice(0, Math.min(3, parsed.hostname.length));
+        return `${parsed.protocol}//${head}•••${parsed.port ? `:${parsed.port}` : ""}`;
+      } catch { return "설정됨(주소 보호)"; }
+    })();
+    opts.log?.(`🔒 프록시 사용: ${masked}`);
+  }
   return chromium.launch({
     headless: opts.headless ?? true,
     args,

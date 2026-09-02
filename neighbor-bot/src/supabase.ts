@@ -171,6 +171,38 @@ export async function incrementInflowQuota(userId: string): Promise<void> {
   if (error) throw new Error(`검색유입 사용량 저장 실패: ${error.message}`);
 }
 
+export async function verifyInflowSession(token: string, claimedUserId: string): Promise<boolean> {
+  if (!token || !claimedUserId) return false;
+  const { data, error } = await supabase.rpc("publy_session_get", { p_token: token });
+  return !error && String(data?.user?.id || "") === claimedUserId;
+}
+
+// DB 함수가 배포된 환경에서는 검증과 한도 차감을 한 트랜잭션으로 처리한다.
+const inflowQuotaLocks = new Map<string, Promise<void>>();
+export async function consumeInflowQuota(token: string, userId: string, limit: number): Promise<{ ok: boolean; used: number; limit: number }> {
+  const { data, error } = await supabase.rpc("publy_inflow_consume_quota", { p_token: token, p_limit: limit });
+  if (error) {
+    // 새 DB 함수 적용 전 구버전 서버도 중단되지 않게 하되, 한 프로세스 안에서는 반드시 직렬 차감한다.
+    if (!/function.*does not exist|schema cache|PGRST202/i.test(`${error.code || ""} ${error.message || ""}`)) throw new Error(`검색유입 원자 한도 차감 실패: ${error.message}`);
+    const previous = inflowQuotaLocks.get(userId) || Promise.resolve();
+    let unlock = () => {};
+    const current = new Promise<void>((resolve) => { unlock = resolve; });
+    const queued = previous.then(() => current);
+    inflowQuotaLocks.set(userId, queued);
+    await previous;
+    try {
+      const q = await checkInflowQuota(userId, limit >= 999999 ? "unlimited" : limit >= 100 ? "pro" : limit >= 50 ? "basic" : "free");
+      if (!q.ok) return q;
+      await incrementInflowQuota(userId);
+      return { ok: true, used: q.used + 1, limit: q.limit };
+    } finally {
+      unlock();
+      if (inflowQuotaLocks.get(userId) === queued) inflowQuotaLocks.delete(userId);
+    }
+  }
+  return { ok: data?.ok === true, used: Number(data?.used || 0), limit: Number(data?.limit || limit) };
+}
+
 // ✍️ 리뷰 자동작성 권한 — 기본 잠금. 관리자·무제한 플랜은 항상 허용, 그 외엔 inflow_review_enabled=true인 회원만.
 export async function inflowReviewAllowed(userId?: string | null): Promise<boolean> {
   if (!userId) return false;

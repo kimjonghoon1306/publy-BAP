@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from "react";
 import { BotEventStream, botFetch } from "../lib/botApi";
 import UsageGuide from "./UsageGuide";
 import SproutAssistant from "./SproutAssistant";
-import { INFLOW_DAILY_LIMIT, PLAN_CONFIG, getInflowDailyUsage, getInflowUsageHistory, getAccounts, PublyAccount, getAutopilot, saveAutopilot, getRankHistory, AutopilotConfig, getInflowSchedule, saveInflowSchedule, inflowScheduleRanToday, markInflowScheduleRan, getPerfReport, PerfReport, recordRankPoint } from "../lib/supabase";
+import { INFLOW_DAILY_LIMIT, PLAN_CONFIG, getInflowDailyUsage, getInflowUsageHistory, getAccounts, PublyAccount, getAutopilot, saveAutopilot, getRankHistory, AutopilotConfig, getInflowSchedule, saveInflowSchedule, inflowScheduleRanToday, markInflowScheduleRan, getPerfReport, PerfReport, recordRankPoint, getMemberSessionToken } from "../lib/supabase";
 
 const BOT = "http://127.0.0.1:3334"; // neighbor-bot
 
@@ -107,8 +107,10 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
   const formKey = "publy_inflow_form";
   const saved0: any = (() => { try { return JSON.parse(localStorage.getItem("publy_inflow_form") || "{}"); } catch { return {}; } })();
   const [targetType, setTargetType] = useState<"place" | "blog">(saved0.targetType ?? "place");
-  const [placeUrl, setPlaceUrl] = useState<string>(saved0.placeUrl ?? "");
-  const [blogUrl, setBlogUrl] = useState<string>(saved0.blogUrl ?? "");
+  const privateKey = `publy_inflow_private_${userId || "guest"}`;
+  const private0: any = (() => { try { return JSON.parse(localStorage.getItem(privateKey) || "{}"); } catch { return {}; } })();
+  const [placeUrl, setPlaceUrl] = useState<string>(private0.placeUrl ?? saved0.placeUrl ?? "");
+  const [blogUrl, setBlogUrl] = useState<string>(private0.blogUrl ?? saved0.blogUrl ?? "");
   const [keywords, setKeywords] = useState<string>(saved0.keywords ?? "");
   const [rounds, setRounds] = useState<number>(saved0.rounds ?? 10);
   const [termMin, setTermMin] = useState<number>(saved0.termMin ?? 30);
@@ -131,12 +133,13 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
   const [actionRate, setActionRate] = useState<number>(saved0.actionRate ?? 100); // 🎲 액션 발동 확률(%)
   const [intensity, setIntensity] = useState<"fast" | "normal" | "deep">(saved0.intensity ?? "normal"); // 📖 체류 강도
   const [maxDwellSec, setMaxDwellSec] = useState<number>(saved0.maxDwellSec ?? 90); // 0=본문 분량에 따라 자동
-  const [extraTargets, setExtraTargets] = useState<string[]>(saved0.extraTargets ?? []); // ➕ 추가 대상(주소 목록)
+  const [extraTargets, setExtraTargets] = useState<string[]>(private0.extraTargets ?? saved0.extraTargets ?? []); // ➕ 추가 대상(주소 목록)
   // 🏪 내 플레이스/블로그 저장 목록(이름+주소) — 여러 개 저장해두고 골라 쓰기
   type SavedTarget = { id: string; name: string; url: string; type: "place" | "blog" };
-  const [savedTargets, setSavedTargets] = useState<SavedTarget[]>(() => { try { return JSON.parse(localStorage.getItem("publy_inflow_saved_targets") || "[]"); } catch { return []; } });
+  const savedTargetsKey = `publy_inflow_saved_targets_${userId || "guest"}`;
+  const [savedTargets, setSavedTargets] = useState<SavedTarget[]>(() => { try { return JSON.parse(localStorage.getItem(savedTargetsKey) || localStorage.getItem("publy_inflow_saved_targets") || "[]"); } catch { return []; } });
   const [savingName, setSavingName] = useState("");
-  const persistSavedTargets = (list: SavedTarget[]) => { setSavedTargets(list); try { localStorage.setItem("publy_inflow_saved_targets", JSON.stringify(list)); } catch {} };
+  const persistSavedTargets = (list: SavedTarget[]) => { setSavedTargets(list); try { localStorage.setItem(savedTargetsKey, JSON.stringify(list)); } catch {} };
   const [advOpen, setAdvOpen] = useState(false);       // ⚙️ 고급 설정 펼침
   const [kwWeights, setKwWeights] = useState<Record<string, number>>(saved0.kwWeights ?? {}); // 키워드별 비중
   const [visible, setVisible] = useState(false); // 🪟 창 보기(테스트) — 저장 안 함(안전상 매번 꺼짐)
@@ -181,14 +184,22 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
     catch { return []; }
   });
   const automationRunningRef = useRef(false);
+  const scheduledRunPendingRef = useRef(false);
+  const skipPrivateSaveRef = useRef(false);
   const esRef = useRef<BotEventStream | null>(null);
   const startRef = useRef<() => void>(() => {});
   // 🎯 오토파일럿 자동 순위 체크(목표 달성 여부) — 최신 값 참조용 ref
   const autopilotCheckRef = useRef<() => Promise<boolean>>(async () => false);
   const logBoxRef = useRef<HTMLDivElement | null>(null);
 
-  const pushLog = (m: string) => setLogs((l) => [...l, { type: "text", text: m }]);
-  const pushShot = (caption: string, dataUrl: string) => setLogs((l) => [...l, { type: "shot", caption, dataUrl }]);
+  const appendLog = (entry: InflowLogEntry) => setLogs((current) => {
+    let next = [...current, entry].slice(-300);
+    const shots = next.reduce((count, item) => count + (item.type === "shot" ? 1 : 0), 0);
+    if (shots > 8) { const firstShot = next.findIndex((item) => item.type === "shot"); if (firstShot >= 0) next = next.filter((_, index) => index !== firstShot); }
+    return next;
+  });
+  const pushLog = (m: string) => appendLog({ type: "text", text: m });
+  const pushShot = (caption: string, dataUrl: string) => appendLog({ type: "shot", caption, dataUrl });
   const refreshStats = () => {
     if (!userId) return;
     getInflowDailyUsage(userId).then(setUsed).catch(() => {});
@@ -203,6 +214,27 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
     getAutopilot(userId).then((ap) => { if (ap) { setApEnabled(ap.enabled); setApGoal(ap.goal_rank); setApKeyword(ap.keyword || ""); setApLastRank(ap.last_rank ?? null); } }).catch(() => {});
     getInflowSchedule(userId).then((s) => { if (s) { setSchedEnabled(s.enabled); setSchedTime(s.time); setSchedRounds(s.rounds); } }).catch(() => {});
   }, [userId]);
+  // 로그인 사용자별 민감한 주소를 격리하고, 기존 고정 키 데이터는 최초 1회 안전하게 이전한다.
+  useEffect(() => {
+    if (!userId) return;
+    try {
+      skipPrivateSaveRef.current = true;
+      const scopedPrivate = JSON.parse(localStorage.getItem(privateKey) || "null");
+      const legacyForm = JSON.parse(localStorage.getItem("publy_inflow_form") || "{}");
+      const nextPrivate = scopedPrivate || { placeUrl: legacyForm.placeUrl || "", blogUrl: legacyForm.blogUrl || "", extraTargets: legacyForm.extraTargets || [] };
+      localStorage.setItem(privateKey, JSON.stringify(nextPrivate));
+      setPlaceUrl(nextPrivate.placeUrl || ""); setBlogUrl(nextPrivate.blogUrl || ""); setExtraTargets(nextPrivate.extraTargets || []);
+
+      const scopedTargets = localStorage.getItem(savedTargetsKey);
+      const legacyTargets = localStorage.getItem("publy_inflow_saved_targets");
+      const migratedTargets = JSON.parse(scopedTargets || legacyTargets || "[]");
+      localStorage.setItem(savedTargetsKey, JSON.stringify(migratedTargets)); setSavedTargets(migratedTargets);
+
+      delete legacyForm.placeUrl; delete legacyForm.blogUrl; delete legacyForm.extraTargets;
+      localStorage.setItem("publy_inflow_form", JSON.stringify(legacyForm));
+      localStorage.removeItem("publy_inflow_saved_targets");
+    } catch {}
+  }, [privateKey, savedTargetsKey, userId]);
   // 주간/월간 토글 바뀌면 리포트 다시 로드
   useEffect(() => { if (userId) getPerfReport(userId, reportPeriod).then(setReport).catch(() => {}); }, [userId, reportPeriod]);
 
@@ -370,16 +402,16 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
       const hhmm = new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Seoul", hour: "2-digit", minute: "2-digit", hour12: false }).format(now);
       if (hhmm !== schedTime) return;
       if (await inflowScheduleRanToday(userId)) return;
-      await markInflowScheduleRan(userId);
       pushLog(`⏰ 예약 시각(${schedTime}) 도달`);
       // 🎯 오토파일럿 켜져 있으면: 순위 먼저 재고 목표 달성이면 유입 스킵(한도 절약)
       if (apEnabled && targetType === "place") {
         const reached = await autopilotCheckRef.current();
-        if (reached) { pushLog("🎯 목표 순위 유지 중 — 오늘 유입은 건너뜁니다(한도 절약)."); return; }
+        if (reached) { pushLog("🎯 목표 순위 유지 중 — 오늘 유입은 건너뜁니다(한도 절약)."); await markInflowScheduleRan(userId); return; }
         pushLog("🎯 목표보다 낮아요 — 순위를 끌어올리기 위해 유입 실행.");
       }
       pushLog("⏰ 자동 유입 시작");
       if (!auto) setRounds(schedRounds);
+      scheduledRunPendingRef.current = true;
       startRef.current();
     };
     const id = setInterval(tick, 30000); // 30초마다 시각 확인
@@ -424,13 +456,15 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
 
   // 🔁 폼 입력값 저장(탭 이동해도 유지). 무거운 것(로그·계정목록)은 제외.
   useEffect(() => {
+    if (skipPrivateSaveRef.current) { skipPrivateSaveRef.current = false; return; }
     try {
       localStorage.setItem(formKey, JSON.stringify({
-        targetType, placeUrl, blogUrl, keywords, rounds, termMin, termMax, device,
-        doSave, doShare, doDir, doCall, doBook, doTalk, doLike, funnel, spread, spreadHours, doReview, reviewText, auto, actionRate, intensity, maxDwellSec, extraTargets, kwWeights,
+        targetType, keywords, rounds, termMin, termMax, device,
+        doSave, doShare, doDir, doCall, doBook, doTalk, doLike, funnel, spread, spreadHours, doReview, reviewText, auto, actionRate, intensity, maxDwellSec, kwWeights,
       }));
+      localStorage.setItem(privateKey, JSON.stringify({ placeUrl, blogUrl, extraTargets }));
     } catch {}
-  }, [formKey, targetType, placeUrl, blogUrl, keywords, rounds, termMin, termMax, device, doSave, doShare, doDir, doCall, doBook, doTalk, doLike, funnel, spread, spreadHours, doReview, reviewText, auto, actionRate, intensity, maxDwellSec, extraTargets, kwWeights]);
+  }, [formKey, privateKey, targetType, placeUrl, blogUrl, keywords, rounds, termMin, termMax, device, doSave, doShare, doDir, doCall, doBook, doTalk, doLike, funnel, spread, spreadHours, doReview, reviewText, auto, actionRate, intensity, maxDwellSec, extraTargets, kwWeights]);
 
   // 🔔 앱 내 자동 알림 — 날짜/주차 마커로 중복을 막고, 다음 실행 때 놓친 알림도 알림함에 쌓는다.
   useEffect(() => {
@@ -550,7 +584,11 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
     if (weights.some((w) => w !== 1)) params.set("keywordWeights", JSON.stringify(weights));
 
     pushLog(`🚀 트래픽 유입 시작 — ${targetType === "place" ? "플레이스" : "블로그"}, 키워드 ${kwList.length}개, ${n}회 방문, 텀 ${termMin}~${termMax}초, ${device === "pc" ? "PC" : device === "mix" ? "혼합" : "모바일"}`);
-    const es = new BotEventStream(`${BOT}/api/inflow?${params.toString()}`);
+    const es = new BotEventStream(`${BOT}/api/inflow`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Publy-Session": getMemberSessionToken() },
+      body: JSON.stringify(Object.fromEntries(params.entries())),
+    });
     esRef.current = es;
     es.onmessage = (e: MessageEvent) => {
       let d: any; try { d = JSON.parse(e.data); } catch { return; }
@@ -559,10 +597,10 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
       else if (d.type === "progress") { setProgress(Math.round((d.done / Math.max(1, d.total)) * 100)); }
       else if (d.type === "quota_info") setUsed(d.used);
       else if (d.type === "quota_exceeded") { pushLog("🛑 오늘 유입 한도를 다 썼어요"); toast("오늘 유입 한도 초과", "error"); setRunning(false); es.close(); esRef.current = null; }
-      else if (d.type === "inflow_done") { setSessOk(d.success || 0); pushLog(`🏁 완료 — 총 ${d.done}회 방문, 성공 ${d.success}회`); toast(`유입 완료 · 성공 ${d.success}회`, "success"); setRunning(false); es.close(); esRef.current = null; refreshStats(); if (apEnabled && targetType === "place") { pushLog("📍 순위 자동 측정 중…"); runMeasureRank(); } }
-      else if (d.type === "error") { pushLog(`❌ ${d.msg}`); toast(d.msg, "error"); setRunning(false); es.close(); esRef.current = null; }
+      else if (d.type === "inflow_done") { setSessOk(d.success || 0); pushLog(`🏁 완료 — 총 ${d.done}회 방문, 성공 ${d.success}회`); toast(`유입 완료 · 성공 ${d.success}회`, "success"); setRunning(false); es.close(); esRef.current = null; if (scheduledRunPendingRef.current) { scheduledRunPendingRef.current = false; if (userId && Number(d.success) > 0) void markInflowScheduleRan(userId); } refreshStats(); if (apEnabled && targetType === "place") { pushLog("📍 순위 자동 측정 중…"); runMeasureRank(); } }
+      else if (d.type === "error") { scheduledRunPendingRef.current = false; pushLog(`❌ ${d.msg}`); toast(d.msg, "error"); setRunning(false); es.close(); esRef.current = null; }
     };
-    es.onerror = () => { pushLog("❌ 봇 연결 오류 — 봇 서버(포트 3334)가 켜져 있는지 확인해주세요"); toast("봇 연결 오류", "error"); setRunning(false); es.close(); esRef.current = null; };
+    es.onerror = () => { scheduledRunPendingRef.current = false; pushLog("❌ 봇 연결 오류 — 봇 서버(포트 3334)가 켜져 있는지 확인해주세요"); toast("봇 연결 오류", "error"); setRunning(false); es.close(); esRef.current = null; };
     es.onclose = () => setRunning(false);
   };
   startRef.current = start;

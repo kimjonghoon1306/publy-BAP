@@ -1,7 +1,7 @@
 import express from "express";
 import cors from "cors";
 import { saveSession, sessionExists, removeSession, crawlBlogIds, crawlBuddyPosts, analyzeBuddyKeywords, addNeighbors, NeighborResult, donePath, engageBlogs, EngageResult, engageDonePath, crawlMyPosts, replyToComments, crawlPlaceReviews, generatePlaceReviewReply, replyToPlaceReviews, crawlBlogStats, checkSelectedBlogExposure, pumasiEngage, crawlPumasiReport, pumasiPreview, updatePostTitle, checkProxy, analyzeBlogAuthenticity, fetchPostBody, crawlPostViews, sendWebmail, sendBlogComments, crawlPlaces, crawlPlaceBloggers, crawlPlaceDetail, crawlPlaceByUrl, suggestPlaceKeywords, parsePlaceUrl, resolvePlaceUrl, searchInflow, diagnosePlace, measurePlaceRank, collectPlaceReviews, InflowTarget } from "./naver";
-import { checkNeighborQuota, incrementNeighborQuota, getNeighborDailyUsage, incrementEngageQuota, getEngageDailyUsage, getUserPlan, checkMembershipAccess, NEIGHBOR_DAILY_LIMIT, ENGAGE_DAILY_LIMIT, REPLY_DAILY_LIMIT, getReplyDailyUsage, incrementReplyQuota, PLACE_REPLY_DAILY_LIMIT, getPlaceReplyDailyUsage, incrementPlaceReplyQuota, addNeighborHistory, addReplyHistory, addPlaceReplyHistory, addBlogscoreHistory, incrementPumasiQuota, TITLE_EDIT_DAILY_LIMIT, getTitleEditDailyUsage, incrementTitleEditQuota, getProxyForAccount, supabase, getOutreachSender, getOutreachSentToday, addOutreachLog, checkPlaceDetailQuota, incrementPlaceDetailQuota, checkInflowQuota, incrementInflowQuota, inflowReviewAllowed } from "./supabase";
+import { checkNeighborQuota, incrementNeighborQuota, getNeighborDailyUsage, incrementEngageQuota, getEngageDailyUsage, getUserPlan, checkMembershipAccess, NEIGHBOR_DAILY_LIMIT, ENGAGE_DAILY_LIMIT, REPLY_DAILY_LIMIT, getReplyDailyUsage, incrementReplyQuota, PLACE_REPLY_DAILY_LIMIT, getPlaceReplyDailyUsage, incrementPlaceReplyQuota, addNeighborHistory, addReplyHistory, addPlaceReplyHistory, addBlogscoreHistory, incrementPumasiQuota, TITLE_EDIT_DAILY_LIMIT, getTitleEditDailyUsage, incrementTitleEditQuota, getProxyForAccount, supabase, getOutreachSender, getOutreachSentToday, addOutreachLog, checkPlaceDetailQuota, incrementPlaceDetailQuota, checkInflowQuota, inflowReviewAllowed, verifyInflowSession, consumeInflowQuota, INFLOW_DAILY_LIMIT } from "./supabase";
 import nodemailer from "nodemailer";
 import fs from "fs";
 import { acquireAccountLock } from "./account-lock";
@@ -1106,9 +1106,11 @@ app.get("/api/post-body", async (req, res) => {
 });
 
 /* ── 🆕 NEW 트래픽 유입 (검색유입, SSE) — 기본 잠금(관리자가 켠 회원만), 관리자=락 해제 ── */
-app.get("/api/inflow", async (req, res) => {
-  const { userId, accountId, keywords, targetType, placeUrl, blogId, logNo, rounds, termMin, termMax, doSave, doLike, doShare, doDir, doCall, doBook, doTalk, device, fullFunnel, spreadHours, doReview, reviewText, visible, actionRate, intensity, maxDwellSec, extraTargets, keywordWeights } = req.query as Record<string, string>;
+app.post("/api/inflow", async (req, res) => {
+  const { userId, accountId, keywords, targetType, placeUrl, blogId, logNo, rounds, termMin, termMax, doSave, doLike, doShare, doDir, doCall, doBook, doTalk, device, fullFunnel, spreadHours, doReview, reviewText, visible, actionRate, intensity, maxDwellSec, extraTargets, keywordWeights } = req.body as Record<string, string>;
   if (!keywords || !targetType) return res.status(400).json({ error: "keywords·targetType 필요" });
+  const memberToken = String(req.get("X-Publy-Session") || "");
+  if (!userId || !await verifyInflowSession(memberToken, userId)) return res.status(401).json({ error: "회원 세션이 올바르지 않습니다" });
   sseSetup(res);
   let releaseAccount = () => {};
   try {
@@ -1164,7 +1166,7 @@ app.get("/api/inflow", async (req, res) => {
     const unlimited = plan === "admin" || plan === "unlimited";
 
     let stopped = false;
-    req.on("close", () => { stopped = true; });
+    res.on("close", () => { stopped = true; });
 
     // ✍️ 리뷰 자동작성은 관리자 락(기본 잠금) — 권한 없으면 안내 후 리뷰만 건너뜀
     const reviewOk = doReview === "true" ? await inflowReviewAllowed(userId) : false;
@@ -1194,11 +1196,11 @@ app.get("/api/inflow", async (req, res) => {
       shouldStop: () => stopped,
       onQuota: async () => {
         if (!userId || unlimited) return true;                 // 관리자/무제한 = 락 해제
-        const q = await checkInflowQuota(userId, plan);
+        const limit = INFLOW_DAILY_LIMIT[plan] ?? INFLOW_DAILY_LIMIT.free;
+        const q = await consumeInflowQuota(memberToken, userId, limit);
         if (!q.ok) return false;
-        await incrementInflowQuota(userId);                    // 방문 1회 차감
-        sseSend(res, { type: "quota_info", used: q.used + 1, limit: q.limit, remaining: Math.max(0, q.limit - q.used - 1) });
-        return true;
+        sseSend(res, { type: "quota_info", used: q.used, limit: q.limit, remaining: Math.max(0, q.limit - q.used) });
+        return q.ok;
       },
     });
     sseSend(res, { type: "inflow_done", ...result });
