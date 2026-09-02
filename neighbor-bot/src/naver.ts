@@ -5205,28 +5205,47 @@ function estimateReadSec(textLen: number, imgCount: number, intensity = 1): numb
 }
 
 // 검색결과를 스크롤하며 대상(플레이스/블로그) 링크를 찾아 클릭 진입. 성공 시 진입한 page 반환.
+//  ★플레이스는 지도(map)로 새지 않게 "플레이스 상세" 링크를 우선 클릭한다.
 async function inflowFindAndEnter(page: any, target: InflowTarget, log: (m: string) => void): Promise<any | null> {
   const needle = target.type === "place" ? String(target.placeId) : String(target.blogId);
-  const sel = `a[href*="${needle}"]`;
+  const enterVia = async (link: any, s: number) => {
+    log(`  🎯 검색결과에서 대상 발견(약 ${s + 1}스크롤 지점) → 클릭 진입`);
+    const ctx = page.context();
+    const before = ctx.pages().length;
+    await Promise.all([
+      page.waitForNavigation({ timeout: 15000 }).catch(() => {}),
+      link.click({ timeout: 8000 }).catch(() => {}),
+    ]);
+    await page.waitForTimeout(inflowRndInt(1200, 2400));
+    const pages = ctx.pages();
+    return pages.length > before ? pages[pages.length - 1] : page;
+  };
   for (let s = 0; s < 8; s++) {
-    const link = await page.$(sel).catch(() => null);
-    if (link) {
-      log(`  🎯 검색결과에서 대상 발견(약 ${s + 1}스크롤 지점) → 클릭 진입`);
-      const ctx = page.context();
-      const before = ctx.pages().length;
-      await Promise.all([
-        page.waitForNavigation({ timeout: 15000 }).catch(() => {}),
-        link.click({ timeout: 8000 }).catch(() => {}),
-      ]);
-      await page.waitForTimeout(inflowRndInt(1200, 2400));
-      // 새 탭으로 열렸으면 그 탭을 사용
-      const pages = ctx.pages();
-      if (pages.length > before) return pages[pages.length - 1];
-      return page;
+    if (target.type === "place") {
+      // 1순위: 플레이스 상세 링크(place.naver.com/.../{id} 또는 /place/{id}) — 지도 링크 제외
+      const placeLink = await page.evaluateHandle((id: string) => {
+        const as = Array.from(document.querySelectorAll("a")) as HTMLAnchorElement[];
+        const detail = as.find(a => a.href.includes(id) && /place\.naver\.com|\/place\/|m\.place/.test(a.href) && !/map\.naver\.com\/p\/search/.test(a.href));
+        return detail || as.find(a => a.href.includes(id)) || null;
+      }, needle).catch(() => null);
+      const el = placeLink && placeLink.asElement ? placeLink.asElement() : null;
+      if (el) return await enterVia(el, s);
+    } else {
+      const link = await page.$(`a[href*="${needle}"]`).catch(() => null);
+      if (link) return await enterVia(link, s);
     }
     // 사람처럼 스크롤하며 lazy 로드된 결과 더 탐색
     await page.mouse.wheel(0, inflowRndInt(700, 1300));
     await page.waitForTimeout(inflowRndInt(700, 1600));
+  }
+  // 🏢 플레이스 폴백(B) — 검색결과에서 못 찾으면(또는 지도로만 뜨면) 플레이스 상세로 직접 진입
+  if (target.type === "place") {
+    const dom = (target as any).domain || "place";
+    const url = `https://m.place.naver.com/${dom}/${needle}/home`;
+    log(`  🏢 검색결과에 플레이스 카드가 안 보여 상세로 직접 진입 → ${url}`);
+    await page.goto(url, { waitUntil: "domcontentloaded", timeout: 20000 }).catch(() => {});
+    await page.waitForTimeout(inflowRndInt(1200, 2400));
+    return page;
   }
   // 🏠 홈 폴백(블로그) — 검색결과서 못 찾으면 블로그 홈으로 직접 진입해 최신 글 중 랜덤으로 읽는다.
   if (target.type === "blog") {
