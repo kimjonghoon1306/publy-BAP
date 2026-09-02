@@ -122,6 +122,16 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
   const [schedEnabled, setSchedEnabled] = useState(false);
   const [schedTime, setSchedTime] = useState("10:00");
   const [schedRounds, setSchedRounds] = useState(10);
+  type ConversionSnapshot={date:string;source:string;keyword:string;rank:number|null;calls:number;bookings:number;talks:number;coupons:number;memo:string};
+  const conversionKey=`publy_inflow_conversions_${userId||"guest"}`;
+  const [campaignSource,setCampaignSource]=useState("네이버 블로그");
+  const [calls,setCalls]=useState(0);
+  const [bookings,setBookings]=useState(0);
+  const [talks,setTalks]=useState(0);
+  const [coupons,setCoupons]=useState(0);
+  const [conversionMemo,setConversionMemo]=useState("");
+  const [snapshots,setSnapshots]=useState<ConversionSnapshot[]>(()=>{try{return JSON.parse(localStorage.getItem(`publy_inflow_conversions_${userId||"guest"}`)||"[]");}catch{return[];}});
+  const [weeklyPlan,setWeeklyPlan]=useState<string[]>([]);
   const esRef = useRef<BotEventStream | null>(null);
   const startRef = useRef<() => void>(() => {});
   const logBoxRef = useRef<HTMLDivElement | null>(null);
@@ -181,6 +191,32 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
   const copyLogs = () => {
     if (!logs.length) return;
     navigator.clipboard.writeText(logs.join("\n")).then(() => toast("로그 전체를 복사했어요", "success")).catch(() => toast("복사 실패", "error"));
+  };
+
+  const totalConversions=calls+bookings+talks+coupons;
+  const previousSnapshot=snapshots.length>1?snapshots[snapshots.length-2]:null;
+  const latestSnapshot=snapshots.length?snapshots[snapshots.length-1]:null;
+  const primaryKeyword=()=>String(apKeyword||keywords.split(",")[0]||"").trim();
+  const makeWeeklyPlan=()=>{
+    const mainKeyword=primaryKeyword();
+    const target=targetType==="place"?placeUrl.trim():blogUrl.trim();
+    if(!mainKeyword||!target){toast("대상 주소와 대표 키워드를 먼저 입력하세요","error");return;}
+    const next:string[]=[];
+    if(apLastRank==null)next.push(`오늘 '${mainKeyword}' 실제 순위를 먼저 측정해 기준점을 저장하세요.`);
+    else if(apLastRank>apGoal)next.push(`현재 ${apLastRank}위 → 목표 ${apGoal}위: 검색 의도에 맞는 제목·대표 이미지를 우선 개선하세요.`);
+    else next.push("목표 순위 달성 중: 제목을 자주 바꾸지 말고 전화·예약 전환 안내를 보강하세요.");
+    next.push(totalConversions===0?"전화·예약·톡톡 중 가장 중요한 행동 하나를 본문과 첫 화면에 또렷하게 안내하세요.":`확인된 실제 전환 ${totalConversions}건: 가장 많이 발생한 행동을 다음 콘텐츠의 핵심 안내로 재사용하세요.`);
+    next.push(`7일 뒤 ${new Date(Date.now()+7*86400000).toLocaleDateString("ko-KR")}에 같은 키워드 순위와 실제 전환을 다시 기록하세요.`);
+    setWeeklyPlan(next);toast("이번 주 원클릭 처방을 만들었어요","success");
+  };
+  const saveConversionSnapshot=()=>{
+    const item:ConversionSnapshot={date:new Date().toISOString(),source:campaignSource,keyword:primaryKeyword(),rank:apLastRank,calls,bookings,talks,coupons,memo:conversionMemo.trim()};
+    const next=[...snapshots,item].slice(-52);setSnapshots(next);localStorage.setItem(conversionKey,JSON.stringify(next));
+    toast(`실제 전환 ${totalConversions}건을 기준점으로 저장했어요`,"success");
+  };
+  const copyTrackingLink=()=>{
+    const raw=(targetType==="place"?placeUrl:blogUrl).trim();if(!raw){toast("대상 주소를 먼저 입력하세요","error");return;}
+    try{const u=new URL(raw);u.searchParams.set("utm_source",campaignSource.replace(/\s+/g,"_").toLowerCase());u.searchParams.set("utm_medium","publy");u.searchParams.set("utm_campaign",(primaryKeyword()||"traffic").replace(/\s+/g,"_"));navigator.clipboard.writeText(u.toString());toast("채널 구분용 추적 링크를 복사했어요","success");}catch{toast("올바른 주소를 입력하세요","error");}
   };
 
   const start = () => {
@@ -251,7 +287,7 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
         </span>
       </div>
       <p style={{ margin: "0 0 16px", fontSize: 13.5, color: C.sub, fontWeight: 600, lineHeight: 1.6 }}>
-        검색 → 클릭 → 글 전체 읽는 체류 → 저장·길찾기 등 실제 손님처럼. 방문마다 <b style={{ color: C.accent }}>프록시로 IP 자동 변경</b>, <b style={{ color: C.accent }}>안전 한도 안</b>에서만.
+        실행 횟수와 실제 고객 성과를 분리해 확인해요. 최종 성과는 <b style={{color:C.accent}}>순위·전화·예약·톡톡·쿠폰</b>으로 판정합니다.
       </p>
 
       {/* ── KPI 카드 ── */}
@@ -270,6 +306,21 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
             </div>
           </div>
         ))}
+      </div>
+
+      {/* ── 실제 성과·전환 센터 ── */}
+      <div style={{background:`linear-gradient(135deg,${C.panel},${C.glow})`,border:`2px solid ${C.accent}`,borderRadius:18,padding:18,marginBottom:14}}>
+        <div style={{display:"flex",alignItems:"center",gap:9,flexWrap:"wrap",marginBottom:12}}><span style={{fontSize:16,fontWeight:900}}>🎯 실제 성과 센터</span><span style={{fontSize:10,fontWeight:900,padding:"3px 8px",borderRadius:8,background:"#16a34a",color:"#fff"}}>방문수와 분리 측정</span><span style={{fontSize:12,color:C.sub}}>7일 전후 순위와 고객 행동으로 효과를 확인해요.</span></div>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(135px,1fr))",gap:8,marginBottom:12}}>
+          <div><label style={labelStyle}>유입 출처</label><select value={campaignSource} onChange={e=>setCampaignSource(e.target.value)} style={inputStyle}>{["네이버 블로그","네이버 플레이스","인스타그램","카카오톡","문자·QR","기타"].map(v=><option key={v}>{v}</option>)}</select></div>
+          {[["전화",calls,setCalls],["예약",bookings,setBookings],["톡톡·문의",talks,setTalks],["쿠폰·구매",coupons,setCoupons]].map(([label,value,setter]:any)=><div key={label}><label style={labelStyle}>{label}</label><input type="number" min={0} value={value} onChange={e=>setter(Math.max(0,Number(e.target.value)))} style={{...inputStyle,textAlign:"center"}}/></div>)}
+        </div>
+        <input value={conversionMemo} onChange={e=>setConversionMemo(e.target.value)} placeholder="매출, 문의 내용, 특이사항을 선택적으로 기록" style={{...inputStyle,marginBottom:10}}/>
+        <div style={{display:"flex",gap:8,flexWrap:"wrap"}}><button onClick={saveConversionSnapshot} style={{padding:"11px 15px",border:0,borderRadius:11,background:C.accent,color:"#fff",fontWeight:900,cursor:"pointer",fontFamily:"inherit"}}>💾 오늘 실제 성과 저장</button><button onClick={copyTrackingLink} style={{padding:"11px 15px",border:`1.5px solid ${C.line2}`,borderRadius:11,background:C.panel,color:C.accent,fontWeight:900,cursor:"pointer",fontFamily:"inherit"}}>🔗 출처 추적 링크 복사</button><button onClick={makeWeeklyPlan} style={{padding:"11px 15px",border:0,borderRadius:11,background:"linear-gradient(135deg,#7c3aed,#2563eb)",color:"#fff",fontWeight:900,cursor:"pointer",fontFamily:"inherit"}}>✨ 이번 주 원클릭 처방</button></div>
+        {(latestSnapshot||weeklyPlan.length>0)&&<div style={{marginTop:12,padding:"12px 14px",borderRadius:12,background:C.panel2,border:`1px solid ${C.line}`}}>
+          {latestSnapshot&&<div style={{fontSize:12.5,fontWeight:800,marginBottom:8}}>최근 기록: {new Date(latestSnapshot.date).toLocaleDateString("ko-KR")} · {latestSnapshot.keyword||"키워드 미입력"} · 실제 전환 {latestSnapshot.calls+latestSnapshot.bookings+latestSnapshot.talks+latestSnapshot.coupons}건 {previousSnapshot?`(이전 대비 ${latestSnapshot.calls+latestSnapshot.bookings+latestSnapshot.talks+latestSnapshot.coupons-(previousSnapshot.calls+previousSnapshot.bookings+previousSnapshot.talks+previousSnapshot.coupons)>=0?"+":""}${latestSnapshot.calls+latestSnapshot.bookings+latestSnapshot.talks+latestSnapshot.coupons-(previousSnapshot.calls+previousSnapshot.bookings+previousSnapshot.talks+previousSnapshot.coupons)}건)`:"(기준점)"}</div>}
+          {weeklyPlan.map((p,i)=><div key={p} style={{fontSize:12,color:C.sub,lineHeight:1.65}}><b style={{color:C.accent}}>{i+1}.</b> {p}</div>)}
+        </div>}
       </div>
 
       {/* ── 그래프 2단: 유입 추이 + 순위 변동 ── */}

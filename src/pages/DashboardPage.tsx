@@ -1079,6 +1079,33 @@ export default function DashboardPage({user, onLogout, onAdminLogin, onThemeTogg
     return{score,items};
   }
 
+  // 품질 미달 원고는 한 번만 최소 보정하고, 점수가 실제로 오른 경우에만 교체한다.
+  async function repairGeneratedQuality(content:string,kw:string,title:string,signal?:AbortSignal,minScore=80):Promise<string>{
+    const before=calcQualityScore(content,kw);
+    if(!before||before.score>=minScore)return content;
+    const failed=before.items.filter(it=>!it.pass).map(it=>`${it.label}: ${it.detail}`).join("\n");
+    try{
+      const prompt=`당신은 네이버 블로그 원고 품질 교정자입니다. 실패한 항목만 고치고 순수 본문만 반환하세요.
+제목: "${title}"\n핵심 키워드: "${kw}"\n현재 점수: ${before.score}점\n실패 항목:\n${failed}
+
+[안전 규칙]
+- 원문의 사실·가격·날짜·장소·경험을 유지하고 새로운 수치나 체험을 지어내지 마세요.
+- 핵심 키워드는 띄어쓰기와 글자를 그대로 유지해 전체 2~6회만 사용하세요.
+- 첫 문단은 질문에 바로 답하는 핵심 요약 2~3문장으로 쓰세요.
+- 4~6개 구간으로 나누고, 절반 이상의 소제목은 왜/어떻게/무엇/언제/가격/비교/주의 같은 질문형으로 쓰세요.
+- 단락마다 2~4문장, 단락 사이는 빈 줄로 나누세요.
+- 해보겠습니다/알아보겠습니다/결론적으로/다양한/효과적인 같은 AI 상투어를 제거하세요.
+- 마크다운 기호, 태그 줄, 교정 설명은 출력하지 마세요.
+
+[원문]\n${content}`;
+      let repaired=stripMarkdown(await callAI(prompt,signal));
+      repaired=ensureQuestionHeadings(repaired,kw);
+      repaired=ensureAeoIntroSummary(await ensureKeywordCount(repaired,kw,2),title);
+      const after=calcQualityScore(repaired,kw);
+      return after&&after.score>before.score?repaired:content;
+    }catch{return content;}
+  }
+
   async function generateCalendar(){
     const kws = calKeywords.split(/[,\n]+/).map(s=>s.trim()).filter(Boolean);
     if(kws.length===0){showToast("키워드를 입력해주세요","error");return;}
@@ -1268,6 +1295,8 @@ Output (JSON object only): {"keyword":"핵심키워드","title":"새 SEO 제목"
   const [videoUrl, setVideoUrl] = useState("");
   const [videoPosition, setVideoPosition] = useState<"top"|"middle"|"bottom">("middle");
   const [imgPattern, setImgPattern] = useState<"A"|"B"|"C"|"random">("random");
+  type ImageConcept = "photo"|"comic";
+  const [imageConcept,setImageConcept]=useState<ImageConcept>(()=>(localStorage.getItem("publy_image_concept") as ImageConcept)||"photo");
   const [currentImgPrompt, setCurrentImgPrompt] = useState("");
   const [genImgCurrent, setGenImgCurrent] = useState(0);
   const imgAbortRef = useRef<AbortController|null>(null);
@@ -1354,6 +1383,7 @@ Output (JSON object only): {"keyword":"핵심키워드","title":"새 SEO 제목"
   const [otCustomTerm,setOtCustomTerm]=useState("");
   const [otImgCount,setOtImgCount]=useState(3);
   const [otImgMode,setOtImgMode]=useState<"flow"|"ai">("flow");   // Flow(무료·봇이 발행중 생성) vs AI(DALL-E/Replicate 유료키)
+  const [otImageConcept,setOtImageConcept]=useState<"photo"|"comic"|"cycle">(()=>(localStorage.getItem("publy_ot_image_concept") as any)||"cycle");
   const [otCharMode,setOtCharMode]=useState<"auto"|"manual">("auto");
   const [otTargetChars,setOtTargetChars]=useState(1500);
   const [otWriteStyle,setOtWriteStyle]=useState<WriteStyle|"자동">(()=>{ const v=localStorage.getItem("publy_ot_style"); return (v==="자동"||v==="감성일기"||v==="정보글"||v==="맛집후기"||v==="여행기")?v as any:"자동"; });   // 기본=자동(키워드마다 AI가 패턴 선택)
@@ -2293,6 +2323,12 @@ Output (JSON object only): {"keyword":"핵심키워드","title":"새 SEO 제목"
     {keywords:["반려식물","식물키우기","다육이","관엽식물"],prompt:"lush indoor plant collection, botanical shelf arrangement, morning sunlight through leaves, cozy green aesthetic"},
   ];
 
+  function withImageConcept(prompt:string,concept:ImageConcept):string{
+    return concept==="comic"
+      ? `${prompt}, Korean webtoon-style editorial illustration, clean expressive line art, polished digital coloring, clear visual storytelling, consistent characters, not photorealistic, no text, no letters, no speech bubbles, no watermark`
+      : `${prompt}, authentic photorealistic editorial photography, realistic materials and anatomy, natural imperfections, no illustration, no cartoon, no text, no watermark`;
+  }
+
   function buildImgPrompt(kw: string, title: string = "", idx: number = 0, segmentContent?: string): string {
     // 구간 내용이 있으면 그걸로 키워드 보강
     const k = segmentContent
@@ -2623,8 +2659,8 @@ Output (JSON object only): {"keyword":"핵심키워드","title":"새 SEO 제목"
     }catch{return url;}
   }
 
-  async function generateOneImage(kw:string,signal:AbortSignal,idx:number=0,segmentContent?:string):Promise<string>{
-    const prompt=buildImgPrompt(kw, genTitle||selectedTitle||"", idx, segmentContent);
+  async function generateOneImage(kw:string,signal:AbortSignal,idx:number=0,segmentContent?:string,concept:ImageConcept=imageConcept,titleOverride?:string):Promise<string>{
+    const prompt=withImageConcept(buildImgPrompt(kw, titleOverride||genTitle||selectedTitle||"", idx, segmentContent),concept);
     const ai=localStorage.getItem("publy_image_ai")||"openai_img";
     if(ai==="openai_img"){
       const key=localStorage.getItem("publy_openai_key")||"";if(!key)throw new Error("OpenAI 키 없음");
@@ -2688,12 +2724,13 @@ Output (JSON object only): {"keyword":"핵심키워드","title":"새 SEO 제목"
     if(reset)setTitles([]);
     setLoadingTitles(true);abortRef.current=new AbortController();
     const prompt=adType==="adpost"
-      ?`당신은 대한민국 최고의 네이버 블로그 SEO 제목 전문가입니다.\n키워드: "${keyword.trim()}"\n\n네이버 검색 상위노출이 잘 되는 제목 30개를 JSON 배열로만 반환하세요.\n\n[반드시 지킬 것]\n- 키워드 "${keyword.trim()}"를 제목 앞부분에 자연스럽게 포함 (검색 매칭)\n- 20~35자 (너무 짧으면 검색 매칭 약함, 실제 검색어 형태로)\n- 사람들이 실제로 네이버에 검색하는 형태: "${keyword.trim()} 추천", "${keyword.trim()} 가격", "${keyword.trim()} 후기", "${keyword.trim()} 방법", "${keyword.trim()} 고르는법", "${keyword.trim()} 위치" 처럼 구체적 정보 니즈를 담기\n- 구체적 정보(지역·가격대·상황·대상)를 하나 이상 포함해 롱테일 검색을 노리기\n\n[절대 금지 — 네이버 저품질/스팸 필터에 걸림]\n⛔ 과장·낚시성 감탄사: "진짜?", "대박!", "충격", "이것만", "1등 비결", "미쳤다"\n⛔ 클릭베이트 상투구: "나만 알던", "솔직히", "해봤더니", "알고보니"\n⛔ "N가지 꿀팁!", "BEST 5!", "TOP 3!" 같은 숫자+감탄사 낚시 패턴 (숫자는 자연스러우면 OK, 감탄사 남발 금지)\n⛔ 물음표·느낌표 남발 (제목당 최대 1개, 없어도 됨)\n\n${AEO_TITLE_RULE}\n\n서로 다른 각도(추천/비교/후기/방법/가격/주의점)로 다양하게. JSON 배열만 반환.`
+      ?`당신은 대한민국 최고의 네이버 블로그 SEO·AI 브리핑 제목 전문가입니다.\n키워드: "${keyword.trim()}"\n\n검색 의도에 정확히 답하는 제목 30개를 JSON 배열로만 반환하세요.\n\n[반드시 지킬 것]\n- 키워드 "${keyword.trim()}"를 제목 앞부분에 정확히 1번만 자연스럽게 포함\n- 20~35자, 사람들이 실제로 묻는 추천/가격/후기/방법/비교/주의 형태\n- 본문에서 실제로 답할 수 있는 약속만 담고 확인되지 않은 가격·연도·순위·숫자는 만들지 않기\n- 지역·상황·대상·선택 기준 중 관련 있는 구체 조건을 담아 롱테일 검색 의도를 분명히 하기\n- 추천/비교/후기/방법/가격/주의 등 서로 다른 각도로 구성하고 유사 변형 반복 금지\n\n[절대 금지 — 네이버 저품질/스팸 필터에 걸림]\n⛔ 과장·낚시성 감탄사: "진짜?", "대박!", "충격", "이것만", "1등 비결", "미쳤다"\n⛔ 클릭베이트 상투구: "나만 알던", "솔직히", "해봤더니", "알고보니"\n⛔ 관련 없는 핫이슈·유행어 억지 결합, 숫자+감탄사 낚시, 물음표·느낌표 남발\n\n${AEO_TITLE_RULE}\n\nJSON 배열만 반환.`
       :`당신은 구글 애드센스 SEO 전문가입니다.\n키워드: "${keyword.trim()}"\n\n검색 노출이 잘 되는 정보성 제목 30개를 JSON 배열로만 반환하세요.\n- 키워드 "${keyword.trim()}"를 앞부분에 자연스럽게 포함\n- 25~40자, 차분한 정보성 톤\n- 실제 검색 형태("완벽 가이드","총정리","비교","이유","방법")\n- 과장·낚시성 감탄사(대박/진짜/충격) 금지, 물음표·느낌표 남발 금지\n\nJSON 배열만 반환.`;
     try{
       const text=await callAI(prompt,abortRef.current.signal);
       // 생성된 제목의 키워드 형태를 입력 형태 그대로 통일(제목·본문 일관)
-      const parsed=parseArr(text).map((t:string)=>enforceExactKeyword(t,keyword.trim()));
+      const parsed=Array.from(new Set(parseArr(text).map((t:string)=>enforceExactKeyword(t,keyword.trim())).filter(Boolean)))
+        .sort((a:string,b:string)=>calcTitleScore(b,keyword.trim())-calcTitleScore(a,keyword.trim()));
       if(!parsed.length)throw new Error("제목 생성 실패. 다시 시도해주세요.");
       setTitles(prev=>{
         const combined=[...parsed,...prev];
@@ -2941,7 +2978,8 @@ POST3: (제목)|(이유)
       const body0=onPartnerItems.length>0?placeOnPartnerProduct(generatedBody,onPartnerItems.map(it=>it.product)):generatedBody.trim();
       // ★키워드 완성: 입력 형태 그대로 최소 5회 보장(형태통일→부족시 AI재요청→최후 문장보충). 상위노출의 핵심.
       const bodyRaw=await ensureKeywordCount(body0,keyword||title,5);
-      const body=charMode==="manual"?enforceMaxChars(bodyRaw,targetChars):bodyRaw;   // 직접 지정 글자수면 오버슈트 방지
+      const capped=charMode==="manual"?enforceMaxChars(bodyRaw,targetChars):bodyRaw;   // 직접 지정 글자수면 오버슈트 방지
+      const body=await repairGeneratedQuality(capped,keyword||title,title,abortRef.current.signal,80);
       setGenContent(body);setQualityScore(calcQualityScore(body,keyword));
       setPendingPromo(null);   // 홍보 삽입 1회용 → 사용 후 해제(다음 글에 안 남게)
       // 비동기 글 생성 도중 직접입력으로 바뀌었으면 추천값으로 절대 덮지 않는다.
@@ -2995,7 +3033,7 @@ POST3: (제목)|(이유)
   // 키워드 목록을 순서대로: 제목(최고점)→본문(키워드 5~6회)→이미지→카테고리 자동매칭→발행, 텀 간격 반복.
   // 기존 부품 재사용: callAI · generateOneImage · /api/publish-full(검증된 발행). 발행 상태(state) 안 건드림.
   async function otGenTitleBest(kw:string,signal:AbortSignal):Promise<string>{
-    const prompt=`당신은 대한민국 최고의 네이버 블로그 SEO 제목 전문가입니다.\n키워드: "${kw}"\n\n네이버 검색 상위노출이 잘 되는 제목 20개를 JSON 배열로만 반환하세요.\n- 키워드 "${kw}"를 제목 앞부분에 자연스럽게 포함\n- 20~35자, 실제 검색어 형태(추천/후기/방법/가격/비교/고르는법)\n- 과장·낚시 감탄사(대박/충격/1등/미쳤다) 금지, 물음표·느낌표 남발 금지\n${AEO_TITLE_RULE}\nJSON 배열만.`;
+    const prompt=`당신은 대한민국 최고의 네이버 블로그 SEO 제목 전문가입니다.\n키워드: "${kw}"\n\n검색 의도에 정확히 답하는 제목 20개를 JSON 배열로만 반환하세요.\n- 키워드 "${kw}"는 제목 앞부분에 정확히 1번만 자연스럽게 포함\n- 20~35자, 실제 검색어 형태(추천/후기/방법/가격/비교/고르는법/주의)\n- 본문에서 실제로 답할 수 있는 약속만 담고 확인되지 않은 가격·연도·순위·숫자는 만들지 않기\n- 추천/비교/방법/비용/대상/주의 등 서로 다른 검색 의도로 구성\n- 관련 없는 핫이슈를 억지로 섞거나 같은 키워드 변형만 반복하지 않기\n- 과장·낚시 감탄사(대박/충격/1등/미쳤다) 금지, 물음표·느낌표 남발 금지\n${AEO_TITLE_RULE}\nJSON 배열만.`;
     const text=await callAI(prompt,signal);
     const arr=parseArr(text).map((t:string)=>enforceExactKeyword(t,kw)).filter(Boolean);
     if(!arr.length)throw new Error("제목 생성 실패");
@@ -3037,7 +3075,9 @@ POST3: (제목)|(이유)
     const body0=ensureQuestionHeadings(bm?bm[1].trim():cleaned,kw);
     const bodyRaw=ensureAeoIntroSummary(await ensureKeywordCount(body0,kw,5),title);   // 키워드 최소 5회 + 도입 핵심요약 보장
     const bodyCap=enforceMaxChars(bodyRaw,chars);   // 자동·직접 모두 목표 글자수 근처로 캡(오버슈트 방지)
-    const body=otSpaceParagraphs(bodyCap);   // 모바일 가독성: 긴 문단을 2~3문장마다 쪼개 빈 줄로 분리
+    const spaced=otSpaceParagraphs(bodyCap);   // 모바일 가독성: 긴 문단을 2~3문장마다 쪼개 빈 줄로 분리
+    const repaired=await repairGeneratedQuality(spaced,kw,title,signal,80);
+    const body=otSpaceParagraphs(enforceMaxChars(repaired,chars));
     return {content:body,tags:tgm?tgm[1].trim():""};
   }
   // 회원 실제 네이버 카테고리 목록 ↔ 글 주제 AI 매칭 → 가장 맞는 카테고리 자동 선택
@@ -3135,7 +3175,7 @@ POST3: (제목)|(이유)
       const lines=content.split("\n").filter((l:string)=>l.trim().length>5);
       const step=Math.max(1,Math.floor(lines.length/flowN));
       payload.useFlow=true; payload.flowImgCount=flowN;
-      payload.flowPrompts=Array.from({length:flowN},(_,i)=>{const seg=lines.slice(i*step,(i+1)*step).join(" ").slice(0,150);return buildFlowPrompt(kw,title,seg,i);});
+      payload.flowPrompts=Array.from({length:flowN},(_,i)=>{const seg=lines.slice(i*step,(i+1)*step).join(" ").slice(0,150);return withImageConcept(buildFlowPrompt(kw,title,seg,i),"photo");});
       payload.flowCaptions=buildCaptions(kw,flowN,content);
     }
     const r=await botFetch(`${BOT}/api/publish-full`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload),signal:otAbortRef.current?.signal});
@@ -3191,11 +3231,11 @@ POST3: (제목)|(이유)
     let hot:string[]=[];
     try{ const r=await botFetch(`${BOT}/api/hot-issues?category=${encodeURIComponent("실시간")}`,{signal:AbortSignal.timeout(15000)} as any); const d=await r.json().catch(()=>({})); if(Array.isArray(d.items))hot=d.items.slice(0,30); }catch{}
     const excl=used.slice(0,120).join(", ");
-    const hotHint=hot.length?`\n\n[요즘 뜨는 주제 참고 — 그대로 베끼지 말고 검색 잘 되는 SEO 키워드로 다듬어 활용]\n${hot.slice(0,25).join(", ")}`:"";
+    const hotHint=hot.length?`\n\n[현재 핫이슈 후보 — 선택 카테고리와 실제 관련 있을 때만 활용]\n${hot.slice(0,25).join(", ")}`:"";
     const catRule=otAiCats.length
       ? `- ★반드시 다음 주제 카테고리 안에서만 생성하세요(이 밖의 주제 금지): ${otAiCats.join(", ")}. 고른 카테고리들에 골고루 분배.`
       : `- 분야를 최대한 골고루 섞기: 맛집·여행·재테크·건강·육아·뷰티·인테리어·IT/가전·정책자금·반려동물·패션·자기계발 등`;
-    const prompt=`당신은 네이버 블로그 SEO·트렌드 전문가입니다.\n지금 검색이 잘 되고 사람들이 많이 찾는, 서로 겹치지 않는 다양한 블로그 키워드 ${count}개를 JSON 배열로만 생성하세요.\n[규칙]\n- 실제 검색량 많은 자연스러운 형태(예: "원주 맛집", "겨울 제철 음식", "소상공인 정책자금 신청", "환절기 건강관리")\n${catRule}\n- 2~4어절, 과장·낚시 금지\n${excl?`- ⛔ 아래 최근 14일간 이미 쓴 키워드는 절대 포함 금지: ${excl}`:""}${hotHint}\nJSON 배열만 반환.`;
+    const prompt=`당신은 네이버 블로그 SEO·검색의도·트렌드 전문가입니다.\n실제로 글로 답할 수 있고 검색자가 행동할 이유가 분명한 키워드 ${count}개를 JSON 배열로만 생성하세요.\n[규칙]\n- 상시형 70%, 계절·시기·핫이슈형 30%로 구성\n- 방법/가격/비교/후기/신청/주의/추천처럼 구체적인 정보 의도를 자연스럽게 포함\n- 너무 넓은 한 단어, 인물명·사건명만 있는 뉴스 키워드, 의미가 거의 같은 변형 반복 금지\n- 핫이슈는 선택 카테고리와 직접 관련되고 독자에게 해결 정보를 줄 수 있을 때만 사용\n- 확인되지 않은 연도·가격·혜택·순위를 지어내지 않기\n- 자연스러운 2~5어절 롱테일 키워드\n${catRule}\n${excl?`- ⛔ 아래 최근 14일간 이미 쓴 키워드는 절대 포함 금지: ${excl}`:""}${hotHint}\nJSON 배열만 반환.`;
     const text=await callAI(prompt,signal);
     const usedSet=new Set(used.map(u=>u.replace(/\s+/g,"")));
     const seen=new Set<string>();
@@ -3207,7 +3247,7 @@ POST3: (제목)|(이유)
       const need=count-arr.length;
       const exclAll=[...used,...arr].slice(0,150).join(", ");
       try{
-        const more=await callAI(`위와 같은 조건으로 네이버 블로그 SEO 키워드 ${need}개를 JSON 배열로만 더 생성하세요.\n${catRule}\n- ⛔ 아래 키워드는 절대 포함 금지(14일 내 사용 + 방금 뽑은 것): ${exclAll}\n- 2~4어절, 과장·낚시 금지\nJSON 배열만.`,signal);
+        const more=await callAI(`위와 같은 조건으로 검색 의도가 분명한 네이버 롱테일 키워드 ${need}개를 JSON 배열로만 더 생성하세요.\n${catRule}\n- ⛔ 아래 키워드는 절대 포함 금지(14일 내 사용 + 방금 뽑은 것): ${exclAll}\n- 2~5어절, 관련 없는 핫이슈·과장·낚시·유사 변형 금지\nJSON 배열만.`,signal);
         for(const k of parseArr(more).map(s=>s.trim()).filter(Boolean)){ const key=k.replace(/\s+/g,""); if(key&&!usedSet.has(key)&&!seen.has(key)){seen.add(key);arr.push(k);} if(arr.length>=count)break; }
       }catch{break;}
     }
@@ -3306,18 +3346,21 @@ POST3: (제목)|(이유)
         if(activeRevive&&title.trim().length<8)throw new Error("제목 생성 품질 미달 — 덮어쓰기 중단(원본 안전)");
         let effStyle:WriteStyle=otWriteStyle==="자동"?"정보글":otWriteStyle;
         if(otWriteStyle==="자동"){ effStyle=await otPickStyle(kw,title,signal); otLive(`  🎨 글 패턴 자동 선택: ${effStyle}`); }
-        upd({step:"본문 생성 중"}); otLive(`  ✍️ 본문 생성 중(${otCharMode==="manual"?otTargetChars+"자·":""}${effStyle}·키워드 5~6회)`); const {content,tags}=await otGenPost(kw,title,signal,effStyle); otLive(`  ✅ 본문 완성 (${content.length}자)`);
+        upd({step:"본문 생성 중"}); otLive(`  ✍️ 본문 생성 중(${otCharMode==="manual"?otTargetChars+"자·":""}${effStyle}·키워드 5~6회)`); const {content,tags}=await otGenPost(kw,title,signal,effStyle); const contentQuality=calcQualityScore(content,kw); otLive(`  ✅ 본문 완성 (${content.length}자 · SEO 품질 ${contentQuality?.score??"-"}점${contentQuality&&contentQuality.score<80?" · 자동 보정 후 재검사":""})`);
         if(activeRevive&&content.replace(/\s/g,"").length<400)throw new Error("본문 생성 품질 미달 — 덮어쓰기 중단(원본 안전)");
         if(activeRevive)otLive(`🖼️ 이미지 ${n}장 · 📄 글자수 ${content.length}자로 덮어쓰기 시작합니다`);
         const imgs:string[]=[];
+        // 글 살리기는 기존 실사 유지. 일반 원터치는 고정 또는 글 단위 실사 2 : 만화 1 순환.
+        const runImageConcept:ImageConcept=activeRevive?"photo":otImageConcept==="cycle"?(i%3===2?"comic":"photo"):otImageConcept;
+        if(!activeRevive)otLive(`  🎭 이미지 콘셉트: ${runImageConcept==="comic"?"만화형":"실사형"}${otImageConcept==="cycle"?" (2:1 순환)":""}`);
         if(n===0){otLive(`  🖼️ 원본 글에 이미지가 없어 이미지 생성은 건너뜁니다`);
         } else if(otImgMode==="ai"){ upd({step:"이미지 생성 중"}); otLive(`  🖼️ 이미지 ${n}장 생성 중(AI)`);
-          for(let k=0;k<n;k++){ if(otStopRef.current)break; try{imgs.push(await generateOneImage(kw,signal,k));}catch(ie:any){otLive(`  ⚠️ 이미지 ${k+1} 실패: ${ie.message||"오류"}`);} }
+          for(let k=0;k<n;k++){ if(otStopRef.current)break; try{imgs.push(await generateOneImage(kw,signal,k,undefined,runImageConcept,title));}catch(ie:any){otLive(`  ⚠️ 이미지 ${k+1} 실패: ${ie.message||"오류"}`);} }
           otLive(`  ✅ 이미지 ${imgs.length}/${n}장`);
         } else {   // 무료 Flow: 위 'Flow 준비'로 연 크롬(포트 9222)을 그대로 사용 → 재로그인/새창 없음
           upd({step:"Flow 이미지 생성 중"}); otLive(`  🖼️ Flow 이미지 ${n}장 생성 중(연결된 크롬 사용)`);
           const flines=content.split("\n").filter((l:string)=>l.trim().length>5); const fstep=Math.max(1,Math.floor(flines.length/n));
-          const fprompts=Array.from({length:n},(_,k)=>{const seg=flines.slice(k*fstep,(k+1)*fstep).join(" ").slice(0,150);return buildFlowPrompt(kw,title,seg,k);});
+          const fprompts=Array.from({length:n},(_,k)=>{const seg=flines.slice(k*fstep,(k+1)*fstep).join(" ").slice(0,150);return withImageConcept(buildFlowPrompt(kw,title,seg,k),runImageConcept);});
           const fcaptions=buildCaptions(kw,n,content);
           // ★크레딧이 떨어지면 미리 로그인해둔 다음 슬롯으로 자동 전환하며 이어감(자리 비워도 OK). 소진 슬롯은 otFlowExhaustedRef에 기록.
           // 시도 순서: 현재 슬롯 먼저, 그다음 소진 안 된 나머지 슬롯들.
@@ -3559,7 +3602,7 @@ ${segList}`;
     // 글 전체를 n등분해 서로 다른 구간의 프롬프트 n개 생성(장면이 안 섞여 괴물 방지). 실패 시 고정 템플릿 폴백.
     try{
       const sceneResult=await buildStoryPrompts(pubTitle||genTitle, content, n);
-      if(sceneResult.prompts.length>=n){ prompts=sceneResult.prompts.slice(0,n); caps=sceneResult.captions.slice(0,n); }
+      if(sceneResult.prompts.length>=n){ prompts=sceneResult.prompts.slice(0,n).map(p=>withImageConcept(p,imageConcept)); caps=sceneResult.captions.slice(0,n); }
     }catch{}
     if(prompts.length<n){
       // 폴백: 구간별 고정 템플릿 — 글을 n등분
@@ -3567,7 +3610,7 @@ ${segList}`;
       const step=Math.max(1,Math.floor(lines.length/n));
       prompts=Array.from({length:n},(_,k)=>{
         const seg=lines.slice(k*step,(k+1)*step).join(" ").slice(0,150);
-        return buildFlowPrompt(keyword||genTitle,pubTitle||genTitle,seg,k);
+        return withImageConcept(buildFlowPrompt(keyword||genTitle,pubTitle||genTitle,seg,k),imageConcept);
       });
       caps=buildCaptions(keyword||genTitle,n,content).slice(0,n);
     }
@@ -3647,7 +3690,7 @@ ${segList}`;
       for(let i=0;i<imgCount;i++){
         if(imgAbortRef.current.signal.aborted)break;
         setGenImgCurrent(i+1);
-        const url=await generateOneImage(keyword||genTitle,imgAbortRef.current.signal,i,segments[i]);
+          const url=await generateOneImage(keyword||genTitle,imgAbortRef.current.signal,i,segments[i],imageConcept);
         imgs.push(url);setGeneratedImages([...imgs]);setGenImgProgress(Math.round(((i+1)/imgCount)*100));
       }
       // 이미지 생성 완료 시 캡션 자동생성 + 블록 자동배치 + 썸네일 자동지정
@@ -3884,7 +3927,7 @@ ${segList}`;
         const step = Math.max(1, Math.floor(lines.length / flowImgCount));
         return Array.from({length: flowImgCount}, (_, i) => {
           const seg = lines.slice(i * step, (i + 1) * step).join(" ").slice(0, 150);
-          return buildFlowPrompt(keyword||genTitle, pubTitle, seg, i);
+          return withImageConcept(buildFlowPrompt(keyword||genTitle, pubTitle, seg, i),imageConcept);
         });
       })() : undefined,
       flowCaptions: imgGenType === "flow" && generatedImages.length === 0
@@ -5408,6 +5451,7 @@ POST3: (제목)|(이유)
                   </div>
 
                   <div style={{display:"flex",gap:8,marginTop:12,flexWrap:"wrap"}}>
+                    <button className="btn btn-secondary" onClick={recommendKeywordsForTitleTab} disabled={aiKeywordLoading||loadingTitles} style={{borderColor:"var(--accent)",color:"var(--accent-text)"}}>{aiKeywordLoading?<><span className="spinner"/>키워드 찾는 중...</>:<>✨ AI 키워드 30개 추천</>}</button>
                     <button className="btn btn-primary" onClick={()=>handleGenerateTitles(true)} disabled={loadingTitles||!keyword}>{loadingTitles?<><span className="spinner"/>추천 중...</>:<>⭐ 제목 {BATCH}개 추천받기</>}</button>
                     {titles.length>0&&<button className="btn btn-secondary" onClick={()=>handleGenerateTitles(false)} disabled={loadingTitles}>{titles.length>=MAX_TITLES?"🔄 초기화 후 재생성":"➕ 30개 추가"}</button>}
                     {titles.length>0&&<button className="btn btn-danger btn-sm" onClick={()=>{setTitles([]);setSelectedTitle("");localStorage.removeItem("publy_titles");}}>🗑 제목 초기화</button>}
@@ -5762,6 +5806,17 @@ POST3: (제목)|(이유)
                       <div style={{fontSize:11,color:"var(--text3)",lineHeight:1.5}}>Google Flow<br/>무료 · 고퀄리티</div>
                       {imgGenType==="flow"&&<div style={{marginTop:8,fontSize:10,fontWeight:800,color:"#c084fc",background:"rgba(168,85,247,.15)",padding:"3px 8px",borderRadius:99,display:"inline-block"}}>✓ 선택됨</div>}
                     </button>
+                  </div>
+                </div>
+
+                {/* 일반 발행 이미지 콘셉트 — AI/Flow 공통 */}
+                <div style={{marginBottom:16,padding:"16px 20px",borderRadius:16,background:"var(--card)",border:"1.5px solid var(--border)"}}>
+                  <div style={{fontSize:14,fontWeight:900,color:"var(--text)",marginBottom:5}}>🎭 이미지 표현 방식</div>
+                  <div style={{fontSize:11.5,color:"var(--text3)",marginBottom:10}}>글 전체 이미지를 한 콘셉트로 통일해요. 이미지 생성 방식과 별개로 적용됩니다.</div>
+                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+                    {([['photo','📷 실사형','자연스러운 실제 사진 느낌'],['comic','🖍️ 만화형','깔끔한 한국 웹툰 일러스트']] as const).map(([v,label,desc])=>{
+                      const on=imageConcept===v;return <button key={v} onClick={()=>{setImageConcept(v);localStorage.setItem("publy_image_concept",v);}} style={{padding:"12px",borderRadius:12,border:`2px solid ${on?"#7c3aed":"var(--border)"}`,background:on?"rgba(124,58,237,.10)":"var(--bg)",color:on?"#8b5cf6":"var(--text2)",fontFamily:"inherit",cursor:"pointer",textAlign:"left"}}><div style={{fontSize:13,fontWeight:900}}>{label}</div><div style={{fontSize:10.5,marginTop:3,opacity:.8}}>{desc}</div></button>;
+                    })}
                   </div>
                 </div>
 
@@ -6962,6 +7017,11 @@ POST3: (제목)|(이유)
                         );})}
                       </div>
                       <div style={{marginTop:8,fontSize:12,color:"var(--text3)",lineHeight:1.5}}>{otImgMode==="flow"?"무료 Flow는 옆의 'Flow 준비'를 먼저 눌러 연결하세요. 그 창으로 이미지를 만들어 넣어요.":"AI 이미지는 설정 탭에 OpenAI/Replicate 키가 있어야 해요. 키가 없으면 이미지 없이 글만 올라가요."}</div>
+                      <div style={{fontSize:13,fontWeight:700,marginTop:14,marginBottom:6}}>이미지 콘셉트</div>
+                      <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                        {([['cycle','🔄 실사 2 : 만화 1','글마다 2:1로 자동 순환'],['photo','📷 실사형','모든 글을 실사로'],['comic','🖍️ 만화형','모든 글을 만화로']] as const).map(([v,label,tip])=>{const on=otImageConcept===v;return <button key={v} disabled={otRunning} title={tip} onClick={()=>{setOtImageConcept(v);localStorage.setItem("publy_ot_image_concept",v);}} style={{padding:"9px 12px",borderRadius:10,border:`2px solid ${on?OT:"var(--border)"}`,background:on?`${OT}16`:"var(--bg)",color:on?OT:"var(--text2)",cursor:otRunning?"default":"pointer",fontSize:12,fontWeight:800,fontFamily:"inherit"}}>{label}</button>;})}
+                      </div>
+                      <div style={{marginTop:6,fontSize:11,color:"var(--text3)"}}>{otImageConcept==="cycle"?"첫 두 글은 실사, 다음 한 글은 만화로 반복해 피드를 자연스럽게 섞어요.":"원터치로 만드는 모든 새 글에 같은 콘셉트를 적용해요."}</div>
                     </div>
                     {otImgMode==="flow"&&(
                       <div style={{flex:"1 1 300px",minWidth:260,maxWidth:440,padding:"14px 16px",borderRadius:12,border:`1.5px solid ${OT}33`,background:`${OT}08`}}>
