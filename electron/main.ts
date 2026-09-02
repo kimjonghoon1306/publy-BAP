@@ -438,6 +438,7 @@ app.whenReady().then(async () => {
   startBotWatchdog();            // ★ 봇 서버 자동 감시·복구 시작
   createWindow();
   createTray();                  // 창을 닫아도 예약 실행은 트레이에서 계속
+  ensureDisplayAwake();          // 퍼블리가 실행 중인 동안 예약 대기·작업 텀까지 화면 절전 방지
   app.on("activate", () => { if (!mainWindow) createWindow(); });
 });
 
@@ -568,22 +569,21 @@ ipcMain.handle("focus-app", () => {
   } catch {}
 });
 
-/* ── 절전 방지: 글쓰기(발행)·이미지 생성 중에는 화면/시스템이 안 꺼지게 (맥·윈도우 공통) ──
-   powerSaveBlocker('prevent-display-sleep')는 디스플레이+시스템 잠자기를 둘 다 막는다.
-   작업 끝나면 renderer가 keepAwake(false)로 꺼서 원래대로 복귀(평소엔 정상 절전). */
+/* ── 전역 절전 방지: 퍼블리가 실행 중이면 예약 대기·방문 텀·모든 기능에서 화면이 안 꺼지게 ──
+   powerSaveBlocker('prevent-display-sleep')는 디스플레이와 시스템 자동 잠자기를 함께 막는다.
+   앱이 종료되면 Electron 프로세스와 함께 자동 해제된다. */
 let powerBlockerId = -1;
+function ensureDisplayAwake() {
+  if (powerBlockerId === -1 || !powerSaveBlocker.isStarted(powerBlockerId)) {
+    powerBlockerId = powerSaveBlocker.start("prevent-display-sleep");
+    console.log("[power] 전역 절전 방지 ON (퍼블리 실행 중 화면 안 꺼짐)");
+  }
+}
 ipcMain.handle("keep-awake", (_e, on: boolean) => {
   try {
-    if (on) {
-      if (powerBlockerId === -1 || !powerSaveBlocker.isStarted(powerBlockerId)) {
-        powerBlockerId = powerSaveBlocker.start("prevent-display-sleep");
-        console.log("[power] 절전 방지 ON (작업 중 화면 안 꺼짐)");
-      }
-    } else if (powerBlockerId !== -1 && powerSaveBlocker.isStarted(powerBlockerId)) {
-      powerSaveBlocker.stop(powerBlockerId);
-      powerBlockerId = -1;
-      console.log("[power] 절전 방지 OFF (작업 끝 — 평소대로)");
-    }
+    // 기존 renderer 호환: 개별 작업이 false를 보내도 앱 전역 정책은 유지한다.
+    void on;
+    ensureDisplayAwake();
     return { ok: true, active: powerBlockerId !== -1 };
   } catch (e: any) { return { ok: false, error: e.message }; }
 });
