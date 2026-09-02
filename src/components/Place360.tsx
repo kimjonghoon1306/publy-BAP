@@ -1165,18 +1165,38 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
           <img src={pearlyImg} alt="펄리" onError={e => { const s = document.createElement("div"); s.textContent = "🐤"; s.style.cssText = "font-size:44px"; e.currentTarget.replaceWith(s); }} style={{ width: 58, height: 58, objectFit: "contain", flexShrink: 0, animation: "p360bob 2.6s ease-in-out infinite", filter: `drop-shadow(0 6px 12px ${M.rose}44)` }} />
           <div style={{ minWidth: 0 }}>
             <div style={{ fontSize: 11, fontWeight: 950, color: M.rose, letterSpacing: ".14em" }}>PUBLY PLACE 365</div>
-            <h1 style={{ margin: "3px 0 3px", fontSize: 22, fontWeight: 900, letterSpacing: "-.03em" }}>안녕하세요! 상위노출 플랜을 함께 짜볼까요? 🩺</h1>
-            <p style={{ margin: 0, fontSize: 12.5, color: M.sub, lineHeight: 1.55 }}>플레이스 <b style={{ color: M.text }}>주소만 붙여넣으면</b> 매장을 통째로 진단하고, 순위 올리는 길을 하나씩 짚어드려요.</p>
+            <h1 style={{ margin: "3px 0 3px", fontSize: 22, fontWeight: 900, letterSpacing: "-.03em" }}>사장님은 플레이스 주소만 넣으세요 🩺</h1>
+            <p style={{ margin: 0, fontSize: 12.5, color: M.sub, lineHeight: 1.55 }}>수집·진단·키워드·순위·경쟁사 비교·실행안은 <b style={{ color: M.text }}>퍼블리가 자동으로 끝냅니다.</b></p>
           </div>
         </div>
         <div className="p360-steps">
-          {[["🔗", "① 링크 넣기", "주소 붙여넣고 불러오기 → 매장 통째로 수집"], ["🔎", "② 검사하기", "저장·리뷰·별점·사진·키워드 실시간 진단"], ["🚀", "③ 진단·솔루션", "부족한 건 퍼블리로 채워 순위 UP"]].map(([ic, t, d], i) => (
+          {[["🔗", "① 주소 넣기", "네이버 플레이스 주소 하나만 붙여넣기"], ["🤖", "② 퍼블리가 자동 실행", "정보수집부터 100위권 측정까지 자동"], ["✅", "③ 결과만 적용", "완성된 문구·키워드·사진 순서를 한 번에 복사"]].map(([ic, t, d], i) => (
             <div key={i} style={{ display: "flex", gap: 10, padding: "12px 13px", borderRadius: 13, background: M.card, border: `1px solid ${M.line}` }}>
               <div style={{ width: 30, height: 30, borderRadius: 9, flexShrink: 0, display: "grid", placeItems: "center", background: `${M.rose}18`, fontSize: 16 }}>{ic}</div>
               <div style={{ minWidth: 0 }}><b style={{ fontSize: 13 }}>{t}</b><div style={{ fontSize: 10.5, color: M.sub, lineHeight: 1.45, marginTop: 2 }}>{d}</div></div>
             </div>
           ))}
         </div>
+      </section>
+
+      {/* 초보 사장님용 단 하나의 다음 행동 */}
+      <section className="p360-card" style={{ padding: "18px 20px", border: `3px solid ${M.rose}`, background: `linear-gradient(135deg,${M.card},${M.rose}0d)` }}>
+        {!livePlace ? <>
+          <div style={{ fontSize: 11, fontWeight: 950, color: M.rose }}>사장님이 지금 할 일 · 1개</div>
+          <h2 style={{ margin: "5px 0", fontSize: 20 }}>플레이스 주소를 붙여넣고 원클릭 버튼만 누르세요.</h2>
+          <p style={{ margin: "0 0 11px", color: M.sub, fontSize: 12 }}>나머지는 퍼블리가 자동으로 검사하고 순위를 올리기 위한 작업물까지 준비해요.</p>
+          <button className="p360-btn" onClick={() => document.querySelector<HTMLInputElement>('.p360-in[placeholder="https://naver.me/xxxx"]')?.focus()} style={{ width: "100%", background: `linear-gradient(135deg,${M.rose},${M.purple})`, color: "#fff", fontSize: 15 }}>🚀 주소 넣고 시작하기</button>
+        </> : (resolving || oneClickPending || checkingKeyword || rankQueue.length > 0 || kwLoading) ? <>
+          <div style={{ fontSize: 11, fontWeight: 950, color: M.purple }}>퍼블리가 자동으로 일하는 중</div>
+          <h2 style={{ margin: "5px 0", fontSize: 20 }}>사장님은 기다리기만 하세요.</h2>
+          <p style={{ margin: 0, color: M.sub, fontSize: 12 }}>매장 수집 → 키워드 발굴 → 100위권 순위 → 경쟁사 비교 → 실행안 생성 중이에요.</p>
+          <div style={{ height: 9, borderRadius: 99, background: M.soft, overflow: "hidden", marginTop: 12 }}><div style={{ width: `${Math.max(scanPct, 12)}%`, height: "100%", background: `linear-gradient(90deg,${M.rose},${M.purple})`, transition: "width .3s" }} /></div>
+        </> : <>
+          <div style={{ fontSize: 11, fontWeight: 950, color: M.green }}>자동 분석 완료 · 사장님이 지금 할 일 1개</div>
+          <h2 style={{ margin: "5px 0", fontSize: 20 }}>{latestRank?.rank ? `현재 ${latestRank.rank}위 — 준비된 개선안을 적용하세요.` : "상위권 밖 — 준비된 우선 개선안부터 적용하세요."}</h2>
+          <p style={{ margin: "0 0 11px", color: M.sub, fontSize: 12 }}>긴 진단표를 공부할 필요 없어요. 퍼블리가 만든 소개글·키워드·사진 순서·실행 일정을 확인하면 됩니다.</p>
+          <button className="p360-btn" onClick={() => document.getElementById("p360-kit")?.scrollIntoView({ behavior: "smooth", block: "center" })} style={{ width: "100%", background: `linear-gradient(135deg,${M.green},${M.purple})`, color: "#fff", fontSize: 15 }}>✅ 퍼블리가 준비한 것 적용하기</button>
+        </>}
       </section>
 
       {/* ── 진행 스트립: 지금 어디까지 왔는지(회진 칩) ── */}
@@ -1409,7 +1429,7 @@ export default function Place360({ showToast, theme = "light", userId, plan = "f
               <p style={{ color: M.sub, fontSize: 10.8, lineHeight: 1.55, margin: "5px 0 10px" }}>이 값은 네이버 순위 점수가 아니라 <b style={{ color: M.text }}>진단에 실제 근거가 얼마나 채워졌는지</b>예요. 검색 위치·시간·개인화에 따라 노출 순서는 달라질 수 있어요.</p>
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(145px,1fr))", gap: 6 }}>{diagnosisCoverage.checks.map(item => <div key={item.label} style={{ padding: "8px 9px", borderRadius: 9, background: M.soft, border: `1px solid ${item.ok ? `${M.green}55` : M.line}`, fontSize: 10.5 }}><b style={{ color: item.ok ? M.green : M.sub }}>{item.ok ? "✓" : "○"} {item.label}</b><div style={{ color: M.sub, marginTop: 2 }}>{item.ok ? item.kind : "아직 미측정"}</div></div>)}</div>
             </section>
-            {oneClickKit && <section className="p360-card" style={{ padding: 16, border: `2px solid ${M.purple}55`, background: `linear-gradient(135deg,${M.card},${M.purple}08)` }}>
+            {oneClickKit && <section id="p360-kit" className="p360-card" style={{ padding: 16, border: `2px solid ${M.purple}55`, background: `linear-gradient(135deg,${M.card},${M.purple}08)` }}>
               <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}><b style={{ fontSize: 14 }}>🚀 원클릭 적용 꾸러미</b><span style={{ marginLeft: "auto", fontSize: 10, fontWeight: 900, color: M.purple }}>자동 완성</span></div>
               <p style={{ color: M.sub, fontSize: 10.8, lineHeight: 1.55, margin: "0 0 10px" }}>진단만 보여주지 않고 스마트플레이스에 바로 옮길 수 있는 문구·키워드·사진 순서를 만들었어요.</p>
               <div style={{ display: "grid", gap: 8 }}>
