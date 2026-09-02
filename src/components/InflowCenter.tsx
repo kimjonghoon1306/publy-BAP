@@ -175,6 +175,8 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
   const [weeklyPlan,setWeeklyPlan]=useState<string[]>([]);
   const esRef = useRef<BotEventStream | null>(null);
   const startRef = useRef<() => void>(() => {});
+  // 🎯 오토파일럿 자동 순위 체크(목표 달성 여부) — 최신 값 참조용 ref
+  const autopilotCheckRef = useRef<() => Promise<boolean>>(async () => false);
   const logBoxRef = useRef<HTMLDivElement | null>(null);
 
   const pushLog = (m: string) => setLogs((l) => [...l, m]);
@@ -227,6 +229,26 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
       }
     } catch { toast("순위 측정 실패 — 봇 서버(3334) 확인", "error"); }
     finally { setRankLoading(false); }
+  };
+
+  // 🎯 오토파일럿 판단 — 순위 측정 후 "목표 달성했나?" 반환(달성=true면 유입 스킵)
+  autopilotCheckRef.current = async () => {
+    if (!userId || !placeUrl.trim()) return false;
+    const kw = (apKeyword || keywords.split(/[,\n]/)[0] || "").trim();
+    if (!kw) return false;
+    try {
+      const r = await fetch(`${BOT}/api/place-rank?keyword=${encodeURIComponent(kw)}&placeUrl=${encodeURIComponent(placeUrl.trim())}`);
+      const j = await r.json();
+      if (j.rank != null) {
+        setApLastRank(j.rank);
+        await recordRankPoint(userId, j.rank);
+        getPerfReport(userId, reportPeriod).then(setReport).catch(()=>{});
+        pushLog(`📍 현재 순위 ${j.rank}위 (목표 ${apGoal}위)`);
+        return j.rank <= apGoal;   // 목표 이내면 달성
+      }
+      pushLog("📍 순위 30위 밖 — 유입으로 끌어올려요.");
+      return false;
+    } catch { return false; }
   };
 
   // 🔎 키워드 발굴 — 입력한 키워드 seed로 숨은 키워드 추천
@@ -300,7 +322,14 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
       if (hhmm !== schedTime) return;
       if (await inflowScheduleRanToday(userId)) return;
       await markInflowScheduleRan(userId);
-      pushLog(`⏰ 예약 시각(${schedTime}) 도달 — 자동 실행 시작`);
+      pushLog(`⏰ 예약 시각(${schedTime}) 도달`);
+      // 🎯 오토파일럿 켜져 있으면: 순위 먼저 재고 목표 달성이면 유입 스킵(한도 절약)
+      if (apEnabled && targetType === "place") {
+        const reached = await autopilotCheckRef.current();
+        if (reached) { pushLog("🎯 목표 순위 유지 중 — 오늘 유입은 건너뜁니다(한도 절약)."); return; }
+        pushLog("🎯 목표보다 낮아요 — 순위를 끌어올리기 위해 유입 실행.");
+      }
+      pushLog("⏰ 자동 유입 시작");
       if (!auto) setRounds(schedRounds);
       startRef.current();
     };
