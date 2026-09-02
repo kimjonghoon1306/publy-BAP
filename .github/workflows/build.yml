@@ -211,8 +211,20 @@ jobs:
             stage=$(mktemp -d)
             cp -R "$app" "$stage/"
             ln -s /Applications "$stage/Applications"
-            hdiutil create -volname "Publy" -srcfolder "$stage" -ov -format UDZO "$dmg"
+            # hdiutil은 러너에서 이전 디스크이미지 작업이 덜 정리되면 "Resource busy"로 간헐 실패한다.
+            # 재시도 + 대기로 근본 방지한다.
+            ok=""
+            for attempt in 1 2 3 4 5; do
+              if hdiutil create -volname "Publy" -srcfolder "$stage" -ov -format UDZO "$dmg"; then
+                ok="1"; break
+              fi
+              echo "hdiutil create failed (attempt $attempt) → 정리 후 재시도"
+              rm -f "$dmg"
+              hdiutil detach /tmp/vchk >/dev/null 2>&1 || true
+              sleep 10
+            done
             rm -rf "$stage"
+            [ -n "$ok" ] || { echo "hdiutil create가 5회 재시도 후에도 실패: $dmg"; return 1; }
           }
           for dmg in release/*-arm64.dmg; do [ -f "$dmg" ] && repack release/mac-arm64 "$dmg"; done
           for dmg in release/*.dmg; do
