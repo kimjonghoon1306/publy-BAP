@@ -106,6 +106,8 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
   const [doReview, setDoReview] = useState<boolean>(saved0.doReview ?? false); // ✍️ 리뷰(관리자 락)
   const [reviewText, setReviewText] = useState<string>(saved0.reviewText ?? "");
   const [auto, setAuto] = useState(saved0.auto ?? false);
+  const [actionRate, setActionRate] = useState<number>(saved0.actionRate ?? 100); // 🎲 액션 발동 확률(%)
+  const [intensity, setIntensity] = useState<"fast" | "normal" | "deep">(saved0.intensity ?? "normal"); // 📖 체류 강도
   const [visible, setVisible] = useState(false); // 🪟 창 보기(테스트) — 저장 안 함(안전상 매번 꺼짐)
   const [accountId, setAccountId] = useState("");
   const [accounts, setAccounts] = useState<PublyAccount[]>([]);
@@ -196,10 +198,10 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
     try {
       localStorage.setItem(formKey, JSON.stringify({
         targetType, placeUrl, blogUrl, keywords, rounds, termMin, termMax, device,
-        doSave, doShare, doDir, doCall, doBook, doTalk, doLike, funnel, spread, spreadHours, doReview, reviewText, auto,
+        doSave, doShare, doDir, doCall, doBook, doTalk, doLike, funnel, spread, spreadHours, doReview, reviewText, auto, actionRate, intensity,
       }));
     } catch {}
-  }, [formKey, targetType, placeUrl, blogUrl, keywords, rounds, termMin, termMax, device, doSave, doShare, doDir, doCall, doBook, doTalk, doLike, funnel, spread, spreadHours, doReview, reviewText, auto]);
+  }, [formKey, targetType, placeUrl, blogUrl, keywords, rounds, termMin, termMax, device, doSave, doShare, doDir, doCall, doBook, doTalk, doLike, funnel, spread, spreadHours, doReview, reviewText, auto, actionRate, intensity]);
 
   const copyLogs = () => {
     if (!logs.length) return;
@@ -252,6 +254,8 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
       spreadHours: spread ? String(spreadHours) : "0",
       doReview: String(doReview), reviewText: doReview ? reviewText : "",
       visible: String(visible),
+      actionRate: String(Math.max(0, Math.min(1, actionRate / 100))),
+      intensity: intensity === "fast" ? "0.5" : intensity === "deep" ? "1.8" : "1",
     });
     if (userId) params.set("userId", userId);
     if (accountId) params.set("accountId", accountId);
@@ -454,6 +458,26 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
           <div style={{ flex: 1, minWidth: 200 }}>
             <label style={labelStyle}>방문 횟수</label>
             <input type="number" min={1} value={rounds} disabled={auto} onChange={(e) => setRounds(Math.max(1, Number(e.target.value)))} style={{ ...inputStyle, textAlign: "center", opacity: auto ? 0.5 : 1 }} />
+          </div>
+        </div>
+
+        {/* 체류 강도 + 액션 확률 */}
+        <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+          <div style={{ flex: 1, minWidth: 220 }}>
+            <label style={labelStyle}>📖 체류 강도 <span style={{ color: C.sub, fontWeight: 600 }}>(글 읽는 시간)</span></label>
+            <div style={{ display: "flex", gap: 6 }}>
+              {([["fast", "빠르게"], ["normal", "보통"], ["deep", "꼼꼼히"]] as const).map(([k, lb]) => (
+                <button key={k} onClick={() => setIntensity(k)} style={{ flex: 1, padding: "11px", borderRadius: 10, border: `2px solid ${intensity === k ? C.accent : C.line2}`, background: intensity === k ? C.glow : C.panel2, color: intensity === k ? C.accent : C.sub, fontSize: 13.5, fontWeight: 800, cursor: "pointer", fontFamily: "inherit" }}>{lb}</button>
+              ))}
+            </div>
+          </div>
+          <div style={{ flex: 1, minWidth: 220 }}>
+            <label style={labelStyle}>🎲 액션 확률 <span style={{ color: C.sub, fontWeight: 600 }}>(방문 중 저장·공감 등 실행 비율)</span></label>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <input type="range" min={0} max={100} step={10} value={actionRate} onChange={(e) => setActionRate(Number(e.target.value))} style={{ flex: 1, accentColor: C.accent }} />
+              <span style={{ minWidth: 44, textAlign: "right", fontSize: 15, fontWeight: 900, color: C.accent }}>{actionRate}%</span>
+            </div>
+            <div style={{ fontSize: 11, color: C.sub, fontWeight: 600, marginTop: 3 }}>낮출수록 자연스러워요(진짜 손님처럼 일부만 저장)</div>
           </div>
         </div>
 
