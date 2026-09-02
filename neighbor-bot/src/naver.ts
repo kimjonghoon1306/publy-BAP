@@ -5264,6 +5264,56 @@ async function inflowActions(page: any, target: InflowTarget, actions: InflowAct
   }
 }
 
+// 🌀 풀퍼널 — 단순 방문을 넘어 "진짜 팬" 행동(여러 글·탭 둘러보기 + 이웃). 체류·페이지뷰·이웃 극대화.
+async function inflowFullFunnel(page: any, target: InflowTarget, log: (m: string) => void, shouldStop?: () => boolean): Promise<void> {
+  try {
+    if (target.type === "blog") {
+      log("  🌀 풀퍼널 — 이 블로그의 다른 글도 둘러봐요");
+      const bid = target.blogId;
+      const links: string[] = await page.$$eval(
+        'a[href*="blog.naver.com"], a[href*="PostView"], a[href*="logNo"]',
+        (as: any[], b: string) => Array.from(new Set(as.map((a: any) => a.href).filter((h: string) => h.includes(b) && /logNo|\/\d{6,}/.test(h)))).slice(0, 12),
+        bid
+      ).catch(() => []);
+      const visits = Math.min(links.length, inflowRndInt(2, 3));
+      for (let j = 0; j < visits; j++) {
+        if (shouldStop?.()) break;
+        const url = links[inflowRndInt(0, links.length - 1)];
+        if (!url) continue;
+        await page.goto(url, { waitUntil: "domcontentloaded", timeout: 20000 }).catch(() => {});
+        log(`    📖 다른 글 읽는 중 (${j + 1}/${visits})`);
+        await inflowDwellRead(page, log, shouldStop);
+      }
+      // 이웃추가 시도(진짜 팬 신호)
+      for (const sl of ['a:has-text("이웃추가")', 'button:has-text("이웃추가")', 'a:has-text("서로이웃")', '[class*="buddy"] a']) {
+        const b = await page.$(sl).catch(() => null);
+        if (b) { await b.click().catch(() => {}); log("    🤝 이웃추가"); await page.waitForTimeout(inflowRndInt(1000, 2200)); break; }
+      }
+    } else {
+      log("  🌀 풀퍼널 — 메뉴·사진·리뷰를 둘러봐요");
+      const tabs: [string, string[]][] = [
+        ["메뉴", ['a:has-text("메뉴")', '[class*="menu"] a']],
+        ["사진", ['a:has-text("사진")', '[class*="photo"] a']],
+        ["리뷰", ['a:has-text("리뷰")', '[class*="review"] a']],
+      ];
+      for (const [name, sels] of tabs) {
+        if (shouldStop?.()) break;
+        for (const sl of sels) {
+          const b = await page.$(sl).catch(() => null);
+          if (b) {
+            await b.click().catch(() => {});
+            log(`    📑 ${name} 둘러보는 중`);
+            for (let s = 0; s < inflowRndInt(2, 4); s++) { await page.mouse.wheel(0, inflowRndInt(300, 700)).catch(() => {}); await page.waitForTimeout(inflowRndInt(700, 1600)).catch(() => {}); }
+            break;
+          }
+        }
+      }
+    }
+  } catch (e: any) {
+    log(`  ⚠️ 풀퍼널 일부 건너뜀: ${e?.message || e}`);
+  }
+}
+
 export async function searchInflow(params: {
   accountId: string;
   ownerUserId?: string;
@@ -5273,6 +5323,7 @@ export async function searchInflow(params: {
   device?: "mobile" | "pc" | "mix"; // 접속 기기(기본 모바일, mix=방문마다 랜덤)
   intervalSec?: [number, number];  // 방문 사이 텀(사용자 임의 지정, 랜덤)
   actions?: InflowActions;         // 저장·공감·공유·길찾기·전화·예약·톡톡
+  fullFunnel?: boolean;            // 🌀 풀퍼널(여러 글·탭 둘러보기 + 이웃)
   requireLogin?: boolean;          // 저장/공감 등 로그인 필요 액션 시
   onLog?: (m: string) => void;
   onProgress?: (done: number, total: number) => void;
@@ -5325,6 +5376,7 @@ export async function searchInflow(params: {
       } else {
         await inflowDwellRead(entered, log, params.shouldStop);
         await inflowActions(entered, target, params.actions || {}, log);
+        if (params.fullFunnel) await inflowFullFunnel(entered, target, log, params.shouldStop);
         success++; done++;
         log(`  ✅ 유입 완료 (${kw}) — 누적 성공 ${success}회`);
         params.onProgress?.(done, rounds);

@@ -1107,7 +1107,7 @@ app.get("/api/post-body", async (req, res) => {
 
 /* ── 🆕 NEW 트래픽 유입 (검색유입, SSE) — 기본 잠금(관리자가 켠 회원만), 관리자=락 해제 ── */
 app.get("/api/inflow", async (req, res) => {
-  const { userId, accountId, keywords, targetType, placeUrl, blogId, logNo, rounds, termMin, termMax, doSave, doLike, doShare, doDir, doCall, doBook, doTalk, device } = req.query as Record<string, string>;
+  const { userId, accountId, keywords, targetType, placeUrl, blogId, logNo, rounds, termMin, termMax, doSave, doLike, doShare, doDir, doCall, doBook, doTalk, device, fullFunnel } = req.query as Record<string, string>;
   if (!keywords || !targetType) return res.status(400).json({ error: "keywords·targetType 필요" });
   sseSetup(res);
   let releaseAccount = () => {};
@@ -1153,6 +1153,7 @@ app.get("/api/inflow", async (req, res) => {
       device: (device === "pc" || device === "mix") ? device : "mobile",
       intervalSec: [tmin, tmax],
       actions: { save: doSave === "true", like: doLike === "true", share: doShare === "true", directions: doDir === "true", call: doCall === "true", booking: doBook === "true", talk: doTalk === "true" },
+      fullFunnel: fullFunnel === "true",
       requireLogin: doSave === "true" || doLike === "true" || doShare === "true" || doBook === "true" || doTalk === "true",
       onLog: (msg) => sseSend(res, { type: "log", msg }),
       onProgress: (done, total) => sseSend(res, { type: "progress", done, total }),

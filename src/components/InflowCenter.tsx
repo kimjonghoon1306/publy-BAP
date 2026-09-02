@@ -77,6 +77,7 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
   const [doBook, setDoBook] = useState(false);
   const [doTalk, setDoTalk] = useState(false);
   const [doLike, setDoLike] = useState(true);
+  const [funnel, setFunnel] = useState(false);
   const [auto, setAuto] = useState(false);
   const [accountId, setAccountId] = useState("");
   const [accounts, setAccounts] = useState<PublyAccount[]>([]);
@@ -122,6 +123,7 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
       termMin: String(termMin), termMax: String(termMax),
       doSave: String(doSave), doLike: String(doLike), doShare: String(doShare),
       doDir: String(doDir), doCall: String(doCall), doBook: String(doBook), doTalk: String(doTalk), device,
+      fullFunnel: String(funnel),
     });
     if (userId) params.set("userId", userId);
     if (accountId) params.set("accountId", accountId);
@@ -275,6 +277,15 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
             <ActionChk v={auto} set={setAuto} label="⚙️ 자동(오늘 한도까지)" />
           </div>
         </div>
+
+        {/* 🌀 풀퍼널 모드 — 킬러 */}
+        <label style={{ display: "flex", alignItems: "center", gap: 12, cursor: "pointer", padding: "14px 16px", borderRadius: 14, border: `2px solid ${funnel ? C.accent : C.line2}`, background: funnel ? C.glow : C.panel2 }}>
+          <input type="checkbox" checked={funnel} onChange={(e) => setFunnel(e.target.checked)} style={{ width: 20, height: 20, accentColor: C.accent, flexShrink: 0 }} />
+          <div>
+            <div style={{ fontSize: 15, fontWeight: 900, color: funnel ? C.accent : C.ink }}>🌀 풀퍼널 모드 <span style={{ fontSize: 10, verticalAlign: "middle", background: C.accent, color: "#fff", padding: "2px 6px", borderRadius: 6, marginLeft: 4 }}>강력</span></div>
+            <div style={{ fontSize: 12, fontWeight: 600, color: C.sub, marginTop: 3, lineHeight: 1.5 }}>{targetType === "place" ? "메뉴·사진·리뷰까지 둘러봐 체류·조회를 극대화 (진짜 손님처럼)" : "이 블로그 다른 글도 2~3개 읽고 이웃까지 — 체류·페이지뷰·이웃 폭발"}</div>
+          </div>
+        </label>
 
         {accounts.length > 0 && (
           <select value={accountId} onChange={(e) => setAccountId(e.target.value)} style={{ ...inputStyle }}>
