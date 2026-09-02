@@ -5306,12 +5306,22 @@ async function inflowActions(page: any, target: InflowTarget, actions: InflowAct
   };
   try {
     if (target.type === "place") {
-      // 방문의도 신호(길찾기·전화·예약)가 플레이스 순위에 가장 강함
-      if (roll(actions.save))       await clickFirst(['button:has-text("저장")', 'a:has-text("저장")', '[class*="save"] button', 'button[aria-label*="저장"]'], "  💾 저장");
-      if (roll(actions.directions)) await clickFirst(['a:has-text("길찾기")', 'button:has-text("길찾기")', '[class*="direction"] a', '[class*="route"] a'], "  🧭 길찾기");
-      if (roll(actions.call))       await clickFirst(['a:has-text("전화")', 'a[href^="tel:"]', 'button:has-text("전화")', '[class*="call"] a'], "  📞 전화");
-      if (roll(actions.booking))    await clickFirst(['a:has-text("예약")', 'button:has-text("예약")', '[class*="booking"] a'], "  📅 예약");
-      if (roll(actions.talk))       await clickFirst(['a:has-text("톡톡")', 'a:has-text("문의")', '[class*="talk"] a'], "  💬 톡톡 문의");
+      // 방문의도 신호(길찾기·전화·예약)가 플레이스 순위에 가장 강함.
+      //   ★셀렉터는 m.place.naver.com 실측 기준(2026-09): 텍스트가 정확히 일치하는 a/button을 우선.
+      if (roll(actions.save))       await clickFirst(['a:text-is("저장")', 'button:text-is("저장")', 'a:has-text("저장")', '[class*="save"]'], "  💾 저장");
+      if (roll(actions.directions)) await clickFirst(['a[href*="route"]', 'a[href*="launchApp/route"]', 'a:text-is("길찾기")', 'a:has-text("길찾기")'], "  🧭 길찾기");
+      if (roll(actions.call)) {
+        // 전화는 tel: 링크 — 실제 통화 앱을 띄우지 않게 클릭 대신 '표시/포커스'로 관심 신호만.
+        const telSel = ['a[href^="tel:"]', 'a:text-is("전화")', 'a:has-text("전화")'];
+        let hit = false;
+        for (const sl of telSel) {
+          const b = await page.$(sl).catch(() => null);
+          if (b) { await b.scrollIntoViewIfNeeded().catch(() => {}); await b.hover().catch(() => {}); log("  📞 전화(번호 노출)"); hit = true; await page.waitForTimeout(inflowRndInt(700, 1500)); break; }
+        }
+        if (!hit) log("  ⚠️ 전화 버튼 없음(이 가게 미설정)");
+      }
+      if (roll(actions.booking))    await clickFirst(['a[href*="booking.naver"]', 'a:text-is("예약")', 'a:has-text("예약")', 'a:has-text("네이버 예약")'], "  📅 예약");
+      if (roll(actions.talk))       await clickFirst(['a[href*="talk.naver"]', 'a[href*="talk"]', 'a:text-is("톡톡")', 'a:has-text("톡톡")', 'a:has-text("문의")'], "  💬 톡톡 문의");
       // ✍️ 리뷰 작성(관리자 락 기본잠금 — 가짜리뷰 밴 위험). 리뷰탭→작성 진입 후 텍스트 입력·등록.
       if (actions.review && actions.reviewText) {
         try {
@@ -5330,9 +5340,9 @@ async function inflowActions(page: any, target: InflowTarget, actions: InflowAct
     if (target.type === "blog" && roll(actions.like)) {
       await clickFirst(['a.u_likeit_list_btn', 'a[class*="like"]', 'button[class*="sympathy"]', 'a:has-text("공감")'], "  💚 블로그 공감");
     }
-    // 🔗 공유 — 플레이스·블로그 공통
+    // 🔗 공유 — 플레이스·블로그 공통(실측: a.spi_sns_share)
     if (roll(actions.share)) {
-      await clickFirst(['button:has-text("공유")', 'a:has-text("공유")', 'button[aria-label*="공유"]', 'a[aria-label*="공유"]', '[class*="share"] button', '[class*="share"] a'], "  🔗 공유");
+      await clickFirst(['a.spi_sns_share', 'a[class*="spi_sns_share"]', 'a:text-is("공유")', 'a:has-text("공유")', 'button:has-text("공유")', '[class*="share"] a'], "  🔗 공유");
     }
   } catch (e: any) {
     log(`  ⚠️ 액션 실패(무시): ${e?.message || e} (실기기 셀렉터 교정 필요)`);
