@@ -195,8 +195,8 @@ export async function checkMembershipAccess(userId: string, feature?: "crawl" | 
     if (!quota?.reset_date || new Date(quota.reset_date).getTime() <= Date.now()) return { ok: false, plan, reason: "이용기간 만료" };
     if (feature === "crawl" && user.crawl_enabled === false) return { ok: false, plan, reason: "관리자가 크롤링 사용을 잠시 중지했어요" };
     if (feature === "place360" && user.place360_enabled === false) return { ok: false, plan, reason: "관리자가 플레이스 360 사용을 잠시 중지했어요" };
-    // 🔒 검색유입은 기본 잠금 — 관리자가 명시적으로 켠(inflow_enabled=true) 회원만 허용
-    if (feature === "inflow" && user.inflow_enabled !== true) return { ok: false, plan, reason: "검색유입은 관리자 승인 후 사용할 수 있어요" };
+    // 🔒 검색유입은 기본 잠금 — 관리자·무제한은 항상 허용, 그 외엔 관리자가 켠(inflow_enabled=true) 회원만
+    if (feature === "inflow" && plan !== "admin" && plan !== "unlimited" && user.inflow_enabled !== true) return { ok: false, plan, reason: "검색유입은 관리자 승인 후 사용할 수 있어요" };
     return { ok: true, plan };
   } catch {
     return { ok: false, plan: "free", reason: "회원정보 확인 실패" };
