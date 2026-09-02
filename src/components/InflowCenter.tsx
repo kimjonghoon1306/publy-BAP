@@ -143,7 +143,8 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
   const [accountId, setAccountId] = useState("");
   const [accounts, setAccounts] = useState<PublyAccount[]>([]);
   const [running, setRunning] = useState(false);
-  const [logs, setLogs] = useState<string[]>([]);
+  type InflowLogEntry = { type: "text"; text: string } | { type: "shot"; caption: string; dataUrl: string };
+  const [logs, setLogs] = useState<InflowLogEntry[]>([]);
   const [used, setUsed] = useState(0);
   const [progress, setProgress] = useState(0);
   const [sessOk, setSessOk] = useState(0); // 이번 실행 성공 수
@@ -186,7 +187,8 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
   const autopilotCheckRef = useRef<() => Promise<boolean>>(async () => false);
   const logBoxRef = useRef<HTMLDivElement | null>(null);
 
-  const pushLog = (m: string) => setLogs((l) => [...l, m]);
+  const pushLog = (m: string) => setLogs((l) => [...l, { type: "text", text: m }]);
+  const pushShot = (caption: string, dataUrl: string) => setLogs((l) => [...l, { type: "shot", caption, dataUrl }]);
   const refreshStats = () => {
     if (!userId) return;
     getInflowDailyUsage(userId).then(setUsed).catch(() => {});
@@ -509,7 +511,7 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
 
   const copyLogs = () => {
     if (!logs.length) return;
-    navigator.clipboard.writeText(logs.join("\n")).then(() => toast("로그 전체를 복사했어요", "success")).catch(() => toast("복사 실패", "error"));
+    navigator.clipboard.writeText(logs.map((entry) => entry.type === "text" ? entry.text : `📸 ${entry.caption}`).join("\n")).then(() => toast("로그 전체를 복사했어요", "success")).catch(() => toast("복사 실패", "error"));
   };
 
   const start = () => {
@@ -553,6 +555,7 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
     es.onmessage = (e: MessageEvent) => {
       let d: any; try { d = JSON.parse(e.data); } catch { return; }
       if (d.type === "log") pushLog(d.msg);
+      else if (d.type === "shot" && d.dataUrl) pushShot(d.caption || "단계별 화면", d.dataUrl);
       else if (d.type === "progress") { setProgress(Math.round((d.done / Math.max(1, d.total)) * 100)); }
       else if (d.type === "quota_info") setUsed(d.used);
       else if (d.type === "quota_exceeded") { pushLog("🛑 오늘 유입 한도를 다 썼어요"); toast("오늘 유입 한도 초과", "error"); setRunning(false); es.close(); esRef.current = null; }
@@ -1163,7 +1166,13 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
           <button onClick={copyLogs} disabled={!logs.length} style={{ padding: "7px 14px", borderRadius: 9, border: `1.5px solid ${C.line2}`, background: C.panel, color: logs.length ? C.accent : C.sub, fontSize: 13, fontWeight: 800, cursor: logs.length ? "pointer" : "default", fontFamily: "inherit" }}>📋 로그 전체복사</button>
         </div>
         <div ref={logBoxRef} style={{ background: C.logBg, color: C.logInk, borderRadius: 14, padding: "16px 18px", height: 520, overflowY: "auto", fontSize: 15, lineHeight: 1.8, fontFamily: "'SF Mono','D2Coding',ui-monospace,monospace", whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
-          {logs.length ? logs.map((l, i) => <div key={i}>{l}</div>) : <div style={{ opacity: 0.5 }}>여기에 검색 → 진입 → 체류 → 액션 전 과정이 실시간으로 표시돼요.</div>}
+          {logs.length ? logs.map((entry, i) => entry.type === "text"
+            ? <div key={i}>{entry.text}</div>
+            : <div key={i} style={{ margin: "8px 0 12px" }}>
+                <div style={{ marginBottom: 5, fontWeight: 800 }}>📸 {entry.caption}</div>
+                <img src={entry.dataUrl} alt={entry.caption} style={{ display: "block", width: "min(280px,100%)", maxHeight: 190, objectFit: "contain", borderRadius: 9, border: "1px solid rgba(255,255,255,.18)" }} />
+              </div>
+          ) : <div style={{ opacity: 0.5 }}>여기에 검색 → 진입 → 체류 → 액션 전 과정이 실시간으로 표시돼요.</div>}
         </div>
       </div>
     </div>

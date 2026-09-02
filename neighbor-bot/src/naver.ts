@@ -5199,6 +5199,16 @@ const INFLOW_PC_UA =
 const inflowSleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 const inflowRnd = (a: number, b: number) => a + Math.random() * (b - a);
 const inflowRndInt = (a: number, b: number) => Math.floor(inflowRnd(a, b + 1));
+const inflowInterruptibleWait = async (ms: number, shouldStop?: () => boolean): Promise<boolean> => {
+  let remaining = Math.max(0, ms);
+  while (remaining > 0) {
+    if (shouldStop?.()) return false;
+    const slice = Math.min(1000, remaining);
+    await inflowSleep(slice);
+    remaining -= slice;
+  }
+  return !shouldStop?.();
+};
 
 // 글 분량(글자수·이미지수)으로 "전체 읽는" 체류시간(초) 추정. intensity=강도 배수(빠르게0.35/보통1/꼼꼼히2.5)
 function estimateReadSec(textLen: number, imgCount: number, intensity = 1): number {
@@ -5307,15 +5317,16 @@ async function inflowDwellRead(page: any, log: (m: string) => void, shouldStop?:
   for (let s = 0; s < steps; s++) {
     if (shouldStop?.()) break;
     await page.mouse.wheel(0, inflowRndInt(300, 720)).catch(() => {});
-    await page.waitForTimeout(Math.round(per * inflowRnd(0.7, 1.3))).catch(() => {});
+    if (!await inflowInterruptibleWait(Math.round(per * inflowRnd(0.7, 1.3)), shouldStop)) break;
   }
+  if (shouldStop?.()) return;
   // 다 읽고 살짝 위로(사람처럼)
   await page.mouse.wheel(0, -inflowRndInt(300, 800)).catch(() => {});
-  await page.waitForTimeout(inflowRndInt(800, 1800)).catch(() => {});
+  await inflowInterruptibleWait(inflowRndInt(800, 1800), shouldStop);
 }
 
 // 저장/공감 등 액션(로그인 필요). 셀렉터는 방어적 — 실패해도 유입 자체는 유효.
-type InflowActions = { save?: boolean; like?: boolean; share?: boolean; directions?: boolean; call?: boolean; booking?: boolean; talk?: boolean; review?: boolean; reviewText?: string; rate?: number };
+type InflowActions = { save?: boolean; like?: boolean; share?: boolean; directions?: boolean; call?: boolean; booking?: boolean; talk?: boolean; review?: boolean; reviewText?: string; rate?: number; loginAvailable?: boolean };
 async function inflowActions(page: any, target: InflowTarget, actions: InflowActions, log: (m: string) => void): Promise<void> {
   // 🎲 액션 확률 — rate(0~1)면 그 확률만큼만 발동(진짜 사람처럼 매번 안 함). 리뷰는 명시 액션이라 확률 제외.
   const rate = typeof actions.rate === "number" ? actions.rate : 1;
@@ -5323,15 +5334,26 @@ async function inflowActions(page: any, target: InflowTarget, actions: InflowAct
   const clickFirst = async (sels: string[], label: string) => {
     for (const sl of sels) {
       const b = await page.$(sl).catch(() => null);
-      if (b) { await b.click().catch(() => {}); log(label); await page.waitForTimeout(inflowRndInt(800, 1900)); return true; }
+      if (b) {
+        try {
+          await b.click();
+          await page.waitForTimeout(inflowRndInt(800, 1900));
+          const currentUrl = String(page.url?.() || "");
+          if (/nid\.naver\.com|nidlogin|\/login/i.test(currentUrl)) return false;
+          log(label);
+          return true;
+        } catch { return false; }
+      }
     }
     return false;
   };
+  const skipLoginAction = (enabled?: boolean) => !!enabled && !actions.loginAvailable;
   try {
     if (target.type === "place") {
       // 방문의도 신호(길찾기·전화·예약)가 플레이스 순위에 가장 강함.
       //   ★셀렉터는 m.place.naver.com 실측 기준(2026-09): 텍스트가 정확히 일치하는 a/button을 우선.
-      if (roll(actions.save))       { if (!await clickFirst(['a:text-is("저장")', 'button:text-is("저장")', 'a:has-text("저장")', '[class*="save"]'], "  💾 저장")) log("  ⚙️ [진단] 저장 버튼 못 찾음 — 로그인 필요하거나 네이버가 화면을 바꿨을 수 있어요(개발자 확인)."); }
+      if (skipLoginAction(actions.save)) log("  🔑 저장: 로그인 필요 — 건너뜀");
+      else if (roll(actions.save))  { if (!await clickFirst(['a:text-is("저장")', 'button:text-is("저장")', 'a:has-text("저장")', '[class*="save"]'], "  💾 저장")) log("  ⚙️ [진단] 저장 버튼 못 찾음 — 로그인 필요하거나 네이버가 화면을 바꿨을 수 있어요(개발자 확인)."); }
       if (roll(actions.directions)) { if (!await clickFirst(['a[href*="route"]', 'a[href*="launchApp/route"]', 'a:text-is("길찾기")', 'a:has-text("길찾기")'], "  🧭 길찾기")) log("  ⚙️ [진단] 길찾기 버튼 못 찾음 — 화면 구조 변경 의심(개발자 확인)."); }
       if (roll(actions.call)) {
         // 전화는 tel: 링크 — 실제 통화 앱을 띄우지 않게 클릭 대신 '표시/포커스'로 관심 신호만.
@@ -5343,10 +5365,13 @@ async function inflowActions(page: any, target: InflowTarget, actions: InflowAct
         }
         if (!hit) log("  ⚠️ 전화 버튼 없음(이 가게 미설정)");
       }
-      if (roll(actions.booking))    { if (!await clickFirst(['a[href*="booking.naver"]', 'a:text-is("예약")', 'a:has-text("예약")', 'a:has-text("네이버 예약")'], "  📅 예약")) log("  ⚙️ [진단] 예약 버튼 못 찾음 — 예약 미설정이거나 네이버 화면 변경 의심."); }
-      if (roll(actions.talk))       { if (!await clickFirst(['a[href*="talk.naver"]', 'a[href*="talk"]', 'a:text-is("톡톡")', 'a:has-text("톡톡")', 'a:has-text("문의")'], "  💬 톡톡 문의")) log("  ⚙️ [진단] 톡톡 버튼 못 찾음 — 톡톡 미설정이거나 네이버 화면 변경 의심."); }
+      if (skipLoginAction(actions.booking)) log("  🔑 예약: 로그인 필요 — 건너뜀");
+      else if (roll(actions.booking)) { if (!await clickFirst(['a[href*="booking.naver"]', 'a:text-is("예약")', 'a:has-text("예약")', 'a:has-text("네이버 예약")'], "  📅 예약")) log("  ⚙️ [진단] 예약 버튼 못 찾음 — 예약 미설정이거나 네이버 화면 변경 의심."); }
+      if (skipLoginAction(actions.talk)) log("  🔑 톡톡: 로그인 필요 — 건너뜀");
+      else if (roll(actions.talk)) { if (!await clickFirst(['a[href*="talk.naver"]', 'a[href*="talk"]', 'a:text-is("톡톡")', 'a:has-text("톡톡")', 'a:has-text("문의")'], "  💬 톡톡 문의")) log("  ⚙️ [진단] 톡톡 버튼 못 찾음 — 톡톡 미설정이거나 네이버 화면 변경 의심."); }
       // ✍️ 리뷰 작성(관리자 락 기본잠금 — 가짜리뷰 밴 위험). 리뷰탭→작성 진입 후 텍스트 입력·등록.
-      if (actions.review && actions.reviewText) {
+      if (actions.review && actions.reviewText && !actions.loginAvailable) log("  🔑 리뷰 작성: 로그인 필요 — 건너뜀");
+      else if (actions.review && actions.reviewText) {
         try {
           await clickFirst(['a:has-text("리뷰")', '[class*="review"] a', 'a:has-text("리뷰쓰기")', 'button:has-text("리뷰")'], "  ✍️ 리뷰 탭 진입");
           await page.waitForTimeout(inflowRndInt(1200, 2400));
@@ -5356,11 +5381,12 @@ async function inflowActions(page: any, target: InflowTarget, actions: InflowAct
             await page.keyboard.type(actions.reviewText, { delay: inflowRndInt(40, 110) }).catch(() => {});
             await page.waitForTimeout(inflowRndInt(600, 1400));
             await clickFirst(['button:has-text("등록")', 'button:has-text("완료")', 'button[type="submit"]'], "  ✍️ 리뷰 등록");
-          } else { log("  ⚠️ 리뷰 입력창 못 찾음(실기기 셀렉터 교정 필요)"); }
-        } catch (er: any) { log(`  ⚠️ 리뷰 작성 건너뜀: ${er?.message || er}`); }
+          } else { log("  ⚠️ 리뷰 작성 실패(로그인·화면구조 확인)"); }
+        } catch { log("  ⚠️ 리뷰 작성 실패(로그인·화면구조 확인)"); }
       }
     }
-    if (target.type === "blog" && roll(actions.like)) {
+    if (target.type === "blog" && skipLoginAction(actions.like)) log("  🔑 블로그 공감: 로그인 필요 — 건너뜀");
+    else if (target.type === "blog" && roll(actions.like)) {
       if (!await clickFirst(['a.u_likeit_list_btn', 'a[class*="like"]', 'button[class*="sympathy"]', 'a:has-text("공감")'], "  💚 블로그 공감")) log("  ⚙️ [진단] 공감 버튼 못 찾음 — 로그인 필요하거나 네이버 화면 변경 의심.");
     }
     // 🔗 공유 — 플레이스·블로그 공통(실측: a.spi_sns_share)
@@ -5589,6 +5615,7 @@ export async function searchInflow(params: {
     log(`\n[${i + 1}/${rounds}] 🔍 "${kw}" → ${curTarget.type === "place" ? "플레이스" : "블로그 " + (curTarget as any).blogId} 유입`);
 
     let browser: any = null;
+    let proxyUnavailable = false;
     try {
       browser = await launchBrowser(params.accountId, { headless: !params.visible, feature: "inflow", ownerUserId: params.ownerUserId, log });
       // 접속 기기 결정 — mix면 방문마다 랜덤(사람처럼 모바일/PC 섞임)
@@ -5625,19 +5652,26 @@ export async function searchInflow(params: {
       } else {
         await shot(entered, "🎯 대상 진입");
         await inflowDwellRead(entered, log, params.shouldStop, intensity, params.maxDwellSec || 0);
-        await inflowActions(entered, curTarget, { ...(params.actions || {}), rate: actionRate }, log);
+        if (params.shouldStop?.()) { log("⏹️ 정지 요청 — 액션 전 중단"); break; }
+        await inflowActions(entered, curTarget, { ...(params.actions || {}), rate: actionRate, loginAvailable: !!cookies }, log);
+        if (params.shouldStop?.()) { log("⏹️ 정지 요청 — 풀퍼널 전 중단"); break; }
         if (params.fullFunnel) await inflowFullFunnel(entered, curTarget, log, params.shouldStop);
+        if (params.shouldStop?.()) { log("⏹️ 정지 요청 — 방문 종료"); break; }
         await shot(entered, "✅ 체류·액션 완료");
         success++; done++; failStreak = 0;
         log(`  ✅ 유입 완료 (${kw}) — 누적 성공 ${success}회`);
         params.onProgress?.(done, rounds);
       }
     } catch (e: any) {
-      log(`  ❌ 방문 오류: ${e?.message || e}`);
+      const errorText = String(e?.message || e);
+      proxyUnavailable = /proxy|ERR_TUNNEL|ERR_NO_SUPPORTED_PROXIES|407|dataimpulse|balance|quota|traffic limit/i.test(errorText);
+      if (proxyUnavailable) log("⚠️ 프록시 사용량 초과/부족 — 중단합니다");
+      else log(`  ❌ 방문 오류: ${errorText}`);
       done++; failStreak++; params.onProgress?.(done, rounds);
     } finally {
       if (browser) await browser.close().catch(() => {});
     }
+    if (proxyUnavailable || params.shouldStop?.()) break;
 
     // 🛡️ 안전 브레이크 — 연속 실패가 임계를 넘으면 계정 보호를 위해 자동 정지
     if (failStreak >= FAIL_BRAKE) {
@@ -5649,7 +5683,7 @@ export async function searchInflow(params: {
     if (i < rounds - 1 && !params.shouldStop?.()) {
       const wait = Math.round(inflowRnd(tmin, tmax));
       log(`  ⏳ 다음 방문까지 ${wait}초 대기…`);
-      for (let s = 0; s < wait; s++) { if (params.shouldStop?.()) break; await inflowSleep(1000); }
+      if (!await inflowInterruptibleWait(wait * 1000, params.shouldStop)) { log("⏹️ 정지 요청 — 대기 중단"); break; }
     }
   }
 
