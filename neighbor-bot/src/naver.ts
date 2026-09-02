@@ -1488,6 +1488,23 @@ export async function crawlPlaceDetail(params: {
 /* ── 붙여넣은 플레이스 주소에서 domain·placeId 뽑기 ──
    지원 형태: pcmap.place / m.place / place.naver.com/{domain}/{id},
    map.naver.com/p/entry/place/{id}, 순수 숫자 ID. 단축주소(naver.me)는 못 뽑으므로 null. */
+// 🔗 naver.me 등 단축주소 → 실제 URL로 펼친 뒤 파싱. 단축이 아니면 그대로 파싱.
+export async function resolvePlaceUrl(input: string): Promise<{ domain: string; placeId: string } | null> {
+  const direct = parsePlaceUrl(input);
+  if (direct) return direct;
+  const s = String(input || "").trim();
+  // 단축주소(naver.me, me2.do 등)면 리다이렉트를 따라가 최종 URL을 얻는다.
+  if (/naver\.me\/|me2\.do\/|url\.kr\//i.test(s)) {
+    try {
+      const r = await fetch(s, { redirect: "follow", headers: { "User-Agent": INFLOW_MOBILE_UA } });
+      const finalUrl = r.url || "";
+      const parsed = parsePlaceUrl(finalUrl);
+      if (parsed) return parsed;
+    } catch { /* ignore */ }
+  }
+  return null;
+}
+
 export function parsePlaceUrl(input: string): { domain: string; placeId: string } | null {
   const s = String(input || "");
   let m = s.match(/(?:pcmap\.place|m\.place|place)\.naver\.com\/([a-z]+)\/(\d{5,})/i);
@@ -5179,12 +5196,12 @@ const inflowSleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 const inflowRnd = (a: number, b: number) => a + Math.random() * (b - a);
 const inflowRndInt = (a: number, b: number) => Math.floor(inflowRnd(a, b + 1));
 
-// 글 분량(글자수·이미지수)으로 "전체 읽는" 체류시간(초) 추정
-function estimateReadSec(textLen: number, imgCount: number): number {
+// 글 분량(글자수·이미지수)으로 "전체 읽는" 체류시간(초) 추정. intensity=강도 배수(빠르게0.5/보통1/꼼꼼히1.8)
+function estimateReadSec(textLen: number, imgCount: number, intensity = 1): number {
   const charsPerSec = inflowRnd(7, 11); // 사람 읽기 속도(대략 분당 420~660자)
   const readByText = textLen / charsPerSec;
   const readByImg = imgCount * inflowRnd(1.5, 3.5);
-  return Math.min(300, Math.max(15, readByText + readByImg)); // 15초~5분 캡
+  return Math.min(420, Math.max(10, (readByText + readByImg) * intensity)); // 10초~7분 캡
 }
 
 // 검색결과를 스크롤하며 대상(플레이스/블로그) 링크를 찾아 클릭 진입. 성공 시 진입한 page 반환.
@@ -5211,15 +5228,37 @@ async function inflowFindAndEnter(page: any, target: InflowTarget, log: (m: stri
     await page.mouse.wheel(0, inflowRndInt(700, 1300));
     await page.waitForTimeout(inflowRndInt(700, 1600));
   }
+  // 🏠 홈 폴백(블로그) — 검색결과서 못 찾으면 블로그 홈으로 직접 진입해 최신 글 중 랜덤으로 읽는다.
+  if (target.type === "blog") {
+    try {
+      log(`  🏠 검색결과에 없어 블로그 홈(${target.blogId})으로 직접 진입 → 랜덤 글 읽기`);
+      await page.goto(`https://m.blog.naver.com/${target.blogId}`, { waitUntil: "domcontentloaded", timeout: 20000 }).catch(() => {});
+      await page.waitForTimeout(inflowRndInt(1400, 2600));
+      const postLinks: string[] = await page.$$eval(
+        'a[href*="logNo"], a[href*="/PostView"], a[href*="blog.naver.com"]',
+        (as: any[], b: string) => Array.from(new Set(as.map((a: any) => a.href).filter((h: string) => h.includes(b) && /logNo=\d+|\/\d{6,}/.test(h)))).slice(0, 20),
+        target.blogId
+      ).catch(() => []);
+      if (postLinks.length) {
+        const pick = postLinks[inflowRndInt(0, postLinks.length - 1)];
+        log(`  📄 최신 글 ${postLinks.length}개 중 랜덤 1개 진입`);
+        await page.goto(pick, { waitUntil: "domcontentloaded", timeout: 20000 }).catch(() => {});
+        await page.waitForTimeout(inflowRndInt(1000, 2000));
+        return page;
+      }
+      log("  🏠 홈 진입은 했으나 글 목록을 못 찾음 — 홈에서 체류");
+      return page; // 그래도 홈 방문은 유효
+    } catch { /* fallthrough */ }
+  }
   return null;
 }
 
-// 진입한 페이지에서 글 전체를 읽는 것처럼 체류(끝까지 스크롤).
-async function inflowDwellRead(page: any, log: (m: string) => void, shouldStop?: () => boolean): Promise<void> {
+// 진입한 페이지에서 글 전체를 읽는 것처럼 체류(끝까지 스크롤). intensity=체류 강도 배수
+async function inflowDwellRead(page: any, log: (m: string) => void, shouldStop?: () => boolean, intensity = 1): Promise<void> {
   const { textLen, imgCount } = await page
     .evaluate(() => ({ textLen: (document.body?.innerText || "").length, imgCount: document.querySelectorAll("img").length }))
     .catch(() => ({ textLen: 1200, imgCount: 5 }));
-  const sec = estimateReadSec(textLen, imgCount);
+  const sec = estimateReadSec(textLen, imgCount, intensity);
   log(`  📖 글 전체 읽는 중… (본문 ${textLen}자·이미지 ${imgCount}장 → 약 ${Math.round(sec)}초 체류)`);
   const steps = Math.max(6, Math.round(sec / inflowRnd(2, 4)));
   const per = (sec * 1000) / steps;
@@ -5234,8 +5273,11 @@ async function inflowDwellRead(page: any, log: (m: string) => void, shouldStop?:
 }
 
 // 저장/공감 등 액션(로그인 필요). 셀렉터는 방어적 — 실패해도 유입 자체는 유효.
-type InflowActions = { save?: boolean; like?: boolean; share?: boolean; directions?: boolean; call?: boolean; booking?: boolean; talk?: boolean; review?: boolean; reviewText?: string };
+type InflowActions = { save?: boolean; like?: boolean; share?: boolean; directions?: boolean; call?: boolean; booking?: boolean; talk?: boolean; review?: boolean; reviewText?: string; rate?: number };
 async function inflowActions(page: any, target: InflowTarget, actions: InflowActions, log: (m: string) => void): Promise<void> {
+  // 🎲 액션 확률 — rate(0~1)면 그 확률만큼만 발동(진짜 사람처럼 매번 안 함). 리뷰는 명시 액션이라 확률 제외.
+  const rate = typeof actions.rate === "number" ? actions.rate : 1;
+  const roll = (on?: boolean) => !!on && (rate >= 1 || Math.random() < rate);
   const clickFirst = async (sels: string[], label: string) => {
     for (const sl of sels) {
       const b = await page.$(sl).catch(() => null);
@@ -5246,11 +5288,11 @@ async function inflowActions(page: any, target: InflowTarget, actions: InflowAct
   try {
     if (target.type === "place") {
       // 방문의도 신호(길찾기·전화·예약)가 플레이스 순위에 가장 강함
-      if (actions.save)       await clickFirst(['button:has-text("저장")', 'a:has-text("저장")', '[class*="save"] button', 'button[aria-label*="저장"]'], "  💾 저장");
-      if (actions.directions) await clickFirst(['a:has-text("길찾기")', 'button:has-text("길찾기")', '[class*="direction"] a', '[class*="route"] a'], "  🧭 길찾기");
-      if (actions.call)       await clickFirst(['a:has-text("전화")', 'a[href^="tel:"]', 'button:has-text("전화")', '[class*="call"] a'], "  📞 전화");
-      if (actions.booking)    await clickFirst(['a:has-text("예약")', 'button:has-text("예약")', '[class*="booking"] a'], "  📅 예약");
-      if (actions.talk)       await clickFirst(['a:has-text("톡톡")', 'a:has-text("문의")', '[class*="talk"] a'], "  💬 톡톡 문의");
+      if (roll(actions.save))       await clickFirst(['button:has-text("저장")', 'a:has-text("저장")', '[class*="save"] button', 'button[aria-label*="저장"]'], "  💾 저장");
+      if (roll(actions.directions)) await clickFirst(['a:has-text("길찾기")', 'button:has-text("길찾기")', '[class*="direction"] a', '[class*="route"] a'], "  🧭 길찾기");
+      if (roll(actions.call))       await clickFirst(['a:has-text("전화")', 'a[href^="tel:"]', 'button:has-text("전화")', '[class*="call"] a'], "  📞 전화");
+      if (roll(actions.booking))    await clickFirst(['a:has-text("예약")', 'button:has-text("예약")', '[class*="booking"] a'], "  📅 예약");
+      if (roll(actions.talk))       await clickFirst(['a:has-text("톡톡")', 'a:has-text("문의")', '[class*="talk"] a'], "  💬 톡톡 문의");
       // ✍️ 리뷰 작성(관리자 락 기본잠금 — 가짜리뷰 밴 위험). 리뷰탭→작성 진입 후 텍스트 입력·등록.
       if (actions.review && actions.reviewText) {
         try {
@@ -5266,11 +5308,11 @@ async function inflowActions(page: any, target: InflowTarget, actions: InflowAct
         } catch (er: any) { log(`  ⚠️ 리뷰 작성 건너뜀: ${er?.message || er}`); }
       }
     }
-    if (target.type === "blog" && actions.like) {
+    if (target.type === "blog" && roll(actions.like)) {
       await clickFirst(['a.u_likeit_list_btn', 'a[class*="like"]', 'button[class*="sympathy"]', 'a:has-text("공감")'], "  💚 블로그 공감");
     }
     // 🔗 공유 — 플레이스·블로그 공통
-    if (actions.share) {
+    if (roll(actions.share)) {
       await clickFirst(['button:has-text("공유")', 'a:has-text("공유")', 'button[aria-label*="공유"]', 'a[aria-label*="공유"]', '[class*="share"] button', '[class*="share"] a'], "  🔗 공유");
     }
   } catch (e: any) {
@@ -5332,8 +5374,12 @@ export async function searchInflow(params: {
   accountId: string;
   ownerUserId?: string;
   keywords: string[];              // 여러 키워드 로테이션
-  target: InflowTarget;            // 플레이스 or 블로그
+  keywordWeights?: number[];       // 키워드별 비중(가중치). 없으면 균등
+  target: InflowTarget;            // 플레이스 or 블로그(단일)
+  targets?: InflowTarget[];        // 여러 대상(있으면 방문마다 로테이션)
   rounds: number;                  // 이번 실행 방문 횟수(한도 내)
+  intensity?: number;              // 체류 강도 배수(0.5 빠르게 /1 보통 /1.8 꼼꼼히)
+  actionRate?: number;             // 액션 발동 확률(0~1). 1=매번
   device?: "mobile" | "pc" | "mix"; // 접속 기기(기본 모바일, mix=방문마다 랜덤)
   intervalSec?: [number, number];  // 방문 사이 텀(사용자 임의 지정, 랜덤)
   spreadHours?: number;            // ⏱️ 이 시간에 걸쳐 자연 분산(0=텀 그대로). 설정 시 텀 자동계산
@@ -5348,6 +5394,18 @@ export async function searchInflow(params: {
 }): Promise<{ done: number; success: number }> {
   const log = params.onLog || (() => {});
   const { keywords, target, rounds } = params;
+  const targets = (params.targets && params.targets.length) ? params.targets : [target]; // 여러 대상(없으면 단일)
+  const intensity = params.intensity && params.intensity > 0 ? params.intensity : 1;
+  const actionRate = typeof params.actionRate === "number" ? Math.max(0, Math.min(1, params.actionRate)) : 1;
+  // 🎯 키워드 가중 선택 — weights 있으면 비중대로, 없으면 순차 로테이션
+  const weights = params.keywordWeights && params.keywordWeights.length === keywords.length ? params.keywordWeights : null;
+  const pickKeyword = (i: number): string => {
+    if (!weights) return keywords[i % keywords.length];
+    const total = weights.reduce((a, b) => a + Math.max(0, b), 0) || 1;
+    let r = Math.random() * total;
+    for (let k = 0; k < keywords.length; k++) { r -= Math.max(0, weights[k]); if (r <= 0) return keywords[k]; }
+    return keywords[i % keywords.length];
+  };
   let [tmin, tmax] = params.intervalSec || [30, 90];
   // ⏱️ 시간 분산 — spreadHours에 걸쳐 rounds회를 자연스럽게 흘려보냄(평균 텀=총시간/횟수, ±40% 랜덤)
   if (params.spreadHours && params.spreadHours > 0 && rounds > 1) {
@@ -5372,8 +5430,9 @@ export async function searchInflow(params: {
     if (params.shouldStop?.()) { log("⏹️ 정지 요청 — 중단"); break; }
     if (params.onQuota && !(await params.onQuota())) { log("🛑 오늘 유입 한도 초과 — 중단(자정 초기화 또는 등급 상향)"); break; }
 
-    const kw = keywords[i % keywords.length];
-    log(`\n[${i + 1}/${rounds}] 🔍 "${kw}" 모바일 검색 유입`);
+    const kw = pickKeyword(i);
+    const curTarget = targets[i % targets.length];   // 여러 대상 로테이션
+    log(`\n[${i + 1}/${rounds}] 🔍 "${kw}" → ${curTarget.type === "place" ? "플레이스" : "블로그 " + (curTarget as any).blogId} 유입`);
 
     let browser: any = null;
     try {
@@ -5393,14 +5452,14 @@ export async function searchInflow(params: {
       log(`  ${dev === "pc" ? "🖥️ PC" : "📱 모바일"} 검색결과 로드 완료 — 결과 탐색 중…`);
       await page.waitForTimeout(inflowRndInt(1200, 2600));
 
-      const entered = await inflowFindAndEnter(page, target, log);
+      const entered = await inflowFindAndEnter(page, curTarget, log);
       if (!entered) {
         log(`  ⚠️ "${kw}" 결과에서 대상을 못 찾음(현재 노출 순위가 낮음). 이번 방문 건너뜀`);
         done++; failStreak++; params.onProgress?.(done, rounds);
       } else {
-        await inflowDwellRead(entered, log, params.shouldStop);
-        await inflowActions(entered, target, params.actions || {}, log);
-        if (params.fullFunnel) await inflowFullFunnel(entered, target, log, params.shouldStop);
+        await inflowDwellRead(entered, log, params.shouldStop, intensity);
+        await inflowActions(entered, curTarget, { ...(params.actions || {}), rate: actionRate }, log);
+        if (params.fullFunnel) await inflowFullFunnel(entered, curTarget, log, params.shouldStop);
         success++; done++; failStreak = 0;
         log(`  ✅ 유입 완료 (${kw}) — 누적 성공 ${success}회`);
         params.onProgress?.(done, rounds);
