@@ -1208,6 +1208,25 @@ app.get("/api/inflow", async (req, res) => {
   res.end();
 });
 
+/* ── 🥊 경쟁사 추적 (내 키워드 상위 경쟁사 vs 나 비교) ── */
+app.get("/api/competitors", async (req, res) => {
+  const { query, myPlaceUrl, userId, accountId } = req.query as Record<string, string>;
+  if (!query) return res.status(400).json({ error: "query(키워드) 필요" });
+  try {
+    const list = await crawlPlaces({ accountId: accountId || "", query, count: 8, ownerUserId: userId || null });
+    const myId = myPlaceUrl ? (parsePlaceUrl(myPlaceUrl)?.placeId || (await resolvePlaceUrl(myPlaceUrl))?.placeId || "") : "";
+    // 상위 5곳 + 내 매장 위치 표시
+    const top = list.slice(0, 5).map((p, i) => ({
+      rank: i + 1, placeId: p.placeId, name: p.name, category: p.category || "",
+      review: p.visitorReviewCount || 0, blog: p.blogReviewCount || 0,
+      isMine: !!myId && String(p.placeId) === String(myId),
+    }));
+    const myIndex = list.findIndex((p) => !!myId && String(p.placeId) === String(myId));
+    const mine = myIndex >= 0 ? { rank: myIndex + 1, name: list[myIndex].name, review: list[myIndex].visitorReviewCount || 0, blog: list[myIndex].blogReviewCount || 0 } : null;
+    res.json({ top, mine, myRank: myIndex >= 0 ? myIndex + 1 : null, total: list.length });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
 /* ── 🩺 플레이스 최적화 진단 (순위 오르려면 뭘 채워야 하나) ── */
 app.get("/api/place-diagnose", async (req, res) => {
   const { placeUrl } = req.query as Record<string, string>;
