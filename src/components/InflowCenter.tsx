@@ -903,16 +903,24 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
         {/* 액션 */}
         <div>
           <label style={labelStyle}>방문해서 할 행동 <span style={{ color: C.sub, fontWeight: 600 }}>{targetType === "place" ? "(길찾기·전화·예약이 순위에 가장 강해요)" : ""}</span></label>
+          {/* 🔑 로그인 필요 액션 안내 — 버튼 바로 위에 잘 보이게 */}
+          <div style={{ display: "flex", gap: 9, alignItems: "flex-start", background: "rgba(245,158,11,.10)", border: "1.5px solid #f59e0b", borderRadius: 12, padding: "10px 13px", marginBottom: 10 }}>
+            <span style={{ fontSize: 16, lineHeight: 1.2, flexShrink: 0 }}>🔑</span>
+            <div style={{ fontSize: 12.5, fontWeight: 700, color: C.ink, lineHeight: 1.6 }}>
+              <b style={{ color: "#d97706" }}>🔑 표시(저장{targetType === "blog" ? " · 공감" : ""})는 네이버 로그인이 필요해요.</b><br />
+              <b>계정 관리</b>에서 계정을 연결한 뒤, 유입 시작할 때 <b>그 계정을 선택</b>해야 작동해요. <span style={{ color: C.sub }}>(길찾기 · 전화 · 예약 · 톡톡 · 공유는 로그인 없이 관심 신호만 줍니다)</span>
+            </div>
+          </div>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             {targetType === "place" ? (<>
-              <ActionChk v={doSave} set={setDoSave} label="💾 저장" />
+              <ActionChk v={doSave} set={setDoSave} label="💾 저장 🔑" />
               <ActionChk v={doDir} set={setDoDir} label="🧭 길찾기" />
               <ActionChk v={doCall} set={setDoCall} label="📞 전화" />
               <ActionChk v={doBook} set={setDoBook} label="📅 예약" />
               <ActionChk v={doTalk} set={setDoTalk} label="💬 톡톡" />
               <ActionChk v={doShare} set={setDoShare} label="🔗 공유" />
             </>) : (<>
-              <ActionChk v={doLike} set={setDoLike} label="💚 공감" />
+              <ActionChk v={doLike} set={setDoLike} label="💚 공감 🔑" />
               <ActionChk v={doShare} set={setDoShare} label="🔗 공유" />
             </>)}
             <ActionChk v={auto} set={setAuto} label="⚙️ 자동(오늘 한도까지)" />

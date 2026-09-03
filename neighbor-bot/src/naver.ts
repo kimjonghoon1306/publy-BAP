@@ -5371,10 +5371,9 @@ async function inflowActions(page: any, target: InflowTarget, actions: InflowAct
         }
         if (!hit) log("  ⚠️ 전화 버튼 없음(이 가게 미설정)");
       }
-      if (skipLoginAction(actions.booking)) log("  🔑 예약: 로그인 필요 — 건너뜀");
-      else if (roll(actions.booking)) { if (!await clickFirst(['a[href*="booking.naver"]', 'a:text-is("예약")', 'a:has-text("예약")', 'a:has-text("네이버 예약")'], "  📅 예약")) log("  ⚙️ [진단] 예약 버튼 못 찾음 — 예약 미설정이거나 네이버 화면 변경 의심."); }
-      if (skipLoginAction(actions.talk)) log("  🔑 톡톡: 로그인 필요 — 건너뜀");
-      else if (roll(actions.talk)) { if (!await clickFirst(['a[href*="talk.naver"]', 'a[href*="talk"]', 'a:text-is("톡톡")', 'a:has-text("톡톡")', 'a:has-text("문의")'], "  💬 톡톡 문의")) log("  ⚙️ [진단] 톡톡 버튼 못 찾음 — 톡톡 미설정이거나 네이버 화면 변경 의심."); }
+      // 예약·톡톡은 링크를 눌러 '살짝 진입(관심 신호)'만 준다 → 로그인 없이도 실행(실제 예약완료·메시지전송이 아님)
+      if (roll(actions.booking)) { if (!await clickFirst(['a[href*="booking.naver"]', 'a:text-is("예약")', 'a:has-text("예약")', 'a:has-text("네이버 예약")'], "  📅 예약 진입")) log("  ⚙️ [진단] 예약 버튼 못 찾음 — 예약 미설정이거나 네이버 화면 변경 의심."); }
+      if (roll(actions.talk)) { if (!await clickFirst(['a[href*="talk.naver"]', 'a[href*="talk"]', 'a:text-is("톡톡")', 'a:has-text("톡톡")', 'a:has-text("문의")'], "  💬 톡톡 진입")) log("  ⚙️ [진단] 톡톡 버튼 못 찾음 — 톡톡 미설정이거나 네이버 화면 변경 의심."); }
       // ✍️ 리뷰 작성(관리자 락 기본잠금 — 가짜리뷰 밴 위험). 리뷰탭→작성 진입 후 텍스트 입력·등록.
       if (actions.review && actions.reviewText && !actions.loginAvailable) log("  🔑 리뷰 작성: 로그인 필요 — 건너뜀");
       else if (actions.review && actions.reviewText) {
@@ -5606,7 +5605,7 @@ export async function searchInflow(params: {
   let cookies: any[] | null = null;
   if (params.requireLogin) {
     try { cookies = await ensureLiveSession(params.accountId, log); }
-    catch { log("⚠️ 로그인 세션 없음 — 체류만 진행(저장/공감 건너뜀)"); }
+    catch { log("⚠️ 로그인 세션 없음 — 저장·공감만 건너뛰고 길찾기·전화·예약·톡톡·공유는 진행해요"); }
   }
 
   log(`🚀 검색유입 시작 — 대상 ${target.type === "place" ? "플레이스" : "블로그"}, 키워드 ${keywords.length}개, 총 ${rounds}회 방문, 텀 ${tmin}~${tmax}초`);

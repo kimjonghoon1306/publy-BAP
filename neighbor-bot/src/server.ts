@@ -1195,7 +1195,7 @@ app.post("/api/inflow", async (req, res) => {
       actionRate: actionRate ? Math.max(0, Math.min(1, parseFloat(actionRate))) : 1,
       dwellBaseSec: dwellBaseSec ? Math.max(5, parseFloat(dwellBaseSec)) : 60,
       dwellCustomSec: dwellCustomSec ? Math.max(0, parseFloat(dwellCustomSec)) : 0,
-      requireLogin: doSave === "true" || doLike === "true" || doShare === "true" || doBook === "true" || doTalk === "true" || reviewOk,
+      requireLogin: doSave === "true" || doLike === "true" || reviewOk,   // 저장·공감·리뷰만 로그인 필요(예약·톡톡·공유는 로그인 없이 진입)
       onLog: (msg) => sseSend(res, { type: "log", msg }),
       onProgress: (done, total) => sseSend(res, { type: "progress", done, total }),
       onShot: (caption, dataUrl) => sseSend(res, { type: "shot", caption, dataUrl }),   // 📸 화면 캡처 전송
