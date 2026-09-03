@@ -1312,7 +1312,7 @@ Output (JSON object only): {"keyword":"핵심키워드","title":"새 SEO 제목"
   //   다른 탭 갔다 와도 작업(SSE)·로그·데이터가 유지되도록 keep-alive. 방문한 탭만 마운트하고 CSS로 숨김.
   const [visitedAutoTabs, setVisitedAutoTabs] = useState<Set<string>>(new Set());
   useEffect(() => {
-    if (["neighbor", "engage", "reply", "pumasi", "blogscore", "place"].includes(tab)) {
+    if (["neighbor", "engage", "reply", "pumasi", "blogscore", "place", "inflow", "crawl"].includes(tab)) {
       setVisitedAutoTabs(prev => prev.has(tab) ? prev : new Set(prev).add(tab));
     }
   }, [tab]);
@@ -8199,11 +8199,11 @@ POST3: (제목)|(이유)
                 <NeighborPage theme={theme as "dark"|"light"} userId={user.id} plan={user.plan} initialTab="reply" singleTab isActive={tab==="reply"} onBusyChange={setNeighborBusy} />
               </div>
             )}
-            {tab==="crawl" && crawlEnabled && (
-              <div><CrawlCenter showToast={showToast} theme={theme==="dark"?"dark":"light"} userId={user.id} plan={user.plan} /></div>
+            {visitedAutoTabs.has("crawl") && crawlEnabled && (
+              <div aria-hidden={tab!=="crawl"} style={{ display: tab==="crawl" ? "block" : "none", pointerEvents: tab==="crawl" ? "auto" : "none" }}><CrawlCenter showToast={showToast} theme={theme==="dark"?"dark":"light"} userId={user.id} plan={user.plan} /></div>
             )}
-            {tab==="inflow" && inflowEnabled && (
-              <div><InflowCenter showToast={showToast} theme={theme==="dark"?"dark":"light"} userId={user.id} plan={user.plan} /></div>
+            {visitedAutoTabs.has("inflow") && inflowEnabled && (
+              <div aria-hidden={tab!=="inflow"} style={{ display: tab==="inflow" ? "block" : "none", pointerEvents: tab==="inflow" ? "auto" : "none" }}><InflowCenter showToast={showToast} theme={theme==="dark"?"dark":"light"} userId={user.id} plan={user.plan} /></div>
             )}
             {visitedAutoTabs.has("place") && place360Enabled && (
               <div aria-hidden={tab!=="place"} style={{ display: tab==="place" ? "block" : "none", pointerEvents: tab==="place" ? "auto" : "none" }}><Place360 showToast={showToast} theme={theme==="dark"?"dark":"light"} userId={user.id} plan={user.plan} onOpenCrawl={()=>setTab("crawl")} onOpenReview={()=>setTab("place_reply")} /></div>

@@ -757,7 +757,7 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
   // ★자동화 탭 keep-alive(대시보드와 동일): 방문한 탭은 언마운트 안 하고 숨김 → 작업·데이터 유지
   const [visitedAutoTabs, setVisitedAutoTabs] = useState<Set<string>>(new Set());
   useEffect(() => {
-    if (["neighbor", "engage", "reply", "pumasi", "blogscore", "place"].includes(tab)) {
+    if (["neighbor", "engage", "reply", "pumasi", "blogscore", "place", "inflow", "crawl"].includes(tab)) {
       setVisitedAutoTabs(prev => prev.has(tab) ? prev : new Set(prev).add(tab));
     }
   }, [tab]);
@@ -3418,14 +3418,14 @@ POST3: (제목)|(이유)
           {/* 메인 */}
           <div className="main">
 
-            {/* ───── 🔍 크롤링 (회원과 동일 · 관리자는 잠금 없이 항상 사용) ───── */}
-            {tab === "crawl" && (
-              <div style={{animation:"fadeUp .25s ease both"}}><CrawlCenter showToast={showToast} theme={theme==="dark"?"dark":"light"} userId={ADM_HISTORY_UID} plan="unlimited" /></div>
+            {/* ───── 🔍 크롤링 (회원과 동일 · 관리자는 잠금 없이 항상 사용) · 탭 이동해도 작업 유지 keep-alive ───── */}
+            {visitedAutoTabs.has("crawl") && (
+              <div style={{ display: tab === "crawl" ? "block" : "none" }}><CrawlCenter showToast={showToast} theme={theme==="dark"?"dark":"light"} userId={ADM_HISTORY_UID} plan="unlimited" /></div>
             )}
 
-            {/* ───── 🆕 NEW 트래픽 유입 (회원과 동일 · 관리자는 무제한 = 여기서 테스트) ───── */}
-            {tab === "inflow" && (
-              <div style={{animation:"fadeUp .25s ease both"}}><InflowCenter showToast={showToast} theme={theme==="dark"?"dark":"light"} userId={ADM_HISTORY_UID} plan="unlimited" /></div>
+            {/* ───── 🆕 NEW 트래픽 유입 (회원과 동일 · 관리자는 무제한) · 탭 이동해도 작업 유지 keep-alive ───── */}
+            {visitedAutoTabs.has("inflow") && (
+              <div style={{ display: tab === "inflow" ? "block" : "none" }}><InflowCenter showToast={showToast} theme={theme==="dark"?"dark":"light"} userId={ADM_HISTORY_UID} plan="unlimited" /></div>
             )}
 
             {/* ───── 🏪 플레이스 365 (회원과 동일 · 관리자는 무제한) ───── */}

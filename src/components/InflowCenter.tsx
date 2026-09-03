@@ -864,15 +864,18 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
           <div style={{ flex: 1, minWidth: 220 }}>
             <label style={labelStyle}>📖 체류 강도 <span style={{ color: C.sub, fontWeight: 600 }}>(글 읽는 시간)</span></label>
             <div style={{ display: "flex", gap: 6 }}>
-              {([["fast", "빠르게 ~20초"], ["normal", "보통 ~60초"], ["deep", "꼼꼼히 ~3분"]] as const).map(([k, lb]) => (
-                <button key={k} onClick={() => { setIntensity(k); toast(`📖 체류강도 '${lb}' 선택됨`, "success"); }} style={{ flex: 1, padding: "11px", borderRadius: 10, border: `2px solid ${intensity === k ? C.accent : C.line2}`, background: intensity === k ? C.glow : C.panel2, color: intensity === k ? C.accent : C.sub, fontSize: 13.5, fontWeight: 800, cursor: "pointer", fontFamily: "inherit" }}>{intensity === k ? "✓ " : ""}{lb}</button>
-              ))}
+              {([["fast", "빠르게 ~20초"], ["normal", "보통 ~60초"], ["deep", "꼼꼼히 ~3분"]] as const).map(([k, lb]) => {
+                const on = intensity === k && maxDwellSec === 0; // 직접지정 중이면 강도 버튼은 꺼진 표시
+                return (
+                <button key={k} onClick={() => { setIntensity(k); setMaxDwellSec(0); toast(`📖 체류강도 '${lb}' 선택됨`, "success"); }} style={{ flex: 1, padding: "11px", borderRadius: 10, border: `2px solid ${on ? C.accent : C.line2}`, background: on ? C.glow : C.panel2, color: on ? C.accent : C.sub, fontSize: 13.5, fontWeight: 800, cursor: "pointer", fontFamily: "inherit" }}>{on ? "✓ " : ""}{lb}</button>
+                );
+              })}
             </div>
           </div>
           <div style={{ flex: 1, minWidth: 220 }}>
-            <label style={labelStyle}>⏱️ 체류시간 직접지정(초) <span style={{ color: C.sub, fontWeight: 600 }}>(0=강도대로)</span></label>
-            <input type="number" min={0} value={maxDwellSec} onChange={(e) => setMaxDwellSec(Math.max(0, Number(e.target.value)))} placeholder="0=강도 · 300=5분" style={{ ...inputStyle, textAlign: "center" }} />
-            <div style={{ fontSize: 11, color: C.sub, fontWeight: 600, marginTop: 3 }}>값을 넣으면 강도 무시하고 그 시간으로(3분↑ 가능)</div>
+            <label style={labelStyle}>⏱️ 체류시간 직접지정(초) {maxDwellSec > 0 ? <span style={{ color: C.accent, fontWeight: 800 }}>✓ 사용 중</span> : <span style={{ color: C.sub, fontWeight: 600 }}>(0=강도대로)</span>}</label>
+            <input type="number" min={0} value={maxDwellSec} onChange={(e) => { const was = maxDwellSec; const v = Math.max(0, Number(e.target.value)); setMaxDwellSec(v); if (was === 0 && v > 0) toast(`⏱️ 체류시간 직접지정 ${v}초로 설정됨 (강도 해제)`, "success"); else if (was > 0 && v === 0) toast("체류강도 선택으로 돌아왔어요", "info"); }} placeholder="0=강도 · 300=5분" style={{ ...inputStyle, textAlign: "center", border: `2px solid ${maxDwellSec > 0 ? C.accent : C.line2}`, background: maxDwellSec > 0 ? C.glow : C.panel2 }} />
+            <div style={{ fontSize: 11, color: maxDwellSec > 0 ? C.accent : C.sub, fontWeight: 700, marginTop: 3 }}>{maxDwellSec > 0 ? `이 시간(약 ${maxDwellSec}초)으로 체류 · 강도 버튼은 꺼짐` : "값을 넣으면 강도 무시하고 그 시간으로(3분↑ 가능)"}</div>
           </div>
           <div style={{ flex: 1, minWidth: 220 }}>
             <label style={labelStyle}>🎲 액션 확률 <span style={{ color: C.sub, fontWeight: 600 }}>(방문 중 저장·공감 등 실행 비율)</span></label>
