@@ -799,18 +799,17 @@ export async function recordRankPoint(userId: string, rank: number, scope = ""):
   await supabase.from("publy_settings").upsert({ key, value: String(rank) }, { onConflict: "key" });
 }
 export async function getRankHistory(userId: string, days = 7, scope = ""): Promise<{ label: string; rank: number | null }[]> {
-  const metas: { key: string; legacy: string; label: string }[] = [];
+  // 🔒 대상별 완전 격리 — scope가 있으면 그 대상 키만 읽는다(legacy 전체값을 끌어와 섞지 않는다).
+  const metas: { key: string; label: string }[] = [];
   const now = Date.now();
   for (let i = days - 1; i >= 0; i--) {
     const ymd = koreaDateKey(new Date(now - i * 86400000));
-    metas.push({ key: scope ? `inflow_rank_${userId}_${scope}_${ymd}` : `inflow_rank_${userId}_${ymd}`, legacy: `inflow_rank_${userId}_${ymd}`, label: ymd.slice(5) });
+    metas.push({ key: scope ? `inflow_rank_${userId}_${scope}_${ymd}` : `inflow_rank_${userId}_${ymd}`, label: ymd.slice(5) });
   }
   try {
-    const keys = Array.from(new Set(metas.flatMap(m => [m.key, m.legacy])));
-    const { data } = await supabase.from("publy_settings").select("key,value").in("key", keys);
+    const { data } = await supabase.from("publy_settings").select("key,value").in("key", metas.map(m => m.key));
     const map = new Map((data || []).map((r: any) => [r.key, parseInt(r.value) || null]));
-    // 대상별 값 우선, 없으면 legacy(과거 이어보기)
-    return metas.map(m => ({ label: m.label, rank: ((map.get(m.key) ?? map.get(m.legacy)) as number) ?? null }));
+    return metas.map(m => ({ label: m.label, rank: (map.get(m.key) as number) ?? null }));
   } catch { return metas.map(m => ({ label: m.label, rank: null })); }
 }
 
@@ -856,18 +855,17 @@ export async function markInflowScheduleRan(userId: string): Promise<void> {
 /* 📈 컨트롤타워 그래프용 — 최근 N일 일별 유입 수(publy_settings에서 날짜별 키를 한 번에 조회).
    scope 있으면 대상별 유입(inflow_stat) 우선, 없는 과거 날짜는 legacy(inflow_daily)로 이어봄. */
 export async function getInflowUsageHistory(userId: string, days = 7, scope = ""): Promise<{ label: string; count: number }[]> {
-  const metas: { key: string; legacy: string; label: string }[] = [];
+  // 🔒 대상별 완전 격리 — scope가 있으면 그 대상 유입(inflow_stat)만 읽는다(legacy 전체값 섞지 않음).
+  const metas: { key: string; label: string }[] = [];
   const now = Date.now();
   for (let i = days - 1; i >= 0; i--) {
     const ymd = koreaDateKey(new Date(now - i * 86400000)); // YYYY-MM-DD (KST)
-    metas.push({ key: scope ? `inflow_stat_${userId}_${scope}_${ymd}` : `inflow_daily_${userId}_${ymd}`, legacy: `inflow_daily_${userId}_${ymd}`, label: ymd.slice(5) });
+    metas.push({ key: scope ? `inflow_stat_${userId}_${scope}_${ymd}` : `inflow_daily_${userId}_${ymd}`, label: ymd.slice(5) });
   }
   try {
-    const keys = Array.from(new Set(metas.flatMap(m => [m.key, m.legacy])));
-    const { data } = await supabase.from("publy_settings").select("key,value").in("key", keys);
+    const { data } = await supabase.from("publy_settings").select("key,value").in("key", metas.map(m => m.key));
     const map = new Map((data || []).map((r: any) => [r.key, parseInt(r.value) || 0]));
-    // 대상별 값이 있으면 그것, 없으면 legacy(과거 이어보기)
-    return metas.map(m => ({ label: m.label, count: map.has(m.key) ? (map.get(m.key) || 0) : (map.get(m.legacy) || 0) }));
+    return metas.map(m => ({ label: m.label, count: map.get(m.key) || 0 }));
   } catch { return metas.map(m => ({ label: m.label, count: 0 })); }
 }
 /* 대상별 오늘 유입 수(KPI '오늘 유입'용). scope 없으면 전체(legacy) */
@@ -891,24 +889,22 @@ export type PerfReport = {
 };
 function ymdOffset(n: number): string { return koreaDateKey(new Date(Date.now() - n * 86400000)); }
 async function sumInflowRange(userId: string, startDaysAgo: number, endDaysAgo: number, scope = ""): Promise<{ total: number; daily: { label: string; count: number }[] }> {
-  const metas: { key: string; legacy: string; label: string }[] = [];
-  for (let i = startDaysAgo; i >= endDaysAgo; i--) { const ymd = ymdOffset(i); metas.push({ key: scope ? `inflow_stat_${userId}_${scope}_${ymd}` : `inflow_daily_${userId}_${ymd}`, legacy: `inflow_daily_${userId}_${ymd}`, label: ymd.slice(5) }); }
+  const metas: { key: string; label: string }[] = [];
+  for (let i = startDaysAgo; i >= endDaysAgo; i--) { const ymd = ymdOffset(i); metas.push({ key: scope ? `inflow_stat_${userId}_${scope}_${ymd}` : `inflow_daily_${userId}_${ymd}`, label: ymd.slice(5) }); }
   try {
-    const keys = Array.from(new Set(metas.flatMap(m => [m.key, m.legacy])));
-    const { data } = await supabase.from("publy_settings").select("key,value").in("key", keys);
+    const { data } = await supabase.from("publy_settings").select("key,value").in("key", metas.map(m => m.key));
     const map = new Map((data || []).map((r: any) => [r.key, parseInt(r.value) || 0]));
-    const daily = metas.map(m => ({ label: m.label, count: map.has(m.key) ? (map.get(m.key) || 0) : (map.get(m.legacy) || 0) }));
+    const daily = metas.map(m => ({ label: m.label, count: map.get(m.key) || 0 }));
     return { total: daily.reduce((s, d) => s + d.count, 0), daily };
   } catch { return { total: 0, daily: metas.map(m => ({ label: m.label, count: 0 })) }; }
 }
 async function lastRankInRange(userId: string, startDaysAgo: number, endDaysAgo: number, scope = ""): Promise<{ last: number | null; daily: { label: string; rank: number | null }[] }> {
-  const metas: { key: string; legacy: string; label: string }[] = [];
-  for (let i = startDaysAgo; i >= endDaysAgo; i--) { const ymd = ymdOffset(i); metas.push({ key: scope ? `inflow_rank_${userId}_${scope}_${ymd}` : `inflow_rank_${userId}_${ymd}`, legacy: `inflow_rank_${userId}_${ymd}`, label: ymd.slice(5) }); }
+  const metas: { key: string; label: string }[] = [];
+  for (let i = startDaysAgo; i >= endDaysAgo; i--) { const ymd = ymdOffset(i); metas.push({ key: scope ? `inflow_rank_${userId}_${scope}_${ymd}` : `inflow_rank_${userId}_${ymd}`, label: ymd.slice(5) }); }
   try {
-    const keys = Array.from(new Set(metas.flatMap(m => [m.key, m.legacy])));
-    const { data } = await supabase.from("publy_settings").select("key,value").in("key", keys);
+    const { data } = await supabase.from("publy_settings").select("key,value").in("key", metas.map(m => m.key));
     const map = new Map((data || []).map((r: any) => [r.key, parseInt(r.value) || null]));
-    const daily = metas.map(m => ({ label: m.label, rank: ((map.get(m.key) ?? map.get(m.legacy)) as number) ?? null }));
+    const daily = metas.map(m => ({ label: m.label, rank: (map.get(m.key) as number) ?? null }));
     let last: number | null = null;
     for (const d of daily) if (d.rank != null) last = d.rank;
     return { last, daily };

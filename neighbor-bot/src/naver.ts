@@ -5673,6 +5673,7 @@ export async function searchInflow(params: {
   onShot?: (caption: string, dataUrl: string) => void; // 📸 단계별 화면 캡처(실제 뭘 하는지 눈으로)
   shouldStop?: () => boolean;
   onQuota?: () => Promise<boolean>; // 회차마다 한도 체크(false면 중단)
+  onSuccess?: () => Promise<void> | void; // ✅ 실제 유입 '성공' 시점에만 호출(대상별 통계 기록 — 부풀림 방지)
 }): Promise<{ done: number; success: number }> {
   const log = params.onLog || (() => {});
   const { keywords, target, rounds } = params;
@@ -5775,6 +5776,7 @@ export async function searchInflow(params: {
         if (params.shouldStop?.()) { log("⏹️ 정지 요청 — 방문 종료"); break; }
         await shot(entered, "✅ 체류·액션 완료");
         success++; done++; failStreak = 0;
+        await Promise.resolve(params.onSuccess?.()).catch(() => {}); // 성공 시점에만 대상별 통계 기록
         log(`  ✅ 유입 완료 (${kw}) — 누적 성공 ${success}회`);
         params.onProgress?.(done, rounds);
       }

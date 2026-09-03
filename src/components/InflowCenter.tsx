@@ -280,9 +280,12 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
       skipPrivateSaveRef.current = true;
       const scopedPrivate = JSON.parse(localStorage.getItem(privateKey) || "null");
       const legacyForm = JSON.parse(localStorage.getItem("publy_inflow_form") || "{}");
-      const nextPrivate = scopedPrivate || { placeUrl: legacyForm.placeUrl || "", blogUrl: legacyForm.blogUrl || "", extraTargets: legacyForm.extraTargets || [] };
+      const nextPrivate = scopedPrivate || { placeUrl: legacyForm.placeUrl || "", blogUrl: legacyForm.blogUrl || "", storeUrl: legacyForm.storeUrl || "", extraByType: { place: legacyForm.extraTargets || [], blog: [], store: [] } };
       localStorage.setItem(privateKey, JSON.stringify(nextPrivate));
-      setPlaceUrl(nextPrivate.placeUrl || ""); setBlogUrl(nextPrivate.blogUrl || ""); setExtraTargets(nextPrivate.extraTargets || []);
+      setPlaceUrl(nextPrivate.placeUrl || ""); setBlogUrl(nextPrivate.blogUrl || ""); setStoreUrl(nextPrivate.storeUrl || "");
+      // 구형(extraTargets 단일)·신형(extraByType) 모두 대응해 대상별로 복원
+      const eb = nextPrivate.extraByType || (nextPrivate.extraTargets ? { place: nextPrivate.extraTargets, blog: [], store: [] } : { place: [], blog: [], store: [] });
+      setExtraByType({ place: eb.place || [], blog: eb.blog || [], store: eb.store || [] });
 
       const scopedTargets = localStorage.getItem(savedTargetsKey);
       const legacyTargets = localStorage.getItem("publy_inflow_saved_targets");
@@ -299,7 +302,7 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
         }
       }).catch(() => {});
 
-      delete legacyForm.placeUrl; delete legacyForm.blogUrl; delete legacyForm.extraTargets;
+      delete legacyForm.placeUrl; delete legacyForm.blogUrl; delete legacyForm.storeUrl; delete legacyForm.extraTargets;
       localStorage.setItem("publy_inflow_form", JSON.stringify(legacyForm));
       localStorage.removeItem("publy_inflow_saved_targets");
     } catch {}
@@ -439,13 +442,13 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
     setKwSuggest(prev => prev.filter(x => x !== k));
   };
 
-  // 🏪 현재 입력한 대상을 이름 붙여 저장
+  // 🏪 현재 입력한 대상을 이름 붙여 저장 — 플레이스/블로그/스토어 각각 격리
   const saveCurrentTarget = () => {
-    const url = (targetType === "place" ? placeUrl : blogUrl).trim();
+    const url = (targetType === "place" ? placeUrl : targetType === "store" ? storeUrl : blogUrl).trim();
     if (!url) { toast("먼저 주소를 입력하세요", "error"); return; }
-    const ok = targetType === "place" ? (!!extractPlaceId(url) || isShortUrl(url)) : !!parseBlogUrl(url);
+    const ok = targetType === "place" ? (!!extractPlaceId(url) || isShortUrl(url)) : targetType === "store" ? !!parseStoreUrl(url) : !!parseBlogUrl(url);
     if (!ok) { toast("주소를 인식하지 못했어요 — 올바른 링크를 넣어주세요", "error"); return; }
-    const name = savingName.trim() || (targetType === "place" ? (extractPlaceId(url) ? "플레이스 " + extractPlaceId(url) : "내 플레이스") : "내 블로그");
+    const name = savingName.trim() || (targetType === "place" ? (extractPlaceId(url) ? "플레이스 " + extractPlaceId(url) : "내 플레이스") : targetType === "store" ? (parseStoreUrl(url)?.storeId ? "스토어 " + parseStoreUrl(url)!.storeId : "내 상품") : "내 블로그");
     const exists = savedTargets.find(t => t.url === url);
     if (exists) { toast("이미 저장된 주소예요", "info"); return; }
     const item: SavedTarget = { id: Date.now().toString(36), name, url, type: targetType };
@@ -455,7 +458,7 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
   };
   const pickSavedTarget = (t: SavedTarget) => {
     setTargetType(t.type);
-    if (t.type === "place") setPlaceUrl(t.url); else setBlogUrl(t.url);
+    if (t.type === "place") setPlaceUrl(t.url); else if (t.type === "store") setStoreUrl(t.url); else setBlogUrl(t.url);
     toast(`"${t.name}" 불러왔어요`, "success");
   };
   const removeSavedTarget = (id: string) => persistSavedTargets(savedTargets.filter(t => t.id !== id));
@@ -570,14 +573,20 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
     if (!running) return;
     let lock: any = null;
     let cancelled = false;
-    const keepScreenOn = async () => {
+    // 🖥️ 화면(모니터)이 꺼지지 않게 Wake Lock 유지. 화면이 잠깐 숨겨졌다 돌아오거나
+    //    브라우저가 lock을 해제하면 실행 중인 한 다시 획득한다(모니터 꺼져도 작업 유지).
+    const acquire = async () => {
       try {
+        if (cancelled || document.visibilityState !== "visible") return;
         lock = await (navigator as any).wakeLock?.request("screen");
-        if (cancelled) await lock?.release();
+        if (cancelled) { await lock?.release(); return; }
+        lock?.addEventListener?.("release", () => { if (!cancelled && running) void acquire(); });
       } catch {}
     };
-    void keepScreenOn();
-    return () => { cancelled = true; void lock?.release().catch(() => {}); };
+    const onVis = () => { if (document.visibilityState === "visible" && !cancelled) void acquire(); };
+    document.addEventListener("visibilitychange", onVis);
+    void acquire();
+    return () => { cancelled = true; document.removeEventListener("visibilitychange", onVis); void lock?.release?.().catch(() => {}); };
   }, [running]);
 
   // 🔁 폼 입력값 저장(탭 이동해도 유지). 무거운 것(로그·계정목록)은 제외.
@@ -588,9 +597,10 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
         targetType, keywordsPlace, keywordsBlog, keywordsStore, rounds, termMin, termMax, device,
         doSave, doShare, doDir, doCall, doBook, doTalk, doLike, doWish, doCart, doOption, funnel, spread, spreadHours, doReview, reviewText, auto, actionRate, intensity, maxDwellSec, kwWeights,
       }));
-      localStorage.setItem(privateKey, JSON.stringify({ placeUrl, blogUrl, storeUrl, extraTargets }));
+      // 추가대상은 대상별 전체(extraByType)를 저장해야 다른 탭 것이 안 사라진다
+      localStorage.setItem(privateKey, JSON.stringify({ placeUrl, blogUrl, storeUrl, extraByType }));
     } catch {}
-  }, [formKey, privateKey, targetType, placeUrl, blogUrl, storeUrl, keywordsPlace, keywordsBlog, keywordsStore, rounds, termMin, termMax, device, doSave, doShare, doDir, doCall, doBook, doTalk, doLike, doWish, doCart, doOption, funnel, spread, spreadHours, doReview, reviewText, auto, actionRate, intensity, maxDwellSec, extraTargets, kwWeights]);
+  }, [formKey, privateKey, targetType, placeUrl, blogUrl, storeUrl, keywordsPlace, keywordsBlog, keywordsStore, rounds, termMin, termMax, device, doSave, doShare, doDir, doCall, doBook, doTalk, doLike, doWish, doCart, doOption, funnel, spread, spreadHours, doReview, reviewText, auto, actionRate, intensity, maxDwellSec, extraByType, kwWeights]);
 
   // 🔔 앱 내 자동 알림 — 날짜/주차 마커로 중복을 막고, 다음 실행 때 놓친 알림도 알림함에 쌓는다.
   useEffect(() => {

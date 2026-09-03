@@ -1155,14 +1155,19 @@ app.post("/api/inflow", async (req, res) => {
       target = { type: "blog", blogId, logNo: logNo || undefined };
     }
 
-    // ➕ 추가 대상 해석 — 주소 문자열들을 place/blog로 자동 판별해 targets 배열 구성(첫 대상=위 target)
+    // ➕ 추가 대상 해석 — 주소 문자열을 스토어/블로그/플레이스로 자동 판별해 targets 배열 구성(첫 대상=위 target)
     const targetsArr: InflowTarget[] = [target];
     if (extraTargets) {
       try {
         const arr: string[] = JSON.parse(extraTargets);
         for (const raw of arr) {
           const s = String(raw || "").trim(); if (!s) continue;
-          if (/blog\.naver|blogId=|\/PostView/i.test(s)) {
+          if (/smartstore\.naver|shopping\.naver|brand\.naver/i.test(s)) {
+            // 🛒 스마트스토어 상품 — store 대상으로 생성(플레이스로 잘못 파싱되지 않게)
+            const sid = s.match(/(?:smartstore|brand)\.naver\.com\/([A-Za-z0-9_-]+)/i)?.[1] || "";
+            const pid = s.match(/products\/(\d+)/i)?.[1] || s.match(/\/(\d{6,})/)?.[1] || "";
+            targetsArr.push({ type: "store", storeUrl: s, storeId: sid, productId: pid });
+          } else if (/blog\.naver|blogId=|\/PostView/i.test(s)) {
             const m = s.match(/blog\.naver\.com\/([A-Za-z0-9_-]+)(?:\/(\d+))?/i) || s.match(/blogId=([A-Za-z0-9_-]+)/i);
             if (m) targetsArr.push({ type: "blog", blogId: m[1], logNo: (m[2] || (s.match(/logNo=(\d+)/i)?.[1])) || undefined });
           } else {
@@ -1221,15 +1226,16 @@ app.post("/api/inflow", async (req, res) => {
       onShot: (caption, dataUrl) => sseSend(res, { type: "shot", caption, dataUrl }),   // 📸 화면 캡처 전송
       shouldStop: () => stopped,
       onQuota: async () => {
+        // 한도 체크·차감만(통계는 성공 시점 onSuccess에서 기록 → 시도만 하고 실패한 방문이 유입수 부풀리지 않게)
         if (!userId) return true;
-        if (unlimited) { await incrementInflowQuota(userId).catch(() => {}); await incrementInflowStat(userId, statScope).catch(() => {}); return true; }  // 무제한(관리자)도 한도만 스킵, 통계는 대상별로 기록
+        if (unlimited) { await incrementInflowQuota(userId).catch(() => {}); return true; }  // 무제한(관리자)은 한도만 스킵
         const limit = INFLOW_DAILY_LIMIT[plan] ?? INFLOW_DAILY_LIMIT.free;
         const q = await consumeInflowQuota(memberToken, userId, limit);
         if (!q.ok) return false;
-        await incrementInflowStat(userId, statScope).catch(() => {});   // 대상별 유입 통계(그래프·누적·리포트 분리)
         sseSend(res, { type: "quota_info", used: q.used, limit: q.limit, remaining: Math.max(0, q.limit - q.used) });
         return q.ok;
       },
+      onSuccess: async () => { if (userId) await incrementInflowStat(userId, statScope).catch(() => {}); },  // ✅ 실제 성공한 유입만 대상별 통계에 반영
     });
     sseSend(res, { type: "inflow_done", ...result });
   } catch (e: any) {
