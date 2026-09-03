@@ -263,8 +263,8 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
   const legacyMigratedRef = useRef(false);
   useEffect(() => {
     if (!userId || !currentScope || legacyMigratedRef.current) return;
-    legacyMigratedRef.current = true;
-    migrateLegacyInflowToScope(userId, currentScope).then(() => refreshStats()).catch(() => {});
+    // 성공했을 때만 ref를 세워 실패 시(조회 오류 등) 다음 로드에서 재시도되게 한다(마커로 멱등이라 중복 안전)
+    migrateLegacyInflowToScope(userId, currentScope).then(() => { legacyMigratedRef.current = true; refreshStats(); }).catch(() => {});
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userId, currentScope]);
   const refreshStats = () => {
@@ -550,21 +550,24 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
     if (!schedEnabled || !userId) return;
     const tick = async () => {
       if (running) return;
-      if (!currentScope) return; // 대상이 인식돼야만 예약 실행(전역 폴백·엉뚱한 대상 실행 방지)
+      const tickScope = currentScope;              // 이번 tick의 대상 고정(대기 중 대상 바뀌면 중단)
+      if (!tickScope) return;                       // 대상이 인식돼야만 예약 실행(전역 폴백·엉뚱한 대상 실행 방지)
       const now = new Date();
       const hhmm = new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Seoul", hour: "2-digit", minute: "2-digit", hour12: false }).format(now);
       if (hhmm !== schedTime) return;
-      if (await inflowScheduleRanToday(userId, currentScope)) return;
+      if (await inflowScheduleRanToday(userId, tickScope)) return;
+      if (currentScope !== tickScope || running) return; // DB 대기 중 대상 전환/실행 시작됐으면 중단
       pushLog(`⏰ 예약 시각(${schedTime}) 도달`);
       // 🎯 오토파일럿 켜져 있으면: 순위 먼저 재고 목표 달성이면 유입 스킵(한도 절약)
       if (apEnabled && targetType === "place") {
         const reached = await autopilotCheckRef.current();
-        if (reached) { pushLog("🎯 목표 순위 유지 중 — 오늘 유입은 건너뜁니다(한도 절약)."); await markInflowScheduleRan(userId, currentScope); return; }
+        if (currentScope !== tickScope || running) return; // 순위 조회 대기 중 전환됐으면 중단
+        if (reached) { pushLog("🎯 목표 순위 유지 중 — 오늘 유입은 건너뜁니다(한도 절약)."); await markInflowScheduleRan(userId, tickScope); return; }
         pushLog("🎯 목표보다 낮아요 — 순위를 끌어올리기 위해 유입 실행.");
       }
       pushLog("⏰ 자동 유입 시작");
       if (!auto) setRounds(schedRounds);
-      scheduledRunScopeRef.current = currentScope; // 실행 시작 시점 대상 고정(실행 중 대상 바꿔도 마커는 이 대상에)
+      scheduledRunScopeRef.current = tickScope;   // 실행 시작 시점 대상 고정(마커는 이 대상에)
       scheduledRunPendingRef.current = true;
       startRef.current();
     };
@@ -576,14 +579,16 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
 
   const saveSched = async (nextEnabled: boolean) => {
     if (!userId) return;
-    if (nextEnabled && !currentScope) { toast("먼저 대상 주소를 정확히 입력해 인식시켜 주세요(예약은 대상별로 저장돼요)", "error"); return; }
+    // 대상 미인식(빈 scope)이면 전역키에 저장하지 않는다(ON은 안내, OFF는 화면 상태만 끔)
+    if (!currentScope) { if (nextEnabled) toast("먼저 대상 주소를 정확히 입력해 인식시켜 주세요(예약은 대상별로 저장돼요)", "error"); else setSchedEnabled(false); return; }
     try { await saveInflowSchedule(userId, { enabled: nextEnabled, time: schedTime, rounds: schedRounds }, currentScope); setSchedEnabled(nextEnabled); toast(nextEnabled ? `⏰ 매일 ${schedTime}에 자동 유입 ${schedRounds}회 예약됨` : "예약 해제", "success"); }
     catch (e: any) { toast(e.message, "error"); }
   };
 
   const saveAp = async (nextEnabled: boolean) => {
     if (!userId) return;
-    if (nextEnabled && !currentScope) { toast("먼저 대상 주소를 정확히 입력해 인식시켜 주세요(오토파일럿은 대상별로 저장돼요)", "error"); return; }
+    // 대상 미인식(빈 scope)이면 테이블 전역 저장 금지(ON은 안내, OFF는 화면 상태만 끔)
+    if (!currentScope) { if (nextEnabled) toast("먼저 대상 주소를 정확히 입력해 인식시켜 주세요(오토파일럿은 대상별로 저장돼요)", "error"); else setApEnabled(false); return; }
     if (nextEnabled && !apKeyword.trim()) { toast("순위를 추적할 키워드를 입력하세요", "error"); return; }
     if (nextEnabled && targetType === "place" && !placeUrl.trim()) { toast("먼저 플레이스 주소를 입력하세요", "error"); return; }
     if (nextEnabled && targetType === "blog" && !blogUrl.trim()) { toast("먼저 블로그 글 주소를 입력하세요", "error"); return; }

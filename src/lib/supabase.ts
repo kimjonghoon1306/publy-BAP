@@ -829,10 +829,11 @@ export async function migrateLegacyInflowToScope(userId: string, scope: string, 
     }
     const legacyKeys = pairs.map(p => p.legacy);
     const scopedKeys = pairs.map(p => p.scoped);
-    const [{ data: legacyRows }, { data: scopedRows }] = await Promise.all([
+    const [{ data: legacyRows, error: e1 }, { data: scopedRows, error: e2 }] = await Promise.all([
       supabase.from("publy_settings").select("key,value").in("key", legacyKeys),
       supabase.from("publy_settings").select("key").in("key", scopedKeys),
     ]);
+    if (e1 || e2) return; // 조회 실패 → 마커 안 남김(빈 결과를 '이관 완료'로 오판하지 않게, 다음 로드 재시도)
     const legacyMap = new Map((legacyRows || []).map((r: any) => [r.key, r.value]));
     const already = new Set((scopedRows || []).map((r: any) => r.key));
     const ups = pairs
