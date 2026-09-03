@@ -124,6 +124,10 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
   const [placeUrl, setPlaceUrl] = useState<string>(private0.placeUrl ?? saved0.placeUrl ?? "");
   const [blogUrl, setBlogUrl] = useState<string>(private0.blogUrl ?? saved0.blogUrl ?? "");
   const [storeUrl, setStoreUrl] = useState<string>(private0.storeUrl ?? saved0.storeUrl ?? "");
+  // 📚 내 블로그 글 수집 → 글별 트래픽(전체/부분/해제)
+  const [myPosts, setMyPosts] = useState<{ url: string; title: string; date: string }[]>([]);
+  const [selectedPosts, setSelectedPosts] = useState<Set<string>>(new Set());
+  const [myPostsLoading, setMyPostsLoading] = useState(false);
   // 🔑 키워드는 플레이스/블로그가 완전히 별개(서로 섞이면 안 됨). 각각 저장하고, 현재 대상 것만 표시·수정.
   const [keywordsPlace, setKeywordsPlace] = useState<string>(saved0.keywordsPlace ?? (saved0.targetType !== "blog" ? saved0.keywords : "") ?? "");
   const [keywordsBlog, setKeywordsBlog] = useState<string>(saved0.keywordsBlog ?? (saved0.targetType === "blog" ? saved0.keywords : "") ?? "");
@@ -289,6 +293,30 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
   useEffect(() => { if (userId) getPerfReport(userId, reportPeriod, currentScope).then(setReport).catch(() => {}); }, [userId, reportPeriod, currentScope]);
   // 📅 기간·대상 바뀌면 유입·순위·오늘유입 다시 로드(과거 데이터·대상별 조회) → 대상 변경 시 화면 전체 갱신
   useEffect(() => { if (!userId) return; getInflowStatToday(userId, currentScope).then(setTodayScoped).catch(() => {}); getInflowUsageHistory(userId, chartDays, currentScope).then(setHistory).catch(() => {}); getRankHistory(userId, chartDays, currentScope).then((h) => { setRankHist(h); const last = [...h].reverse().find((x) => x.rank != null); setApLastRank(last ? last.rank : null); setApRankOut(false); }).catch(() => {}); }, [userId, chartDays, currentScope]);
+
+  // 📚 내 블로그 글 수집하기 — 로그인된 계정으로 내 글 목록을 쫙 불러온다(SSE)
+  const collectMyPosts = () => {
+    if (!accountId) { toast("먼저 위에서 내 네이버 계정을 선택하세요(계정 관리에서 연결)", "error"); return; }
+    setMyPostsLoading(true); setMyPosts([]); setSelectedPosts(new Set());
+    const es = new BotEventStream(`${BOT}/api/my-posts?accountId=${encodeURIComponent(accountId)}&selectMode=all`, { method: "GET" });
+    es.onmessage = (e: MessageEvent) => {
+      let d: any; try { d = JSON.parse(e.data); } catch { return; }
+      if (d.type === "log") pushLog(d.msg);
+      else if (d.type === "posts") { const arr = (d.posts || []) as { url: string; title: string; date: string }[]; setMyPosts(arr); setSelectedPosts(new Set(arr.map((p) => p.url))); toast(`📚 내 글 ${arr.length}개를 불러왔어요`, "success"); setMyPostsLoading(false); es.close(); }
+      else if (d.type === "error") { toast(d.msg, "error"); setMyPostsLoading(false); es.close(); }
+    };
+    es.onerror = () => { toast("글 수집 실패 — 봇 서버(3334)·계정 로그인 확인", "error"); setMyPostsLoading(false); es.close(); };
+  };
+  const togglePost = (url: string) => setSelectedPosts((prev) => { const n = new Set(prev); n.has(url) ? n.delete(url) : n.add(url); return n; });
+  const selectAllPosts = () => setSelectedPosts(new Set(myPosts.map((p) => p.url)));
+  const clearSelectedPosts = () => setSelectedPosts(new Set());
+  // 선택한 글들을 유입 대상으로 설정(첫 글=기본 대상, 나머지=추가 대상 로테이션)
+  const applySelectedPostsAsTargets = () => {
+    const urls = myPosts.filter((p) => selectedPosts.has(p.url)).map((p) => p.url);
+    if (!urls.length) { toast("먼저 유입할 글을 선택하세요", "error"); return; }
+    setBlogUrl(urls[0]); setExtraTargets(urls.slice(1));
+    toast(`✅ ${urls.length}개 글이 유입 대상으로 설정됐어요 — 아래 '유입 시작'을 누르세요`, "success");
+  };
 
   // 🩺 플레이스 최적화 진단 실행(현재 입력된 플레이스 주소 기준)
   const runDiagnose = async () => {
@@ -821,6 +849,40 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
           {targetType === "store" && storeUrl.trim() && (parseStoreUrl(storeUrl)
             ? <div style={{ marginTop: 6, fontSize: 12.5, fontWeight: 700, color: "#16a34a" }}>✅ 인식됨 — 스토어 {parseStoreUrl(storeUrl)!.storeId || "?"}{parseStoreUrl(storeUrl)!.productId ? " / 상품 " + parseStoreUrl(storeUrl)!.productId : ""}</div>
             : <div style={{ marginTop: 6, fontSize: 12.5, fontWeight: 700, color: "#dc2626" }}>⚠️ 주소를 못 읽었어요 — smartstore.naver.com/스토어/products/상품번호 형태로 붙여넣어 주세요</div>)}
+
+          {/* 📚 내 블로그 글 수집 → 글별 트래픽(전체/부분/해제) — 블로그 대상일 때만 */}
+          {targetType === "blog" && (
+            <div style={{ marginTop: 10, padding: 12, borderRadius: 12, background: C.panel2, border: `1.5px solid ${C.line2}` }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: myPosts.length ? 10 : 0 }}>
+                <span style={{ fontSize: 13, fontWeight: 900, color: C.ink }}>📚 내 블로그 글로 유입</span>
+                <span style={{ fontSize: 11, color: C.sub, fontWeight: 600 }}>계정 선택 후 내 글을 불러와 원하는 글에 트래픽을 걸어요</span>
+                <button onClick={collectMyPosts} disabled={myPostsLoading} style={{ marginLeft: "auto", padding: "8px 16px", borderRadius: 10, border: "none", background: `linear-gradient(135deg,${C.accent},${C.cyan})`, color: "#fff", fontSize: 13, fontWeight: 900, cursor: myPostsLoading ? "default" : "pointer", fontFamily: "inherit", opacity: myPostsLoading ? 0.6 : 1, whiteSpace: "nowrap" }}>{myPostsLoading ? "불러오는 중…" : "🔎 내 글 수집하기"}</button>
+              </div>
+              {myPosts.length > 0 && (<>
+                {/* 전체설정 / 해제 */}
+                <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
+                  <button onClick={selectAllPosts} style={{ padding: "6px 12px", borderRadius: 8, border: `1.5px solid ${C.accent}`, background: C.glow, color: C.accent, fontSize: 12, fontWeight: 800, cursor: "pointer", fontFamily: "inherit" }}>✅ 전체 설정</button>
+                  <button onClick={clearSelectedPosts} style={{ padding: "6px 12px", borderRadius: 8, border: `1.5px solid ${C.line2}`, background: C.panel, color: C.sub, fontSize: 12, fontWeight: 800, cursor: "pointer", fontFamily: "inherit" }}>◻️ 전체 해제</button>
+                  <span style={{ fontSize: 12, fontWeight: 800, color: C.ink }}>선택 {selectedPosts.size}/{myPosts.length}개</span>
+                </div>
+                {/* 글 목록(부분 설정=체크박스) */}
+                <div style={{ maxHeight: 220, overflowY: "auto", display: "flex", flexDirection: "column", gap: 5 }}>
+                  {myPosts.map((p) => { const on = selectedPosts.has(p.url); return (
+                    <label key={p.url} style={{ display: "flex", alignItems: "center", gap: 9, padding: "8px 10px", borderRadius: 9, background: on ? C.glow : C.panel, border: `1px solid ${on ? C.accent : C.line}`, cursor: "pointer" }}>
+                      <input type="checkbox" checked={on} onChange={() => togglePost(p.url)} style={{ width: 16, height: 16, accentColor: C.accent, flexShrink: 0 }} />
+                      <div style={{ minWidth: 0, flex: 1 }}>
+                        <div style={{ fontSize: 13, fontWeight: 700, color: C.ink, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{p.title || "(제목 없음)"}</div>
+                        {p.date && <div style={{ fontSize: 10.5, color: C.sub, fontWeight: 600 }}>{p.date}</div>}
+                      </div>
+                    </label>
+                  ); })}
+                </div>
+                <button onClick={applySelectedPostsAsTargets} style={{ width: "100%", marginTop: 9, padding: "11px", borderRadius: 10, border: "none", background: selectedPosts.size ? `linear-gradient(135deg,${C.accent},${C.cyan})` : C.line2, color: "#fff", fontSize: 13.5, fontWeight: 900, cursor: selectedPosts.size ? "pointer" : "default", fontFamily: "inherit" }}>🎯 선택한 {selectedPosts.size}개 글을 유입 대상으로 설정</button>
+                <div style={{ fontSize: 11, color: C.sub, fontWeight: 600, marginTop: 5 }}>설정하면 아래 <b>유입 시작</b>을 누를 때 이 글들을 번갈아 방문해요(로테이션).</div>
+              </>)}
+            </div>
+          )}
+
           {/* 이름 + 저장 버튼 */}
           <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
             <input value={savingName} onChange={(e) => setSavingName(e.target.value)} placeholder={targetType === "place" ? "이 플레이스 이름 (예: 강남점)" : "이 블로그 이름"} style={{ ...inputStyle, flex: 1 }} />
