@@ -1,7 +1,7 @@
 import express from "express";
 import cors from "cors";
 import { saveSession, sessionExists, removeSession, crawlBlogIds, crawlBuddyPosts, analyzeBuddyKeywords, addNeighbors, NeighborResult, donePath, engageBlogs, EngageResult, engageDonePath, crawlMyPosts, replyToComments, crawlPlaceReviews, generatePlaceReviewReply, replyToPlaceReviews, crawlBlogStats, checkSelectedBlogExposure, pumasiEngage, crawlPumasiReport, pumasiPreview, updatePostTitle, checkProxy, analyzeBlogAuthenticity, fetchPostBody, crawlPostViews, sendWebmail, sendBlogComments, crawlPlaces, crawlPlaceBloggers, crawlPlaceDetail, crawlPlaceByUrl, suggestPlaceKeywords, parsePlaceUrl, resolvePlaceUrl, searchInflow, diagnosePlace, measurePlaceRank, collectPlaceReviews, InflowTarget } from "./naver";
-import { checkNeighborQuota, incrementNeighborQuota, getNeighborDailyUsage, incrementEngageQuota, getEngageDailyUsage, getUserPlan, checkMembershipAccess, NEIGHBOR_DAILY_LIMIT, ENGAGE_DAILY_LIMIT, REPLY_DAILY_LIMIT, getReplyDailyUsage, incrementReplyQuota, PLACE_REPLY_DAILY_LIMIT, getPlaceReplyDailyUsage, incrementPlaceReplyQuota, addNeighborHistory, addReplyHistory, addPlaceReplyHistory, addBlogscoreHistory, incrementPumasiQuota, TITLE_EDIT_DAILY_LIMIT, getTitleEditDailyUsage, incrementTitleEditQuota, getProxyForAccount, supabase, getOutreachSender, getOutreachSentToday, addOutreachLog, checkPlaceDetailQuota, incrementPlaceDetailQuota, checkInflowQuota, inflowReviewAllowed, verifyInflowSession, verifyAdminSession, consumeInflowQuota, INFLOW_DAILY_LIMIT } from "./supabase";
+import { checkNeighborQuota, incrementNeighborQuota, getNeighborDailyUsage, incrementEngageQuota, getEngageDailyUsage, getUserPlan, checkMembershipAccess, NEIGHBOR_DAILY_LIMIT, ENGAGE_DAILY_LIMIT, REPLY_DAILY_LIMIT, getReplyDailyUsage, incrementReplyQuota, PLACE_REPLY_DAILY_LIMIT, getPlaceReplyDailyUsage, incrementPlaceReplyQuota, addNeighborHistory, addReplyHistory, addPlaceReplyHistory, addBlogscoreHistory, incrementPumasiQuota, TITLE_EDIT_DAILY_LIMIT, getTitleEditDailyUsage, incrementTitleEditQuota, getProxyForAccount, supabase, getOutreachSender, getOutreachSentToday, addOutreachLog, checkPlaceDetailQuota, incrementPlaceDetailQuota, checkInflowQuota, incrementInflowQuota, inflowReviewAllowed, verifyInflowSession, verifyAdminSession, consumeInflowQuota, INFLOW_DAILY_LIMIT } from "./supabase";
 import nodemailer from "nodemailer";
 import fs from "fs";
 import { acquireAccountLock } from "./account-lock";
@@ -1201,7 +1201,8 @@ app.post("/api/inflow", async (req, res) => {
       onShot: (caption, dataUrl) => sseSend(res, { type: "shot", caption, dataUrl }),   // 📸 화면 캡처 전송
       shouldStop: () => stopped,
       onQuota: async () => {
-        if (!userId || unlimited) return true;                 // 관리자/무제한 = 락 해제
+        if (!userId) return true;
+        if (unlimited) { await incrementInflowQuota(userId).catch(() => {}); return true; }  // 무제한(관리자)도 한도만 스킵, 통계 카운트는 기록(오늘 유입·누적·7일에 반영)
         const limit = INFLOW_DAILY_LIMIT[plan] ?? INFLOW_DAILY_LIMIT.free;
         const q = await consumeInflowQuota(memberToken, userId, limit);
         if (!q.ok) return false;
