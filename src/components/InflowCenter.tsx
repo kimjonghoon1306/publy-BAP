@@ -124,10 +124,14 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
   const [placeUrl, setPlaceUrl] = useState<string>(private0.placeUrl ?? saved0.placeUrl ?? "");
   const [blogUrl, setBlogUrl] = useState<string>(private0.blogUrl ?? saved0.blogUrl ?? "");
   const [storeUrl, setStoreUrl] = useState<string>(private0.storeUrl ?? saved0.storeUrl ?? "");
-  // 📚 내 블로그 글 수집 → 글별 트래픽(전체/부분/해제)
+  // 📚 블로그 글 지정 유입 — 팝업(글주소 직접 / 로그인해서 내 글 불러오기)
   const [myPosts, setMyPosts] = useState<{ url: string; title: string; date: string }[]>([]);
   const [selectedPosts, setSelectedPosts] = useState<Set<string>>(new Set());
   const [myPostsLoading, setMyPostsLoading] = useState(false);
+  const [postPopup, setPostPopup] = useState<null | "manual" | "login">(null); // 어떤 팝업이 열렸나
+  const [manualPostUrls, setManualPostUrls] = useState<string>("");             // 글주소 직접 입력(줄바꿈 여러 개)
+  const [popupAccountId, setPopupAccountId] = useState<string>("");             // 로그인 팝업에서 고른 계정
+  const [pickedPostCount, setPickedPostCount] = useState<number>(0);            // 지정된 글 개수(요약 표시)
   // 🔑 키워드는 플레이스/블로그가 완전히 별개(서로 섞이면 안 됨). 각각 저장하고, 현재 대상 것만 표시·수정.
   const [keywordsPlace, setKeywordsPlace] = useState<string>(saved0.keywordsPlace ?? (saved0.targetType !== "blog" ? saved0.keywords : "") ?? "");
   const [keywordsBlog, setKeywordsBlog] = useState<string>(saved0.keywordsBlog ?? (saved0.targetType === "blog" ? saved0.keywords : "") ?? "");
@@ -294,11 +298,11 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
   // 📅 기간·대상 바뀌면 유입·순위·오늘유입 다시 로드(과거 데이터·대상별 조회) → 대상 변경 시 화면 전체 갱신
   useEffect(() => { if (!userId) return; getInflowStatToday(userId, currentScope).then(setTodayScoped).catch(() => {}); getInflowUsageHistory(userId, chartDays, currentScope).then(setHistory).catch(() => {}); getRankHistory(userId, chartDays, currentScope).then((h) => { setRankHist(h); const last = [...h].reverse().find((x) => x.rank != null); setApLastRank(last ? last.rank : null); setApRankOut(false); }).catch(() => {}); }, [userId, chartDays, currentScope]);
 
-  // 📚 내 블로그 글 수집하기 — 로그인된 계정으로 내 글 목록을 쫙 불러온다(SSE)
-  const collectMyPosts = () => {
-    if (!accountId) { toast("먼저 위에서 내 네이버 계정을 선택하세요(계정 관리에서 연결)", "error"); return; }
+  // 🔐 로그인해서 내 글 불러오기 — 계정 관리에서 연결한 계정으로 내 글 목록을 정확히 수집(SSE)
+  const collectMyPosts = (acctId: string) => {
+    if (!acctId) { toast("먼저 불러올 네이버 계정을 선택하세요", "error"); return; }
     setMyPostsLoading(true); setMyPosts([]); setSelectedPosts(new Set());
-    const es = new BotEventStream(`${BOT}/api/my-posts?accountId=${encodeURIComponent(accountId)}&selectMode=all`, { method: "GET" });
+    const es = new BotEventStream(`${BOT}/api/my-posts?accountId=${encodeURIComponent(acctId)}&selectMode=all`, { method: "GET" });
     es.onmessage = (e: MessageEvent) => {
       let d: any; try { d = JSON.parse(e.data); } catch { return; }
       if (d.type === "log") pushLog(d.msg);
@@ -310,13 +314,15 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
   const togglePost = (url: string) => setSelectedPosts((prev) => { const n = new Set(prev); n.has(url) ? n.delete(url) : n.add(url); return n; });
   const selectAllPosts = () => setSelectedPosts(new Set(myPosts.map((p) => p.url)));
   const clearSelectedPosts = () => setSelectedPosts(new Set());
-  // 선택한 글들을 유입 대상으로 설정(첫 글=기본 대상, 나머지=추가 대상 로테이션)
-  const applySelectedPostsAsTargets = () => {
-    const urls = myPosts.filter((p) => selectedPosts.has(p.url)).map((p) => p.url);
-    if (!urls.length) { toast("먼저 유입할 글을 선택하세요", "error"); return; }
-    setBlogUrl(urls[0]); setExtraTargets(urls.slice(1));
-    toast(`✅ ${urls.length}개 글이 유입 대상으로 설정됐어요 — 아래 '유입 시작'을 누르세요`, "success");
+  // 여러 글을 유입 대상으로 확정(첫 글=기본 대상, 나머지=추가 대상 로테이션) — 팝업 공통
+  const applyPostsAsTargets = (urls: string[]) => {
+    const clean = urls.map((u) => u.trim()).filter(Boolean);
+    if (!clean.length) { toast("먼저 유입할 글을 선택하세요", "error"); return; }
+    setTargetType("blog"); setBlogUrl(clean[0]); setExtraTargets(clean.slice(1)); setPickedPostCount(clean.length);
+    toast(`✅ ${clean.length}개 글이 유입 대상으로 설정됐어요 — '유입 시작'을 누르세요`, "success");
+    setPostPopup(null);
   };
+  const applySelectedPostsAsTargets = () => applyPostsAsTargets(myPosts.filter((p) => selectedPosts.has(p.url)).map((p) => p.url));
 
   // 🩺 플레이스 최적화 진단 실행(현재 입력된 플레이스 주소 기준)
   const runDiagnose = async () => {
@@ -769,6 +775,85 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
         .inflow-result { animation: inflowResultIn .32s ease-out both; }
         @media (prefers-reduced-motion: reduce) { .inflow-card, .inflow-result { transition: none; animation: none; } }
       `}</style>
+
+      {/* ═══ 📝 팝업 A — 글 주소 직접 넣기(로그인 불필요) ═══ */}
+      {postPopup === "manual" && (
+        <div onClick={() => setPostPopup(null)} style={{ position: "fixed", inset: 0, zIndex: 10000, background: "rgba(0,0,0,.6)", display: "flex", alignItems: "center", justifyContent: "center", padding: 18 }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: 460, background: C.panel, borderRadius: 18, border: `2px solid ${C.accent}`, overflow: "hidden", boxShadow: "0 24px 60px rgba(0,0,0,.45)" }}>
+            <div style={{ padding: "16px 18px", background: `linear-gradient(135deg,${C.accent},${C.cyan})`, color: "#fff" }}>
+              <div style={{ fontSize: 16, fontWeight: 900 }}>📝 글 주소 직접 넣기</div>
+              <div style={{ fontSize: 12, fontWeight: 600, opacity: .92, marginTop: 2 }}>로그인 없이 · 원하는 글 링크를 넣어 그 글에 트래픽을 걸어요</div>
+            </div>
+            <div style={{ padding: 18 }}>
+              <div style={{ fontSize: 12.5, fontWeight: 700, color: C.ink, lineHeight: 1.6, marginBottom: 9, background: "rgba(16,133,107,.08)", border: "1.5px solid #16a34a", borderRadius: 10, padding: "9px 12px" }}>
+                <b style={{ color: "#16a34a" }}>✅ 로그인 필요 없어요.</b> 글 주소만 있으면 방문·체류·읽기·공유가 돼요. <b>한 줄에 하나씩</b> 여러 개 넣으면 방문마다 번갈아 방문해요(로테이션).
+              </div>
+              <textarea value={manualPostUrls} onChange={(e) => setManualPostUrls(e.target.value)} rows={5}
+                placeholder={"blog.naver.com/아이디/글번호\nblog.naver.com/아이디/글번호2\n... (한 줄에 하나씩)"}
+                style={{ ...inputStyle, resize: "vertical", fontSize: 13, lineHeight: 1.6 }} />
+              <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+                <button onClick={() => setPostPopup(null)} style={{ flex: 1, padding: "12px", borderRadius: 11, border: `1.5px solid ${C.line2}`, background: C.panel2, color: C.sub, fontSize: 13.5, fontWeight: 800, cursor: "pointer", fontFamily: "inherit" }}>취소</button>
+                <button onClick={() => { const urls = manualPostUrls.split(/[\n,]/).map((s) => s.trim()).filter((s) => parseBlogUrl(s)); if (!urls.length) { toast("올바른 블로그 글 주소를 넣어주세요", "error"); return; } applyPostsAsTargets(urls); }} style={{ flex: 2, padding: "12px", borderRadius: 11, border: "none", background: `linear-gradient(135deg,${C.accent},${C.cyan})`, color: "#fff", fontSize: 13.5, fontWeight: 900, cursor: "pointer", fontFamily: "inherit" }}>🎯 이 글들을 유입 대상으로</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ═══ 🔐 팝업 B — 로그인해서 내 글 불러오기 ═══ */}
+      {postPopup === "login" && (
+        <div onClick={() => setPostPopup(null)} style={{ position: "fixed", inset: 0, zIndex: 10000, background: "rgba(0,0,0,.6)", display: "flex", alignItems: "center", justifyContent: "center", padding: 18 }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: 480, maxHeight: "88vh", overflowY: "auto", background: C.panel, borderRadius: 18, border: "2px solid #d97706", boxShadow: "0 24px 60px rgba(0,0,0,.45)" }}>
+            <div style={{ padding: "16px 18px", background: "linear-gradient(135deg,#f59e0b,#d97706)", color: "#fff" }}>
+              <div style={{ fontSize: 16, fontWeight: 900 }}>🔐 로그인해서 내 글 불러오기</div>
+              <div style={{ fontSize: 12, fontWeight: 600, opacity: .92, marginTop: 2 }}>연결한 계정으로 내 글 목록을 불러와 골라서 트래픽을 걸어요</div>
+            </div>
+            <div style={{ padding: 18 }}>
+              <div style={{ fontSize: 12.5, fontWeight: 700, color: C.ink, lineHeight: 1.6, marginBottom: 11, background: "rgba(245,158,11,.10)", border: "1.5px solid #d97706", borderRadius: 10, padding: "9px 12px" }}>
+                <b style={{ color: "#d97706" }}>🔑 로그인이 필요해요.</b> 내 글 목록은 <b>계정 관리에서 연결한 네이버 계정</b>으로 불러와요. 아래에서 계정을 고르면 비밀번호 재입력 없이 바로 불러와요.
+              </div>
+              {/* 계정 선택 */}
+              <div style={{ fontSize: 12, fontWeight: 800, color: C.sub, marginBottom: 6 }}>불러올 계정</div>
+              {accounts.length === 0 ? (
+                <div style={{ fontSize: 12.5, fontWeight: 700, color: "#dc2626", padding: "10px 12px", borderRadius: 10, background: "rgba(220,38,38,.06)", border: "1px solid rgba(220,38,38,.3)" }}>연결된 네이버 계정이 없어요 — <b>계정 관리</b>에서 먼저 계정을 연결해주세요.</div>
+              ) : (
+                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  {accounts.map((a) => { const on = popupAccountId === a.id; return (
+                    <button key={a.id} onClick={() => setPopupAccountId(a.id)} style={{ display: "flex", alignItems: "center", gap: 9, padding: "10px 12px", borderRadius: 10, background: on ? C.glow : C.panel2, border: `1.5px solid ${on ? C.accent : C.line}`, cursor: "pointer", fontFamily: "inherit", textAlign: "left" }}>
+                      <span style={{ width: 9, height: 9, borderRadius: "50%", background: on ? C.accent : C.line2, flexShrink: 0 }} />
+                      <span style={{ fontSize: 13.5, fontWeight: 800, color: on ? C.accent : C.ink }}>{on ? "✓ " : ""}{a.username}</span>
+                      {a.blog_name && <span style={{ fontSize: 11, color: C.sub, fontWeight: 600 }}>· {a.blog_name}</span>}
+                    </button>
+                  ); })}
+                </div>
+              )}
+              <button onClick={() => collectMyPosts(popupAccountId)} disabled={!popupAccountId || myPostsLoading} style={{ width: "100%", marginTop: 11, padding: "12px", borderRadius: 11, border: "none", background: (popupAccountId && !myPostsLoading) ? "linear-gradient(135deg,#f59e0b,#d97706)" : C.line2, color: "#fff", fontSize: 13.5, fontWeight: 900, cursor: (popupAccountId && !myPostsLoading) ? "pointer" : "default", fontFamily: "inherit" }}>{myPostsLoading ? "불러오는 중…" : "📚 내 글 불러오기"}</button>
+
+              {myPosts.length > 0 && (<div style={{ marginTop: 14, paddingTop: 12, borderTop: `1px solid ${C.line}` }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
+                  <button onClick={selectAllPosts} style={{ padding: "6px 12px", borderRadius: 8, border: `1.5px solid ${C.accent}`, background: C.glow, color: C.accent, fontSize: 12, fontWeight: 800, cursor: "pointer", fontFamily: "inherit" }}>✅ 전체 선택</button>
+                  <button onClick={clearSelectedPosts} style={{ padding: "6px 12px", borderRadius: 8, border: `1.5px solid ${C.line2}`, background: C.panel2, color: C.sub, fontSize: 12, fontWeight: 800, cursor: "pointer", fontFamily: "inherit" }}>◻️ 전체 해제</button>
+                  <span style={{ fontSize: 12, fontWeight: 800, color: C.ink }}>선택 {selectedPosts.size}/{myPosts.length}개</span>
+                </div>
+                <div style={{ maxHeight: 240, overflowY: "auto", display: "flex", flexDirection: "column", gap: 5 }}>
+                  {myPosts.map((p) => { const on = selectedPosts.has(p.url); return (
+                    <label key={p.url} style={{ display: "flex", alignItems: "center", gap: 9, padding: "8px 10px", borderRadius: 9, background: on ? C.glow : C.panel2, border: `1px solid ${on ? C.accent : C.line}`, cursor: "pointer" }}>
+                      <input type="checkbox" checked={on} onChange={() => togglePost(p.url)} style={{ width: 16, height: 16, accentColor: C.accent, flexShrink: 0 }} />
+                      <div style={{ minWidth: 0, flex: 1 }}>
+                        <div style={{ fontSize: 13, fontWeight: 700, color: C.ink, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{p.title || "(제목 없음)"}</div>
+                        {p.date && <div style={{ fontSize: 10.5, color: C.sub, fontWeight: 600 }}>{p.date}</div>}
+                      </div>
+                    </label>
+                  ); })}
+                </div>
+                <button onClick={applySelectedPostsAsTargets} disabled={!selectedPosts.size} style={{ width: "100%", marginTop: 10, padding: "12px", borderRadius: 11, border: "none", background: selectedPosts.size ? `linear-gradient(135deg,${C.accent},${C.cyan})` : C.line2, color: "#fff", fontSize: 13.5, fontWeight: 900, cursor: selectedPosts.size ? "pointer" : "default", fontFamily: "inherit" }}>🎯 선택한 {selectedPosts.size}개 글을 유입 대상으로</button>
+              </div>)}
+              <button onClick={() => setPostPopup(null)} style={{ width: "100%", marginTop: 8, padding: "10px", borderRadius: 11, border: `1.5px solid ${C.line2}`, background: C.panel2, color: C.sub, fontSize: 13, fontWeight: 800, cursor: "pointer", fontFamily: "inherit" }}>닫기</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ── 헤더 ── */}
       <div style={{ order: -2, display: "flex", alignItems: "center", gap: 12, marginBottom: 4, flexWrap: "wrap" }}>
         <span style={{ background: `linear-gradient(135deg,${C.accent},${C.cyan})`, color: "#fff", fontSize: 12, fontWeight: 900, padding: "5px 10px", borderRadius: 8, letterSpacing: 0.5 }}>NEW</span>
@@ -850,36 +935,30 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
             ? <div style={{ marginTop: 6, fontSize: 12.5, fontWeight: 700, color: "#16a34a" }}>✅ 인식됨 — 스토어 {parseStoreUrl(storeUrl)!.storeId || "?"}{parseStoreUrl(storeUrl)!.productId ? " / 상품 " + parseStoreUrl(storeUrl)!.productId : ""}</div>
             : <div style={{ marginTop: 6, fontSize: 12.5, fontWeight: 700, color: "#dc2626" }}>⚠️ 주소를 못 읽었어요 — smartstore.naver.com/스토어/products/상품번호 형태로 붙여넣어 주세요</div>)}
 
-          {/* 📚 내 블로그 글 수집 → 글별 트래픽(전체/부분/해제) — 블로그 대상일 때만 */}
+          {/* 📚 블로그 글 지정 유입 — 3가지 방법(주소만=랜덤 / 글주소 직접 / 로그인해서 내 글) 컬러 그룹 */}
           {targetType === "blog" && (
-            <div style={{ marginTop: 10, padding: 12, borderRadius: 12, background: C.panel2, border: `1.5px solid ${C.line2}` }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: myPosts.length ? 10 : 0 }}>
-                <span style={{ fontSize: 13, fontWeight: 900, color: C.ink }}>📚 내 블로그 글로 유입</span>
-                <span style={{ fontSize: 11, color: C.sub, fontWeight: 600 }}>계정 선택 후 내 글을 불러와 원하는 글에 트래픽을 걸어요</span>
-                <button onClick={collectMyPosts} disabled={myPostsLoading} style={{ marginLeft: "auto", padding: "8px 16px", borderRadius: 10, border: "none", background: `linear-gradient(135deg,${C.accent},${C.cyan})`, color: "#fff", fontSize: 13, fontWeight: 900, cursor: myPostsLoading ? "default" : "pointer", fontFamily: "inherit", opacity: myPostsLoading ? 0.6 : 1, whiteSpace: "nowrap" }}>{myPostsLoading ? "불러오는 중…" : "🔎 내 글 수집하기"}</button>
+            <div style={{ marginTop: 12, padding: 14, borderRadius: 16, background: "linear-gradient(135deg,rgba(16,133,107,.06),transparent)", border: "2px solid #16a34a" }}>
+              <div style={{ fontSize: 13.5, fontWeight: 900, color: "#16a34a", marginBottom: 4 }}>📚 어느 글에 트래픽을 넣을까요?</div>
+              <div style={{ fontSize: 12, fontWeight: 600, color: C.sub, lineHeight: 1.6, marginBottom: 11 }}>
+                • <b style={{ color: C.ink }}>위 주소만</b> 넣으면 → 그 블로그의 <b>여러 글에 랜덤</b>으로 방문해요 <span style={{ color: "#16a34a", fontWeight: 800 }}>(로그인 X)</span><br />
+                • <b style={{ color: C.ink }}>특정 글</b>만 노리려면 아래 두 방법으로 골라요 👇
               </div>
-              {myPosts.length > 0 && (<>
-                {/* 전체설정 / 해제 */}
-                <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
-                  <button onClick={selectAllPosts} style={{ padding: "6px 12px", borderRadius: 8, border: `1.5px solid ${C.accent}`, background: C.glow, color: C.accent, fontSize: 12, fontWeight: 800, cursor: "pointer", fontFamily: "inherit" }}>✅ 전체 설정</button>
-                  <button onClick={clearSelectedPosts} style={{ padding: "6px 12px", borderRadius: 8, border: `1.5px solid ${C.line2}`, background: C.panel, color: C.sub, fontSize: 12, fontWeight: 800, cursor: "pointer", fontFamily: "inherit" }}>◻️ 전체 해제</button>
-                  <span style={{ fontSize: 12, fontWeight: 800, color: C.ink }}>선택 {selectedPosts.size}/{myPosts.length}개</span>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <button onClick={() => setPostPopup("manual")} style={{ flex: 1, minWidth: 180, padding: "13px", borderRadius: 12, border: `2px solid ${C.accent}`, background: C.panel, cursor: "pointer", fontFamily: "inherit", textAlign: "left" }}>
+                  <div style={{ fontSize: 13.5, fontWeight: 900, color: C.accent }}>📝 글 주소 직접 넣기</div>
+                  <div style={{ fontSize: 11, fontWeight: 600, color: C.sub, marginTop: 2 }}>로그인 없이 · 글 링크를 붙여넣기</div>
+                </button>
+                <button onClick={() => setPostPopup("login")} style={{ flex: 1, minWidth: 180, padding: "13px", borderRadius: 12, border: `2px solid #d97706`, background: C.panel, cursor: "pointer", fontFamily: "inherit", textAlign: "left" }}>
+                  <div style={{ fontSize: 13.5, fontWeight: 900, color: "#d97706" }}>🔐 로그인해서 내 글 불러오기</div>
+                  <div style={{ fontSize: 11, fontWeight: 600, color: C.sub, marginTop: 2 }}>연결한 계정으로 · 내 글 목록에서 선택</div>
+                </button>
+              </div>
+              {pickedPostCount > 0 && (
+                <div style={{ marginTop: 10, padding: "9px 13px", borderRadius: 10, background: C.glow, border: `1.5px solid ${C.accent}`, fontSize: 12.5, fontWeight: 800, color: C.accent, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                  ✅ 지정된 글 <b>{pickedPostCount}개</b>에 유입 예정 — 아래 '유입 시작'을 누르세요
+                  <button onClick={() => { setExtraTargets([]); setPickedPostCount(0); toast("지정 글 해제 — 주소의 랜덤 글로 돌아갔어요", "info"); }} style={{ marginLeft: "auto", padding: "4px 10px", borderRadius: 7, border: `1px solid ${C.line2}`, background: C.panel, color: C.sub, fontSize: 11, fontWeight: 800, cursor: "pointer", fontFamily: "inherit" }}>해제</button>
                 </div>
-                {/* 글 목록(부분 설정=체크박스) */}
-                <div style={{ maxHeight: 220, overflowY: "auto", display: "flex", flexDirection: "column", gap: 5 }}>
-                  {myPosts.map((p) => { const on = selectedPosts.has(p.url); return (
-                    <label key={p.url} style={{ display: "flex", alignItems: "center", gap: 9, padding: "8px 10px", borderRadius: 9, background: on ? C.glow : C.panel, border: `1px solid ${on ? C.accent : C.line}`, cursor: "pointer" }}>
-                      <input type="checkbox" checked={on} onChange={() => togglePost(p.url)} style={{ width: 16, height: 16, accentColor: C.accent, flexShrink: 0 }} />
-                      <div style={{ minWidth: 0, flex: 1 }}>
-                        <div style={{ fontSize: 13, fontWeight: 700, color: C.ink, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{p.title || "(제목 없음)"}</div>
-                        {p.date && <div style={{ fontSize: 10.5, color: C.sub, fontWeight: 600 }}>{p.date}</div>}
-                      </div>
-                    </label>
-                  ); })}
-                </div>
-                <button onClick={applySelectedPostsAsTargets} style={{ width: "100%", marginTop: 9, padding: "11px", borderRadius: 10, border: "none", background: selectedPosts.size ? `linear-gradient(135deg,${C.accent},${C.cyan})` : C.line2, color: "#fff", fontSize: 13.5, fontWeight: 900, cursor: selectedPosts.size ? "pointer" : "default", fontFamily: "inherit" }}>🎯 선택한 {selectedPosts.size}개 글을 유입 대상으로 설정</button>
-                <div style={{ fontSize: 11, color: C.sub, fontWeight: 600, marginTop: 5 }}>설정하면 아래 <b>유입 시작</b>을 누를 때 이 글들을 번갈아 방문해요(로테이션).</div>
-              </>)}
+              )}
             </div>
           )}
 
@@ -1023,21 +1102,18 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
             <div style={{ fontSize: 12.5, fontWeight: 700, color: C.ink, lineHeight: 1.6 }}>
               {targetType === "place" ? (
                 <>
-                  <b style={{ color: "#d97706" }}>🔑 저장(💾)은 네이버 로그인이 필요해요.</b><br />
-                  저장은 <b>내 네이버 계정의 저장목록(MY플레이스)</b>에 넣는 기능이라, 로그인 없이는 저장할 데가 없어 안 돼요. <b>계정 관리</b>에서 계정을 연결하고, 유입 시작할 때 <b>그 계정을 선택</b>하면 저장까지 실행돼요.<br />
-                  <span style={{ color: C.sub }}>🧭 길찾기 · 📞 전화 · 📅 예약 · 💬 톡톡 · 🔗 공유는 로그인 없이 관심 신호를 줍니다.</span>
+                  <b style={{ color: "#16a34a" }}>✅ 로그인 없이 가능(주소만):</b> 검색→클릭→체류·스크롤(방문 트래픽) · 🧭 길찾기 · 📞 전화 · 📅 예약 · 💬 톡톡 · 🔗 공유. <b>여기까지가 순위에 강한 방문·관심 신호</b>라 계정 없이도 순위를 올릴 수 있어요.<br />
+                  <b style={{ color: "#d97706" }}>🔑 로그인 필요(저장 💾만):</b> 저장은 <b>내 네이버 계정의 저장목록(MY플레이스)</b>에 넣는 거라 로그인이 꼭 필요해요. 저장까지 원하면 <b>계정 관리</b>에서 계정 연결 후 유입 시작 때 <b>그 계정을 선택</b>하세요. (저장 안 켜면 계정 없이 진행)
                 </>
               ) : targetType === "store" ? (
                 <>
-                  <b style={{ color: "#d97706" }}>🔑 찜(💚) · 장바구니(🛒)는 네이버 로그인이 필요해요.</b><br />
-                  찜·장바구니는 <b>내 네이버 계정</b>에 담는 기능이라, 로그인이 안 돼 있으면 로그인 페이지로 튕겨서 건너뛰어요. <b>계정 관리</b>에서 계정을 연결하고, 유입 시작할 때 <b>그 계정을 선택</b>하면 찜·장바구니까지 실행돼요.<br />
-                  <span style={{ color: C.sub }}>🔍 옵션·상세 탐색 · 🔗 공유는 로그인 없이 관심 신호를 줍니다. 상품 상세 체류·옵션 탐색은 쇼핑 순위에 도움돼요.</span>
+                  <b style={{ color: "#16a34a" }}>✅ 로그인 없이 가능(상품 주소만):</b> 쇼핑 검색→클릭→상품 상세 체류·스크롤 · 🔍 옵션·상세 탐색 · 🔗 공유. <b>여기까지가 쇼핑 순위에 도움되는 방문·관심 신호</b>라 계정 없이도 순위 작업이 돼요.<br />
+                  <b style={{ color: "#d97706" }}>🔑 로그인 필요(찜 💚·장바구니 🛒):</b> 찜·장바구니는 <b>내 네이버 계정</b>에 담는 거라 로그인이 필요해요. 원하면 <b>계정 관리</b>에서 계정 연결 후 <b>그 계정을 선택</b>하세요. (안 켜면 계정 없이 진행)
                 </>
               ) : (
                 <>
-                  <b style={{ color: "#d97706" }}>🔑 공감(💚)은 네이버 로그인이 필요해요.</b><br />
-                  블로그 공감(좋아요)은 <b>내 네이버 계정으로 누르는 것</b>이라, 로그인이 안 돼 있으면 공감 창이 로그인 페이지로 튕겨서 건너뛰어요. <b>계정 관리</b>에서 계정을 연결하고, 유입 시작할 때 <b>그 계정을 선택</b>하면 공감까지 실행돼요.<br />
-                  <span style={{ color: C.sub }}>🔗 공유는 로그인 없이 됩니다. 글 전체를 읽는 체류·다른 글 둘러보기(풀퍼널)도 블로그 지수에 도움돼요.</span>
+                  <b style={{ color: "#16a34a" }}>✅ 로그인 없이 가능(글 주소·아이디만):</b> 검색→클릭→글 전체 읽기 체류·다른 글 둘러보기(풀퍼널) · 🔗 공유 · <b>📚 내 글 수집</b>도 로그인 없이 아이디만으로 돼요. <b>여기까지가 블로그 지수·순위에 도움되는 신호</b>예요.<br />
+                  <b style={{ color: "#d97706" }}>🔑 로그인 필요(공감 💚만):</b> 공감(좋아요)은 <b>내 네이버 계정으로 누르는 것</b>이라 로그인이 필요해요. 원하면 <b>계정 관리</b>에서 계정 연결 후 <b>그 계정을 선택</b>하세요. (공감 안 켜면 계정 없이 진행)
                 </>
               )}
             </div>

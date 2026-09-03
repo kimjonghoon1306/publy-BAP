@@ -3717,6 +3717,39 @@ export async function crawlBlogStats(params: {
 
 /* ── 답방 ①: 내 블로그 글 목록 불러오기 ──
    세션에 저장된 내 blogId로 최근 글을 수집. selectMode=count(최근 N개)/period(최근 N일)/all(전체). */
+// 🌐 로그인 없이 블로그 아이디만으로 공개 글 목록 수집(PostTitleListAsync 공개 API).
+//   내 글이든 남의 글이든 공개 글이면 아이디만으로 가져온다(계정 로그인 불필요·빠름).
+export async function crawlPublicPosts(params: {
+  blogId: string;
+  count?: number;
+  onLog?: (msg: string) => void;
+}): Promise<{ url: string; title: string; date: string }[]> {
+  const { blogId, onLog } = params;
+  const log = onLog || console.log;
+  const want = Math.max(1, params.count || 30);
+  const out: { url: string; title: string; date: string }[] = [];
+  log(`🌐 "${blogId}" 공개 글 목록 불러오는 중…(로그인 불필요)`);
+  try {
+    for (let page = 1; page <= 10 && out.length < want; page++) {
+      const url = `https://blog.naver.com/PostTitleListAsync.naver?blogId=${encodeURIComponent(blogId)}&viewdate=&currentPage=${page}&categoryNo=0&countPerPage=30`;
+      const r = await fetch(url, { headers: { "User-Agent": INFLOW_MOBILE_UA, "Referer": `https://blog.naver.com/${blogId}` } });
+      const raw = await r.text();
+      let data: any; try { data = JSON.parse(raw.replace(/^\)\]\}',?\s*/, "")); } catch { break; }
+      const list: any[] = data?.postList || [];
+      if (!list.length) break;
+      for (const p of list) {
+        const logNo = String(p.logNo || "").trim(); if (!logNo) continue;
+        let title = String(p.title || "").trim();
+        try { title = decodeURIComponent(title.replace(/\+/g, " ")); } catch {}
+        out.push({ url: `https://blog.naver.com/${blogId}/${logNo}`, title: title || "(제목 없음)", date: String(p.addDate || "") });
+        if (out.length >= want) break;
+      }
+    }
+    log(`🌐 공개 글 ${out.length}개 수집 완료`);
+  } catch (e: any) { log(`⚠️ 공개 글 수집 실패: ${e?.message || e}`); }
+  return out;
+}
+
 export async function crawlMyPosts(params: {
   accountId: string;
   selectMode: "count" | "all" | "period";

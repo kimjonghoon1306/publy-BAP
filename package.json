@@ -1,6 +1,6 @@
 {
   "name": "publy",
-  "version": "2.10.90",
+  "version": "2.10.91",
   "description": "Publy - 네이버/티스토리 자동발행 앱",
   "main": "dist-electron/main.js",
   "scripts": {
