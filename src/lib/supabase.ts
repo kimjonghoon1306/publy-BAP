@@ -783,8 +783,7 @@ export async function saveAutopilot(cfg: AutopilotConfig): Promise<void> {
   if (error) throw new Error(`오토파일럿 저장 실패: ${error.message}`);
 }
 /* 🎯 대상(매장/블로그/상품)별 데이터 분리용 scope 키.
-   scope가 있으면 대상별로 순위·유입·리포트를 완전히 분리 저장한다.
-   A(이어보기): 대상별 데이터가 없는 과거 날짜는 legacy(scope 없는) 값으로 이어서 보여준다. */
+   scope가 있으면 대상별로 순위·유입·리포트를 완전히 분리 저장한다. */
 export function inflowScope(targetType: string, ref: string): string {
   const r = String(ref || "").replace(/[^A-Za-z0-9_-]/g, "").slice(0, 40);
   if (!r) return "";
@@ -792,6 +791,37 @@ export function inflowScope(targetType: string, ref: string): string {
   if (targetType === "blog") return `b_${r}`;
   if (targetType === "store") return `s_${r}`;
   return "";
+}
+/* 🔁 1회성 마이그레이션 — 예전(대상 구분 없이 저장된) 과거 유입·순위 기록을 현재 대상 scope로 이관.
+   대상별 격리 도입 전 데이터가 화면에서 사라지지 않게(=업데이트해도 기록 유지). userId당 1회만 실행.
+   보통 사용자는 대상 1개(플레이스)만 썼으므로 그 첫 대상에 과거 기록을 귀속한다. */
+export async function migrateLegacyInflowToScope(userId: string, scope: string, days = 120): Promise<void> {
+  if (!userId || !scope) return;
+  const marker = `inflow_legacy_migrated_${userId}`;
+  try {
+    const { data: m } = await supabase.from("publy_settings").select("value").eq("key", marker).maybeSingle();
+    if (m?.value) return; // 이미 이관함
+    const now = Date.now();
+    const pairs: { legacy: string; scoped: string }[] = [];
+    for (let i = 0; i < days; i++) {
+      const ymd = koreaDateKey(new Date(now - i * 86400000));
+      pairs.push({ legacy: `inflow_daily_${userId}_${ymd}`, scoped: `inflow_stat_${userId}_${scope}_${ymd}` });
+      pairs.push({ legacy: `inflow_rank_${userId}_${ymd}`, scoped: `inflow_rank_${userId}_${scope}_${ymd}` });
+    }
+    const legacyKeys = pairs.map(p => p.legacy);
+    const scopedKeys = pairs.map(p => p.scoped);
+    const [{ data: legacyRows }, { data: scopedRows }] = await Promise.all([
+      supabase.from("publy_settings").select("key,value").in("key", legacyKeys),
+      supabase.from("publy_settings").select("key").in("key", scopedKeys),
+    ]);
+    const legacyMap = new Map((legacyRows || []).map((r: any) => [r.key, r.value]));
+    const already = new Set((scopedRows || []).map((r: any) => r.key));
+    const ups = pairs
+      .filter(p => legacyMap.has(p.legacy) && !already.has(p.scoped)) // 이미 대상별 값 있으면 안 덮음
+      .map(p => ({ key: p.scoped, value: String(legacyMap.get(p.legacy)) }));
+    if (ups.length) await supabase.from("publy_settings").upsert(ups, { onConflict: "key" });
+    await supabase.from("publy_settings").upsert({ key: marker, value: `1:${scope}` }, { onConflict: "key" });
+  } catch { /* 마이그레이션 실패는 조용히 — 다음 로드에서 재시도 */ }
 }
 // 순위 이력(그래프용) — publy_settings key-value 재사용. 하루 1값(최신 덮어씀).
 export async function recordRankPoint(userId: string, rank: number, scope = ""): Promise<void> {

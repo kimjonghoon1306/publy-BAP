@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from "react";
 import { BotEventStream, botFetch } from "../lib/botApi";
 import UsageGuide from "./UsageGuide";
 import SproutAssistant from "./SproutAssistant";
-import { INFLOW_DAILY_LIMIT, PLAN_CONFIG, getInflowDailyUsage, getInflowUsageHistory, getAccounts, PublyAccount, getAutopilot, saveAutopilot, getRankHistory, AutopilotConfig, getInflowSchedule, saveInflowSchedule, inflowScheduleRanToday, markInflowScheduleRan, getPerfReport, PerfReport, recordRankPoint, getMemberSessionToken, getAdminSessionToken, getInflowTargets, saveInflowTargets, inflowScope, getInflowStatToday } from "../lib/supabase";
+import { INFLOW_DAILY_LIMIT, PLAN_CONFIG, getInflowDailyUsage, getInflowUsageHistory, getAccounts, PublyAccount, getAutopilot, saveAutopilot, getRankHistory, AutopilotConfig, getInflowSchedule, saveInflowSchedule, inflowScheduleRanToday, markInflowScheduleRan, getPerfReport, PerfReport, recordRankPoint, getMemberSessionToken, getAdminSessionToken, getInflowTargets, saveInflowTargets, inflowScope, getInflowStatToday, migrateLegacyInflowToScope } from "../lib/supabase";
 
 const BOT = "http://127.0.0.1:3334"; // neighbor-bot
 
@@ -258,6 +258,14 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
     } catch {}
     return "";
   })();
+  // 🔁 대상별 격리 도입 전 과거 기록을 최초 1회 현재 대상으로 이관(업데이트해도 기록 유지)
+  const legacyMigratedRef = useRef(false);
+  useEffect(() => {
+    if (!userId || !currentScope || legacyMigratedRef.current) return;
+    legacyMigratedRef.current = true;
+    migrateLegacyInflowToScope(userId, currentScope).then(() => refreshStats()).catch(() => {});
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userId, currentScope]);
   const refreshStats = () => {
     if (!userId) return;
     getInflowDailyUsage(userId).then(setUsed).catch(() => {});                    // 전체 한도 사용량
@@ -280,7 +288,10 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
       skipPrivateSaveRef.current = true;
       const scopedPrivate = JSON.parse(localStorage.getItem(privateKey) || "null");
       const legacyForm = JSON.parse(localStorage.getItem("publy_inflow_form") || "{}");
-      const nextPrivate = scopedPrivate || { placeUrl: legacyForm.placeUrl || "", blogUrl: legacyForm.blogUrl || "", storeUrl: legacyForm.storeUrl || "", extraByType: { place: legacyForm.extraTargets || [], blog: [], store: [] } };
+      // 구형 extraTargets는 그 당시 대상 타입(saved0.targetType)에 귀속(무조건 place로 넣지 않게)
+      const legacySeedType: "place" | "blog" | "store" = saved0.targetType === "blog" ? "blog" : saved0.targetType === "store" ? "store" : "place";
+      const legacyExtra: string[] = legacyForm.extraTargets || [];
+      const nextPrivate = scopedPrivate || { placeUrl: legacyForm.placeUrl || "", blogUrl: legacyForm.blogUrl || "", storeUrl: legacyForm.storeUrl || "", extraByType: { place: legacySeedType === "place" ? legacyExtra : [], blog: legacySeedType === "blog" ? legacyExtra : [], store: legacySeedType === "store" ? legacyExtra : [] } };
       localStorage.setItem(privateKey, JSON.stringify(nextPrivate));
       setPlaceUrl(nextPrivate.placeUrl || ""); setBlogUrl(nextPrivate.blogUrl || ""); setStoreUrl(nextPrivate.storeUrl || "");
       // 구형(extraTargets 단일)·신형(extraByType) 모두 대응해 대상별로 복원
@@ -356,7 +367,8 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
   const applyPostsAsTargets = (urls: string[]) => {
     const clean = urls.map((u) => u.trim()).filter(Boolean);
     if (!clean.length) { toast("먼저 유입할 글을 선택하세요", "error"); return; }
-    setTargetType("blog"); setBlogUrl(clean[0]); setExtraTargets(clean.slice(1)); setPickedPostCount(clean.length);
+    // 블로그 글 지정이므로 blog 버킷에 명시적으로 넣는다(setExtraTargets는 현재 렌더 targetType 클로저를 써서 오분류될 수 있음)
+    setTargetType("blog"); setBlogUrl(clean[0]); setExtraByType((prev) => ({ ...prev, blog: clean.slice(1) })); setPickedPostCount(clean.length);
     toast(`✅ ${clean.length}개 글이 유입 대상으로 설정됐어요 — '유입 시작'을 누르세요`, "success");
     setPostPopup(null);
   };

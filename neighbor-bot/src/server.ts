@@ -1193,8 +1193,11 @@ app.post("/api/inflow", async (req, res) => {
     const unlimited = plan === "admin" || plan === "unlimited";
 
     // 🎯 대상별 통계 scope(프론트 inflowScope와 동일 규칙) — 대상마다 유입·순위·리포트 분리 저장
-    const scopeRef = target.type === "place" ? target.placeId : target.type === "blog" ? target.blogId : ((target as any).productId || (target as any).storeId || "");
-    const statScope = scopeRef ? `${target.type === "place" ? "p" : target.type === "blog" ? "b" : "s"}_${String(scopeRef).replace(/[^A-Za-z0-9_-]/g, "").slice(0, 40)}` : "";
+    const scopeOf = (t: InflowTarget): string => {
+      const ref = t.type === "place" ? t.placeId : t.type === "blog" ? t.blogId : ((t as any).productId || (t as any).storeId || "");
+      return ref ? `${t.type === "place" ? "p" : t.type === "blog" ? "b" : "s"}_${String(ref).replace(/[^A-Za-z0-9_-]/g, "").slice(0, 40)}` : "";
+    };
+    const statScope = scopeOf(target);
 
     let stopped = false;
     res.on("close", () => { stopped = true; });
@@ -1237,7 +1240,7 @@ app.post("/api/inflow", async (req, res) => {
         sseSend(res, { type: "quota_info", used: q.used, limit: q.limit, remaining: Math.max(0, q.limit - q.used) });
         return q.ok;
       },
-      onSuccess: async () => { if (userId) await incrementInflowStat(userId, statScope).catch(() => {}); },  // ✅ 실제 성공한 유입만 대상별 통계에 반영
+      onSuccess: async (t) => { if (userId) await incrementInflowStat(userId, scopeOf(t) || statScope).catch(() => {}); },  // ✅ 성공한 그 대상(다중 로테이션 시 각 대상)별 통계에 반영
     });
     sseSend(res, { type: "inflow_done", ...result });
   } catch (e: any) {
