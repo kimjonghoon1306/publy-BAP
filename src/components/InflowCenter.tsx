@@ -164,6 +164,8 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
   const [intensity, setIntensity] = useState<"fast" | "normal" | "deep">(saved0.intensity ?? "normal"); // 📖 체류 강도
   const [maxDwellSec, setMaxDwellSec] = useState<number>(saved0.maxDwellSec ?? 0); // 0=강도 사용, >0=직접지정 확정값
   const [dwellDraft, setDwellDraft] = useState<string>(String(saved0.maxDwellSec ?? 30)); // 직접지정 입력 임시값(설정 버튼 눌러야 확정)
+  const [dataSaver, setDataSaver] = useState<"normal" | "save" | "max">(saved0.dataSaver ?? "save"); // 💾 데이터(프록시) 절약 모드
+  const [dataSaverInfo, setDataSaverInfo] = useState(false); // ⓘ 설명 팝업
   // ➕ 추가 대상(주소 목록) — 대상(플레이스/블로그/스토어)별로 격리(서로 섞이지 않게)
   const [extraByType, setExtraByType] = useState<{ place: string[]; blog: string[]; store: string[] }>(() => {
     const legacy = private0.extraTargets ?? saved0.extraTargets ?? [];
@@ -263,8 +265,8 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
   const legacyMigratedRef = useRef(false);
   useEffect(() => {
     if (!userId || !currentScope || legacyMigratedRef.current) return;
-    // 성공했을 때만 ref를 세워 실패 시(조회 오류 등) 다음 로드에서 재시도되게 한다(마커로 멱등이라 중복 안전)
-    migrateLegacyInflowToScope(userId, currentScope).then(() => { legacyMigratedRef.current = true; refreshStats(); }).catch(() => {});
+    // 성공(true)했을 때만 ref를 세워 실패 시(조회/저장 오류) 다음 로드에서 재시도되게 한다(마커로 멱등이라 중복 안전)
+    migrateLegacyInflowToScope(userId, currentScope).then((ok) => { if (ok) { legacyMigratedRef.current = true; refreshStats(); } }).catch(() => {});
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userId, currentScope]);
   const refreshStats = () => {
@@ -627,12 +629,12 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
     try {
       localStorage.setItem(formKey, JSON.stringify({
         targetType, keywordsPlace, keywordsBlog, keywordsStore, rounds, termMin, termMax, device,
-        doSave, doShare, doDir, doCall, doBook, doTalk, doLike, doWish, doCart, doOption, funnel, spread, spreadHours, doReview, reviewText, auto, actionRate, intensity, maxDwellSec, kwWeights,
+        doSave, doShare, doDir, doCall, doBook, doTalk, doLike, doWish, doCart, doOption, funnel, spread, spreadHours, doReview, reviewText, auto, actionRate, intensity, maxDwellSec, dataSaver, kwWeights,
       }));
       // 추가대상은 대상별 전체(extraByType)를 저장해야 다른 탭 것이 안 사라진다
       localStorage.setItem(privateKey, JSON.stringify({ placeUrl, blogUrl, storeUrl, extraByType }));
     } catch {}
-  }, [formKey, privateKey, targetType, placeUrl, blogUrl, storeUrl, keywordsPlace, keywordsBlog, keywordsStore, rounds, termMin, termMax, device, doSave, doShare, doDir, doCall, doBook, doTalk, doLike, doWish, doCart, doOption, funnel, spread, spreadHours, doReview, reviewText, auto, actionRate, intensity, maxDwellSec, extraByType, kwWeights]);
+  }, [formKey, privateKey, targetType, placeUrl, blogUrl, storeUrl, keywordsPlace, keywordsBlog, keywordsStore, rounds, termMin, termMax, device, doSave, doShare, doDir, doCall, doBook, doTalk, doLike, doWish, doCart, doOption, funnel, spread, spreadHours, doReview, reviewText, auto, actionRate, intensity, maxDwellSec, dataSaver, extraByType, kwWeights]);
 
   // 🔔 앱 내 자동 알림 — 날짜/주차 마커로 중복을 막고, 다음 실행 때 놓친 알림도 알림함에 쌓는다.
   useEffect(() => {
@@ -742,6 +744,7 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
       actionRate: String(Math.max(0, Math.min(1, actionRate / 100))),
       dwellBaseSec: intensity === "fast" ? "20" : intensity === "deep" ? "180" : "60",
       dwellCustomSec: String(Math.max(0, maxDwellSec)),
+      dataSaver,
     });
     if (userId) params.set("userId", userId);
     // 🔄 다계정 로테이션 — 선택된 계정들을 저장·찜·공감에 번갈아. 첫 계정을 기본 accountId로.
@@ -780,6 +783,7 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
     else if (acctList.length === 1) pushLog(`👤 로그인 계정 1개 사용 (저장·찜·공감)`);
     pushLog(`⏳ 방문 텀: ${termMin}~${termMax}초 랜덤${spread ? ` · ${spreadHours}시간 분산` : ""}  ·  🎲 액션확률 ${actionRate}%`);
     pushLog(`⏱️ 예상 방문시간: 약 ${totalSec}초 (체류 ${dwellSec}초 + 행동 ${actionSec}초)`);
+    pushLog(`💾 데이터 사용: ${dataSaver === "normal" ? "일반(다 받음 · 가장 자연스러움)" : dataSaver === "save" ? "절약(영상·광고·폰트 차단 · GB 40~50%↓)" : "초절약(이미지까지 차단 · GB 80~90%↓)"}`);
     if (funnel) pushLog(`🌀 풀퍼널 모드 ON — 여러 글·탭까지 둘러봐요`);
     if (auto) pushLog(`⚙️ 자동 모드 — 오늘 한도까지 실행`);
     if (apEnabled) pushLog(`🎯 오토파일럿 ON — "${apKeyword}" ${apGoal}위 목표`);
@@ -871,6 +875,38 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
         .inflow-result { animation: inflowResultIn .32s ease-out both; }
         @media (prefers-reduced-motion: reduce) { .inflow-card, .inflow-result { transition: none; animation: none; } }
       `}</style>
+
+      {/* ═══ 💾 데이터(프록시) 사용 설명 팝업 ═══ */}
+      {dataSaverInfo && (
+        <div onClick={() => setDataSaverInfo(false)} style={{ position: "fixed", inset: 0, zIndex: 10000, background: "rgba(0,0,0,.6)", display: "flex", alignItems: "center", justifyContent: "center", padding: 18 }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: 500, maxHeight: "88vh", overflowY: "auto", background: C.panel, borderRadius: 18, border: `2px solid ${C.accent}`, boxShadow: "0 24px 60px rgba(0,0,0,.45)" }}>
+            <div style={{ padding: "16px 18px", background: `linear-gradient(135deg,${C.accent},${C.cyan})`, color: "#fff" }}>
+              <div style={{ fontSize: 16, fontWeight: 900 }}>💾 데이터(프록시)는 이렇게 써요</div>
+              <div style={{ fontSize: 12, fontWeight: 600, opacity: .92, marginTop: 2 }}>프록시는 GB(데이터)를 쓸수록 비용이 나가요. 3가지 모드로 아낄 수 있어요.</div>
+            </div>
+            <div style={{ padding: 18, fontSize: 13, lineHeight: 1.7, color: C.ink }}>
+              <div style={{ background: C.panel2, border: `1px solid ${C.line}`, borderRadius: 10, padding: "10px 13px", marginBottom: 12, fontWeight: 600, color: C.sub }}>
+                방문 1번마다 네이버 페이지를 <b style={{ color: C.ink }}>프록시(다른 IP)</b>로 열어요. 이때 사진·영상·광고까지 다 받으면 <b style={{ color: C.ink }}>데이터(GB)</b>를 많이 써요. 안 받아도 <b style={{ color: "#16a34a" }}>클릭·체류·저장·순위 신호는 그대로</b> 작동해요(버튼은 글자·구조로 있으니까요).
+              </div>
+              {[
+                { t: "🟢 일반", d: "사진·영상·광고 다 받음. 진짜 사람과 가장 똑같아 제일 자연스러워요.", g: "방문당 약 5MB · 50GB로 약 1만 방문", c: C.ink },
+                { t: "💾 절약 (추천)", d: "영상·광고·폰트만 차단. 사진은 그대로 받아서 자연스러움 유지. 순위 신호 100%.", g: "방문당 약 2.5MB · 50GB로 약 2만 방문 (데이터 반절↓)", c: C.accent },
+                { t: "🔋 초절약", d: "사진까지 차단. 데이터 최대 절약. 기능은 100% 정상이나, 이미지를 안 받는 게 아주 미세하게 덜 자연스러울 수 있어요(실사용엔 거의 영향 없음).", g: "방문당 약 0.5~1MB · 50GB로 약 5만~10만 방문 (데이터 1/10)", c: "#d97706" },
+              ].map((m) => (
+                <div key={m.t} style={{ marginBottom: 12, padding: "11px 13px", borderRadius: 12, border: `1.5px solid ${m.c === C.ink ? C.line2 : m.c}`, background: C.panel2 }}>
+                  <div style={{ fontSize: 14, fontWeight: 900, color: m.c === C.ink ? C.ink : m.c }}>{m.t}</div>
+                  <div style={{ fontSize: 12.5, fontWeight: 600, color: C.sub, marginTop: 3 }}>{m.d}</div>
+                  {unlimited && <div style={{ fontSize: 12, fontWeight: 800, color: m.c === C.ink ? C.sub : m.c, marginTop: 5 }}>📊 {m.g}</div>}
+                </div>
+              ))}
+              <div style={{ fontSize: 12, fontWeight: 700, color: C.sub, lineHeight: 1.6, background: "rgba(16,133,107,.06)", border: "1px solid #16a34a", borderRadius: 10, padding: "10px 13px" }}>
+                🔒 <b style={{ color: "#16a34a" }}>어느 모드든 기능은 안전해요.</b> 저장·찜·길찾기·체류 같은 순위 신호는 다 유지돼요. CSS·화면 구조는 절대 막지 않아서 버튼을 못 찾는 일도 없어요.
+              </div>
+              <button onClick={() => setDataSaverInfo(false)} style={{ width: "100%", marginTop: 14, padding: "12px", borderRadius: 11, border: "none", background: `linear-gradient(135deg,${C.accent},${C.cyan})`, color: "#fff", fontSize: 14, fontWeight: 900, cursor: "pointer", fontFamily: "inherit" }}>이해했어요 · 닫기</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ═══ 📝 팝업 A — 글 주소 직접 넣기(로그인 불필요) ═══ */}
       {postPopup === "manual" && (
@@ -1131,6 +1167,30 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
             {([["mobile", "📱 모바일"], ["pc", "🖥️ PC"], ["mix", "🔀 혼합(랜덤)"]] as const).map(([k, lb]) => (
               <button key={k} onClick={() => { setDevice(k); toast(`📶 접속패턴 '${lb}' 선택됨`, "success"); }} style={{ flex: 1, padding: "11px", borderRadius: 12, border: `2px solid ${device === k ? C.accent : C.line2}`, background: device === k ? C.glow : C.panel2, color: device === k ? C.accent : C.sub, fontSize: 14, fontWeight: 800, cursor: "pointer", fontFamily: "inherit" }}>{device === k ? "✓ " : ""}{lb}</button>
             ))}
+          </div>
+        </div>
+
+        {/* 💾 데이터(프록시) 사용 모드 — 플레이스·블로그·스마트스토어 공통 */}
+        <div>
+          <label style={{ ...labelStyle, display: "flex", alignItems: "center", gap: 7 }}>
+            💾 데이터(프록시) 사용
+            <span style={{ color: C.sub, fontWeight: 600 }}>— 프록시 GB를 얼마나 아낄지</span>
+            <button onClick={() => setDataSaverInfo(true)} title="이 기능이 프록시를 어떻게 쓰는지" style={{ width: 20, height: 20, borderRadius: "50%", border: `1.5px solid ${C.accent}`, background: C.panel2, color: C.accent, fontSize: 12, fontWeight: 900, cursor: "pointer", fontFamily: "inherit", lineHeight: 1, flexShrink: 0 }}>ⓘ</button>
+          </label>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+            {([["normal", "🟢 일반", "다 받음 · 가장 자연스러움", "약 1만 회"], ["save", "💾 절약", "영상·광고·폰트 차단 · GB 반절", "약 2만 회"], ["max", "🔋 초절약", "이미지까지 차단 · GB 1/10", "약 7만 회"]] as const).map(([k, lb, desc, cnt]) => {
+              const on = dataSaver === k;
+              return (
+                <button key={k} onClick={() => { setDataSaver(k); toast(`💾 데이터 '${lb.replace(/^[^ ]+ /, "")}' 모드 선택됨`, "success"); }} style={{ flex: "1 1 150px", minWidth: 140, padding: "11px", borderRadius: 10, border: `2px solid ${on ? C.accent : C.line2}`, background: on ? C.glow : C.panel2, cursor: "pointer", fontFamily: "inherit", textAlign: "left" }}>
+                  <div style={{ fontSize: 13.5, fontWeight: 900, color: on ? C.accent : C.ink }}>{on ? "✓ " : ""}{lb}</div>
+                  <div style={{ fontSize: 10.5, fontWeight: 600, color: C.sub, marginTop: 1 }}>{desc}</div>
+                  {unlimited && <div style={{ fontSize: 10.5, fontWeight: 800, color: on ? C.accent : C.cyan, marginTop: 3 }}>📊 50GB로 {cnt}</div>}
+                </button>
+              );
+            })}
+          </div>
+          <div style={{ fontSize: 11, color: C.sub, fontWeight: 600, marginTop: 4 }}>
+            💡 <b style={{ color: C.ink }}>절약</b> 추천 — 순위 신호(클릭·체류·저장)는 100% 유지하면서 프록시 데이터를 아껴요. ⓘ를 눌러 자세히 보세요.
           </div>
         </div>
 

@@ -5665,6 +5665,7 @@ export async function searchInflow(params: {
   rounds: number;                  // 이번 실행 방문 횟수(한도 내)
   dwellBaseSec?: number;           // 체류 강도별 기준시간(초): 빠르게20/보통60/꼼꼼히180
   dwellCustomSec?: number;         // 직접지정 체류시간(초). 0이면 강도 기준시간 사용(3분↑ 자유)
+  dataSaver?: "normal" | "save" | "max"; // 💾 데이터 절약: normal=다받음/save=영상·광고·폰트차단/max=이미지까지
   actionRate?: number;             // 액션 발동 확률(0~1). 1=매번
   device?: "mobile" | "pc" | "mix"; // 접속 기기(기본 모바일, mix=방문마다 랜덤)
   intervalSec?: [number, number];  // 방문 사이 텀(사용자 임의 지정, 랜덤)
@@ -5748,6 +5749,24 @@ export async function searchInflow(params: {
           : { userAgent: INFLOW_MOBILE_UA, viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, deviceScaleFactor: 3, locale: "ko-KR" }
       );
       await context.addInitScript(ANTI_DETECTION_SCRIPT);   // 🥷 봇 감지 회피(쇼핑·플레이스 안정성↑)
+      // 💾 데이터 절약 — 프록시(GB) 아끼기. normal=다 받음 / save=영상·광고·폰트 차단 / max=이미지까지 차단.
+      //    CSS·JS는 절대 안 막는다(막으면 버튼을 못 찾아 기능이 깨짐). 순위 신호(클릭·체류·저장)는 그대로 유지.
+      const dataSaver = params.dataSaver || "normal";
+      if (dataSaver !== "normal") {
+        const AD_HOSTS = /doubleclick|googlesyndication|google-analytics|googletagmanager|adservice|criteo|taboola|scorecardresearch|facebook\.net|analytics|adsystem|ad\.naver|adcr\.naver|wcs\.naver|siape\.veta/i;
+        await context.route("**/*", (route: any) => {
+          try {
+            const req = route.request();
+            const type = req.resourceType();
+            const url = req.url();
+            if (AD_HOSTS.test(url)) return route.abort();               // 광고·트래킹(둘 다 차단)
+            if (type === "media" || type === "font") return route.abort(); // 영상·폰트(둘 다 차단)
+            if (dataSaver === "max" && type === "image") return route.abort(); // 초절약만 이미지 차단
+            return route.continue();
+          } catch { try { return route.continue(); } catch { return; } }
+        });
+        log(`  💾 데이터 절약 모드: ${dataSaver === "max" ? "초절약(이미지까지 차단)" : "절약(영상·광고·폰트 차단)"} — 프록시 GB 아껴요`);
+      }
       const cookies = await getCookiesFor(acct);   // 🔄 이 방문 계정의 로그인 쿠키(다계정이면 계정별)
       if (cookies) await context.addCookies(cookies).catch(() => {});
       const page = await context.newPage();

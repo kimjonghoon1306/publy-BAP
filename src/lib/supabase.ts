@@ -814,12 +814,14 @@ export function inflowScope(targetType: string, ref: string): string {
 /* 🔁 1회성 마이그레이션 — 예전(대상 구분 없이 저장된) 과거 유입·순위 기록을 현재 대상 scope로 이관.
    대상별 격리 도입 전 데이터가 화면에서 사라지지 않게(=업데이트해도 기록 유지). userId당 1회만 실행.
    보통 사용자는 대상 1개(플레이스)만 썼으므로 그 첫 대상에 과거 기록을 귀속한다. */
-export async function migrateLegacyInflowToScope(userId: string, scope: string, days = 120): Promise<void> {
-  if (!userId || !scope) return;
+// 반환값: true=이관 완료(또는 이미 완료), false=조회/저장 실패로 다음에 재시도 필요.
+export async function migrateLegacyInflowToScope(userId: string, scope: string, days = 120): Promise<boolean> {
+  if (!userId || !scope) return false;
   const marker = `inflow_legacy_migrated_${userId}`;
   try {
-    const { data: m } = await supabase.from("publy_settings").select("value").eq("key", marker).maybeSingle();
-    if (m?.value) return; // 이미 이관함
+    const { data: m, error: em } = await supabase.from("publy_settings").select("value").eq("key", marker).maybeSingle();
+    if (em) return false;  // 마커 조회 실패 → 재시도
+    if (m?.value) return true; // 이미 이관함
     const now = Date.now();
     const pairs: { legacy: string; scoped: string }[] = [];
     for (let i = 0; i < days; i++) {
@@ -833,7 +835,7 @@ export async function migrateLegacyInflowToScope(userId: string, scope: string, 
       supabase.from("publy_settings").select("key,value").in("key", legacyKeys),
       supabase.from("publy_settings").select("key").in("key", scopedKeys),
     ]);
-    if (e1 || e2) return; // 조회 실패 → 마커 안 남김(빈 결과를 '이관 완료'로 오판하지 않게, 다음 로드 재시도)
+    if (e1 || e2) return false; // 조회 실패 → 마커 안 남김(빈 결과를 '이관 완료'로 오판하지 않게, 다음 로드 재시도)
     const legacyMap = new Map((legacyRows || []).map((r: any) => [r.key, r.value]));
     const already = new Set((scopedRows || []).map((r: any) => r.key));
     const ups = pairs
@@ -841,10 +843,11 @@ export async function migrateLegacyInflowToScope(userId: string, scope: string, 
       .map(p => ({ key: p.scoped, value: String(legacyMap.get(p.legacy)) }));
     if (ups.length) {
       const { error } = await supabase.from("publy_settings").upsert(ups, { onConflict: "key" });
-      if (error) return; // 이관 저장 실패 → 마커 안 남김(다음 로드에서 재시도, 원본은 그대로라 유실 없음)
+      if (error) return false; // 이관 저장 실패 → 마커 안 남김(다음 로드에서 재시도, 원본은 그대로라 유실 없음)
     }
-    await supabase.from("publy_settings").upsert({ key: marker, value: `1:${scope}` }, { onConflict: "key" });
-  } catch { /* 마이그레이션 실패는 조용히 — 다음 로드에서 재시도 */ }
+    const { error: emk } = await supabase.from("publy_settings").upsert({ key: marker, value: `1:${scope}` }, { onConflict: "key" });
+    return !emk; // 마커 저장까지 성공해야 true
+  } catch { return false; /* 실패는 조용히 — 다음 로드에서 재시도 */ }
 }
 // 순위 이력(그래프용) — publy_settings key-value 재사용. 하루 1값(최신 덮어씀).
 export async function recordRankPoint(userId: string, rank: number, scope = ""): Promise<void> {
