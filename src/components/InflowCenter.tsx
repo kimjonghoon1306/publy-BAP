@@ -179,6 +179,7 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
   const [kwWeights, setKwWeights] = useState<Record<string, number>>(saved0.kwWeights ?? {}); // 키워드별 비중
   const [visible, setVisible] = useState(false); // 🪟 창 보기(테스트) — 저장 안 함(안전상 매번 꺼짐)
   const [accountId, setAccountId] = useState("");
+  const [selectedAccts, setSelectedAccts] = useState<Set<string>>(new Set()); // 🔄 다계정 로테이션(저장·찜·공감을 여러 계정으로)
   const [accounts, setAccounts] = useState<PublyAccount[]>([]);
   const [running, setRunning] = useState(false);
   type InflowLogEntry = { type: "text"; text: string } | { type: "shot"; caption: string; dataUrl: string };
@@ -667,7 +668,10 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
       dwellCustomSec: String(Math.max(0, maxDwellSec)),
     });
     if (userId) params.set("userId", userId);
-    if (accountId) params.set("accountId", accountId);
+    // 🔄 다계정 로테이션 — 선택된 계정들을 저장·찜·공감에 번갈아. 첫 계정을 기본 accountId로.
+    const acctList = accounts.filter((a) => selectedAccts.has(a.id)).map((a) => a.id);
+    if (acctList.length) { params.set("accountIds", JSON.stringify(acctList)); params.set("accountId", acctList[0]); }
+    else if (accountId) params.set("accountId", accountId);
     if (targetType === "place") params.set("placeUrl", placeUrl.trim());
     else if (targetType === "store") params.set("storeUrl", storeUrl.trim());
     else if (parsedBlog) { params.set("blogId", parsedBlog.blogId); if (parsedBlog.logNo) params.set("logNo", parsedBlog.logNo); }
@@ -696,6 +700,8 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
     const totalSec = Math.round(dwellSec + actionSec);
     pushLog(`📖 체류시간: ${maxDwellSec > 0 ? `직접지정 약 ${maxDwellSec}초` : `${intensityLabel} 약 ${dwellSec}초`} (방문마다 ±오차)`);
     pushLog(`🎬 방문해서 할 행동: ${actionLabels.length ? `${actionLabels.join("  ")} — 약 ${actionSec}초 추가` : "없음(체류만)"}`);
+    if (acctList.length > 1) pushLog(`🔄 다계정 로테이션: ${acctList.length}개 계정을 번갈아 로그인 — 저장·찜·공감이 계정마다 실행돼요`);
+    else if (acctList.length === 1) pushLog(`👤 로그인 계정 1개 사용 (저장·찜·공감)`);
     pushLog(`⏳ 방문 텀: ${termMin}~${termMax}초 랜덤${spread ? ` · ${spreadHours}시간 분산` : ""}  ·  🎲 액션확률 ${actionRate}%`);
     pushLog(`⏱️ 예상 방문시간: 약 ${totalSec}초 (체류 ${dwellSec}초 + 행동 ${actionSec}초)`);
     if (funnel) pushLog(`🌀 풀퍼널 모드 ON — 여러 글·탭까지 둘러봐요`);
@@ -1210,11 +1216,27 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
           </div>
         </label>
 
+        {/* 🔄 다계정 로테이션 — 저장·찜·공감을 여러 계정으로 번갈아(계정 수만큼 증가). 로그인 액션 켤 때만 의미 */}
         {accounts.length > 0 && (
-          <select value={accountId} onChange={(e) => setAccountId(e.target.value)} style={{ ...inputStyle }}>
-            <option value="">계정 선택 (저장·공감 등 로그인 액션용, 선택)</option>
-            {accounts.map((a) => <option key={a.id} value={a.id}>{a.blog_name || a.username}</option>)}
-          </select>
+          <div style={{ padding: 13, borderRadius: 14, background: "linear-gradient(135deg,rgba(245,158,11,.07),transparent)", border: "2px solid #f59e0b" }}>
+            <div style={{ fontSize: 13.5, fontWeight: 900, color: "#d97706", marginBottom: 3 }}>🔄 저장·찜·공감에 쓸 계정 (다계정 로테이션)</div>
+            <div style={{ fontSize: 11.5, fontWeight: 600, color: C.sub, lineHeight: 1.6, marginBottom: 10 }}>
+              선택한 계정을 <b>방문마다 번갈아 로그인</b>해서 저장·찜·공감을 눌러요. <b style={{ color: "#d97706" }}>계정 수만큼 저장·찜 수가 올라가요</b>(같은 계정은 1번만 유효). 각 계정은 자기 IP(프록시)로 접속해 안전해요. <span style={{ color: C.sub }}>※ 저장·찜·공감을 안 켜면 계정 없이도 방문 트래픽은 돼요.</span>
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
+              <button onClick={() => setSelectedAccts(new Set(accounts.map((a) => a.id)))} style={{ padding: "6px 12px", borderRadius: 8, border: `1.5px solid ${C.accent}`, background: C.glow, color: C.accent, fontSize: 12, fontWeight: 800, cursor: "pointer", fontFamily: "inherit" }}>✅ 전체 설정</button>
+              <button onClick={() => setSelectedAccts(new Set())} style={{ padding: "6px 12px", borderRadius: 8, border: `1.5px solid ${C.line2}`, background: C.panel, color: C.sub, fontSize: 12, fontWeight: 800, cursor: "pointer", fontFamily: "inherit" }}>◻️ 전체 해제</button>
+              <span style={{ fontSize: 12, fontWeight: 800, color: C.ink }}>선택 {selectedAccts.size}/{accounts.length}개</span>
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 5, maxHeight: 180, overflowY: "auto" }}>
+              {accounts.map((a) => { const on = selectedAccts.has(a.id); return (
+                <label key={a.id} style={{ display: "flex", alignItems: "center", gap: 9, padding: "8px 11px", borderRadius: 9, background: on ? C.glow : C.panel2, border: `1px solid ${on ? C.accent : C.line}`, cursor: "pointer" }}>
+                  <input type="checkbox" checked={on} onChange={() => setSelectedAccts((prev) => { const n = new Set(prev); n.has(a.id) ? n.delete(a.id) : n.add(a.id); return n; })} style={{ width: 16, height: 16, accentColor: C.accent, flexShrink: 0 }} />
+                  <span style={{ fontSize: 13.5, fontWeight: 800, color: on ? C.accent : C.ink }}>{on ? "✓ " : ""}{a.blog_name || a.username}</span>
+                </label>
+              ); })}
+            </div>
+          </div>
         )}
 
         {/* 실행 */}

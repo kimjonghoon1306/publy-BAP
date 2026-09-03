@@ -5667,6 +5667,7 @@ export async function searchInflow(params: {
   actions?: InflowActions;         // 저장·공감·공유·길찾기·전화·예약·톡톡·리뷰
   fullFunnel?: boolean;            // 🌀 풀퍼널(여러 글·탭 둘러보기 + 이웃)
   requireLogin?: boolean;          // 저장/공감 등 로그인 필요 액션 시
+  accountIds?: string[];           // 🔄 다계정 로테이션 — 방문마다 다른 계정으로 로그인해 저장·찜·공감(계정 수만큼 증가). 각 계정 자기 프록시.
   onLog?: (m: string) => void;
   onProgress?: (done: number, total: number) => void;
   onShot?: (caption: string, dataUrl: string) => void; // 📸 단계별 화면 캡처(실제 뭘 하는지 눈으로)
@@ -5697,13 +5698,21 @@ export async function searchInflow(params: {
   let done = 0, success = 0, failStreak = 0;
   const FAIL_BRAKE = 5; // 🛡️ 연속 실패 임계 — 초과 시 자동 정지(계정 보호)
 
-  // 저장/공감 액션용 로그인 쿠키(없으면 체류만)
-  let cookies: any[] | null = null;
-  if (params.requireLogin) {
-    try { cookies = await ensureLiveSession(params.accountId, log); }
-    catch { log("⚠️ 로그인 세션 없음 — 저장·공감만 건너뛰고 길찾기·전화·예약·톡톡·공유는 진행해요"); }
-  }
+  // 🔄 로그인 액션에 쓸 계정 목록(다계정 로테이션). 없으면 단일 계정.
+  const loginAccts = (params.accountIds && params.accountIds.length) ? params.accountIds.filter(Boolean) : (params.accountId ? [params.accountId] : []);
+  const multiAcct = loginAccts.length > 1;
+  // 계정별 로그인 쿠키를 lazy 캐시(방문마다 다시 로그인하지 않게)
+  const cookieCache = new Map<string, any[] | null>();
+  const getCookiesFor = async (acct: string): Promise<any[] | null> => {
+    if (!params.requireLogin || !acct) return null;
+    if (cookieCache.has(acct)) return cookieCache.get(acct) ?? null;
+    let ck: any[] | null = null;
+    try { ck = await ensureLiveSession(acct, log); }
+    catch { log(`⚠️ 계정(${acct}) 로그인 세션 없음 — 이 계정의 저장·찜·공감은 건너뛰어요(체류·공유는 진행)`); }
+    cookieCache.set(acct, ck); return ck;
+  };
 
+  if (multiAcct && params.requireLogin) log(`🔄 다계정 로테이션 — ${loginAccts.length}개 계정을 번갈아 로그인해 저장·찜·공감을 계정마다 실행해요(각 계정 자기 IP)`);
   log(`🚀 검색유입 시작 — 대상 ${target.type === "place" ? "플레이스" : "블로그"}, 키워드 ${keywords.length}개, 총 ${rounds}회 방문, 텀 ${tmin}~${tmax}초`);
 
   for (let i = 0; i < rounds; i++) {
@@ -5714,10 +5723,14 @@ export async function searchInflow(params: {
     const curTarget = targets[i % targets.length];   // 여러 대상 로테이션
     log(`\n[${i + 1}/${rounds}] 🔍 "${kw}" → ${curTarget.type === "place" ? "플레이스" : "블로그 " + (curTarget as any).blogId} 유입`);
 
+    // 🔄 이번 방문에 쓸 로그인 계정(다계정이면 번갈아). 각 계정은 자기 배정 프록시로 접속.
+    const acct = loginAccts.length ? loginAccts[i % loginAccts.length] : params.accountId;
+    if (multiAcct && params.requireLogin) log(`  🔄 이번 방문 계정: ${acct}`);
+
     let browser: any = null;
     let proxyUnavailable = false;
     try {
-      browser = await launchBrowser(params.accountId, { headless: !params.visible, feature: "inflow", ownerUserId: params.ownerUserId, log });
+      browser = await launchBrowser(acct, { headless: !params.visible, feature: "inflow", ownerUserId: params.ownerUserId, log });
       // 접속 기기 결정 — mix면 방문마다 랜덤(사람처럼 모바일/PC 섞임)
       const dev = params.device === "mix" ? (Math.random() < 0.5 ? "pc" : "mobile") : (params.device === "pc" ? "pc" : "mobile");
       const context = await browser.newContext(
@@ -5726,6 +5739,7 @@ export async function searchInflow(params: {
           : { userAgent: INFLOW_MOBILE_UA, viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, deviceScaleFactor: 3, locale: "ko-KR" }
       );
       await context.addInitScript(ANTI_DETECTION_SCRIPT);   // 🥷 봇 감지 회피(쇼핑·플레이스 안정성↑)
+      const cookies = await getCookiesFor(acct);   // 🔄 이 방문 계정의 로그인 쿠키(다계정이면 계정별)
       if (cookies) await context.addCookies(cookies).catch(() => {});
       const page = await context.newPage();
 

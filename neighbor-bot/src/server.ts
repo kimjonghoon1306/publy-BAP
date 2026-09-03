@@ -1112,7 +1112,7 @@ app.get("/api/post-body", async (req, res) => {
 
 /* ── 🆕 NEW 트래픽 유입 (검색유입, SSE) — 기본 잠금(관리자가 켠 회원만), 관리자=락 해제 ── */
 app.post("/api/inflow", async (req, res) => {
-  const { userId, accountId, keywords, targetType, placeUrl, blogId, logNo, rounds, termMin, termMax, doSave, doLike, doShare, doDir, doCall, doBook, doTalk, doWish, doCart, doOption, device, fullFunnel, spreadHours, doReview, reviewText, visible, actionRate, dwellBaseSec, dwellCustomSec, extraTargets, keywordWeights } = req.body as Record<string, string>;
+  const { userId, accountId, accountIds, keywords, targetType, placeUrl, blogId, logNo, rounds, termMin, termMax, doSave, doLike, doShare, doDir, doCall, doBook, doTalk, doWish, doCart, doOption, device, fullFunnel, spreadHours, doReview, reviewText, visible, actionRate, dwellBaseSec, dwellCustomSec, extraTargets, keywordWeights } = req.body as Record<string, string>;
   if (!keywords || !targetType) return res.status(400).json({ error: "keywords·targetType 필요" });
   const memberToken = String(req.get("X-Publy-Session") || "");
   const adminToken = String(req.get("X-Publy-Admin-Session") || "");
@@ -1194,8 +1194,12 @@ app.post("/api/inflow", async (req, res) => {
     const reviewOk = doReview === "true" ? await inflowReviewAllowed(userId) : false;
     if (doReview === "true" && !reviewOk) sseSend(res, { type: "log", msg: "🔒 리뷰 자동작성은 관리자 승인이 필요해요 — 리뷰는 건너뛰고 진행합니다" });
 
+    // 🔄 다계정 로테이션 — accountIds(JSON 배열)가 오면 저장·찜·공감을 여러 계정으로 번갈아 실행
+    let acctIdsArr: string[] | undefined;
+    if (accountIds) { try { const a = JSON.parse(accountIds); if (Array.isArray(a) && a.length) acctIdsArr = a.map(String).filter(Boolean); } catch { acctIdsArr = undefined; } }
     const result = await searchInflow({
       accountId: accountId || "",
+      accountIds: acctIdsArr,
       ownerUserId: userId || undefined,
       keywords: kwList,
       keywordWeights: kwWeightsArr,
