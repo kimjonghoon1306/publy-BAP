@@ -241,7 +241,7 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
   const esRef = useRef<BotEventStream | null>(null);
   const startRef = useRef<() => void>(() => {});
   // 🎯 오토파일럿 자동 순위 체크(목표 달성 여부) — 최신 값 참조용 ref
-  const autopilotCheckRef = useRef<() => Promise<boolean>>(async () => false);
+  const autopilotCheckRef = useRef<() => Promise<{ measured: boolean; reached: boolean }>>(async () => ({ measured: false, reached: false }));
   const logBoxRef = useRef<HTMLDivElement | null>(null);
 
   const appendLog = (entry: InflowLogEntry) => setLogs((current) => {
@@ -403,13 +403,21 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
   // 📍 순위 측정 — 대표 키워드로 내 플레이스 순위 측정 후 저장(리포트·그래프에 자동 반영)
   const [rankLoading, setRankLoading] = useState(false);
   const runMeasureRank = async () => {
-    if (targetType !== "place" || !placeUrl.trim()) { toast("먼저 플레이스 주소를 입력하세요", "error"); return; }
     const kw = (apKeyword || keywords.split(/[,\n]/)[0] || "").trim();
     if (!kw) { toast("순위를 측정할 키워드를 입력하세요(오토파일럿 키워드 또는 첫 키워드)", "error"); return; }
+    let url = "";
+    if (targetType === "place") {
+      if (!placeUrl.trim()) { toast("먼저 플레이스 주소를 입력하세요", "error"); return; }
+      url = `${BOT}/api/place-rank?keyword=${encodeURIComponent(kw)}&placeUrl=${encodeURIComponent(placeUrl.trim())}`;
+    } else if (targetType === "blog") {
+      const p = parseBlogUrl(blogUrl.trim());
+      if (!p) { toast("먼저 블로그 글 주소를 입력하세요", "error"); return; }
+      url = `${BOT}/api/blog-rank?keyword=${encodeURIComponent(kw)}&blogId=${encodeURIComponent(p.blogId)}&logNo=${encodeURIComponent(p.logNo)}`;
+    } else { toast("스토어(쇼핑)는 순위 자동측정을 지원하지 않아요", "error"); return; }
     setRankLoading(true);
     pushLog(`📍 "${kw}" 현재 순위 측정 중…`);
     try {
-      const r = await botFetch(`${BOT}/api/place-rank?keyword=${encodeURIComponent(kw)}&placeUrl=${encodeURIComponent(placeUrl.trim())}`);
+      const r = await botFetch(url);
       const j = await r.json();
       if (j.error) { pushLog(`❌ 순위 측정 실패 — ${j.error}`); toast(j.error, "error"); return; }
       if (j.rank == null) {
@@ -426,24 +434,41 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
     finally { setRankLoading(false); }
   };
 
-  // 🎯 오토파일럿 판단 — 순위 측정 후 "목표 달성했나?" 반환(달성=true면 유입 스킵)
+  // 🎯 오토파일럿 판단 — 현재 순위를 재고 {측정됨, 목표달성}을 반환.
+  //   measured=false(측정 실패/미지원)면 호출부는 자동 유입을 보류한다(잘못된 순위로 오조절 방지).
+  //   플레이스=/api/place-rank, 블로그=/api/blog-rank. 스토어(쇼핑)는 순위 자동측정 미지원.
   autopilotCheckRef.current = async () => {
-    if (!userId || !placeUrl.trim()) return false;
+    const fail = { measured: false, reached: false };
+    if (!userId) return fail;
     const kw = (apKeyword || keywords.split(/[,\n]/)[0] || "").trim();
-    if (!kw) return false;
+    if (!kw) return fail;
+    let url = "";
+    if (targetType === "place") {
+      if (!placeUrl.trim()) return fail;
+      url = `${BOT}/api/place-rank?keyword=${encodeURIComponent(kw)}&placeUrl=${encodeURIComponent(placeUrl.trim())}`;
+    } else if (targetType === "blog") {
+      const p = parseBlogUrl(blogUrl.trim());
+      if (!p) return fail;
+      url = `${BOT}/api/blog-rank?keyword=${encodeURIComponent(kw)}&blogId=${encodeURIComponent(p.blogId)}&logNo=${encodeURIComponent(p.logNo)}`;
+    } else {
+      pushLog("🎯 스토어(쇼핑)는 순위 자동측정을 지원하지 않아 자동 유입을 보류해요.");
+      return fail;
+    }
     try {
-      const r = await botFetch(`${BOT}/api/place-rank?keyword=${encodeURIComponent(kw)}&placeUrl=${encodeURIComponent(placeUrl.trim())}`);
+      const r = await botFetch(url);
       const j = await r.json();
+      if (j.error) { pushLog(`📍 순위 측정 실패 — ${j.error}`); return fail; }
       if (j.rank != null) {
         setApLastRank(j.rank);
         await recordRankPoint(userId, j.rank, currentScope);
         getPerfReport(userId, reportPeriod, currentScope).then(setReport).catch(()=>{});
         pushLog(`📍 현재 순위 ${j.rank}위 (목표 ${apGoal}위)`);
-        return j.rank <= apGoal;   // 목표 이내면 달성
+        return { measured: true, reached: j.rank <= apGoal };   // 목표 이내면 달성
       }
+      // 순위 못 찾음(에러 없음) = 30위 밖 → 측정은 됨, 목표 미달로 보고 유입
       pushLog("📍 순위 30위 밖 — 유입으로 끌어올려요.");
-      return false;
-    } catch { return false; }
+      return { measured: true, reached: false };
+    } catch { pushLog("📍 순위 측정 실패 — 봇 서버(3334) 확인"); return fail; }
   };
 
   // 🔎 키워드 발굴 — 입력한 키워드 seed로 숨은 키워드 추천
@@ -560,11 +585,12 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
       if (await inflowScheduleRanToday(userId, tickScope)) return;
       if (currentScope !== tickScope || running) return; // DB 대기 중 대상 전환/실행 시작됐으면 중단
       pushLog(`⏰ 예약 시각(${schedTime}) 도달`);
-      // 🎯 오토파일럿 켜져 있으면: 순위 먼저 재고 목표 달성이면 유입 스킵(한도 절약)
-      if (apEnabled && targetType === "place") {
-        const reached = await autopilotCheckRef.current();
+      // 🎯 오토파일럿 켜져 있으면: 순위 먼저 재고 목표 달성이면 유입 스킵(한도 절약). 플레이스+블로그.
+      if (apEnabled && (targetType === "place" || targetType === "blog")) {
+        const chk = await autopilotCheckRef.current();
         if (currentScope !== tickScope || running) return; // 순위 조회 대기 중 전환됐으면 중단
-        if (reached) { pushLog("🎯 목표 순위 유지 중 — 오늘 유입은 건너뜁니다(한도 절약)."); await markInflowScheduleRan(userId, tickScope); return; }
+        if (!chk.measured) { pushLog("🎯 순위 측정 실패 — 오늘 자동 유입은 보류해요(잘못된 순위로 오조절 방지)."); await markInflowScheduleRan(userId, tickScope); return; }
+        if (chk.reached) { pushLog("🎯 목표 순위 유지 중 — 오늘 유입은 건너뜁니다(한도 절약)."); await markInflowScheduleRan(userId, tickScope); return; }
         pushLog("🎯 목표보다 낮아요 — 순위를 끌어올리기 위해 유입 실행.");
       }
       pushLog("⏰ 자동 유입 시작");
@@ -578,6 +604,36 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
     return () => clearInterval(id);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [schedEnabled, schedTime, schedRounds, userId, running, currentScope]);
+
+  // 🎯 오토파일럿 독립 실행(A) — 예약(스케줄)을 안 켰어도 오토파일럿만 ON이면, 앱이 켜져 있는 동안
+  //   하루 1회 스스로 "순위 측정→목표 판단→낮으면 유입"을 실행한다. 예약이 켜져 있으면 예약 루프가
+  //   오토파일럿을 담당하므로(중복 방지) 여기선 쉰다. 하루 1회 마커는 예약과 공유(둘은 상호배타).
+  //   측정 실패면 유입을 보류(잘못된 순위로 오조절 방지). 스토어(쇼핑)는 순위 자동측정 미지원이라 제외.
+  useEffect(() => {
+    if (!apEnabled || schedEnabled || !userId) return;
+    if (targetType !== "place" && targetType !== "blog") return;
+    const tick = async () => {
+      if (running) return;
+      const tickScope = currentScope;
+      if (!tickScope) return;
+      if (await inflowScheduleRanToday(userId, tickScope)) return;   // 오늘 이미 자동 실행함
+      if (currentScope !== tickScope || running) return;
+      pushLog("🎯 오토파일럿 — 오늘 자동 점검 시작");
+      const chk = await autopilotCheckRef.current();
+      if (currentScope !== tickScope || running) return;
+      if (!chk.measured) { pushLog("🎯 순위 측정 실패 — 오늘 자동 유입은 보류해요(오조절 방지)."); await markInflowScheduleRan(userId, tickScope); return; }
+      if (chk.reached) { pushLog("🎯 목표 순위 유지 중 — 오늘 유입은 건너뜁니다(한도 절약)."); await markInflowScheduleRan(userId, tickScope); return; }
+      pushLog("🎯 목표보다 낮아요 — 순위를 끌어올리기 위해 유입 실행.");
+      if (!auto) setRounds(schedRounds);
+      scheduledRunScopeRef.current = tickScope;
+      scheduledRunPendingRef.current = true;
+      startRef.current();
+    };
+    const id = setInterval(tick, 30000);
+    const t0 = setTimeout(tick, 6000);   // 앱 켜고 6초 뒤 첫 자동 점검
+    return () => { clearInterval(id); clearTimeout(t0); };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [apEnabled, schedEnabled, userId, running, currentScope, targetType]);
 
   const saveSched = async (nextEnabled: boolean) => {
     if (!userId) return;
@@ -813,7 +869,7 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
       else if (d.type === "progress") { setProgress(Math.round((d.done / Math.max(1, d.total)) * 100)); }
       else if (d.type === "quota_info") setUsed(d.used);
       else if (d.type === "quota_exceeded") { pushLog("🛑 오늘 유입 한도를 다 썼어요"); toast("오늘 유입 한도 초과", "error"); setRunning(false); es.close(); esRef.current = null; }
-      else if (d.type === "inflow_done") { setSessOk(d.success || 0); pushLog(`🏁 완료 — 총 ${d.done}회 방문, 성공 ${d.success}회`); toast(`유입 완료 · 성공 ${d.success}회`, "success"); setRunning(false); es.close(); esRef.current = null; if (scheduledRunPendingRef.current) { scheduledRunPendingRef.current = false; if (userId && Number(d.success) > 0) void markInflowScheduleRan(userId, scheduledRunScopeRef.current || currentScope); } refreshStats(); if (apEnabled && targetType === "place") { pushLog("📍 순위 자동 측정 중…"); runMeasureRank(); } }
+      else if (d.type === "inflow_done") { setSessOk(d.success || 0); pushLog(`🏁 완료 — 총 ${d.done}회 방문, 성공 ${d.success}회`); toast(`유입 완료 · 성공 ${d.success}회`, "success"); setRunning(false); es.close(); esRef.current = null; if (scheduledRunPendingRef.current) { scheduledRunPendingRef.current = false; if (userId && Number(d.success) > 0) void markInflowScheduleRan(userId, scheduledRunScopeRef.current || currentScope); } refreshStats(); if (apEnabled && (targetType === "place" || targetType === "blog")) { pushLog("📍 순위 자동 측정 중…"); autopilotCheckRef.current().then(() => { if (userId) getRankHistory(userId, chartDays, currentScope).then(setRankHist).catch(() => {}); }); } }
       else if (d.type === "error") { scheduledRunPendingRef.current = false; pushLog(`❌ ${d.msg}`); toast(d.msg, "error"); setRunning(false); es.close(); esRef.current = null; }
     };
     es.onerror = () => { scheduledRunPendingRef.current = false; pushLog("❌ 봇 연결 오류 — 봇 서버(포트 3334)가 켜져 있는지 확인해주세요"); toast("봇 연결 오류", "error"); setRunning(false); es.close(); esRef.current = null; };
@@ -1641,12 +1697,12 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
       </div>
       </div>
 
-      {/* ── 🎯 오토파일럿 ── */}
-      {targetType === "place" && (<div className="inflow-card" style={{ order: 12, background: apEnabled ? `linear-gradient(135deg,${C.glow},transparent)` : C.panel, border: `2px solid ${apEnabled ? C.accent : "#3b82f6"}`, borderRadius: 16, padding: 16, marginBottom: 14 }}>
+      {/* ── 🎯 오토파일럿 (플레이스+블로그) ── */}
+      {(targetType === "place" || targetType === "blog") && (<div className="inflow-card" style={{ order: 12, background: apEnabled ? `linear-gradient(135deg,${C.glow},transparent)` : C.panel, border: `2px solid ${apEnabled ? C.accent : "#3b82f6"}`, borderRadius: 16, padding: 16, marginBottom: 14 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: apEnabled || true ? 12 : 0, flexWrap: "wrap" }}>
           <span style={{ fontSize: 15, fontWeight: 900 }}>🎯 순위 오토파일럿</span>
           <span style={{ fontSize: 10, fontWeight: 800, background: apEnabled ? "#16a34a" : C.sub, color: "#fff", padding: "2px 8px", borderRadius: 6 }}>{apEnabled ? "가동 중" : "꺼짐"}</span>
-          <span style={{ fontSize: 12, color: C.sub, fontWeight: 600, flex: 1, minWidth: 180 }}>목표 순위만 정해두면, 순위가 떨어질 때 자동으로 유입을 채워 지켜줘요.</span>
+          <span style={{ fontSize: 12, color: C.sub, fontWeight: 600, flex: 1, minWidth: 180 }}>목표 순위만 정해두면, <b style={{color:C.ink}}>예약을 안 켜도</b> 앱이 켜져 있는 동안 하루 1회 스스로 순위를 재고, 떨어졌으면 자동으로 유입을 채워 지켜줘요.</span>
         </div>
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
           <div style={{ flex: 2, minWidth: 180 }}>
@@ -1660,7 +1716,7 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
           <button onClick={runMeasureRank} disabled={rankLoading} style={{ padding: "13px 18px", borderRadius: 12, border: `1.5px solid ${C.accent}`, background: C.panel2, color: C.accent, fontSize: 14, fontWeight: 800, cursor: rankLoading?"default":"pointer", fontFamily: "inherit", whiteSpace: "nowrap", opacity: rankLoading?0.6:1 }}>{rankLoading ? "측정 중…" : "📍 지금 순위 측정"}</button>
           <button onClick={() => saveAp(!apEnabled)} style={{ padding: "13px 20px", borderRadius: 12, border: apEnabled ? `2px solid ${C.accent}` : "none", background: apEnabled ? C.panel2 : `linear-gradient(135deg,${C.accent},${C.cyan})`, color: apEnabled ? C.accent : "#fff", fontSize: 15, fontWeight: 900, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}>{apEnabled ? "끄기" : "🎯 켜기"}</button>
         </div>
-        <p style={{ margin: "10px 0 0", fontSize: 11, color: C.sub, fontWeight: 600, lineHeight: 1.5 }}>※ 위 실행 패널의 대상(플레이스/블로그 주소)을 기준으로 추적해요. <b style={{color:C.ink}}>📍 지금 순위 측정</b>을 누르면 현재 순위를 기록해 리포트·그래프에 반영돼요. 달성하면 유입을 줄여 한도를 아끼고, 떨어지면 다시 밀어 올려요.</p>
+        <p style={{ margin: "10px 0 0", fontSize: 11, color: C.sub, fontWeight: 600, lineHeight: 1.5 }}>※ 위 실행 패널의 대상(<b style={{color:C.ink}}>플레이스·블로그</b> 주소)을 기준으로 추적해요. <b style={{color:C.ink}}>📍 지금 순위 측정</b>을 누르면 현재 순위를 기록해 리포트·그래프에 반영돼요. 켜두면 <b style={{color:C.ink}}>예약과 상관없이</b> 하루 1회 자동으로 순위를 재서 — 달성했으면 유입을 줄여 한도를 아끼고, 떨어졌으면 다시 밀어 올려요. (순위 측정이 실패한 날은 잘못된 판단을 막으려 유입을 보류해요. 스토어(쇼핑)는 순위 자동측정 미지원.)</p>
       </div>)}
 
       {/* ── ⏰ 예약 실행 ── */}

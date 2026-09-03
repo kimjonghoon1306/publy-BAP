@@ -1,6 +1,6 @@
 import express from "express";
 import cors from "cors";
-import { saveSession, sessionExists, removeSession, crawlBlogIds, crawlBuddyPosts, analyzeBuddyKeywords, addNeighbors, NeighborResult, donePath, engageBlogs, EngageResult, engageDonePath, crawlMyPosts, crawlPublicPosts, replyToComments, crawlPlaceReviews, generatePlaceReviewReply, replyToPlaceReviews, crawlBlogStats, checkSelectedBlogExposure, pumasiEngage, crawlPumasiReport, pumasiPreview, updatePostTitle, checkProxy, analyzeBlogAuthenticity, fetchPostBody, crawlPostViews, sendWebmail, sendBlogComments, crawlPlaces, crawlPlaceBloggers, crawlPlaceDetail, crawlPlaceByUrl, suggestPlaceKeywords, parsePlaceUrl, resolvePlaceUrl, searchInflow, diagnosePlace, measurePlaceRank, collectPlaceReviews, InflowTarget } from "./naver";
+import { saveSession, sessionExists, removeSession, crawlBlogIds, crawlBuddyPosts, analyzeBuddyKeywords, addNeighbors, NeighborResult, donePath, engageBlogs, EngageResult, engageDonePath, crawlMyPosts, crawlPublicPosts, replyToComments, crawlPlaceReviews, generatePlaceReviewReply, replyToPlaceReviews, crawlBlogStats, checkSelectedBlogExposure, pumasiEngage, crawlPumasiReport, pumasiPreview, updatePostTitle, checkProxy, analyzeBlogAuthenticity, fetchPostBody, crawlPostViews, sendWebmail, sendBlogComments, crawlPlaces, crawlPlaceBloggers, crawlPlaceDetail, crawlPlaceByUrl, suggestPlaceKeywords, parsePlaceUrl, resolvePlaceUrl, searchInflow, diagnosePlace, measurePlaceRank, measureBlogRank, collectPlaceReviews, InflowTarget } from "./naver";
 import { checkNeighborQuota, incrementNeighborQuota, getNeighborDailyUsage, incrementEngageQuota, getEngageDailyUsage, getUserPlan, checkMembershipAccess, NEIGHBOR_DAILY_LIMIT, ENGAGE_DAILY_LIMIT, REPLY_DAILY_LIMIT, getReplyDailyUsage, incrementReplyQuota, PLACE_REPLY_DAILY_LIMIT, getPlaceReplyDailyUsage, incrementPlaceReplyQuota, addNeighborHistory, addReplyHistory, addPlaceReplyHistory, addBlogscoreHistory, incrementPumasiQuota, TITLE_EDIT_DAILY_LIMIT, getTitleEditDailyUsage, incrementTitleEditQuota, getProxyForAccount, supabase, getOutreachSender, getOutreachSentToday, addOutreachLog, checkPlaceDetailQuota, incrementPlaceDetailQuota, checkInflowQuota, incrementInflowQuota, incrementInflowStat, inflowReviewAllowed, verifyInflowSession, verifyAdminSession, consumeInflowQuota, INFLOW_DAILY_LIMIT } from "./supabase";
 import nodemailer from "nodemailer";
 import fs from "fs";
@@ -1268,6 +1268,16 @@ app.get("/api/place-rank", async (req, res) => {
   if (!keyword || !placeUrl) return res.status(400).json({ error: "keyword·placeUrl 필요" });
   try {
     const r = await measurePlaceRank({ keyword, placeUrl, accountId: accountId || "", ownerUserId: userId || null });
+    res.json(r);
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+/* ── 📝 블로그 글 순위 측정 (오토파일럿용) — 키워드로 통합검색 블로그탭에서 내 글 순위 ── */
+app.get("/api/blog-rank", async (req, res) => {
+  const { keyword, blogId, logNo, accountId } = req.query as Record<string, string>;
+  if (!keyword || !blogId || !logNo) return res.status(400).json({ error: "keyword·blogId·logNo 필요" });
+  try {
+    const r = await measureBlogRank({ keyword, blogId, logNo, accountId: accountId || "" });
     res.json(r);
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });

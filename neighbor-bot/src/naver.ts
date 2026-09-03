@@ -5604,6 +5604,26 @@ export async function measurePlaceRank(params: { keyword: string; placeUrl: stri
   } catch (e: any) { return { error: e?.message || "순위 측정 실패" }; }
 }
 
+/* 📝 블로그 글 순위 측정 — 키워드로 통합검색(모바일 블로그탭)해서 내 (blogId/logNo)가 몇 위인지.
+   measurePlaceRank의 블로그 짝. 익명 브라우저(로그인 불필요)로 searchRealRank 재사용. 오토파일럿이 사용. */
+export async function measureBlogRank(params: { keyword: string; blogId: string; logNo: string; accountId?: string; onLog?: (m: string) => void }): Promise<{ rank: number | null; scanned: number } | { error: string }> {
+  const log = params.onLog || (() => {});
+  const blogId = (params.blogId || "").trim();
+  const logNo = (params.logNo || "").trim();
+  if (!blogId || !logNo) return { error: "블로그 글 주소를 인식하지 못했어요" };
+  let browser: any = null;
+  try {
+    browser = await launchBrowser(params.accountId || "", { headless: true, feature: "inflow", log });
+    const ctx = await browser.newContext({ userAgent: INFLOW_MOBILE_UA, viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, locale: "ko-KR" });
+    await ctx.addInitScript(ANTI_DETECTION_SCRIPT);
+    try {
+      const r = await searchRealRank(ctx, blogId, logNo, params.keyword, log);
+      return { rank: r.rank, scanned: r.total };
+    } finally { await ctx.close().catch(() => {}); }
+  } catch (e: any) { return { error: e?.message || "순위 측정 실패" }; }
+  finally { if (browser) await browser.close().catch(() => {}); }
+}
+
 /* 🩺 플레이스 최적화 진단 — 상세페이지를 읽어 "순위 오르려면 뭘 채워야 하는지" 항목별 점검.
    ★순위는 트래픽만으로 안 오름: 리뷰·정보완성·사진·소식·방문의도수단이 종합 점수. 이걸 실측해 처방.
    반환: 항목별 ok/값 + 100점 만점 점수 + 부족항목(처방). */
