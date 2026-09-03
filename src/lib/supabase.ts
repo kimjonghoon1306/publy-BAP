@@ -762,7 +762,7 @@ export async function resetInflowQuota(userId: string): Promise<void> {
 /* ══ 🎯 순위 오토파일럿 — 목표 순위 정하면 유입을 자동 조절(낮으면↑ 달성하면↓). publy_autopilot 테이블. ══ */
 export type AutopilotConfig = {
   user_id: string;
-  target_type: "place" | "blog";
+  target_type: "place" | "blog" | "store";
   target_ref: string;        // 플레이스 URL 또는 블로그 글 주소
   keyword: string;           // 순위 추적할 대표 키워드
   goal_rank: number;         // 목표 순위(예: 5)
@@ -782,22 +782,35 @@ export async function saveAutopilot(cfg: AutopilotConfig): Promise<void> {
     .upsert({ ...cfg, updated_at: new Date().toISOString() }, { onConflict: "user_id" });
   if (error) throw new Error(`오토파일럿 저장 실패: ${error.message}`);
 }
+/* 🎯 대상(매장/블로그/상품)별 데이터 분리용 scope 키.
+   scope가 있으면 대상별로 순위·유입·리포트를 완전히 분리 저장한다.
+   A(이어보기): 대상별 데이터가 없는 과거 날짜는 legacy(scope 없는) 값으로 이어서 보여준다. */
+export function inflowScope(targetType: string, ref: string): string {
+  const r = String(ref || "").replace(/[^A-Za-z0-9_-]/g, "").slice(0, 40);
+  if (!r) return "";
+  if (targetType === "place") return `p_${r}`;
+  if (targetType === "blog") return `b_${r}`;
+  if (targetType === "store") return `s_${r}`;
+  return "";
+}
 // 순위 이력(그래프용) — publy_settings key-value 재사용. 하루 1값(최신 덮어씀).
-export async function recordRankPoint(userId: string, rank: number): Promise<void> {
-  const key = `inflow_rank_${userId}_${koreaDateKey()}`;
+export async function recordRankPoint(userId: string, rank: number, scope = ""): Promise<void> {
+  const key = scope ? `inflow_rank_${userId}_${scope}_${koreaDateKey()}` : `inflow_rank_${userId}_${koreaDateKey()}`;
   await supabase.from("publy_settings").upsert({ key, value: String(rank) }, { onConflict: "key" });
 }
-export async function getRankHistory(userId: string, days = 7): Promise<{ label: string; rank: number | null }[]> {
-  const metas: { key: string; label: string }[] = [];
+export async function getRankHistory(userId: string, days = 7, scope = ""): Promise<{ label: string; rank: number | null }[]> {
+  const metas: { key: string; legacy: string; label: string }[] = [];
   const now = Date.now();
   for (let i = days - 1; i >= 0; i--) {
     const ymd = koreaDateKey(new Date(now - i * 86400000));
-    metas.push({ key: `inflow_rank_${userId}_${ymd}`, label: ymd.slice(5) });
+    metas.push({ key: scope ? `inflow_rank_${userId}_${scope}_${ymd}` : `inflow_rank_${userId}_${ymd}`, legacy: `inflow_rank_${userId}_${ymd}`, label: ymd.slice(5) });
   }
   try {
-    const { data } = await supabase.from("publy_settings").select("key,value").in("key", metas.map(m => m.key));
+    const keys = Array.from(new Set(metas.flatMap(m => [m.key, m.legacy])));
+    const { data } = await supabase.from("publy_settings").select("key,value").in("key", keys);
     const map = new Map((data || []).map((r: any) => [r.key, parseInt(r.value) || null]));
-    return metas.map(m => ({ label: m.label, rank: (map.get(m.key) as number) ?? null }));
+    // 대상별 값 우선, 없으면 legacy(과거 이어보기)
+    return metas.map(m => ({ label: m.label, rank: ((map.get(m.key) ?? map.get(m.legacy)) as number) ?? null }));
   } catch { return metas.map(m => ({ label: m.label, rank: null })); }
 }
 
@@ -817,7 +830,7 @@ export async function saveInflowSchedule(userId: string, sched: InflowSchedule):
 
 /* 🏪 내 플레이스/블로그 저장 목록 — 서버 영구저장(publy_settings key-value, 스키마 변경 없음).
    기존엔 localStorage에만 있어 앱 재설치 시 회원 데이터가 날아갔음 → Supabase로 영구화. */
-export type InflowSavedTarget = { id: string; name: string; url: string; type: "place" | "blog" };
+export type InflowSavedTarget = { id: string; name: string; url: string; type: "place" | "blog" | "store" };
 function inflowTargetsKey(userId: string): string { return `inflow_targets_${userId}`; }
 export async function getInflowTargets(userId: string): Promise<InflowSavedTarget[] | null> {
   try {
@@ -840,19 +853,31 @@ export async function markInflowScheduleRan(userId: string): Promise<void> {
   await supabase.from("publy_settings").upsert({ key: `inflow_sched_ran_${userId}`, value: koreaDateKey() }, { onConflict: "key" });
 }
 
-/* 📈 컨트롤타워 그래프용 — 최근 N일 일별 유입 수(publy_settings에서 날짜별 키를 한 번에 조회) */
-export async function getInflowUsageHistory(userId: string, days = 7): Promise<{ label: string; count: number }[]> {
-  const metas: { key: string; label: string }[] = [];
+/* 📈 컨트롤타워 그래프용 — 최근 N일 일별 유입 수(publy_settings에서 날짜별 키를 한 번에 조회).
+   scope 있으면 대상별 유입(inflow_stat) 우선, 없는 과거 날짜는 legacy(inflow_daily)로 이어봄. */
+export async function getInflowUsageHistory(userId: string, days = 7, scope = ""): Promise<{ label: string; count: number }[]> {
+  const metas: { key: string; legacy: string; label: string }[] = [];
   const now = Date.now();
   for (let i = days - 1; i >= 0; i--) {
     const ymd = koreaDateKey(new Date(now - i * 86400000)); // YYYY-MM-DD (KST)
-    metas.push({ key: `inflow_daily_${userId}_${ymd}`, label: ymd.slice(5) }); // MM-DD
+    metas.push({ key: scope ? `inflow_stat_${userId}_${scope}_${ymd}` : `inflow_daily_${userId}_${ymd}`, legacy: `inflow_daily_${userId}_${ymd}`, label: ymd.slice(5) });
   }
   try {
-    const { data } = await supabase.from("publy_settings").select("key,value").in("key", metas.map(m => m.key));
+    const keys = Array.from(new Set(metas.flatMap(m => [m.key, m.legacy])));
+    const { data } = await supabase.from("publy_settings").select("key,value").in("key", keys);
     const map = new Map((data || []).map((r: any) => [r.key, parseInt(r.value) || 0]));
-    return metas.map(m => ({ label: m.label, count: map.get(m.key) || 0 }));
+    // 대상별 값이 있으면 그것, 없으면 legacy(과거 이어보기)
+    return metas.map(m => ({ label: m.label, count: map.has(m.key) ? (map.get(m.key) || 0) : (map.get(m.legacy) || 0) }));
   } catch { return metas.map(m => ({ label: m.label, count: 0 })); }
+}
+/* 대상별 오늘 유입 수(KPI '오늘 유입'용). scope 없으면 전체(legacy) */
+export async function getInflowStatToday(userId: string, scope = ""): Promise<number> {
+  if (!scope) return getInflowDailyUsage(userId);
+  try {
+    const key = `inflow_stat_${userId}_${scope}_${koreaDateKey()}`;
+    const { data } = await supabase.from("publy_settings").select("value").eq("key", key).maybeSingle();
+    return data?.value ? parseInt(data.value) || 0 : 0;
+  } catch { return 0; }
 }
 
 /* ══ 📊 성과 리포트 — 주간/월간, 이번 기간 vs 지난 기간 비교 ══
@@ -865,35 +890,37 @@ export type PerfReport = {
   rankDaily: { label: string; rank: number | null }[];
 };
 function ymdOffset(n: number): string { return koreaDateKey(new Date(Date.now() - n * 86400000)); }
-async function sumInflowRange(userId: string, startDaysAgo: number, endDaysAgo: number): Promise<{ total: number; daily: { label: string; count: number }[] }> {
-  const metas: { key: string; label: string }[] = [];
-  for (let i = startDaysAgo; i >= endDaysAgo; i--) { const ymd = ymdOffset(i); metas.push({ key: `inflow_daily_${userId}_${ymd}`, label: ymd.slice(5) }); }
+async function sumInflowRange(userId: string, startDaysAgo: number, endDaysAgo: number, scope = ""): Promise<{ total: number; daily: { label: string; count: number }[] }> {
+  const metas: { key: string; legacy: string; label: string }[] = [];
+  for (let i = startDaysAgo; i >= endDaysAgo; i--) { const ymd = ymdOffset(i); metas.push({ key: scope ? `inflow_stat_${userId}_${scope}_${ymd}` : `inflow_daily_${userId}_${ymd}`, legacy: `inflow_daily_${userId}_${ymd}`, label: ymd.slice(5) }); }
   try {
-    const { data } = await supabase.from("publy_settings").select("key,value").in("key", metas.map(m => m.key));
+    const keys = Array.from(new Set(metas.flatMap(m => [m.key, m.legacy])));
+    const { data } = await supabase.from("publy_settings").select("key,value").in("key", keys);
     const map = new Map((data || []).map((r: any) => [r.key, parseInt(r.value) || 0]));
-    const daily = metas.map(m => ({ label: m.label, count: map.get(m.key) || 0 }));
+    const daily = metas.map(m => ({ label: m.label, count: map.has(m.key) ? (map.get(m.key) || 0) : (map.get(m.legacy) || 0) }));
     return { total: daily.reduce((s, d) => s + d.count, 0), daily };
   } catch { return { total: 0, daily: metas.map(m => ({ label: m.label, count: 0 })) }; }
 }
-async function lastRankInRange(userId: string, startDaysAgo: number, endDaysAgo: number): Promise<{ last: number | null; daily: { label: string; rank: number | null }[] }> {
-  const metas: { key: string; label: string }[] = [];
-  for (let i = startDaysAgo; i >= endDaysAgo; i--) { const ymd = ymdOffset(i); metas.push({ key: `inflow_rank_${userId}_${ymd}`, label: ymd.slice(5) }); }
+async function lastRankInRange(userId: string, startDaysAgo: number, endDaysAgo: number, scope = ""): Promise<{ last: number | null; daily: { label: string; rank: number | null }[] }> {
+  const metas: { key: string; legacy: string; label: string }[] = [];
+  for (let i = startDaysAgo; i >= endDaysAgo; i--) { const ymd = ymdOffset(i); metas.push({ key: scope ? `inflow_rank_${userId}_${scope}_${ymd}` : `inflow_rank_${userId}_${ymd}`, legacy: `inflow_rank_${userId}_${ymd}`, label: ymd.slice(5) }); }
   try {
-    const { data } = await supabase.from("publy_settings").select("key,value").in("key", metas.map(m => m.key));
+    const keys = Array.from(new Set(metas.flatMap(m => [m.key, m.legacy])));
+    const { data } = await supabase.from("publy_settings").select("key,value").in("key", keys);
     const map = new Map((data || []).map((r: any) => [r.key, parseInt(r.value) || null]));
-    const daily = metas.map(m => ({ label: m.label, rank: (map.get(m.key) as number) ?? null }));
+    const daily = metas.map(m => ({ label: m.label, rank: ((map.get(m.key) ?? map.get(m.legacy)) as number) ?? null }));
     let last: number | null = null;
     for (const d of daily) if (d.rank != null) last = d.rank;
     return { last, daily };
   } catch { return { last: null, daily: metas.map(m => ({ label: m.label, rank: null })) }; }
 }
-export async function getPerfReport(userId: string, period: "week" | "month"): Promise<PerfReport> {
+export async function getPerfReport(userId: string, period: "week" | "month", scope = ""): Promise<PerfReport> {
   const span = period === "week" ? 7 : 30;
   const [nowU, prevU, nowR, prevR] = await Promise.all([
-    sumInflowRange(userId, span - 1, 0),
-    sumInflowRange(userId, span * 2 - 1, span),
-    lastRankInRange(userId, span - 1, 0),
-    lastRankInRange(userId, span * 2 - 1, span),
+    sumInflowRange(userId, span - 1, 0, scope),
+    sumInflowRange(userId, span * 2 - 1, span, scope),
+    lastRankInRange(userId, span - 1, 0, scope),
+    lastRankInRange(userId, span * 2 - 1, span, scope),
   ]);
   return { period, inflowNow: nowU.total, inflowPrev: prevU.total, rankNow: nowR.last, rankPrev: prevR.last, daily: nowU.daily, rankDaily: nowR.daily };
 }

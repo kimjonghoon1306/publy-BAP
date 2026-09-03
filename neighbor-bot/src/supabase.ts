@@ -170,6 +170,14 @@ export async function incrementInflowQuota(userId: string): Promise<void> {
   const { error } = await supabase.from("publy_settings").upsert({ key, value: String(used + 1) }, { onConflict: "key" });
   if (error) throw new Error(`검색유입 사용량 저장 실패: ${error.message}`);
 }
+// 🎯 대상(매장/블로그/상품)별 유입 통계 — 대상별 그래프·누적·리포트가 서로 섞이지 않게 분리 기록
+export async function incrementInflowStat(userId: string, scope: string): Promise<void> {
+  if (!scope) return;
+  const key = `inflow_stat_${userId}_${scope}_${koreaDateKey()}`;
+  const { data } = await supabase.from("publy_settings").select("value").eq("key", key).maybeSingle();
+  const n = Number.parseInt(data?.value || "0", 10) || 0;
+  await supabase.from("publy_settings").upsert({ key, value: String(n + 1) }, { onConflict: "key" }).then(({ error }) => { if (error) console.error("[inflow-stat]", error.message); });
+}
 
 export async function verifyInflowSession(token: string, claimedUserId: string): Promise<boolean> {
   if (!token || !claimedUserId) return false;

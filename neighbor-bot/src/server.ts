@@ -1,7 +1,7 @@
 import express from "express";
 import cors from "cors";
 import { saveSession, sessionExists, removeSession, crawlBlogIds, crawlBuddyPosts, analyzeBuddyKeywords, addNeighbors, NeighborResult, donePath, engageBlogs, EngageResult, engageDonePath, crawlMyPosts, replyToComments, crawlPlaceReviews, generatePlaceReviewReply, replyToPlaceReviews, crawlBlogStats, checkSelectedBlogExposure, pumasiEngage, crawlPumasiReport, pumasiPreview, updatePostTitle, checkProxy, analyzeBlogAuthenticity, fetchPostBody, crawlPostViews, sendWebmail, sendBlogComments, crawlPlaces, crawlPlaceBloggers, crawlPlaceDetail, crawlPlaceByUrl, suggestPlaceKeywords, parsePlaceUrl, resolvePlaceUrl, searchInflow, diagnosePlace, measurePlaceRank, collectPlaceReviews, InflowTarget } from "./naver";
-import { checkNeighborQuota, incrementNeighborQuota, getNeighborDailyUsage, incrementEngageQuota, getEngageDailyUsage, getUserPlan, checkMembershipAccess, NEIGHBOR_DAILY_LIMIT, ENGAGE_DAILY_LIMIT, REPLY_DAILY_LIMIT, getReplyDailyUsage, incrementReplyQuota, PLACE_REPLY_DAILY_LIMIT, getPlaceReplyDailyUsage, incrementPlaceReplyQuota, addNeighborHistory, addReplyHistory, addPlaceReplyHistory, addBlogscoreHistory, incrementPumasiQuota, TITLE_EDIT_DAILY_LIMIT, getTitleEditDailyUsage, incrementTitleEditQuota, getProxyForAccount, supabase, getOutreachSender, getOutreachSentToday, addOutreachLog, checkPlaceDetailQuota, incrementPlaceDetailQuota, checkInflowQuota, incrementInflowQuota, inflowReviewAllowed, verifyInflowSession, verifyAdminSession, consumeInflowQuota, INFLOW_DAILY_LIMIT } from "./supabase";
+import { checkNeighborQuota, incrementNeighborQuota, getNeighborDailyUsage, incrementEngageQuota, getEngageDailyUsage, getUserPlan, checkMembershipAccess, NEIGHBOR_DAILY_LIMIT, ENGAGE_DAILY_LIMIT, REPLY_DAILY_LIMIT, getReplyDailyUsage, incrementReplyQuota, PLACE_REPLY_DAILY_LIMIT, getPlaceReplyDailyUsage, incrementPlaceReplyQuota, addNeighborHistory, addReplyHistory, addPlaceReplyHistory, addBlogscoreHistory, incrementPumasiQuota, TITLE_EDIT_DAILY_LIMIT, getTitleEditDailyUsage, incrementTitleEditQuota, getProxyForAccount, supabase, getOutreachSender, getOutreachSentToday, addOutreachLog, checkPlaceDetailQuota, incrementPlaceDetailQuota, checkInflowQuota, incrementInflowQuota, incrementInflowStat, inflowReviewAllowed, verifyInflowSession, verifyAdminSession, consumeInflowQuota, INFLOW_DAILY_LIMIT } from "./supabase";
 import nodemailer from "nodemailer";
 import fs from "fs";
 import { acquireAccountLock } from "./account-lock";
@@ -1107,7 +1107,7 @@ app.get("/api/post-body", async (req, res) => {
 
 /* ── 🆕 NEW 트래픽 유입 (검색유입, SSE) — 기본 잠금(관리자가 켠 회원만), 관리자=락 해제 ── */
 app.post("/api/inflow", async (req, res) => {
-  const { userId, accountId, keywords, targetType, placeUrl, blogId, logNo, rounds, termMin, termMax, doSave, doLike, doShare, doDir, doCall, doBook, doTalk, device, fullFunnel, spreadHours, doReview, reviewText, visible, actionRate, dwellBaseSec, dwellCustomSec, extraTargets, keywordWeights } = req.body as Record<string, string>;
+  const { userId, accountId, keywords, targetType, placeUrl, blogId, logNo, rounds, termMin, termMax, doSave, doLike, doShare, doDir, doCall, doBook, doTalk, doWish, doCart, doOption, device, fullFunnel, spreadHours, doReview, reviewText, visible, actionRate, dwellBaseSec, dwellCustomSec, extraTargets, keywordWeights } = req.body as Record<string, string>;
   if (!keywords || !targetType) return res.status(400).json({ error: "keywords·targetType 필요" });
   const memberToken = String(req.get("X-Publy-Session") || "");
   const adminToken = String(req.get("X-Publy-Admin-Session") || "");
@@ -1138,6 +1138,13 @@ app.post("/api/inflow", async (req, res) => {
       const parsed = await resolvePlaceUrl(placeUrl || "");   // naver.me 단축주소도 펼쳐서 인식
       if (!parsed) { sseSend(res, { type: "error", msg: "플레이스 주소를 인식하지 못했어요(m.place/지도/naver.me 링크를 붙여주세요)" }); res.end(); return; }
       target = { type: "place", placeId: parsed.placeId, domain: parsed.domain, placeUrl };
+    } else if (targetType === "store") {
+      // 🛒 스마트스토어 상품 URL: smartstore.naver.com/{store}/products/{id} 등에서 스토어명·상품ID 추출
+      const su = String((req.body as any).storeUrl || "").trim();
+      if (!su) { sseSend(res, { type: "error", msg: "스마트스토어 상품 주소를 입력해주세요" }); res.end(); return; }
+      const sid = su.match(/smartstore\.naver\.com\/([A-Za-z0-9_-]+)/i)?.[1] || "";
+      const pid = su.match(/products\/(\d+)/i)?.[1] || su.match(/\/(\d{6,})/)?.[1] || "";
+      target = { type: "store", storeUrl: su, storeId: sid, productId: pid };
     } else {
       if (!blogId) { sseSend(res, { type: "error", msg: "블로그 아이디가 필요해요" }); res.end(); return; }
       target = { type: "blog", blogId, logNo: logNo || undefined };
@@ -1171,6 +1178,10 @@ app.post("/api/inflow", async (req, res) => {
     const tmax = Math.max(tmin, parseInt(termMax || "90", 10));
     const unlimited = plan === "admin" || plan === "unlimited";
 
+    // 🎯 대상별 통계 scope(프론트 inflowScope와 동일 규칙) — 대상마다 유입·순위·리포트 분리 저장
+    const scopeRef = target.type === "place" ? target.placeId : target.type === "blog" ? target.blogId : ((target as any).productId || (target as any).storeId || "");
+    const statScope = scopeRef ? `${target.type === "place" ? "p" : target.type === "blog" ? "b" : "s"}_${String(scopeRef).replace(/[^A-Za-z0-9_-]/g, "").slice(0, 40)}` : "";
+
     let stopped = false;
     res.on("close", () => { stopped = true; });
 
@@ -1188,24 +1199,25 @@ app.post("/api/inflow", async (req, res) => {
       rounds: n,
       device: (device === "pc" || device === "mix") ? device : "mobile",
       intervalSec: [tmin, tmax],
-      actions: { save: doSave === "true", like: doLike === "true", share: doShare === "true", directions: doDir === "true", call: doCall === "true", booking: doBook === "true", talk: doTalk === "true", review: doReview === "true" && reviewOk, reviewText: reviewText || "" },
+      actions: { save: doSave === "true", like: doLike === "true", share: doShare === "true", directions: doDir === "true", call: doCall === "true", booking: doBook === "true", talk: doTalk === "true", wish: doWish === "true", cart: doCart === "true", optionView: doOption === "true", review: doReview === "true" && reviewOk, reviewText: reviewText || "" },
       fullFunnel: fullFunnel === "true",
       spreadHours: spreadHours ? Math.max(0, parseFloat(spreadHours)) : 0,
       visible: visible === "true",
       actionRate: actionRate ? Math.max(0, Math.min(1, parseFloat(actionRate))) : 1,
       dwellBaseSec: dwellBaseSec ? Math.max(5, parseFloat(dwellBaseSec)) : 60,
       dwellCustomSec: dwellCustomSec ? Math.max(0, parseFloat(dwellCustomSec)) : 0,
-      requireLogin: doSave === "true" || doLike === "true" || reviewOk,   // 저장·공감·리뷰만 로그인 필요(예약·톡톡·공유는 로그인 없이 진입)
+      requireLogin: doSave === "true" || doLike === "true" || doWish === "true" || doCart === "true" || reviewOk,   // 저장·공감·찜·장바구니·리뷰는 로그인 필요(예약·톡톡·공유·옵션탐색은 로그인 없이)
       onLog: (msg) => sseSend(res, { type: "log", msg }),
       onProgress: (done, total) => sseSend(res, { type: "progress", done, total }),
       onShot: (caption, dataUrl) => sseSend(res, { type: "shot", caption, dataUrl }),   // 📸 화면 캡처 전송
       shouldStop: () => stopped,
       onQuota: async () => {
         if (!userId) return true;
-        if (unlimited) { await incrementInflowQuota(userId).catch(() => {}); return true; }  // 무제한(관리자)도 한도만 스킵, 통계 카운트는 기록(오늘 유입·누적·7일에 반영)
+        if (unlimited) { await incrementInflowQuota(userId).catch(() => {}); await incrementInflowStat(userId, statScope).catch(() => {}); return true; }  // 무제한(관리자)도 한도만 스킵, 통계는 대상별로 기록
         const limit = INFLOW_DAILY_LIMIT[plan] ?? INFLOW_DAILY_LIMIT.free;
         const q = await consumeInflowQuota(memberToken, userId, limit);
         if (!q.ok) return false;
+        await incrementInflowStat(userId, statScope).catch(() => {});   // 대상별 유입 통계(그래프·누적·리포트 분리)
         sseSend(res, { type: "quota_info", used: q.used, limit: q.limit, remaining: Math.max(0, q.limit - q.used) });
         return q.ok;
       },

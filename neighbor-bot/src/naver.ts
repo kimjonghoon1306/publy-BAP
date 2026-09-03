@@ -5200,7 +5200,8 @@ export async function replyToPlaceReviews(params: {
    ══════════════════════════════════════════════════════════════════════ */
 export type InflowTarget =
   | { type: "place"; placeId: string; domain?: string; placeUrl?: string }
-  | { type: "blog"; blogId: string; logNo?: string };
+  | { type: "blog"; blogId: string; logNo?: string }
+  | { type: "store"; storeUrl: string; storeId?: string; productId?: string }; // 🛒 스마트스토어(네이버쇼핑) 상품
 
 const INFLOW_MOBILE_UA =
   "Mozilla/5.0 (iPhone; CPU iPhone OS 17_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.1 Mobile/15E148 Safari/604.1";
@@ -5248,7 +5249,7 @@ async function inflowDiagnose(page: any, target: InflowTarget, log: (m: string) 
 // 검색결과를 스크롤하며 대상(플레이스/블로그) 링크를 찾아 클릭 진입. 성공 시 진입한 page 반환.
 //  ★플레이스는 지도(map)로 새지 않게 "플레이스 상세" 링크를 우선 클릭한다.
 async function inflowFindAndEnter(page: any, target: InflowTarget, log: (m: string) => void): Promise<any | null> {
-  const needle = target.type === "place" ? String(target.placeId) : String(target.blogId);
+  const needle = target.type === "place" ? String(target.placeId) : target.type === "blog" ? String(target.blogId) : String((target as any).productId || (target as any).storeId || "");
   const enterVia = async (link: any, s: number) => {
     log(`  🎯 검색결과에서 대상 발견(약 ${s + 1}스크롤 지점) → 클릭 진입`);
     const ctx = page.context();
@@ -5271,6 +5272,14 @@ async function inflowFindAndEnter(page: any, target: InflowTarget, log: (m: stri
     await page.mouse.wheel(0, -inflowRndInt(600, 1400)).catch(() => {}); // 위로 다시 올려 재확인
     await page.waitForTimeout(inflowRndInt(500, 1200));
   } catch { /* 비교 탐색 실패는 무시하고 바로 대상 탐색 */ }
+  // 🛒 스마트스토어는 '쇼핑 검색'에서 찾아야 한다 → 일반 검색창을 쇼핑검색으로 전환
+  if (target.type === "store") {
+    const kw = (() => { try { return decodeURIComponent(new URL(page.url()).searchParams.get("query") || ""); } catch { return ""; } })();
+    const shopUrl = `https://search.shopping.naver.com/search/all?query=${encodeURIComponent(kw)}`;
+    log(`  🛒 쇼핑 검색으로 상품 찾는 중… "${kw}"`);
+    await page.goto(shopUrl, { waitUntil: "domcontentloaded", timeout: 25000 }).catch(() => {});
+    await page.waitForTimeout(inflowRndInt(1400, 2800));
+  }
   for (let s = 0; s < 8; s++) {
     if (target.type === "place") {
       // 1순위: 플레이스 상세 링크(place.naver.com/.../{id} 또는 /place/{id}) — 지도 링크 제외
@@ -5281,6 +5290,15 @@ async function inflowFindAndEnter(page: any, target: InflowTarget, log: (m: stri
       }, needle).catch(() => null);
       const el = placeLink && placeLink.asElement ? placeLink.asElement() : null;
       if (el) return await enterVia(el, s);
+    } else if (target.type === "store") {
+      // 🛒 상품ID 또는 스토어명이 들어간 상품 링크를 검색결과에서 찾아 클릭
+      const sid = String((target as any).storeId || "");
+      const link = await page.evaluateHandle((args: { pid: string; sid: string }) => {
+        const as = Array.from(document.querySelectorAll("a")) as HTMLAnchorElement[];
+        return as.find(a => (args.pid && a.href.includes(args.pid)) || (args.sid && a.href.includes("smartstore.naver.com/" + args.sid))) || null;
+      }, { pid: String((target as any).productId || ""), sid }).catch(() => null);
+      const el = link && link.asElement ? link.asElement() : null;
+      if (el) return await enterVia(el, s);
     } else {
       const link = await page.$(`a[href*="${needle}"]`).catch(() => null);
       if (link) return await enterVia(link, s);
@@ -5288,6 +5306,14 @@ async function inflowFindAndEnter(page: any, target: InflowTarget, log: (m: stri
     // 사람처럼 스크롤하며 lazy 로드된 결과 더 탐색
     await page.mouse.wheel(0, inflowRndInt(700, 1300));
     await page.waitForTimeout(inflowRndInt(700, 1600));
+  }
+  // 🛒 스토어 폴백 — 검색결과서 못 찾으면 상품 URL로 직접 진입(방문·체류는 유효)
+  if (target.type === "store") {
+    const url = (target as any).storeUrl;
+    log(`  🛒 검색결과에 상품이 안 보여 상품 페이지로 직접 진입 → ${url}`);
+    await page.goto(url, { waitUntil: "domcontentloaded", timeout: 20000 }).catch(() => {});
+    await page.waitForTimeout(inflowRndInt(1200, 2400));
+    return page;
   }
   // 🏢 플레이스 폴백(B) — 검색결과에서 못 찾으면(또는 지도로만 뜨면) 플레이스 상세로 직접 진입
   if (target.type === "place") {
@@ -5355,7 +5381,7 @@ async function inflowDwellRead(page: any, log: (m: string) => void, shouldStop?:
 }
 
 // 저장/공감 등 액션(로그인 필요). 셀렉터는 방어적 — 실패해도 유입 자체는 유효.
-type InflowActions = { save?: boolean; like?: boolean; share?: boolean; directions?: boolean; call?: boolean; booking?: boolean; talk?: boolean; review?: boolean; reviewText?: string; rate?: number; loginAvailable?: boolean };
+type InflowActions = { save?: boolean; like?: boolean; share?: boolean; directions?: boolean; call?: boolean; booking?: boolean; talk?: boolean; review?: boolean; reviewText?: string; wish?: boolean; cart?: boolean; optionView?: boolean; rate?: number; loginAvailable?: boolean };
 async function inflowActions(page: any, target: InflowTarget, actions: InflowActions, log: (m: string) => void): Promise<void> {
   // 🎲 액션 확률 — rate(0~1)면 그 확률만큼만 발동(진짜 사람처럼 매번 안 함). 리뷰는 명시 액션이라 확률 제외.
   const rate = typeof actions.rate === "number" ? actions.rate : 1;
@@ -5414,6 +5440,18 @@ async function inflowActions(page: any, target: InflowTarget, actions: InflowAct
           } else { log("  ⚠️ 리뷰 작성 실패(로그인·화면구조 확인)"); }
         } catch { log("  ⚠️ 리뷰 작성 실패(로그인·화면구조 확인)"); }
       }
+    }
+    // 🛒 스마트스토어 — 옵션·이미지 탐색(로그인 불필요, 관심 신호) + 찜·장바구니(로그인 필요)
+    if (target.type === "store") {
+      if (rollStrong(actions.optionView)) {
+        // 옵션 선택 UI·상세 이미지를 눌러보며 둘러본다(구매 고민하는 손님처럼)
+        const ok = await clickFirst(['a:has-text("상세정보")', 'a:has-text("리뷰")', 'button:has-text("옵션")', '[class*="option"] button', 'a:has-text("상품정보")'], "  🔍 옵션·상세 탐색");
+        if (ok) { await page.waitForTimeout(inflowRndInt(1500, 3000)); await page.mouse.wheel(0, inflowRndInt(600, 1400)).catch(() => {}); }
+      }
+      if (skipLoginAction(actions.wish)) log("  🔑 찜: 로그인 필요 — 건너뜀");
+      else if (roll(actions.wish)) { if (!await clickFirst(['a:has-text("찜")', 'button:has-text("찜")', '[class*="wish"] button', 'button[class*="wish"]', 'a[class*="wish"]'], "  💚 찜(관심상품)")) log("  ⚙️ [진단] 찜 버튼 못 찾음 — 로그인 필요하거나 네이버 화면 변경 의심."); }
+      if (skipLoginAction(actions.cart)) log("  🔑 장바구니: 로그인 필요 — 건너뜀");
+      else if (roll(actions.cart)) { if (!await clickFirst(['button:has-text("장바구니")', 'a:has-text("장바구니")', '[class*="cart"] button', 'button[class*="cart"]'], "  🛒 장바구니 담기")) log("  ⚙️ [진단] 장바구니 버튼 못 찾음 — 로그인 필요하거나 네이버 화면 변경 의심."); }
     }
     if (target.type === "blog" && skipLoginAction(actions.like)) log("  🔑 블로그 공감: 로그인 필요 — 건너뜀");
     else if (target.type === "blog" && roll(actions.like)) {

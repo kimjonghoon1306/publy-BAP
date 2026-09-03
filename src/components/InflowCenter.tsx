@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from "react";
 import { BotEventStream, botFetch } from "../lib/botApi";
 import UsageGuide from "./UsageGuide";
 import SproutAssistant from "./SproutAssistant";
-import { INFLOW_DAILY_LIMIT, PLAN_CONFIG, getInflowDailyUsage, getInflowUsageHistory, getAccounts, PublyAccount, getAutopilot, saveAutopilot, getRankHistory, AutopilotConfig, getInflowSchedule, saveInflowSchedule, inflowScheduleRanToday, markInflowScheduleRan, getPerfReport, PerfReport, recordRankPoint, getMemberSessionToken, getAdminSessionToken, getInflowTargets, saveInflowTargets } from "../lib/supabase";
+import { INFLOW_DAILY_LIMIT, PLAN_CONFIG, getInflowDailyUsage, getInflowUsageHistory, getAccounts, PublyAccount, getAutopilot, saveAutopilot, getRankHistory, AutopilotConfig, getInflowSchedule, saveInflowSchedule, inflowScheduleRanToday, markInflowScheduleRan, getPerfReport, PerfReport, recordRankPoint, getMemberSessionToken, getAdminSessionToken, getInflowTargets, saveInflowTargets, inflowScope, getInflowStatToday } from "../lib/supabase";
 
 const BOT = "http://127.0.0.1:3334"; // neighbor-bot
 
@@ -44,9 +44,21 @@ function extractPlaceId(input: string): string | null {
 }
 const isShortUrl = (s: string) => /naver\.me\/|me2\.do\//i.test(String(s || ""));
 
-// 🔎 주소만 보고 플레이스/블로그 자동 감지(탭 안 바꿔도 되게)
-function detectTargetType(input: string): "place" | "blog" | null {
+// 🛒 스마트스토어 상품 주소 → { storeId, productId } 인식
+function parseStoreUrl(input: string): { storeId: string; productId: string } | null {
+  const s = (input || "").trim();
+  if (!s) return null;
+  if (!/smartstore\.naver\.com|shopping\.naver\.com|brand\.naver\.com/i.test(s)) return null;
+  const storeId = s.match(/(?:smartstore|brand)\.naver\.com\/([A-Za-z0-9_-]+)/i)?.[1] || "";
+  const productId = s.match(/products\/(\d+)/i)?.[1] || s.match(/\/(\d{6,})/)?.[1] || "";
+  if (!storeId && !productId) return null;
+  return { storeId, productId };
+}
+
+// 🔎 주소만 보고 플레이스/블로그/스토어 자동 감지(탭 안 바꿔도 되게)
+function detectTargetType(input: string): "place" | "blog" | "store" | null {
   const s = (input || "").toLowerCase();
+  if (/smartstore\.naver|shopping\.naver|brand\.naver/.test(s)) return "store";
   if (/place\.naver|map\.naver|naver\.me|pcmap|entry\/place/.test(s)) return "place";
   if (/blog\.naver|blogid=|\/postview/.test(s)) return "blog";
   return null;
@@ -106,11 +118,12 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
   // 🔁 탭을 옮겨도·앱을 껐다 켜도 입력값이 유지되게 — 고정 키(userId 무관, 로그인 로딩중 초기화 방지)
   const formKey = "publy_inflow_form";
   const saved0: any = (() => { try { return JSON.parse(localStorage.getItem("publy_inflow_form") || "{}"); } catch { return {}; } })();
-  const [targetType, setTargetType] = useState<"place" | "blog">(saved0.targetType ?? "place");
+  const [targetType, setTargetType] = useState<"place" | "blog" | "store">(saved0.targetType ?? "place");
   const privateKey = `publy_inflow_private_${userId || "guest"}`;
   const private0: any = (() => { try { return JSON.parse(localStorage.getItem(privateKey) || "{}"); } catch { return {}; } })();
   const [placeUrl, setPlaceUrl] = useState<string>(private0.placeUrl ?? saved0.placeUrl ?? "");
   const [blogUrl, setBlogUrl] = useState<string>(private0.blogUrl ?? saved0.blogUrl ?? "");
+  const [storeUrl, setStoreUrl] = useState<string>(private0.storeUrl ?? saved0.storeUrl ?? "");
   // 🔑 키워드는 플레이스/블로그가 완전히 별개(서로 섞이면 안 됨). 각각 저장하고, 현재 대상 것만 표시·수정.
   const [keywordsPlace, setKeywordsPlace] = useState<string>(saved0.keywordsPlace ?? (saved0.targetType !== "blog" ? saved0.keywords : "") ?? "");
   const [keywordsBlog, setKeywordsBlog] = useState<string>(saved0.keywordsBlog ?? (saved0.targetType === "blog" ? saved0.keywords : "") ?? "");
@@ -128,6 +141,10 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
   const [doBook, setDoBook] = useState(saved0.doBook ?? false);
   const [doTalk, setDoTalk] = useState(saved0.doTalk ?? false);
   const [doLike, setDoLike] = useState(saved0.doLike ?? true);
+  // 🛒 스마트스토어 액션
+  const [doWish, setDoWish] = useState(saved0.doWish ?? true);      // 💚 찜(로그인 필요)
+  const [doCart, setDoCart] = useState(saved0.doCart ?? false);     // 🛒 장바구니(로그인 필요)
+  const [doOption, setDoOption] = useState(saved0.doOption ?? true); // 🔍 옵션·상세 탐색(로그인 불필요)
   const [funnel, setFunnel] = useState(saved0.funnel ?? false);
   const [spread, setSpread] = useState(saved0.spread ?? false);   // ⏱️ 시간 분산
   const [spreadHours, setSpreadHours] = useState<number>(saved0.spreadHours ?? 3);
@@ -136,10 +153,11 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
   const [auto, setAuto] = useState(saved0.auto ?? false);
   const [actionRate, setActionRate] = useState<number>(saved0.actionRate ?? 100); // 🎲 액션 발동 확률(%)
   const [intensity, setIntensity] = useState<"fast" | "normal" | "deep">(saved0.intensity ?? "normal"); // 📖 체류 강도
-  const [maxDwellSec, setMaxDwellSec] = useState<number>(saved0.maxDwellSec ?? 90); // 0=본문 분량에 따라 자동
+  const [maxDwellSec, setMaxDwellSec] = useState<number>(saved0.maxDwellSec ?? 0); // 0=강도 사용, >0=직접지정 확정값
+  const [dwellDraft, setDwellDraft] = useState<string>(String(saved0.maxDwellSec ?? 30)); // 직접지정 입력 임시값(설정 버튼 눌러야 확정)
   const [extraTargets, setExtraTargets] = useState<string[]>(private0.extraTargets ?? saved0.extraTargets ?? []); // ➕ 추가 대상(주소 목록)
   // 🏪 내 플레이스/블로그 저장 목록(이름+주소) — 여러 개 저장해두고 골라 쓰기
-  type SavedTarget = { id: string; name: string; url: string; type: "place" | "blog" };
+  type SavedTarget = { id: string; name: string; url: string; type: "place" | "blog" | "store" };
   const savedTargetsKey = `publy_inflow_saved_targets_${userId || "guest"}`;
   const [savedTargets, setSavedTargets] = useState<SavedTarget[]>(() => { try { return JSON.parse(localStorage.getItem(savedTargetsKey) || localStorage.getItem("publy_inflow_saved_targets") || "[]"); } catch { return []; } });
   const [savingName, setSavingName] = useState("");
@@ -157,7 +175,8 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
   const [running, setRunning] = useState(false);
   type InflowLogEntry = { type: "text"; text: string } | { type: "shot"; caption: string; dataUrl: string };
   const [logs, setLogs] = useState<InflowLogEntry[]>([]);
-  const [used, setUsed] = useState(0);
+  const [used, setUsed] = useState(0);            // 전체 하루 한도 사용량(한도 계산용)
+  const [todayScoped, setTodayScoped] = useState(0); // 현재 대상의 오늘 유입(KPI 표시용, 대상별 분리)
   const [progress, setProgress] = useState(0);
   const [sessOk, setSessOk] = useState(0); // 이번 실행 성공 수
   const [history, setHistory] = useState<{ label: string; count: number }[]>([]);
@@ -211,12 +230,22 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
   });
   const pushLog = (m: string) => appendLog({ type: "text", text: m });
   const pushShot = (caption: string, dataUrl: string) => appendLog({ type: "shot", caption, dataUrl });
+  // 🎯 현재 선택된 대상의 데이터 scope(대상별 통계 분리 키). 대상이 인식되면 그 대상 기준으로 조회.
+  const currentScope = (() => {
+    try {
+      if (targetType === "place") { const id = extractPlaceId(placeUrl); return id ? inflowScope("place", id) : ""; }
+      if (targetType === "blog") { const b = parseBlogUrl(blogUrl); return b ? inflowScope("blog", b.blogId) : ""; }
+      if (targetType === "store") { const s = parseStoreUrl(storeUrl); return s ? inflowScope("store", s.productId || s.storeId) : ""; }
+    } catch {}
+    return "";
+  })();
   const refreshStats = () => {
     if (!userId) return;
-    getInflowDailyUsage(userId).then(setUsed).catch(() => {});
-    getInflowUsageHistory(userId, chartDays).then(setHistory).catch(() => {});
-    getRankHistory(userId, chartDays).then(setRankHist).catch(() => {});
-    getPerfReport(userId, reportPeriod).then(setReport).catch(() => {});
+    getInflowDailyUsage(userId).then(setUsed).catch(() => {});                    // 전체 한도 사용량
+    getInflowStatToday(userId, currentScope).then(setTodayScoped).catch(() => {}); // 이 대상 오늘 유입
+    getInflowUsageHistory(userId, chartDays, currentScope).then(setHistory).catch(() => {});
+    getRankHistory(userId, chartDays, currentScope).then(setRankHist).catch(() => {});
+    getPerfReport(userId, reportPeriod, currentScope).then(setReport).catch(() => {});
   };
   useEffect(() => {
     refreshStats();
@@ -256,10 +285,10 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
       localStorage.removeItem("publy_inflow_saved_targets");
     } catch {}
   }, [privateKey, savedTargetsKey, userId]);
-  // 주간/월간 토글 바뀌면 리포트 다시 로드
-  useEffect(() => { if (userId) getPerfReport(userId, reportPeriod).then(setReport).catch(() => {}); }, [userId, reportPeriod]);
-  // 📅 기간 바뀌면 유입·순위 그래프 다시 로드(과거 데이터 조회)
-  useEffect(() => { if (!userId) return; getInflowUsageHistory(userId, chartDays).then(setHistory).catch(() => {}); getRankHistory(userId, chartDays).then(setRankHist).catch(() => {}); }, [userId, chartDays]);
+  // 주간/월간 토글·대상 바뀌면 리포트 다시 로드(대상별)
+  useEffect(() => { if (userId) getPerfReport(userId, reportPeriod, currentScope).then(setReport).catch(() => {}); }, [userId, reportPeriod, currentScope]);
+  // 📅 기간·대상 바뀌면 유입·순위·오늘유입 다시 로드(과거 데이터·대상별 조회) → 대상 변경 시 화면 전체 갱신
+  useEffect(() => { if (!userId) return; getInflowStatToday(userId, currentScope).then(setTodayScoped).catch(() => {}); getInflowUsageHistory(userId, chartDays, currentScope).then(setHistory).catch(() => {}); getRankHistory(userId, chartDays, currentScope).then((h) => { setRankHist(h); const last = [...h].reverse().find((x) => x.rank != null); setApLastRank(last ? last.rank : null); setApRankOut(false); }).catch(() => {}); }, [userId, chartDays, currentScope]);
 
   // 🩺 플레이스 최적화 진단 실행(현재 입력된 플레이스 주소 기준)
   const runDiagnose = async () => {
@@ -292,7 +321,7 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
         toast(`"${kw}"에서 30위 밖이에요(노출 순위 낮음). 유입·리뷰로 끌어올리세요.`, "info");
       } else {
         setApLastRank(j.rank); setApRankOut(false);
-        if (userId) { await recordRankPoint(userId, j.rank); getPerfReport(userId, reportPeriod).then(setReport).catch(()=>{}); getRankHistory(userId, 7).then(setRankHist).catch(()=>{}); }
+        if (userId) { await recordRankPoint(userId, j.rank, currentScope); getPerfReport(userId, reportPeriod, currentScope).then(setReport).catch(()=>{}); getRankHistory(userId, chartDays, currentScope).then(setRankHist).catch(()=>{}); }
         pushLog(`📍 현재 "${kw}" ${j.rank}위${apEnabled ? ` (목표 ${apGoal}위)` : ""} — 기록했어요`);
         toast(`현재 "${kw}" ${j.rank}위 — 기록했어요`, "success");
       }
@@ -310,8 +339,8 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
       const j = await r.json();
       if (j.rank != null) {
         setApLastRank(j.rank);
-        await recordRankPoint(userId, j.rank);
-        getPerfReport(userId, reportPeriod).then(setReport).catch(()=>{});
+        await recordRankPoint(userId, j.rank, currentScope);
+        getPerfReport(userId, reportPeriod, currentScope).then(setReport).catch(()=>{});
         pushLog(`📍 현재 순위 ${j.rank}위 (목표 ${apGoal}위)`);
         return j.rank <= apGoal;   // 목표 이내면 달성
       }
@@ -459,7 +488,7 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
     if (nextEnabled && !apKeyword.trim()) { toast("순위를 추적할 키워드를 입력하세요", "error"); return; }
     if (nextEnabled && targetType === "place" && !placeUrl.trim()) { toast("먼저 플레이스 주소를 입력하세요", "error"); return; }
     if (nextEnabled && targetType === "blog" && !blogUrl.trim()) { toast("먼저 블로그 글 주소를 입력하세요", "error"); return; }
-    const cfg: AutopilotConfig = { user_id: userId, target_type: targetType, target_ref: targetType === "place" ? placeUrl.trim() : blogUrl.trim(), keyword: apKeyword.trim(), goal_rank: apGoal, enabled: nextEnabled, last_rank: apLastRank };
+    const cfg: AutopilotConfig = { user_id: userId, target_type: targetType, target_ref: targetType === "place" ? placeUrl.trim() : targetType === "store" ? storeUrl.trim() : blogUrl.trim(), keyword: apKeyword.trim(), goal_rank: apGoal, enabled: nextEnabled, last_rank: apLastRank };
     try { await saveAutopilot(cfg); setApEnabled(nextEnabled); toast(nextEnabled ? `🎯 오토파일럿 ON — ${apKeyword} ${apGoal}위 목표로 자동 관리` : "오토파일럿 OFF", "success"); }
     catch (e: any) { toast(e.message, "error"); }
   };
@@ -488,11 +517,11 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
     try {
       localStorage.setItem(formKey, JSON.stringify({
         targetType, keywordsPlace, keywordsBlog, rounds, termMin, termMax, device,
-        doSave, doShare, doDir, doCall, doBook, doTalk, doLike, funnel, spread, spreadHours, doReview, reviewText, auto, actionRate, intensity, maxDwellSec, kwWeights,
+        doSave, doShare, doDir, doCall, doBook, doTalk, doLike, doWish, doCart, doOption, funnel, spread, spreadHours, doReview, reviewText, auto, actionRate, intensity, maxDwellSec, kwWeights,
       }));
-      localStorage.setItem(privateKey, JSON.stringify({ placeUrl, blogUrl, extraTargets }));
+      localStorage.setItem(privateKey, JSON.stringify({ placeUrl, blogUrl, storeUrl, extraTargets }));
     } catch {}
-  }, [formKey, privateKey, targetType, placeUrl, blogUrl, keywordsPlace, keywordsBlog, rounds, termMin, termMax, device, doSave, doShare, doDir, doCall, doBook, doTalk, doLike, funnel, spread, spreadHours, doReview, reviewText, auto, actionRate, intensity, maxDwellSec, extraTargets, kwWeights]);
+  }, [formKey, privateKey, targetType, placeUrl, blogUrl, storeUrl, keywordsPlace, keywordsBlog, rounds, termMin, termMax, device, doSave, doShare, doDir, doCall, doBook, doTalk, doLike, doWish, doCart, doOption, funnel, spread, spreadHours, doReview, reviewText, auto, actionRate, intensity, maxDwellSec, extraTargets, kwWeights]);
 
   // 🔔 앱 내 자동 알림 — 날짜/주차 마커로 중복을 막고, 다음 실행 때 놓친 알림도 알림함에 쌓는다.
   useEffect(() => {
@@ -540,7 +569,7 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
             if (previous > 0 && result.rank > previous) addNotification(`${keyword} 순위 ${previous}위→${result.rank}위 하락, 유입 보강 권장`);
             localStorage.setItem(`${markerPrefix}_last_rank`, String(result.rank));
             setApLastRank(result.rank);
-            await recordRankPoint(userId, result.rank);
+            await recordRankPoint(userId, result.rank, currentScope);
           }
           markRun("rank", day);
         }
@@ -583,6 +612,8 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
     if (targetType === "place" && !placeUrl.trim()) { toast("플레이스 주소(지도/플레이스 링크)를 입력하세요", "error"); return; }
     const parsedBlog = targetType === "blog" ? parseBlogUrl(blogUrl) : null;
     if (targetType === "blog" && !parsedBlog) { toast("블로그 글 주소를 붙여넣어 주세요", "error"); return; }
+    const parsedStore = targetType === "store" ? parseStoreUrl(storeUrl) : null;
+    if (targetType === "store" && !parsedStore) { toast("스마트스토어 상품 주소를 붙여넣어 주세요", "error"); return; }
     if (!unlimited && used >= limit) { toast(`오늘 유입 한도(${limit}회)를 다 썼어요. 자정에 초기화돼요.`, "error"); return; }
     const n = auto ? (unlimited ? 999 : Math.max(1, limit - used)) : Math.max(1, rounds);
 
@@ -591,7 +622,8 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
       targetType, keywords: kwList.join(","), rounds: String(n),
       termMin: String(termMin), termMax: String(termMax),
       doSave: String(doSave), doLike: String(doLike), doShare: String(doShare),
-      doDir: String(doDir), doCall: String(doCall), doBook: String(doBook), doTalk: String(doTalk), device,
+      doDir: String(doDir), doCall: String(doCall), doBook: String(doBook), doTalk: String(doTalk),
+      doWish: String(doWish), doCart: String(doCart), doOption: String(doOption), device,
       fullFunnel: String(funnel),
       spreadHours: spread ? String(spreadHours) : "0",
       doReview: String(doReview), reviewText: doReview ? reviewText : "",
@@ -603,6 +635,7 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
     if (userId) params.set("userId", userId);
     if (accountId) params.set("accountId", accountId);
     if (targetType === "place") params.set("placeUrl", placeUrl.trim());
+    else if (targetType === "store") params.set("storeUrl", storeUrl.trim());
     else if (parsedBlog) { params.set("blogId", parsedBlog.blogId); if (parsedBlog.logNo) params.set("logNo", parsedBlog.logNo); }
     // ➕ 추가 대상들(있으면 방문마다 로테이션) — 서버가 targets JSON을 받아 처리
     const extras = extraTargets.map((s) => s.trim()).filter(Boolean);
@@ -618,9 +651,12 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
     const dwellSec = maxDwellSec > 0 ? maxDwellSec : (baseSecMap[intensity] ?? 60);
     const actionLabels = (targetType === "place"
       ? [doSave && "💾저장", doDir && "🧭길찾기", doCall && "📞전화", doBook && "📅예약", doTalk && "💬톡톡", doShare && "🔗공유"]
+      : targetType === "store"
+      ? [doOption && "🔍옵션탐색", doWish && "💚찜", doCart && "🛒장바구니", doShare && "🔗공유"]
       : [doLike && "💚공감", doShare && "🔗공유"]).filter(Boolean) as string[];
+    const targetLabel = targetType === "place" ? "플레이스" : targetType === "store" ? "스마트스토어" : "블로그";
     pushLog(`━━━━━ 🚀 트래픽 유입 시작 · 적용된 설정 ━━━━━`);
-    pushLog(`📍 대상: ${targetType === "place" ? "플레이스" : "블로그"} · 키워드 ${kwList.length}개 · ${n}회 방문`);
+    pushLog(`📍 대상: ${targetLabel} · 키워드 ${kwList.length}개 · ${n}회 방문`);
     pushLog(`📶 접속패턴(기기): ${deviceLabel}`);
     const actionSec = Math.round(actionLabels.length * 2.5);
     const totalSec = Math.round(dwellSec + actionSec);
@@ -756,19 +792,22 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
         <div>
           <label style={labelStyle}>어디로 유입시킬까요?</label>
           <div style={{ display: "flex", gap: 8 }}>
-            {([["place", "🗺️ 플레이스(지도)"], ["blog", "📝 블로그 글"]] as const).map(([k, lb]) => (
-              <button key={k} onClick={() => setTargetType(k)} style={{ flex: 1, padding: "13px", borderRadius: 12, border: `2px solid ${targetType === k ? C.accent : C.line2}`, background: targetType === k ? C.glow : C.panel2, color: targetType === k ? C.accent : C.sub, fontSize: 15, fontWeight: 800, cursor: "pointer", fontFamily: "inherit" }}>{lb}</button>
+            {([["place", "🗺️ 플레이스"], ["blog", "📝 블로그"], ["store", "🛒 스마트스토어"]] as const).map(([k, lb]) => (
+              <button key={k} onClick={() => setTargetType(k)} style={{ flex: 1, padding: "13px", borderRadius: 12, border: `2px solid ${targetType === k ? C.accent : C.line2}`, background: targetType === k ? C.glow : C.panel2, color: targetType === k ? C.accent : C.sub, fontSize: 14.5, fontWeight: 800, cursor: "pointer", fontFamily: "inherit" }}>{lb}</button>
             ))}
           </div>
         </div>
 
         {/* 대상 입력 + 이름 붙여 저장 */}
         <div>
-          <label style={labelStyle}>{targetType === "place" ? "내 플레이스 주소" : "내 블로그 글 주소"}</label>
+          <label style={labelStyle}>{targetType === "place" ? "내 플레이스 주소" : targetType === "store" ? "내 스마트스토어 상품 주소" : "내 블로그 글 주소"}</label>
           <input
-            value={targetType === "place" ? placeUrl : blogUrl}
-            onChange={(e) => { const v = e.target.value; if (targetType === "place") { setPlaceUrl(v); if (detectTargetType(v) === "blog") { setBlogUrl(v); setTargetType("blog"); toast("블로그 주소로 인식했어요", "info"); } } else { setBlogUrl(v); if (detectTargetType(v) === "place") { setPlaceUrl(v); setTargetType("place"); toast("플레이스 주소로 인식했어요", "info"); } } }}
-            placeholder={targetType === "place" ? "지도/플레이스/naver.me 링크 붙여넣기" : "글 주소/아이디 (blog.naver.com/아이디/글번호)"}
+            value={targetType === "place" ? placeUrl : targetType === "store" ? storeUrl : blogUrl}
+            onChange={(e) => { const v = e.target.value; const det = detectTargetType(v);
+              if (targetType === "place") { setPlaceUrl(v); if (det === "blog") { setBlogUrl(v); setTargetType("blog"); toast("블로그 주소로 인식했어요", "info"); } else if (det === "store") { setStoreUrl(v); setTargetType("store"); toast("스마트스토어 주소로 인식했어요", "info"); } }
+              else if (targetType === "store") { setStoreUrl(v); if (det === "place") { setPlaceUrl(v); setTargetType("place"); toast("플레이스 주소로 인식했어요", "info"); } else if (det === "blog") { setBlogUrl(v); setTargetType("blog"); toast("블로그 주소로 인식했어요", "info"); } }
+              else { setBlogUrl(v); if (det === "place") { setPlaceUrl(v); setTargetType("place"); toast("플레이스 주소로 인식했어요", "info"); } else if (det === "store") { setStoreUrl(v); setTargetType("store"); toast("스마트스토어 주소로 인식했어요", "info"); } } }}
+            placeholder={targetType === "place" ? "지도/플레이스/naver.me 링크 붙여넣기" : targetType === "store" ? "smartstore.naver.com/스토어/products/상품번호" : "글 주소/아이디 (blog.naver.com/아이디/글번호)"}
             style={inputStyle} />
           {/* 인식 배지 */}
           {targetType === "place" && placeUrl.trim() && (extractPlaceId(placeUrl)
@@ -779,6 +818,9 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
           {targetType === "blog" && blogUrl.trim() && (parseBlogUrl(blogUrl)
             ? <div style={{ marginTop: 6, fontSize: 12.5, fontWeight: 700, color: "#16a34a" }}>✅ 인식됨 — {parseBlogUrl(blogUrl)!.blogId}{parseBlogUrl(blogUrl)!.logNo ? " / 글 " + parseBlogUrl(blogUrl)!.logNo : ""}</div>
             : <div style={{ marginTop: 6, fontSize: 12.5, fontWeight: 700, color: "#dc2626" }}>⚠️ 주소를 못 읽었어요 — blog.naver.com/아이디/글번호 형태로 붙여넣어 주세요</div>)}
+          {targetType === "store" && storeUrl.trim() && (parseStoreUrl(storeUrl)
+            ? <div style={{ marginTop: 6, fontSize: 12.5, fontWeight: 700, color: "#16a34a" }}>✅ 인식됨 — 스토어 {parseStoreUrl(storeUrl)!.storeId || "?"}{parseStoreUrl(storeUrl)!.productId ? " / 상품 " + parseStoreUrl(storeUrl)!.productId : ""}</div>
+            : <div style={{ marginTop: 6, fontSize: 12.5, fontWeight: 700, color: "#dc2626" }}>⚠️ 주소를 못 읽었어요 — smartstore.naver.com/스토어/products/상품번호 형태로 붙여넣어 주세요</div>)}
           {/* 이름 + 저장 버튼 */}
           <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
             <input value={savingName} onChange={(e) => setSavingName(e.target.value)} placeholder={targetType === "place" ? "이 플레이스 이름 (예: 강남점)" : "이 블로그 이름"} style={{ ...inputStyle, flex: 1 }} />
@@ -870,14 +912,21 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
               {([["fast", "빠르게 ~20초"], ["normal", "보통 ~60초"], ["deep", "꼼꼼히 ~3분"]] as const).map(([k, lb]) => {
                 const on = intensity === k && maxDwellSec === 0; // 직접지정 중이면 강도 버튼은 꺼진 표시
                 return (
-                <button key={k} onClick={() => { setIntensity(k); setMaxDwellSec(0); toast(`📖 체류강도 '${lb}' 선택됨`, "success"); }} style={{ flex: 1, padding: "11px", borderRadius: 10, border: `2px solid ${on ? C.accent : C.line2}`, background: on ? C.glow : C.panel2, color: on ? C.accent : C.sub, fontSize: 13.5, fontWeight: 800, cursor: "pointer", fontFamily: "inherit" }}>{on ? "✓ " : ""}{lb}</button>
+                <button key={k} onClick={() => { setIntensity(k); setMaxDwellSec(0); setDwellDraft("30"); toast(`📖 체류강도 '${lb}' 선택됨`, "success"); }} style={{ flex: 1, padding: "11px", borderRadius: 10, border: `2px solid ${on ? C.accent : C.line2}`, background: on ? C.glow : C.panel2, color: on ? C.accent : C.sub, fontSize: 13.5, fontWeight: 800, cursor: "pointer", fontFamily: "inherit" }}>{on ? "✓ " : ""}{lb}</button>
                 );
               })}
             </div>
           </div>
           <div style={{ flex: 1, minWidth: 220 }}>
-            <label style={labelStyle}>⏱️ 체류시간 직접지정(초) {maxDwellSec > 0 ? <span style={{ color: C.accent, fontWeight: 800 }}>✓ 사용 중</span> : <span style={{ color: C.sub, fontWeight: 600 }}>(0=강도대로)</span>}</label>
-            <input type="number" min={0} value={maxDwellSec} onChange={(e) => { const was = maxDwellSec; const v = Math.max(0, Number(e.target.value)); setMaxDwellSec(v); if (was === 0 && v > 0) toast(`⏱️ 체류시간 직접지정 ${v}초로 설정됨 (강도 해제)`, "success"); else if (was > 0 && v === 0) toast("체류강도 선택으로 돌아왔어요", "info"); }} placeholder="0=강도 · 300=5분" style={{ ...inputStyle, textAlign: "center", border: `2px solid ${maxDwellSec > 0 ? C.accent : C.line2}`, background: maxDwellSec > 0 ? C.glow : C.panel2 }} />
+            <label style={labelStyle}>⏱️ 체류시간 직접지정(초) {maxDwellSec > 0 ? <span style={{ color: C.accent, fontWeight: 800 }}>✓ {maxDwellSec}초 사용 중</span> : <span style={{ color: C.sub, fontWeight: 600 }}>(강도 대신 직접)</span>}</label>
+            <div style={{ display: "flex", gap: 6 }}>
+              <input type="number" min={0} value={dwellDraft}
+                onChange={(e) => setDwellDraft(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") { const v = Math.max(0, Number(dwellDraft) || 0); setMaxDwellSec(v); toast(v > 0 ? `⏱️ 체류시간 ${v}초로 설정됨 (강도 해제)` : "체류강도 선택으로 돌아왔어요", v > 0 ? "success" : "info"); } }}
+                placeholder="예: 300 = 5분" style={{ ...inputStyle, flex: 1, textAlign: "center", border: `2px solid ${maxDwellSec > 0 ? C.accent : C.line2}`, background: maxDwellSec > 0 ? C.glow : C.panel2 }} />
+              <button onClick={() => { const v = Math.max(0, Number(dwellDraft) || 0); setMaxDwellSec(v); toast(v > 0 ? `⏱️ 체류시간 ${v}초로 설정됨 (강도 해제)` : "체류강도 선택으로 돌아왔어요", v > 0 ? "success" : "info"); }}
+                style={{ padding: "0 16px", borderRadius: 10, border: "none", background: `linear-gradient(135deg,${C.accent},${C.cyan})`, color: "#fff", fontSize: 13.5, fontWeight: 900, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}>설정</button>
+            </div>
             <div style={{ fontSize: 11, color: maxDwellSec > 0 ? C.accent : C.sub, fontWeight: 700, marginTop: 3 }}>{maxDwellSec > 0 ? `이 시간(약 ${maxDwellSec}초)으로 체류 · 강도 버튼은 꺼짐` : "값을 넣으면 강도 무시하고 그 시간으로(3분↑ 가능)"}</div>
           </div>
           <div style={{ flex: 1, minWidth: 220 }}>
@@ -916,6 +965,12 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
                   저장은 <b>내 네이버 계정의 저장목록(MY플레이스)</b>에 넣는 기능이라, 로그인 없이는 저장할 데가 없어 안 돼요. <b>계정 관리</b>에서 계정을 연결하고, 유입 시작할 때 <b>그 계정을 선택</b>하면 저장까지 실행돼요.<br />
                   <span style={{ color: C.sub }}>🧭 길찾기 · 📞 전화 · 📅 예약 · 💬 톡톡 · 🔗 공유는 로그인 없이 관심 신호를 줍니다.</span>
                 </>
+              ) : targetType === "store" ? (
+                <>
+                  <b style={{ color: "#d97706" }}>🔑 찜(💚) · 장바구니(🛒)는 네이버 로그인이 필요해요.</b><br />
+                  찜·장바구니는 <b>내 네이버 계정</b>에 담는 기능이라, 로그인이 안 돼 있으면 로그인 페이지로 튕겨서 건너뛰어요. <b>계정 관리</b>에서 계정을 연결하고, 유입 시작할 때 <b>그 계정을 선택</b>하면 찜·장바구니까지 실행돼요.<br />
+                  <span style={{ color: C.sub }}>🔍 옵션·상세 탐색 · 🔗 공유는 로그인 없이 관심 신호를 줍니다. 상품 상세 체류·옵션 탐색은 쇼핑 순위에 도움돼요.</span>
+                </>
               ) : (
                 <>
                   <b style={{ color: "#d97706" }}>🔑 공감(💚)은 네이버 로그인이 필요해요.</b><br />
@@ -932,6 +987,11 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
               <ActionChk v={doCall} set={setDoCall} label="📞 전화" />
               <ActionChk v={doBook} set={setDoBook} label="📅 예약" />
               <ActionChk v={doTalk} set={setDoTalk} label="💬 톡톡" />
+              <ActionChk v={doShare} set={setDoShare} label="🔗 공유" />
+            </>) : targetType === "store" ? (<>
+              <ActionChk v={doOption} set={setDoOption} label="🔍 옵션·상세 탐색" />
+              <ActionChk v={doWish} set={setDoWish} label="💚 찜 🔑" />
+              <ActionChk v={doCart} set={setDoCart} label="🛒 장바구니 🔑" />
               <ActionChk v={doShare} set={setDoShare} label="🔗 공유" />
             </>) : (<>
               <ActionChk v={doLike} set={setDoLike} label="💚 공감 🔑" />
