@@ -5713,7 +5713,8 @@ export async function searchInflow(params: {
   };
 
   if (multiAcct && params.requireLogin) log(`🔄 다계정 로테이션 — ${loginAccts.length}개 계정을 번갈아 로그인해 저장·찜·공감을 계정마다 실행해요(각 계정 자기 IP)`);
-  log(`🚀 검색유입 시작 — 대상 ${target.type === "place" ? "플레이스" : "블로그"}, 키워드 ${keywords.length}개, 총 ${rounds}회 방문, 텀 ${tmin}~${tmax}초`);
+  const typeLabel = (t: InflowTarget) => t.type === "place" ? "플레이스" : t.type === "store" ? "스마트스토어" : "블로그";
+  log(`🚀 검색유입 시작 — 대상 ${typeLabel(target)}, 키워드 ${keywords.length}개, 총 ${rounds}회 방문, 텀 ${tmin}~${tmax}초`);
 
   for (let i = 0; i < rounds; i++) {
     if (params.shouldStop?.()) { log("⏹️ 정지 요청 — 중단"); break; }
@@ -5721,7 +5722,8 @@ export async function searchInflow(params: {
 
     const kw = pickKeyword(i);
     const curTarget = targets[i % targets.length];   // 여러 대상 로테이션
-    log(`\n[${i + 1}/${rounds}] 🔍 "${kw}" → ${curTarget.type === "place" ? "플레이스" : "블로그 " + (curTarget as any).blogId} 유입`);
+    const curLabel = curTarget.type === "place" ? "플레이스" : curTarget.type === "store" ? "스마트스토어 " + ((curTarget as any).storeId || "") : "블로그 " + (curTarget as any).blogId;
+    log(`\n[${i + 1}/${rounds}] 🔍 "${kw}" → ${curLabel} 유입`);
 
     // 🔄 이번 방문에 쓸 로그인 계정(다계정이면 번갈아). 각 계정은 자기 배정 프록시로 접속.
     const acct = loginAccts.length ? loginAccts[i % loginAccts.length] : params.accountId;

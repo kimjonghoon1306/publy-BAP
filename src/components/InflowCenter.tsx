@@ -309,18 +309,42 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
   // 📅 기간·대상 바뀌면 유입·순위·오늘유입 다시 로드(과거 데이터·대상별 조회) → 대상 변경 시 화면 전체 갱신
   useEffect(() => { if (!userId) return; getInflowStatToday(userId, currentScope).then(setTodayScoped).catch(() => {}); getInflowUsageHistory(userId, chartDays, currentScope).then(setHistory).catch(() => {}); getRankHistory(userId, chartDays, currentScope).then((h) => { setRankHist(h); const last = [...h].reverse().find((x) => x.rank != null); setApLastRank(last ? last.rank : null); setApRankOut(false); }).catch(() => {}); }, [userId, chartDays, currentScope]);
 
-  // 🔐 로그인해서 내 글 불러오기 — 계정 관리에서 연결한 계정으로 내 글 목록을 정확히 수집(SSE)
+  // 🌐 공개 API로 글 불러오기(로그인 세션 없이 아이디만) — 로그인 방식 실패 시 폴백. 모든 과정 라이브 로그에 기록.
+  const collectPublicPosts = (bid: string, reason: string) => {
+    if (!bid) { pushLog(`❌ 공개 수집 실패 — 블로그 주소(아이디)를 먼저 입력하세요`); toast("블로그 주소(아이디)를 먼저 입력하세요", "error"); setMyPostsLoading(false); return; }
+    pushLog(`🌐 ${reason} → 로그인 없이 공개 글 목록으로 불러올게요 (아이디: ${bid})`);
+    const es = new BotEventStream(`${BOT}/api/my-posts?blogId=${encodeURIComponent(bid)}&count=100`, { method: "GET" });
+    es.onmessage = (e: MessageEvent) => {
+      let d: any; try { d = JSON.parse(e.data); } catch { return; }
+      if (d.type === "log") pushLog(`  ${d.msg}`);
+      else if (d.type === "posts") { const arr = (d.posts || []) as { url: string; title: string; date: string }[]; setMyPosts(arr); setSelectedPosts(new Set(arr.map((p) => p.url))); pushLog(`✅ 공개 글 ${arr.length}개 불러옴`); toast(`📚 공개 글 ${arr.length}개를 불러왔어요`, "success"); setMyPostsLoading(false); es.close(); }
+      else if (d.type === "error") { pushLog(`❌ 공개 글 수집 실패 — ${d.msg}`); toast(d.msg, "error"); setMyPostsLoading(false); es.close(); }
+    };
+    es.onerror = () => { pushLog(`❌ 공개 글 수집 연결 오류 — 봇 서버(3334)를 확인해주세요`); toast("공개 글 수집 실패 — 봇 서버(3334) 확인", "error"); setMyPostsLoading(false); es.close(); };
+  };
+
+  // 🔐 로그인해서 내 글 불러오기 — 계정 관리에서 연결한 계정으로 내 글 목록 수집(SSE). 모든 과정 라이브 로그.
   const collectMyPosts = (acctId: string) => {
     if (!acctId) { toast("먼저 불러올 네이버 계정을 선택하세요", "error"); return; }
+    const acctName = accounts.find((a) => a.id === acctId)?.username || acctId;
+    const fallbackBid = parseBlogUrl(blogUrl)?.blogId || "";
     setMyPostsLoading(true); setMyPosts([]); setSelectedPosts(new Set());
+    pushLog(`━━━━━ 📚 내 글 불러오기 시작 ━━━━━`);
+    pushLog(`🔐 로그인 계정 '${acctName}'로 내 글 목록 요청 중…`);
+    let gotPosts = false;
     const es = new BotEventStream(`${BOT}/api/my-posts?accountId=${encodeURIComponent(acctId)}&selectMode=all`, { method: "GET" });
     es.onmessage = (e: MessageEvent) => {
       let d: any; try { d = JSON.parse(e.data); } catch { return; }
-      if (d.type === "log") pushLog(d.msg);
-      else if (d.type === "posts") { const arr = (d.posts || []) as { url: string; title: string; date: string }[]; setMyPosts(arr); setSelectedPosts(new Set(arr.map((p) => p.url))); toast(`📚 내 글 ${arr.length}개를 불러왔어요`, "success"); setMyPostsLoading(false); es.close(); }
-      else if (d.type === "error") { toast(d.msg, "error"); setMyPostsLoading(false); es.close(); }
+      if (d.type === "log") pushLog(`  ${d.msg}`);
+      else if (d.type === "posts") { gotPosts = true; const arr = (d.posts || []) as { url: string; title: string; date: string }[]; setMyPosts(arr); setSelectedPosts(new Set(arr.map((p) => p.url))); pushLog(`✅ 내 글 ${arr.length}개 불러옴 (로그인 방식)`); toast(`📚 내 글 ${arr.length}개를 불러왔어요`, "success"); setMyPostsLoading(false); es.close(); }
+      else if (d.type === "error") {
+        pushLog(`⚠️ 로그인 방식 실패 — ${d.msg}`);
+        es.close();
+        // 세션 만료/없음이면 공개 API로 자동 폴백(로그인 없이 공개 글이라도 보여줌)
+        collectPublicPosts(fallbackBid, "로그인 세션이 없거나 만료됨");
+      }
     };
-    es.onerror = () => { toast("글 수집 실패 — 봇 서버(3334)·계정 로그인 확인", "error"); setMyPostsLoading(false); es.close(); };
+    es.onerror = () => { if (gotPosts) return; pushLog(`⚠️ 로그인 방식 연결 오류 — 공개 방식으로 재시도해요`); es.close(); collectPublicPosts(fallbackBid, "봇 응답 오류"); };
   };
   const togglePost = (url: string) => setSelectedPosts((prev) => { const n = new Set(prev); n.has(url) ? n.delete(url) : n.add(url); return n; });
   const selectAllPosts = () => setSelectedPosts(new Set(myPosts.map((p) => p.url)));
@@ -776,9 +800,13 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
   const labelStyle: React.CSSProperties = { fontSize: 13.5, fontWeight: 800, color: C.ink, marginBottom: 8, display: "block" };
   const chk: React.CSSProperties = { display: "flex", alignItems: "center", gap: 7, cursor: "pointer", fontSize: 14, fontWeight: 700, color: C.ink, padding: "8px 12px", borderRadius: 10, border: `1px solid ${C.line}`, background: C.panel2 };
 
-  const ActionChk = ({ v, set, label }: { v: boolean; set: (b: boolean) => void; label: string }) => (
-    <label style={{ ...chk, borderColor: v ? C.accent : C.line, background: v ? C.glow : C.panel2 }}>
-      <input type="checkbox" checked={v} onChange={(e) => set(e.target.checked)} style={{ width: 17, height: 17, accentColor: C.accent }} />{label}
+  const ActionChk = ({ v, set, label, desc }: { v: boolean; set: (b: boolean) => void; label: string; desc?: string }) => (
+    <label style={{ display: "flex", alignItems: "flex-start", gap: 8, cursor: "pointer", padding: "10px 12px", borderRadius: 10, border: `1.5px solid ${v ? C.accent : C.line}`, background: v ? C.glow : C.panel2, minWidth: 150, flex: "1 1 160px" }}>
+      <input type="checkbox" checked={v} onChange={(e) => set(e.target.checked)} style={{ width: 17, height: 17, accentColor: C.accent, marginTop: 1, flexShrink: 0 }} />
+      <div style={{ minWidth: 0 }}>
+        <div style={{ fontSize: 13.5, fontWeight: 800, color: v ? C.accent : C.ink }}>{label}</div>
+        {desc && <div style={{ fontSize: 10.5, fontWeight: 600, color: C.sub, marginTop: 1, lineHeight: 1.4 }}>{desc}</div>}
+      </div>
     </label>
   );
   // 🎨 실행패널 그룹 구분 헤더 — 묶이는 기능을 색으로 나눠 한눈에 구분(밋밋함 제거)

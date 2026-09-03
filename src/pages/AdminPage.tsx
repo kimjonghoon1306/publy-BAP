@@ -7202,26 +7202,26 @@ POST3: (제목)|(이유)
       {pwPrompt&&(
         <div style={{position:"fixed",inset:0,zIndex:10000,background:"rgba(0,0,0,.75)",display:"flex",alignItems:"center",justifyContent:"center",padding:20}}
           onClick={()=>{ pwPromptResolve.current?.(null); pwPromptResolve.current=null; setPwPrompt(null); }}>
-          <div style={{width:"100%",maxWidth:400,borderRadius:20,background:"var(--card)",border:"1px solid var(--accent-border)",overflow:"hidden",animation:"fadeUp .25s ease",boxShadow:"0 24px 60px rgba(0,0,0,.5)"}} onClick={e=>e.stopPropagation()}>
-            <div style={{padding:"18px 22px 14px",background:"linear-gradient(135deg,var(--accent),#00cc80)",display:"flex",alignItems:"center",gap:10}}>
+          <div style={{width:"100%",maxWidth:400,borderRadius:20,background:theme==="dark"?"#111927":"#ffffff",border:`1px solid ${theme==="dark"?"#26313f":"#e3e9f2"}`,overflow:"hidden",animation:"fadeUp .25s ease",boxShadow:"0 24px 60px rgba(0,0,0,.5)"}} onClick={e=>e.stopPropagation()}>
+            <div style={{padding:"18px 22px 14px",background:"linear-gradient(135deg,#16a34a,#00cc80)",display:"flex",alignItems:"center",gap:10}}>
               <span style={{fontSize:24}}>🔒</span>
-              <div><div style={{fontSize:16,fontWeight:900,color:"#000"}}>세션이 만료되었어요</div>
-              <div style={{fontSize:12,color:"rgba(0,0,0,.7)",marginTop:2}}>{pwPrompt.acc.platform==="naver"?"네이버":"티스토리"} 비밀번호를 다시 입력해주세요</div></div>
+              <div><div style={{fontSize:16,fontWeight:900,color:"#ffffff"}}>세션이 만료되었어요</div>
+              <div style={{fontSize:12,color:"rgba(255,255,255,.9)",marginTop:2}}>{pwPrompt.acc.platform==="naver"?"네이버":"티스토리"} 비밀번호를 다시 입력해주세요</div></div>
             </div>
             <div style={{padding:"20px 22px"}}>
-              <div style={{fontSize:12,color:"var(--text3)",marginBottom:6}}>계정: <b style={{color:"var(--text)"}}>{pwPrompt.acc.username}</b></div>
+              <div style={{fontSize:12,color:theme==="dark"?"#8fa3bd":"#647084",marginBottom:6}}>계정: <b style={{color:theme==="dark"?"#eaf1fb":"#111a28"}}>{pwPrompt.acc.username}</b></div>
               <div style={{position:"relative",marginBottom:14}}>
-                <input type={showPwPrompt?"text":"password"} autoFocus className="inp" placeholder="비밀번호" value={pwPrompt.value}
+                <input type={showPwPrompt?"text":"password"} autoFocus placeholder="비밀번호" value={pwPrompt.value}
                   onChange={e=>setPwPrompt(p=>p?{...p,value:e.target.value}:p)}
                   onKeyDown={e=>{ if(e.key==="Enter"&&pwPrompt.value){ pwPromptResolve.current?.(pwPrompt.value); pwPromptResolve.current=null; setPwPrompt(null); } }}
-                  style={{fontSize:14,padding:"12px 44px 12px 14px"}}/>
-                <button type="button" onClick={()=>setShowPwPrompt(v=>!v)} aria-label="비밀번호 보기" style={{position:"absolute",right:10,top:"50%",transform:"translateY(-50%)",background:"none",border:"none",cursor:"pointer",fontSize:18,color:"var(--text3)"}}>{showPwPrompt?"🙈":"👁️"}</button>
+                  style={{width:"100%",boxSizing:"border-box",fontSize:14,padding:"12px 44px 12px 14px",borderRadius:10,border:`1.5px solid ${theme==="dark"?"#33404f":"#d2dbe8"}`,background:theme==="dark"?"#18212f":"#f5f8fc",color:theme==="dark"?"#eaf1fb":"#111a28",fontFamily:"inherit"}}/>
+                <button type="button" onClick={()=>setShowPwPrompt(v=>!v)} aria-label="비밀번호 보기" style={{position:"absolute",right:10,top:"50%",transform:"translateY(-50%)",background:"none",border:"none",cursor:"pointer",fontSize:18,color:theme==="dark"?"#8fa3bd":"#647084"}}>{showPwPrompt?"🙈":"👁️"}</button>
               </div>
               <div style={{display:"flex",gap:8}}>
                 <button onClick={()=>{ pwPromptResolve.current?.(null); pwPromptResolve.current=null; setPwPrompt(null); }}
-                  style={{flex:1,padding:"11px",borderRadius:10,border:"1px solid var(--border)",background:"var(--bg2)",color:"var(--text2)",cursor:"pointer",fontSize:13,fontWeight:700,fontFamily:"inherit"}}>취소</button>
+                  style={{flex:1,padding:"11px",borderRadius:10,border:`1px solid ${theme==="dark"?"#33404f":"#d2dbe8"}`,background:theme==="dark"?"#18212f":"#f5f8fc",color:theme==="dark"?"#8fa3bd":"#647084",cursor:"pointer",fontSize:13,fontWeight:700,fontFamily:"inherit"}}>취소</button>
                 <button disabled={!pwPrompt.value} onClick={()=>{ pwPromptResolve.current?.(pwPrompt.value); pwPromptResolve.current=null; setPwPrompt(null); }}
-                  style={{flex:2,padding:"11px",borderRadius:10,border:"none",background:pwPrompt.value?"var(--accent)":"var(--border)",color:pwPrompt.value?"#000":"var(--text3)",cursor:pwPrompt.value?"pointer":"not-allowed",fontSize:13,fontWeight:800,fontFamily:"inherit"}}>🔗 재연결</button>
+                  style={{flex:2,padding:"11px",borderRadius:10,border:"none",background:pwPrompt.value?"#16a34a":(theme==="dark"?"#26313f":"#d2dbe8"),color:pwPrompt.value?"#fff":(theme==="dark"?"#8fa3bd":"#647084"),cursor:pwPrompt.value?"pointer":"not-allowed",fontSize:13,fontWeight:800,fontFamily:"inherit"}}>🔗 재연결</button>
               </div>
             </div>
           </div>
