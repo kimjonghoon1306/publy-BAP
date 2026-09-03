@@ -170,6 +170,7 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
   const [rankHist, setRankHist] = useState<{ label: string; rank: number | null }[]>([]);
   // 📊 성과 리포트(주간/월간)
   const [reportPeriod, setReportPeriod] = useState<"week" | "month">("week");
+  const [chartDays, setChartDays] = useState<number>(7); // 📅 그래프·누적 기간(7/30/90일·365=전체)
   const [report, setReport] = useState<PerfReport | null>(null);
   // 🩺 플레이스 최적화 진단
   const [diagLoading, setDiagLoading] = useState(false);
@@ -213,8 +214,8 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
   const refreshStats = () => {
     if (!userId) return;
     getInflowDailyUsage(userId).then(setUsed).catch(() => {});
-    getInflowUsageHistory(userId, 7).then(setHistory).catch(() => {});
-    getRankHistory(userId, 7).then(setRankHist).catch(() => {});
+    getInflowUsageHistory(userId, chartDays).then(setHistory).catch(() => {});
+    getRankHistory(userId, chartDays).then(setRankHist).catch(() => {});
     getPerfReport(userId, reportPeriod).then(setReport).catch(() => {});
   };
   useEffect(() => {
@@ -257,6 +258,8 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
   }, [privateKey, savedTargetsKey, userId]);
   // 주간/월간 토글 바뀌면 리포트 다시 로드
   useEffect(() => { if (userId) getPerfReport(userId, reportPeriod).then(setReport).catch(() => {}); }, [userId, reportPeriod]);
+  // 📅 기간 바뀌면 유입·순위 그래프 다시 로드(과거 데이터 조회)
+  useEffect(() => { if (!userId) return; getInflowUsageHistory(userId, chartDays).then(setHistory).catch(() => {}); getRankHistory(userId, chartDays).then(setRankHist).catch(() => {}); }, [userId, chartDays]);
 
   // 🩺 플레이스 최적화 진단 실행(현재 입력된 플레이스 주소 기준)
   const runDiagnose = async () => {
@@ -1049,7 +1052,7 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
         {[
           { k: "오늘 유입", v: `${used}`, sub: unlimited ? "무제한" : `/ ${limit}회`, col: C.accent },
           { k: "현재 순위", v: apLastRank != null ? `${apLastRank}` : apRankOut ? "30+" : "—", sub: apEnabled ? `목표 ${apGoal}위` : "위", col: "#16a34a" },
-          { k: "최근 7일", v: `${weekTotal}`, sub: "누적 방문", col: C.cyan },
+          { k: chartDays >= 365 ? "전체 누적" : `최근 ${chartDays}일`, v: `${weekTotal}`, sub: "누적 방문", col: C.cyan },
           { k: "남은 한도", v: unlimited ? "∞" : `${Math.max(0, limit - used)}`, sub: unlimited ? "무제한" : "회", col: "#f59e0b" },
         ].map((kp) => (
           <div key={kp.k} style={{ background: C.kpiBg, border: `1px solid ${C.line}`, borderRadius: 16, padding: "14px 16px", boxShadow: `0 4px 14px ${C.glow}` }}>
@@ -1223,17 +1226,26 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
         </div>
       )}
 
+      {/* 📅 기간 선택 — 유입·순위·누적을 원하는 기간으로(과거 기록까지). 플레이스·블로그 공통 */}
+      <div style={{ order: 10, display: "flex", alignItems: "center", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
+        <span style={{ fontSize: 12.5, fontWeight: 800, color: C.sub }}>📅 기간</span>
+        {([[7, "7일"], [30, "30일"], [90, "90일"], [365, "전체"]] as const).map(([d, lb]) => (
+          <button key={d} onClick={() => { setChartDays(d); toast(`📅 ${lb} 데이터로 봐요`, "success"); }} style={{ padding: "6px 14px", borderRadius: 8, border: `1.5px solid ${chartDays === d ? C.accent : C.line2}`, background: chartDays === d ? C.glow : C.panel2, color: chartDays === d ? C.accent : C.sub, fontSize: 12.5, fontWeight: 800, cursor: "pointer", fontFamily: "inherit" }}>{chartDays === d ? "✓ " : ""}{lb}</button>
+        ))}
+        <span style={{ fontSize: 11, color: C.sub, fontWeight: 600, marginLeft: 4 }}>과거 기록까지 조회 · 앱을 껐다 켜도 유지돼요</span>
+      </div>
+
       {/* ── 그래프 2단: 유입 추이 + 순위 변동 ── */}
       <div style={{ order: 11, display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(280px,1fr))", gap: 12, marginBottom: 14 }}>
       <div style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 16, padding: "14px 16px 8px" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
-          <span style={{ fontSize: 13.5, fontWeight: 800 }}>📈 최근 7일 유입 추이</span>
+          <span style={{ fontSize: 13.5, fontWeight: 800 }}>📈 {chartDays >= 365 ? "전체" : `최근 ${chartDays}일`} 유입 추이</span>
           <span style={{ fontSize: 11.5, fontWeight: 700, color: C.sub }}>총 {weekTotal}회</span>
         </div>
         {history.length > 0 ? <AreaChart data={history} C={C} /> : <div style={{ height: 120, display: "flex", alignItems: "center", justifyContent: "center", color: C.sub, fontSize: 12.5, fontWeight: 600 }}>데이터가 쌓이면 그래프가 그려져요</div>}
-        <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: C.sub, fontWeight: 700, padding: "0 2px" }}>
+        {chartDays <= 31 && <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: C.sub, fontWeight: 700, padding: "0 2px" }}>
           {history.map((d) => <span key={d.label}>{d.label}</span>)}
-        </div>
+        </div>}
       </div>
       {/* 순위 변동 */}
       <div style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 16, padding: "14px 16px 8px" }}>
