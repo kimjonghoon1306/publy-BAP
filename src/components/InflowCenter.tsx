@@ -907,8 +907,19 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
           <div style={{ display: "flex", gap: 9, alignItems: "flex-start", background: "rgba(245,158,11,.10)", border: "1.5px solid #f59e0b", borderRadius: 12, padding: "10px 13px", marginBottom: 10 }}>
             <span style={{ fontSize: 16, lineHeight: 1.2, flexShrink: 0 }}>🔑</span>
             <div style={{ fontSize: 12.5, fontWeight: 700, color: C.ink, lineHeight: 1.6 }}>
-              <b style={{ color: "#d97706" }}>🔑 표시(저장{targetType === "blog" ? " · 공감" : ""})는 네이버 로그인이 필요해요.</b><br />
-              <b>계정 관리</b>에서 계정을 연결한 뒤, 유입 시작할 때 <b>그 계정을 선택</b>해야 작동해요. <span style={{ color: C.sub }}>(길찾기 · 전화 · 예약 · 톡톡 · 공유는 로그인 없이 관심 신호만 줍니다)</span>
+              {targetType === "place" ? (
+                <>
+                  <b style={{ color: "#d97706" }}>🔑 저장(💾)은 네이버 로그인이 필요해요.</b><br />
+                  저장은 <b>내 네이버 계정의 저장목록(MY플레이스)</b>에 넣는 기능이라, 로그인 없이는 저장할 데가 없어 안 돼요. <b>계정 관리</b>에서 계정을 연결하고, 유입 시작할 때 <b>그 계정을 선택</b>하면 저장까지 실행돼요.<br />
+                  <span style={{ color: C.sub }}>🧭 길찾기 · 📞 전화 · 📅 예약 · 💬 톡톡 · 🔗 공유는 로그인 없이 관심 신호를 줍니다.</span>
+                </>
+              ) : (
+                <>
+                  <b style={{ color: "#d97706" }}>🔑 공감(💚)은 네이버 로그인이 필요해요.</b><br />
+                  블로그 공감(좋아요)은 <b>내 네이버 계정으로 누르는 것</b>이라, 로그인이 안 돼 있으면 공감 창이 로그인 페이지로 튕겨서 건너뛰어요. <b>계정 관리</b>에서 계정을 연결하고, 유입 시작할 때 <b>그 계정을 선택</b>하면 공감까지 실행돼요.<br />
+                  <span style={{ color: C.sub }}>🔗 공유는 로그인 없이 됩니다. 글 전체를 읽는 체류·다른 글 둘러보기(풀퍼널)도 블로그 지수에 도움돼요.</span>
+                </>
+              )}
             </div>
           </div>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
