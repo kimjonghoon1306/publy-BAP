@@ -5220,12 +5220,11 @@ const inflowInterruptibleWait = async (ms: number, shouldStop?: () => boolean): 
   return !shouldStop?.();
 };
 
-// 글 분량(글자수·이미지수)으로 "전체 읽는" 체류시간(초) 추정. intensity=강도 배수(빠르게0.35/보통1/꼼꼼히2.5)
-function estimateReadSec(textLen: number, imgCount: number, intensity = 1): number {
-  const charsPerSec = inflowRnd(7, 11); // 사람 읽기 속도(대략 분당 420~660자)
-  const readByText = textLen / charsPerSec;
-  const readByImg = imgCount * inflowRnd(1.5, 3.5);
-  return Math.min(420, Math.max(10, (readByText + readByImg) * intensity)); // 10초~7분 캡
+// 체류시간(초) 결정 — 강도별 정해진 시간(빠르게20/보통60/꼼꼼히180)에서 방문마다 ±오차.
+//   customSec>0이면 강도 대신 사용자가 직접 지정한 시간을 쓴다(3분 이상도 자유). 오차로 봇 티를 줄인다.
+function decideDwellSec(baseSec: number, customSec: number): number {
+  const target = customSec > 0 ? customSec : baseSec;
+  return Math.max(3, Math.round(target * inflowRnd(0.8, 1.2))); // ±20% 랜덤 오차
 }
 
 // 🩺 실패 원인 정밀 진단 — 페이지 상태를 읽어 "왜 안 됐는지" 정확히 로그로.
@@ -5314,14 +5313,11 @@ async function inflowFindAndEnter(page: any, target: InflowTarget, log: (m: stri
   return null;
 }
 
-// 진입한 페이지에서 글 전체를 읽는 것처럼 체류(끝까지 스크롤). intensity=체류 강도 배수
-async function inflowDwellRead(page: any, log: (m: string) => void, shouldStop?: () => boolean, intensity = 1, maxDwellSec = 0): Promise<void> {
-  const { textLen, imgCount } = await page
-    .evaluate(() => ({ textLen: (document.body?.innerText || "").length, imgCount: document.querySelectorAll("img").length }))
-    .catch(() => ({ textLen: 1200, imgCount: 5 }));
-  const estimatedSec = estimateReadSec(textLen, imgCount, intensity);
-  const sec = maxDwellSec > 0 ? Math.min(estimatedSec, maxDwellSec) : estimatedSec;
-  log(`  📖 글 전체 읽는 중… (본문 ${textLen}자·이미지 ${imgCount}장 → 약 ${Math.round(sec)}초 체류)`);
+// 진입한 페이지에서 글 전체를 읽는 것처럼 체류(끝까지 스크롤).
+//   baseSec=강도별 기준시간(빠르게20/보통60/꼼꼼히180), customSec>0이면 직접지정 시간을 우선 사용.
+async function inflowDwellRead(page: any, log: (m: string) => void, shouldStop?: () => boolean, baseSec = 60, customSec = 0): Promise<void> {
+  const sec = decideDwellSec(baseSec, customSec);
+  log(`  📖 글 읽는 중… (약 ${sec}초 체류${customSec > 0 ? " · 직접지정" : ""})`);
   const steps = Math.max(6, Math.round(sec / inflowRnd(2, 4)));
   const per = (sec * 1000) / steps;
   for (let s = 0; s < steps; s++) {
@@ -5566,8 +5562,8 @@ export async function searchInflow(params: {
   target: InflowTarget;            // 플레이스 or 블로그(단일)
   targets?: InflowTarget[];        // 여러 대상(있으면 방문마다 로테이션)
   rounds: number;                  // 이번 실행 방문 횟수(한도 내)
-  intensity?: number;              // 체류 강도 배수(0.35 빠르게 /1 보통 /2.5 꼼꼼히)
-  maxDwellSec?: number;            // 최대 체류시간(초), 0이면 본문 분량에 따라 자동
+  dwellBaseSec?: number;           // 체류 강도별 기준시간(초): 빠르게20/보통60/꼼꼼히180
+  dwellCustomSec?: number;         // 직접지정 체류시간(초). 0이면 강도 기준시간 사용(3분↑ 자유)
   actionRate?: number;             // 액션 발동 확률(0~1). 1=매번
   device?: "mobile" | "pc" | "mix"; // 접속 기기(기본 모바일, mix=방문마다 랜덤)
   intervalSec?: [number, number];  // 방문 사이 텀(사용자 임의 지정, 랜덤)
@@ -5585,7 +5581,6 @@ export async function searchInflow(params: {
   const log = params.onLog || (() => {});
   const { keywords, target, rounds } = params;
   const targets = (params.targets && params.targets.length) ? params.targets : [target]; // 여러 대상(없으면 단일)
-  const intensity = params.intensity && params.intensity > 0 ? params.intensity : 1;
   const actionRate = typeof params.actionRate === "number" ? Math.max(0, Math.min(1, params.actionRate)) : 1;
   // 🎯 키워드 가중 선택 — weights 있으면 비중대로, 없으면 순차 로테이션
   const weights = params.keywordWeights && params.keywordWeights.length === keywords.length ? params.keywordWeights : null;
@@ -5661,7 +5656,7 @@ export async function searchInflow(params: {
         done++; failStreak++; params.onProgress?.(done, rounds);
       } else {
         await shot(entered, "🎯 대상 진입");
-        await inflowDwellRead(entered, log, params.shouldStop, intensity, params.maxDwellSec || 0);
+        await inflowDwellRead(entered, log, params.shouldStop, params.dwellBaseSec ?? 60, params.dwellCustomSec ?? 0);
         if (params.shouldStop?.()) { log("⏹️ 정지 요청 — 액션 전 중단"); break; }
         await inflowActions(entered, curTarget, { ...(params.actions || {}), rate: actionRate, loginAvailable: !!cookies }, log);
         if (params.shouldStop?.()) { log("⏹️ 정지 요청 — 풀퍼널 전 중단"); break; }

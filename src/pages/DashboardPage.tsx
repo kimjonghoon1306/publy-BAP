@@ -286,6 +286,8 @@ const CSS = `
 .plan-pro{background:rgba(0,214,143,.1);color:var(--success);border:1px solid rgba(0,214,143,.25);}
 .icon-btn{width:36px;height:36px;border-radius:9px;display:flex;align-items:center;justify-content:center;border:1px solid var(--border);background:transparent;color:var(--text2);cursor:pointer;font-size:15px;transition:all .15s;}
 .icon-btn:hover{background:var(--card-hover);color:var(--text);border-color:var(--border-focus);}
+.icon-btn:active{transform:scale(.9);}
+@keyframes publySpin{to{transform:rotate(360deg);}}
 .user-chip{display:flex;align-items:center;gap:7px;padding:5px 12px;border-radius:99px;background:var(--card);border:1px solid var(--border);cursor:pointer;font-size:12px;font-weight:600;color:var(--text);transition:all .15s;max-width:140px;}
 .user-chip:hover{border-color:var(--border-focus);}
 .user-avatar{width:22px;height:22px;border-radius:7px;background:var(--accent-bg);border:1px solid var(--accent-border);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:800;color:var(--accent-text);flex-shrink:0;}
@@ -2018,6 +2020,16 @@ Output (JSON object only): {"keyword":"핵심키워드","title":"새 SEO 제목"
     try{const r=await botFetch(`${BOT}/health`,{signal:AbortSignal.timeout(3000)});setBotOnline(r.ok);}
     catch{setBotOnline(false);}
   },[]);
+
+  // 🔄 상단바 새로고침 — 클릭하면 눈에 보이게 반응(회전+토스트)하고 봇 상태를 갱신한 뒤 실제 새로고침
+  const [refreshing,setRefreshing]=useState(false);
+  const handleHeaderRefresh=useCallback(()=>{
+    if(refreshing)return;
+    setRefreshing(true);
+    showToast("🔄 최신 상태로 새로고침해요","success");
+    checkBot();
+    setTimeout(()=>window.location.reload(),480);
+  },[refreshing,checkBot,showToast]);
 
   // ── 프록시 노란불: 관리자가 이 회원에게 프록시를 배정하면 대시보드에 "프록시 ON" 깜빡이 ──
   const NEIGHBOR_BOT = "http://127.0.0.1:3334";   // 서이추·공감·품앗이 봇(프록시 배정 조회)
@@ -4867,8 +4879,8 @@ POST3: (제목)|(이유)
             <button className="video-open-btn" onClick={()=>setShowVideo(true)} title="소개 영상 보기">🎬 <span className="guide-btn-text">영상</span></button>
             <button className="guide-open-btn" onClick={()=>{setShowGuide(true);setGuideTab(0);}}>📖 <span className="guide-btn-text">사용설명서</span></button>
             <button className="guide-open-btn" onClick={()=>setShowDaebaekseo(true)} title="어떤 순서로 어떨 때 쓰면 좋은지 모아둔 퍼블리 대백서" style={{background:"linear-gradient(135deg,#ff7eb6,#ff5a98)",color:"#fff",border:0}}>📚 <span className="guide-btn-text">대백서</span></button>
-            <button className="icon-btn" onClick={onThemeToggle}>{theme==="dark"?"☀️":"🌙"}</button>
-            <button className="icon-btn" onClick={checkBot}>🔄</button>
+            <button className="icon-btn" onClick={onThemeToggle} title="화면 밝기 전환" aria-label="테마 전환">{theme==="dark"?"☀️":"🌙"}</button>
+            <button className="icon-btn" onClick={handleHeaderRefresh} title="새로고침" aria-label="새로고침" disabled={refreshing}><span style={{display:"inline-block",animation:refreshing?"publySpin .55s linear infinite":"none"}}>🔄</span></button>
 
             {/* 유저 칩 + 드롭다운 */}
             <div style={{position:"relative"}}>

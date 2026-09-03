@@ -1107,7 +1107,7 @@ app.get("/api/post-body", async (req, res) => {
 
 /* ── 🆕 NEW 트래픽 유입 (검색유입, SSE) — 기본 잠금(관리자가 켠 회원만), 관리자=락 해제 ── */
 app.post("/api/inflow", async (req, res) => {
-  const { userId, accountId, keywords, targetType, placeUrl, blogId, logNo, rounds, termMin, termMax, doSave, doLike, doShare, doDir, doCall, doBook, doTalk, device, fullFunnel, spreadHours, doReview, reviewText, visible, actionRate, intensity, maxDwellSec, extraTargets, keywordWeights } = req.body as Record<string, string>;
+  const { userId, accountId, keywords, targetType, placeUrl, blogId, logNo, rounds, termMin, termMax, doSave, doLike, doShare, doDir, doCall, doBook, doTalk, device, fullFunnel, spreadHours, doReview, reviewText, visible, actionRate, dwellBaseSec, dwellCustomSec, extraTargets, keywordWeights } = req.body as Record<string, string>;
   if (!keywords || !targetType) return res.status(400).json({ error: "keywords·targetType 필요" });
   const memberToken = String(req.get("X-Publy-Session") || "");
   const adminToken = String(req.get("X-Publy-Admin-Session") || "");
@@ -1193,8 +1193,8 @@ app.post("/api/inflow", async (req, res) => {
       spreadHours: spreadHours ? Math.max(0, parseFloat(spreadHours)) : 0,
       visible: visible === "true",
       actionRate: actionRate ? Math.max(0, Math.min(1, parseFloat(actionRate))) : 1,
-      intensity: intensity ? Math.max(0.2, parseFloat(intensity)) : 1,
-      maxDwellSec: maxDwellSec ? Math.max(0, parseFloat(maxDwellSec)) : 0,
+      dwellBaseSec: dwellBaseSec ? Math.max(5, parseFloat(dwellBaseSec)) : 60,
+      dwellCustomSec: dwellCustomSec ? Math.max(0, parseFloat(dwellCustomSec)) : 0,
       requireLogin: doSave === "true" || doLike === "true" || doShare === "true" || doBook === "true" || doTalk === "true" || reviewOk,
       onLog: (msg) => sseSend(res, { type: "log", msg }),
       onProgress: (done, total) => sseSend(res, { type: "progress", done, total }),

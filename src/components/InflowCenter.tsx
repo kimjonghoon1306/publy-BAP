@@ -166,6 +166,7 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
   const [apGoal, setApGoal] = useState(5);
   const [apKeyword, setApKeyword] = useState("");
   const [apLastRank, setApLastRank] = useState<number | null>(null);
+  const [apRankOut, setApRankOut] = useState(false); // 최근 측정에서 30위 밖이었나(현재순위 '30+' 표시용)
   const [rankHist, setRankHist] = useState<{ label: string; rank: number | null }[]>([]);
   // 📊 성과 리포트(주간/월간)
   const [reportPeriod, setReportPeriod] = useState<"week" | "month">("week");
@@ -277,17 +278,22 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
     const kw = (apKeyword || keywords.split(/[,\n]/)[0] || "").trim();
     if (!kw) { toast("순위를 측정할 키워드를 입력하세요(오토파일럿 키워드 또는 첫 키워드)", "error"); return; }
     setRankLoading(true);
+    pushLog(`📍 "${kw}" 현재 순위 측정 중…`);
     try {
       const r = await botFetch(`${BOT}/api/place-rank?keyword=${encodeURIComponent(kw)}&placeUrl=${encodeURIComponent(placeUrl.trim())}`);
       const j = await r.json();
-      if (j.error) { toast(j.error, "error"); return; }
-      if (j.rank == null) { toast(`"${kw}"에서 30위 밖이에요(노출 순위 낮음). 유입·리뷰로 끌어올리세요.`, "info"); }
-      else {
-        setApLastRank(j.rank);
+      if (j.error) { pushLog(`❌ 순위 측정 실패 — ${j.error}`); toast(j.error, "error"); return; }
+      if (j.rank == null) {
+        setApRankOut(true); // 현재순위 카드에 '30+' 표시
+        pushLog(`📍 "${kw}" 30위 밖 — 노출 순위가 낮아요. 유입·리뷰로 끌어올리세요.`);
+        toast(`"${kw}"에서 30위 밖이에요(노출 순위 낮음). 유입·리뷰로 끌어올리세요.`, "info");
+      } else {
+        setApLastRank(j.rank); setApRankOut(false);
         if (userId) { await recordRankPoint(userId, j.rank); getPerfReport(userId, reportPeriod).then(setReport).catch(()=>{}); getRankHistory(userId, 7).then(setRankHist).catch(()=>{}); }
+        pushLog(`📍 현재 "${kw}" ${j.rank}위${apEnabled ? ` (목표 ${apGoal}위)` : ""} — 기록했어요`);
         toast(`현재 "${kw}" ${j.rank}위 — 기록했어요`, "success");
       }
-    } catch { toast("순위 측정 실패 — 봇 서버(3334) 확인", "error"); }
+    } catch { pushLog("❌ 순위 측정 실패 — 봇 서버(3334)를 확인해주세요"); toast("순위 측정 실패 — 봇 서버(3334) 확인", "error"); }
     finally { setRankLoading(false); }
   };
 
@@ -588,8 +594,8 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
       doReview: String(doReview), reviewText: doReview ? reviewText : "",
       visible: String(visible),
       actionRate: String(Math.max(0, Math.min(1, actionRate / 100))),
-      intensity: intensity === "fast" ? "0.35" : intensity === "deep" ? "2.5" : "1",
-      maxDwellSec: String(Math.max(0, maxDwellSec)),
+      dwellBaseSec: intensity === "fast" ? "20" : intensity === "deep" ? "180" : "60",
+      dwellCustomSec: String(Math.max(0, maxDwellSec)),
     });
     if (userId) params.set("userId", userId);
     if (accountId) params.set("accountId", accountId);
@@ -602,7 +608,39 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
     const weights = kwList.map((k) => Number(kwWeights[k]) || 1);
     if (weights.some((w) => w !== 1)) params.set("keywordWeights", JSON.stringify(weights));
 
-    pushLog(`🚀 트래픽 유입 시작 — ${targetType === "place" ? "플레이스" : "블로그"}, 키워드 ${kwList.length}개, ${n}회 방문, 텀 ${termMin}~${termMax}초, ${device === "pc" ? "PC" : device === "mix" ? "혼합" : "모바일"}`);
+    // ── 시작 시 '적용된 설정'을 항목별로 로그에 남긴다(정말 이대로 시작되는지 눈으로 확인) ──
+    const deviceLabel = device === "pc" ? "🖥️ PC" : device === "mix" ? "🔀 혼합(랜덤)" : "📱 모바일";
+    const intensityLabel = intensity === "fast" ? "빠르게(~20초)" : intensity === "deep" ? "꼼꼼히(~3분)" : "보통(~60초)";
+    const baseSecMap: Record<string, number> = { fast: 20, normal: 60, deep: 180 };
+    const dwellSec = maxDwellSec > 0 ? maxDwellSec : (baseSecMap[intensity] ?? 60);
+    const actionLabels = (targetType === "place"
+      ? [doSave && "💾저장", doDir && "🧭길찾기", doCall && "📞전화", doBook && "📅예약", doTalk && "💬톡톡", doShare && "🔗공유"]
+      : [doLike && "💚공감", doShare && "🔗공유"]).filter(Boolean) as string[];
+    pushLog(`━━━━━ 🚀 트래픽 유입 시작 · 적용된 설정 ━━━━━`);
+    pushLog(`📍 대상: ${targetType === "place" ? "플레이스" : "블로그"} · 키워드 ${kwList.length}개 · ${n}회 방문`);
+    pushLog(`📶 접속패턴(기기): ${deviceLabel}`);
+    const actionSec = Math.round(actionLabels.length * 2.5);
+    const totalSec = Math.round(dwellSec + actionSec);
+    pushLog(`📖 체류시간: ${maxDwellSec > 0 ? `직접지정 약 ${maxDwellSec}초` : `${intensityLabel} 약 ${dwellSec}초`} (방문마다 ±오차)`);
+    pushLog(`🎬 방문해서 할 행동: ${actionLabels.length ? `${actionLabels.join("  ")} — 약 ${actionSec}초 추가` : "없음(체류만)"}`);
+    pushLog(`⏳ 방문 텀: ${termMin}~${termMax}초 랜덤${spread ? ` · ${spreadHours}시간 분산` : ""}  ·  🎲 액션확률 ${actionRate}%`);
+    pushLog(`⏱️ 예상 방문시간: 약 ${totalSec}초 (체류 ${dwellSec}초 + 행동 ${actionSec}초)`);
+    if (funnel) pushLog(`🌀 풀퍼널 모드 ON — 여러 글·탭까지 둘러봐요`);
+    if (auto) pushLog(`⚙️ 자동 모드 — 오늘 한도까지 실행`);
+    if (apEnabled) pushLog(`🎯 오토파일럿 ON — "${apKeyword}" ${apGoal}위 목표`);
+    // 🔒 프록시(IP) 사용 여부 — 서버 배정 상태를 조회해 로그로 확실히 알려준다
+    (async () => {
+      try {
+        const acctList = accountId ? [accountId] : accounts.map((a) => a.id);
+        const q = acctList.length ? `?accts=${encodeURIComponent(acctList.join(","))}` : "";
+        const r = await botFetch(`${BOT}/api/my-proxy/${userId || "guest"}${q}`);
+        const j = await r.json();
+        pushLog(j.active
+          ? `🔒 프록시 IP 사용 — 내 실제 IP를 가려서 안전하게 접속해요`
+          : `🌐 프록시 미배정 — 내 IP 그대로 접속해요(관리자에게 프록시 배정 요청 가능)`);
+      } catch { pushLog(`🌐 프록시 상태 확인 실패 — 봇 서버(3334)를 확인해주세요`); }
+    })();
+    pushLog(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
     const es = new BotEventStream(`${BOT}/api/inflow`, {
       method: "POST",
       headers: { "Content-Type": "application/json", "X-Publy-Session": getMemberSessionToken(), "X-Publy-Admin-Session": getAdminSessionToken() },
@@ -800,7 +838,7 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
           <label style={labelStyle}>접속 기기 <span style={{ color: C.sub, fontWeight: 600 }}>(기본 모바일 — 안 바꿔도 돼요)</span></label>
           <div style={{ display: "flex", gap: 8 }}>
             {([["mobile", "📱 모바일"], ["pc", "🖥️ PC"], ["mix", "🔀 혼합(랜덤)"]] as const).map(([k, lb]) => (
-              <button key={k} onClick={() => setDevice(k)} style={{ flex: 1, padding: "11px", borderRadius: 12, border: `2px solid ${device === k ? C.accent : C.line2}`, background: device === k ? C.glow : C.panel2, color: device === k ? C.accent : C.sub, fontSize: 14, fontWeight: 800, cursor: "pointer", fontFamily: "inherit" }}>{lb}</button>
+              <button key={k} onClick={() => { setDevice(k); toast(`📶 접속패턴 '${lb}' 선택됨`, "success"); }} style={{ flex: 1, padding: "11px", borderRadius: 12, border: `2px solid ${device === k ? C.accent : C.line2}`, background: device === k ? C.glow : C.panel2, color: device === k ? C.accent : C.sub, fontSize: 14, fontWeight: 800, cursor: "pointer", fontFamily: "inherit" }}>{device === k ? "✓ " : ""}{lb}</button>
             ))}
           </div>
         </div>
@@ -827,13 +865,14 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
             <label style={labelStyle}>📖 체류 강도 <span style={{ color: C.sub, fontWeight: 600 }}>(글 읽는 시간)</span></label>
             <div style={{ display: "flex", gap: 6 }}>
               {([["fast", "빠르게 ~20초"], ["normal", "보통 ~60초"], ["deep", "꼼꼼히 ~3분"]] as const).map(([k, lb]) => (
-                <button key={k} onClick={() => setIntensity(k)} style={{ flex: 1, padding: "11px", borderRadius: 10, border: `2px solid ${intensity === k ? C.accent : C.line2}`, background: intensity === k ? C.glow : C.panel2, color: intensity === k ? C.accent : C.sub, fontSize: 13.5, fontWeight: 800, cursor: "pointer", fontFamily: "inherit" }}>{lb}</button>
+                <button key={k} onClick={() => { setIntensity(k); toast(`📖 체류강도 '${lb}' 선택됨`, "success"); }} style={{ flex: 1, padding: "11px", borderRadius: 10, border: `2px solid ${intensity === k ? C.accent : C.line2}`, background: intensity === k ? C.glow : C.panel2, color: intensity === k ? C.accent : C.sub, fontSize: 13.5, fontWeight: 800, cursor: "pointer", fontFamily: "inherit" }}>{intensity === k ? "✓ " : ""}{lb}</button>
               ))}
             </div>
           </div>
           <div style={{ flex: 1, minWidth: 220 }}>
-            <label style={labelStyle}>⏱️ 최대 체류시간(초) <span style={{ color: C.sub, fontWeight: 600 }}>(0=자동)</span></label>
-            <input type="number" min={0} value={maxDwellSec} onChange={(e) => setMaxDwellSec(Math.max(0, Number(e.target.value)))} style={{ ...inputStyle, textAlign: "center" }} />
+            <label style={labelStyle}>⏱️ 체류시간 직접지정(초) <span style={{ color: C.sub, fontWeight: 600 }}>(0=강도대로)</span></label>
+            <input type="number" min={0} value={maxDwellSec} onChange={(e) => setMaxDwellSec(Math.max(0, Number(e.target.value)))} placeholder="0=강도 · 300=5분" style={{ ...inputStyle, textAlign: "center" }} />
+            <div style={{ fontSize: 11, color: C.sub, fontWeight: 600, marginTop: 3 }}>값을 넣으면 강도 무시하고 그 시간으로(3분↑ 가능)</div>
           </div>
           <div style={{ flex: 1, minWidth: 220 }}>
             <label style={labelStyle}>🎲 액션 확률 <span style={{ color: C.sub, fontWeight: 600 }}>(방문 중 저장·공감 등 실행 비율)</span></label>
@@ -842,6 +881,19 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
               <span style={{ minWidth: 44, textAlign: "right", fontSize: 15, fontWeight: 900, color: C.accent }}>{actionRate}%</span>
             </div>
             <div style={{ fontSize: 11, color: C.sub, fontWeight: 600, marginTop: 3 }}>낮출수록 자연스러워요(진짜 손님처럼 일부만 저장)</div>
+          </div>
+        </div>
+
+        {/* 💡 체류·행동 시간 계산법 — 사용자가 머리 안 굴려도 알게 눈에 잘 보이게 */}
+        <div style={{ background: `linear-gradient(135deg,${C.glow},transparent)`, border: `1.5px solid ${C.accent}`, borderRadius: 14, padding: "13px 16px" }}>
+          <div style={{ fontSize: 13.5, fontWeight: 900, color: C.accent, marginBottom: 7 }}>💡 방문시간은 이렇게 정해져요</div>
+          <div style={{ fontSize: 12.5, fontWeight: 600, color: C.ink, lineHeight: 1.75 }}>
+            • <b>체류시간</b> = 빠르게 <b>20초</b> · 보통 <b>60초</b> · 꼼꼼히 <b>180초</b> <span style={{ color: C.sub }}>(방문마다 ±오차로 자연스럽게)</span><br />
+            • 더 오래 보게 하려면 <b>체류시간 직접지정</b>에 초 입력 <span style={{ color: C.sub }}>(예: 300 = 5분, 강도 무시)</span><br />
+            • <b>방문행동</b>(저장·길찾기 등)은 <b>행동당 약 2~3초</b>씩 체류시간 위에 더해져요
+          </div>
+          <div style={{ marginTop: 8, padding: "8px 12px", borderRadius: 10, background: C.panel2, border: `1px solid ${C.line}`, fontSize: 13, fontWeight: 800, color: C.ink }}>
+            👉 총 방문시간 = 체류시간 + 행동시간(행동 수 × 2~3초)
           </div>
         </div>
 
@@ -974,7 +1026,7 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
       <div style={{ order: 6, display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(140px,1fr))", gap: 12, marginBottom: 14 }}>
         {[
           { k: "오늘 유입", v: `${used}`, sub: unlimited ? "무제한" : `/ ${limit}회`, col: C.accent },
-          { k: "현재 순위", v: apLastRank != null ? `${apLastRank}` : "—", sub: apEnabled ? `목표 ${apGoal}위` : "위", col: "#16a34a" },
+          { k: "현재 순위", v: apLastRank != null ? `${apLastRank}` : apRankOut ? "30+" : "—", sub: apEnabled ? `목표 ${apGoal}위` : "위", col: "#16a34a" },
           { k: "최근 7일", v: `${weekTotal}`, sub: "누적 방문", col: C.cyan },
           { k: "남은 한도", v: unlimited ? "∞" : `${Math.max(0, limit - used)}`, sub: unlimited ? "무제한" : "회", col: "#f59e0b" },
         ].map((kp) => (
@@ -1136,7 +1188,7 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
                       <div style={{ fontSize: 11.5, color: C.sub, fontWeight: 600 }}>{c.category}</div>
                     </div>
                     <div style={{ textAlign: "right", fontSize: 12, fontWeight: 700, color: C.sub, whiteSpace: "nowrap" }}>
-                      방문 <b style={{color:C.ink}}>{c.review.toLocaleString()}</b> · 블로그 <b style={{color:C.ink}}>{c.blog.toLocaleString()}</b>
+                      방문자리뷰 <b style={{color:C.ink}}>{c.review.toLocaleString()}</b> · 블로그리뷰 <b style={{color:C.ink}}>{c.blog.toLocaleString()}</b>
                     </div>
                   </div>
                 ))}

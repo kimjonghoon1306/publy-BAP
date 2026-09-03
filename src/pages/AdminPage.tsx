@@ -179,6 +179,8 @@ const CSS = `
 .dot-off{background:var(--text3);}
 .icon-btn{width:36px;height:36px;border-radius:8px;display:flex;align-items:center;justify-content:center;border:1px solid var(--border);background:transparent;color:var(--text2);cursor:pointer;font-size:15px;transition:all .15s;}
 .icon-btn:hover{background:var(--card-hover);color:var(--text);border-color:var(--border-focus);}
+.icon-btn:active{transform:scale(.9);}
+@keyframes publySpin{to{transform:rotate(360deg);}}
 .back-btn{display:flex;align-items:center;gap:6px;padding:7px 14px;border-radius:8px;border:1px solid var(--border);background:transparent;color:var(--text2);cursor:pointer;font-size:13px;font-weight:600;font-family:'Noto Sans KR',sans-serif;transition:all .15s;white-space:nowrap;}
 .back-btn:hover{background:var(--card-hover);color:var(--text);border-color:var(--border-focus);}
 .adm-badge{padding:5px 12px;border-radius:99px;font-size:11px;font-weight:800;background:rgba(248,81,73,.1);color:var(--danger);border:1px solid rgba(248,81,73,.3);letter-spacing:.05em;}
@@ -2051,6 +2053,16 @@ Output (JSON object only): {"keyword":"핵심키워드","title":"새 제목","st
     catch { setBotOnline(false); }
   }, []);
 
+  // 🔄 상단바 새로고침 — 눈에 보이게 반응(회전+토스트)하고 봇 상태 갱신 후 실제 새로고침
+  const [refreshing, setRefreshing] = useState(false);
+  const handleHeaderRefresh = useCallback(() => {
+    if (refreshing) return;
+    setRefreshing(true);
+    showToast("🔄 최신 상태로 새로고침해요", "success");
+    checkBot();
+    setTimeout(() => window.location.reload(), 480);
+  }, [refreshing, checkBot]);
+
   useEffect(() => {
     checkBot(); getAccounts(ADM_UID).then(setAdmAccs); loadUsers();
     getHistory(ADM_HISTORY_UID).then(setHistory).catch(e=>console.error("[관리자 발행기록] 로드 실패", e));
@@ -3343,7 +3355,7 @@ POST3: (제목)|(이유)
           </div>
           <div className="header-right">
             <button className="icon-btn" onClick={onThemeToggle}>{theme==="dark"?"☀️":"🌙"}</button>
-            <button className="icon-btn" onClick={checkBot}>🔄</button>
+            <button className="icon-btn" onClick={handleHeaderRefresh} title="새로고침" aria-label="새로고침" disabled={refreshing}><span style={{display:"inline-block",animation:refreshing?"publySpin .55s linear infinite":"none"}}>🔄</span></button>
             <button className="adm-guide-btn" onClick={() => { setShowGuide(true); setGuideTab(0); }}>
               📋 <span className="adm-guide-text">관리자 가이드</span>
             </button>
