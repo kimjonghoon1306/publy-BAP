@@ -771,15 +771,27 @@ export type AutopilotConfig = {
   last_run?: string | null;  // 마지막 실행(ISO)
   updated_at?: string;
 };
-export async function getAutopilot(userId: string): Promise<AutopilotConfig | null> {
+// 🔒 대상별 격리: scope 있으면 publy_settings 키(대상마다 따로)에 저장 — 한 대상 설정이 다른 대상을 덮어쓰지 않게.
+//    (기존 publy_autopilot 테이블은 user당 1행이라 대상 여러 개면 덮어써짐 → key-value로 이전)
+function autopilotKey(userId: string, scope: string): string { return `inflow_autopilot_${userId}_${scope}`; }
+export async function getAutopilot(userId: string, scope = ""): Promise<AutopilotConfig | null> {
   try {
-    const { data } = await supabase.from("publy_autopilot").select("*").eq("user_id", userId).maybeSingle();
-    return (data as AutopilotConfig) || null;
+    if (!scope) { const { data } = await supabase.from("publy_autopilot").select("*").eq("user_id", userId).maybeSingle(); return (data as AutopilotConfig) || null; }
+    const { data } = await supabase.from("publy_settings").select("value").eq("key", autopilotKey(userId, scope)).maybeSingle();
+    if (data?.value) return JSON.parse(data.value) as AutopilotConfig;
+    // 최초 1회: 구 테이블의 오토파일럿 1건을 첫 조회 대상으로 이전하고 테이블 행 제거(소유권 이동, 중복 방지)
+    const { data: legacy } = await supabase.from("publy_autopilot").select("*").eq("user_id", userId).maybeSingle();
+    if (legacy) { await supabase.from("publy_settings").upsert({ key: autopilotKey(userId, scope), value: JSON.stringify(legacy) }, { onConflict: "key" }); await supabase.from("publy_autopilot").delete().eq("user_id", userId); return legacy as AutopilotConfig; }
+    return null;
   } catch { return null; }
 }
-export async function saveAutopilot(cfg: AutopilotConfig): Promise<void> {
-  const { error } = await supabase.from("publy_autopilot")
-    .upsert({ ...cfg, updated_at: new Date().toISOString() }, { onConflict: "user_id" });
+export async function saveAutopilot(cfg: AutopilotConfig, scope = ""): Promise<void> {
+  if (!scope) {
+    const { error } = await supabase.from("publy_autopilot").upsert({ ...cfg, updated_at: new Date().toISOString() }, { onConflict: "user_id" });
+    if (error) throw new Error(`오토파일럿 저장 실패: ${error.message}`);
+    return;
+  }
+  const { error } = await supabase.from("publy_settings").upsert({ key: autopilotKey(cfg.user_id, scope), value: JSON.stringify({ ...cfg, updated_at: new Date().toISOString() }) }, { onConflict: "key" });
   if (error) throw new Error(`오토파일럿 저장 실패: ${error.message}`);
 }
 /* 🎯 대상(매장/블로그/상품)별 데이터 분리용 scope 키.
@@ -843,17 +855,24 @@ export async function getRankHistory(userId: string, days = 7, scope = ""): Prom
   } catch { return metas.map(m => ({ label: m.label, rank: null })); }
 }
 
-/* ⏰ 예약 실행 — 매일 지정 시각(HH:MM, KST)에 자동 유입. publy_settings key-value에 JSON 저장(스키마 변경 불필요). */
+/* ⏰ 예약 실행 — 매일 지정 시각(HH:MM, KST)에 자동 유입. publy_settings key-value에 JSON 저장(스키마 변경 불필요).
+   🔒 대상별 격리: scope가 있으면 대상마다 예약을 따로 저장(한 대상 예약이 다른 대상을 덮어쓰지 않게). */
 export type InflowSchedule = { enabled: boolean; time: string; rounds: number };
-function inflowSchedKey(userId: string): string { return `inflow_schedule_${userId}`; }
-export async function getInflowSchedule(userId: string): Promise<InflowSchedule | null> {
+function inflowSchedKey(userId: string, scope = ""): string { return scope ? `inflow_schedule_${userId}_${scope}` : `inflow_schedule_${userId}`; }
+export async function getInflowSchedule(userId: string, scope = ""): Promise<InflowSchedule | null> {
   try {
-    const { data } = await supabase.from("publy_settings").select("value").eq("key", inflowSchedKey(userId)).maybeSingle();
-    return data?.value ? JSON.parse(data.value) as InflowSchedule : null;
+    const { data } = await supabase.from("publy_settings").select("value").eq("key", inflowSchedKey(userId, scope)).maybeSingle();
+    if (data?.value) return JSON.parse(data.value) as InflowSchedule;
+    // 최초 1회: 대상 구분 없던 예약을 이 대상으로 이어봄(있으면). 소유권은 첫 조회 대상에 귀속.
+    if (scope) {
+      const { data: legacy } = await supabase.from("publy_settings").select("value").eq("key", `inflow_schedule_${userId}`).maybeSingle();
+      if (legacy?.value) { await supabase.from("publy_settings").upsert({ key: inflowSchedKey(userId, scope), value: legacy.value }, { onConflict: "key" }); await supabase.from("publy_settings").delete().eq("key", `inflow_schedule_${userId}`); return JSON.parse(legacy.value) as InflowSchedule; }
+    }
+    return null;
   } catch { return null; }
 }
-export async function saveInflowSchedule(userId: string, sched: InflowSchedule): Promise<void> {
-  const { error } = await supabase.from("publy_settings").upsert({ key: inflowSchedKey(userId), value: JSON.stringify(sched) }, { onConflict: "key" });
+export async function saveInflowSchedule(userId: string, sched: InflowSchedule, scope = ""): Promise<void> {
+  const { error } = await supabase.from("publy_settings").upsert({ key: inflowSchedKey(userId, scope), value: JSON.stringify(sched) }, { onConflict: "key" });
   if (error) throw new Error(`예약 저장 실패: ${error.message}`);
 }
 
@@ -871,15 +890,15 @@ export async function saveInflowTargets(userId: string, targets: InflowSavedTarg
   const { error } = await supabase.from("publy_settings").upsert({ key: inflowTargetsKey(userId), value: JSON.stringify(targets) }, { onConflict: "key" });
   if (error) throw new Error(`매장 저장 실패: ${error.message}`);
 }
-// 오늘 이미 예약 실행했는지(중복 방지) — 실행 후 날짜 마킹
-export async function inflowScheduleRanToday(userId: string): Promise<boolean> {
+// 오늘 이미 예약 실행했는지(중복 방지) — 실행 후 날짜 마킹. 대상별 scope로 격리(대상마다 하루 1회).
+export async function inflowScheduleRanToday(userId: string, scope = ""): Promise<boolean> {
   try {
-    const { data } = await supabase.from("publy_settings").select("value").eq("key", `inflow_sched_ran_${userId}`).maybeSingle();
+    const { data } = await supabase.from("publy_settings").select("value").eq("key", scope ? `inflow_sched_ran_${userId}_${scope}` : `inflow_sched_ran_${userId}`).maybeSingle();
     return data?.value === koreaDateKey();
   } catch { return false; }
 }
-export async function markInflowScheduleRan(userId: string): Promise<void> {
-  await supabase.from("publy_settings").upsert({ key: `inflow_sched_ran_${userId}`, value: koreaDateKey() }, { onConflict: "key" });
+export async function markInflowScheduleRan(userId: string, scope = ""): Promise<void> {
+  await supabase.from("publy_settings").upsert({ key: scope ? `inflow_sched_ran_${userId}_${scope}` : `inflow_sched_ran_${userId}`, value: koreaDateKey() }, { onConflict: "key" });
 }
 
 /* 📈 컨트롤타워 그래프용 — 최근 N일 일별 유입 수(publy_settings에서 날짜별 키를 한 번에 조회).

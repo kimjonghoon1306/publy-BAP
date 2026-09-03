@@ -278,9 +278,14 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
     refreshStats();
     if (!userId) return;
     getAccounts(userId).then((a) => setAccounts(a.filter((x) => x.platform === "naver"))).catch(() => {});
-    getAutopilot(userId).then((ap) => { if (ap) { setApEnabled(ap.enabled); setApGoal(ap.goal_rank); setApKeyword(ap.keyword || ""); setApLastRank(ap.last_rank ?? null); } }).catch(() => {});
-    getInflowSchedule(userId).then((s) => { if (s) { setSchedEnabled(s.enabled); setSchedTime(s.time); setSchedRounds(s.rounds); } }).catch(() => {});
   }, [userId]);
+  // 🔒 오토파일럿·예약은 대상별로 격리 로드 — 대상 바꾸면 그 대상 설정으로 갱신(없으면 OFF로 리셋해 다른 대상 설정이 안 남게)
+  useEffect(() => {
+    if (!userId || !currentScope) return;
+    getAutopilot(userId, currentScope).then((ap) => { if (ap) { setApEnabled(ap.enabled); setApGoal(ap.goal_rank); setApKeyword(ap.keyword || ""); setApLastRank(ap.last_rank ?? null); } else { setApEnabled(false); } }).catch(() => {});
+    getInflowSchedule(userId, currentScope).then((s) => { if (s) { setSchedEnabled(s.enabled); setSchedTime(s.time); setSchedRounds(s.rounds); } else { setSchedEnabled(false); } }).catch(() => {});
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userId, currentScope]);
   // 로그인 사용자별 민감한 주소를 격리하고, 기존 고정 키 데이터는 최초 1회 안전하게 이전한다.
   useEffect(() => {
     if (!userId) return;
@@ -542,12 +547,12 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
       const now = new Date();
       const hhmm = new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Seoul", hour: "2-digit", minute: "2-digit", hour12: false }).format(now);
       if (hhmm !== schedTime) return;
-      if (await inflowScheduleRanToday(userId)) return;
+      if (await inflowScheduleRanToday(userId, currentScope)) return;
       pushLog(`⏰ 예약 시각(${schedTime}) 도달`);
       // 🎯 오토파일럿 켜져 있으면: 순위 먼저 재고 목표 달성이면 유입 스킵(한도 절약)
       if (apEnabled && targetType === "place") {
         const reached = await autopilotCheckRef.current();
-        if (reached) { pushLog("🎯 목표 순위 유지 중 — 오늘 유입은 건너뜁니다(한도 절약)."); await markInflowScheduleRan(userId); return; }
+        if (reached) { pushLog("🎯 목표 순위 유지 중 — 오늘 유입은 건너뜁니다(한도 절약)."); await markInflowScheduleRan(userId, currentScope); return; }
         pushLog("🎯 목표보다 낮아요 — 순위를 끌어올리기 위해 유입 실행.");
       }
       pushLog("⏰ 자동 유입 시작");
@@ -559,11 +564,11 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
     tick();
     return () => clearInterval(id);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [schedEnabled, schedTime, schedRounds, userId, running]);
+  }, [schedEnabled, schedTime, schedRounds, userId, running, currentScope]);
 
   const saveSched = async (nextEnabled: boolean) => {
     if (!userId) return;
-    try { await saveInflowSchedule(userId, { enabled: nextEnabled, time: schedTime, rounds: schedRounds }); setSchedEnabled(nextEnabled); toast(nextEnabled ? `⏰ 매일 ${schedTime}에 자동 유입 ${schedRounds}회 예약됨` : "예약 해제", "success"); }
+    try { await saveInflowSchedule(userId, { enabled: nextEnabled, time: schedTime, rounds: schedRounds }, currentScope); setSchedEnabled(nextEnabled); toast(nextEnabled ? `⏰ 매일 ${schedTime}에 자동 유입 ${schedRounds}회 예약됨` : "예약 해제", "success"); }
     catch (e: any) { toast(e.message, "error"); }
   };
 
@@ -573,7 +578,7 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
     if (nextEnabled && targetType === "place" && !placeUrl.trim()) { toast("먼저 플레이스 주소를 입력하세요", "error"); return; }
     if (nextEnabled && targetType === "blog" && !blogUrl.trim()) { toast("먼저 블로그 글 주소를 입력하세요", "error"); return; }
     const cfg: AutopilotConfig = { user_id: userId, target_type: targetType, target_ref: targetType === "place" ? placeUrl.trim() : targetType === "store" ? storeUrl.trim() : blogUrl.trim(), keyword: apKeyword.trim(), goal_rank: apGoal, enabled: nextEnabled, last_rank: apLastRank };
-    try { await saveAutopilot(cfg); setApEnabled(nextEnabled); toast(nextEnabled ? `🎯 오토파일럿 ON — ${apKeyword} ${apGoal}위 목표로 자동 관리` : "오토파일럿 OFF", "success"); }
+    try { await saveAutopilot(cfg, currentScope); setApEnabled(nextEnabled); toast(nextEnabled ? `🎯 오토파일럿 ON — ${apKeyword} ${apGoal}위 목표로 자동 관리` : "오토파일럿 OFF", "success"); }
     catch (e: any) { toast(e.message, "error"); }
   };
   useEffect(() => { logBoxRef.current?.scrollTo({ top: logBoxRef.current.scrollHeight, behavior: "smooth" }); }, [logs]);
@@ -789,7 +794,7 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
       else if (d.type === "progress") { setProgress(Math.round((d.done / Math.max(1, d.total)) * 100)); }
       else if (d.type === "quota_info") setUsed(d.used);
       else if (d.type === "quota_exceeded") { pushLog("🛑 오늘 유입 한도를 다 썼어요"); toast("오늘 유입 한도 초과", "error"); setRunning(false); es.close(); esRef.current = null; }
-      else if (d.type === "inflow_done") { setSessOk(d.success || 0); pushLog(`🏁 완료 — 총 ${d.done}회 방문, 성공 ${d.success}회`); toast(`유입 완료 · 성공 ${d.success}회`, "success"); setRunning(false); es.close(); esRef.current = null; if (scheduledRunPendingRef.current) { scheduledRunPendingRef.current = false; if (userId && Number(d.success) > 0) void markInflowScheduleRan(userId); } refreshStats(); if (apEnabled && targetType === "place") { pushLog("📍 순위 자동 측정 중…"); runMeasureRank(); } }
+      else if (d.type === "inflow_done") { setSessOk(d.success || 0); pushLog(`🏁 완료 — 총 ${d.done}회 방문, 성공 ${d.success}회`); toast(`유입 완료 · 성공 ${d.success}회`, "success"); setRunning(false); es.close(); esRef.current = null; if (scheduledRunPendingRef.current) { scheduledRunPendingRef.current = false; if (userId && Number(d.success) > 0) void markInflowScheduleRan(userId, currentScope); } refreshStats(); if (apEnabled && targetType === "place") { pushLog("📍 순위 자동 측정 중…"); runMeasureRank(); } }
       else if (d.type === "error") { scheduledRunPendingRef.current = false; pushLog(`❌ ${d.msg}`); toast(d.msg, "error"); setRunning(false); es.close(); esRef.current = null; }
     };
     es.onerror = () => { scheduledRunPendingRef.current = false; pushLog("❌ 봇 연결 오류 — 봇 서버(포트 3334)가 켜져 있는지 확인해주세요"); toast("봇 연결 오류", "error"); setRunning(false); es.close(); esRef.current = null; };
