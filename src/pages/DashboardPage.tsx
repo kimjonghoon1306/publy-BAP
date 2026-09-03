@@ -3292,10 +3292,9 @@ POST3: (제목)|(이유)
       ? `━━ 글 살리기 시작 ━━`
       : `━━━━━ ${new Date().toLocaleString("ko-KR")} 원터치 ${resume?`이어가기(${resume.idx+1}번째부터)`:bySched?"예약 자동 시작":"시작"} ━━━━━`].slice(-300));
     const otLive=(t:string,running=true)=>{const line=`[${new Date().toLocaleTimeString("ko-KR")}] ${t}`; liveLines.push(line); setOtLiveLog(prev=>[...prev,line].slice(-300)); try{pushLiveLog(user.id,{name:user.name,email:user.email,context:"⚡ 원터치 발행",text:liveLines.slice(-80).join("\n"),running});}catch{}};
-    if(activeRevive){
-      const runAcc=accounts.find(a=>a.id===runAccId);
-      otLive(`👤 글 작성 계정: ${runAcc?.username||"확인 불가"}${runAcc?.blog_name?` → 블로그 ${runAcc.blog_name}`:""}`);
-    }
+    // 👤 어떤 네이버 계정으로 도는지 시작 로그 맨 앞에 항상 표시(일반 원터치·예약·이어가기·글살리기 전부). 회원=관리자 동일.
+    { const runAcc=connAccs.find(a=>a.id===runAccId)||accounts.find(a=>a.id===runAccId);
+      otLive(`👤 글 작성 계정: ${runAcc?.username||"확인 불가"}${runAcc?.blog_name?` → 블로그 ${runAcc.blog_name}`:""}`); }
     if(activeRevive?.blogId&&activeRevive.logNo){
       otLive(`🔗 살릴 글 주소: https://blog.naver.com/${encodeURIComponent(activeRevive.blogId)}/${encodeURIComponent(activeRevive.logNo)}`);
     }

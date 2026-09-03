@@ -2407,10 +2407,19 @@ export async function generateFlowImagesCDP(params: {
         return inputCleared || generating;
       }, prompt).catch(() => false);
 
+      // ★제출 성공 신호에 '새 이미지가 실제로 뜨기 시작했나'도 포함(테리: 프롬프트만 계속 반복해서 씀).
+      //   Flow가 제출 후에도 입력 텍스트를 잠깐 남기거나 '생성 중' 문구 없이 진행하면 submissionStarted가
+      //   오탐(실패)하여 requeue→재타이핑→크레딧 낭비 루프가 됨. 새 큰 이미지가 하나라도 나타나면 제출 성공으로 본다.
+      const newImageAppeared = async (): Promise<boolean> => page.evaluate((beforeArr: string[]) => {
+        const before = new Set(beforeArr);
+        return [...document.querySelectorAll('img[src*="media.getMediaUrlRedirect"]')]
+          .some(im => (im as HTMLImageElement).naturalWidth >= 500 && !before.has((im as HTMLImageElement).src));
+      }, beforeSrcs).catch(() => false);
       const waitForSubmission = async (): Promise<boolean> => {
-        for (let check = 0; check < 6; check++) {
+        for (let check = 0; check < 10; check++) {
           await page.waitForTimeout(500);
           if (await submissionStarted()) return true;
+          if (await newImageAppeared()) return true;
         }
         return false;
       };
