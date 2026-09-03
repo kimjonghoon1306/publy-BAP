@@ -5384,9 +5384,10 @@ async function inflowFindAndEnter(page: any, target: InflowTarget, log: (m: stri
 
 // 진입한 페이지에서 글 전체를 읽는 것처럼 체류(끝까지 스크롤).
 //   baseSec=강도별 기준시간(빠르게20/보통60/꼼꼼히180), customSec>0이면 직접지정 시간을 우선 사용.
-async function inflowDwellRead(page: any, log: (m: string) => void, shouldStop?: () => boolean, baseSec = 60, customSec = 0): Promise<void> {
+async function inflowDwellRead(page: any, log: (m: string) => void, shouldStop?: () => boolean, baseSec = 60, customSec = 0, targetType: "place" | "blog" | "store" = "blog"): Promise<void> {
   const sec = decideDwellSec(baseSec, customSec);
-  log(`  📖 글 읽는 중… (약 ${sec}초 체류${customSec > 0 ? " · 직접지정" : ""})`);
+  const dwellVerb = targetType === "place" ? "📖 플레이스 둘러보는 중…" : targetType === "store" ? "📖 상품 상세 보는 중…" : "📖 글 읽는 중…";
+  log(`  ${dwellVerb} (약 ${sec}초 체류${customSec > 0 ? " · 직접지정" : ""})`);
   const steps = Math.max(6, Math.round(sec / inflowRnd(2, 4)));
   const per = (sec * 1000) / steps;
   // 🧑 실사용자 패턴 — 균등 스크롤이 아니라 완급(빨리 훑다 관심구간 정독)+가끔 위로 재확인
@@ -5525,8 +5526,13 @@ async function inflowFullFunnel(page: any, target: InflowTarget, log: (m: string
         if (b) { await b.click().catch(() => {}); log("    🤝 이웃추가"); await page.waitForTimeout(inflowRndInt(1000, 2200)); break; }
       }
     } else {
-      log("  🌀 풀퍼널 — 메뉴·사진·리뷰를 둘러봐요");
-      const tabs: [string, string[]][] = [
+      const isStore = target.type === "store";
+      log(isStore ? "  🌀 풀퍼널 — 상세정보·리뷰·연관상품을 둘러봐요" : "  🌀 풀퍼널 — 메뉴·사진·리뷰를 둘러봐요");
+      const tabs: [string, string[]][] = isStore ? [
+        ["상세정보", ['a:has-text("상세정보")', 'a:has-text("상품정보")', '[class*="detail"] a']],
+        ["리뷰", ['a:has-text("리뷰")', '[class*="review"] a']],
+        ["연관상품", ['a:has-text("연관")', 'a:has-text("함께")', '[class*="related"] a']],
+      ] : [
         ["메뉴", ['a:has-text("메뉴")', '[class*="menu"] a']],
         ["사진", ['a:has-text("사진")', '[class*="photo"] a']],
         ["리뷰", ['a:has-text("리뷰")', '[class*="review"] a']],
@@ -5768,7 +5774,7 @@ export async function searchInflow(params: {
         done++; failStreak++; params.onProgress?.(done, rounds);
       } else {
         await shot(entered, "🎯 대상 진입");
-        await inflowDwellRead(entered, log, params.shouldStop, params.dwellBaseSec ?? 60, params.dwellCustomSec ?? 0);
+        await inflowDwellRead(entered, log, params.shouldStop, params.dwellBaseSec ?? 60, params.dwellCustomSec ?? 0, curTarget.type);
         if (params.shouldStop?.()) { log("⏹️ 정지 요청 — 액션 전 중단"); break; }
         await inflowActions(entered, curTarget, { ...(params.actions || {}), rate: actionRate, loginAvailable: !!cookies }, log);
         if (params.shouldStop?.()) { log("⏹️ 정지 요청 — 풀퍼널 전 중단"); break; }

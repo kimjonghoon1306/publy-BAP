@@ -1127,7 +1127,11 @@ app.post("/api/inflow", async (req, res) => {
   let releaseAccount = () => {};
   try {
     if (!await ensureActiveMember(userId, res, "inflow")) return;   // 🔒 기본 잠금
-    const release = acquireAccountsOrReport([accountId || ""], "NEW 트래픽 유입", res);
+    // 🔄 다계정 로테이션 — 저장·찜·공감에 쓸 계정 전체를 락(나머지 계정이 다른 작업과 충돌·세션깨짐 방지)
+    let acctIdsArr: string[] | undefined;
+    if (accountIds) { try { const a = JSON.parse(accountIds); if (Array.isArray(a) && a.length) acctIdsArr = Array.from(new Set(a.map(String).filter(Boolean))); } catch { acctIdsArr = undefined; } }
+    const lockList = (acctIdsArr && acctIdsArr.length) ? acctIdsArr : [accountId || ""];
+    const release = acquireAccountsOrReport(lockList, "NEW 트래픽 유입", res);
     if (!release) return;
     releaseAccount = release;
 
@@ -1199,9 +1203,7 @@ app.post("/api/inflow", async (req, res) => {
     const reviewOk = doReview === "true" ? await inflowReviewAllowed(userId) : false;
     if (doReview === "true" && !reviewOk) sseSend(res, { type: "log", msg: "🔒 리뷰 자동작성은 관리자 승인이 필요해요 — 리뷰는 건너뛰고 진행합니다" });
 
-    // 🔄 다계정 로테이션 — accountIds(JSON 배열)가 오면 저장·찜·공감을 여러 계정으로 번갈아 실행
-    let acctIdsArr: string[] | undefined;
-    if (accountIds) { try { const a = JSON.parse(accountIds); if (Array.isArray(a) && a.length) acctIdsArr = a.map(String).filter(Boolean); } catch { acctIdsArr = undefined; } }
+    // 🔄 다계정 로테이션 — 위에서 파싱·락한 acctIdsArr를 그대로 사용(저장·찜·공감을 여러 계정 번갈아)
     const result = await searchInflow({
       accountId: accountId || "",
       accountIds: acctIdsArr,

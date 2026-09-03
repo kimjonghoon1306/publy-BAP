@@ -947,7 +947,7 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
 
       {/* 👣 사용방법 안내 */}
       <div style={{ order: 2 }}><UsageGuide theme={theme} accent={C.accent}
-        subtitle="펄리예요! 키워드로 검색해 내 플레이스·블로그로 진짜 손님처럼 유입시키고, 순위가 오르려면 뭘 채워야 하는지 진단까지 해드려요."
+        subtitle="펄리예요! 키워드로 검색해 내 플레이스·블로그·스마트스토어로 진짜 손님처럼 유입시키고, 순위가 오르려면 뭘 채워야 하는지 진단까지 해드려요."
         steps={[
           { ico: "📍", title: "대상·키워드 넣기", desc: "내 플레이스(지도/naver.me)·블로그 글·스마트스토어 상품 주소를 붙여넣고, 검색 키워드를 여러 개 적어요(자동으로 인식돼요)." },
           { ico: "🎛️", title: "옵션 고르기", desc: "방문 횟수·텀·기기(모바일/PC)·할 행동(저장·길찾기·전화 등)을 정해요. 시간분산·액션확률로 더 자연스럽게." },
