@@ -779,9 +779,16 @@ export async function getAutopilot(userId: string, scope = ""): Promise<Autopilo
     if (!scope) { const { data } = await supabase.from("publy_autopilot").select("*").eq("user_id", userId).maybeSingle(); return (data as AutopilotConfig) || null; }
     const { data } = await supabase.from("publy_settings").select("value").eq("key", autopilotKey(userId, scope)).maybeSingle();
     if (data?.value) return JSON.parse(data.value) as AutopilotConfig;
-    // 최초 1회: 구 테이블의 오토파일럿 1건을 첫 조회 대상으로 이전하고 테이블 행 제거(소유권 이동, 중복 방지)
+    // 최초 1회: 구 테이블의 오토파일럿 1건을 첫 조회 대상으로 이전(마커로 1회만·다른 대상 복제 방지).
+    //   ⚠️ 원본(테이블)은 삭제하지 않는다 — 이전 저장이 실패해도 데이터가 유실되지 않게(유실 방지 최우선).
+    const { data: mk } = await supabase.from("publy_settings").select("value").eq("key", `inflow_autopilot_migrated_${userId}`).maybeSingle();
+    if (mk?.value) return null; // 이미 다른 대상이 구 설정을 가져감
     const { data: legacy } = await supabase.from("publy_autopilot").select("*").eq("user_id", userId).maybeSingle();
-    if (legacy) { await supabase.from("publy_settings").upsert({ key: autopilotKey(userId, scope), value: JSON.stringify(legacy) }, { onConflict: "key" }); await supabase.from("publy_autopilot").delete().eq("user_id", userId); return legacy as AutopilotConfig; }
+    if (legacy) {
+      const up = await supabase.from("publy_settings").upsert({ key: autopilotKey(userId, scope), value: JSON.stringify(legacy) }, { onConflict: "key" });
+      if (!up.error) await supabase.from("publy_settings").upsert({ key: `inflow_autopilot_migrated_${userId}`, value: scope }, { onConflict: "key" });
+      return legacy as AutopilotConfig; // 저장 실패해도 원본은 남아있으니 값은 보여줌(유실 없음)
+    }
     return null;
   } catch { return null; }
 }
@@ -831,7 +838,10 @@ export async function migrateLegacyInflowToScope(userId: string, scope: string, 
     const ups = pairs
       .filter(p => legacyMap.has(p.legacy) && !already.has(p.scoped)) // 이미 대상별 값 있으면 안 덮음
       .map(p => ({ key: p.scoped, value: String(legacyMap.get(p.legacy)) }));
-    if (ups.length) await supabase.from("publy_settings").upsert(ups, { onConflict: "key" });
+    if (ups.length) {
+      const { error } = await supabase.from("publy_settings").upsert(ups, { onConflict: "key" });
+      if (error) return; // 이관 저장 실패 → 마커 안 남김(다음 로드에서 재시도, 원본은 그대로라 유실 없음)
+    }
     await supabase.from("publy_settings").upsert({ key: marker, value: `1:${scope}` }, { onConflict: "key" });
   } catch { /* 마이그레이션 실패는 조용히 — 다음 로드에서 재시도 */ }
 }
@@ -863,10 +873,16 @@ export async function getInflowSchedule(userId: string, scope = ""): Promise<Inf
   try {
     const { data } = await supabase.from("publy_settings").select("value").eq("key", inflowSchedKey(userId, scope)).maybeSingle();
     if (data?.value) return JSON.parse(data.value) as InflowSchedule;
-    // 최초 1회: 대상 구분 없던 예약을 이 대상으로 이어봄(있으면). 소유권은 첫 조회 대상에 귀속.
+    // 최초 1회: 대상 구분 없던 예약을 이 대상으로 이어봄(마커로 1회만). ⚠️ 원본은 삭제하지 않음(유실 방지).
     if (scope) {
+      const { data: mk } = await supabase.from("publy_settings").select("value").eq("key", `inflow_sched_migrated_${userId}`).maybeSingle();
+      if (mk?.value) return null;
       const { data: legacy } = await supabase.from("publy_settings").select("value").eq("key", `inflow_schedule_${userId}`).maybeSingle();
-      if (legacy?.value) { await supabase.from("publy_settings").upsert({ key: inflowSchedKey(userId, scope), value: legacy.value }, { onConflict: "key" }); await supabase.from("publy_settings").delete().eq("key", `inflow_schedule_${userId}`); return JSON.parse(legacy.value) as InflowSchedule; }
+      if (legacy?.value) {
+        const up = await supabase.from("publy_settings").upsert({ key: inflowSchedKey(userId, scope), value: legacy.value }, { onConflict: "key" });
+        if (!up.error) await supabase.from("publy_settings").upsert({ key: `inflow_sched_migrated_${userId}`, value: scope }, { onConflict: "key" });
+        return JSON.parse(legacy.value) as InflowSchedule;
+      }
     }
     return null;
   } catch { return null; }

@@ -234,6 +234,7 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
   });
   const automationRunningRef = useRef(false);
   const scheduledRunPendingRef = useRef(false);
+  const scheduledRunScopeRef = useRef(""); // 예약 실행 시작 시점의 대상 scope 고정(실행 중 대상 변경 대비)
   const skipPrivateSaveRef = useRef(false);
   const esRef = useRef<BotEventStream | null>(null);
   const startRef = useRef<() => void>(() => {});
@@ -281,9 +282,14 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
   }, [userId]);
   // 🔒 오토파일럿·예약은 대상별로 격리 로드 — 대상 바꾸면 그 대상 설정으로 갱신(없으면 OFF로 리셋해 다른 대상 설정이 안 남게)
   useEffect(() => {
-    if (!userId || !currentScope) return;
-    getAutopilot(userId, currentScope).then((ap) => { if (ap) { setApEnabled(ap.enabled); setApGoal(ap.goal_rank); setApKeyword(ap.keyword || ""); setApLastRank(ap.last_rank ?? null); } else { setApEnabled(false); } }).catch(() => {});
-    getInflowSchedule(userId, currentScope).then((s) => { if (s) { setSchedEnabled(s.enabled); setSchedTime(s.time); setSchedRounds(s.rounds); } else { setSchedEnabled(false); } }).catch(() => {});
+    if (!userId) return;
+    // 대상 바뀌면 이전 대상 설정으로 오작동하지 않게 먼저 OFF로 리셋한 뒤, 그 대상 설정을 비동기 로드한다.
+    setApEnabled(false); setSchedEnabled(false);
+    if (!currentScope) return;
+    let alive = true; const loadScope = currentScope;
+    getAutopilot(userId, loadScope).then((ap) => { if (!alive || currentScope !== loadScope) return; if (ap) { setApEnabled(ap.enabled); setApGoal(ap.goal_rank); setApKeyword(ap.keyword || ""); setApLastRank(ap.last_rank ?? null); } }).catch(() => {});
+    getInflowSchedule(userId, loadScope).then((s) => { if (!alive || currentScope !== loadScope) return; if (s) { setSchedEnabled(s.enabled); setSchedTime(s.time); setSchedRounds(s.rounds); } }).catch(() => {});
+    return () => { alive = false; };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userId, currentScope]);
   // 로그인 사용자별 민감한 주소를 격리하고, 기존 고정 키 데이터는 최초 1회 안전하게 이전한다.
@@ -544,6 +550,7 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
     if (!schedEnabled || !userId) return;
     const tick = async () => {
       if (running) return;
+      if (!currentScope) return; // 대상이 인식돼야만 예약 실행(전역 폴백·엉뚱한 대상 실행 방지)
       const now = new Date();
       const hhmm = new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Seoul", hour: "2-digit", minute: "2-digit", hour12: false }).format(now);
       if (hhmm !== schedTime) return;
@@ -557,6 +564,7 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
       }
       pushLog("⏰ 자동 유입 시작");
       if (!auto) setRounds(schedRounds);
+      scheduledRunScopeRef.current = currentScope; // 실행 시작 시점 대상 고정(실행 중 대상 바꿔도 마커는 이 대상에)
       scheduledRunPendingRef.current = true;
       startRef.current();
     };
@@ -568,12 +576,14 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
 
   const saveSched = async (nextEnabled: boolean) => {
     if (!userId) return;
+    if (nextEnabled && !currentScope) { toast("먼저 대상 주소를 정확히 입력해 인식시켜 주세요(예약은 대상별로 저장돼요)", "error"); return; }
     try { await saveInflowSchedule(userId, { enabled: nextEnabled, time: schedTime, rounds: schedRounds }, currentScope); setSchedEnabled(nextEnabled); toast(nextEnabled ? `⏰ 매일 ${schedTime}에 자동 유입 ${schedRounds}회 예약됨` : "예약 해제", "success"); }
     catch (e: any) { toast(e.message, "error"); }
   };
 
   const saveAp = async (nextEnabled: boolean) => {
     if (!userId) return;
+    if (nextEnabled && !currentScope) { toast("먼저 대상 주소를 정확히 입력해 인식시켜 주세요(오토파일럿은 대상별로 저장돼요)", "error"); return; }
     if (nextEnabled && !apKeyword.trim()) { toast("순위를 추적할 키워드를 입력하세요", "error"); return; }
     if (nextEnabled && targetType === "place" && !placeUrl.trim()) { toast("먼저 플레이스 주소를 입력하세요", "error"); return; }
     if (nextEnabled && targetType === "blog" && !blogUrl.trim()) { toast("먼저 블로그 글 주소를 입력하세요", "error"); return; }
@@ -794,7 +804,7 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
       else if (d.type === "progress") { setProgress(Math.round((d.done / Math.max(1, d.total)) * 100)); }
       else if (d.type === "quota_info") setUsed(d.used);
       else if (d.type === "quota_exceeded") { pushLog("🛑 오늘 유입 한도를 다 썼어요"); toast("오늘 유입 한도 초과", "error"); setRunning(false); es.close(); esRef.current = null; }
-      else if (d.type === "inflow_done") { setSessOk(d.success || 0); pushLog(`🏁 완료 — 총 ${d.done}회 방문, 성공 ${d.success}회`); toast(`유입 완료 · 성공 ${d.success}회`, "success"); setRunning(false); es.close(); esRef.current = null; if (scheduledRunPendingRef.current) { scheduledRunPendingRef.current = false; if (userId && Number(d.success) > 0) void markInflowScheduleRan(userId, currentScope); } refreshStats(); if (apEnabled && targetType === "place") { pushLog("📍 순위 자동 측정 중…"); runMeasureRank(); } }
+      else if (d.type === "inflow_done") { setSessOk(d.success || 0); pushLog(`🏁 완료 — 총 ${d.done}회 방문, 성공 ${d.success}회`); toast(`유입 완료 · 성공 ${d.success}회`, "success"); setRunning(false); es.close(); esRef.current = null; if (scheduledRunPendingRef.current) { scheduledRunPendingRef.current = false; if (userId && Number(d.success) > 0) void markInflowScheduleRan(userId, scheduledRunScopeRef.current || currentScope); } refreshStats(); if (apEnabled && targetType === "place") { pushLog("📍 순위 자동 측정 중…"); runMeasureRank(); } }
       else if (d.type === "error") { scheduledRunPendingRef.current = false; pushLog(`❌ ${d.msg}`); toast(d.msg, "error"); setRunning(false); es.close(); esRef.current = null; }
     };
     es.onerror = () => { scheduledRunPendingRef.current = false; pushLog("❌ 봇 연결 오류 — 봇 서버(포트 3334)가 켜져 있는지 확인해주세요"); toast("봇 연결 오류", "error"); setRunning(false); es.close(); esRef.current = null; };
@@ -1058,7 +1068,7 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
               <div style={{ fontSize: 12, fontWeight: 800, color: C.sub, marginBottom: 8 }}>🏪 저장한 대상 (눌러서 불러오기)</div>
               <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                 {savedTargets.filter((t) => t.type === targetType).map((t) => {
-                  const active = (t.type === "place" ? placeUrl : blogUrl).trim() === t.url && targetType === t.type;
+                  const active = (t.type === "place" ? placeUrl : t.type === "store" ? storeUrl : blogUrl).trim() === t.url && targetType === t.type;
                   return (
                     <div key={t.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 12px", borderRadius: 10, background: active ? C.glow : C.panel, border: `1px solid ${active ? C.accent : C.line}` }}>
                       <button onClick={() => pickSavedTarget(t)} style={{ flex: 1, textAlign: "left", background: "transparent", border: "none", cursor: "pointer", fontFamily: "inherit", padding: 0, minWidth: 0 }}>
