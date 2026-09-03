@@ -756,6 +756,13 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
   const [statsSubTab, setStatsSubTab] = useState<"mine"|"all">("mine");
   // ★자동화 탭 keep-alive(대시보드와 동일): 방문한 탭은 언마운트 안 하고 숨김 → 작업·데이터 유지
   const [visitedAutoTabs, setVisitedAutoTabs] = useState<Set<string>>(new Set());
+  // 재연결 비밀번호 입력 모달 (window.prompt는 Electron에서 안 뜸 → 커스텀 모달) — 회원과 동일
+  const [pwPrompt, setPwPrompt] = useState<{acc:PublyAccount; value:string} | null>(null);
+  const [showPwPrompt, setShowPwPrompt] = useState(false);
+  const pwPromptResolve = useRef<((pw:string|null)=>void)|null>(null);
+  function askPassword(acc:PublyAccount):Promise<string|null>{
+    return new Promise((resolve)=>{ pwPromptResolve.current=resolve; setPwPrompt({acc,value:""}); });
+  }
   useEffect(() => {
     if (["neighbor", "engage", "reply", "pumasi", "blogscore", "place", "inflow", "crawl"].includes(tab)) {
       setVisitedAutoTabs(prev => prev.has(tab) ? prev : new Set(prev).add(tab));
@@ -2996,7 +3003,9 @@ POST3: (제목)|(이유)
       if(!botOnline)throw new Error("봇 서버 실행 필요");
       const r=await botFetch(`${BOT}/api/${newPlat}/save-session`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({userId:ADM_UID,id:newUser,pw:newPw,blogName:newBlog||undefined})});
       const d=await r.json();if(!d.success)throw new Error(d.error||"연결 실패");
-      await upsertAccount({user_id:ADM_UID,platform:newPlat,username:newUser,blog_name:newBlog||undefined,is_connected:true,connected_at:new Date().toISOString()});
+      // 같은 계정(플랫폼+아이디)이 이미 있으면 새로 만들지 말고 그 행을 갱신 → 중복 생성 방지
+      const existingAcc=admAccs.find(a=>a.platform===newPlat&&a.username===newUser);
+      await upsertAccount({...(existingAcc?{id:existingAcc.id}:{}),user_id:ADM_UID,platform:newPlat,username:newUser,blog_name:newBlog||undefined,is_connected:true,connected_at:new Date().toISOString()});
       await getAccounts(ADM_UID).then(setAdmAccs);setNewUser("");setNewPw("");setNewBlog("");
     }
     catch(e:any) { alert(e.message); }
@@ -3008,7 +3017,7 @@ POST3: (제목)|(이유)
     setConnId(acc.id);
     try {
       const legacy=(acc as any).password_encrypted||"";let pw="";try{pw=legacy?atob(legacy):"";}catch{}
-      if(!pw)pw=window.prompt("세션이 만료되었습니다. 비밀번호를 다시 입력해주세요.")||"";
+      if(!pw){ const entered=await askPassword(acc); if(entered===null){setConnId(null);return;} pw=entered; }
       if(!pw)throw new Error("비밀번호 입력이 필요합니다");
       const r = await botFetch(`${BOT}/api/${acc.platform}/save-session`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({userId:ADM_UID,id:acc.username,pw,blogName:acc.blog_name})});
       if (!r.ok) { const d = await r.json(); throw new Error(d.error); }
@@ -7184,6 +7193,36 @@ POST3: (제목)|(이유)
                   ))}
                 </div>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── 재연결 비밀번호 입력 모달 (window.prompt 대체) — 회원과 동일 ── */}
+      {pwPrompt&&(
+        <div style={{position:"fixed",inset:0,zIndex:10000,background:"rgba(0,0,0,.75)",display:"flex",alignItems:"center",justifyContent:"center",padding:20}}
+          onClick={()=>{ pwPromptResolve.current?.(null); pwPromptResolve.current=null; setPwPrompt(null); }}>
+          <div style={{width:"100%",maxWidth:400,borderRadius:20,background:"var(--card)",border:"1px solid var(--accent-border)",overflow:"hidden",animation:"fadeUp .25s ease",boxShadow:"0 24px 60px rgba(0,0,0,.5)"}} onClick={e=>e.stopPropagation()}>
+            <div style={{padding:"18px 22px 14px",background:"linear-gradient(135deg,var(--accent),#00cc80)",display:"flex",alignItems:"center",gap:10}}>
+              <span style={{fontSize:24}}>🔒</span>
+              <div><div style={{fontSize:16,fontWeight:900,color:"#000"}}>세션이 만료되었어요</div>
+              <div style={{fontSize:12,color:"rgba(0,0,0,.7)",marginTop:2}}>{pwPrompt.acc.platform==="naver"?"네이버":"티스토리"} 비밀번호를 다시 입력해주세요</div></div>
+            </div>
+            <div style={{padding:"20px 22px"}}>
+              <div style={{fontSize:12,color:"var(--text3)",marginBottom:6}}>계정: <b style={{color:"var(--text)"}}>{pwPrompt.acc.username}</b></div>
+              <div style={{position:"relative",marginBottom:14}}>
+                <input type={showPwPrompt?"text":"password"} autoFocus className="inp" placeholder="비밀번호" value={pwPrompt.value}
+                  onChange={e=>setPwPrompt(p=>p?{...p,value:e.target.value}:p)}
+                  onKeyDown={e=>{ if(e.key==="Enter"&&pwPrompt.value){ pwPromptResolve.current?.(pwPrompt.value); pwPromptResolve.current=null; setPwPrompt(null); } }}
+                  style={{fontSize:14,padding:"12px 44px 12px 14px"}}/>
+                <button type="button" onClick={()=>setShowPwPrompt(v=>!v)} aria-label="비밀번호 보기" style={{position:"absolute",right:10,top:"50%",transform:"translateY(-50%)",background:"none",border:"none",cursor:"pointer",fontSize:18,color:"var(--text3)"}}>{showPwPrompt?"🙈":"👁️"}</button>
+              </div>
+              <div style={{display:"flex",gap:8}}>
+                <button onClick={()=>{ pwPromptResolve.current?.(null); pwPromptResolve.current=null; setPwPrompt(null); }}
+                  style={{flex:1,padding:"11px",borderRadius:10,border:"1px solid var(--border)",background:"var(--bg2)",color:"var(--text2)",cursor:"pointer",fontSize:13,fontWeight:700,fontFamily:"inherit"}}>취소</button>
+                <button disabled={!pwPrompt.value} onClick={()=>{ pwPromptResolve.current?.(pwPrompt.value); pwPromptResolve.current=null; setPwPrompt(null); }}
+                  style={{flex:2,padding:"11px",borderRadius:10,border:"none",background:pwPrompt.value?"var(--accent)":"var(--border)",color:pwPrompt.value?"#000":"var(--text3)",cursor:pwPrompt.value?"pointer":"not-allowed",fontSize:13,fontWeight:800,fontFamily:"inherit"}}>🔗 재연결</button>
+              </div>
             </div>
           </div>
         </div>

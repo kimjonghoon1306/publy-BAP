@@ -4169,7 +4169,9 @@ ${segList}`;
       if(!botOnline)throw new Error("PC에서 Publy 앱을 먼저 실행해주세요");
       const r=await botFetch(`${BOT}/api/${newPlat}/save-session`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({userId:user.id,id:newUser,pw:newPw,blogName:newBlog||undefined}),signal:AbortSignal.timeout(120000)});
       const d=await r.json();if(!d.success)throw new Error(d.error||"연결 실패");
-      await upsertAccount({user_id:user.id,platform:newPlat,username:newUser,blog_name:newBlog||undefined,is_connected:true,connected_at:new Date().toISOString()});
+      // 같은 계정(플랫폼+아이디)이 이미 있으면 새로 만들지 말고 그 행을 갱신 → 중복 생성 방지
+      const existingAcc=accounts.find(a=>a.platform===newPlat&&a.username===newUser);
+      await upsertAccount({...(existingAcc?{id:existingAcc.id}:{}),user_id:user.id,platform:newPlat,username:newUser,blog_name:newBlog||undefined,is_connected:true,connected_at:new Date().toISOString()});
       await getAccounts(user.id).then(setAccounts);setNewUser("");setNewPw("");setNewBlog("");
     }
     catch(e:any){alert(e.message);}finally{setAddingAcc(false);}
