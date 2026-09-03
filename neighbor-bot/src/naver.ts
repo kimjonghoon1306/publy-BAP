@@ -5261,6 +5261,16 @@ async function inflowFindAndEnter(page: any, target: InflowTarget, log: (m: stri
     const pages = ctx.pages();
     return pages.length > before ? pages[pages.length - 1] : page;
   };
+  // 🧑 실사용자 패턴 — 바로 첫 결과를 누르지 않고 검색결과를 먼저 훑어본다(비교 탐색 후 선택)
+  try {
+    log("  🧑 검색결과 훑어보는 중…(바로 안 누르고 비교)");
+    for (let i = 0; i < inflowRndInt(2, 4); i++) {
+      await page.mouse.wheel(0, inflowRndInt(500, 1100)).catch(() => {});
+      await page.waitForTimeout(inflowRndInt(700, 1700));
+    }
+    await page.mouse.wheel(0, -inflowRndInt(600, 1400)).catch(() => {}); // 위로 다시 올려 재확인
+    await page.waitForTimeout(inflowRndInt(500, 1200));
+  } catch { /* 비교 탐색 실패는 무시하고 바로 대상 탐색 */ }
   for (let s = 0; s < 8; s++) {
     if (target.type === "place") {
       // 1순위: 플레이스 상세 링크(place.naver.com/.../{id} 또는 /place/{id}) — 지도 링크 제외
@@ -5320,10 +5330,23 @@ async function inflowDwellRead(page: any, log: (m: string) => void, shouldStop?:
   log(`  📖 글 읽는 중… (약 ${sec}초 체류${customSec > 0 ? " · 직접지정" : ""})`);
   const steps = Math.max(6, Math.round(sec / inflowRnd(2, 4)));
   const per = (sec * 1000) / steps;
+  // 🧑 실사용자 패턴 — 균등 스크롤이 아니라 완급(빨리 훑다 관심구간 정독)+가끔 위로 재확인
   for (let s = 0; s < steps; s++) {
     if (shouldStop?.()) break;
-    await page.mouse.wheel(0, inflowRndInt(300, 720)).catch(() => {});
-    if (!await inflowInterruptibleWait(Math.round(per * inflowRnd(0.7, 1.3)), shouldStop)) break;
+    const r = Math.random();
+    if (r < 0.2) {
+      // 관심 구간 — 천천히 정독(작게 스크롤 + 길게 멈춤)
+      await page.mouse.wheel(0, inflowRndInt(120, 300)).catch(() => {});
+      if (!await inflowInterruptibleWait(Math.round(per * inflowRnd(1.4, 2.2)), shouldStop)) break;
+    } else if (r < 0.35) {
+      // 위로 다시 올려 재확인(사람처럼)
+      await page.mouse.wheel(0, -inflowRndInt(200, 500)).catch(() => {});
+      if (!await inflowInterruptibleWait(Math.round(per * inflowRnd(0.6, 1.0)), shouldStop)) break;
+    } else {
+      // 보통 속도로 훑기
+      await page.mouse.wheel(0, inflowRndInt(350, 780)).catch(() => {});
+      if (!await inflowInterruptibleWait(Math.round(per * inflowRnd(0.7, 1.3)), shouldStop)) break;
+    }
   }
   if (shouldStop?.()) return;
   // 다 읽고 살짝 위로(사람처럼)
