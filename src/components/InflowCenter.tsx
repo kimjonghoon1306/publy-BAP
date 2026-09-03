@@ -135,8 +135,9 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
   // 🔑 키워드는 플레이스/블로그가 완전히 별개(서로 섞이면 안 됨). 각각 저장하고, 현재 대상 것만 표시·수정.
   const [keywordsPlace, setKeywordsPlace] = useState<string>(saved0.keywordsPlace ?? (saved0.targetType !== "blog" ? saved0.keywords : "") ?? "");
   const [keywordsBlog, setKeywordsBlog] = useState<string>(saved0.keywordsBlog ?? (saved0.targetType === "blog" ? saved0.keywords : "") ?? "");
-  const keywords = targetType === "place" ? keywordsPlace : keywordsBlog;
-  const setKeywords = targetType === "place" ? setKeywordsPlace : setKeywordsBlog;
+  const [keywordsStore, setKeywordsStore] = useState<string>(saved0.keywordsStore ?? ""); // 🛒 스토어 키워드 격리(블로그·플레이스와 안 섞임)
+  const keywords = targetType === "place" ? keywordsPlace : targetType === "store" ? keywordsStore : keywordsBlog;
+  const setKeywords = targetType === "place" ? setKeywordsPlace : targetType === "store" ? setKeywordsStore : setKeywordsBlog;
   const [rounds, setRounds] = useState<number>(saved0.rounds ?? 10);
   const [termMin, setTermMin] = useState<number>(saved0.termMin ?? 30);
   const [termMax, setTermMax] = useState<number>(saved0.termMax ?? 90);
@@ -163,7 +164,16 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
   const [intensity, setIntensity] = useState<"fast" | "normal" | "deep">(saved0.intensity ?? "normal"); // 📖 체류 강도
   const [maxDwellSec, setMaxDwellSec] = useState<number>(saved0.maxDwellSec ?? 0); // 0=강도 사용, >0=직접지정 확정값
   const [dwellDraft, setDwellDraft] = useState<string>(String(saved0.maxDwellSec ?? 30)); // 직접지정 입력 임시값(설정 버튼 눌러야 확정)
-  const [extraTargets, setExtraTargets] = useState<string[]>(private0.extraTargets ?? saved0.extraTargets ?? []); // ➕ 추가 대상(주소 목록)
+  // ➕ 추가 대상(주소 목록) — 대상(플레이스/블로그/스토어)별로 격리(서로 섞이지 않게)
+  const [extraByType, setExtraByType] = useState<{ place: string[]; blog: string[]; store: string[] }>(() => {
+    const legacy = private0.extraTargets ?? saved0.extraTargets ?? [];
+    const seed = private0.extraByType ?? { place: [], blog: [], store: [] };
+    // 기존 단일 목록은 그때 대상 타입에 귀속(이전 데이터 보존)
+    if (legacy.length && !private0.extraByType) { const t = (saved0.targetType ?? "place") as "place" | "blog" | "store"; seed[t] = legacy; }
+    return { place: seed.place || [], blog: seed.blog || [], store: seed.store || [] };
+  });
+  const extraTargets = extraByType[targetType];
+  const setExtraTargets = (updater: string[] | ((arr: string[]) => string[])) => setExtraByType((prev) => ({ ...prev, [targetType]: typeof updater === "function" ? (updater as any)(prev[targetType]) : updater }));
   // 🏪 내 플레이스/블로그 저장 목록(이름+주소) — 여러 개 저장해두고 골라 쓰기
   type SavedTarget = { id: string; name: string; url: string; type: "place" | "blog" | "store" };
   const savedTargetsKey = `publy_inflow_saved_targets_${userId || "guest"}`;
@@ -551,12 +561,12 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
     if (skipPrivateSaveRef.current) { skipPrivateSaveRef.current = false; return; }
     try {
       localStorage.setItem(formKey, JSON.stringify({
-        targetType, keywordsPlace, keywordsBlog, rounds, termMin, termMax, device,
+        targetType, keywordsPlace, keywordsBlog, keywordsStore, rounds, termMin, termMax, device,
         doSave, doShare, doDir, doCall, doBook, doTalk, doLike, doWish, doCart, doOption, funnel, spread, spreadHours, doReview, reviewText, auto, actionRate, intensity, maxDwellSec, kwWeights,
       }));
       localStorage.setItem(privateKey, JSON.stringify({ placeUrl, blogUrl, storeUrl, extraTargets }));
     } catch {}
-  }, [formKey, privateKey, targetType, placeUrl, blogUrl, storeUrl, keywordsPlace, keywordsBlog, rounds, termMin, termMax, device, doSave, doShare, doDir, doCall, doBook, doTalk, doLike, doWish, doCart, doOption, funnel, spread, spreadHours, doReview, reviewText, auto, actionRate, intensity, maxDwellSec, extraTargets, kwWeights]);
+  }, [formKey, privateKey, targetType, placeUrl, blogUrl, storeUrl, keywordsPlace, keywordsBlog, keywordsStore, rounds, termMin, termMax, device, doSave, doShare, doDir, doCall, doBook, doTalk, doLike, doWish, doCart, doOption, funnel, spread, spreadHours, doReview, reviewText, auto, actionRate, intensity, maxDwellSec, extraTargets, kwWeights]);
 
   // 🔔 앱 내 자동 알림 — 날짜/주차 마커로 중복을 막고, 다음 실행 때 놓친 알림도 알림함에 쌓는다.
   useEffect(() => {
@@ -747,8 +757,8 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
 
   // 🌱 새싹 비서 — 지금 데이터 상태를 보고 "오늘 뭐 하세요" 한마디(우선순위 규칙, AI 키 불필요)
   const sproutAdvice = (() => {
-    const hasTarget = targetType === "place" ? !!placeUrl.trim() : !!blogUrl.trim();
-    if (!hasTarget) return { tone: "start", msg: "먼저 내 플레이스나 블로그 주소를 넣어주세요. 그럼 순위·경쟁사·리뷰까지 제가 챙겨드릴게요!" };
+    const hasTarget = targetType === "place" ? !!placeUrl.trim() : targetType === "store" ? !!storeUrl.trim() : !!blogUrl.trim();
+    if (!hasTarget) return { tone: "start", msg: `먼저 내 ${targetType === "place" ? "플레이스" : targetType === "store" ? "스마트스토어 상품" : "블로그 글"} 주소를 넣어주세요. 그럼 순위·유입까지 제가 챙겨드릴게요!` };
     if (!keywords.trim()) return { tone: "start", msg: "검색 키워드를 넣어주세요. ‘🔎 키워드 추천’을 누르면 숨은 키워드도 찾아드려요." };
     // 진단 결과 있으면 부족 항목 우선
     if (diag) { const weak = diag.items.find(it => !it.ok); if (weak && diag.score < 90) return { tone: "fix", msg: `진단 점수 ${diag.score}점! ‘${weak.label}’만 채우면 순위가 더 잘 올라요 — ${weak.tip}` }; }
@@ -825,13 +835,16 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
               <div style={{ fontSize: 12, fontWeight: 600, opacity: .92, marginTop: 2 }}>연결한 계정으로 내 글 목록을 불러와 골라서 트래픽을 걸어요</div>
             </div>
             <div style={{ padding: 18 }}>
-              <div style={{ fontSize: 12.5, fontWeight: 700, color: C.ink, lineHeight: 1.6, marginBottom: 11, background: "rgba(245,158,11,.10)", border: "1.5px solid #d97706", borderRadius: 10, padding: "9px 12px" }}>
-                <b style={{ color: "#d97706" }}>🔑 로그인이 필요해요.</b> 내 글 목록은 <b>계정 관리에서 연결한 네이버 계정</b>으로 불러와요. 아래에서 계정을 고르면 비밀번호 재입력 없이 바로 불러와요.
+              <div style={{ fontSize: 12.5, fontWeight: 700, color: C.ink, lineHeight: 1.7, marginBottom: 11, background: "rgba(245,158,11,.10)", border: "1.5px solid #d97706", borderRadius: 10, padding: "10px 13px" }}>
+                <b style={{ color: "#d97706" }}>🔑 로그인이 필요해요.</b> 내 글 목록은 로그인해야 볼 수 있어요.<br />
+                <b>① 왼쪽 메뉴 맨 아래 ‘계정 관리’ 탭</b>으로 가서<br />
+                <b>② 네이버 아이디·비밀번호로 계정을 연결(로그인)</b>한 뒤<br />
+                <b>③ 다시 여기 와서 그 계정을 선택</b>하면 목록이 나와요. <span style={{ color: C.sub }}>(한 번 연결하면 다음부턴 비번 없이 바로)</span>
               </div>
               {/* 계정 선택 */}
-              <div style={{ fontSize: 12, fontWeight: 800, color: C.sub, marginBottom: 6 }}>불러올 계정</div>
+              <div style={{ fontSize: 12, fontWeight: 800, color: C.sub, marginBottom: 6 }}>불러올 계정 (계정 관리에서 연결한 계정)</div>
               {accounts.length === 0 ? (
-                <div style={{ fontSize: 12.5, fontWeight: 700, color: "#dc2626", padding: "10px 12px", borderRadius: 10, background: "rgba(220,38,38,.06)", border: "1px solid rgba(220,38,38,.3)" }}>연결된 네이버 계정이 없어요 — <b>계정 관리</b>에서 먼저 계정을 연결해주세요.</div>
+                <div style={{ fontSize: 12.5, fontWeight: 700, color: "#dc2626", padding: "11px 13px", borderRadius: 10, background: "rgba(220,38,38,.06)", border: "1px solid rgba(220,38,38,.3)", lineHeight: 1.6 }}>⚠️ 아직 연결된 네이버 계정이 없어요.<br /><b>왼쪽 메뉴 ‘계정 관리’ 탭 → 네이버 아이디·비밀번호로 연결</b>한 뒤 다시 오세요.</div>
               ) : (
                 <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                   {accounts.map((a) => { const on = popupAccountId === a.id; return (
@@ -898,7 +911,7 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
       <div style={{ order: 2 }}><UsageGuide theme={theme} accent={C.accent}
         subtitle="펄리예요! 키워드로 검색해 내 플레이스·블로그로 진짜 손님처럼 유입시키고, 순위가 오르려면 뭘 채워야 하는지 진단까지 해드려요."
         steps={[
-          { ico: "📍", title: "대상·키워드 넣기", desc: "내 플레이스(지도/naver.me) 또는 블로그 글 주소를 붙여넣고, 검색 키워드를 여러 개 적어요(자동으로 인식돼요)." },
+          { ico: "📍", title: "대상·키워드 넣기", desc: "내 플레이스(지도/naver.me)·블로그 글·스마트스토어 상품 주소를 붙여넣고, 검색 키워드를 여러 개 적어요(자동으로 인식돼요)." },
           { ico: "🎛️", title: "옵션 고르기", desc: "방문 횟수·텀·기기(모바일/PC)·할 행동(저장·길찾기·전화 등)을 정해요. 시간분산·액션확률로 더 자연스럽게." },
           { ico: "🚀", title: "유입 시작", desc: "‘유입 시작’을 누르면 방문마다 IP를 바꿔 안전 한도 안에서 돌아요. 진짜 손님처럼 검색결과를 먼저 비교하고, 완급을 두어 읽고(관심 구간 정독·위로 재확인) 자연스럽게 행동해요. 라이브 로그로 전 과정을 볼 수 있어요." },
           { ico: "🩺", title: "성과·진단 확인", desc: "성과 리포트(주간/월간)로 순위·유입 변화를 보고, ‘플레이스 진단’으로 부족한 곳을 찾아 채우면 순위가 더 잘 올라요." },
@@ -981,7 +994,7 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
 
           {/* 이름 + 저장 버튼 */}
           <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-            <input value={savingName} onChange={(e) => setSavingName(e.target.value)} placeholder={targetType === "place" ? "이 플레이스 이름 (예: 강남점)" : "이 블로그 이름"} style={{ ...inputStyle, flex: 1 }} />
+            <input value={savingName} onChange={(e) => setSavingName(e.target.value)} placeholder={targetType === "place" ? "이 플레이스 이름 (예: 강남점)" : targetType === "store" ? "이 상품 이름 (예: 홍삼 세트)" : "이 블로그 이름"} style={{ ...inputStyle, flex: 1 }} />
             <button onClick={saveCurrentTarget} style={{ padding: "0 22px", borderRadius: 12, border: "none", background: `linear-gradient(135deg,${C.accent},${C.cyan})`, color: "#fff", fontSize: 14.5, fontWeight: 900, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}>💾 저장</button>
           </div>
           {/* 저장된 목록 — 골라 쓰기 */}
@@ -1008,10 +1021,13 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
 
         {/* ➕ 추가 대상(여러 곳 번갈아 유입) */}
         <div>
-          <label style={labelStyle}>➕ 추가 대상 <span style={{ color: C.sub, fontWeight: 600 }}>(여러 플레이스·글을 번갈아 — 선택)</span></label>
+          <label style={labelStyle}>➕ 추가 대상 <span style={{ color: C.sub, fontWeight: 600 }}>(선택 — 위 대상 말고 더 유입할 곳)</span></label>
+          <div style={{ fontSize: 11.5, fontWeight: 600, color: C.sub, lineHeight: 1.6, marginBottom: 8, background: C.panel2, border: `1px solid ${C.line}`, borderRadius: 10, padding: "8px 11px" }}>
+            💡 여러 곳을 <b>한 번에</b> 유입하고 싶을 때 써요. 여기에 넣은 주소들을 <b>위 대상과 번갈아(로테이션)</b> 방문해요. {targetType === "store" ? "예: 상품 여러 개를 동시에" : targetType === "blog" ? "예: 글 여러 개를 동시에" : "예: 매장 여러 곳을 동시에"} 올리고 싶을 때. <b>안 넣어도 돼요.</b>
+          </div>
           {extraTargets.map((t, i) => (
             <div key={i} style={{ display: "flex", gap: 8, marginBottom: 6 }}>
-              <input value={t} onChange={(e) => setExtraTargets((arr) => arr.map((x, j) => j === i ? e.target.value : x))} placeholder="플레이스/블로그 주소 붙여넣기" style={{ ...inputStyle, flex: 1 }} />
+              <input value={t} onChange={(e) => setExtraTargets((arr) => arr.map((x, j) => j === i ? e.target.value : x))} placeholder={targetType === "store" ? "스마트스토어 상품 주소" : targetType === "blog" ? "블로그 글 주소" : "플레이스 주소"} style={{ ...inputStyle, flex: 1 }} />
               <button onClick={() => setExtraTargets((arr) => arr.filter((_, j) => j !== i))} style={{ padding: "0 14px", borderRadius: 10, border: `1.5px solid ${C.line2}`, background: C.panel2, color: "#dc2626", fontSize: 18, fontWeight: 900, cursor: "pointer" }}>×</button>
             </div>
           ))}
@@ -1023,7 +1039,8 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
             <label style={{ ...labelStyle, margin: 0 }}>검색 키워드 <span style={{ color: C.sub, fontWeight: 600 }}>(여러 개 — 돌아가며 검색)</span></label>
             <button onClick={runKeywordSuggest} disabled={kwLoading} style={{ marginLeft: "auto", padding: "6px 12px", borderRadius: 8, border: `1.5px solid ${C.accent}`, background: C.panel2, color: C.accent, fontSize: 12.5, fontWeight: 800, cursor: kwLoading?"default":"pointer", fontFamily: "inherit", opacity: kwLoading?0.6:1 }}>{kwLoading ? "찾는 중…" : "🔎 키워드 추천"}</button>
           </div>
-          <textarea value={keywords} onChange={(e) => setKeywords(e.target.value)} placeholder={"예) 강남 맛집, 강남역 삼겹살, 역삼동 고깃집"} rows={2} style={{ ...inputStyle, resize: "vertical", lineHeight: 1.6 }} />
+          <textarea value={keywords} onChange={(e) => setKeywords(e.target.value)} placeholder={targetType === "store" ? "예) 홍삼 스틱, 산양삼 선물세트, 6년근 홍삼" : targetType === "blog" ? "예) 강남 맛집 후기, 부업 추천, 블로그 체험단" : "예) 강남 맛집, 강남역 삼겹살, 역삼동 고깃집"} rows={2} style={{ ...inputStyle, resize: "vertical", lineHeight: 1.6 }} />
+          <div style={{ fontSize: 11, fontWeight: 600, color: C.sub, marginTop: 4 }}>🔒 키워드는 {targetType === "store" ? "스마트스토어" : targetType === "blog" ? "블로그" : "플레이스"} 전용으로 따로 저장돼요 — 대상을 바꿔도 서로 섞이지 않아요.</div>
           {kwSuggest.length > 0 && (
             <div style={{ marginTop: 8, padding: 12, borderRadius: 12, background: C.panel2, border: `1px solid ${C.line}` }}>
               <div style={{ fontSize: 12, fontWeight: 800, color: C.sub, marginBottom: 8 }}>💡 이런 키워드도 있어요 (눌러서 추가)</div>
@@ -1212,7 +1229,7 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
           <input type="checkbox" checked={funnel} onChange={(e) => setFunnel(e.target.checked)} style={{ width: 20, height: 20, accentColor: C.accent, flexShrink: 0 }} />
           <div>
             <div style={{ fontSize: 15, fontWeight: 900, color: funnel ? C.accent : C.ink }}>🌀 풀퍼널 모드 <span style={{ fontSize: 10, verticalAlign: "middle", background: C.accent, color: "#fff", padding: "2px 6px", borderRadius: 6, marginLeft: 4 }}>강력</span></div>
-            <div style={{ fontSize: 12, fontWeight: 600, color: C.sub, marginTop: 3, lineHeight: 1.5 }}>{targetType === "place" ? "메뉴·사진·리뷰까지 둘러봐 체류·조회를 극대화 (진짜 손님처럼)" : "이 블로그 다른 글도 2~3개 읽고 이웃까지 — 체류·페이지뷰·이웃 폭발"}</div>
+            <div style={{ fontSize: 12, fontWeight: 600, color: C.sub, marginTop: 3, lineHeight: 1.5 }}>{targetType === "place" ? "메뉴·사진·리뷰까지 둘러봐 체류·조회를 극대화 (진짜 손님처럼)" : targetType === "store" ? "상세정보·리뷰·연관상품까지 둘러봐 체류·조회를 극대화 (진짜 구매 고민 손님처럼)" : "이 블로그 다른 글도 2~3개 읽고 이웃까지 — 체류·페이지뷰·이웃 폭발"}</div>
           </div>
         </label>
 
