@@ -765,6 +765,16 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
       <input type="checkbox" checked={v} onChange={(e) => set(e.target.checked)} style={{ width: 17, height: 17, accentColor: C.accent }} />{label}
     </label>
   );
+  // 🎨 실행패널 그룹 구분 헤더 — 묶이는 기능을 색으로 나눠 한눈에 구분(밋밋함 제거)
+  const GroupHeader = ({ n, title, desc, color }: { n: string; title: string; desc: string; color: string }) => (
+    <div style={{ display: "flex", alignItems: "center", gap: 11, padding: "11px 14px", borderRadius: 12, background: `${color}14`, borderLeft: `5px solid ${color}`, marginTop: 4 }}>
+      <span style={{ width: 26, height: 26, borderRadius: 8, background: color, color: "#fff", fontSize: 14, fontWeight: 900, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>{n}</span>
+      <div style={{ minWidth: 0 }}>
+        <div style={{ fontSize: 14, fontWeight: 900, color }}>{title}</div>
+        <div style={{ fontSize: 11.5, fontWeight: 600, color: C.sub, marginTop: 1 }}>{desc}</div>
+      </div>
+    </div>
+  );
 
   return (
     <div className="inflow-center" style={{ fontFamily: "'Pretendard','Apple SD Gothic Neo',sans-serif", color: C.ink, display: "flex", flexDirection: "column" }}>
@@ -901,6 +911,7 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
 
       {/* ── 실행 패널 ── */}
       <div className="inflow-card" style={{ order: 4, background: C.panel, border: "1.5px solid #2563eb", borderRadius: 16, padding: 18, marginBottom: 14, display: "flex", flexDirection: "column", gap: 16 }}>
+        <GroupHeader n="1" color="#2563eb" title="어디에 · 무엇으로 검색" desc="유입할 대상(플레이스·블로그·스토어)과 검색 키워드를 정해요" />
         {/* 대상 */}
         <div>
           <label style={labelStyle}>어디로 유입시킬까요?</label>
@@ -1019,6 +1030,7 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
           )}
         </div>
 
+        <GroupHeader n="2" color="#7c3aed" title="어떻게 방문할까 (자연스럽게)" desc="접속 기기·방문 텀·횟수·체류시간·액션 확률 — 진짜 손님처럼" />
         {/* 기기 */}
         <div>
           <label style={labelStyle}>접속 기기 <span style={{ color: C.sub, fontWeight: 600 }}>(기본 모바일 — 안 바꿔도 돼요)</span></label>
@@ -1093,6 +1105,7 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
           </div>
         </div>
 
+        <GroupHeader n="3" color="#16a34a" title="방문해서 할 행동" desc="저장·길찾기·전화·찜 등 — 🔑 표시는 로그인 필요, 나머지는 계정 없이 OK" />
         {/* 액션 */}
         <div>
           <label style={labelStyle}>방문해서 할 행동 <span style={{ color: C.sub, fontWeight: 600 }}>{targetType === "place" ? "(길찾기·전화·예약이 순위에 가장 강해요)" : ""}</span></label>
@@ -1140,6 +1153,7 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
           </div>
         </div>
 
+        <GroupHeader n="⚙️" color="#64748b" title="고급 · 더 자연스럽게 (선택)" desc="키워드 비중·시간 분산·풀퍼널 — 몰라도 되지만 켜면 봇 티가 줄어요" />
         {/* ⚙️ 고급 설정 — 키워드별 비중(자주 안 쓰는 건 접어둠) */}
         <div>
           <button onClick={() => setAdvOpen((v) => !v)} style={{ padding: "10px 14px", borderRadius: 10, border: `1.5px solid ${C.line2}`, background: C.panel2, color: C.ink, fontSize: 13.5, fontWeight: 800, cursor: "pointer", fontFamily: "inherit", width: "100%", textAlign: "left" }}>
