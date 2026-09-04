@@ -273,6 +273,14 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
     } catch {}
     return "";
   })();
+  // 비동기 통계 응답이 대상 전환 뒤 도착해도 새 대상 화면을 덮지 못하게 한다.
+  const statsRequestRef = useRef(0);
+  const currentScopeRef = useRef(currentScope);
+  const chartDaysRef = useRef(chartDays);
+  const reportPeriodRef = useRef(reportPeriod);
+  currentScopeRef.current = currentScope;
+  chartDaysRef.current = chartDays;
+  reportPeriodRef.current = reportPeriod;
   // 🔁 대상별 격리 도입 전 과거 기록을 최초 1회 현재 대상으로 이관(업데이트해도 기록 유지)
   const legacyMigratedRef = useRef(false);
   useEffect(() => {
@@ -283,17 +291,29 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
   }, [userId, currentScope]);
   const refreshStats = () => {
     if (!userId) return;
+    const requestId = ++statsRequestRef.current;
+    const scope = currentScopeRef.current;
+    const days = chartDaysRef.current;
+    const period = reportPeriodRef.current;
     getInflowDailyUsage(userId).then(setUsed).catch(() => {});                    // 전체 한도 사용량(글로벌)
     // 🔒 대상 미선택(scope 없음)이면 이 대상 표시는 비운다 — 빈 scope의 글로벌 폴백이 다른 대상/전체 수치를
     //   끌어와 "스토어인데 플레이스 수치가 뜨는" 오염을 막는다(대상별 격리 원칙).
-    if (!currentScope) { setTodayScoped(0); setHistory([]); setRankHist([]); setReport(null); setApLastRank(null); setApRankOut(false); return; }
-    getInflowStatToday(userId, currentScope).then(setTodayScoped).catch(() => {}); // 이 대상 오늘 유입
-    getInflowUsageHistory(userId, chartDays, currentScope).then(setHistory).catch(() => {});
-    getRankHistory(userId, chartDays, currentScope).then(setRankHist).catch(() => {});
-    getPerfReport(userId, reportPeriod, currentScope).then(setReport).catch(() => {});
+    if (!scope) { setTodayScoped(0); setHistory([]); setRankHist([]); setReport(null); setApLastRank(null); setApRankOut(false); return; }
+    // 유효한 다른 대상으로 전환한 순간에도 이전 대상 값을 먼저 제거한다.
+    setTodayScoped(0); setHistory([]); setRankHist([]); setReport(null); setApLastRank(null); setApRankOut(false);
+    Promise.all([
+      getInflowStatToday(userId, scope),
+      getInflowUsageHistory(userId, days, scope),
+      getRankHistory(userId, days, scope),
+      getPerfReport(userId, period, scope),
+    ]).then(([today, nextHistory, nextRankHist, nextReport]) => {
+      if (requestId !== statsRequestRef.current || currentScopeRef.current !== scope) return;
+      setTodayScoped(today); setHistory(nextHistory); setRankHist(nextRankHist); setReport(nextReport);
+      const last = [...nextRankHist].reverse().find((x) => x.rank != null);
+      setApLastRank(last?.rank ?? null); setApRankOut(false);
+    }).catch(() => {});
   };
   useEffect(() => {
-    refreshStats();
     if (!userId) return;
     getAccounts(userId).then((a) => setAccounts(a.filter((x) => x.platform === "naver"))).catch(() => {});
   }, [userId]);
@@ -346,10 +366,8 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
       localStorage.removeItem("publy_inflow_saved_targets");
     } catch {}
   }, [privateKey, savedTargetsKey, userId]);
-  // 주간/월간 토글·대상 바뀌면 리포트 다시 로드(대상별). 대상 없으면 비움(글로벌 폴백 오염 차단)
-  useEffect(() => { if (!userId) return; if (!currentScope) { setReport(null); return; } getPerfReport(userId, reportPeriod, currentScope).then(setReport).catch(() => {}); }, [userId, reportPeriod, currentScope]);
-  // 📅 기간·대상 바뀌면 유입·순위·오늘유입 다시 로드(과거 데이터·대상별 조회) → 대상 변경 시 화면 전체 갱신
-  useEffect(() => { if (!userId) return; if (!currentScope) { setTodayScoped(0); setHistory([]); setRankHist([]); setApLastRank(null); setApRankOut(false); return; } getInflowStatToday(userId, currentScope).then(setTodayScoped).catch(() => {}); getInflowUsageHistory(userId, chartDays, currentScope).then(setHistory).catch(() => {}); getRankHistory(userId, chartDays, currentScope).then((h) => { setRankHist(h); const last = [...h].reverse().find((x) => x.rank != null); setApLastRank(last ? last.rank : null); setApRankOut(false); }).catch(() => {}); }, [userId, chartDays, currentScope]);
+  // 📅 대상·기간 변경 즉시 화면을 비우고 해당 scope의 모든 통계를 한 묶음으로 다시 로드한다.
+  useEffect(() => { refreshStats(); }, [userId, currentScope, chartDays, reportPeriod]);
 
   // 📅 현재 기간 필터 → epoch ms 범위(0=제한없음). 쿼리스트링으로 봇에 전달.
   const postRangeQuery = (): string => {
@@ -429,6 +447,8 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
   // 📍 순위 측정 — 대표 키워드로 내 플레이스 순위 측정 후 저장(리포트·그래프에 자동 반영)
   const [rankLoading, setRankLoading] = useState(false);
   const runMeasureRank = async () => {
+    const measureScope = currentScope;
+    if (!measureScope) { toast("대상 주소를 먼저 입력하세요", "error"); return; }
     const kw = (apKeyword || keywords.split(/[,\n]/)[0] || "").trim();
     if (!kw) { toast("순위를 측정할 키워드를 입력하세요(오토파일럿 키워드 또는 첫 키워드)", "error"); return; }
     let url = "";
@@ -445,6 +465,7 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
     try {
       const r = await botFetch(url);
       const j = await r.json();
+      if (currentScopeRef.current !== measureScope) return; // 측정 중 대상이 바뀌면 이전 대상 결과를 화면에 표시하지 않음
       if (j.error) { pushLog(`❌ 순위 측정 실패 — ${j.error}`); toast(j.error, "error"); return; }
       if (j.rank == null) {
         setApRankOut(true); // 현재순위 카드에 '30+' 표시
@@ -452,7 +473,7 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
         toast(`"${kw}"에서 30위 밖이에요(노출 순위 낮음). 유입·리뷰로 끌어올리세요.`, "info");
       } else {
         setApLastRank(j.rank); setApRankOut(false);
-        if (userId) { await recordRankPoint(userId, j.rank, currentScope); getPerfReport(userId, reportPeriod, currentScope).then(setReport).catch(()=>{}); getRankHistory(userId, chartDays, currentScope).then(setRankHist).catch(()=>{}); }
+        if (userId) { await recordRankPoint(userId, j.rank, measureScope); if (currentScopeRef.current === measureScope) refreshStats(); }
         pushLog(`📍 현재 "${kw}" ${j.rank}위${apEnabled ? ` (목표 ${apGoal}위)` : ""} — 기록했어요`);
         toast(`현재 "${kw}" ${j.rank}위 — 기록했어요`, "success");
       }
@@ -466,6 +487,8 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
   autopilotCheckRef.current = async () => {
     const fail = { measured: false, reached: false };
     if (!userId) return fail;
+    const measureScope = currentScope;
+    if (!measureScope) return fail;
     const kw = (apKeyword || keywords.split(/[,\n]/)[0] || "").trim();
     if (!kw) return fail;
     let url = "";
@@ -483,11 +506,12 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
     try {
       const r = await botFetch(url);
       const j = await r.json();
+      if (currentScopeRef.current !== measureScope) return fail;
       if (j.error) { pushLog(`📍 순위 측정 실패 — ${j.error}`); return fail; }
       if (j.rank != null) {
         setApLastRank(j.rank);
-        await recordRankPoint(userId, j.rank, currentScope);
-        getPerfReport(userId, reportPeriod, currentScope).then(setReport).catch(()=>{});
+        await recordRankPoint(userId, j.rank, measureScope);
+        if (currentScopeRef.current === measureScope) refreshStats();
         pushLog(`📍 현재 순위 ${j.rank}위 (목표 ${apGoal}위)`);
         return { measured: true, reached: j.rank <= apGoal };   // 목표 이내면 달성
       }
@@ -784,7 +808,8 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
         const place = placeUrl.trim();
 
         if (hhmm >= "09:00" && !hasRun("report", day)) {
-          const dailyReport = await getPerfReport(userId, "week");
+          if (!currentScope) return;
+          const dailyReport = await getPerfReport(userId, "week", currentScope);
           const yesterdayInflow = dailyReport.daily.at(-2)?.count ?? 0;
           addNotification(`매일 리포트 · 어제 순위 ${dailyReport.rankNow != null ? `${dailyReport.rankNow}위` : "미측정"} · 유입 ${yesterdayInflow}명`);
           markRun("report", day);
@@ -1570,7 +1595,7 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
       {/* ── KPI 카드 ── */}
       <div style={{ order: 6, display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(140px,1fr))", gap: 12, marginBottom: 14 }}>
         {[
-          { k: "오늘 유입", v: `${used}`, sub: unlimited ? "무제한" : `/ ${limit}회`, col: C.accent },
+          { k: "오늘 유입", v: `${todayScoped}`, sub: unlimited ? "무제한" : `/ ${limit}회`, col: C.accent },
           // 🛒 스토어는 순위 자동측정 미지원 → '현재 순위' 대신 '이번 성공'으로(죽은 순위 값 노출 방지)
           targetType === "store"
             ? { k: "이번 성공", v: `${sessOk}`, sub: "회", col: "#16a34a" }

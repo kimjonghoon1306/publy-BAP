@@ -851,7 +851,8 @@ export async function migrateLegacyInflowToScope(userId: string, scope: string, 
 }
 // 순위 이력(그래프용) — publy_settings key-value 재사용. 하루 1값(최신 덮어씀).
 export async function recordRankPoint(userId: string, rank: number, scope = ""): Promise<void> {
-  const key = scope ? `inflow_rank_${userId}_${scope}_${koreaDateKey()}` : `inflow_rank_${userId}_${koreaDateKey()}`;
+  if (!scope) return; // 대상 없는 전역 rank 저장 금지
+  const key = `inflow_rank_${userId}_${scope}_${koreaDateKey()}`;
   await supabase.from("publy_settings").upsert({ key, value: String(rank) }, { onConflict: "key" });
 }
 export async function getRankHistory(userId: string, days = 7, scope = ""): Promise<{ label: string; rank: number | null }[]> {
@@ -862,6 +863,7 @@ export async function getRankHistory(userId: string, days = 7, scope = ""): Prom
     const ymd = koreaDateKey(new Date(now - i * 86400000));
     metas.push({ key: scope ? `inflow_rank_${userId}_${scope}_${ymd}` : `inflow_rank_${userId}_${ymd}`, label: ymd.slice(5) });
   }
+  if (!scope) return metas.map(m => ({ label: m.label, rank: null }));
   try {
     const { data } = await supabase.from("publy_settings").select("key,value").in("key", metas.map(m => m.key));
     const map = new Map((data || []).map((r: any) => [r.key, parseInt(r.value) || null]));
@@ -931,15 +933,16 @@ export async function getInflowUsageHistory(userId: string, days = 7, scope = ""
     const ymd = koreaDateKey(new Date(now - i * 86400000)); // YYYY-MM-DD (KST)
     metas.push({ key: scope ? `inflow_stat_${userId}_${scope}_${ymd}` : `inflow_daily_${userId}_${ymd}`, label: ymd.slice(5) });
   }
+  if (!scope) return metas.map(m => ({ label: m.label, count: 0 }));
   try {
     const { data } = await supabase.from("publy_settings").select("key,value").in("key", metas.map(m => m.key));
     const map = new Map((data || []).map((r: any) => [r.key, parseInt(r.value) || 0]));
     return metas.map(m => ({ label: m.label, count: map.get(m.key) || 0 }));
   } catch { return metas.map(m => ({ label: m.label, count: 0 })); }
 }
-/* 대상별 오늘 유입 수(KPI '오늘 유입'용). scope 없으면 전체(legacy) */
+/* 대상별 오늘 유입 수(KPI '오늘 유입'용). scope 없으면 빈 값(전역 legacy 폴백 금지). */
 export async function getInflowStatToday(userId: string, scope = ""): Promise<number> {
-  if (!scope) return getInflowDailyUsage(userId);
+  if (!scope) return 0;
   try {
     const key = `inflow_stat_${userId}_${scope}_${koreaDateKey()}`;
     const { data } = await supabase.from("publy_settings").select("value").eq("key", key).maybeSingle();
@@ -981,6 +984,10 @@ async function lastRankInRange(userId: string, startDaysAgo: number, endDaysAgo:
 }
 export async function getPerfReport(userId: string, period: "week" | "month", scope = ""): Promise<PerfReport> {
   const span = period === "week" ? 7 : 30;
+  if (!scope) {
+    const daily = Array.from({ length: span }, (_, index) => ({ label: ymdOffset(span - 1 - index).slice(5), count: 0 }));
+    return { period, inflowNow: 0, inflowPrev: 0, rankNow: null, rankPrev: null, daily, rankDaily: daily.map(({ label }) => ({ label, rank: null })) };
+  }
   const [nowU, prevU, nowR, prevR] = await Promise.all([
     sumInflowRange(userId, span - 1, 0, scope),
     sumInflowRange(userId, span * 2 - 1, span, scope),
