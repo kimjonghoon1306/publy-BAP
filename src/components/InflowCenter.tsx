@@ -289,7 +289,8 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
     migrateLegacyInflowToScope(userId, currentScope).then((ok) => { if (ok) { legacyMigratedRef.current = true; refreshStats(); } }).catch(() => {});
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userId, currentScope]);
-  const refreshStats = () => {
+  // keepRank=true면 apLastRank(현재순위 카드)를 건드리지 않는다 — 방금 측정한 값이 DB반영 전 재조회로 null 덮어써 "6위가 사라지는" 버그 방지.
+  const refreshStats = (keepRank = false) => {
     if (!userId) return;
     const requestId = ++statsRequestRef.current;
     const scope = currentScopeRef.current;
@@ -298,9 +299,9 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
     getInflowDailyUsage(userId).then(setUsed).catch(() => {});                    // 전체 한도 사용량(글로벌)
     // 🔒 대상 미선택(scope 없음)이면 이 대상 표시는 비운다 — 빈 scope의 글로벌 폴백이 다른 대상/전체 수치를
     //   끌어와 "스토어인데 플레이스 수치가 뜨는" 오염을 막는다(대상별 격리 원칙).
-    if (!scope) { setTodayScoped(0); setHistory([]); setRankHist([]); setReport(null); setApLastRank(null); setApRankOut(false); return; }
-    // 유효한 다른 대상으로 전환한 순간에도 이전 대상 값을 먼저 제거한다.
-    setTodayScoped(0); setHistory([]); setRankHist([]); setReport(null); setApLastRank(null); setApRankOut(false);
+    if (!scope) { setTodayScoped(0); setHistory([]); setRankHist([]); setReport(null); if (!keepRank) { setApLastRank(null); setApRankOut(false); } return; }
+    // 유효한 다른 대상으로 전환한 순간에도 이전 대상 값을 먼저 제거한다.(측정 직후 keepRank면 순위는 유지)
+    setTodayScoped(0); setHistory([]); setRankHist([]); setReport(null); if (!keepRank) { setApLastRank(null); setApRankOut(false); }
     Promise.all([
       getInflowStatToday(userId, scope),
       getInflowUsageHistory(userId, days, scope),
@@ -309,8 +310,11 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
     ]).then(([today, nextHistory, nextRankHist, nextReport]) => {
       if (requestId !== statsRequestRef.current || currentScopeRef.current !== scope) return;
       setTodayScoped(today); setHistory(nextHistory); setRankHist(nextRankHist); setReport(nextReport);
-      const last = [...nextRankHist].reverse().find((x) => x.rank != null);
-      setApLastRank(last?.rank ?? null); setApRankOut(false);
+      // 측정 직후(keepRank)엔 방금 측정값을 유지. 그 외엔 기록의 마지막 값으로 카드 갱신(있을 때만 — null로 덮어쓰지 않음).
+      if (!keepRank) {
+        const last = [...nextRankHist].reverse().find((x) => x.rank != null);
+        if (last?.rank != null) { setApLastRank(last.rank); setApRankOut(false); }
+      }
     }).catch(() => {});
   };
   useEffect(() => {
@@ -473,7 +477,8 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
         toast(`"${kw}"에서 30위 밖이에요(노출 순위 낮음). 유입·리뷰로 끌어올리세요.`, "info");
       } else {
         setApLastRank(j.rank); setApRankOut(false);
-        if (userId) { await recordRankPoint(userId, j.rank, measureScope); if (currentScopeRef.current === measureScope) refreshStats(); }
+        // 순위 저장 후 그래프·리포트는 갱신하되, 방금 측정한 현재순위 카드값은 유지(keepRank=true).
+        if (userId) { await recordRankPoint(userId, j.rank, measureScope); if (currentScopeRef.current === measureScope) refreshStats(true); }
         pushLog(`📍 현재 "${kw}" ${j.rank}위${apEnabled ? ` (목표 ${apGoal}위)` : ""} — 기록했어요`);
         toast(`현재 "${kw}" ${j.rank}위 — 기록했어요`, "success");
       }
@@ -1596,10 +1601,10 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
       <div style={{ order: 6, display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(140px,1fr))", gap: 12, marginBottom: 14 }}>
         {[
           { k: "오늘 유입", v: `${todayScoped}`, sub: unlimited ? "무제한" : `/ ${limit}회`, col: C.accent },
-          // 🛒 스토어는 순위 자동측정 미지원 → '현재 순위' 대신 '이번 성공'으로(죽은 순위 값 노출 방지)
-          targetType === "store"
-            ? { k: "이번 성공", v: `${sessOk}`, sub: "회", col: "#16a34a" }
-            : { k: "현재 순위", v: apLastRank != null ? `${apLastRank}` : apRankOut ? "30+" : "—", sub: apEnabled ? `목표 ${apGoal}위` : "위", col: "#16a34a" },
+          // 🎯 '현재 순위'는 플레이스 전용(검색 순위 개념). 블로그·스토어는 순위 개념이 아니라 '이번 성공'을 보여준다.
+          targetType === "place"
+            ? { k: "현재 순위", v: apLastRank != null ? `${apLastRank}` : apRankOut ? "30+" : "—", sub: apEnabled ? `목표 ${apGoal}위` : "위", col: "#16a34a" }
+            : { k: "이번 성공", v: `${sessOk}`, sub: "회", col: "#16a34a" },
           { k: chartDays >= 365 ? "전체 누적" : `최근 ${chartDays}일`, v: `${weekTotal}`, sub: "누적 방문", col: C.cyan },
           { k: "남은 한도", v: unlimited ? "∞" : `${Math.max(0, limit - used)}`, sub: unlimited ? "무제한" : "회", col: "#f59e0b" },
         ].map((kp) => (
@@ -1630,9 +1635,9 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
             </div>
             <button onClick={downloadReportPdf} style={{ marginLeft: "auto", padding: "8px 16px", borderRadius: 10, border: `1.5px solid ${C.accent}`, background: C.panel, color: C.accent, fontSize: 13, fontWeight: 800, cursor: "pointer", fontFamily: "inherit" }}>📄 PDF로 저장 · 고객 제출용</button>
           </div>
-          {/* 비교 KPI — 스토어는 순위 미측정이라 '현재 순위' 칸을 빼고 유입 지표만 보여줌 */}
+          {/* 비교 KPI — '현재 순위'는 플레이스 전용. 블로그·스토어는 순위 개념이 없어 유입 지표만 보여줌 */}
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(150px,1fr))", gap: 12, marginBottom: 14 }}>
-            {targetType !== "store" && (
+            {targetType === "place" && (
             <div style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 14, padding: "14px 16px" }}>
               <div style={{ fontSize: 12, fontWeight: 800, color: C.sub, marginBottom: 5 }}>현재 순위</div>
               <div style={{ fontSize: 28, fontWeight: 900, color: "#16a34a" }}>{report.rankNow!=null?`${report.rankNow}위`:"—"}</div>
@@ -1664,7 +1669,7 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
             <div style={{ fontSize: 12.5, fontWeight: 800, color: C.sub, marginBottom: 6 }}>✅ 이번 {per} 체크포인트</div>
             {rankDelta!=null && rankDelta>0 && <div style={{ fontSize: 13.5, fontWeight: 700, marginTop: 3 }}>🎉 순위가 <b style={{color:"#16a34a"}}>{rankDelta}계단</b> 올랐어요!</div>}
             {infDelta!=null && infDelta>0 && <div style={{ fontSize: 13.5, fontWeight: 700, marginTop: 3 }}>📈 유입이 지난 {per}보다 <b style={{color:C.accent}}>{infDelta}%</b> 늘었어요.</div>}
-            {(rankDelta==null && report.rankNow==null) && <div style={{ fontSize: 13, fontWeight: 600, color: C.sub, marginTop: 3 }}>순위는 오토파일럿·순위 측정을 켜면 자동으로 기록돼요.</div>}
+            {targetType==="place" && (rankDelta==null && report.rankNow==null) && <div style={{ fontSize: 13, fontWeight: 600, color: C.sub, marginTop: 3 }}>순위는 오토파일럿·순위 측정을 켜면 자동으로 기록돼요.</div>}
             {(infDelta==null || infDelta<=0) && rankDelta==null && report.inflowNow>0 && <div style={{ fontSize: 13, fontWeight: 600, color: C.sub, marginTop: 3 }}>이번 {per} 유입 {report.inflowNow}명 — 꾸준히 쌓이고 있어요.</div>}
           </div>
         </div>
@@ -1891,28 +1896,33 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
           {history.map((d) => <span key={d.label}>{d.label}</span>)}
         </div>}
       </div>
-      {/* 순위 변동 — 스토어는 순위 자동측정 미지원이라 그래프 대신 안내 */}
+      {/* 순위 변동 — 플레이스 전용(순위 개념). 블로그·스토어는 순위 개념이 없어 안내로 대체 */}
       <div style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 16, padding: "14px 16px 8px" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
           <span style={{ fontSize: 13.5, fontWeight: 800 }}>📉 순위 변동 <span style={{ color: C.sub, fontWeight: 600, fontSize: 11 }}>(위=상위)</span></span>
-          {apEnabled && targetType !== "store" && <span style={{ fontSize: 11.5, fontWeight: 800, color: C.cyan }}>목표 {apGoal}위 ---</span>}
+          {apEnabled && targetType === "place" && <span style={{ fontSize: 11.5, fontWeight: 800, color: C.cyan }}>목표 {apGoal}위 ---</span>}
         </div>
-        {targetType === "store" ? (
+        {targetType === "place" ? (<>
+          <RankChart data={rankHist} goal={apGoal} C={C} />
+          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: C.sub, fontWeight: 700, padding: "0 2px" }}>
+            {rankHist.map((d) => <span key={d.label}>{d.label}</span>)}
+          </div>
+        </>) : targetType === "blog" ? (
+          <div style={{ height: 120, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 6, color: C.sub, fontSize: 12.5, fontWeight: 600, textAlign: "center", lineHeight: 1.6 }}>
+            <span style={{ fontSize: 22 }}>📘</span>
+            블로그는 순위 대신 <b style={{color:C.ink}}>방문자·이웃·글 품질</b>이 핵심이에요.<br />아래 <b style={{color:C.ink}}>블로그 진단</b>에서 확인하세요.
+          </div>
+        ) : (
           <div style={{ height: 120, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 6, color: C.sub, fontSize: 12.5, fontWeight: 600, textAlign: "center", lineHeight: 1.6 }}>
             <span style={{ fontSize: 22 }}>🛒</span>
             스마트스토어는 순위 자동측정을 지원하지 않아요.<br />유입·체류 신호로 상품 노출을 높이는 데 집중해요.
           </div>
-        ) : (<>
-        <RankChart data={rankHist} goal={apGoal} C={C} />
-        <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: C.sub, fontWeight: 700, padding: "0 2px" }}>
-          {rankHist.map((d) => <span key={d.label}>{d.label}</span>)}
-        </div>
-        </>)}
+        )}
       </div>
       </div>
 
-      {/* ── 🎯 오토파일럿 (플레이스+블로그) ── */}
-      {(targetType === "place" || targetType === "blog") && (<div className="inflow-card" style={{ order: 12, background: apEnabled ? `linear-gradient(135deg,${C.glow},transparent)` : C.panel, border: `2px solid ${apEnabled ? C.accent : "#3b82f6"}`, borderRadius: 16, padding: 16, marginBottom: 14 }}>
+      {/* ── 🎯 오토파일럿 (플레이스 전용 — 순위 개념) ── */}
+      {targetType === "place" && (<div className="inflow-card" style={{ order: 12, background: apEnabled ? `linear-gradient(135deg,${C.glow},transparent)` : C.panel, border: `2px solid ${apEnabled ? C.accent : "#3b82f6"}`, borderRadius: 16, padding: 16, marginBottom: 14 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: apEnabled || true ? 12 : 0, flexWrap: "wrap" }}>
           <span style={{ fontSize: 15, fontWeight: 900 }}>🎯 순위 오토파일럿</span>
           <span style={{ fontSize: 10, fontWeight: 800, background: apEnabled ? "#16a34a" : C.sub, color: "#fff", padding: "2px 8px", borderRadius: 6 }}>{apEnabled ? "가동 중" : "꺼짐"}</span>
