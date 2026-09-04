@@ -283,7 +283,10 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
   }, [userId, currentScope]);
   const refreshStats = () => {
     if (!userId) return;
-    getInflowDailyUsage(userId).then(setUsed).catch(() => {});                    // 전체 한도 사용량
+    getInflowDailyUsage(userId).then(setUsed).catch(() => {});                    // 전체 한도 사용량(글로벌)
+    // 🔒 대상 미선택(scope 없음)이면 이 대상 표시는 비운다 — 빈 scope의 글로벌 폴백이 다른 대상/전체 수치를
+    //   끌어와 "스토어인데 플레이스 수치가 뜨는" 오염을 막는다(대상별 격리 원칙).
+    if (!currentScope) { setTodayScoped(0); setHistory([]); setRankHist([]); setReport(null); setApLastRank(null); setApRankOut(false); return; }
     getInflowStatToday(userId, currentScope).then(setTodayScoped).catch(() => {}); // 이 대상 오늘 유입
     getInflowUsageHistory(userId, chartDays, currentScope).then(setHistory).catch(() => {});
     getRankHistory(userId, chartDays, currentScope).then(setRankHist).catch(() => {});
@@ -343,10 +346,10 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
       localStorage.removeItem("publy_inflow_saved_targets");
     } catch {}
   }, [privateKey, savedTargetsKey, userId]);
-  // 주간/월간 토글·대상 바뀌면 리포트 다시 로드(대상별)
-  useEffect(() => { if (userId) getPerfReport(userId, reportPeriod, currentScope).then(setReport).catch(() => {}); }, [userId, reportPeriod, currentScope]);
+  // 주간/월간 토글·대상 바뀌면 리포트 다시 로드(대상별). 대상 없으면 비움(글로벌 폴백 오염 차단)
+  useEffect(() => { if (!userId) return; if (!currentScope) { setReport(null); return; } getPerfReport(userId, reportPeriod, currentScope).then(setReport).catch(() => {}); }, [userId, reportPeriod, currentScope]);
   // 📅 기간·대상 바뀌면 유입·순위·오늘유입 다시 로드(과거 데이터·대상별 조회) → 대상 변경 시 화면 전체 갱신
-  useEffect(() => { if (!userId) return; getInflowStatToday(userId, currentScope).then(setTodayScoped).catch(() => {}); getInflowUsageHistory(userId, chartDays, currentScope).then(setHistory).catch(() => {}); getRankHistory(userId, chartDays, currentScope).then((h) => { setRankHist(h); const last = [...h].reverse().find((x) => x.rank != null); setApLastRank(last ? last.rank : null); setApRankOut(false); }).catch(() => {}); }, [userId, chartDays, currentScope]);
+  useEffect(() => { if (!userId) return; if (!currentScope) { setTodayScoped(0); setHistory([]); setRankHist([]); setApLastRank(null); setApRankOut(false); return; } getInflowStatToday(userId, currentScope).then(setTodayScoped).catch(() => {}); getInflowUsageHistory(userId, chartDays, currentScope).then(setHistory).catch(() => {}); getRankHistory(userId, chartDays, currentScope).then((h) => { setRankHist(h); const last = [...h].reverse().find((x) => x.rank != null); setApLastRank(last ? last.rank : null); setApRankOut(false); }).catch(() => {}); }, [userId, chartDays, currentScope]);
 
   // 📅 현재 기간 필터 → epoch ms 범위(0=제한없음). 쿼리스트링으로 봇에 전달.
   const postRangeQuery = (): string => {
