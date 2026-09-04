@@ -132,6 +132,11 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
   const [manualPostUrls, setManualPostUrls] = useState<string>("");             // 글주소 직접 입력(줄바꿈 여러 개)
   const [popupAccountId, setPopupAccountId] = useState<string>("");             // 로그인 팝업에서 고른 계정
   const [pickedPostCount, setPickedPostCount] = useState<number>(0);            // 지정된 글 개수(요약 표시)
+  // 📅 글 불러올 때 기간 필터: 전체 / 최근 N일 / 날짜 지정(시작~종료)
+  const [postDateMode, setPostDateMode] = useState<"all" | "recent" | "range">("all");
+  const [postRecentDays, setPostRecentDays] = useState<number>(30);
+  const [postFrom, setPostFrom] = useState<string>("");                          // yyyy-mm-dd
+  const [postTo, setPostTo] = useState<string>("");                             // yyyy-mm-dd
   // 🔑 키워드는 플레이스/블로그가 완전히 별개(서로 섞이면 안 됨). 각각 저장하고, 현재 대상 것만 표시·수정.
   const [keywordsPlace, setKeywordsPlace] = useState<string>(saved0.keywordsPlace ?? (saved0.targetType !== "blog" ? saved0.keywords : "") ?? "");
   const [keywordsBlog, setKeywordsBlog] = useState<string>(saved0.keywordsBlog ?? (saved0.targetType === "blog" ? saved0.keywords : "") ?? "");
@@ -224,6 +229,13 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
   // 💬 리뷰 감정분석
   const [revLoading, setRevLoading] = useState(false);
   const [revResult, setRevResult] = useState<{ total: number; likes: { word: string; n: number }[]; dislikes: { word: string; n: number }[] } | null>(null);
+  // 📘 블로그 진단(blog 전용) — 기존 자산 crawlBlogStats / /api/blog-stats 재사용
+  const [blogDiagLoading, setBlogDiagLoading] = useState(false);
+  const [blogDiag, setBlogDiag] = useState<any>(null);
+  const [blogDiagAcctId, setBlogDiagAcctId] = useState<string>("");
+  // 🛒 스토어 상품 진단(store 전용) — /api/store-info(리뷰수·찜·평점·가격)
+  const [storeInfoLoading, setStoreInfoLoading] = useState(false);
+  const [storeInfo, setStoreInfo] = useState<any>(null);
   // ⏰ 예약 실행
   const [schedEnabled, setSchedEnabled] = useState(false);
   const [schedTime, setSchedTime] = useState("10:00");
@@ -336,11 +348,22 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
   // 📅 기간·대상 바뀌면 유입·순위·오늘유입 다시 로드(과거 데이터·대상별 조회) → 대상 변경 시 화면 전체 갱신
   useEffect(() => { if (!userId) return; getInflowStatToday(userId, currentScope).then(setTodayScoped).catch(() => {}); getInflowUsageHistory(userId, chartDays, currentScope).then(setHistory).catch(() => {}); getRankHistory(userId, chartDays, currentScope).then((h) => { setRankHist(h); const last = [...h].reverse().find((x) => x.rank != null); setApLastRank(last ? last.rank : null); setApRankOut(false); }).catch(() => {}); }, [userId, chartDays, currentScope]);
 
+  // 📅 현재 기간 필터 → epoch ms 범위(0=제한없음). 쿼리스트링으로 봇에 전달.
+  const postRangeQuery = (): string => {
+    let fromMs = 0, toMs = 0;
+    if (postDateMode === "recent") fromMs = Date.now() - Math.max(1, postRecentDays) * 86400000;
+    else if (postDateMode === "range") {
+      if (postFrom) fromMs = new Date(postFrom + "T00:00:00").getTime();
+      if (postTo) toMs = new Date(postTo + "T23:59:59").getTime();
+    }
+    return `&fromMs=${fromMs || 0}&toMs=${toMs || 0}`;
+  };
+
   // 🌐 공개 API로 글 불러오기(로그인 세션 없이 아이디만) — 로그인 방식 실패 시 폴백. 모든 과정 라이브 로그에 기록.
   const collectPublicPosts = (bid: string, reason: string) => {
     if (!bid) { pushLog(`❌ 공개 수집 실패 — 블로그 주소(아이디)를 먼저 입력하세요`); toast("블로그 주소(아이디)를 먼저 입력하세요", "error"); setMyPostsLoading(false); return; }
     pushLog(`🌐 ${reason} → 로그인 없이 공개 글 목록으로 불러올게요 (아이디: ${bid})`);
-    const es = new BotEventStream(`${BOT}/api/my-posts?blogId=${encodeURIComponent(bid)}&count=100`, { method: "GET" });
+    const es = new BotEventStream(`${BOT}/api/my-posts?blogId=${encodeURIComponent(bid)}&count=100${postRangeQuery()}`, { method: "GET" });
     es.onmessage = (e: MessageEvent) => {
       let d: any; try { d = JSON.parse(e.data); } catch { return; }
       if (d.type === "log") pushLog(`  ${d.msg}`);
@@ -359,7 +382,7 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
     pushLog(`━━━━━ 📚 내 글 불러오기 시작 ━━━━━`);
     pushLog(`🔐 로그인 계정 '${acctName}'로 내 글 목록 요청 중…`);
     let gotPosts = false;
-    const es = new BotEventStream(`${BOT}/api/my-posts?accountId=${encodeURIComponent(acctId)}&selectMode=all`, { method: "GET" });
+    const es = new BotEventStream(`${BOT}/api/my-posts?accountId=${encodeURIComponent(acctId)}&selectMode=all${postRangeQuery()}`, { method: "GET" });
     es.onmessage = (e: MessageEvent) => {
       let d: any; try { d = JSON.parse(e.data); } catch { return; }
       if (d.type === "log") pushLog(`  ${d.msg}`);
@@ -530,6 +553,39 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
       setRevResult({ total: reviews.length, likes: count(LIKE).slice(0, 6), dislikes: count(BAD).slice(0, 6) });
     } catch { toast("리뷰 분석 실패 — 봇 서버(3334) 확인", "error"); }
     finally { setRevLoading(false); }
+  };
+
+  // 📘 블로그 진단(blog 전용) — 검증본 crawlBlogStats(/api/blog-stats) 재사용. 방문자·글수·이웃·활성도·저품질·유입키워드.
+  const runBlogDiagnose = () => {
+    if (targetType !== "blog") return;
+    const acctId = blogDiagAcctId || accounts[0]?.id || "";
+    if (!acctId) { toast("먼저 왼쪽 '계정 관리'에서 네이버 블로그 계정을 연결하세요", "error"); return; }
+    setBlogDiagLoading(true); setBlogDiag(null);
+    pushLog("📘 블로그 지표 수집 중… (방문자·글수·이웃·활성도)");
+    const q = new URLSearchParams({ accountId: acctId, plan, ...(userId ? { userId } : {}) });
+    const es = new BotEventStream(`${BOT}/api/blog-stats?${q.toString()}`);
+    es.onmessage = (e: MessageEvent) => {
+      let d: any; try { d = JSON.parse(e.data); } catch { return; }
+      if (d.type === "log") pushLog(`  ${d.msg}`);
+      else if (d.type === "stats") { setBlogDiag(d.stats); pushLog("✅ 블로그 진단 완료"); toast("블로그 진단 완료", "success"); setBlogDiagLoading(false); es.close(); }
+      else if (d.type === "error") { pushLog(`❌ 블로그 진단 실패 — ${d.msg}`); toast(d.msg, "error"); setBlogDiagLoading(false); es.close(); }
+    };
+    es.onerror = () => { pushLog("❌ 블로그 진단 연결 오류 — 봇 서버(3334) 확인"); toast("블로그 진단 실패 — 봇 서버(3334) 확인", "error"); setBlogDiagLoading(false); es.close(); };
+  };
+
+  // 🛒 스토어 상품 진단(store 전용) — /api/store-info. 프록시+브라우저로 상품 페이지 읽어 리뷰수·찜·평점·가격.
+  const runStoreDiagnose = () => {
+    if (targetType !== "store" || !storeUrl.trim()) { toast("먼저 스마트스토어 상품 주소를 입력하세요", "error"); return; }
+    setStoreInfoLoading(true); setStoreInfo(null);
+    pushLog("🛒 스마트스토어 상품 정보 수집 중… (리뷰·찜·평점·가격)");
+    const es = new BotEventStream(`${BOT}/api/store-info?storeUrl=${encodeURIComponent(storeUrl.trim())}`);
+    es.onmessage = (e: MessageEvent) => {
+      let d: any; try { d = JSON.parse(e.data); } catch { return; }
+      if (d.type === "log") pushLog(`  ${d.msg}`);
+      else if (d.type === "store") { setStoreInfo(d.info); pushLog("✅ 상품 진단 완료"); toast("상품 진단 완료", "success"); setStoreInfoLoading(false); es.close(); }
+      else if (d.type === "error") { pushLog(`❌ 상품 진단 실패 — ${d.msg}`); toast(d.msg, "error"); setStoreInfoLoading(false); es.close(); }
+    };
+    es.onerror = () => { pushLog("❌ 상품 진단 연결 오류 — 봇 서버(3334) 확인"); toast("상품 진단 실패 — 봇 서버(3334) 확인", "error"); setStoreInfoLoading(false); es.close(); };
   };
 
   // 🥊 경쟁사 추적 — 내 키워드 상위 경쟁사 vs 나
@@ -1018,6 +1074,30 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
                   ); })}
                 </div>
               )}
+              {/* 📅 기간 필터 — 전체 / 최근 N일 / 날짜 지정 */}
+              <div style={{ marginTop: 12, padding: "11px 13px", borderRadius: 11, background: C.panel2, border: `1px solid ${C.line}` }}>
+                <div style={{ fontSize: 12, fontWeight: 800, color: C.sub, marginBottom: 7 }}>📅 어느 기간 글을 불러올까요</div>
+                <div style={{ display: "flex", gap: 6, marginBottom: postDateMode === "all" ? 0 : 9 }}>
+                  {([["all", "전체"], ["recent", "최근 N일"], ["range", "날짜 지정"]] as const).map(([k, lb]) => (
+                    <button key={k} onClick={() => setPostDateMode(k)} style={{ flex: 1, padding: "8px 6px", borderRadius: 9, border: `1.5px solid ${postDateMode === k ? C.accent : C.line2}`, background: postDateMode === k ? C.glow : C.panel, color: postDateMode === k ? C.accent : C.sub, fontSize: 12.5, fontWeight: 800, cursor: "pointer", fontFamily: "inherit" }}>{postDateMode === k ? "✓ " : ""}{lb}</button>
+                  ))}
+                </div>
+                {postDateMode === "recent" && (
+                  <div style={{ display: "flex", gap: 6 }}>
+                    {[7, 30, 90, 180].map((d) => (
+                      <button key={d} onClick={() => setPostRecentDays(d)} style={{ flex: 1, padding: "7px 4px", borderRadius: 8, border: `1.5px solid ${postRecentDays === d ? C.accent : C.line2}`, background: postRecentDays === d ? C.glow : C.panel, color: postRecentDays === d ? C.accent : C.sub, fontSize: 12, fontWeight: 800, cursor: "pointer", fontFamily: "inherit" }}>{d}일</button>
+                    ))}
+                  </div>
+                )}
+                {postDateMode === "range" && (
+                  <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
+                    <input type="date" value={postFrom} max={postTo || undefined} onChange={(e) => setPostFrom(e.target.value)} style={{ ...inputStyle, flex: 1, padding: "8px 10px", fontSize: 12.5 }} />
+                    <span style={{ fontSize: 12, fontWeight: 800, color: C.sub }}>~</span>
+                    <input type="date" value={postTo} min={postFrom || undefined} onChange={(e) => setPostTo(e.target.value)} style={{ ...inputStyle, flex: 1, padding: "8px 10px", fontSize: 12.5 }} />
+                  </div>
+                )}
+              </div>
+
               <button onClick={() => collectMyPosts(popupAccountId)} disabled={!popupAccountId || myPostsLoading} style={{ width: "100%", marginTop: 11, padding: "12px", borderRadius: 11, border: "none", background: (popupAccountId && !myPostsLoading) ? "linear-gradient(135deg,#f59e0b,#d97706)" : C.line2, color: "#fff", fontSize: 13.5, fontWeight: 900, cursor: (popupAccountId && !myPostsLoading) ? "pointer" : "default", fontFamily: "inherit" }}>{myPostsLoading ? "불러오는 중…" : "📚 내 글 불러오기"}</button>
 
               {myPosts.length > 0 && (<div style={{ marginTop: 14, paddingTop: 12, borderTop: `1px solid ${C.line}` }}>
@@ -1488,7 +1568,10 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
       <div style={{ order: 6, display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(140px,1fr))", gap: 12, marginBottom: 14 }}>
         {[
           { k: "오늘 유입", v: `${used}`, sub: unlimited ? "무제한" : `/ ${limit}회`, col: C.accent },
-          { k: "현재 순위", v: apLastRank != null ? `${apLastRank}` : apRankOut ? "30+" : "—", sub: apEnabled ? `목표 ${apGoal}위` : "위", col: "#16a34a" },
+          // 🛒 스토어는 순위 자동측정 미지원 → '현재 순위' 대신 '이번 성공'으로(죽은 순위 값 노출 방지)
+          targetType === "store"
+            ? { k: "이번 성공", v: `${sessOk}`, sub: "회", col: "#16a34a" }
+            : { k: "현재 순위", v: apLastRank != null ? `${apLastRank}` : apRankOut ? "30+" : "—", sub: apEnabled ? `목표 ${apGoal}위` : "위", col: "#16a34a" },
           { k: chartDays >= 365 ? "전체 누적" : `최근 ${chartDays}일`, v: `${weekTotal}`, sub: "누적 방문", col: C.cyan },
           { k: "남은 한도", v: unlimited ? "∞" : `${Math.max(0, limit - used)}`, sub: unlimited ? "무제한" : "회", col: "#f59e0b" },
         ].map((kp) => (
@@ -1519,13 +1602,15 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
             </div>
             <button onClick={downloadReportPdf} style={{ marginLeft: "auto", padding: "8px 16px", borderRadius: 10, border: `1.5px solid ${C.accent}`, background: C.panel, color: C.accent, fontSize: 13, fontWeight: 800, cursor: "pointer", fontFamily: "inherit" }}>📄 PDF로 저장 · 고객 제출용</button>
           </div>
-          {/* 비교 KPI 3 */}
+          {/* 비교 KPI — 스토어는 순위 미측정이라 '현재 순위' 칸을 빼고 유입 지표만 보여줌 */}
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(150px,1fr))", gap: 12, marginBottom: 14 }}>
+            {targetType !== "store" && (
             <div style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 14, padding: "14px 16px" }}>
               <div style={{ fontSize: 12, fontWeight: 800, color: C.sub, marginBottom: 5 }}>현재 순위</div>
               <div style={{ fontSize: 28, fontWeight: 900, color: "#16a34a" }}>{report.rankNow!=null?`${report.rankNow}위`:"—"}</div>
               {rankDelta!=null && <div style={{ fontSize: 12.5, fontWeight: 800, color: rankDelta>0?"#16a34a":rankDelta<0?"#dc2626":C.sub, marginTop: 3 }}>{rankDelta>0?`▲ ${rankDelta}계단 상승 🎉`:rankDelta<0?`▼ ${-rankDelta}계단`:"변동 없음"}</div>}
             </div>
+            )}
             <div style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 14, padding: "14px 16px" }}>
               <div style={{ fontSize: 12, fontWeight: 800, color: C.sub, marginBottom: 5 }}>{per} 유입</div>
               <div style={{ fontSize: 28, fontWeight: 900, color: C.accent }}>{report.inflowNow.toLocaleString()}<span style={{fontSize:14,color:C.sub}}> 명</span></div>
@@ -1663,6 +1748,100 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
         </div>
       )}
 
+      {/* ── 📘 블로그 진단 (blog 전용) — 순위 오르려면 뭘 채워야 하나. crawlBlogStats 재사용 ── */}
+      {targetType === "blog" && (
+        <div className="inflow-card" style={{ order: 8, background: C.panel, border: "1.5px solid #3b82f6", borderRadius: 16, padding: 18, marginBottom: 14 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4, flexWrap: "wrap" }}>
+            <span style={{ fontSize: 16, fontWeight: 900 }}>📘 블로그 진단</span>
+            <button onClick={runBlogDiagnose} disabled={blogDiagLoading} style={{ marginLeft: "auto", padding: "9px 18px", borderRadius: 10, border: "none", background: `linear-gradient(135deg,#3b82f6,${C.cyan})`, color: "#fff", fontSize: 13.5, fontWeight: 800, cursor: blogDiagLoading ? "default" : "pointer", fontFamily: "inherit", opacity: blogDiagLoading ? 0.6 : 1 }}>{blogDiagLoading ? "진단 중…" : "📘 내 블로그 진단하기"}</button>
+          </div>
+          <p style={{ margin: "0 0 12px", fontSize: 12.5, color: C.sub, fontWeight: 600, lineHeight: 1.6 }}>블로그 순위는 <b style={{ color: C.ink }}>방문자·발행 활성도·이웃·글 품질</b>이 종합 점수예요. 지금 내 블로그 상태를 진단해 부족한 곳을 알려드려요. <span style={{ color: "#3b82f6" }}>(연결한 계정으로 로그인 진단)</span></p>
+          {/* 계정 선택(여러 개면) */}
+          {accounts.length > 1 && (
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 10 }}>
+              {accounts.map((a) => { const on = (blogDiagAcctId || accounts[0]?.id) === a.id; return (
+                <button key={a.id} onClick={() => setBlogDiagAcctId(a.id)} style={{ padding: "6px 12px", borderRadius: 8, border: `1.5px solid ${on ? "#3b82f6" : C.line2}`, background: on ? C.glow : C.panel2, color: on ? "#3b82f6" : C.sub, fontSize: 12, fontWeight: 800, cursor: "pointer", fontFamily: "inherit" }}>{on ? "✓ " : ""}{a.blog_name || a.username}</button>
+              ); })}
+            </div>
+          )}
+          {blogDiag ? (()=>{ const s = blogDiag; const vlast = Array.isArray(s.visitorDays) && s.visitorDays.length ? s.visitorDays[s.visitorDays.length - 1].visitors : null; const act = s.activity; const actCol = act?.level === "active" ? "#16a34a" : act?.level === "inactive" ? "#dc2626" : "#f59e0b"; const actTxt = act?.level === "active" ? "활발 👍" : act?.level === "inactive" ? "비활성 ⚠️" : "보통"; return (
+            <div className="inflow-result">
+              {/* KPI 4 */}
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(130px,1fr))", gap: 10, marginBottom: 12 }}>
+                {[
+                  { k: "최근 방문자", v: vlast != null ? `${vlast}` : "—", sub: "명/일", col: "#3b82f6" },
+                  { k: "총 글 수", v: `${s.totalPosts ?? "—"}`, sub: "개", col: C.ink },
+                  { k: "이웃 수", v: `${s.neighbors ?? "—"}`, sub: "명", col: C.cyan },
+                  { k: "발행 활성도", v: actTxt, sub: act?.daysSinceLast != null ? `최근 ${act.daysSinceLast}일 전` : "", col: actCol },
+                ].map((kp) => (
+                  <div key={kp.k} style={{ background: C.panel2, border: `1px solid ${C.line}`, borderRadius: 12, padding: "12px 14px" }}>
+                    <div style={{ fontSize: 11.5, fontWeight: 800, color: C.sub, marginBottom: 5 }}>{kp.k}</div>
+                    <div style={{ display: "flex", alignItems: "baseline", gap: 4 }}>
+                      <span style={{ fontSize: 20, fontWeight: 900, color: kp.col }}>{kp.v}</span>
+                      <span style={{ fontSize: 11, fontWeight: 700, color: C.sub }}>{kp.sub}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              {/* 발행 활성도 처방 */}
+              {act?.message && <div style={{ fontSize: 13, fontWeight: 700, padding: "10px 12px", borderRadius: 10, background: C.panel2, border: `1px solid ${C.line}`, marginBottom: 8, lineHeight: 1.5 }}>📌 {act.message}</div>}
+              {/* 저품질 의심 */}
+              {s.lowQualitySuspected === true && <div style={{ fontSize: 13, fontWeight: 800, padding: "10px 12px", borderRadius: 10, background: "rgba(220,38,38,.06)", border: "1px solid #dc262633", color: "#dc2626", marginBottom: 8, lineHeight: 1.5 }}>⚠️ 저품질(누락) 의심 — 검색 노출이 약해요. 글 품질·발행 주기를 점검하세요.</div>}
+              {/* 방문자 급감 */}
+              {s.visitorDrop?.detected && <div style={{ fontSize: 13, fontWeight: 700, padding: "10px 12px", borderRadius: 10, background: "rgba(245,158,11,.08)", border: "1px solid #f59e0b33", color: "#b45309", marginBottom: 8, lineHeight: 1.5 }}>📉 {s.visitorDrop.message}</div>}
+              {/* 유입 키워드 */}
+              {Array.isArray(s.inflowKeywords) && s.inflowKeywords.length > 0 && (
+                <div>
+                  <div style={{ fontSize: 12.5, fontWeight: 800, color: C.sub, margin: "6px 0 7px" }}>🔑 방문자가 검색해 들어온 키워드</div>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                    {s.inflowKeywords.slice(0, 12).map((k: any, i: number) => (
+                      <span key={i} style={{ fontSize: 12, fontWeight: 700, padding: "5px 11px", borderRadius: 99, background: C.glow, color: "#3b82f6", border: `1px solid ${C.line}` }}>{k.keyword}{k.count ? ` ${k.count}` : ""}</span>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          ); })() : !blogDiagLoading && (
+            <div style={{ padding: "20px", textAlign: "center", color: C.sub, fontSize: 13, fontWeight: 600 }}>위 버튼을 눌러 내 블로그가 순위 오르기에 뭐가 부족한지 확인하세요.</div>
+          )}
+        </div>
+      )}
+
+      {/* ── 🛒 스토어 상품 진단 (store 전용) — 리뷰·찜·평점·가격 ── */}
+      {targetType === "store" && (
+        <div className="inflow-card" style={{ order: 8, background: C.panel, border: "1.5px solid #10b981", borderRadius: 16, padding: 18, marginBottom: 14 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4, flexWrap: "wrap" }}>
+            <span style={{ fontSize: 16, fontWeight: 900 }}>🛒 상품 진단</span>
+            <button onClick={runStoreDiagnose} disabled={storeInfoLoading} style={{ marginLeft: "auto", padding: "9px 18px", borderRadius: 10, border: "none", background: "linear-gradient(135deg,#10b981,#059669)", color: "#fff", fontSize: 13.5, fontWeight: 800, cursor: storeInfoLoading ? "default" : "pointer", fontFamily: "inherit", opacity: storeInfoLoading ? 0.6 : 1 }}>{storeInfoLoading ? "진단 중…" : "🛒 내 상품 진단하기"}</button>
+          </div>
+          <p style={{ margin: "0 0 12px", fontSize: 12.5, color: C.sub, fontWeight: 600, lineHeight: 1.6 }}>상품 노출은 <b style={{ color: C.ink }}>리뷰·찜·유입</b>이 함께 밀어줘요. 지금 내 상품의 리뷰·찜·평점을 확인하고, 유입으로 노출을 키우세요. <span style={{ color: "#059669" }}>(리뷰·찜 자동생성은 밴 위험이라 미지원 — 유입만 안전)</span></p>
+          {storeInfo ? (()=>{ const s = storeInfo; return (
+            <div className="inflow-result">
+              {s.name && <div style={{ fontSize: 13.5, fontWeight: 800, color: C.ink, marginBottom: 10, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>📦 {s.name}</div>}
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(120px,1fr))", gap: 10 }}>
+                {[
+                  { k: "리뷰 수", v: s.reviewCount != null ? `${s.reviewCount.toLocaleString()}` : "—", sub: "개", col: "#10b981" },
+                  { k: "찜(관심)", v: s.wishCount != null ? `${s.wishCount.toLocaleString()}` : "—", sub: "명", col: "#ec4899" },
+                  { k: "평점", v: s.rating != null ? `${s.rating}` : "—", sub: "/5", col: "#f59e0b" },
+                  { k: "판매가", v: s.price ? `${s.price.toLocaleString()}` : "—", sub: "원", col: C.ink },
+                ].map((kp) => (
+                  <div key={kp.k} style={{ background: C.panel2, border: `1px solid ${C.line}`, borderRadius: 12, padding: "12px 14px" }}>
+                    <div style={{ fontSize: 11.5, fontWeight: 800, color: C.sub, marginBottom: 5 }}>{kp.k}</div>
+                    <div style={{ display: "flex", alignItems: "baseline", gap: 4 }}>
+                      <span style={{ fontSize: 19, fontWeight: 900, color: kp.col }}>{kp.v}</span>
+                      <span style={{ fontSize: 11, fontWeight: 700, color: C.sub }}>{kp.sub}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <p style={{ margin: "10px 0 0", fontSize: 11.5, color: C.sub, fontWeight: 600, lineHeight: 1.5 }}>💡 경쟁 상품보다 리뷰·찜이 적으면 유입(클릭·체류)으로 노출 기회를 늘리고, 리뷰는 실제 구매 고객에게 유도하세요.</p>
+            </div>
+          ); })() : !storeInfoLoading && (
+            <div style={{ padding: "20px", textAlign: "center", color: C.sub, fontSize: 13, fontWeight: 600 }}>위 상품 주소를 넣고 버튼을 누르면 리뷰·찜·평점·가격을 확인해요.</div>
+          )}
+        </div>
+      )}
+
       {/* 📅 기간 선택 — 유입·순위·누적을 원하는 기간으로(과거 기록까지). 플레이스·블로그 공통 */}
       <div style={{ order: 10, display: "flex", alignItems: "center", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
         <span style={{ fontSize: 12.5, fontWeight: 800, color: C.sub }}>📅 기간</span>
@@ -1684,16 +1863,23 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
           {history.map((d) => <span key={d.label}>{d.label}</span>)}
         </div>}
       </div>
-      {/* 순위 변동 */}
+      {/* 순위 변동 — 스토어는 순위 자동측정 미지원이라 그래프 대신 안내 */}
       <div style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 16, padding: "14px 16px 8px" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
           <span style={{ fontSize: 13.5, fontWeight: 800 }}>📉 순위 변동 <span style={{ color: C.sub, fontWeight: 600, fontSize: 11 }}>(위=상위)</span></span>
-          {apEnabled && <span style={{ fontSize: 11.5, fontWeight: 800, color: C.cyan }}>목표 {apGoal}위 ---</span>}
+          {apEnabled && targetType !== "store" && <span style={{ fontSize: 11.5, fontWeight: 800, color: C.cyan }}>목표 {apGoal}위 ---</span>}
         </div>
+        {targetType === "store" ? (
+          <div style={{ height: 120, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 6, color: C.sub, fontSize: 12.5, fontWeight: 600, textAlign: "center", lineHeight: 1.6 }}>
+            <span style={{ fontSize: 22 }}>🛒</span>
+            스마트스토어는 순위 자동측정을 지원하지 않아요.<br />유입·체류 신호로 상품 노출을 높이는 데 집중해요.
+          </div>
+        ) : (<>
         <RankChart data={rankHist} goal={apGoal} C={C} />
         <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: C.sub, fontWeight: 700, padding: "0 2px" }}>
           {rankHist.map((d) => <span key={d.label}>{d.label}</span>)}
         </div>
+        </>)}
       </div>
       </div>
 

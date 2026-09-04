@@ -1,6 +1,6 @@
 import express from "express";
 import cors from "cors";
-import { saveSession, sessionExists, removeSession, crawlBlogIds, crawlBuddyPosts, analyzeBuddyKeywords, addNeighbors, NeighborResult, donePath, engageBlogs, EngageResult, engageDonePath, crawlMyPosts, crawlPublicPosts, replyToComments, crawlPlaceReviews, generatePlaceReviewReply, replyToPlaceReviews, crawlBlogStats, checkSelectedBlogExposure, pumasiEngage, crawlPumasiReport, pumasiPreview, updatePostTitle, checkProxy, analyzeBlogAuthenticity, fetchPostBody, crawlPostViews, sendWebmail, sendBlogComments, crawlPlaces, crawlPlaceBloggers, crawlPlaceDetail, crawlPlaceByUrl, suggestPlaceKeywords, parsePlaceUrl, resolvePlaceUrl, searchInflow, diagnosePlace, measurePlaceRank, measureBlogRank, collectPlaceReviews, InflowTarget } from "./naver";
+import { saveSession, sessionExists, removeSession, crawlBlogIds, crawlBuddyPosts, analyzeBuddyKeywords, addNeighbors, NeighborResult, donePath, engageBlogs, EngageResult, engageDonePath, crawlMyPosts, crawlPublicPosts, replyToComments, crawlPlaceReviews, generatePlaceReviewReply, replyToPlaceReviews, crawlBlogStats, checkSelectedBlogExposure, pumasiEngage, crawlPumasiReport, pumasiPreview, updatePostTitle, checkProxy, analyzeBlogAuthenticity, fetchPostBody, crawlPostViews, sendWebmail, sendBlogComments, crawlPlaces, crawlPlaceBloggers, crawlPlaceDetail, crawlPlaceByUrl, suggestPlaceKeywords, parsePlaceUrl, resolvePlaceUrl, searchInflow, diagnosePlace, diagnoseStore, measurePlaceRank, measureBlogRank, collectPlaceReviews, InflowTarget } from "./naver";
 import { checkNeighborQuota, incrementNeighborQuota, getNeighborDailyUsage, incrementEngageQuota, getEngageDailyUsage, getUserPlan, checkMembershipAccess, NEIGHBOR_DAILY_LIMIT, ENGAGE_DAILY_LIMIT, REPLY_DAILY_LIMIT, getReplyDailyUsage, incrementReplyQuota, PLACE_REPLY_DAILY_LIMIT, getPlaceReplyDailyUsage, incrementPlaceReplyQuota, addNeighborHistory, addReplyHistory, addPlaceReplyHistory, addBlogscoreHistory, incrementPumasiQuota, TITLE_EDIT_DAILY_LIMIT, getTitleEditDailyUsage, incrementTitleEditQuota, getProxyForAccount, supabase, getOutreachSender, getOutreachSentToday, addOutreachLog, checkPlaceDetailQuota, incrementPlaceDetailQuota, checkInflowQuota, incrementInflowQuota, incrementInflowStat, inflowReviewAllowed, verifyInflowSession, verifyAdminSession, consumeInflowQuota, INFLOW_DAILY_LIMIT } from "./supabase";
 import nodemailer from "nodemailer";
 import fs from "fs";
@@ -458,6 +458,20 @@ app.get("/api/blog-stats", async (req, res) => {
   res.end();
 });
 
+/* ── 🛒 스마트스토어 상품 진단 (SSE) — 리뷰수·찜·평점·가격. 프록시+브라우저로 안전 접근 ── */
+app.get("/api/store-info", async (req, res) => {
+  const { storeUrl } = req.query as Record<string, string>;
+  if (!storeUrl) return res.status(400).json({ error: "storeUrl 필요" });
+  sseSetup(res);
+  try {
+    const info = await diagnoseStore({ storeUrl, onLog: (msg) => sseSend(res, { type: "log", msg }) });
+    sseSend(res, { type: "store", info });
+  } catch (e: any) {
+    sseSend(res, { type: "error", msg: e.message });
+  }
+  res.end();
+});
+
 /* ── 🩺 P4: 글별 조회수 수집 (통계 조회수 순위 페이지 파싱) ── */
 app.post("/api/post-views", async (req, res) => {
   const { accountId } = req.body || {};
@@ -486,19 +500,23 @@ app.post("/api/exposure-check", async (req, res) => {
 
 /* ── 답방 ①: 내 블로그 글 목록 불러오기 (SSE) ── */
 app.get("/api/my-posts", async (req, res) => {
-  const { accountId, selectMode, count, period, blogId } = req.query as Record<string, string>;
+  const { accountId, selectMode, count, period, blogId, fromMs, toMs } = req.query as Record<string, string>;
+  const from = parseInt(fromMs || "0", 10) || 0;   // 날짜 지정 시작(epoch ms, 0=제한없음)
+  const to = parseInt(toMs || "0", 10) || 0;       // 날짜 지정 종료
   sseSetup(res);
   try {
     // 🌐 blogId만 오면 로그인 없이 공개 API로 수집(계정 불필요). accountId 있으면 로그인 방식(정확).
     let posts;
     if (blogId && !accountId) {
-      posts = await crawlPublicPosts({ blogId, count: parseInt(count || "50", 10), onLog: (msg) => sseSend(res, { type: "log", msg }) });
+      posts = await crawlPublicPosts({ blogId, count: parseInt(count || "100", 10), fromMs: from, toMs: to, onLog: (msg) => sseSend(res, { type: "log", msg }) });
     } else if (accountId) {
       posts = await crawlMyPosts({
         accountId,
         selectMode: (selectMode === "all" || selectMode === "period") ? selectMode : "count",
         count: parseInt(count || "10", 10),
         period: parseInt(period || "7", 10),
+        fromMs: from,
+        toMs: to,
         onLog: (msg) => sseSend(res, { type: "log", msg }),
       });
     } else { sseSend(res, { type: "error", msg: "accountId 또는 blogId 필요" }); res.end(); return; }

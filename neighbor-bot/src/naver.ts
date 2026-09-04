@@ -3722,32 +3722,26 @@ export async function crawlBlogStats(params: {
 export async function crawlPublicPosts(params: {
   blogId: string;
   count?: number;
+  fromMs?: number;   // 시작일(epoch ms, 0=제한없음)
+  toMs?: number;     // 종료일(epoch ms, 0=제한없음)
   onLog?: (msg: string) => void;
 }): Promise<{ url: string; title: string; date: string }[]> {
-  const { blogId, onLog } = params;
+  const { blogId, fromMs = 0, toMs = 0, onLog } = params;
   const log = onLog || console.log;
-  const want = Math.max(1, params.count || 30);
-  const out: { url: string; title: string; date: string }[] = [];
+  const want = Math.max(1, params.count || 100);
+  const ranged = !!(fromMs || toMs);
   log(`🌐 "${blogId}" 공개 글 목록 불러오는 중…(로그인 불필요)`);
   try {
-    for (let page = 1; page <= 10 && out.length < want; page++) {
-      const url = `https://blog.naver.com/PostTitleListAsync.naver?blogId=${encodeURIComponent(blogId)}&viewdate=&currentPage=${page}&categoryNo=0&countPerPage=30`;
-      const r = await fetch(url, { headers: { "User-Agent": INFLOW_MOBILE_UA, "Referer": `https://blog.naver.com/${blogId}` } });
-      const raw = await r.text();
-      let data: any; try { data = JSON.parse(raw.replace(/^\)\]\}',?\s*/, "")); } catch { break; }
-      const list: any[] = data?.postList || [];
-      if (!list.length) break;
-      for (const p of list) {
-        const logNo = String(p.logNo || "").trim(); if (!logNo) continue;
-        let title = String(p.title || "").trim();
-        try { title = decodeURIComponent(title.replace(/\+/g, " ")); } catch {}
-        out.push({ url: `https://blog.naver.com/${blogId}/${logNo}`, title: title || "(제목 없음)", date: String(p.addDate || "") });
-        if (out.length >= want) break;
-      }
-    }
-    log(`🌐 공개 글 ${out.length}개 수집 완료`);
-  } catch (e: any) { log(`⚠️ 공개 글 수집 실패: ${e?.message || e}`); }
-  return out;
+    // ★검증본 재사용(reusable_assets 원칙): \' 이스케이프 처리·모바일 API 폴백·정확한 작성일(dateMs) 포함.
+    //   따로 구현하다 \' 미처리로 JSON.parse가 죽어 0개 나오던 버그를 근본 제거(2026-09-04).
+    const { posts } = await fetchNaverPostList({ blogId, cookies: [], maxCount: ranged ? null : want, log });
+    let filtered = posts;
+    if (fromMs) filtered = filtered.filter((p) => !p.dateMs || p.dateMs >= fromMs);
+    if (toMs) filtered = filtered.filter((p) => !p.dateMs || p.dateMs <= toMs);
+    const sliced = filtered.slice(0, want);
+    log(`🌐 공개 글 ${sliced.length}개 수집 완료${ranged ? " (기간 필터 적용)" : ""}`);
+    return sliced.map((p) => ({ url: p.url, title: p.title, date: p.date }));
+  } catch (e: any) { log(`⚠️ 공개 글 수집 실패: ${e?.message || e}`); return []; }
 }
 
 export async function crawlMyPosts(params: {
@@ -3755,9 +3749,11 @@ export async function crawlMyPosts(params: {
   selectMode: "count" | "all" | "period";
   count: number;
   period: number;
+  fromMs?: number;   // 시작일(epoch ms, 0=제한없음) — 날짜 지정 필터
+  toMs?: number;     // 종료일(epoch ms, 0=제한없음)
   onLog?: (msg: string) => void;
 }): Promise<{ url: string; title: string; date: string }[]> {
-  const { accountId, selectMode, count, period, onLog } = params;
+  const { accountId, selectMode, count, period, fromMs = 0, toMs = 0, onLog } = params;
   const log = onLog || console.log;
   if (!naverSessionExists(accountId)) throw new Error("세션 없음 — 먼저 로그인하세요");
   const { blogId: storedBlogId, cookies } = loadSession(accountId);
@@ -3831,8 +3827,61 @@ export async function crawlMyPosts(params: {
   } finally {
     await browser.close().catch(() => {});
   }
-  const sliced = selectMode === "count" ? out.slice(0, count) : out;
+  let ranged = out;
+  if (fromMs) ranged = ranged.filter((p) => !p.dateMs || p.dateMs >= fromMs);
+  if (toMs) ranged = ranged.filter((p) => !p.dateMs || p.dateMs <= toMs);
+  if (fromMs || toMs) log(`[답방] 기간 필터 후 ${ranged.length}개`);
+  const sliced = selectMode === "count" ? ranged.slice(0, count) : ranged;
   return sliced.map(p => ({ url: p.url, title: p.title, date: p.date }));
+}
+
+/* ── 🛒 스마트스토어 상품 진단 ──
+   스토어는 검증된 분석 자산이 없어 신설. 스마트스토어가 직접 fetch(429)를 막으므로 프록시+브라우저로 접근하고,
+   네이버가 페이지에 심는 상태 객체(__PRELOADED_STATE__ 등)를 읽어 리뷰수·찜·평점·가격을 뽑는다(CSS 추측 대신 JSON).
+   못 찾으면 상태 최상위 키를 진단 로그로 덤프해 첫 실행에서 실제 키를 확정한다(공유 버튼과 동일 자가교정 패턴). */
+export async function diagnoseStore(params: { storeUrl: string; onLog?: (m: string) => void }): Promise<{ name: string; price: number; reviewCount: number | null; wishCount: number | null; rating: number | null; url: string }> {
+  const { storeUrl, onLog } = params;
+  const log = onLog || console.log;
+  const url = storeUrl.trim();
+  log(`🛒 스마트스토어 상품 정보 수집 중… (프록시+브라우저로 안전 접근)`);
+  const browser = await launchBrowser(null, { headless: true, feature: "inflow", log });
+  const context = await browser.newContext({ userAgent: INFLOW_MOBILE_UA, viewport: { width: 420, height: 900 }, locale: "ko-KR" });
+  await applyAntiDetection(context);
+  const page = await context.newPage();
+  try {
+    await page.goto(url, { waitUntil: "domcontentloaded", timeout: 25000 }).catch(() => {});
+    await page.waitForTimeout(2600);
+    const data: any = await page.evaluate(() => {
+      const out: any = { name: "", price: 0, reviewCount: null, wishCount: null, rating: null, keys: [] };
+      const og = (p: string) => ((document.querySelector(`meta[property="${p}"]`) as any)?.content) || "";
+      out.name = og("og:title") || document.title || "";
+      const pa = (document.querySelector('meta[property="product:price:amount"]') as any)?.content;
+      if (pa) out.price = Number(String(pa).replace(/[^\d]/g, "")) || 0;
+      const st: any = (window as any).__PRELOADED_STATE__ || (window as any).__NEXT_DATA__ || null;
+      if (st && typeof st === "object") { try { out.keys = Object.keys(st).slice(0, 30); } catch {} }
+      const walk = (o: any, d: number) => {
+        if (!o || d > 9 || typeof o !== "object") return;
+        for (const k in o) {
+          let v: any; try { v = o[k]; } catch { continue; }
+          const lk = k.toLowerCase();
+          if (typeof v === "number") {
+            if (out.reviewCount == null && /(review).*(count|amount|total)|totalreview|reviewcnt/.test(lk)) out.reviewCount = v;
+            if (out.wishCount == null && /(wish|interest|zzim).*count|wishcnt|interestcount/.test(lk)) out.wishCount = v;
+            if (out.rating == null && v > 0 && v <= 5 && /(average|avg).*(score|rating)|reviewscore|scoreavg|ratingaverage/.test(lk)) out.rating = v;
+            if (!out.price && /(disc|disp)?saleprice|salepriceamount|dispsaleprice/.test(lk)) out.price = v;
+          } else if (v && typeof v === "object") walk(v, d + 1);
+        }
+      };
+      try { walk(st, 0); } catch {}
+      if (out.reviewCount == null) { const t = document.body.innerText || ""; const m = t.match(/(?:리뷰|구매평)\s*\(?\s*([\d,]+)/); if (m) out.reviewCount = Number(m[1].replace(/,/g, "")) || null; }
+      return out;
+    }).catch(() => ({ name: "", price: 0, reviewCount: null, wishCount: null, rating: null, keys: [] }));
+    if (data.reviewCount == null) log(`  ⚙️ [진단] 리뷰수 위치 못 찾음 — 상태 최상위 키: ${(data.keys || []).join(", ") || "없음"}(개발자 확인)`);
+    log(`🛒 수집 완료 — 리뷰 ${data.reviewCount ?? "?"} · 찜 ${data.wishCount ?? "?"} · 평점 ${data.rating ?? "?"} · 가격 ${data.price || "?"}`);
+    return { name: data.name || "", price: data.price || 0, reviewCount: data.reviewCount, wishCount: data.wishCount, rating: data.rating, url };
+  } finally {
+    await browser.close().catch(() => {});
+  }
 }
 
 /* ── 답방 ②: 내 글 댓글에 대댓글(답글) 달기 ──
@@ -5361,22 +5410,40 @@ async function inflowFindAndEnter(page: any, target: InflowTarget, log: (m: stri
   if (target.type === "blog") {
     try {
       log(`  🏠 검색결과에 없어 블로그 홈(${target.blogId})으로 직접 진입 → 랜덤 글 읽기`);
-      await page.goto(`https://m.blog.naver.com/${target.blogId}`, { waitUntil: "domcontentloaded", timeout: 20000 }).catch(() => {});
-      await page.waitForTimeout(inflowRndInt(1400, 2600));
-      const postLinks: string[] = await page.$$eval(
-        'a[href*="logNo"], a[href*="/PostView"], a[href*="blog.naver.com"]',
-        (as: any[], b: string) => Array.from(new Set(as.map((a: any) => a.href).filter((h: string) => h.includes(b) && /logNo=\d+|\/\d{6,}/.test(h)))).slice(0, 20),
-        target.blogId
-      ).catch(() => []);
-      if (postLinks.length) {
-        const pick = postLinks[inflowRndInt(0, postLinks.length - 1)];
-        log(`  📄 최신 글 ${postLinks.length}개 중 랜덤 1개 진입`);
+      let pick = "";
+      // ★1차: 검증본 글목록 API 재사용(reusable_assets 원칙) — 홈 DOM을 긁으면 네이버 레이아웃 변경 시
+      //   "글 목록 못 찾음"으로 들쭉날쭉했음. PostTitleListAsync/모바일 API로 실제 글 URL을 받아 바로 진입 → 안정.
+      try {
+        const { posts } = await fetchNaverPostList({ blogId: target.blogId, cookies: [], maxCount: 20, log: () => {} });
+        if (posts.length) {
+          const n = Math.min(posts.length, 20);
+          pick = posts[inflowRndInt(0, n - 1)].url;
+          log(`  📄 최신 글 ${n}개 중 랜덤 1개 진입 (검증 글목록 API)`);
+        }
+      } catch { /* API 실패 → DOM 폴백 */ }
+      // ★2차 폴백: 홈 DOM 긁기(구버전 방식)
+      if (!pick) {
+        await page.goto(`https://m.blog.naver.com/${target.blogId}`, { waitUntil: "domcontentloaded", timeout: 20000 }).catch(() => {});
+        await page.waitForTimeout(inflowRndInt(1400, 2600));
+        const postLinks: string[] = await page.$$eval(
+          'a[href*="logNo"], a[href*="/PostView"], a[href*="blog.naver.com"]',
+          (as: any[], b: string) => Array.from(new Set(as.map((a: any) => a.href).filter((h: string) => h.includes(b) && /logNo=\d+|\/\d{6,}/.test(h)))).slice(0, 20),
+          target.blogId
+        ).catch(() => []);
+        if (postLinks.length) {
+          pick = postLinks[inflowRndInt(0, postLinks.length - 1)];
+          log(`  📄 최신 글 ${postLinks.length}개 중 랜덤 1개 진입`);
+        }
+      }
+      if (pick) {
         await page.goto(pick, { waitUntil: "domcontentloaded", timeout: 20000 }).catch(() => {});
         await page.waitForTimeout(inflowRndInt(1000, 2000));
         return page;
       }
+      // 최후: 글을 못 찾아도 홈 방문은 유효
+      await page.goto(`https://m.blog.naver.com/${target.blogId}`, { waitUntil: "domcontentloaded", timeout: 20000 }).catch(() => {});
       log("  🏠 홈 진입은 했으나 글 목록을 못 찾음 — 홈에서 체류");
-      return page; // 그래도 홈 방문은 유효
+      return page;
     } catch { /* fallthrough */ }
   }
   return null;
@@ -5491,9 +5558,29 @@ async function inflowActions(page: any, target: InflowTarget, actions: InflowAct
     else if (target.type === "blog" && roll(actions.like)) {
       if (!await clickFirst(['a.u_likeit_list_btn', 'a[class*="like"]', 'button[class*="sympathy"]', 'a:has-text("공감")'], "  💚 블로그 공감")) log("  ⚙️ [진단] 공감 버튼 못 찾음 — 로그인 필요하거나 네이버 화면 변경 의심.");
     }
-    // 🔗 공유 — 플레이스·블로그 공통(실측: a.spi_sns_share)
+    // 🔗 공유
     if (roll(actions.share)) {
-      if (!await clickFirst(['a.spi_sns_share', 'a[class*="spi_sns_share"]', 'a:text-is("공유")', 'a:has-text("공유")', 'button:has-text("공유")', '[class*="share"] a'], "  🔗 공유")) log("  ⚙️ [진단] 공유 버튼 못 찾음 — 네이버 화면 변경 의심(개발자 확인).");
+      if (target.type === "blog") {
+        // 블로그(PC/모바일 새 뷰)는 공유가 '더보기(⋯/⋮)' 메뉴 안에 있음(실측 스샷 2026-09-04).
+        //   ① 더보기·공유 트리거 클릭 → ② 공유 레이어에서 'URL 복사'만(카톡·밴드 등 외부이동/새창 방지) → ③ Esc로 닫기.
+        //   ★플레이스용 [class*="share"] a 를 블로그에 쓰면 카카오톡·밴드 공유 링크를 눌러 창이 튀므로 분리한다.
+        const opened = await clickFirst([
+          'a:has-text("공유하기")', 'button:has-text("공유하기")',
+          'button[aria-label*="공유"]', 'a[aria-label*="공유"]',
+          'button.btn_share', 'a.btn_share', 'button[class*="share"]',
+          'button[aria-label*="더보기"]', 'button.btn_more', 'a.btn_more', '.btn_etc',
+        ], "  🔗 공유 메뉴 열기");
+        if (opened) {
+          await page.waitForTimeout(inflowRndInt(700, 1500));
+          const copied = await clickFirst(['button:has-text("URL 복사")', 'a:has-text("URL 복사")', 'button:text-is("복사")', 'a:text-is("복사")', 'a:has-text("링크 복사")'], "  🔗 링크 복사(공유 신호)");
+          if (!copied) log("  🔗 공유 레이어 열림 — 복사 버튼은 못 찾아 열람 신호만");
+          await page.keyboard.press("Escape").catch(() => {});
+        } else {
+          log("  ⚙️ [진단] 블로그 공유 버튼 못 찾음 — 더보기(⋯) 메뉴 셀렉터 확인 필요(개발자).");
+        }
+      } else {
+        if (!await clickFirst(['a.spi_sns_share', 'a[class*="spi_sns_share"]', 'a:text-is("공유")', 'a:has-text("공유")', 'button:has-text("공유")', '[class*="share"] a'], "  🔗 공유")) log("  ⚙️ [진단] 공유 버튼 못 찾음 — 네이버 화면 변경 의심(개발자 확인).");
+      }
     }
   } catch (e: any) {
     log(`  ⚠️ 액션 실패(무시): ${e?.message || e} (실기기 셀렉터 교정 필요)`);
