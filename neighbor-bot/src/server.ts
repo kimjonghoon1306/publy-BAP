@@ -1130,7 +1130,7 @@ app.get("/api/post-body", async (req, res) => {
 
 /* ── 🆕 NEW 트래픽 유입 (검색유입, SSE) — 기본 잠금(관리자가 켠 회원만), 관리자=락 해제 ── */
 app.post("/api/inflow", async (req, res) => {
-  const { userId, accountId, accountIds, keywords, targetType, placeUrl, blogId, logNo, rounds, termMin, termMax, doSave, doLike, doShare, doDir, doCall, doBook, doTalk, doWish, doCart, doOption, device, fullFunnel, spreadHours, doReview, reviewText, visible, actionRate, dwellBaseSec, dwellCustomSec, dataSaver, extraTargets, keywordWeights } = req.body as Record<string, string>;
+  const { userId, accountId, accountIds, keywords, targetType, placeUrl, blogId, logNo, rounds, termMin, termMax, doSave, doLike, doNeighbor, doShare, doDir, doCall, doBook, doTalk, doWish, doCart, doOption, device, fullFunnel, spreadHours, doReview, reviewText, visible, actionRate, dwellBaseSec, dwellCustomSec, dataSaver, extraTargets, keywordWeights } = req.body as Record<string, string>;
   if (!keywords || !targetType) return res.status(400).json({ error: "keywords·targetType 필요" });
   const memberToken = String(req.get("X-Publy-Session") || "");
   const adminToken = String(req.get("X-Publy-Admin-Session") || "");
@@ -1236,7 +1236,7 @@ app.post("/api/inflow", async (req, res) => {
       rounds: n,
       device: (device === "pc" || device === "mix") ? device : "mobile",
       intervalSec: [tmin, tmax],
-      actions: { save: doSave === "true", like: doLike === "true", share: doShare === "true", directions: doDir === "true", call: doCall === "true", booking: doBook === "true", talk: doTalk === "true", wish: doWish === "true", cart: doCart === "true", optionView: doOption === "true", review: doReview === "true" && reviewOk, reviewText: reviewText || "" },
+      actions: { save: doSave === "true", like: doLike === "true", neighbor: doNeighbor === "true", share: doShare === "true", directions: doDir === "true", call: doCall === "true", booking: doBook === "true", talk: doTalk === "true", wish: doWish === "true", cart: doCart === "true", optionView: doOption === "true", review: doReview === "true" && reviewOk, reviewText: reviewText || "" },
       fullFunnel: fullFunnel === "true",
       spreadHours: spreadHours ? Math.max(0, parseFloat(spreadHours)) : 0,
       visible: visible === "true",

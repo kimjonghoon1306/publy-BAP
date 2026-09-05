@@ -155,6 +155,7 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
   const [doBook, setDoBook] = useState(saved0.doBook ?? false);
   const [doTalk, setDoTalk] = useState(saved0.doTalk ?? false);
   const [doLike, setDoLike] = useState(saved0.doLike ?? true);
+  const [doNeighbor, setDoNeighbor] = useState(saved0.doNeighbor ?? false); // 👥 이웃추가(블로그·로그인 필요)
   // 🛒 스마트스토어 액션
   const [doWish, setDoWish] = useState(saved0.doWish ?? true);      // 💚 찜(로그인 필요)
   const [doCart, setDoCart] = useState(saved0.doCart ?? false);     // 🛒 장바구니(로그인 필요)
@@ -773,12 +774,12 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
     try {
       localStorage.setItem(formKey, JSON.stringify({
         targetType, keywordsPlace, keywordsBlog, keywordsStore, rounds, termMin, termMax, device,
-        doSave, doShare, doDir, doCall, doBook, doTalk, doLike, doWish, doCart, doOption, funnel, spread, spreadHours, doReview, reviewText, auto, actionRate, intensity, maxDwellSec, dataSaver, kwWeights,
+        doSave, doShare, doDir, doCall, doBook, doTalk, doLike, doNeighbor, doWish, doCart, doOption, funnel, spread, spreadHours, doReview, reviewText, auto, actionRate, intensity, maxDwellSec, dataSaver, kwWeights,
       }));
       // 추가대상은 대상별 전체(extraByType)를 저장해야 다른 탭 것이 안 사라진다
       localStorage.setItem(privateKey, JSON.stringify({ placeUrl, blogUrl, storeUrl, extraByType }));
     } catch {}
-  }, [formKey, privateKey, targetType, placeUrl, blogUrl, storeUrl, keywordsPlace, keywordsBlog, keywordsStore, rounds, termMin, termMax, device, doSave, doShare, doDir, doCall, doBook, doTalk, doLike, doWish, doCart, doOption, funnel, spread, spreadHours, doReview, reviewText, auto, actionRate, intensity, maxDwellSec, dataSaver, extraByType, kwWeights]);
+  }, [formKey, privateKey, targetType, placeUrl, blogUrl, storeUrl, keywordsPlace, keywordsBlog, keywordsStore, rounds, termMin, termMax, device, doSave, doShare, doDir, doCall, doBook, doTalk, doLike, doNeighbor, doWish, doCart, doOption, funnel, spread, spreadHours, doReview, reviewText, auto, actionRate, intensity, maxDwellSec, dataSaver, extraByType, kwWeights]);
 
   // 🔔 앱 내 자동 알림 — 날짜/주차 마커로 중복을 막고, 다음 실행 때 놓친 알림도 알림함에 쌓는다.
   useEffect(() => {
@@ -1468,6 +1469,7 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
               <ActionChk v={doShare} set={setDoShare} label="🔗 공유" />
             </>) : (<>
               <ActionChk v={doLike} set={setDoLike} label="💚 공감 🔑" />
+              <ActionChk v={doNeighbor} set={setDoNeighbor} label="👥 이웃추가 🔑" />
               <ActionChk v={doShare} set={setDoShare} label="🔗 공유" />
             </>)}
             <ActionChk v={auto} set={setAuto} label="⚙️ 자동(오늘 한도까지)" />
