@@ -5483,6 +5483,16 @@ async function inflowDwellRead(page: any, log: (m: string) => void, shouldStop?:
 
 // 저장/공감 등 액션(로그인 필요). 셀렉터는 방어적 — 실패해도 유입 자체는 유효.
 type InflowActions = { save?: boolean; like?: boolean; share?: boolean; directions?: boolean; call?: boolean; booking?: boolean; talk?: boolean; review?: boolean; reviewText?: string; wish?: boolean; cart?: boolean; optionView?: boolean; rate?: number; loginAvailable?: boolean };
+// 공유 버튼 못 찾을 때 실제 클릭요소를 덤프(자가교정). 트래픽 앱과 동일 헬퍼.
+async function dumpShareCandidates(page: any, log: (m: string) => void): Promise<void> {
+  try {
+    const items = await page.$$eval('a,button,[role="button"]', (els: any[]) => els.slice(0, 120).map((e: any) => ({
+      t: (e.textContent || "").trim().slice(0, 24), c: String(e.className || "").slice(0, 50), a: e.getAttribute("aria-label") || ""
+    })).filter((x: any) => /공유|share|더보기|more|etc|복사|copy|스크랩|보내기|sns/i.test(x.t + " " + x.c + " " + x.a)));
+    log("  🔎 [DOM진단] 공유/더보기 후보 " + items.length + "개: " + JSON.stringify(items.slice(0, 18)));
+  } catch (e: any) { log("  🔎 [DOM진단] 후보 수집 실패: " + (e?.message || "")); }
+}
+
 async function inflowActions(page: any, target: InflowTarget, actions: InflowActions, log: (m: string) => void): Promise<void> {
   // 🎲 액션 확률 — rate(0~1)면 그 확률만큼만 발동(진짜 사람처럼 매번 안 함). 리뷰는 명시 액션이라 확률 제외.
   const rate = typeof actions.rate === "number" ? actions.rate : 1;
@@ -5564,45 +5574,35 @@ async function inflowActions(page: any, target: InflowTarget, actions: InflowAct
         // 블로그(PC/모바일 새 뷰)는 공유가 '더보기(⋯/⋮)' 메뉴 안에 있음(실측 스샷 2026-09-04).
         //   ① 더보기·공유 트리거 클릭 → ② 공유 레이어에서 'URL 복사'만(카톡·밴드 등 외부이동/새창 방지) → ③ Esc로 닫기.
         //   ★플레이스용 [class*="share"] a 를 블로그에 쓰면 카카오톡·밴드 공유 링크를 눌러 창이 튀므로 분리한다.
-        const opened = await clickFirst([
-          // ★모바일 m.blog.naver.com 실측(2026-09-04): 공유는 네이버 소셜플러그인 <span class="share sim naver-splugin-c">.
-          //   span이라 a/button만 찾던 이전 셀렉터가 못 잡았음. 이게 최우선.
-          '.share.naver-splugin-c', 'span.share.naver-splugin-c', '.naver-splugin-c.share', '[class*="naver-splugin"][class*="share"]',
-          // PC 새 뷰
-          'a:has-text("공유하기")', 'button:has-text("공유하기")',
-          'button[aria-label*="공유"]', 'a[aria-label*="공유"]',
-          'button.btn_share', 'a.btn_share',
-          // 모바일 기타 후보(공유/더보기 아이콘)
-          'a[class*="share" i]', 'button[class*="share" i]', 'a[href*="share"]',
-          'a[class*="sns" i]', 'button[class*="sns" i]',
-          'button[aria-label*="더보기"]', 'a[aria-label*="더보기"]',
-          '.btn_more', 'a.btn_more', 'button.btn_more', '[class*="more" i]', '[class*="option" i]', '.btn_etc',
-        ], "  🔗 공유 열기");
-        if (opened) {
-          await page.waitForTimeout(inflowRndInt(700, 1500));
-          const copied = await clickFirst(['button:has-text("URL 복사")', 'a:has-text("URL 복사")', 'button:text-is("복사")', 'a:text-is("복사")', 'a:has-text("링크 복사")', 'button:has-text("공유")', 'a:has-text("공유")'], "  🔗 링크 복사(공유 신호)");
-          if (!copied) log("  🔗 공유 레이어 열림 — 복사 버튼은 못 찾아 열람 신호만");
-          await page.keyboard.press("Escape").catch(() => {});
-        } else {
-          // 못 찾음 → 실제 클릭요소를 덤프해 정확한 셀렉터를 잡는다(자가교정)
-          const cands: string[] = await page.evaluate(() => {
-            const out: string[] = [];
-            const els = Array.from(document.querySelectorAll('a, button, [role="button"]')).slice(0, 200);
-            for (const el of els as any[]) {
-              const t = (el.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 14);
-              const al = el.getAttribute('aria-label') || '';
-              const cl = (el.getAttribute('class') || '').slice(0, 44);
-              if (/share|공유|더보기|옵션|option|more|sns|스크랩|보내기/i.test(t + ' ' + al + ' ' + cl)) {
-                out.push(el.tagName.toLowerCase() + (al ? `[al=${al}]` : '') + (cl ? `.${cl.replace(/\s+/g, '.')}` : '') + (t ? ` "${t}"` : ''));
-              }
-              if (out.length >= 18) break;
-            }
-            return out;
-          }).catch(() => [] as string[]);
-          log("  ⚙️ [진단] 블로그 공유 버튼 못 찾음 — 후보요소: " + (cands.length ? cands.join('  |  ') : '없음(더보기 렌더 전이거나 아이콘만)'));
+        // 실측 DOM(2026-09-05 진단): 공유 트리거=<a class="naver-splugin">공유하기</a>·헤더<a class="civ__header__btn--share">공유</a>, 복사=<a class="_copy_url">URL복사</a>(띄어쓰기 없음).
+        //   ① URL복사(_copy_url)가 이미 보이면 그것만 눌러 URL 복사 = 안전한 공유 신호(외부창 X). ② 없으면 공유하기/헤더공유 열고 복사.
+        let copied = await clickFirst([
+          'a._copy_url', '._copy_url', '[class*="_copy_url"]', 'a:has-text("URL복사")', 'button:has-text("URL복사")',
+        ], "  🔗 URL 복사(공유 신호)");
+        if (!copied) {
+          const opened = await clickFirst([
+            // ★실측 DOM진단(2026-09-05): 신뷰어 헤더 공유버튼 class="civ__header__btn--share" 텍스트"공유" = 진짜 공유레이어 트리거. 최우선.
+            '[class*="civ__header__btn--share"]', 'a[class*="civ__header__btn--share"]', 'button[class*="civ__header__btn--share"]',
+            'a.naver-splugin', '.naver-splugin', '[class*="naver-splugin"]',
+            'a:has-text("공유하기")', 'button:has-text("공유하기")',
+            'button[aria-label*="공유"]', 'a[aria-label*="공유"]',
+            'button.btn_share', 'a.btn_share', 'button[class*="share"]',
+            'button[aria-label*="더보기"]', 'button.btn_more', 'a.btn_more', '.btn_etc', '[class*="MoreMenu"]',
+          ], "  🔗 공유 메뉴 열기");
+          if (opened) {
+            await page.waitForTimeout(inflowRndInt(700, 1500));
+            copied = await clickFirst([
+              'a._copy_url', '._copy_url', 'a:has-text("URL복사")', 'button:has-text("URL복사")',
+              'button:has-text("URL 복사")', 'a:has-text("URL 복사")', 'button:text-is("복사")', 'a:text-is("복사")', 'a:has-text("링크 복사")',
+            ], "  🔗 링크 복사(공유 신호)");
+            if (!copied) log("  🔗 공유 레이어 열림 — 복사 버튼은 못 찾아 열람 신호만");
+            await page.keyboard.press("Escape").catch(() => {});
+          } else {
+            log("  ⚙️ [진단] 블로그 공유 버튼 못 찾음 — 더보기(⋯) 메뉴 셀렉터 확인 필요."); await dumpShareCandidates(page, log);
+          }
         }
       } else {
-        if (!await clickFirst(['a.spi_sns_share', 'a[class*="spi_sns_share"]', 'a:text-is("공유")', 'a:has-text("공유")', 'button:has-text("공유")', '[class*="share"] a'], "  🔗 공유")) log("  ⚙️ [진단] 공유 버튼 못 찾음 — 네이버 화면 변경 의심(개발자 확인).");
+        if (!await clickFirst(['a.spi_sns_share', 'a[class*="spi_sns_share"]', 'a:text-is("공유")', 'a:has-text("공유")', 'button:has-text("공유")', '[class*="share"] a'], "  🔗 공유")) { log("  ⚙️ [진단] 공유 버튼 못 찾음 — 네이버 화면 변경 의심."); await dumpShareCandidates(page, log); }
       }
     }
   } catch (e: any) {
