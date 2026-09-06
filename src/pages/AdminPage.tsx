@@ -1131,11 +1131,13 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
       : `- 분야를 최대한 골고루 섞기: 맛집·여행·재테크·건강·육아·뷰티·인테리어·IT/가전·정책자금·반려동물·패션·자기계발 등`;
     const text=await callAI(`당신은 네이버 블로그 SEO·트렌드 전문가입니다.\n지금 검색이 잘 되고 사람들이 많이 찾는, 서로 겹치지 않는 다양한 블로그 키워드 ${count}개를 JSON 배열로만 생성하세요.\n[규칙]\n- 실제 검색량 많은 자연스러운 형태(예: "원주 맛집", "겨울 제철 음식", "소상공인 정책자금 신청")\n${catRule}\n- 2~4어절, 과장·낚시 금지\n${excl?`- ⛔ 최근 14일간 이미 쓴 키워드는 절대 포함 금지: ${excl}`:""}${hotHint}\nJSON 배열만 반환.`);
     const usedSet=new Set(used.map(u=>u.replace(/\s+/g,""))); const seen=new Set<string>();
-    const arr=parseArr(text).map(s=>s.trim()).filter(Boolean).filter(k=>{const key=k.replace(/\s+/g,""); if(!key||usedSet.has(key)||seen.has(key))return false; seen.add(key); return true;});
+    // ★[object Object] 방지: AI가 객체배열({keyword:..})을 주면 문자열로 변환. 문자열 아닌 건 버림.
+    const toStr=(x:any):string=>{ if(typeof x==="string")return x; if(x&&typeof x==="object")return String(x.keyword||x.kw||x.text||x.name||x.title||"").trim(); return ""; };
+    const arr=parseArr(text).map(toStr).map(s=>s.trim()).filter(Boolean).filter(k=>{const key=k.replace(/\s+/g,""); if(!key||usedSet.has(key)||seen.has(key))return false; seen.add(key); return true;});
     let tries=0;
     while(arr.length<count && tries<2){ tries++; const need=count-arr.length; const exclAll=[...used,...arr].slice(0,150).join(", ");
       try{ const more=await callAI(`위와 같은 조건으로 네이버 블로그 SEO 키워드 ${need}개를 JSON 배열로만 더 생성하세요.\n${catRule}\n- ⛔ 아래 키워드는 절대 포함 금지(14일 내 사용 + 방금 뽑은 것): ${exclAll}\n- 2~4어절, 과장·낚시 금지\nJSON 배열만.`);
-        for(const k of parseArr(more).map(s=>s.trim()).filter(Boolean)){ const key=k.replace(/\s+/g,""); if(key&&!usedSet.has(key)&&!seen.has(key)){seen.add(key);arr.push(k);} if(arr.length>=count)break; }
+        for(const k of parseArr(more).map(toStr).map(s=>s.trim()).filter(Boolean)){ const key=k.replace(/\s+/g,""); if(key&&!usedSet.has(key)&&!seen.has(key)){seen.add(key);arr.push(k);} if(arr.length>=count)break; }
       }catch{break;} }
     return arr.slice(0,count);
   }
