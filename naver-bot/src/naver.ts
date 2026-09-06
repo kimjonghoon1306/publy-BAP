@@ -2278,6 +2278,20 @@ export async function generateFlowImagesCDP(params: {
     const setOutputCountToOne = async (): Promise<boolean> => {
       log("[Flow] 🎯 출력 개수 1장 설정 탐색...");
       try {
+        // ★실제 Flow UI(테리 스크린샷): 설정 팝업에 x1/x2/x3/x4 배수 버튼. x1을 눌러야 1장씩 생성(안 그러면 4장씩 만들어 토큰 폭발).
+        const mult = await page.evaluate(() => {
+          const visible = (el: Element) => { const r = el.getBoundingClientRect(); const s = getComputedStyle(el); return r.width > 0 && r.height > 0 && s.display !== "none" && s.visibility !== "hidden"; };
+          const cands = [...document.querySelectorAll("button,[role=button],[role=radio],[role=tab]")].filter(el => visible(el) && /^x?1$/i.test((el.textContent || "").trim()));
+          // x1/1 후보 중, 옆에 x2·x4가 같이 있는(=배수 그룹) 것을 우선
+          for (const el of cands) {
+            const sib = (el.parentElement ? [...el.parentElement.children] : []).map(c => (c.textContent || "").trim());
+            if (sib.some(t => /^x?[24]$/i.test(t))) { (el as HTMLElement).click(); return "mult-x1"; }
+          }
+          if (cands[0]) { (cands[0] as HTMLElement).click(); return "x1-solo"; }
+          return "";
+        });
+        if (mult) { await page.waitForTimeout(500); log(`[Flow] ✅ 생성 배수 x1로 설정(1장씩 · ${mult})`); return true; }
+
         const direct = await page.evaluate(() => {
           const visible = (el: Element) => {
             const r = el.getBoundingClientRect();
