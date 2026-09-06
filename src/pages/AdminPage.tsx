@@ -945,7 +945,18 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
   async function handleFlowConnectAll(){
     if(!(window as any).electron?.flowLaunchChrome){ showToast("PC 앱에서만 가능해요.","error"); return; }
     setFlowLaunching(true);
-    try{ for(const s of flowSlots){ try{ const r=await (window as any).electron.flowLaunchChrome(s.id); if(r.ok)setFlowSlotReady(p=>({...p,[s.id]:true})); }catch{} await new Promise(r=>setTimeout(r,1500)); } showToast(`✅ ${flowSlots.length}개 계정 창을 순서대로 열었어요. 이미 로그인된 계정은 그대로 두고, 풀린 계정만 다시 로그인해 주세요.`); }
+    try{
+      let opened=0, kept=0;
+      for(const s of flowSlots){
+        let healthy=false;
+        try{ const st=await (window as any).electron.flowStatus?.(s.id); healthy=!!st?.ready; }catch{}
+        if(healthy){ setFlowSlotReady(p=>({...p,[s.id]:true})); kept++; continue; }   // 이미 연결됨 → 재연결 안 함(무한 크롬 방지)
+        try{ const r=await (window as any).electron.flowLaunchChrome(s.id); if(r.ok)setFlowSlotReady(p=>({...p,[s.id]:true})); }catch{}
+        opened++;
+        await new Promise(r=>setTimeout(r,1500));
+      }
+      showToast(kept>0 ? `✅ 이미 연결된 ${kept}개는 그대로 두고, ${opened}개 창만 새로 열었어요.` : `✅ ${opened}개 계정 창을 순서대로 열었어요. 풀린 계정만 로그인하세요.`);
+    }
     finally { setFlowLaunching(false); }
   }
   useEffect(()=>{
@@ -4846,6 +4857,7 @@ POST3: (제목)|(이유)
                           <div style={{display:"flex",gap:6}}>
                             <button onClick={handleFlowConnectAll} disabled={flowLaunching} style={{fontSize:11,fontWeight:800,padding:"5px 10px",borderRadius:8,border:`1px solid ${OT}55`,background:"var(--bg)",color:OT,cursor:flowLaunching?"wait":"pointer",fontFamily:"inherit"}}>전체 연결</button>
                             <button onClick={()=>{const id=(flowSlots.reduce((m,s)=>Math.max(m,s.id),-1))+1; setFlowSlots(p=>[...p,{id,name:`계정 ${id+1}`}]);}} disabled={flowLaunching} style={{fontSize:11,fontWeight:800,padding:"5px 10px",borderRadius:8,border:`1px solid ${OT}55`,background:"var(--bg)",color:OT,cursor:"pointer",fontFamily:"inherit"}}>➕ 계정 추가</button>
+                            {flowSlots.length>1&&<button onClick={()=>{const keep=flowSlots.filter(s=>s.id===0||flowSlotReady[s.id]); const removed=flowSlots.length-keep.length; if(removed<=0){showToast("정리할 미연결 계정이 없어요(연결 안 된 빈 계정만 정리해요).");return;} setFlowSlots(keep.length?keep:[{id:0,name:"기본 계정"}]); if(!keep.some(s=>s.id===flowSlot))setFlowSlot(0); showToast(`🧹 연결 안 된 빈 계정 ${removed}개를 정리했어요.`);}} disabled={flowLaunching||otRunning} title="연결 안 된 빈 계정(계정 N)을 한 번에 삭제" style={{fontSize:11,fontWeight:800,padding:"5px 10px",borderRadius:8,border:`1px solid ${OT}55`,background:"var(--bg)",color:"var(--text3)",cursor:"pointer",fontFamily:"inherit"}}>🧹 미연결 정리</button>}
                           </div>
                         </div>
                         <div style={{fontSize:11,color:"var(--text3)",lineHeight:1.5,marginBottom:10}}>계정마다 <b>최초 1회</b> [로그인] → 이후 [전환]으로 바로 사용.</div>
