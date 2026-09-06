@@ -1929,6 +1929,49 @@ export async function generateFlowImages(params: {
     return true; // Enter로 이미 시도했음
   }
 
+  // ── 헬퍼: 출력 모드를 '이미지'로 강제(★영상 생성 방지) ──
+  //   labs.google/flow는 원래 Veo 영상 툴이라 기본 출력이 '동영상'이다. 프롬프트만 넣고 생성하면
+  //   영상이 만들어져 크레딧(토큰)을 대량 소모한다. → 프롬프트 입력 전에 출력 유형을 반드시 '이미지'로 바꾼다.
+  //   Flow UI는 자주 바뀌므로 여러 후보로 시도 + 실패 시 진단 로그(어떤 옵션이 보였는지)를 남긴다.
+  async function ensureImageMode(): Promise<boolean> {
+    // 실제 Flow UI(2026-09 테리 스크린샷): 입력창 옆 요약 칩('동영상·360p·8초')을 누르면 설정 팝업이 열리고,
+    //   맨 위에 [이미지][동영상] 토글이 있다. '이미지'를 누르면 이미지 모드(크레딧↓)로 바뀐다.
+    try {
+      // 이미 이미지 모드면(요약 칩에 '이미지' 표시) 아무것도 안 함
+      const already = await page.evaluate(() => {
+        const chip = [...document.querySelectorAll("button")].find(b => /360p|720p|8초|동영상|이미지/.test(b.textContent || "") && /·/.test(b.textContent || ""));
+        return chip ? (chip.textContent || "").includes("이미지") : false;
+      }).catch(() => false);
+      if (already) { log("  🖼️ [Flow] 이미 이미지 모드"); return true; }
+
+      // 1) 설정 팝업 열기 — 요약 칩(동영상·360p·8초) 클릭
+      for (const sel of ["button:has-text('360p')", "button:has-text('720p')", "button:has-text('8초')", "button:has-text('동영상')"]) {
+        try { const el = await page.$(sel); if (el && await el.isVisible()) { await el.click({ force: true }); await page.waitForTimeout(700); break; } } catch {}
+      }
+      // 2) [이미지] 토글 클릭 — 정확히 '이미지'만 있는 버튼(동영상과 나란한 토글)
+      const imgSels = ["button:has-text('이미지'):not(:has-text('동영상'))", "[role='radio']:has-text('이미지')", "[role='tab']:has-text('이미지')", "[role='button']:has-text('이미지')", "button:has-text('이미지')"];
+      for (const sel of imgSels) {
+        try {
+          const els = await page.$$(sel);
+          for (const el of els) {
+            const txt = ((await el.textContent()) || "").trim();
+            if (await el.isVisible() && txt.length < 12 && txt.includes("이미지") && !txt.includes("동영상")) {
+              await el.click(); await page.waitForTimeout(600); log("  🖼️ [Flow] 출력 모드를 '이미지'로 설정(영상 방지·크레딧 절약)"); return true;
+            }
+          }
+        } catch {}
+      }
+      // 3) 실패 → 진단 로그(다음 교정용)
+      const seen = await page.evaluate(() => {
+        const t: string[] = [];
+        document.querySelectorAll("button,[role='radio'],[role='tab'],[role='option']").forEach(e => { const s = (e.textContent || "").trim(); if (s && s.length < 30) t.push(s); });
+        return Array.from(new Set(t)).slice(0, 40);
+      }).catch(() => []);
+      log(`  ⚠️ [Flow] '이미지' 토글 못 찾음. 화면 버튼들: ${(seen as string[]).join(" | ")}`);
+      return false;
+    } catch (e: any) { log(`  ⚠️ [Flow] 이미지 모드 설정 중 오류: ${e?.message || e}`); return false; }
+  }
+
   // ── 헬퍼: 생성된 이미지 저장 ──
   async function saveGeneratedImage(idx: number, caption: string): Promise<boolean> {
     // ★고정 대기(25초)는 생성이 느리면 완성 전에 넘어가 '중단'된다. → 완성될 때까지 폴링(진행 로그 포함).
@@ -1958,35 +2001,48 @@ export async function generateFlowImages(params: {
       await page.waitForTimeout(STEP);
     }
     if (imgSrcs.length === 0) { log(`  ⚠️ [Flow] 생성이 너무 오래 걸려 이미지를 못 받았어요 (다음 장으로 진행)`); return false; }
-    log(`  🖼️ [Flow] 이미지 확인 → 저장 중...`);
+    log(`  🖼️ [Flow] 이미지 확인(${imgSrcs.length}개 후보) → 저장 중...`);
 
-    if (imgSrcs.length > 0) {
-      const src = imgSrcs[0];
-      if (src.startsWith("blob:")) {
-        // blob URL → base64 변환 후 파일 저장
-        const base64 = await page.evaluate(async (blobUrl) => {
-          const res = await fetch(blobUrl);
-          const blob = await res.blob();
-          return new Promise<string>((resolve) => {
-            const reader = new FileReader();
-            reader.onloadend = () => resolve(reader.result as string);
-            reader.readAsDataURL(blob);
-          });
-        }, src);
-        if (base64) {
-          const filePath = path.join(DOWNLOAD_DIR, `flow_${Date.now()}_${idx}.png`);
-          const base64Data = base64.replace(/^data:image\/\w+;base64,/, "");
-          fs.writeFileSync(filePath, Buffer.from(base64Data, "base64"));
-          results.push({ src: filePath, alt: caption });
-          log(`  ✅ [Flow] 이미지 ${idx + 1} 저장 완료`);
-          return true;
-        }
-      } else if (src.startsWith("http")) {
-        results.push({ src, alt: caption });
-        log(`  ✅ [Flow] 이미지 ${idx + 1} URL 저장`);
-        return true;
+    // ★ 회수(퍼블리로 끌어오기) 강화: blob/data/http 모두 '파일로' 확실히 내려받는다.
+    //   - data:image 누락 버그 수정(이전엔 blob/http만 처리해 data URL은 못 끌어옴)
+    //   - blob·http는 페이지 컨텍스트에서 fetch→base64(쿠키·CORS 유지). 실패 시 재시도 + 다음 후보로.
+    //   - http URL을 그대로 두지 않고 파일로 저장(발행 때 인증·만료 URL이 깨지는 문제 방지).
+    const saveDataUrlToFile = (dataUrl: string): string | null => {
+      const m = dataUrl.match(/^data:(image\/[\w+.-]+);base64,(.+)$/);
+      if (!m) return null;
+      const ext = (m[1].split("/")[1] || "png").replace("jpeg", "jpg").split("+")[0];
+      const fp = path.join(DOWNLOAD_DIR, `flow_${Date.now()}_${idx}.${ext}`);
+      try { fs.writeFileSync(fp, Buffer.from(m[2], "base64")); return fp; } catch { return null; }
+    };
+    const fetchToDataUrl = async (u: string): Promise<string | null> => {
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const dataUrl = await page.evaluate(async (url) => {
+          try {
+            const res = await fetch(url, { credentials: "include" });
+            if (!res.ok) return "";
+            const blob = await res.blob();
+            if (!blob || blob.size < 500) return "";   // 너무 작으면 깨진/빈 이미지
+            return await new Promise<string>((resolve) => { const r = new FileReader(); r.onloadend = () => resolve(r.result as string); r.onerror = () => resolve(""); r.readAsDataURL(blob); });
+          } catch { return ""; }
+        }, u).catch(() => "");
+        if (dataUrl && dataUrl.startsWith("data:image")) return dataUrl;
+        await page.waitForTimeout(1200);   // 재시도 전 대기(blob 준비 지연 대비)
       }
+      return null;
+    };
+
+    // 후보들을 순서대로 시도 → 첫 성공에서 파일 저장하고 종료
+    for (const src of imgSrcs) {
+      try {
+        let dataUrl: string | null = null;
+        if (src.startsWith("data:image")) dataUrl = src;
+        else if (src.startsWith("blob:") || src.startsWith("http")) dataUrl = await fetchToDataUrl(src);
+        if (!dataUrl) continue;
+        const fp = saveDataUrlToFile(dataUrl);
+        if (fp) { results.push({ src: fp, alt: caption }); log(`  ✅ [Flow] 이미지 ${idx + 1} 저장 완료(퍼블리로 회수)`); return true; }
+      } catch { /* 다음 후보 */ }
     }
+    log(`  ⚠️ [Flow] fetch 회수 실패 → 다운로드 버튼 시도`);
 
     // 다운로드 버튼 시도
     try {
@@ -2052,6 +2108,7 @@ export async function generateFlowImages(params: {
         await page.waitForTimeout(3000);
       }
 
+      await ensureImageMode();   // ★영상 방지: 프롬프트 넣기 전에 출력 모드를 '이미지'로 강제(토큰 대량소모 차단)
       const entered = await enterPrompt(prompts[i]);
       if (!entered) continue;
 
@@ -2287,6 +2344,41 @@ export async function generateFlowImagesCDP(params: {
       return false;
     };
     outputCountIsOne = await setOutputCountToOne();
+
+    // 4-b) ★출력 모드를 '이미지'로 강제(영상 방지·토큰 절약) — Flow는 원래 Veo 영상 툴이라 기본이 동영상.
+    //   세션당 1회만 설정하면 됨. Flow UI가 자주 바뀌므로 여러 후보 시도 + 실패 시 DOM 진단 로그.
+    const setImageMode = async (): Promise<boolean> => {
+      // 실제 Flow UI(테리 스크린샷): 요약 칩('동영상·360p·8초')→설정 팝업→맨 위 [이미지][동영상] 토글. '이미지' 클릭.
+      try {
+        // 이미 이미지 모드면 스킵
+        const already = await page.evaluate(() => {
+          const chip = [...document.querySelectorAll("button")].find(b => /·/.test(b.textContent || "") && /360p|720p|8초|동영상|이미지/.test(b.textContent || ""));
+          return chip ? (chip.textContent || "").includes("이미지") : false;
+        }).catch(() => false);
+        if (already) { log("[Flow] 🖼️ 이미 이미지 모드"); return true; }
+        // 1) 설정 팝업 열기(요약 칩 클릭)
+        for (const sel of ["button:has-text('360p')", "button:has-text('720p')", "button:has-text('8초')", "button:has-text('동영상')"]) {
+          try { const el = page.locator(sel).first(); if (await el.count() > 0 && await el.isVisible().catch(() => false)) { await el.click({ timeout: 3000 }); await page.waitForTimeout(700); break; } } catch {}
+        }
+        // 2) [이미지] 토글 클릭
+        for (const sel of ["button:has-text('이미지')", "[role='radio']:has-text('이미지')", "[role='tab']:has-text('이미지')"]) {
+          try {
+            const loc = page.locator(sel);
+            const n = await loc.count();
+            for (let k = 0; k < n; k++) {
+              const el = loc.nth(k); const txt = ((await el.textContent().catch(() => "")) || "").trim();
+              if (await el.isVisible().catch(() => false) && txt.length < 12 && txt.includes("이미지") && !txt.includes("동영상")) {
+                await el.click({ timeout: 3000 }); await page.waitForTimeout(600); log("[Flow] 🖼️ 출력 모드를 '이미지'로 설정(영상 방지·크레딧 절약)"); return true;
+              }
+            }
+          } catch {}
+        }
+        log("[Flow] ⚠️ '이미지' 토글 못 찾음 — DOM 진단 남김");
+        await dumpFlowControls("이미지 모드 설정 실패");
+        return false;
+      } catch (e: any) { log(`[Flow] ⚠️ 이미지 모드 설정 오류: ${String(e?.message || e).split("\n")[0]}`); return false; }
+    };
+    await setImageMode();
 
     // 5) 프롬프트별 생성 — ★ 큐 방식: 실패한 프롬프트는 다시 시도(최대 3회)해서 "요청한 개수 정확히" 채운다.
     log(`[Flow] 🎬 준비 끝! 이제 그림 ${prompts.length}장을 한 장씩 만들게요`);
@@ -2600,14 +2692,20 @@ export async function generateFlowImagesCDP(params: {
       let dataUrl = "ERR:no candidate downloaded";
       let chosen: { src: string; width: number; height: number } | undefined;
       for (const candidate of freshCandidates) {
-        dataUrl = await page.evaluate(async (src) => {
-          try {
-            const res = await fetch(src);
-            if (!res.ok) return "ERR:" + res.status;
-            const blob = await res.blob();
-            return await new Promise<string>(r => { const rd = new FileReader(); rd.onloadend = () => r(rd.result as string); rd.readAsDataURL(blob); });
-          } catch (e: any) { return "ERR:" + e.message; }
-        }, candidate.src);
+        // ★회수 강화(테리 "못 끌어오는 경우"): credentials 포함 + 최대 3회 재시도(blob 준비 지연·인증 URL 대비).
+        for (let attempt = 0; attempt < 3; attempt++) {
+          dataUrl = await page.evaluate(async (src) => {
+            try {
+              const res = await fetch(src, { credentials: "include" });
+              if (!res.ok) return "ERR:" + res.status;
+              const blob = await res.blob();
+              if (!blob || blob.size < 500) return "ERR:tiny";   // 빈/깨진 이미지 방지
+              return await new Promise<string>(r => { const rd = new FileReader(); rd.onloadend = () => r(rd.result as string); rd.onerror = () => r("ERR:read"); rd.readAsDataURL(blob); });
+            } catch (e: any) { return "ERR:" + e.message; }
+          }, candidate.src);
+          if (dataUrl.startsWith("data:image")) break;
+          await page.waitForTimeout(1200);
+        }
         if (dataUrl.startsWith("data:image")) { chosen = candidate; break; }
       }
 
