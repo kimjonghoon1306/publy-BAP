@@ -2277,6 +2277,15 @@ export async function generateFlowImagesCDP(params: {
     let outputCountIsOne = false;
     const setOutputCountToOne = async (): Promise<boolean> => {
       log("[Flow] 🎯 출력 개수 1장 설정 탐색...");
+      // ★설정 팝업이 닫혀 있으면 x1/출력개수 버튼이 DOM에 없다 → 요약 칩을 눌러 팝업을 먼저 연다(2026-09 UI 변경 대응).
+      try {
+        const anyMult = await page.evaluate(() => [...document.querySelectorAll("button,[role=button],[role=radio]")].some(el => /^x?[1-4]$/i.test((el.textContent || "").trim())));
+        if (!anyMult) {
+          for (const sel of ["button:has-text('360p')", "button:has-text('720p')", "button:has-text('8초')", "button:has-text('동영상')", "button:has-text('이미지')"]) {
+            try { const el = page.locator(sel).first(); if (await el.count() > 0 && await el.isVisible().catch(() => false)) { await el.click({ timeout: 3000 }); await page.waitForTimeout(700); break; } } catch {}
+          }
+        }
+      } catch {}
       try {
         // ★실제 Flow UI(테리 스크린샷): 설정 팝업에 x1/x2/x3/x4 배수 버튼. x1을 눌러야 1장씩 생성(안 그러면 4장씩 만들어 토큰 폭발).
         const mult = await page.evaluate(() => {
@@ -2357,7 +2366,7 @@ export async function generateFlowImagesCDP(params: {
       await dumpFlowControls("출력개수 설정 실패");
       return false;
     };
-    outputCountIsOne = await setOutputCountToOne();
+    // ★출력개수 설정은 아래 setImageMode(설정 팝업 오픈) 다음에 호출한다(팝업이 열려야 x1/출력개수 버튼이 DOM에 나옴).
 
     // 4-b) ★출력 모드를 '이미지'로 강제(영상 방지·토큰 절약) — Flow는 원래 Veo 영상 툴이라 기본이 동영상.
     //   세션당 1회만 설정하면 됨. Flow UI가 자주 바뀌므로 여러 후보 시도 + 실패 시 DOM 진단 로그.
@@ -2392,7 +2401,11 @@ export async function generateFlowImagesCDP(params: {
         return false;
       } catch (e: any) { log(`[Flow] ⚠️ 이미지 모드 설정 오류: ${String(e?.message || e).split("\n")[0]}`); return false; }
     };
+    // ★순서 중요: 설정 팝업을 여는 setImageMode를 먼저 → 팝업이 열린 상태에서 출력개수 1장을 잡는다.
+    //   (2026-09 Flow 무료 UI 변경으로 x1/출력개수 버튼이 설정 팝업 안으로 이동 → 팝업 닫힌 채 찾으면 실패해 4장씩 생성됨)
     await setImageMode();
+    outputCountIsOne = await setOutputCountToOne();
+    if (!outputCountIsOne) log("[Flow] ℹ️ 1장 설정을 못 걸었어요(무료판이 4장 강제일 수 있음) → 4장 그리드에서 필요한 만큼 재활용해 빠르게 채울게요");
 
     // 5) 프롬프트별 생성 — ★ 큐 방식: 실패한 프롬프트는 다시 시도(최대 3회)해서 "요청한 개수 정확히" 채운다.
     log(`[Flow] 🎬 준비 끝! 이제 그림 ${prompts.length}장을 한 장씩 만들게요`);
@@ -2407,7 +2420,16 @@ export async function generateFlowImagesCDP(params: {
     let fillTotal = 0;                       // 채우기로 큐에 넣은 총 횟수(무한루프 방지)
     const fillCap = target * 3 + 3;          // 채우기 시도 상한
     let fillNotice = false;
+    // ★2026-09 테리 실측 근본대책: Flow가 오래 걸려 30분 뒤 '실패'로 글까지 못 나가는 걸 막는다.
+    //   (1) 월클럭 데드라인 8분 — 넘으면 있는 이미지로(없으면 없는 대로) 즉시 빠져나와 글 발행으로 넘긴다.
+    //   (2) 생성 제출 하드캡 — 감지가 놓쳐도 재타이핑 무한반복(한도 태우기) 불가.
+    const flowStartedAt = Date.now();
+    const FLOW_MAX_MS = 8 * 60 * 1000;
+    let genRuns = 0;
+    const genCap = target + 3;               // 수확 방식이면 목표/4번이면 충분 → target+3은 넉넉한 안전상한
     while (results.length < target) {
+      if (Date.now() - flowStartedAt > FLOW_MAX_MS) { log(`[Flow] ⏱️ ${Math.round(FLOW_MAX_MS/60000)}분이 지나 여기까지(${results.length}/${target}장)로 마치고 글 발행으로 넘어갈게요`); break; }
+      if (genRuns >= genCap) { log(`[Flow] 🧯 생성 시도 상한(${genCap}회) 도달 — ${results.length}/${target}장으로 마치고 글 발행으로 넘어갈게요`); break; }
       if (queue.length === 0) {
         const safeIdxs = [...new Set(results.map(r => r.promptIndex))];  // 성공한(=안전한) 프롬프트 인덱스
         if (safeIdxs.length === 0) break;    // 성공작이 하나도 없으면 채울 재료가 없어 종료
@@ -2419,6 +2441,7 @@ export async function generateFlowImagesCDP(params: {
       }
       const i = queue.shift()!;
       attemptsById[i] = (attemptsById[i] || 0) + 1;
+      genRuns++;   // 프롬프트 타이핑/제출 시도 1회 = 한도 소모 1회 → genCap로 재타이핑 폭주(한도 태우기) 차단
       const requeue = () => { if (attemptsById[i] < 3) { queue.push(i); log(`[Flow] 🔁 ${i + 1}번째 그림을 다시 만들어 볼게요 (${attemptsById[i]}번째 시도)`); } else { log(`[Flow] ⛔ ${i + 1}번째 그림은 여러 번 해봐도 안 돼서 건너뛸게요`); } };
       // 텍스트 오염 방지 안전장치(어떤 경로로 온 프롬프트든 글자 없이 순수 이미지)
       let prompt = prompts[i];
@@ -2487,9 +2510,12 @@ export async function generateFlowImagesCDP(params: {
       await page.waitForTimeout(1500); // 입력 반영 + 전송버튼 활성화 대기
 
       // 전송 전 이미지 URL 집합 기록(개수가 아닌 URL diff로 새 이미지 판별 → 견고)
+      //   ★2026-09 근본원인: Flow가 이미지 URL 호스트를 바꿔(media.getMediaUrlRedirect→다른 경로) 예전 셀렉터가
+      //   생성된 이미지를 '못 봐서' 매번 실패로 오판→재타이핑→한도 소진했다. 호스트 의존을 버리고
+      //   '제출 후 새로 나타난 큰 이미지(≥500×500, http/blob)'로 감지한다(우린 참조이미지 업로드를 안 하므로 새 큰 이미지=생성물).
       const beforeSrcs: string[] = await page.evaluate(() =>
-        [...document.querySelectorAll('img[src*="media.getMediaUrlRedirect"]')]
-          .filter(im => (im as HTMLImageElement).naturalWidth >= 500)
+        [...document.querySelectorAll('img')]
+          .filter(im => { const el = im as HTMLImageElement; return el.naturalWidth >= 500 && el.naturalHeight >= 500 && /^(https?:|blob:)/.test(el.src || ""); })
           .map(im => (im as HTMLImageElement).src)
       );
 
@@ -2518,8 +2544,8 @@ export async function generateFlowImagesCDP(params: {
       //   오탐(실패)하여 requeue→재타이핑→크레딧 낭비 루프가 됨. 새 큰 이미지가 하나라도 나타나면 제출 성공으로 본다.
       const newImageAppeared = async (): Promise<boolean> => page.evaluate((beforeArr: string[]) => {
         const before = new Set(beforeArr);
-        return [...document.querySelectorAll('img[src*="media.getMediaUrlRedirect"]')]
-          .some(im => (im as HTMLImageElement).naturalWidth >= 500 && !before.has((im as HTMLImageElement).src));
+        return [...document.querySelectorAll('img')]
+          .some(im => { const el = im as HTMLImageElement; return el.naturalWidth >= 500 && el.naturalHeight >= 500 && /^(https?:|blob:)/.test(el.src || "") && !before.has(el.src); });
       }, beforeSrcs).catch(() => false);
       const waitForSubmission = async (): Promise<boolean> => {
         for (let check = 0; check < 10; check++) {
@@ -2592,7 +2618,9 @@ export async function generateFlowImagesCDP(params: {
       //   '크레딧이 부족'류 문구가 뜨면 아무리 기다려도 안 되므로 즉시 전체 실패로 끝낸다(무한반복 방지).
       const creditState = await page.evaluate(() => {
         const body = document.body.innerText || "";
-        const noCredit = /크레딧이?\s*(부족|없|모자|소진)|충분한?\s*크레딧|크레딧을?\s*모두|out of credits|not enough credits|insufficient credit|no credits|한도.*초과|일일.*한도/i.test(body);
+        // ★2026-09 테리 실측: Flow 무료가 "사용량 한도에 도달했습니다"를 띄우기 시작 → 예전 정규식이 못 잡아
+        //   한도 찬 걸 모르고 계속 재시도·재타이핑해 한도를 끝까지 태웠다. 한도/사용량 문구를 폭넓게 잡아 즉시 멈춘다.
+        const noCredit = /크레딧이?\s*(부족|없|모자|소진)|충분한?\s*크레딧|크레딧을?\s*모두|사용량\s*한도|한도에?\s*도달|한도\s*초과|한도를?\s*초과|일일\s*한도|out of credits|not enough credits|insufficient credit|no credits|usage limit|limit reached|reached your (usage )?limit|quota (exceeded|reached)|daily limit/i.test(body);
         // 크레딧 사용 승인 다이얼로그(예: "크레딧 15개를 사용하여 …생성을 시작할까요?")
         const needApprove = /크레딧\s*\d+\s*개를?\s*사용|크레딧을?\s*사용하여|사용하여\s*\d+개/i.test(body);
         let approved = false;
@@ -2624,9 +2652,9 @@ export async function generateFlowImagesCDP(params: {
         const snap = await page.evaluate((beforeArr: string[]) => {
           const before = new Set(beforeArr);
           const bySrc = new Map<string, { src: string; width: number; height: number }>();
-          document.querySelectorAll('img[src*="media.getMediaUrlRedirect"]').forEach(im => {
+          document.querySelectorAll('img').forEach(im => {
             const el = im as HTMLImageElement;
-            if (el.naturalWidth >= 500 && !before.has(el.src)) {
+            if (el.naturalWidth >= 500 && el.naturalHeight >= 500 && /^(https?:|blob:)/.test(el.src || "") && !before.has(el.src)) {
               const old = bySrc.get(el.src);
               if (!old || el.naturalWidth * el.naturalHeight > old.width * old.height) {
                 bySrc.set(el.src, { src: el.src, width: el.naturalWidth, height: el.naturalHeight });
@@ -2638,7 +2666,7 @@ export async function generateFlowImagesCDP(params: {
           // ★구글이 프롬프트를 "정책 위반"으로 거부한 경우 감지(테리 실측: "이 생성은 구글 정책을 위반할
           //   수 있습니다. 다른 프롬프트를 사용해 보거나 의견을 보내주세요"). 이러면 같은 프롬프트론 계속 거부됨.
           const policyBlocked = /정책을?\s*위반|정책\s*위반|다른\s*프롬프트를?\s*사용|violat|policy|not\s*allowed|can'?t\s*(help|generate|create)|무언가\s*잘못/i.test(document.body.innerText);
-          const noCredit = /크레딧이?\s*(부족|없|모자|소진)|충분한?\s*크레딧|크레딧을?\s*모두|out of credits|not enough credits|insufficient credit|no credits/i.test(document.body.innerText);
+          const noCredit = /크레딧이?\s*(부족|없|모자|소진)|충분한?\s*크레딧|크레딧을?\s*모두|사용량\s*한도|한도에?\s*도달|한도\s*초과|한도를?\s*초과|일일\s*한도|out of credits|not enough credits|insufficient credit|no credits|usage limit|limit reached|reached your (usage )?limit|quota (exceeded|reached)|daily limit/i.test(document.body.innerText);
           return { fresh: [...bySrc.values()], generating, policyBlocked, noCredit };
         }, beforeSrcs);
         // 생성 중 크레딧 소진 감지 → 무한 대기 방지 위해 전체 실패로 끝낸다.
@@ -2671,9 +2699,9 @@ export async function generateFlowImagesCDP(params: {
       freshCandidates = await page.evaluate((beforeArr: string[]) => {
         const before = new Set(beforeArr);
         const bySrc = new Map<string, { src: string; width: number; height: number }>();
-        document.querySelectorAll('img[src*="media.getMediaUrlRedirect"]').forEach(im => {
+        document.querySelectorAll('img').forEach(im => {
           const el = im as HTMLImageElement;
-          if (el.naturalWidth >= 500 && !before.has(el.src)) {
+          if (el.naturalWidth >= 500 && el.naturalHeight >= 500 && /^(https?:|blob:)/.test(el.src || "") && !before.has(el.src)) {
             const old = bySrc.get(el.src);
             if (!old || el.naturalWidth * el.naturalHeight > old.width * old.height) {
               bySrc.set(el.src, { src: el.src, width: el.naturalWidth, height: el.naturalHeight });
@@ -2700,43 +2728,44 @@ export async function generateFlowImagesCDP(params: {
         }
         log(`[Flow] ⚠️ ${i + 1}번째 그림이 잘 안 나왔어요. 다시 만들어 볼게요`); requeue(); continue;
       }
-      log(`[Flow]    🖼️ 나온 그림 ${freshCandidates.length}장 중에서 제일 예쁜 걸 고르는 중이에요...`);
-
-      // 가장 큰 후보부터 다운로드하되 URL 일시 실패 시 다음 후보로 폴백한다.
-      let dataUrl = "ERR:no candidate downloaded";
-      let chosen: { src: string; width: number; height: number } | undefined;
-      for (const candidate of freshCandidates) {
-        // ★회수 강화(테리 "못 끌어오는 경우"): credentials 포함 + 최대 3회 재시도(blob 준비 지연·인증 URL 대비).
+      // ★2026-09 테리 실측: 예전엔 1장·빠름 → 며칠새 Flow 무료가 '한 번에 4장(그리드) 강제'로 바뀜(25분·22장 폭주).
+      //   x1을 못 걸면 어차피 4장이 렌더되므로, 3장을 버리지 말고 '부족분(need)만큼' 이 그리드에서 바로 수확한다.
+      //   → 생성 횟수 = 목표/4 로 줄어 25분→수분. x1이 걸렸으면 후보가 1장이라 자동으로 1장만 수확(기존과 동일).
+      const need = Math.max(1, target - results.length);
+      const dl = async (src: string): Promise<string> => {
         for (let attempt = 0; attempt < 3; attempt++) {
-          dataUrl = await page.evaluate(async (src) => {
+          const d = await page.evaluate(async (s) => {
             try {
-              const res = await fetch(src, { credentials: "include" });
+              const res = await fetch(s, { credentials: "include" });
               if (!res.ok) return "ERR:" + res.status;
               const blob = await res.blob();
               if (!blob || blob.size < 500) return "ERR:tiny";   // 빈/깨진 이미지 방지
               return await new Promise<string>(r => { const rd = new FileReader(); rd.onloadend = () => r(rd.result as string); rd.onerror = () => r("ERR:read"); rd.readAsDataURL(blob); });
             } catch (e: any) { return "ERR:" + e.message; }
-          }, candidate.src);
-          if (dataUrl.startsWith("data:image")) break;
+          }, src);
+          if (d.startsWith("data:image")) return d;
           await page.waitForTimeout(1200);
         }
-        if (dataUrl.startsWith("data:image")) { chosen = candidate; break; }
-      }
-
-      if (dataUrl.startsWith("data:image")) {
+        return "ERR:no candidate downloaded";
+      };
+      let harvested = 0;
+      for (const candidate of freshCandidates) {
+        if (harvested >= need) break;   // 부족분만큼만 가져오고 나머지는 남겨둠(불필요한 다운로드 방지)
+        const dataUrl = await dl(candidate.src);
+        if (!dataUrl.startsWith("data:image")) continue;
         results.push({ src: dataUrl, alt: captions[i] || "", promptIndex: i });
-        if (chosen) log(`[Flow]    ✅ 제일 예쁜 그림을 골랐어요`);
-        // 바탕화면 날짜 폴더에 자동 백업
+        harvested++;
         if (backupDir) {
           try {
             const safeName = (captions[i] || prompts[i] || `flow_${i + 1}`).slice(0, 30).replace(/[\/\\:*?"<>|]/g, "_").trim();
             const ts = new Date().toISOString().replace(/[:T]/g, "-").slice(0, 19);
-            const file = path.join(backupDir, `${safeName}_${ts}.png`);
+            const file = path.join(backupDir, `${safeName}_${harvested}_${ts}.png`);
             fs.writeFileSync(file, Buffer.from(dataUrl.split(",")[1], "base64"));
-            log(`[Flow]    💾 그림을 컴퓨터 바탕화면에도 저장해 뒀어요`);
           } catch {}
         }
-        log(`[Flow] ✅ ${i + 1}번째 그림 완성! (총 ${prompts.length}장 중 ${results.length}장 다 만들었어요)`);
+      }
+      if (harvested > 0) {
+        log(`[Flow] ✅ 이번 생성에서 ${harvested}장 확보(그리드 재활용) — 총 ${results.length}/${target}장`);
       } else {
         log(`[Flow] ⚠️ ${i + 1}번째 그림을 가져오지 못했어요. 다시 만들어 볼게요`);
         requeue();
