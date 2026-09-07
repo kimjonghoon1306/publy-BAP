@@ -2254,6 +2254,18 @@ export async function generateFlowImagesCDP(params: {
       log("[Flow] ⚠️ 새 프로젝트/세션 진입 실패 — 현재 화면에서 진행");
     }
 
+    // ★2026-09-07 근본수정 보강: 재바인딩을 '한 번'만 하면, 이후 Flow가 탭을 바꾸거나 옛 page가 닫히면
+    //   봇이 죽은 핸들을 계속 봐서 이미지가 실제로 생성됐는데도 'Target page closed'로 실패한다(실측 확인).
+    //   → 생성/감지 도중에도 '살아있는 project 탭'으로 page를 항상 다시 잡는다. page에 안 묶인 순수 sleep도 사용.
+    const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+    const resolveLivePage = () => {
+      if (!page.isClosed() && page.url().includes("/project/")) return page;
+      const live = ctx.pages().find(p => !p.isClosed() && isFlowUrl(p.url()) && p.url().includes("/project/"))
+                || ctx.pages().find(p => !p.isClosed() && isFlowUrl(p.url()));
+      if (live && live !== page) { page = live; log("[Flow] 🔄 살아있는 작업 화면으로 다시 연결했어요"); }
+      return page;
+    };
+
     // Flow UI는 자주 바뀌므로 실패 시 다음 수정에 필요한 DOM 단서를 로그로 남겨둔다.
     const dumpFlowControls = async (reason: string) => {
       try {
@@ -2463,6 +2475,7 @@ export async function generateFlowImagesCDP(params: {
     let genRuns = 0;
     const genCap = target + 3;               // 수확 방식이면 목표/4번이면 충분 → target+3은 넉넉한 안전상한
     while (results.length < target) {
+      page = resolveLivePage();   // ★매 시도마다 살아있는 작업 탭으로 재확인(stale 핸들 방지)
       if (Date.now() - flowStartedAt > FLOW_MAX_MS) { log(`[Flow] ⏱️ ${Math.round(FLOW_MAX_MS/60000)}분이 지나 여기까지(${results.length}/${target}장)로 마치고 글 발행으로 넘어갈게요`); break; }
       if (genRuns >= genCap) { log(`[Flow] 🧯 생성 시도 상한(${genCap}회) 도달 — ${results.length}/${target}장으로 마치고 글 발행으로 넘어갈게요`); break; }
       if (queue.length === 0) {
@@ -2683,7 +2696,8 @@ export async function generateFlowImagesCDP(params: {
       let lastLoggedCount = -1;   // 상태 변화 있을 때만 로그(도배 방지)
       let policyBlocked = false;  // 구글이 이 프롬프트를 정책 위반으로 거부했는지
       for (let t = 0; t < 55; t++) {
-        await page.waitForTimeout(3000);
+        await sleep(3000);            // ★page에 안 묶인 sleep — 탭이 잠깐 바뀌어도 여기서 죽지 않음
+        page = resolveLivePage();     // ★대기 중 page가 stale/closed 됐으면 살아있는 작업 탭으로 다시 잡기(이미지 놓침 방지)
         const snap = await page.evaluate((beforeArr: string[]) => {
           const before = new Set(beforeArr);
           const bySrc = new Map<string, { src: string; width: number; height: number }>();
