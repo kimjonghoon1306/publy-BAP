@@ -775,7 +775,7 @@ ipcMain.handle("flow-launch-chrome", async (_e, slot: number = 0) => {
 
   // 전용 프로필 폴더(사용자 평소 크롬과 분리, 로그인 유지됨) — 슬롯별로 분리해 여러 구글 계정 동시 보유
   const profileDir = flowProfileDir(slot);
-  const flowUrl = "https://labs.google/fx/ko/tools/flow";
+  const flowUrl = "https://flow.google.com/";   // ★2026-09-07: Flow가 labs.google/fx → flow.google.com 로 이동(리다이렉트 대기 제거·봇 탭탐색과 도메인 일치)
 
   // 이미 살아있으면(로그인 유지됨) 그 계정 창을 앞으로 띄워 사용자가 눈으로 확인하게 한다.
   // 같은 프로필로 --new-window를 다시 요청하면 기존 크롬 인스턴스가 새 창을 앞에 띄운다(맥·윈도우 공통).

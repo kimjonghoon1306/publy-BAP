@@ -2166,15 +2166,22 @@ export async function generateFlowImagesCDP(params: {
     if (!ctx) throw new Error("크롬 컨텍스트를 찾을 수 없습니다");
 
     // 2) Flow 탭 찾기(없으면 새로 열기)
+    //    ★2026-09-07 실측 근본원인: Flow가 labs.google/fx/ko/tools/flow → flow.google.com 으로 도메인 이동.
+    //      옛 URL(labs.google/fx)만 찾으면 탭을 못 잡고 새 탭을 옛 주소로 열어 리다이렉트된 루트 랜딩
+    //      (입력창·생성물 없음)에 머물러, 실제 생성물이 뜨는 flow.google.com/project/{id} 페이지를 못 봐
+    //      "0장"으로 오판했다(6장 생겼는데 봇 0장·Target page closed의 진범). → 두 도메인 다 인식하고
+    //      작업 페이지(/project/)를 최우선으로 잡는다.
     log("[Flow] 🔎 그림 만드는 화면을 찾는 중이에요...");
-    let page = ctx.pages().find(p => p.url().includes("labs.google/fx"));
-    if (!page) {
-      log("[Flow] 그림 만드는 화면을 새로 여는 중이에요");
-      page = await ctx.newPage();
-      await page.goto("https://labs.google/fx/ko/tools/flow", { waitUntil: "domcontentloaded", timeout: 30000 });
-      await page.waitForTimeout(4000);
-    } else {
+    const isFlowUrl = (u: string) => /labs\.google\/fx|flow\.google\.com/.test(u);
+    const existingFlow = ctx.pages().find(p => isFlowUrl(p.url()) && p.url().includes("/project/"))
+                      || ctx.pages().find(p => isFlowUrl(p.url()));
+    let page = existingFlow ?? await ctx.newPage();   // page: Page 확정(undefined 아님 → 클로저·재할당 안전)
+    if (existingFlow) {
       log("[Flow] ✅ 화면을 찾았어요");
+    } else {
+      log("[Flow] 그림 만드는 화면을 새로 여는 중이에요");
+      await page.goto("https://flow.google.com/", { waitUntil: "domcontentloaded", timeout: 30000 });
+      await page.waitForTimeout(4000);
     }
     await page.bringToFront();
     await page.waitForTimeout(1500);
@@ -2220,14 +2227,14 @@ export async function generateFlowImagesCDP(params: {
     //    기존 프로젝트에 있으면 홈으로 나갔다가 새로 생성한다.
     log("[Flow] 🧹 깨끗한 새 화면을 준비하는 중이에요 (이전 그림이 섞이지 않게)...");
     if (page.url().includes("/project/")) {
-      await page.goto("https://labs.google/fx/ko/tools/flow", { waitUntil: "domcontentloaded", timeout: 30000 });
+      await page.goto("https://flow.google.com/", { waitUntil: "domcontentloaded", timeout: 30000 });
       await page.waitForTimeout(3500);
     }
-    //   ★실제 Flow UI 버튼명은 "새 프로젝트"가 아니라 "새로운 세션"(edit_square)일 수 있다(로그 DOM 확인).
+    //   ★실제 Flow UI 버튼명은 "새 프로젝트"(add 아이콘) — flow.google.com 루트에 있음(2026-09-07 실측).
     //     이걸 못 눌러 기존 프로젝트에 이미지가 쌓이면, Flow(대화형)가 이전 이미지를 참조해 엉뚱한
     //     이미지(예: 양념게장이 게 괴물로)를 만든다. 여러 이름을 순서대로 시도한다.
     let newSessionOk = false;
-    for (const label of ["새로운 세션", "새 프로젝트", "새 세션", "New session", "New project"]) {
+    for (const label of ["새 프로젝트", "새로운 세션", "새 세션", "New project", "New session"]) {
       try {
         const btn = page.locator(`button:has-text('${label}')`).first();
         if (await btn.count() > 0) { await btn.click({ timeout: 4000 }); newSessionOk = true; log(`[Flow] 세션 초기화 클릭: ${label}`); break; }
@@ -2237,6 +2244,12 @@ export async function generateFlowImagesCDP(params: {
       try { await page.click("text=새 프로젝트", { timeout: 4000 }); newSessionOk = true; } catch {}
     }
     await page.waitForTimeout(5000);
+    // ★2026-09-07 실측 근본대책: 새 프로젝트가 새 탭/네비게이션으로 열리면 옛 page 핸들이 stale(=Target page closed)이
+    //   되어 생성물을 못 본다. 클릭 후 항상 작업 페이지(/project/)를 다시 잡아 page 핸들을 갱신한다.
+    {
+      const proj = ctx.pages().find(p => !p.isClosed() && isFlowUrl(p.url()) && p.url().includes("/project/"));
+      if (proj && proj !== page) { page = proj; await page.bringToFront().catch(() => {}); await page.waitForTimeout(800); log("[Flow] 🔄 작업 페이지(project)로 전환했어요"); }
+    }
     if (!page.url().includes("/project/") && !newSessionOk) {
       log("[Flow] ⚠️ 새 프로젝트/세션 진입 실패 — 현재 화면에서 진행");
     }
@@ -2265,7 +2278,15 @@ export async function generateFlowImagesCDP(params: {
             .filter(el => visible(el) && /\ucd9c\ub825\s*(\uac1c\uc218|\uc218)|\uc774\ubbf8\uc9c0\s*(\uac1c\uc218|\uc218)|number\s+of\s+outputs?|outputs?|images?\s*(count|number)|\uac1c\s*\uc0dd\uc131/i.test(`${el.textContent || ""} ${el.getAttribute("aria-label") || ""}`))
             .slice(0, 40).map(describe);
           const inputs = [...document.querySelectorAll("textarea,[contenteditable=true],input,select")].filter(visible).slice(0, 40).map(describe);
-          return { url: location.href, buttons, outputRelated, inputs };
+          // ★생성물 위치·형태 진단(2026-09-07): "6장 생겼는데 봇 0장"류 재발 시 어느 페이지에 무슨 태그로 있는지 즉시 파악.
+          const media = {
+            imgTotal: document.querySelectorAll("img").length,
+            imgBig: [...document.querySelectorAll("img")].filter(im => (im as HTMLImageElement).naturalWidth >= 300).length,
+            video: document.querySelectorAll("video").length,
+            canvas: document.querySelectorAll("canvas").length,
+            iframe: document.querySelectorAll("iframe").length,
+          };
+          return { url: location.href, media, buttons, outputRelated, inputs };
         });
         log(`[Flow] 🔎 DOM 진단(${reason}): ${JSON.stringify(dump)}`);
       } catch (e: any) {
@@ -2383,20 +2404,34 @@ export async function generateFlowImagesCDP(params: {
         for (const sel of ["button:has-text('360p')", "button:has-text('720p')", "button:has-text('8초')", "button:has-text('동영상')"]) {
           try { const el = page.locator(sel).first(); if (await el.count() > 0 && await el.isVisible().catch(() => false)) { await el.click({ timeout: 3000 }); await page.waitForTimeout(700); break; } } catch {}
         }
-        // 2) [이미지] 토글 클릭
-        for (const sel of ["button:has-text('이미지')", "[role='radio']:has-text('이미지')", "[role='tab']:has-text('이미지')"]) {
-          try {
-            const loc = page.locator(sel);
-            const n = await loc.count();
-            for (let k = 0; k < n; k++) {
-              const el = loc.nth(k); const txt = ((await el.textContent().catch(() => "")) || "").trim();
-              if (await el.isVisible().catch(() => false) && txt.length < 12 && txt.includes("이미지") && !txt.includes("동영상")) {
-                await el.click({ timeout: 3000 }); await page.waitForTimeout(600); log("[Flow] 🖼️ 출력 모드를 '이미지'로 설정(영상 방지·크레딧 절약)"); return true;
-              }
+        // 2) [이미지] 토글 클릭 — 페이지 안에서 '정확히 이미지' 토글을 찾아 클릭하고, 클릭 후 실제로 이미지 모드가 됐는지 검증.
+        //   ★테리 실측(2026-09): 클릭이 안 먹어 '동영상'인 채로 생성돼 6크레딧·high-demand 경고·느림. → 최대 3회 재시도+검증.
+        const isImageNow = async (): Promise<boolean> => page.evaluate(() => {
+          const chip = [...document.querySelectorAll("button")].find(b => /·/.test(b.textContent || "") && /360p|720p|초|동영상|이미지/.test(b.textContent || ""));
+          if (chip && (chip.textContent || "").includes("이미지")) return true;
+          // 팝업 안 [이미지]/[동영상] 토글의 선택상태(aria-pressed/aria-checked/클래스)로도 판별
+          const img = [...document.querySelectorAll("button,[role=radio],[role=tab]")].find(el => (el.textContent || "").trim() === "이미지");
+          if (img) { const a = img.getAttribute("aria-pressed") || img.getAttribute("aria-checked") || img.getAttribute("aria-selected"); if (a === "true") return true; }
+          return false;
+        }).catch(() => false);
+        for (let attempt = 0; attempt < 3; attempt++) {
+          const clicked = await page.evaluate(() => {
+            const vis = (el: Element) => { const r = el.getBoundingClientRect(); const s = getComputedStyle(el); return r.width > 0 && r.height > 0 && s.display !== "none" && s.visibility !== "hidden"; };
+            // 정확히 '이미지'인 클릭요소(동영상 제외). 세그먼트 토글이 button/div[role] 무엇이든 잡는다.
+            const cand = [...document.querySelectorAll("button,[role=radio],[role=tab],[role=button]")].filter(el => vis(el) && (el.textContent || "").trim() === "이미지");
+            if (cand[0]) { (cand[0] as HTMLElement).click(); return true; }
+            return false;
+          }).catch(() => false);
+          await page.waitForTimeout(600);
+          if (await isImageNow()) { log("[Flow] 🖼️ 출력 모드를 '이미지'로 설정(영상 방지·크레딧 절약)"); return true; }
+          if (!clicked && attempt === 0) {
+            // 팝업이 아직 안 열렸을 수 있으니 요약 칩 다시 클릭해 연다
+            for (const sel of ["button:has-text('360p')", "button:has-text('720p')", "button:has-text('동영상')"]) {
+              try { const el = page.locator(sel).first(); if (await el.count() > 0 && await el.isVisible().catch(() => false)) { await el.click({ timeout: 2000 }); await page.waitForTimeout(500); break; } } catch {}
             }
-          } catch {}
+          }
         }
-        log("[Flow] ⚠️ '이미지' 토글 못 찾음 — DOM 진단 남김");
+        log("[Flow] ⚠️ '이미지' 토글 클릭이 반영 안 됨 — DOM 진단 남김(동영상으로 생성될 수 있음)");
         await dumpFlowControls("이미지 모드 설정 실패");
         return false;
       } catch (e: any) { log(`[Flow] ⚠️ 이미지 모드 설정 오류: ${String(e?.message || e).split("\n")[0]}`); return false; }

@@ -2860,6 +2860,7 @@ POST3: (제목)|(이유)
       flowCaptions: imgGenType === "flow"
         ? buildCaptions(keywords[0]||"", flowImgCount, genContent)
         : undefined,
+      cdpPort: imgGenType === "flow" ? 9222 + flowSlot : undefined,   // ★2026-09-07: 일반발행 Flow도 연결된 크롬(슬롯 포트) 사용 = CDP 통일
     };
     try {
       const r = await botFetch(`${BOT}/api/publish-full`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(publishBody)});

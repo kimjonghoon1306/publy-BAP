@@ -3951,6 +3951,7 @@ ${segList}`;
       flowCaptions: imgGenType === "flow" && generatedImages.length === 0
         ? buildCaptions(keyword||genTitle, flowImgCount, genContent)
         : undefined,
+      cdpPort: (imgGenType === "flow" && generatedImages.length === 0) ? 9222 + flowSlot : undefined,   // ★2026-09-07: 일반발행 Flow도 연결된 크롬(슬롯 포트) 사용 = CDP 통일
     };
     try{
       // 하루 발행 한도 체크

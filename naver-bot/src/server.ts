@@ -162,7 +162,7 @@ app.delete("/api/session/:platform/:userId", (req, res) => {
 app.post("/api/publish-full", async (req, res) => {
   const { userId, platform, naverId, title, content, pubScope = "full", tags = [], imageUrl, categoryId, visibility, scheduleTime, blocks,
     videoUrl, videoPosition, editLogNo, editBlogId,
-    useFlow, flowImgCount, flowPrompts, flowCaptions } = req.body;
+    useFlow, flowImgCount, flowPrompts, flowCaptions, cdpPort } = req.body;
   if (!userId || !platform || !title || !content) {
     return res.status(400).json({ error: "userId, platform, title, content 필요" });
   }
@@ -191,10 +191,13 @@ app.post("/api/publish-full", async (req, res) => {
     if (useFlow && flowPrompts?.length > 0 && platform === "naver") {
       console.log(`[server] Flow 이미지 생성 시작: ${flowImgCount}장`);
       try {
-        const flowImages = await generateFlowImages({
-          userId,
+        // ★2026-09-07: 일반 발행 Flow 이미지도 검증된 CDP 경로로 통일(원터치와 동일 함수).
+        //   자체 launch(generateFlowImages)는 Flow 도메인 이동(flow.google.com)·재로그인창 문제가 있어
+        //   연결된 크롬(cdpPort)으로 생성하는 generateFlowImagesCDP 하나로 합친다(앞으로 한 곳만 유지).
+        const flowImages = await generateFlowImagesCDP({
           prompts: flowPrompts,
           captions: flowCaptions || [],
+          cdpPort: (typeof cdpPort === "number" && cdpPort >= 9222 && cdpPort <= 9299) ? cdpPort : 9222,   // 슬롯별 포트(프론트가 9222+slot 전달)
           onLog: (msg) => console.log(msg),
         });
 
