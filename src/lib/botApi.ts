@@ -3,7 +3,11 @@ let tokenPromise: Promise<string> | null = null;
 async function getBotToken(): Promise<string> {
   if (!window.electron?.getBotSecret) return "";
   tokenPromise ||= window.electron.getBotSecret().catch(() => "");
-  return tokenPromise;
+  const t = await tokenPromise;
+  // ★2026-09-08(테리): 빈 토큰("")은 캐시하지 않는다 — 앱 시작·프리로드 타이밍으로 한 번 ""가 나오면 그 세션 내내
+  //   Authorization이 안 붙어 봇이 401 Unauthorized(재연결 실패·버퍼링). 다음 호출 때 재시도하게 캐시 비운다.
+  if (!t) tokenPromise = null;
+  return t;
 }
 
 export async function botFetch(input: RequestInfo | URL, init: RequestInit = {}): Promise<Response> {
