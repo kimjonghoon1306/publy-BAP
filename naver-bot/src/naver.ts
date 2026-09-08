@@ -2487,9 +2487,12 @@ export async function generateFlowImagesCDP(params: {
     //   (1) 월클럭 데드라인 8분 — 넘으면 있는 이미지로(없으면 없는 대로) 즉시 빠져나와 글 발행으로 넘긴다.
     //   (2) 생성 제출 하드캡 — 감지가 놓쳐도 재타이핑 무한반복(한도 태우기) 불가.
     const flowStartedAt = Date.now();
-    const FLOW_MAX_MS = 8 * 60 * 1000;
+    // ★2026-09-08(테리): Nano Banana Pro가 장당 1~1.5분으로 느려짐 → 8분 고정이면 4장 중 3장에서 컷.
+    //   목표 장수에 비례(장당 3.5분)로 늘려 4장도 다 채우게. 단 무한대기 방지 상한 20분.
+    const FLOW_MAX_MS = Math.min(20 * 60 * 1000, Math.max(8, target * 3.5) * 60 * 1000);
     let genRuns = 0;
-    const genCap = target + 3;               // 수확 방식이면 목표/4번이면 충분 → target+3은 넉넉한 안전상한
+    // ★2026-09-08: 그리드 수확으로 보통 목표/4번이면 되지만, 실패·재시도 대비 넉넉히(목표×2+4). 크레딧 폭주는 FLOW_MAX_MS로 막음.
+    const genCap = target * 2 + 4;
     while (results.length < target) {
       page = resolveLivePage();   // ★매 시도마다 살아있는 작업 탭으로 재확인(stale 핸들 방지)
       if (Date.now() - flowStartedAt > FLOW_MAX_MS) { log(`[Flow] ⏱️ ${Math.round(FLOW_MAX_MS/60000)}분이 지나 여기까지(${results.length}/${target}장)로 마치고 글 발행으로 넘어갈게요`); break; }
@@ -2752,10 +2755,12 @@ export async function generateFlowImagesCDP(params: {
           stableChecks = snap.fresh.length === previousCount ? stableChecks + 1 : 0;
           previousCount = snap.fresh.length;
           // 보통 4장 그리드가 순차 렌더되므로 4장이 모이면 생성 종료+안정을 확인해 종료한다.
-          // UI가 4장보다 적게 내는 경우도 있어, 첫 후보 후 30초간 개수가 안정되고 생성 표시가 끝나면 종료한다.
-          // 1장 출력으로 설정했다면 첫 이미지가 안정된 즉시 종료한다.
-          const gridComplete = outputCountIsOne ? snap.fresh.length >= 1 : snap.fresh.length >= 4;
-          const fallbackSettled = t - firstCandidateAt >= 10;
+          // ★2026-09-08(테리): Nano Banana Pro가 느려 4장 그리드가 순차로 천천히 나옴. 첫 이미지 뜨자마자 빠져나오면
+          //   1장만 수확→4장 채우려 재생성→8분 초과→3/4장. 부족분(need)만큼 후보가 모일 때까지 더 기다려 한 번에 수확한다.
+          //   (need는 아래 수확부와 동일 계산. 남은 목표만큼 후보가 차면 즉시, 아니면 최대 90초까지 기다림.)
+          const needNow = Math.max(1, target - results.length);
+          const gridComplete = outputCountIsOne ? snap.fresh.length >= 1 : (snap.fresh.length >= Math.min(4, needNow));
+          const fallbackSettled = t - firstCandidateAt >= 30;   // 첫 후보 후 최대 90초(30틱)까지 그리드 채워지길 기다림
           if (!snap.generating && stableChecks >= 2 && (gridComplete || fallbackSettled)) break;
         }
       }
