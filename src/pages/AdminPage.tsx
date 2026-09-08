@@ -2501,15 +2501,7 @@ Output (JSON object only): {"keyword":"핵심키워드","title":"새 제목","st
 
   function recommendImageCount(content: string): number { return Math.max(1, Math.min(10, Math.floor(content.length/500))); }
 
-  // ★2026-09-08 Flow Nano Banana Pro가 프롬프트 속 "한글 제목"을 이미지에 그리려다 정책거부 → 제목/한글키워드 제거 래퍼(DashboardPage와 동일).
   function buildAdmFlowPrompt(kw: string, title: string = "", content: string = "", idx: number = 0): string {
-    const raw = _buildAdmFlowPromptCore(kw, title, content, idx);
-    return raw
-      .replace(/\s*(featuring|of|for|representing|capturing)\s+"[^"]*"/gi, "")
-      .replace(/\s+about\s+[가-힣][^,]*/g, "")
-      .replace(/\s+,/g, ",").replace(/,\s*,/g, ",").replace(/\s{2,}/g, " ").trim();
-  }
-  function _buildAdmFlowPromptCore(kw: string, title: string = "", content: string = "", idx: number = 0): string {
     const k = (kw + " " + title).toLowerCase();
     const c = content.slice(0, 500).toLowerCase();
     const lightings = [

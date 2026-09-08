@@ -2401,17 +2401,7 @@ Output (JSON object only): {"keyword":"핵심키워드","title":"새 SEO 제목"
   }
 
   /* ── Flow 전용 디테일 프롬프트 ── */
-  // ★2026-09-08 Flow가 이미지모델을 Nano Banana Pro로 바꾸며, 프롬프트 속 "한글 제목"을 이미지에 글자로 그리려다
-  //   "죄송합니다. 이미지를 생성할 수 없습니다."로 정책 거부 → 멍때림·0장. 제목/한글 키워드를 프롬프트에서 제거하는 래퍼.
-  //   (카테고리 매칭엔 title이 필요하므로 매칭은 그대로 두고, 최종 프롬프트 문자열에서만 "…" 제목과 "about 한글" 을 뺀다.)
   function buildFlowPrompt(kw: string, title: string = "", content: string = "", idx: number = 0): string {
-    const raw = _buildFlowPromptCore(kw, title, content, idx);
-    return raw
-      .replace(/\s*(featuring|of|for|representing|capturing)\s+"[^"]*"/gi, "")  // 동사+"한글제목" 통째 제거
-      .replace(/\s+about\s+[가-힣][^,]*/g, "")                                   // "about 한글키워드" 제거
-      .replace(/\s+,/g, ",").replace(/,\s*,/g, ",").replace(/\s{2,}/g, " ").trim();
-  }
-  function _buildFlowPromptCore(kw: string, title: string = "", content: string = "", idx: number = 0): string {
     const k = (kw + " " + title).toLowerCase();
     const c = content.slice(0, 500).toLowerCase();
 
