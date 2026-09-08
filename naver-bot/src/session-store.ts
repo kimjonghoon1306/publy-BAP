@@ -125,3 +125,15 @@ export function deleteSession(name: string, legacyDirs: string[] = []): void {
     try { if (fs.existsSync(file)) fs.unlinkSync(file); } catch {}
   }
 }
+
+// 회원 연결 해제 시 활성 슬롯과 계정별 슬롯을 함께 제거(재활성화로 부활 방지).
+export function deleteSessionFamily(name: string, legacyDirs: string[] = []): void {
+  deleteSession(name, legacyDirs);
+  for (const dir of [...new Set([...candidateDirs(), ...legacyDirs])]) {
+    let files: string[];
+    try { files = fs.readdirSync(dir); } catch { continue; }
+    for (const file of files) {
+      if (file.startsWith(`${name}__`) && /\.(session|json)$/.test(file)) fs.unlinkSync(path.join(dir, file));
+    }
+  }
+}

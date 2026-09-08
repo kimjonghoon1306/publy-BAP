@@ -18,6 +18,8 @@ type BotEntry = {
   name: string;
   port: number;
   state: BotState;
+  busy: boolean;
+  isAlive: () => boolean;
   restart: () => Promise<boolean>;
   cancelScheduledRestart: () => void;
 };
@@ -77,7 +79,12 @@ async function botHealth(port: number, timeoutMs = 2500): Promise<HealthState> {
       headers: { Authorization: `Bearer ${botAuthToken}` },
       signal: AbortSignal.timeout(timeoutMs),
     });
-    if (res.ok) return "online";
+    if (res.ok) {
+      const body = await res.json() as { busy?: boolean; running?: number; queued?: number };
+      const bot = botRegistry.find(entry => entry.port === port);
+      if (bot && !(bot.port === 3333 && bot.isAlive())) bot.busy = body.busy === true || (body.running || 0) > 0 || (body.queued || 0) > 0;
+      return "online";
+    }
     if (res.status === 401) {
       // 세 봇 서버의 인증 미들웨어가 내는 고정 응답까지 일치해야 이전 Publy 봇으로 본다.
       // 단순히 401을 냈다는 이유만으로 같은 포트의 타 프로그램을 종료하지 않는다.
@@ -202,7 +209,7 @@ async function forkBotServer(opts: {
     } catch { crashFd = "ignore"; }
     const child = spawn(process.execPath, [serverJs], {
       cwd: opts.botPath,
-      stdio: ["ignore", crashFd, crashFd],
+      stdio: ["ignore", crashFd, crashFd, "ipc"],
       windowsHide: true,
       env: { ...env, ELECTRON_RUN_AS_NODE: "1" },
     });
@@ -214,6 +221,10 @@ async function forkBotServer(opts: {
       return false;
     }
     opts.setProc(child);
+    entry.busy = false;
+    child.on("message", (message: any) => {
+      if (opts.getProc() === child && message?.type === "publy-activity" && typeof message.busy === "boolean") entry.busy = message.busy;
+    });
     const stableTimer = setTimeout(() => { restartAttempts = 0; }, 30000);
     child.on("spawn", () => console.log(`[${opts.name}] 실행됨 pid=${child.pid}`));
     child.on("error", (error) => console.error(`[${opts.name}] 실행 실패:`, error.message));
@@ -230,6 +241,11 @@ async function forkBotServer(opts: {
   let entry: BotEntry;
   let restartStartedAt = 0;
   const restart = (reason: "initial" | "scheduled" | "watchdog" | "manual"): Promise<boolean> => {
+    // 워치독뿐 아니라 IPC 수동 재시작/예약 재시작도 실행 중 발행을 종료하지 않는다.
+    if (entry?.port === 3333 && entry.busy && entry.isAlive()) {
+      console.warn(`[${opts.name}] 작업 중 → ${reason} 재시작 보류`);
+      return Promise.resolve(false);
+    }
     // ★재시작이 갇히지 않게: 진행 중이라도 45초 넘게 안 끝났으면(hung) 강제로 새 재시작을 허용한다.
     if (restartInFlight && Date.now() - restartStartedAt < 45000) return restartInFlight;
     if (restartInFlight) { console.warn(`[${opts.name}] 이전 재시작이 45초+ 지속(hung) → 강제 재시도`); restartInFlight = null; }
@@ -241,6 +257,7 @@ async function forkBotServer(opts: {
     // 재시작 본체에 전체 타임아웃(40초). 어떤 await가 멈춰도 재시작이 영구 정지하지 않게 한다.
     const core = (async () => {
       if (waitMs) await new Promise(resolve => setTimeout(resolve, waitMs));
+      if (entry.port === 3333 && entry.busy && entry.isAlive()) return true;
       const oldChild = opts.getProc();
       generation++;
       if (oldChild) expectedExits.add(oldChild);
@@ -275,6 +292,8 @@ async function forkBotServer(opts: {
     name: opts.name,
     port: opts.port,
     state: "idle",
+    busy: false,
+    isAlive: () => { const child = opts.getProc(); return !!child && child.exitCode === null && child.signalCode === null && !child.killed; },
     restart: () => restart("manual"),
     cancelScheduledRestart,
   };
@@ -313,8 +332,14 @@ function startBotWatchdog() {
         anyOffline = true;
         if (!botOfflineSince[bot.name]) botOfflineSince[bot.name] = Date.now();
         const downMs = Date.now() - botOfflineSince[bot.name];
-        // idle이면 바로 재시작. restarting/grace라도 '45초+ 계속 죽어있으면' 갇힌 것으로 보고 강제 재시작.
-        if (bot.state === "idle" || downMs > 45000) {
+        // health timeout 동안에도 IPC로 받은 busy는 유지. 실제 종료는 close 핸들러가 복구한다.
+        if (bot.busy && bot.isAlive()) {
+          console.warn(`[watchdog] ${bot.name} 작업 중 health 지연 → 재시작 보류`);
+          continue;
+        }
+        // 일시 지연에는 재시작하지 않고 연속 45초 이상 실패할 때만 복구.
+        // 진행 중인 재시작/유예는 기존 복구 체인에 맡긴다.
+        if (bot.port === 3333 ? bot.state === "idle" && downMs > 45000 : bot.state === "idle" || downMs > 45000) {
           console.warn(`[watchdog] ${bot.name}(:${bot.port}) offline ${Math.round(downMs/1000)}s (state=${bot.state}) → 재시작`);
           try { await bot.restart(); } catch (e: any) { console.error(`[watchdog] ${bot.name} 재시작 실패:`, e?.message); }
         }
