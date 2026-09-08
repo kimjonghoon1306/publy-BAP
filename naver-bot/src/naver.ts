@@ -187,6 +187,32 @@ async function downloadImageToTemp(url: string): Promise<string | null> {
   }
 }
 
+// 두 로그인 경로에서 동일하게 키보드로 입력한다. 값 직접 주입은 사용하지 않는다.
+async function typeNaverCredentials(page: Page, id: string, pw: string): Promise<void> {
+  const randomDelay = (min: number, max: number) => min + Math.floor(Math.random() * (max - min + 1));
+  await page.waitForTimeout(randomDelay(600, 1000));
+  for (const [selector, value] of [["#id", id], ["#pw", pw]]) {
+    await page.waitForTimeout(randomDelay(100, 250));
+    try {
+      await page.click(selector, { timeout: 2000 });
+    } catch {
+      // 기존 DOM focus 폴백 유지. 입력은 이 경로에서도 키보드로 수행한다.
+      await page.evaluate((sel) => {
+        const el = document.querySelector(sel) as HTMLInputElement | null;
+        if (!el) throw new Error(`로그인 입력 필드를 찾지 못했습니다: ${sel}`);
+        el.focus();
+        if (document.activeElement !== el) throw new Error(`로그인 입력 필드에 포커스할 수 없습니다: ${sel}`);
+      }, selector);
+    }
+    await page.press(selector, process.platform === "darwin" ? "Meta+A" : "Control+A");
+    await page.press(selector, "Backspace");
+    for (const character of value) {
+      await page.type(selector, character, { delay: randomDelay(80, 180) });
+    }
+    await page.waitForTimeout(randomDelay(300, selector === "#id" ? 550 : 800));
+  }
+}
+
 /* ── 네이버 로그인 + blogId 추출 ── */
 export async function saveNaverSession(
   userId: string, id: string, pw: string
@@ -202,19 +228,7 @@ export async function saveNaverSession(
   try {
     console.log("[naver] 로그인 페이지 진입...");
     await page.goto("https://nid.naver.com/nidlogin.login", { waitUntil: "domcontentloaded", timeout: 30000 });
-    await page.waitForTimeout(800);
-
-    await page.evaluate((v) => {
-      const el = document.querySelector("#id") as HTMLInputElement;
-      if (el) { el.focus(); el.value = v; el.dispatchEvent(new Event("input", { bubbles: true })); }
-    }, id);
-    await page.waitForTimeout(400);
-
-    await page.evaluate((v) => {
-      const el = document.querySelector("#pw") as HTMLInputElement;
-      if (el) { el.focus(); el.value = v; el.dispatchEvent(new Event("input", { bubbles: true })); }
-    }, pw);
-    await page.waitForTimeout(400);
+    await typeNaverCredentials(page, id, pw);
 
     // 로그인 버튼 클릭 (네이버 개편: #loginBtn_row/#loginBtn_column, class btn_done, type=button — 옛 .btn_login 사라짐)
     let _loginClicked = false;
@@ -295,11 +309,7 @@ export async function reloginNaverSilent(userId: string, visible = false, sessio
   if (visible) await page.bringToFront().catch(() => {});
   try {
     await page.goto("https://nid.naver.com/nidlogin.login", { waitUntil: "domcontentloaded", timeout: 20000 });
-    await page.waitForTimeout(600);
-    try { await page.click("#id"); await page.type("#id", loginId, { delay: 60 }); } catch { await page.evaluate((v) => { const el = document.querySelector("#id") as HTMLInputElement; if (el) { el.focus(); el.value = v; el.dispatchEvent(new Event("input", { bubbles: true })); } }, loginId); }
-    await page.waitForTimeout(250);
-    try { await page.click("#pw"); await page.type("#pw", pw, { delay: 55 }); } catch { await page.evaluate((v) => { const el = document.querySelector("#pw") as HTMLInputElement; if (el) { el.focus(); el.value = v; el.dispatchEvent(new Event("input", { bubbles: true })); } }, pw); }
-    await page.waitForTimeout(300);
+    await typeNaverCredentials(page, loginId, pw);
     { let _c = false; for (const _s of ["#loginBtn_row", "#loginBtn_column"]) { try { const _e = await page.$(_s); if (_e && await _e.isVisible()) { await _e.click(); _c = true; break; } } catch {} } if (!_c) { try { await page.click(".btn_login", { timeout: 2000 }); _c = true; } catch {} } if (!_c) { try { await page.click("button[type='submit']", { timeout: 2000 }); _c = true; } catch {} } if (!_c) { await page.keyboard.press("Enter"); } }
     const timeout = visible ? 120000 : 15000;
     try { await page.waitForFunction(() => !location.href.includes("nid.naver.com/nidlogin"), undefined, { timeout }); }
