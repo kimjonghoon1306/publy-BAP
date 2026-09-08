@@ -2016,6 +2016,17 @@ export async function generateFlowImages(params: {
     };
     const fetchToDataUrl = async (u: string): Promise<string | null> => {
       for (let attempt = 0; attempt < 3; attempt++) {
+        // ★2026-09-08 Flow가 이미지 주소를 https://flow-content.google/ (cross-origin)로 바꿈 → 페이지 내 fetch는 CORS로 막힘.
+        //   playwright request.get(쿠키공유·CORS무관)로 먼저 받고, 안 되면 페이지 내 fetch 폴백(blob: 대응).
+        if (u.startsWith("http")) {
+          try {
+            const resp = await page.request.get(u, { timeout: 15000 });
+            if (resp.ok()) {
+              const buf = await resp.body();
+              if (buf && buf.length >= 500) { const ct = (resp.headers()["content-type"] || "image/png").split(";")[0]; return `data:${ct};base64,${buf.toString("base64")}`; }
+            }
+          } catch { /* 폴백 */ }
+        }
         const dataUrl = await page.evaluate(async (url) => {
           try {
             const res = await fetch(url, { credentials: "include" });
@@ -2783,6 +2794,22 @@ export async function generateFlowImagesCDP(params: {
       const need = Math.max(1, target - results.length);
       const dl = async (src: string): Promise<string> => {
         for (let attempt = 0; attempt < 3; attempt++) {
+          // ★2026-09-08 근본수정(테리 실측): Flow가 완성 이미지 주소를 blob: → https://flow-content.google/image/... 로 바꿈.
+          //   이건 flow.google.com과 다른 도메인(cross-origin)이라 페이지 내 fetch가 CORS로 막혀 "Failed to fetch" → 0장 회수.
+          //   playwright의 request.get은 브라우저 쿠키를 공유하면서 CORS 제약 없이 서버에서 직접 받는다(실측: 200·166KB 성공).
+          if (src.startsWith("http")) {
+            try {
+              const resp = await page.request.get(src, { timeout: 15000 });
+              if (resp.ok()) {
+                const buf = await resp.body();
+                if (buf && buf.length >= 500) {
+                  const ct = (resp.headers()["content-type"] || "image/png").split(";")[0];
+                  return `data:${ct};base64,${buf.toString("base64")}`;
+                }
+              }
+            } catch { /* 아래 페이지 내 fetch 폴백 */ }
+          }
+          // 폴백: 페이지 내 fetch (blob: 등 same-origin 주소 대응 — 예전 방식)
           const d = await page.evaluate(async (s) => {
             try {
               const res = await fetch(s, { credentials: "include" });
