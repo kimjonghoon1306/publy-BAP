@@ -514,6 +514,8 @@ app.post("/api/flow-generate", async (req, res) => {
     if (msg.includes("CDP_CONNECT_FAIL")) return res.status(503).json({ error: "Flow 준비가 안 됐어요. 'Flow 준비' 버튼으로 크롬을 먼저 열어주세요.", code: "CDP_CONNECT_FAIL" });
     if (msg.includes("FLOW_NOT_LOGGED_IN")) return res.status(401).json({ error: "크롬에서 Google Flow에 먼저 로그인해주세요.", code: "FLOW_NOT_LOGGED_IN" });
     if (msg.includes("FLOW_NO_CREDIT")) return res.status(402).json({ error: "Flow 무료 크레딧이 부족해요 — Flow 계정을 바꾸거나 크레딧 충전 후 다시 해주세요.", code: "FLOW_NO_CREDIT" });
+    // ★2026-09-08 연속 정책거부(이 계정이 이미지를 못 만드는 상태)도 크레딧 소진과 동일하게 402 → 프론트가 다음 Flow 계정으로 전환.
+    if (msg.includes("FLOW_POLICY_STUCK")) return res.status(402).json({ error: "이 Flow 계정이 지금 이미지를 못 만들어요 — 다음 계정으로 넘어갑니다.", code: "FLOW_NO_CREDIT" });
     res.status(500).json({ error: msg });
   }
 });

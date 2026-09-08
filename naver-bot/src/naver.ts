@@ -2471,6 +2471,11 @@ export async function generateFlowImagesCDP(params: {
     const queue: number[] = prompts.map((_, i) => i);
     const attemptsById: Record<number, number> = {};
     const softened: Record<number, boolean> = {};   // 정책 거부로 프롬프트를 순화한 슬롯 표시
+    // ★2026-09-08(테리): "이미지를 생성할 수 없습니다"(정책거부)가 한 계정에서 연속으로 계속 나면 = 그 계정이 지금
+    //   이미지를 못 만드는 상태(주제 문제와 별개로 계정이 맛간 경우 포함). 크레딧 소진과 똑같이 '다음 Flow 계정으로
+    //   전환' 신호(FLOW_POLICY_STUCK)를 던져 프론트가 계정 전환하게 한다. 연속 성공하면 카운터 리셋.
+    let policyBlockStreak = 0;
+    const POLICY_STUCK_LIMIT = 3;   // 연속 3장 정책거부(순화 포함)면 계정 전환
     // ── 부족분 자동 채우기 ──
     // 저작권/정책으로 원래 프롬프트가 막혀 목표 장수에 못 미치면(예: 5장 중 2장 거부),
     // 성공했던(=안전한) 프롬프트를 다시 그려 목표 장수를 채운다. 사용자가 다시 명령하지 않아도
@@ -2773,6 +2778,13 @@ export async function generateFlowImagesCDP(params: {
 
       if (freshCandidates.length === 0) {
         if (policyBlocked) {
+          policyBlockStreak++;   // 이 계정에서 연속 정책거부 카운트
+          // ★연속 정책거부가 임계 넘으면 = 이 계정이 지금 이미지를 못 만드는 상태 → 크레딧 소진처럼 다음 Flow 계정으로 전환.
+          //   (주제가 진짜 문제면 다음 계정에서도 거부돼 순화·건너뛰기로 처리됨. 계정만 맛간 거면 다음 계정서 성공.)
+          if (policyBlockStreak >= POLICY_STUCK_LIMIT) {
+            log(`[Flow] 🔄 이 계정에서 이미지 생성이 연속 ${policyBlockStreak}번 막혔어요 — 다음 Flow 계정으로 넘어갈게요`);
+            throw new Error("FLOW_POLICY_STUCK: 이 계정이 이미지를 못 만드는 상태 — 다음 계정으로 전환");
+          }
           // 구글이 이 프롬프트를 정책 위반으로 거부함. 같은 프롬프트론 계속 거부되므로,
           //   딱 한 번만 "안전하고 무난한 프롬프트"로 바꿔 다시 시도하고, 그래도 막히면 건너뛴다.
           if (!softened[i]) {
@@ -2841,6 +2853,7 @@ export async function generateFlowImagesCDP(params: {
         }
       }
       if (harvested > 0) {
+        policyBlockStreak = 0;   // ★이미지 하나라도 성공하면 정책거부 연속 카운터 리셋(계정 정상)
         log(`[Flow] ✅ 이번 생성에서 ${harvested}장 확보(그리드 재활용) — 총 ${results.length}/${target}장`);
       } else {
         log(`[Flow] ⚠️ ${i + 1}번째 그림을 가져오지 못했어요. 다시 만들어 볼게요`);
