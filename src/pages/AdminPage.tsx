@@ -3023,12 +3023,12 @@ POST3: (제목)|(이유)
       await upsertAccount({...(existingAcc?{id:existingAcc.id}:{}),user_id:ADM_UID,platform:newPlat,username:newUser,blog_name:newBlog||undefined,is_connected:true,connected_at:new Date().toISOString()});
       await getAccounts(ADM_UID).then(setAdmAccs);setNewUser("");setNewPw("");setNewBlog("");
     }
-    catch(e:any) { alert(e.message); }
+    catch(e:any) { showToast(e.message); }
     finally { setAddingAcc(false); }
   }
 
   async function handleConnect(acc: PublyAccount) {
-    if (!botOnline) { alert("봇 서버 실행 필요"); return; }
+    if (!botOnline) { showToast("봇 서버 실행 필요"); return; }
     setConnId(acc.id);
     try {
       const legacy=(acc as any).password_encrypted||"";let pw="";try{pw=legacy?atob(legacy):"";}catch{}
@@ -3039,7 +3039,7 @@ POST3: (제목)|(이유)
       await supabase.from("publy_accounts").update({is_connected:true,connected_at:new Date().toISOString()}).eq("id",acc.id);
       await upsertAccount({...acc,password_encrypted:"",is_connected:true,connected_at:new Date().toISOString()});
       getAccounts(ADM_UID).then(setAdmAccs);
-    } catch(e:any) { alert("연결 실패: "+e.message); }
+    } catch(e:any) { showToast("연결 실패: "+e.message); }
     finally { setConnId(null); }
   }
   // 🔖 AEO 강조 배너 — 회원과 동일. 발행/원터치 상단.

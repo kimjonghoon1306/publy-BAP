@@ -4168,7 +4168,7 @@ ${segList}`;
     const config = PLAN_CONFIG[user.plan] ?? PLAN_CONFIG.free;
     const currentCount = accounts.filter(a => a.platform !== "google").length;
     if (currentCount >= config.maxAccounts) {
-      alert(`${config.label} 플랜은 최대 ${config.maxAccounts}개 계정까지 등록 가능합니다`);
+      showToast(`${config.label} 플랜은 최대 ${config.maxAccounts}개 계정까지 등록 가능합니다`);
       return;
     }
     setAddingAcc(true);
@@ -4181,10 +4181,10 @@ ${segList}`;
       await upsertAccount({...(existingAcc?{id:existingAcc.id}:{}),user_id:user.id,platform:newPlat,username:newUser,blog_name:newBlog||undefined,is_connected:true,connected_at:new Date().toISOString()});
       await getAccounts(user.id).then(setAccounts);setNewUser("");setNewPw("");setNewBlog("");
     }
-    catch(e:any){alert(e.message);}finally{setAddingAcc(false);}
+    catch(e:any){showToast(e.message);}finally{setAddingAcc(false);}
   }
   async function handleConnect(acc:PublyAccount){
-    if(!botOnline){alert("PC에서 Publy 앱을 먼저 실행해주세요");return;}setConnId(acc.id);
+    if(!botOnline){showToast("PC에서 Publy 앱을 먼저 실행해주세요");return;}setConnId(acc.id);
     try{
       const legacy=(acc as any).password_encrypted||"";
       let pw="";try{pw=legacy?atob(legacy):"";}catch{}
@@ -4195,7 +4195,7 @@ ${segList}`;
       await upsertAccount({...acc,password_encrypted:"",is_connected:true,connected_at:new Date().toISOString()});
       getAccounts(user.id).then(setAccounts);
       refreshSessionStatus();
-    }catch(e:any){alert("연결 실패: "+e.message);}finally{setConnId(null);}
+    }catch(e:any){showToast("연결 실패: "+e.message);}finally{setConnId(null);}
   }
   // 🔖 AEO 강조 배너 — 퍼블리가 네이버 AI 인용(AEO) 형식으로 글을 쓰는 걸 강조. 발행/원터치 상단.
   function renderAeoBanner(){

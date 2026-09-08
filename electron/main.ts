@@ -20,7 +20,8 @@ type BotEntry = {
   state: BotState;
   busy: boolean;
   isAlive: () => boolean;
-  restart: () => Promise<boolean>;
+  restart: (reason?: "watchdog" | "manual") => Promise<boolean>;
+  hasScheduledRestart: () => boolean;
   cancelScheduledRestart: () => void;
 };
 const botRegistry: BotEntry[] = [];
@@ -196,25 +197,28 @@ async function forkBotServer(opts: {
     if (app.isQuitting) return false;
     // ★봇 크래시 원인 캡처: stdout/stderr을 '파일 fd로 직접' 리다이렉트한다(메인 프로세스를 거치지 않으므로
     //   v2.0.26의 '메인이 봇 출력 받아 화면 멈춤' 문제가 없다). 봇이 왜 죽는지(OOM·예외 등)가 파일에 남는다.
-    let crashFd: number | "ignore" = "ignore";
+    let crashFile: import("fs/promises").FileHandle | undefined;
     try {
-      const fs = require("fs") as typeof import("fs");
       const logDir = path.join(app.getPath("userData"), "logs");
-      fs.mkdirSync(logDir, { recursive: true });
+      await fs.promises.mkdir(logDir, { recursive: true });
       const crashLog = path.join(logDir, `bot-crash-${opts.name}.log`);
-      // 너무 커지면(5MB+) 새로 시작해 무한 증가 방지
-      try { if (fs.statSync(crashLog).size > 5 * 1024 * 1024) fs.truncateSync(crashLog, 0); } catch {}
-      crashFd = fs.openSync(crashLog, "a");
-      fs.writeSync(crashFd, `\n━━━━━ ${new Date().toISOString()} ${opts.name} spawn ━━━━━\n`);
-    } catch { crashFd = "ignore"; }
-    const child = spawn(process.execPath, [serverJs], {
-      cwd: opts.botPath,
-      stdio: ["ignore", crashFd, crashFd, "ipc"],
-      windowsHide: true,
-      env: { ...env, ELECTRON_RUN_AS_NODE: "1" },
-    });
-    // 부모는 상속시킨 fd를 닫아 누수 방지(자식이 계속 소유). 실패해도 무해.
-    if (typeof crashFd === "number") { const _fd = crashFd; setTimeout(() => { try { (require("fs") as typeof import("fs")).closeSync(_fd); } catch {} }, 2000); }
+      try { if ((await fs.promises.stat(crashLog)).size > 5 * 1024 * 1024) await fs.promises.truncate(crashLog, 0); } catch {}
+      crashFile = await fs.promises.open(crashLog, "a");
+      await crashFile.write(`\n━━━━━ ${new Date().toISOString()} ${opts.name} spawn ━━━━━\n`);
+    } catch { /* 로그 실패는 봇 기동을 막지 않는다. */ }
+    if (app.isQuitting) { await crashFile?.close().catch(() => {}); return false; }
+    let child: ChildProcess;
+    try {
+      child = spawn(process.execPath, [serverJs], {
+        cwd: opts.botPath,
+        stdio: ["ignore", crashFile?.fd ?? "ignore", crashFile?.fd ?? "ignore", "ipc"],
+        windowsHide: true,
+        env: { ...env, ELECTRON_RUN_AS_NODE: "1" },
+      });
+    } finally {
+      // spawn이 상속한 fd만 자식이 소유. 이벤트 핸들러 등록 전 await하지 않는다.
+      void crashFile?.close().catch(() => {});
+    }
     if (myGeneration !== generation || app.isQuitting) {
       expectedExits.add(child);
       await terminateTrackedChild(child);
@@ -239,22 +243,20 @@ async function forkBotServer(opts: {
   };
 
   let entry: BotEntry;
-  let restartStartedAt = 0;
   const restart = (reason: "initial" | "scheduled" | "watchdog" | "manual"): Promise<boolean> => {
     // 워치독뿐 아니라 IPC 수동 재시작/예약 재시작도 실행 중 발행을 종료하지 않는다.
     if (entry?.port === 3333 && entry.busy && entry.isAlive()) {
       console.warn(`[${opts.name}] 작업 중 → ${reason} 재시작 보류`);
       return Promise.resolve(false);
     }
-    // ★재시작이 갇히지 않게: 진행 중이라도 45초 넘게 안 끝났으면(hung) 강제로 새 재시작을 허용한다.
-    if (restartInFlight && Date.now() - restartStartedAt < 45000) return restartInFlight;
-    if (restartInFlight) { console.warn(`[${opts.name}] 이전 재시작이 45초+ 지속(hung) → 강제 재시도`); restartInFlight = null; }
+    // 기존 작업이 끝나기 전에는 포트 정리/스폰을 중첩하지 않는다.
+    if (restartInFlight) return restartInFlight;
+    if (reason === "watchdog" && scheduledRestart) return Promise.resolve(false);
     cancelScheduledRestart();
     if (graceTimer) clearTimeout(graceTimer);
     const waitMs = reason === "manual" ? Math.max(0, 2000 - (Date.now() - lastRestartAt)) : 0;
     setState("restarting", entry);
-    restartStartedAt = Date.now();
-    // 재시작 본체에 전체 타임아웃(40초). 어떤 await가 멈춰도 재시작이 영구 정지하지 않게 한다.
+    // 각 프로세스 종료/명령에는 자체 제한 시간이 있다. 타임아웃 race로 잠금을 먼저 풀지 않는다.
     const core = (async () => {
       if (waitMs) await new Promise(resolve => setTimeout(resolve, waitMs));
       if (entry.port === 3333 && entry.busy && entry.isAlive()) return true;
@@ -263,18 +265,14 @@ async function forkBotServer(opts: {
       if (oldChild) expectedExits.add(oldChild);
       await terminateTrackedChild(oldChild);
       if (opts.getProc() === oldChild) opts.setProc(null);
-      if (reason !== "scheduled") restartAttempts = 0;
       lastRestartAt = Date.now();
       return await start(generation);
     })();
-    const guarded = Promise.race([
-      core,
-      new Promise<boolean>(resolve => setTimeout(() => resolve(false), 40000)),
-    ]);
+    const guarded = core;
     restartInFlight = guarded;
     guarded.then(ok => {
-      // ★재시작이 실패/타임아웃이면 재시도 체인을 유지한다(과거엔 실패 시 재시도가 끊겨 영구 오프라인).
-      if (!ok && !app.isQuitting) { console.warn(`[${opts.name}] 재시작 실패/타임아웃 → 재예약`); scheduleRestart(); }
+      // 실패 시 재시도 체인을 유지한다.
+      if (!ok && !app.isQuitting) { console.warn(`[${opts.name}] 재시작 실패 → 재예약`); scheduleRestart(); }
     }).catch(() => { if (!app.isQuitting) scheduleRestart(); }).finally(() => {
       if (restartInFlight === guarded) restartInFlight = null;
       if (app.isQuitting) return;
@@ -294,7 +292,8 @@ async function forkBotServer(opts: {
     state: "idle",
     busy: false,
     isAlive: () => { const child = opts.getProc(); return !!child && child.exitCode === null && child.signalCode === null && !child.killed; },
-    restart: () => restart("manual"),
+    restart: (reason = "manual") => restart(reason),
+    hasScheduledRestart: () => scheduledRestart !== null,
     cancelScheduledRestart,
   };
   botRegistry.push(entry);
@@ -339,9 +338,9 @@ function startBotWatchdog() {
         }
         // 일시 지연에는 재시작하지 않고 연속 45초 이상 실패할 때만 복구.
         // 진행 중인 재시작/유예는 기존 복구 체인에 맡긴다.
-        if (bot.port === 3333 ? bot.state === "idle" && downMs > 45000 : bot.state === "idle" || downMs > 45000) {
+        if (bot.state === "idle" && !bot.hasScheduledRestart() && downMs > 45000) {
           console.warn(`[watchdog] ${bot.name}(:${bot.port}) offline ${Math.round(downMs/1000)}s (state=${bot.state}) → 재시작`);
-          try { await bot.restart(); } catch (e: any) { console.error(`[watchdog] ${bot.name} 재시작 실패:`, e?.message); }
+          try { await bot.restart("watchdog"); } catch (e: any) { console.error(`[watchdog] ${bot.name} 재시작 실패:`, e?.message); }
         }
       }
     } catch (e: any) {
@@ -455,7 +454,18 @@ function stripSelfQuarantine() {
   }
 }
 
+// 같은 userData의 Publy만 단일 실행한다. 별도 앱인 트래픽의 잠금과는 독립적이다.
+const ownsInstance = app.requestSingleInstanceLock();
+if (!ownsInstance) app.exit(0);
+app.on("second-instance", () => {
+  if (!mainWindow) return; // 초기 기동 중에는 기존 기동을 그대로 기다린다.
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.show();
+  mainWindow.focus();
+});
+
 app.whenReady().then(async () => {
+  if (!ownsInstance) return;
   stripSelfQuarantine();          // ★ 봇 스폰 전에 반드시 먼저
   await startBotServer();
   await startNeighborBotServer();
