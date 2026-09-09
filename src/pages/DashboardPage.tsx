@@ -168,9 +168,6 @@ const NAV_GROUPS = [
   {label:"블로그 운영",tabs:[
     {k:"calendar",i:"📅",l:"콘텐츠 캘린더",shine:true},{k:"manage",i:"📋",l:"발행 관리"},{k:"blogscore",i:"📈",l:"블로그 지수"},{k:"crawl",i:"🔍",l:"크롤링"},
   ]},
-  {label:"NEW 트래픽",boxed:true,tabs:[
-    {k:"inflow",i:"🆕",l:"트래픽 유입"},
-  ]},
   {label:"플레이스",boxed:true,tabs:[
     {k:"place",i:"🏪",l:"플레이스 365"},{k:"place_reply",i:"🗣️",l:"플레이스 리뷰답글"},
   ]},
@@ -5028,7 +5025,7 @@ POST3: (제목)|(이유)
             {NAV_GROUPS.map(group=>(
               <div key={group.label} className={(group as any).boxed?"nav-box":""}>
                 {group.label&&<div className={(group as any).boxed?"nav-box-lbl":"nav-lbl"}>{group.label}</div>}
-                {group.tabs.map(t=> (t.k==="crawl" || t.k==="place" || t.k==="place_reply" || t.k==="inflow") ? (() => { const enabled = (t.k === "place" || t.k === "place_reply") ? place360Enabled : (t.k === "inflow") ? inflowEnabled : crawlEnabled; return (
+                {group.tabs.map(t=> (t.k==="crawl" || t.k==="place" || t.k==="place_reply") ? (() => { const enabled = (t.k === "place" || t.k === "place_reply") ? place360Enabled : crawlEnabled; return (
                   <button key={t.k} className={`nav-item nav-crawl nav-shine ${tab===t.k&&enabled?"active":""} ${enabled?"":"nav-crawl-locked"}`} onClick={()=>{ if(!enabled){ setShowCrawlLock(true); return; } setTab(t.k); }}>
                     <span className="nav-ico">{t.i}</span><span className="nav-crawl-label">{t.l}</span>
                     <span className="nav-hot">HOT</span>
