@@ -474,6 +474,24 @@ export function cleanContent(text: string): string {
     .trim();
 }
 
+/* ── 지금 페이지가 '네이버 로그인 화면'인지 확실히 판별 ──
+   URL(nidlogin/login.naver)뿐 아니라 실제 로그인 폼(#id·#pw)이 화면에 있는지도 본다.
+   ★윈도우 실측: 로그인 페이지가 nid URL이 아니어도 로그인폼만 뜨는 경우가 있어 URL만 보면 놓친다
+   → 편집기 찾기가 로그인 입력칸을 편집기로 오인해 '제목을 아이디 칸에 입력'하는 버그. 폼 존재로 확실히 잡는다. */
+async function isNaverLoginPage(page: Page): Promise<boolean> {
+  try {
+    const u = page.url();
+    if (/nidlogin|login\.naver|nid\.naver\.com/.test(u)) return true;
+    // 페이지·프레임 어디든 로그인 아이디+비번 입력칸이 실제로 보이면 로그인 화면으로 간주
+    for (const frame of page.frames()) {
+      const hasId = await frame.locator("#id, input[name='id']").first().count().catch(() => 0);
+      const hasPw = await frame.locator("#pw, input[name='pw']").first().count().catch(() => 0);
+      if (hasId && hasPw) return true;
+    }
+  } catch { /* 판별 실패는 로그인 아님으로(기존 흐름 유지) */ }
+  return false;
+}
+
 /* ── 발행 중 로그인 화면 만나면 그 자리에서 1회 복구 ──
    발행 브라우저(보이는 창)가 세션 만료로 로그인 페이지에 튕겼을 때, 별도 창/재로그인 반복 없이
    "그 창에서 사람처럼 아이디·비번 입력 → 제출"로 복구한다. 반복 로그인(=네이버 보호조치 유발)을
@@ -735,8 +753,10 @@ export async function publishNaver(params: {
       assertPageOpen("글쓰기 페이지 이동 전");
       await page.goto(writeUrl, { waitUntil: "domcontentloaded", timeout: 60000 });
       // 🔐 세션 만료로 로그인 화면에 튕기면 → 그 창에서 사람처럼 자동 로그인 1회 복구 후 글쓰기 재진입.
-      //   (예전엔 여기서 그냥 멈춤/실패 → '창 뜨고 가만히 있는' 버그. 발행은 프록시 없이 같은 IP라 1회 로그인 안전.)
-      if (page.url().includes("nidlogin") || page.url().includes("login.naver")) {
+      //   ★2026-09-09(테리, 윈도우 실측): 로그인 페이지 URL이 nidlogin/login.naver가 아닌 경우가 있어(그냥 blog.naver 도메인
+      //     안에서 로그인폼 노출) → URL만 보면 '로그인 아님'으로 통과 → 편집기 찾기가 로그인폼 입력칸을 편집기로 오인 →
+      //     '제목'을 아이디 칸에 입력하는 버그(사진 확인). 그래서 URL이 아니라 '실제 로그인 폼(#id·#pw) 존재'로 감지한다.
+      if (await isNaverLoginPage(page)) {
         const ok = await recoverLoginInPublishPage(page, session, userId, console.log);
         if (ok) {
           assertPageOpen("자동 로그인 후 글쓰기 재진입");
@@ -745,7 +765,7 @@ export async function publishNaver(params: {
       }
     }
 
-    if (page.url().includes("nidlogin") || page.url().includes("login.naver")) {
+    if (await isNaverLoginPage(page)) {
       session.cookies = []; persistNaverSession(userId, session);
       throw new Error("네이버 세션 만료 — 자동 로그인 복구도 실패했어요. 계정 관리에서 '연결하기'를 한 번 눌러 직접 로그인해주세요(보안문자/보호조치 가능).");
     }
