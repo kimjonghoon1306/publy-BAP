@@ -3082,7 +3082,12 @@ POST3: (제목)|(이유)
       if(e.days!==undefined){
         if(!u.quota) throw new Error("만료일 저장 실패 — 회원의 publy_quotas 행이 없습니다");
         const days=Number(e.days); if(!Number.isFinite(days)) throw new Error("기간은 숫자여야 합니다");
-        const d=new Date(u.quota.reset_date); d.setDate(d.getDate()+days); quotaUpdate.reset_date=d.toISOString();
+        // ★연장 기준 = '현재 만료일'과 '오늘' 중 더 늦은 날(자정 기준). 이미 만료된(과거) 만료일에 더하면
+        //   여전히 과거가 되는 버그 → 만료된 회원은 오늘부터 연장. 미리보기(field)와 동일 계산.
+        const cur=new Date(u.quota.reset_date); cur.setHours(0,0,0,0);
+        const today=new Date(); today.setHours(0,0,0,0);
+        const base=cur.getTime()>today.getTime()?cur:today;
+        const d=new Date(base); d.setDate(d.getDate()+days); quotaUpdate.reset_date=d.toISOString();
       }
       if(Object.keys(quotaUpdate).length){
         const {data,error}=await supabase.from("publy_quotas").update(quotaUpdate).eq("user_id",u.id).select("user_id,total_quota,used_quota,reset_date");
@@ -5261,7 +5266,15 @@ POST3: (제목)|(이유)
                                 <input className="field-inp" type="number" placeholder="예: 30" value={editMap[u.id]?.days??""} onChange={e=>setEditMap(p=>({...p,[u.id]:{...p[u.id],days:e.target.value}}))}/>
                                 {editMap[u.id]?.days && u.quota?.reset_date && (
                                   <div style={{fontSize:11,color:"#8B5CF6",fontWeight:700,marginTop:5}}>
-                                    → {(()=>{const d=new Date(u.quota!.reset_date);d.setDate(d.getDate()+Number(editMap[u.id].days||0));return d.toLocaleDateString("ko-KR");})()} 까지 사용 가능
+                                    → {(()=>{
+                                      // 저장 로직과 동일: 현재 만료일과 오늘 중 더 늦은 날 기준으로 연장(만료된 회원은 오늘부터).
+                                      const cur=new Date(u.quota!.reset_date);cur.setHours(0,0,0,0);
+                                      const today=new Date();today.setHours(0,0,0,0);
+                                      const base=cur.getTime()>today.getTime()?cur:today;
+                                      const d=new Date(base);d.setDate(d.getDate()+Number(editMap[u.id].days||0));
+                                      return d.toLocaleDateString("ko-KR");
+                                    })()} 까지 사용 가능
+                                    {(()=>{const cur=new Date(u.quota!.reset_date);cur.setHours(0,0,0,0);const today=new Date();today.setHours(0,0,0,0);return cur.getTime()<today.getTime()?<span style={{color:"var(--text3)",fontWeight:600}}> (이미 만료돼 오늘부터 계산)</span>:null;})()}
                                   </div>
                                 )}
                               </div>
