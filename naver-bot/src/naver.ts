@@ -345,7 +345,7 @@ async function isSessionAliveNaver(cookies: any[]): Promise<boolean> {
 }
 
 /* 세션 유지: 명확한 만료에만 자동 로그인 1회. 실패/보호조치는 직접 연결로 안내. */
-export async function ensureLiveSessionNaver(userId: string, log: (m: string) => void = console.log, session?: any): Promise<any[]> {
+export async function ensureLiveSessionNaver(userId: string, log: (m: string) => void = console.log, session?: any, softFail = false): Promise<any[]> {
   if (!naverSessionExists(userId)) {
     // 🔍 진단 첨부 — 폴더마다 세션 0개면 '계정 연결 안 함', 다른 이름 있으면 '경로/계정 불일치'
     const diag = sessionDiagnosis(naverSessionName(userId), LEGACY_SESSION_DIRS);
@@ -357,11 +357,18 @@ export async function ensureLiveSessionNaver(userId: string, log: (m: string) =>
   if (await isSessionAliveNaver(cookies)) return cookies;
   let latestAttempt = session.lastAutoLoginAt || 0;
   try { latestAttempt = Math.max(latestAttempt, readSession<any>(naverAcctSessionName(userId, session.loginId), LEGACY_SESSION_DIRS).lastAutoLoginAt || 0); } catch {}
-  if (Date.now() - latestAttempt < 30 * 60 * 1000) throw new Error("자동 로그인이 최근 시도됐어요. 반복 로그인 방지를 위해 계정 관리에서 직접 확인해주세요.");
+  // ★softFail(발행): 여기서 죽이지 않는다. 발행 브라우저(보이는 창)가 로그인 화면을 만나면 그 창에서
+  //   사람처럼 1회 자동 로그인 복구를 하므로, throttle/재연결 실패여도 (오래된)쿠키를 반환해 발행을 진행시킨다.
+  //   → 예전 '창 뜨고 가만히 멈춤' 해결. 로그인 반복(보호조치)은 발행창 복구가 1회·세션갱신으로 억제.
+  if (Date.now() - latestAttempt < 30 * 60 * 1000) {
+    if (softFail) { log("[세션] 최근 자동로그인 시도 이력 — 발행 창에서 필요 시 1회 복구합니다"); return cookies || []; }
+    throw new Error("자동 로그인이 최근 시도됐어요. 반복 로그인 방지를 위해 계정 관리에서 직접 확인해주세요.");
+  }
   session.lastAutoLoginAt = Date.now();
   persistNaverSession(userId, session);
   log("[세션] 로그인이 만료돼 저장된 정보로 자동 재연결을 시도해요...");
   if (await reloginNaverSilent(userId, false, session)) { log("[세션] ✅ 자동 재연결 성공"); return session.cookies; }
+  if (softFail) { log("[세션] 조용한 재연결 실패 — 발행 창에서 자동 로그인으로 복구를 시도합니다"); return session.cookies || cookies || []; }
   throw new Error("로그인 재연결에 실패했어요. 계정 관리에서 '연결하기'를 한 번 눌러 직접 로그인해주세요.");
 }
 
@@ -467,6 +474,39 @@ export function cleanContent(text: string): string {
     .trim();
 }
 
+/* ── 발행 중 로그인 화면 만나면 그 자리에서 1회 복구 ──
+   발행 브라우저(보이는 창)가 세션 만료로 로그인 페이지에 튕겼을 때, 별도 창/재로그인 반복 없이
+   "그 창에서 사람처럼 아이디·비번 입력 → 제출"로 복구한다. 반복 로그인(=네이버 보호조치 유발)을
+   피하려고 한 발행당 1회만. 발행은 프록시 없이 항상 같은 내 IP·기기라 이 1회 로그인은 안전.
+   성공하면 true(호출측이 글쓰기로 재진입), 실패면 false(호출측이 명확히 중단). */
+async function recoverLoginInPublishPage(page: Page, session: any, userId: string, log: (m: string) => void): Promise<boolean> {
+  const loginId: string = session.loginId;
+  let pw: string | null = null;
+  if (session.pw) { try { pw = Buffer.from(session.pw, "base64").toString("utf-8"); } catch {} }
+  if (!loginId || !pw) { log("[naver] 세션에 저장된 로그인 정보가 없어 자동 복구 불가 — 계정 관리에서 재연결 필요"); return false; }
+  try {
+    log("[naver] 🔐 세션이 만료돼 이 창에서 자동 로그인으로 복구합니다(사람처럼 입력, 1회만)");
+    // 로그인 폼이 뜰 때까지 잠깐 대기
+    await page.waitForSelector("#id", { timeout: 8000 }).catch(() => {});
+    if (!(await page.$("#id"))) { log("[naver] 로그인 입력칸(#id)을 못 찾음 — 보호조치 화면일 수 있어 중단"); return false; }
+    await typeNaverCredentials(page, loginId, pw);
+    // 제출(로그인 버튼 여러 형태 대응)
+    let clicked = false;
+    for (const s of ["#loginBtn_row", "#loginBtn_column", ".btn_login", "button[type='submit']"]) {
+      try { const e = await page.$(s); if (e && await e.isVisible()) { await e.click(); clicked = true; break; } } catch {}
+    }
+    if (!clicked) await page.keyboard.press("Enter");
+    // 로그인 페이지를 벗어나면 성공
+    await page.waitForFunction(() => !/nidlogin|login\.naver/.test(location.href), { timeout: 20000 }).catch(() => {});
+    const stillLogin = /nidlogin|login\.naver/.test(page.url());
+    if (stillLogin) { log("[naver] 자동 로그인 후에도 로그인 화면 — 보안문자(캡차)/보호조치 가능. 계정 관리에서 직접 재연결 필요"); return false; }
+    // 갱신된 쿠키 저장(다음 글은 재로그인 없이 이 세션 재사용 → 로그인 반복 방지)
+    try { session.cookies = await page.context().cookies(); persistNaverSession(userId, session); } catch {}
+    log("[naver] ✅ 자동 로그인 복구 성공 — 발행을 계속합니다");
+    return true;
+  } catch (e: any) { log(`[naver] 자동 로그인 복구 실패: ${e?.message || e}`); return false; }
+}
+
 /* ── 네이버 블로그 자동발행 ── */
 export async function publishNaver(params: {
   userId: string;
@@ -524,7 +564,7 @@ export async function publishNaver(params: {
   const cleanedContent = cleanContent(scopedContent);
   const session = (params as any).__naverSession || readSession<any>(naverSessionName(userId), LEGACY_SESSION_DIRS);
   const storedBlogId = session.blogId;
-  const cookies = await ensureLiveSessionNaver(userId, console.log, session);   // 명확한 만료일 때만 자동 재연결 1회
+  const cookies = await ensureLiveSessionNaver(userId, console.log, session, true);   // softFail: 죽이지 말고 발행 창에서 1회 복구
   // ★실제 blogId 확정(로그인ID≠블로그주소 대응) — 제목수정에서 검증된 공용 로직 재사용.
   //   특히 글 살리기(편집)는 정확한 blogId 아니면 PostWriteForm이 글목록으로 튕기므로 반드시 교정.
   const blogId = await resolveNaverBlogId(storedBlogId, cookies, userId, console.log, session);
@@ -633,8 +673,15 @@ export async function publishNaver(params: {
           console.log(`[naver] ⚠️ 편집 Update URL 이동 오류: ${e instanceof Error ? e.message : String(e)}`);
         });
         if (page.url().includes("nidlogin") || page.url().includes("login.naver")) {
-          session.cookies = []; persistNaverSession(userId, session);
-          throw new Error("네이버 세션 만료. 재연결 필요");
+          // 🔐 글 살리기도 로그인 화면 튕기면 그 창에서 자동 로그인 1회 복구 후 편집 URL 재시도.
+          const ok = await recoverLoginInPublishPage(page, session, userId, console.log);
+          if (ok) {
+            await page.goto(editUrls[u], { waitUntil: "domcontentloaded", timeout: 60000 }).catch(() => {});
+          }
+          if (page.url().includes("nidlogin") || page.url().includes("login.naver")) {
+            session.cookies = []; persistNaverSession(userId, session);
+            throw new Error("네이버 세션 만료 — 자동 로그인 복구 실패. 계정 관리에서 직접 재연결해주세요.");
+          }
         }
         verifiedEditFrame = await waitForEditor(`Update URL 시도${u + 1}`, 20000);
         if (!verifiedEditFrame) console.log(`[naver] 이 URL로는 편집기가 안 떠서 다음 형태로 재시도`);
@@ -687,11 +734,20 @@ export async function publishNaver(params: {
       console.log(`[naver] 글쓰기 진입: ${writeUrl}`);
       assertPageOpen("글쓰기 페이지 이동 전");
       await page.goto(writeUrl, { waitUntil: "domcontentloaded", timeout: 60000 });
+      // 🔐 세션 만료로 로그인 화면에 튕기면 → 그 창에서 사람처럼 자동 로그인 1회 복구 후 글쓰기 재진입.
+      //   (예전엔 여기서 그냥 멈춤/실패 → '창 뜨고 가만히 있는' 버그. 발행은 프록시 없이 같은 IP라 1회 로그인 안전.)
+      if (page.url().includes("nidlogin") || page.url().includes("login.naver")) {
+        const ok = await recoverLoginInPublishPage(page, session, userId, console.log);
+        if (ok) {
+          assertPageOpen("자동 로그인 후 글쓰기 재진입");
+          await page.goto(writeUrl, { waitUntil: "domcontentloaded", timeout: 60000 });
+        }
+      }
     }
 
     if (page.url().includes("nidlogin") || page.url().includes("login.naver")) {
       session.cookies = []; persistNaverSession(userId, session);
-      throw new Error("네이버 세션 만료. 재연결 필요");
+      throw new Error("네이버 세션 만료 — 자동 로그인 복구도 실패했어요. 계정 관리에서 '연결하기'를 한 번 눌러 직접 로그인해주세요(보안문자/보호조치 가능).");
     }
 
     requireNaverLogin(page.url());

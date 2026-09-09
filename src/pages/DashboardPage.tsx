@@ -934,13 +934,29 @@ export default function DashboardPage({user, onLogout, onAdminLogin, onThemeTogg
   const stopDm = ()=>{ try{esDmRef.current?.close();}catch{} setDmRunning(false); dmLog("⏹️ 중단됨"); };
   const [quota, setQuota] = useState<PublyQuota|null>(null);
   const [dailyPublishUsed, setDailyPublishUsed] = useState(0);
-  // 🔍 크롤링 = 기본 오픈(등급별 한도로 이미 제한됨). 관리자가 crawl_enabled=false로 명시 잠금할 때만 잠긴다.
-  //   미설정(null/undefined)·true = 사용 가능. false만 잠김. (관리자 표시·토글도 동일 규칙으로 맞춤)
-  const crawlEnabled = (user as any)?.crawl_enabled !== false;
-  // 🆕 NEW 트래픽 유입 = 기본 잠금. 관리자가 inflow_enabled=true로 켠 회원만.
-  const inflowEnabled = (user as any)?.inflow_enabled === true;
-  const [place360Enabled, setPlace360Enabled] = useState(false);
-  useEffect(() => { let active = true; getPlace360Access(user.id).then(enabled => { if (active) setPlace360Enabled(enabled); }); return () => { active = false; }; }, [user.id]);
+  // 🔒 잠금 3종(크롤링·플레이스365·트래픽유입)을 한 소스에서 통일해 읽는다.
+  //   ★기존 버그: inflow만 잠기고 나머지 안 잠김 — 소스가 제각각이었음(inflow=user객체 / crawl=user객체지만
+  //     로그인RPC가 값 미반환 시 undefined→항상열림 / place360=로그인때 1회쿼리라 관리자가 나중에 잠가도 stale).
+  //   해결: publy_users에서 3개를 DB로 직접·주기(20초)로 같이 읽어 판정 → 관리자 잠금이 재로그인 없이 반영.
+  //   anon 읽기 가능(RLS all true, persistSession:false로 anon 고정). 기본값: crawl·place=열림(!==false), inflow=잠김(===true).
+  const [accessFlags, setAccessFlags] = useState<{ crawl?: boolean; place360?: boolean; inflow?: boolean }>({
+    crawl: (user as any)?.crawl_enabled, place360: (user as any)?.place360_enabled, inflow: (user as any)?.inflow_enabled,
+  });
+  useEffect(() => {
+    let active = true;
+    const load = async () => {
+      try {
+        const { data } = await supabase.from("publy_users").select("crawl_enabled,place360_enabled,inflow_enabled").eq("id", user.id).maybeSingle();
+        if (active && data) setAccessFlags({ crawl: data.crawl_enabled, place360: data.place360_enabled, inflow: data.inflow_enabled });
+      } catch { /* 네트워크 실패는 무시 — 기존 값 유지 */ }
+    };
+    load();
+    const iv = setInterval(load, 20000);   // 관리자가 잠그면 20초 내 회원 화면에 반영
+    return () => { active = false; clearInterval(iv); };
+  }, [user.id]);
+  const crawlEnabled = accessFlags.crawl !== false;      // 기본 열림, false만 잠김
+  const inflowEnabled = accessFlags.inflow === true;     // 기본 잠김, true만 열림
+  const place360Enabled = accessFlags.place360 !== false; // 기본 열림, false만 잠김
   const [showCrawlLock, setShowCrawlLock] = useState(false);
   // 📖 퍼블리 대백서 — 로그인하면 자동 팝업(‘다시 안 보기’ 체크 전까지). 헤더 📚 버튼으로 언제든 다시.
   const [showDaebaekseo, setShowDaebaekseo] = useState(false);
