@@ -1653,9 +1653,14 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
     ${exposeRows ? `<h2>🔎 글 검색 노출 진단</h2><table class="rtbl"><thead><tr><th>글 제목</th><th>검색 순위</th></tr></thead><tbody>${exposeRows}</tbody></table>` : ""}
     <div class="foot">본 보고서는 네이버 블로그 공개 지표(글 수·이웃·발행 활동·검색 노출)를 기준으로 <b>퍼블리</b>가 자동 생성했습니다. 부족 항목은 퍼블리 글쓰기·제목 최적화·서이추·품앗이로 개선할 수 있습니다. · publy.blogautopro.com</div>
     <script>window.onload=()=>{setTimeout(()=>window.print(),400)}</script></body></html>`;
-    const w = window.open("", "_blank");
-    if (!w) { alert("팝업이 차단됐어요. 팝업을 허용한 뒤 다시 시도해 주세요."); return; }
-    w.document.write(html); w.document.close();
+    // Electron 앱은 window.open이 차단됨 → IPC(openPreview)로 새 창에 띄운다(사진 글쓰기 미리보기와 동일 방식).
+    if ((window as any).electron?.openPreview) {
+      (window as any).electron.openPreview(html);
+    } else {
+      const w = window.open("", "_blank");
+      if (!w) { alert("팝업이 차단됐어요. 팝업을 허용한 뒤 다시 시도해 주세요."); return; }
+      w.document.write(html); w.document.close();
+    }
   };
 
   /* 제목 수정 한도 로드 (지수 탭 진입 시) */
