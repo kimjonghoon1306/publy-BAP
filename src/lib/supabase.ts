@@ -326,6 +326,8 @@ export async function signUp(email: string, password: string, name: string, phon
   // 추천인 컬럼이 없는 기존 운영 스키마에서는 가입 자체를 막지 않고 추후 추천 테이블로 처리한다.
   void referredBy;
   const u = data.user as PublyUser;
+  // 📝 퍼블리 앱 가입 → '퍼블리 회원'으로 표시(퍼블리↔트래픽 분리). 이미 다른 앱이면 'both'로 승격. 실패해도 가입은 유지.
+  try { await supabase.rpc("publy_mark_app_type", { p_user_id: u.id, p_app_type: "app" }); } catch { /* 태그 실패 무시 */ }
   await claimActiveDevice(u.id, (u as any).email);   // 이 기기를 활성 기기로 등록
   return u;
 }
