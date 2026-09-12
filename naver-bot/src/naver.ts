@@ -691,15 +691,9 @@ export async function publishNaver(params: {
           console.log(`[naver] ⚠️ 편집 Update URL 이동 오류: ${e instanceof Error ? e.message : String(e)}`);
         });
         if (page.url().includes("nidlogin") || page.url().includes("login.naver")) {
-          // 🔐 글 살리기도 로그인 화면 튕기면 그 창에서 자동 로그인 1회 복구 후 편집 URL 재시도.
-          const ok = await recoverLoginInPublishPage(page, session, userId, console.log);
-          if (ok) {
-            await page.goto(editUrls[u], { waitUntil: "domcontentloaded", timeout: 60000 }).catch(() => {});
-          }
-          if (page.url().includes("nidlogin") || page.url().includes("login.naver")) {
-            session.cookies = []; persistNaverSession(userId, session);
-            throw new Error("네이버 세션 만료 — 자동 로그인 복구 실패. 계정 관리에서 직접 재연결해주세요.");
-          }
+          // 🔴 2026-09-12(테리): 자동 로그인(recover) 안 함 + 세션 보존(글쓰기 경로와 동일 이유).
+          //   봇 자동 로그인=보호조치 유발, 세션 삭제(cookies=[])=재로그인 반복 악순환. 직접 재연결 안내 후 중단.
+          throw new Error("네이버 로그인 확인이 필요해요(보안문자·보호조치 가능). 계정 관리에서 '연결하기'로 직접 로그인해 주세요. (기존 연결은 유지했어요)");
         }
         verifiedEditFrame = await waitForEditor(`Update URL 시도${u + 1}`, 20000);
         if (!verifiedEditFrame) console.log(`[naver] 이 URL로는 편집기가 안 떠서 다음 형태로 재시도`);
@@ -756,18 +750,13 @@ export async function publishNaver(params: {
       //   ★2026-09-09(테리, 윈도우 실측): 로그인 페이지 URL이 nidlogin/login.naver가 아닌 경우가 있어(그냥 blog.naver 도메인
       //     안에서 로그인폼 노출) → URL만 보면 '로그인 아님'으로 통과 → 편집기 찾기가 로그인폼 입력칸을 편집기로 오인 →
       //     '제목'을 아이디 칸에 입력하는 버그(사진 확인). 그래서 URL이 아니라 '실제 로그인 폼(#id·#pw) 존재'로 감지한다.
-      if (await isNaverLoginPage(page)) {
-        const ok = await recoverLoginInPublishPage(page, session, userId, console.log);
-        if (ok) {
-          assertPageOpen("자동 로그인 후 글쓰기 재진입");
-          await page.goto(writeUrl, { waitUntil: "domcontentloaded", timeout: 60000 });
-        }
-      }
     }
 
     if (await isNaverLoginPage(page)) {
-      session.cookies = []; persistNaverSession(userId, session);
-      throw new Error("네이버 세션 만료 — 자동 로그인 복구도 실패했어요. 계정 관리에서 '연결하기'를 한 번 눌러 직접 로그인해주세요(보안문자/보호조치 가능).");
+      // 🔴 2026-09-12(테리): 발행 창에서 봇이 자동 로그인(recover)하면 네이버가 '봇 로그인'으로 감지해
+      //   보안문자도 안 띄우고 보호조치→튕김, 실패 시 세션까지 삭제(cookies=[])해 재로그인 반복→보호조치 악순환.
+      //   → 자동 로그인 시도 안 함 + 세션 보존. 사용자에게 직접 재연결을 안내하고 이 발행만 중단한다.
+      throw new Error("네이버 로그인 확인이 필요해요(보안문자·보호조치 가능). 계정 관리에서 '연결하기'로 직접 로그인해 주세요. (기존 연결은 유지했어요)");
     }
 
     requireNaverLogin(page.url());
