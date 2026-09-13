@@ -192,7 +192,34 @@ function KeyInput({k}:{k:any; [x:string]:any}) {
   const [val,setVal]=useState(()=>localStorage.getItem(k.storageKey)||"");
   const [show,setShow]=useState(false);
   const [saved,setSaved]=useState(false);
-  function save(){if(!val.trim())return;localStorage.setItem(k.storageKey,val.trim());setSaved(true);setTimeout(()=>setSaved(false),2500);}
+  const [testing,setTesting]=useState(false);
+  const [testMsg,setTestMsg]=useState("");
+  function save(){if(!val.trim())return;localStorage.setItem(k.storageKey,val.trim());setSaved(true);setTestMsg("✅ 저장됐어요");setTimeout(()=>{setSaved(false);setTestMsg("");},3000);}
+  // 실제 API로 키가 진짜 동작하는지 확인 — 관리자 화면과 동일. 저장 전에 "내 키 되나?"를 회원이 직접 확인.
+  async function testKey(){
+    if(!val.trim()){setTestMsg("❌ 키를 먼저 입력해주세요");return;}
+    setTesting(true);setTestMsg("");
+    try{
+      if(k.id==="gemini"){
+        let done=false;
+        for(const model of GEMINI_MODELS){
+          const r=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${val.trim()}`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({contents:[{parts:[{text:"hi"}]}],generationConfig:{maxOutputTokens:10}}),signal:AbortSignal.timeout(8000)});
+          if(r.ok){setTestMsg("✅ 연결 성공! 이 키로 글이 생성돼요");done=true;break;}
+          if(r.status===400||r.status===401||r.status===403){setTestMsg("❌ 키가 올바르지 않아요. 다시 확인해주세요");done=true;break;}
+        }
+        if(!done)setTestMsg("❌ 연결 실패 — 잠시 후 다시 시도해주세요");
+      }else if(k.id==="groq"){
+        const r=await fetch("https://api.groq.com/openai/v1/models",{headers:{"Authorization":`Bearer ${val.trim()}`},signal:AbortSignal.timeout(8000)});
+        setTestMsg(r.ok?"✅ 연결 성공! 이 키로 글이 생성돼요":"❌ 키가 올바르지 않아요. 다시 확인해주세요");
+      }else if(k.id==="openai"||k.id==="openai_img"){
+        const r=await fetch("https://api.openai.com/v1/models",{headers:{"Authorization":`Bearer ${val.trim()}`},signal:AbortSignal.timeout(8000)});
+        setTestMsg(r.ok?"✅ 연결 성공! 이 키로 생성돼요":"❌ 키가 올바르지 않아요(결제/잔액도 확인해주세요)");
+      }else{
+        setTestMsg("저장 후 실제 생성으로 확인돼요");
+      }
+    }catch(e:any){setTestMsg("❌ "+(e.message||"네트워크 오류"));}
+    finally{setTesting(false);}
+  }
   return (
     <div style={{marginBottom:10,padding:"12px 14px",borderRadius:12,border:"1px solid var(--border)",background:"var(--bg)"}}>
       <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
@@ -204,8 +231,10 @@ function KeyInput({k}:{k:any; [x:string]:any}) {
       <div style={{display:"flex",gap:6}}>
         <input className="inp" type={show?"text":"password"} placeholder={k.placeholder} value={val} onChange={e=>setVal(e.target.value)} style={{flex:1,fontSize:13,padding:"9px 12px"}}/>
         <button className="btn-ghost" onClick={()=>setShow(s=>!s)}>{show?"숨김":"표시"}</button>
+        <button className="btn-ghost" onClick={testKey} disabled={testing}>{testing?"테스트 중…":"테스트"}</button>
         <button style={{padding:"9px 16px",borderRadius:8,border:"none",background:saved?"#00c875":"var(--accent)",color:"#000",cursor:"pointer",fontSize:12,fontWeight:800,fontFamily:"inherit",transition:"all .2s"}} onClick={save}>{saved?"✓":"저장"}</button>
       </div>
+      {testMsg && <div style={{fontSize:12,marginTop:6,fontWeight:600,color:testMsg.includes("✅")?"#00c875":"#ff6b6b"}}>{testMsg}</div>}
     </div>
   );
 }
@@ -8314,11 +8343,12 @@ POST3: (제목)|(이유)
                     ))}
                   </div>
                   <div className="alert-box alert-info" style={{margin:"4px 0 0"}}>💡 OpenAI 키 하나로 GPT-4o(글쓰기) + DALL-E 3(이미지) 모두 사용 가능해요</div>
+                  <div className="alert-box alert-warn" style={{margin:"8px 0 0"}}>🖼️ 이미지 생성은 <b>무료 옵션이 없어요</b> — DALL-E 3 또는 Flux(Replicate) <b>유료 키가 필요</b>합니다. (글쓰기는 Gemini·Groq로 무료 가능)</div>
                 </div>
                 <div className="card">
                   <div className="card-title" style={{marginBottom:14}}>🔑 API 키 관리</div>
                   <div className="key-section" style={{background:"var(--accent-bg)",borderColor:"var(--accent-border)"}}><div className="key-section-title" style={{color:"var(--accent-text)"}}>📝 글쓰기 API 키</div>{WRITE_AI_LIST.map(k=><KeyInput key={k.id} k={k}/>)}</div>
-                  <div className="key-section" style={{background:"rgba(155,125,255,.07)",borderColor:"rgba(155,125,255,.2)"}}><div className="key-section-title" style={{color:"var(--purple)"}}>🖼️ 이미지 API 키</div>{IMAGE_AI_LIST.map(k=><KeyInput key={k.id} k={k}/>)}</div>
+                  <div className="key-section" style={{background:"rgba(155,125,255,.07)",borderColor:"rgba(155,125,255,.2)"}}><div className="key-section-title" style={{color:"var(--purple)"}}>🖼️ 이미지 API 키 <span style={{fontSize:11,fontWeight:600,color:"var(--warn)"}}>(유료만 지원 — 무료 없음)</span></div>{IMAGE_AI_LIST.map(k=><KeyInput key={k.id} k={k}/>)}</div>
                 </div>
                 <div className="card">
                   <div className="card-title" style={{marginBottom:14}}>👤 내 계정 정보</div>

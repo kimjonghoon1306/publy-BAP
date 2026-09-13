@@ -7012,6 +7012,7 @@ POST3: (제목)|(이유)
                       </button>
                     ))}
                   </div>
+                  <div className="alert alert-warn" style={{margin:"10px 0 0"}}>🖼️ 이미지 생성은 <b>무료 옵션이 없어요</b> — DALL-E 3 또는 Flux(Replicate) <b>유료 키가 필요</b>합니다. (글쓰기는 Gemini·Groq로 무료 가능)</div>
                 </div>
 
                 <div className="card">
