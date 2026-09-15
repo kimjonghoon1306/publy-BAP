@@ -200,7 +200,9 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
   const [selectedAccts, setSelectedAccts] = useState<Set<string>>(new Set()); // 🔄 다계정 로테이션(저장·찜·공감을 여러 계정으로)
   const [accounts, setAccounts] = useState<PublyAccount[]>([]);
   const [running, setRunning] = useState(false);
-  type InflowLogEntry = { type: "text"; text: string } | { type: "shot"; caption: string; dataUrl: string };
+  type InflowLogEntry = ({ type: "text"; text: string } | { type: "shot"; caption: string; dataUrl: string }) & { t?: number };
+  // 🕒 로그 한 줄마다 실시간 시각(테리: 행위마다 시간 찍혀야) — [시:분:초]
+  const logTs = (t?: number) => (t ? new Date(t).toLocaleTimeString("ko-KR", { hour12: false }) : "");
   const [logs, setLogs] = useState<InflowLogEntry[]>([]);
   const [used, setUsed] = useState(0);            // 전체 하루 한도 사용량(한도 계산용)
   const [todayScoped, setTodayScoped] = useState(0); // 현재 대상의 오늘 유입(KPI 표시용, 대상별 분리)
@@ -258,7 +260,8 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
   const logBoxRef = useRef<HTMLDivElement | null>(null);
 
   const appendLog = (entry: InflowLogEntry) => setLogs((current) => {
-    let next = [...current, entry].slice(-300);
+    const stamped = { ...entry, t: entry.t ?? Date.now() }; // 🕒 쌓는 시점의 실시간 시각 기록
+    let next = [...current, stamped].slice(-300);
     const shots = next.reduce((count, item) => count + (item.type === "shot" ? 1 : 0), 0);
     if (shots > 8) { const firstShot = next.findIndex((item) => item.type === "shot"); if (firstShot >= 0) next = next.filter((_, index) => index !== firstShot); }
     return next;
@@ -861,7 +864,7 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
 
   const copyLogs = () => {
     if (!logs.length) return;
-    navigator.clipboard.writeText(logs.map((entry) => entry.type === "text" ? entry.text : `📸 ${entry.caption}`).join("\n")).then(() => toast("로그 전체를 복사했어요", "success")).catch(() => toast("복사 실패", "error"));
+    navigator.clipboard.writeText(logs.map((entry) => `${logTs(entry.t)}  ${entry.type === "text" ? entry.text : `📸 ${entry.caption}`}`).join("\n")).then(() => toast("로그 전체를 복사했어요", "success")).catch(() => toast("복사 실패", "error"));
   };
 
   const start = () => {
@@ -1974,9 +1977,9 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
         </div>
         <div ref={logBoxRef} style={{ background: C.logBg, color: C.logInk, borderRadius: 14, padding: "16px 18px", height: 520, overflowY: "auto", fontSize: 15, lineHeight: 1.8, fontFamily: "'SF Mono','D2Coding',ui-monospace,monospace", whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
           {logs.length ? logs.map((entry, i) => entry.type === "text"
-            ? <div key={i}>{entry.text}</div>
+            ? <div key={i}><span style={{ opacity: 0.45, marginRight: 6 }}>{logTs(entry.t)}</span>{entry.text}</div>
             : <div key={i} style={{ margin: "8px 0 12px" }}>
-                <div style={{ marginBottom: 5, fontWeight: 800 }}>📸 {entry.caption}</div>
+                <div style={{ marginBottom: 5, fontWeight: 800 }}><span style={{ opacity: 0.45, marginRight: 6, fontWeight: 400 }}>{logTs(entry.t)}</span>📸 {entry.caption}</div>
                 <img src={entry.dataUrl} alt={entry.caption} style={{ display: "block", width: "min(280px,100%)", maxHeight: 190, objectFit: "contain", borderRadius: 9, border: "1px solid rgba(255,255,255,.18)" }} />
               </div>
           ) : <div style={{ opacity: 0.5 }}>여기에 검색 → 진입 → 체류 → 액션 전 과정이 실시간으로 표시돼요.</div>}
