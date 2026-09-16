@@ -15,6 +15,8 @@ import Daebaekseo, { DAEBAEKSEO_VERSION } from "../components/Daebaekseo";
 import dodoImg from "../assets/dodo.png";
 
 type MainTab = "control" | "keyword" | "write" | "image" | "photo" | "publish" | "onetouch" | "manage" | "accounts" | "rank" | "blogscore" | "calendar" | "settings" | "neighbor" | "engage" | "reply" | "pumasi" | "insta_dm" | "crawl" | "inflow" | "place" | "place_reply";
+// 계정연결/Flow연결 미비 시 공통 게이트 팝업에서 쓰는 이슈(무엇을·버튼 누르면 어디로).
+type GateIssue = { msg:string; btnLabel:string; go:()=>void };
 type OnPartnerProduct = {id:string|null;name:string;image:string;price:number|null;available:boolean;partnerUrl:string;shopUrl:string};
 type OnPartnerPlacement = "auto"|"adpost"|"after_first"|"middle"|"before_last"|"bottom";
 type PublishConcept = "full" | "body_faq" | "body_only";
@@ -870,6 +872,9 @@ export default function DashboardPage({user, onLogout, onAdminLogin, onThemeTogg
     try{ const r=await botFetch(`${BOT}/api/session-status/${user.id}`,{signal:AbortSignal.timeout(3000)}); if(r.ok) setRealSession(await r.json()); }catch{}
   },[user.id]);
   useEffect(()=>{ if(botOnline) refreshSessionStatus(); },[botOnline,refreshSessionStatus]);
+  // 봇 온라인 동안 주기 갱신 — 발행/글살리기 직전에 세션이 죽어도(예: 시간 경과·다른 기능 접속) 게이트가 최신 상태로 막게.
+  useEffect(()=>{ if(!botOnline)return; const iv=setInterval(refreshSessionStatus,30000); return ()=>clearInterval(iv); },[botOnline,refreshSessionStatus]);
+  const [gate, setGate] = useState<{title:string;issues:GateIssue[]}|null>(null);   // 계정/Flow 연결 게이트 팝업
   // 인스타 DM
   const [dmTargets, setDmTargets] = useState<InstaDmTarget[]>([]);
   const [dmHistory, setDmHistory] = useState<InstaDmHistory[]>([]);
@@ -3240,8 +3245,33 @@ POST3: (제목)|(이유)
   }
   function stopOneTouch(){otStopRef.current=true;try{otAbortRef.current?.abort();}catch{};setOtRunning(false);setOtNextAt(null);showToast("원터치를 멈췄어요 — 진행 중이던 작업도 중단","info");}
 
+  // 네이버 세션 실측 게이트 — 계정 관리(needReconnect: rs===false)와 100% 동일 기준.
+  //   ★조회 전/실패(undefined)면 '모름'이라 관대하게 통과(멀쩡한 세션 오차단 방지). 실측으로 죽음(false)이 확인됐을 때만 차단.
+  function naverSessionReady():boolean{
+    const everConnected=accounts.some(a=>a.platform==="naver"&&a.is_connected);
+    if(!everConnected) return false;                          // 계정 자체가 연결 안 됨
+    if(botOnline && realSession.naver===false) return false;  // 봇이 실제로 세션 없음을 확인한 경우에만 차단
+    return true;
+  }
+  // 발행 계열(원터치·글살리기·제목수정 등) 공통 게이트 수집. needFlow=이미지 Flow가 필요한 작업인가.
+  function collectPublishGate(opts:{needFlow:boolean}):GateIssue[]{
+    const issues:GateIssue[]=[];
+    const everConnected=accounts.some(a=>a.platform==="naver"&&a.is_connected);
+    if(!naverSessionReady()){
+      issues.push({
+        msg: everConnected ? "네이버 세션이 만료됐어요. 계정 관리에서 다시 연결해주세요." : "네이버 계정이 아직 연결 안 됐어요. 계정 관리에서 연결해주세요.",
+        btnLabel:"계정 관리로 이동", go:()=>setTab("accounts"),
+      });
+    }
+    if(opts.needFlow && !flowSlotReady[flowSlot]){
+      issues.push({ msg:"무료 Flow 이미지가 연결 안 됐어요. 원터치 발행에서 'Flow 준비'를 눌러 연결해주세요.", btnLabel:"Flow 연결하러 가기", go:()=>setTab("onetouch") });
+    }
+    return issues;
+  }
+  // 문자열 에러도 내용에 맞춰 이동 버튼을 붙여 커스텀 모달로 띄운다(window.alert은 버튼 이동 불가).
   function showOneTouchPreflight(errors:string[],title="글 살리기를 시작할 수 없어요"){
-    window.alert(`${title}\n\n${errors.map(v=>`• ${v}`).join("\n")}`);
+    const issues:GateIssue[]=errors.map(msg=>/Flow/i.test(msg)?{msg,btnLabel:"Flow 연결하러 가기",go:()=>setTab("onetouch")}:{msg,btnLabel:"계정 관리로 이동",go:()=>setTab("accounts")});
+    setGate({title,issues});
   }
 
   // 블로그지수(NeighborPage)에서 '글 살리기' 클릭 → 이벤트로 여기서 실행(원터치 탭으로 이동해 진행상황 표시)
@@ -3255,8 +3285,7 @@ POST3: (제목)|(이유)
       //   연결 때 저장한 blog_name(실제 blogId)을 우선 비교한다. 현재 원터치 선택계정을 쓰면
       //   다른 계정(s9653)의 정상 세션을 활성화해 그 블로그에서 편집기를 찾는 사고가 난다.
       const naverAccs=accounts.filter(a=>a.platform==="naver"&&(botOnline?a.is_connected:true));
-      const errors:string[]=[];
-      if(!naverAccs.length)errors.push("네이버 계정이 연결 안 됐어요 → 계정관리에서 계정을 연결하세요");
+      const gateIssues=collectPublishGate({needFlow:otImgMode==="flow"});
       const norm=(v?:string)=>String(v||"").trim().toLowerCase().replace(/@naver\.com$/i,"");
       const targetBlogId=norm(target.blogId);
       // 1순위는 블로그지수/제목수정에서 이미 검증해 사용한 로그인ID. blog_name 비교는 구버전 이벤트용 폴백.
@@ -3264,9 +3293,8 @@ POST3: (제목)|(이유)
         ||naverAccs.find(a=>norm(a.blog_name)===targetBlogId)
         ||naverAccs.find(a=>norm(a.username)===targetBlogId)
         ||(naverAccs.length===1?naverAccs[0]:undefined);
-      if(naverAccs.length&&!ownerAcc)errors.push(`이 글의 주인 블로그(${target.blogId})와 연결된 계정을 찾지 못했어요 → 해당 네이버 계정을 다시 연결하세요`);
-      if(otImgMode==="flow"&&!flowSlotReady[flowSlot])errors.push("Flow가 연결 안 됐어요 → 원터치 발행에서 Flow를 연결 후 다시 시작하세요");
-      if(errors.length){e.preventDefault?.();showOneTouchPreflight(errors);finish(false);return;}
+      if(naverAccs.length&&!ownerAcc)gateIssues.push({msg:`이 글의 주인 블로그(${target.blogId})와 연결된 계정을 찾지 못했어요. 해당 네이버 계정을 다시 연결해주세요.`,btnLabel:"계정 관리로 이동",go:()=>setTab("accounts")});
+      if(gateIssues.length){e.preventDefault?.();setGate({title:"글 살리기를 시작할 수 없어요",issues:gateIssues});finish(false);return;}
       if(otRunningRef.current){e.preventDefault?.();const fail="다른 원터치 작업이 진행 중이에요. 완료하거나 중단한 뒤 다시 시도해주세요.";setReviveState({...target,title:target.origTitle,step:"실패",fail});showToast(fail,"error");finish(false);return;}
       const acc=ownerAcc!;
       setPubAccId(acc.id);
@@ -3275,7 +3303,13 @@ POST3: (제목)|(이유)
     };
     window.addEventListener("publy-revive-post",h as any);
     return ()=>window.removeEventListener("publy-revive-post",h as any);
-  },[accounts,platform,botOnline,otImgMode,flowSlot,flowSlotReady]);
+  },[accounts,platform,botOnline,otImgMode,flowSlot,flowSlotReady,realSession]);
+  // 🔗 블로그지수 등 하위 화면(NeighborPage)에서 "제목수정 등 네이버 작업" 진입 시 세션/Flow 게이트를 이 통합 팝업으로 위임.
+  useEffect(()=>{
+    const h=(e:any)=>{ const issues=collectPublishGate({needFlow:!!e.detail?.needFlow}); if(issues.length)setGate({title:e.detail?.title||"계정 연결이 필요해요",issues}); };
+    window.addEventListener("publy-open-gate",h as any);
+    return ()=>window.removeEventListener("publy-open-gate",h as any);
+  },[accounts,realSession,botOnline,flowSlot,flowSlotReady]);
   // ── 14일 중복방지: 사용한 키워드 기록/조회 ──
   function otRecentUsedKw():string[]{ try{ const cut=Date.now()-14*86400000; return (JSON.parse(localStorage.getItem("publy_ot_used_kw")||"[]") as any[]).filter(r=>r.at>cut).map(r=>r.kw); }catch{return [];} }
   function otRecordUsedKw(kws:string[]){ try{ const cut=Date.now()-14*86400000; const kept=(JSON.parse(localStorage.getItem("publy_ot_used_kw")||"[]") as any[]).filter(r=>r.at>cut); const now=Date.now(); for(const k of kws) kept.push({kw:k,at:now}); localStorage.setItem("publy_ot_used_kw",JSON.stringify(kept.slice(-800))); }catch{} }
@@ -3316,13 +3350,11 @@ POST3: (제목)|(이유)
       if(!rq.ok){const fail=`오늘 이 글 살리기 한도(${rq.limit}회)를 모두 사용했어요. 자정에 다시 사용할 수 있어요.`;setReviveState({logNo:activeRevive.logNo,title:activeRevive.origTitle,step:"실패",fail});showToast(fail,"info");return;}
     }
     const runAccId=accountId||pubAccId;
-    const preflightErrors:string[]=[];
-    // 관문 = '연결된 네이버 계정이 있나'(발행은 user.id 세션으로 하므로 계정 매칭 불필요). revive는 platform 상태와 무관하게 통과해야 하니 accounts 전체에서 확인.
-    const hasNaverAcc=accounts.some(a=>a.platform==="naver"&&(botOnline?a.is_connected:true));
-    const runAccOk=!!runAccId&&(connAccs.some(a=>a.id===runAccId)||accounts.some(a=>a.id===runAccId));
-    if(activeRevive?!hasNaverAcc:(!runAccOk))preflightErrors.push("네이버 계정이 연결 안 됐어요 → 계정관리에서 계정을 연결하세요");
-    if(otImgMode==="flow"&&!flowSlotReady[flowSlot])preflightErrors.push("Flow가 연결 안 됐어요 → 원터치 발행에서 Flow를 연결 후 다시 시작하세요");
-    if(preflightErrors.length){showOneTouchPreflight(preflightErrors,activeRevive?undefined:"원터치 발행을 시작할 수 없어요");return;}
+    // 관문 = 네이버 세션이 실제 살아있나(계정 관리와 동일 실측) + Flow 필요 시 Flow 연결. 세션 살아있으면 조용히 통과, 죽었을 때만 안내.
+    const gateIssues=collectPublishGate({needFlow:otImgMode==="flow"});
+    const runAccOk=activeRevive?true:(!!runAccId&&(connAccs.some(a=>a.id===runAccId)||accounts.some(a=>a.id===runAccId)));
+    if(!runAccOk&&!gateIssues.some(g=>g.btnLabel==="계정 관리로 이동"))gateIssues.unshift({msg:"발행할 네이버 계정이 선택 안 됐어요. 계정 관리에서 연결·선택해주세요.",btnLabel:"계정 관리로 이동",go:()=>setTab("accounts")});
+    if(gateIssues.length){setGate({title:activeRevive?"글 살리기를 시작할 수 없어요":"원터치 발행을 시작할 수 없어요",issues:gateIssues});return;}
     const termMin=otCustomTerm.trim()?Math.max(1,parseInt(otCustomTerm,10)||otTermMin):otTermMin;
     otRunningRef.current=true;otStopRef.current=false;setOtRunning(true);setOtNextAt(null);setOtPaused(null);otFlowExhaustedRef.current.clear();
     const ctrl=new AbortController();otAbortRef.current=ctrl;const signal=ctrl.signal;
@@ -3841,7 +3873,11 @@ ${segList}`;
     if(effTitle && effTitle!==pubTitle) setPubTitle(effTitle);
     if(effGenContent && effGenContent!==genContent) setGenContent(effGenContent);
 
-    if(!pubAccId){alert("발행할 계정을 선택해주세요 (계정 관리에서 연결)");return;}
+    // 🔗 네이버 세션 게이트 — 실측으로 세션 죽었으면 발행 도중 튕기지 말고 진입 전 안내(계정 관리로 이동 버튼). 일반발행은 Flow 불필요.
+    { const gateIssues=collectPublishGate({needFlow:false});
+      const runAccOk=!!pubAccId&&(connAccs.some(a=>a.id===pubAccId)||accounts.some(a=>a.id===pubAccId));
+      if(!runAccOk&&!gateIssues.some(g=>g.btnLabel==="계정 관리로 이동"))gateIssues.unshift({msg:"발행할 네이버 계정이 선택 안 됐어요. 계정 관리에서 연결·선택해주세요.",btnLabel:"계정 관리로 이동",go:()=>setTab("accounts")});
+      if(gateIssues.length){setGate({title:"발행을 시작할 수 없어요",issues:gateIssues});return;} }
     if(!effTitle){alert("제목이 없어요. 글 생성 또는 키워드/제목에서 제목을 만들어주세요");return;}
     // content 계산 (state 대신 복원값 기준)
     const content = buildPublishContentWith(effGenContent);
@@ -8649,6 +8685,25 @@ POST3: (제목)|(이유)
             <div style={{padding:"18px 22px"}}>
               <button onClick={()=>setImageCountPopup(null)} style={{width:"100%",padding:"14px",borderRadius:12,border:0,background:"linear-gradient(135deg,#a855f7,#7c3aed)",color:"#fff",fontSize:15,fontWeight:900,cursor:"pointer",fontFamily:"inherit"}}>확인</button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ⚠️ 계정/Flow 연결 게이트 팝업 — 무엇을·버튼 누르면 그 페이지로 이동 */}
+      {gate && (
+        <div onClick={()=>setGate(null)} style={{position:"fixed",inset:0,background:"rgba(0,0,0,.55)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:99999,padding:20}}>
+          <div onClick={e=>e.stopPropagation()} style={{width:"100%",maxWidth:420,background:theme==="dark"?"#18212f":"#fff",borderRadius:16,padding:"24px 22px",boxShadow:"0 20px 60px rgba(0,0,0,.4)"}}>
+            <div style={{fontSize:17,fontWeight:900,color:theme==="dark"?"#fff":"#1a2332",marginBottom:6}}>⚠️ {gate.title}</div>
+            <div style={{fontSize:13,color:theme==="dark"?"#8fa3bd":"#647084",marginBottom:18,lineHeight:1.5}}>아래만 연결하면 바로 이어서 진행할 수 있어요.</div>
+            <div style={{display:"flex",flexDirection:"column",gap:12}}>
+              {gate.issues.map((it,i)=>(
+                <div key={i} style={{background:theme==="dark"?"#111a26":"#f5f8fc",borderRadius:12,padding:"14px 15px"}}>
+                  <div style={{fontSize:13.5,color:theme==="dark"?"#d5e0ef":"#33404f",lineHeight:1.55,marginBottom:12}}>{it.msg}</div>
+                  <button onClick={()=>{ const go=it.go; setGate(null); go(); }} style={{width:"100%",padding:"11px",borderRadius:10,border:"none",background:"#7c3aed",color:"#fff",cursor:"pointer",fontSize:13.5,fontWeight:800,fontFamily:"inherit"}}>{it.btnLabel} →</button>
+                </div>
+              ))}
+            </div>
+            <button onClick={()=>setGate(null)} style={{width:"100%",marginTop:14,padding:"10px",borderRadius:10,border:`1px solid ${theme==="dark"?"#33404f":"#d2dbe8"}`,background:"transparent",color:theme==="dark"?"#8fa3bd":"#647084",cursor:"pointer",fontSize:12.5,fontWeight:700,fontFamily:"inherit"}}>닫기</button>
           </div>
         </div>
       )}

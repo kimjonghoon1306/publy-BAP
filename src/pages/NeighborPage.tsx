@@ -1316,7 +1316,8 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
     const list = targets;
     if (!list.length) return alert("수집된 블로그가 없습니다");
     const acc = activeAccount;
-    if (!acc) return alert("먼저 계정을 연결하세요");
+    // 세션이 살아있는 계정이 없음(연결 안 됨/만료) → 부모 통합 게이트 팝업(계정 관리로 이동 버튼)으로 안내.
+    if (!acc) { window.dispatchEvent(new CustomEvent("publy-open-gate",{detail:{title:"계정 연결이 필요해요"}})); return; }
     const n = Math.max(2, Math.min(10, spreadBatches));
     const gapMs = Math.max(1, spreadGapMin) * 60 * 1000;
     // 대상을 n개 배치로 균등 분할
@@ -1408,7 +1409,8 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
     const list = targetList || eTargets;
     if (!list.length) return alert("수집된 블로그가 없습니다");
     const acc = activeAccount;
-    if (!acc) return alert("먼저 계정을 연결하세요");
+    // 세션이 살아있는 계정이 없음(연결 안 됨/만료) → 부모 통합 게이트 팝업(계정 관리로 이동 버튼)으로 안내.
+    if (!acc) { window.dispatchEvent(new CustomEvent("publy-open-gate",{detail:{title:"계정 연결이 필요해요"}})); return; }
     setEWorking(true); setEDoneCnt(0); setEFailCnt(0);
     eJobIdRef.current = Date.now().toString();
     const days = ePeriod === "custom" ? eCustomDays : ePeriod;
@@ -1721,7 +1723,8 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
   /* 개선 제목 → 실제 글 제목 자동 변경(재발행) */
   const handleApplyTitle = async (originalTitle: string, newTitle: string, key: string, logNoArg?: string) => {
     const acc = activeAccount;
-    if (!acc) return alert("먼저 계정을 연결하세요");
+    // 세션이 살아있는 계정이 없음(연결 안 됨/만료) → 부모 통합 게이트 팝업(계정 관리로 이동 버튼)으로 안내.
+    if (!acc) { window.dispatchEvent(new CustomEvent("publy-open-gate",{detail:{title:"계정 연결이 필요해요"}})); return; }
     // logNo: 솔루션에 직접 붙여둔 값 우선, 없으면 원제목 매칭으로 폴백
     const match = (scResult?.exposureChecks || []).find(c => c.title === originalTitle);
     const logNo = logNoArg || match?.logNo || "";
@@ -1796,6 +1799,8 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
 
   // 🚀 지금 목록(list)의 미노출 글 전체를 자동으로: 관찰중 제외 → 개선안 → 제목1·2 랜덤 → 변경. 한도 걸리면 멈추고 업그레이드 팝업.
   const runBulkRetitle = async (targets: { title: string; logNo?: string; blogId?: string }[]) => {
+    // 세션 살아있는 계정 없으면 부모 통합 게이트 팝업으로 안내(도중에 터지지 않게 진입 전 차단).
+    if (!activeAccount) { window.dispatchEvent(new CustomEvent("publy-open-gate",{detail:{title:"제목을 바꿀 수 없어요"}})); return; }
     // 관찰중(이미 제목 바꿔 지켜보는) 글 제외 — 무한루프 차단
     const todo = targets.filter(t => t.logNo).filter(t => {
       const care = careMap[t.logNo!];
