@@ -3412,9 +3412,32 @@ POST3: (제목)|(이유)
           otLive(`  ✅ 이미지 ${imgs.length}/${n}장`);
         } else {   // 무료 Flow: 위 'Flow 준비'로 연 크롬(포트 9222)을 그대로 사용 → 재로그인/새창 없음
           upd({step:"Flow 이미지 생성 중"}); otLive(`  🖼️ Flow 이미지 ${n}장 생성 중(연결된 크롬 사용)`);
-          const flines=content.split("\n").filter((l:string)=>l.trim().length>5); const fstep=Math.max(1,Math.floor(flines.length/n));
-          const fprompts=Array.from({length:n},(_,k)=>{const seg=flines.slice(k*fstep,(k+1)*fstep).join(" ").slice(0,150);return withImageConcept(buildFlowPrompt(kw,title,seg,k),runImageConcept);});
-          const fcaptions=buildCaptions(kw,n,content);
+          // ★이미지 프롬프트: Gemini가 본문 각 구간을 실제로 읽고 "그 문단이 말하는 바로 그 장면"을 그리게 한다(buildStoryPrompts).
+          //   기존 buildFlowPrompt(키워드 사전 매칭)는 사전에 없는 주제(항공/마일리지 등)가 폴백으로 새서
+          //   본문과 무관한 이미지(마일리지 글에 수술 사진 등)가 생성되는 실측 버그가 있었다.
+          //   수동 이미지 생성 탭과 동일 로직으로 통일 → 오매칭 원천 차단.
+          let fprompts:string[]; let fcaptions:string[];
+          try{
+            const story=await buildStoryPrompts(title,content,n);
+            if(!story.prompts.length) throw new Error("빈 결과");
+            const capPool0=buildCaptions(kw,n,content);
+            fprompts=story.prompts.map(p=>withImageConcept(p,runImageConcept));
+            fcaptions=story.prompts.map((_,ci)=>story.captions[ci]||capPool0[ci]||`${kw}`);
+          }catch(spErr:any){
+            if(spErr?.name==="AbortError")throw spErr;
+            // 안전망: AI 프롬프트 생성 실패 시에만 기존 키워드매칭 방식으로 폴백(발행은 멈추지 않게)
+            otLive(`  ⚠️ 장면 프롬프트 생성 실패(${spErr?.message||"오류"}) — 기본 방식으로 이미지 생성`);
+            const flines=content.split("\n").filter((l:string)=>l.trim().length>5); const fstep=Math.max(1,Math.floor(flines.length/n));
+            fprompts=Array.from({length:n},(_,k)=>{const seg=flines.slice(k*fstep,(k+1)*fstep).join(" ").slice(0,150);return withImageConcept(buildFlowPrompt(kw,title,seg,k),runImageConcept);});
+            fcaptions=buildCaptions(kw,n,content);
+          }
+          // 개수 정합: buildStoryPrompts가 n보다 적게 만들면(짧은 글) 부족분을 채우고, 넘치면 n장으로 자른다.
+          if(fprompts.length<n){
+            const flines=content.split("\n").filter((l:string)=>l.trim().length>5); const fstep=Math.max(1,Math.floor(flines.length/n));
+            const capPool=buildCaptions(kw,n,content);
+            for(let k=fprompts.length;k<n;k++){const seg=flines.slice(k*fstep,(k+1)*fstep).join(" ").slice(0,150);fprompts.push(withImageConcept(buildFlowPrompt(kw,title,seg,k),runImageConcept));fcaptions.push(capPool[k]||`${kw}`);}
+          }
+          fprompts=fprompts.slice(0,n); fcaptions=fcaptions.slice(0,n);
           // ★크레딧이 떨어지면 미리 로그인해둔 다음 슬롯으로 자동 전환하며 이어감(자리 비워도 OK). 소진 슬롯은 otFlowExhaustedRef에 기록.
           // 시도 순서: 현재 슬롯 먼저, 그다음 소진 안 된 나머지 슬롯들.
           const trySlots=[flowSlot,...flowSlots.map(s=>s.id).filter(id=>id!==flowSlot)].filter(id=>!otFlowExhaustedRef.current.has(id));
