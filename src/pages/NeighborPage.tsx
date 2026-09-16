@@ -154,7 +154,7 @@ const DEFAULT_MULTI_MSGS = [
 interface EngageResult { keyword: string; blogId: string; postUrl: string; liked: boolean; commented: boolean; status: "success"|"fail"|"skip"|"pending"|"running"; message: string; }
 // 상단·사이드바 배지와 동일한 플랜별 하루 한도 (lib/supabase.ts의 NEIGHBOR/ENGAGE_DAILY_LIMIT와 일치)
 const DAILY_LIMIT_BY_PLAN: Record<string, number> = { free: 10, basic: 50, pro: 100, unlimited: 999999, admin: 9999 };
-interface Props { theme: "dark"|"light"; userId?: string; plan?: string; initialTab?: "neighbor"|"engage"|"reply"|"score"|"pumasi"; singleTab?: boolean; isActive?: boolean; onEngageUsageChange?: (used:number)=>void; initialNeighborUsed?: number; initialEngageUsed?: number; onBusyChange?: (busy:boolean)=>void; }
+interface Props { theme: "dark"|"light"; userId?: string; plan?: string; publishUserId?: string; initialTab?: "neighbor"|"engage"|"reply"|"score"|"pumasi"; singleTab?: boolean; isActive?: boolean; onEngageUsageChange?: (used:number)=>void; initialNeighborUsed?: number; initialEngageUsed?: number; onBusyChange?: (busy:boolean)=>void; }
 
 /* ── 내 이웃 키워드 분석 카드 (서이추·공감댓글 공용) ── */
 const KeywordAnalyzer = ({ keywords, loading, onAnalyze, onPick }: {
@@ -468,7 +468,7 @@ const REPUBLISH_BANDS: { k: string; label: string; min: number; max: number }[] 
 ];
 
 /* ── 메인 컴포넌트 ── */
-export default function NeighborPage({ theme, userId, plan = "free", initialTab, singleTab, isActive = true, onEngageUsageChange, initialNeighborUsed = 0, initialEngageUsed = 0, onBusyChange }: Props) {
+export default function NeighborPage({ theme, userId, plan = "free", publishUserId, initialTab, singleTab, isActive = true, onEngageUsageChange, initialNeighborUsed = 0, initialEngageUsed = 0, onBusyChange }: Props) {
   const [tab, setTab] = useState<"neighbor"|"engage"|"reply"|"score"|"pumasi">(initialTab || "neighbor");
   // ★탭별 계정·세션 완전 격리(2026-08-23): 서이추·공감댓글·답방·품앗이·지수가 각각 자기 계정 목록과 세션을 따로 갖는다.
   //   한 탭에서 연결해도 다른 탭엔 공유되지 않음. accountId에 tabKey를 붙여 봇 세션(naver_{accountId})까지 자동 격리.
@@ -787,11 +787,13 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
     if (!window.confirm(`선택한 글 ${queue.length}개를 차례대로 자동 살릴까요?\n\n제목·본문·이미지를 새로 만들어 기존 글에 덮어써요. 주소와 좋아요는 유지됩니다.${queue.length < targets.length ? `\n\n※ 오늘 남은 한도 때문에 ${queue.length}개만 진행합니다.` : ""}`)) return;
     reviveBulkStopRef.current = false;
     setReviveBulk({running:true,done:0,total:queue.length,success:0,failed:0});
+    addScLog(`🌱 전체 글 살리기 시작 — ${queue.length}개 (선택한 글을 차례대로 살려요)`);
     let success = 0; let failed = 0;
     for (let i=0;i<queue.length;i++) {
       if (reviveBulkStopRef.current) break;
       const item = queue[i];
       setReviveBulk({running:true,done:i,total:queue.length,success,failed,current:item.title});
+      addScLog(`🌱 (${i + 1}/${queue.length}) "${item.title.slice(0, 20)}" 살리는 중...`);
       const requestId = `bulk-revive-${Date.now()}-${i}-${item.logNo}`;
       const ok = await new Promise<boolean>(resolve => {
         let tracked = false;
@@ -805,7 +807,7 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
         const cleanup=()=>{window.clearTimeout(timer);window.removeEventListener("publy-revive-succeeded",onSucceeded);window.removeEventListener("publy-revive-request-finished",onFinished);};
         window.addEventListener("publy-revive-succeeded",onSucceeded);
         window.addEventListener("publy-revive-request-finished",onFinished);
-        const accepted=window.dispatchEvent(new CustomEvent("publy-revive-post",{cancelable:true,detail:{requestId,logNo:item.logNo,title:item.title,blogId:activeAccount?.blogId,naverId:activeAccount?.id,careAccountId:activeAccount?.accountId}}));
+        const accepted=window.dispatchEvent(new CustomEvent("publy-revive-post",{cancelable:true,detail:{requestId,logNo:item.logNo,title:item.title,blogId:activeAccount?.blogId,naverId:activeAccount?.id,careAccountId:activeAccount?.accountId,bulkIndex:i+1,bulkTotal:queue.length}}));
         if(!accepted){cleanup();resolve(false);}
       });
       if(ok)success++;else failed++;
@@ -1161,11 +1163,12 @@ export default function NeighborPage({ theme, userId, plan = "free", initialTab,
     if (!acc || !acc.id || !acc.pw) { if (!silent) alert("아이디와 비밀번호를 입력하세요"); return false; }
     setAccounts(p => p.map(a => a.accountId === accountId ? { ...a, loginLoading: true } : a));
     try {
-      const r = await botFetch(`${BOT}/api/login`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ accountId, id: acc.id, pw: acc.pw }) });
+      const r = await botFetch(`${BOT}/api/login`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ accountId, id: acc.id, pw: acc.pw, publishUserId }) });
       const d = await r.json();
       if (d.success) {
         setAccounts(p => p.map(a => a.accountId === accountId ? { ...a, sessionOk: true, blogId: d.blogId, loginLoading: false } : a));
         addLog(`✅ [${acc.id}] 로그인 성공 (blogId: ${d.blogId})`);
+        if (d.publishSynced) addLog(`🔗 이 계정으로 발행·글살리기도 바로 됩니다 (계정 관리에 자동 연동)`);
         addELog(`✅ [${acc.id}] 로그인 성공`);
         return true;
       } else throw new Error(d.error || "로그인 실패");

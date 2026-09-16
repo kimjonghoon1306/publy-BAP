@@ -3276,9 +3276,9 @@ POST3: (제목)|(이유)
 
   // 블로그지수(NeighborPage)에서 '글 살리기' 클릭 → 이벤트로 여기서 실행(원터치 탭으로 이동해 진행상황 표시)
   useEffect(()=>{
-    const h=async(e:any)=>{ const {logNo,title,blogId,naverId,careAccountId,requestId}=e.detail||{}; if(!logNo)return;
+    const h=async(e:any)=>{ const {logNo,title,blogId,naverId,careAccountId,requestId,bulkIndex,bulkTotal}=e.detail||{}; if(!logNo)return;
       const finish=(accepted:boolean)=>window.dispatchEvent(new CustomEvent("publy-revive-request-finished",{detail:{requestId,logNo:String(logNo),accepted}}));
-      const target={logNo:String(logNo),origTitle:String(title||""),origBody:"",blogId:String(blogId||""),careAccountId:String(careAccountId||"")};
+      const target={logNo:String(logNo),origTitle:String(title||""),origBody:"",blogId:String(blogId||""),careAccountId:String(careAccountId||""),bulkIndex:Number(bulkIndex)||0,bulkTotal:Number(bulkTotal)||0};
       setTab("onetouch");
       // ★글 살리기는 반드시 원문 소유 블로그의 로그인 세션을 골라야 한다.
       //   네이버 로그인ID(bb9653)와 블로그ID(system-b)는 다를 수 있으므로 username이 아니라
@@ -3341,7 +3341,7 @@ POST3: (제목)|(이유)
     }
     return arr.slice(0,count);
   }
-  async function runOneTouch(resume?:{idx:number;kws:string[];reviveTarget?:{logNo:string;origTitle:string;origBody:string;blogId?:string;careAccountId?:string}},reviveTarget?:{logNo:string;origTitle:string;origBody:string;blogId?:string;careAccountId?:string},source:"manual"|"schedule"|"revive"="manual",accountId?:string){
+  async function runOneTouch(resume?:{idx:number;kws:string[];reviveTarget?:{logNo:string;origTitle:string;origBody:string;blogId?:string;careAccountId?:string;bulkIndex?:number;bulkTotal?:number}},reviveTarget?:{logNo:string;origTitle:string;origBody:string;blogId?:string;careAccountId?:string;bulkIndex?:number;bulkTotal?:number},source:"manual"|"schedule"|"revive"="manual",accountId?:string){
     const activeRevive=reviveTarget||resume?.reviveTarget;
     if(otRunningRef.current){if(activeRevive)setReviveState({logNo:activeRevive.logNo,title:activeRevive.origTitle,step:"실패",fail:"다른 원터치 작업이 진행 중이에요."});return;}
     if(otSchedOn&&source!=="schedule"&&!activeRevive){const fail=`예약 대기 중이에요. ${otSchedTime} 예약을 끈 뒤 다시 시도해주세요.`;showToast(fail,"info");return;}
@@ -3362,9 +3362,17 @@ POST3: (제목)|(이유)
     // 📡 모든 단계를 라이브 로그로 → 회원 본인도, 관리자도 실시간 확인. (관리자 '라이브 로그' 탭에서 회원별로 보임)
     const liveLines:string[]=[];
     const bySched=source==="schedule";
-    setOtLiveLog(prev=>[...prev,activeRevive
-      ? `━━ 글 살리기 시작 ━━`
-      : `━━━━━ ${new Date().toLocaleString("ko-KR")} 원터치 ${resume?`이어가기(${resume.idx+1}번째부터)`:bySched?"예약 자동 시작":"시작"} ━━━━━`].slice(-300));
+    // 🌱 여러 글 묶어서 살리기(일괄)면 처음에 "총 N개" 요약 + 각 글에 (몇/총) 진행 표시. 단건이면 그대로.
+    const bi=activeRevive?.bulkIndex||0, bt=activeRevive?.bulkTotal||0;
+    { const lines:string[]=[];
+      if(activeRevive){
+        if(bt>1&&bi===1) lines.push(`━━━━━ 🌱 총 ${bt}개 글 살리기 시작 ━━━━━`);
+        lines.push(bt>1?`━━ 글 살리기 (${bi}/${bt}) 시작 ━━`:`━━ 글 살리기 시작 ━━`);
+      } else {
+        lines.push(`━━━━━ ${new Date().toLocaleString("ko-KR")} 원터치 ${resume?`이어가기(${resume.idx+1}번째부터)`:bySched?"예약 자동 시작":"시작"} ━━━━━`);
+      }
+      setOtLiveLog(prev=>[...prev,...lines].slice(-300));
+    }
     const otLive=(t:string,running=true)=>{const line=`[${new Date().toLocaleTimeString("ko-KR")}] ${t}`; liveLines.push(line); setOtLiveLog(prev=>[...prev,line].slice(-300)); try{pushLiveLog(user.id,{name:user.name,email:user.email,context:"⚡ 원터치 발행",text:liveLines.slice(-80).join("\n"),running});}catch{}};
     // 👤 어떤 네이버 계정으로 도는지 시작 로그 맨 앞에 항상 표시(일반 원터치·예약·이어가기·글살리기 전부). 회원=관리자 동일.
     { const runAcc=connAccs.find(a=>a.id===runAccId)||accounts.find(a=>a.id===runAccId);
@@ -8297,17 +8305,17 @@ POST3: (제목)|(이유)
             {/* ★자동화 탭 keep-alive: 방문한 탭은 언마운트하지 않고 display로만 숨김 → 탭 이동해도 작업·데이터 유지 */}
             {visitedAutoTabs.has("neighbor") && (
               <div className="tab-neighbor" aria-hidden={tab!=="neighbor"} style={{ display: tab==="neighbor" ? "block" : "none", pointerEvents: tab==="neighbor" ? "auto" : "none" }}>
-                <NeighborPage theme={theme as "dark"|"light"} userId={user.id} plan={user.plan} singleTab isActive={tab==="neighbor"} initialNeighborUsed={neighborUsed} onBusyChange={setNeighborBusy} />
+                <NeighborPage theme={theme as "dark"|"light"} userId={user.id} plan={user.plan} publishUserId={user.id} singleTab isActive={tab==="neighbor"} initialNeighborUsed={neighborUsed} onBusyChange={setNeighborBusy} />
               </div>
             )}
             {visitedAutoTabs.has("engage") && (
               <div className="tab-engage" aria-hidden={tab!=="engage"} style={{ display: tab==="engage" ? "block" : "none", pointerEvents: tab==="engage" ? "auto" : "none" }}>
-                <NeighborPage theme={theme as "dark"|"light"} userId={user.id} plan={user.plan} initialTab="engage" singleTab isActive={tab==="engage"} onEngageUsageChange={setEngageUsed} initialEngageUsed={engageUsed} onBusyChange={setNeighborBusy} />
+                <NeighborPage theme={theme as "dark"|"light"} userId={user.id} plan={user.plan} publishUserId={user.id} initialTab="engage" singleTab isActive={tab==="engage"} onEngageUsageChange={setEngageUsed} initialEngageUsed={engageUsed} onBusyChange={setNeighborBusy} />
               </div>
             )}
             {visitedAutoTabs.has("reply") && (
               <div className="tab-reply" aria-hidden={tab!=="reply"} style={{ display: tab==="reply" ? "block" : "none", pointerEvents: tab==="reply" ? "auto" : "none" }}>
-                <NeighborPage theme={theme as "dark"|"light"} userId={user.id} plan={user.plan} initialTab="reply" singleTab isActive={tab==="reply"} onBusyChange={setNeighborBusy} />
+                <NeighborPage theme={theme as "dark"|"light"} userId={user.id} plan={user.plan} publishUserId={user.id} initialTab="reply" singleTab isActive={tab==="reply"} onBusyChange={setNeighborBusy} />
               </div>
             )}
             {visitedAutoTabs.has("crawl") && crawlEnabled && (
@@ -8324,12 +8332,12 @@ POST3: (제목)|(이유)
             )}
             {visitedAutoTabs.has("pumasi") && (
               <div className="tab-pumasi" aria-hidden={tab!=="pumasi"} style={{ display: tab==="pumasi" ? "block" : "none", pointerEvents: tab==="pumasi" ? "auto" : "none" }}>
-                <NeighborPage theme={theme as "dark"|"light"} userId={user.id} plan={user.plan} initialTab="pumasi" singleTab isActive={tab==="pumasi"} onBusyChange={setNeighborBusy} />
+                <NeighborPage theme={theme as "dark"|"light"} userId={user.id} plan={user.plan} publishUserId={user.id} initialTab="pumasi" singleTab isActive={tab==="pumasi"} onBusyChange={setNeighborBusy} />
               </div>
             )}
             {visitedAutoTabs.has("blogscore") && (
               <div className="tab-blogscore" aria-hidden={tab!=="blogscore"} style={{ display: tab==="blogscore" ? "block" : "none", pointerEvents: tab==="blogscore" ? "auto" : "none" }}>
-                <NeighborPage theme={theme as "dark"|"light"} userId={user.id} plan={user.plan} initialTab="score" singleTab isActive={tab==="blogscore"} onBusyChange={setNeighborBusy} />
+                <NeighborPage theme={theme as "dark"|"light"} userId={user.id} plan={user.plan} publishUserId={user.id} initialTab="score" singleTab isActive={tab==="blogscore"} onBusyChange={setNeighborBusy} />
               </div>
             )}
 

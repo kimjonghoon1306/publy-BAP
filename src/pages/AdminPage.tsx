@@ -1138,9 +1138,9 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
   }
 
   useEffect(()=>{
-    const h=async(e:any)=>{ const {logNo,title,blogId,naverId,careAccountId,requestId}=e.detail||{}; if(!logNo)return;
+    const h=async(e:any)=>{ const {logNo,title,blogId,naverId,careAccountId,requestId,bulkIndex,bulkTotal}=e.detail||{}; if(!logNo)return;
       const finish=(accepted:boolean)=>window.dispatchEvent(new CustomEvent("publy-revive-request-finished",{detail:{requestId,logNo:String(logNo),accepted}}));
-      const target={logNo:String(logNo),origTitle:String(title||""),origBody:"",blogId:String(blogId||""),careAccountId:String(careAccountId||"")};
+      const target={logNo:String(logNo),origTitle:String(title||""),origBody:"",blogId:String(blogId||""),careAccountId:String(careAccountId||""),bulkIndex:Number(bulkIndex)||0,bulkTotal:Number(bulkTotal)||0};
       setTab("onetouch");
       // ★원문 blogId로 소유 계정을 고른다. 로그인ID와 블로그ID가 다른 계정도
       //   blog_name(연결 때 저장한 실제 blogId)으로 정확히 찾는다.
@@ -1192,7 +1192,7 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
       }catch{break;} }
     return arr.slice(0,count);
   }
-  async function runOneTouch(resume?:{idx:number;kws:string[];reviveTarget?:{logNo:string;origTitle:string;origBody:string;blogId?:string;careAccountId?:string}},reviveTarget?:{logNo:string;origTitle:string;origBody:string;blogId?:string;careAccountId?:string},source:"manual"|"schedule"|"revive"="manual",accountId?:string){
+  async function runOneTouch(resume?:{idx:number;kws:string[];reviveTarget?:{logNo:string;origTitle:string;origBody:string;blogId?:string;careAccountId?:string;bulkIndex?:number;bulkTotal?:number}},reviveTarget?:{logNo:string;origTitle:string;origBody:string;blogId?:string;careAccountId?:string;bulkIndex?:number;bulkTotal?:number},source:"manual"|"schedule"|"revive"="manual",accountId?:string){
     const activeRevive=reviveTarget||resume?.reviveTarget;
     if(otRunningRef.current){if(activeRevive)setReviveState({logNo:activeRevive.logNo,title:activeRevive.origTitle,step:"실패",fail:"다른 원터치 작업이 진행 중이에요."});return;}
     if(otSchedOn&&source!=="schedule"&&!activeRevive){const fail=`예약 대기 중이에요. ${otSchedTime} 예약을 끈 뒤 다시 시도해주세요.`;showToast(fail,"info");return;}
@@ -1213,9 +1213,17 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
     try{
     const otLive=(t:string)=>setOtLiveLog(prev=>[...prev,`[${new Date().toLocaleTimeString("ko-KR")}] ${t}`].slice(-300));
     const bySched=source==="schedule";
-    setOtLiveLog(prev=>[...prev,activeRevive
-      ? `━━ 글 살리기 시작 ━━`
-      : `━━━━━ ${new Date().toLocaleString("ko-KR")} 원터치 ${resume?`이어가기(${resume.idx+1}번째부터)`:bySched?"예약 자동 시작":"시작"} ━━━━━`].slice(-300));
+    // 🌱 여러 글 묶어서 살리기(일괄)면 처음에 "총 N개" 요약 + 각 글에 (몇/총) 진행 표시. 단건이면 그대로.
+    const bi=activeRevive?.bulkIndex||0, bt=activeRevive?.bulkTotal||0;
+    { const lines:string[]=[];
+      if(activeRevive){
+        if(bt>1&&bi===1) lines.push(`━━━━━ 🌱 총 ${bt}개 글 살리기 시작 ━━━━━`);
+        lines.push(bt>1?`━━ 글 살리기 (${bi}/${bt}) 시작 ━━`:`━━ 글 살리기 시작 ━━`);
+      } else {
+        lines.push(`━━━━━ ${new Date().toLocaleString("ko-KR")} 원터치 ${resume?`이어가기(${resume.idx+1}번째부터)`:bySched?"예약 자동 시작":"시작"} ━━━━━`);
+      }
+      setOtLiveLog(prev=>[...prev,...lines].slice(-300));
+    }
     // 👤 어떤 네이버 계정으로 도는지 시작 로그 맨 앞에 항상 표시(일반 원터치·예약·이어가기·글살리기 전부). 회원=관리자 동일.
     { const runAccount=connAccs.find(a=>a.id===runAccId)||admAccs.find(a=>a.id===runAccId);
       otLive(`👤 글 작성 계정: ${runAccount?.username||"확인 불가"}${runAccount?.blog_name?` → 블로그 ${runAccount.blog_name}`:""}`); }
@@ -3503,11 +3511,11 @@ POST3: (제목)|(이유)
 
             {/* ───── 🏪 플레이스 365 (회원과 동일 · 관리자는 무제한) ───── */}
             {visitedAutoTabs.has("place") && (
-              <div style={{ display: tab === "place" ? "block" : "none" }}><Place360 showToast={showToast} theme={theme==="dark"?"dark":"light"} userId={ADM_UID} plan="admin" onOpenCrawl={()=>setTab("crawl")} onOpenReview={()=>setTab("place_reply")} /></div>
+              <div style={{ display: tab === "place" ? "block" : "none" }}><Place360 showToast={showToast} theme={theme==="dark"?"dark":"light"} userId={ADM_UID} plan="admin"onOpenCrawl={()=>setTab("crawl")} onOpenReview={()=>setTab("place_reply")} /></div>
             )}
             {/* ───── 🗣️ 플레이스 리뷰답글 (회원과 동일 · 관리자는 무제한) ───── */}
             {tab==="place_reply" && (
-              <PlaceReview showToast={showToast} theme={theme==="dark"?"dark":"light"} userId={ADM_UID} plan="admin" onOpenPlace={()=>setTab("place")} />
+              <PlaceReview showToast={showToast} theme={theme==="dark"?"dark":"light"} userId={ADM_UID} plan="admin"onOpenPlace={()=>setTab("place")} />
             )}
 
             {/* ───── 🔎 크롤링·플레이스 365 관리 (관리자 전용 · 공용 권한 승인) ───── */}
@@ -6047,27 +6055,27 @@ POST3: (제목)|(이유)
             {/* ───── 자동화 탭 keep-alive: 방문한 탭은 숨기기만(작업·데이터 유지) ───── */}
             {visitedAutoTabs.has("neighbor") && (
               <div style={{ display: tab === "neighbor" ? "block" : "none" }}>
-                <NeighborPage theme={theme} userId={ADM_HISTORY_UID} plan="admin" singleTab isActive={tab === "neighbor"} />
+                <NeighborPage theme={theme} userId={ADM_HISTORY_UID} plan="admin" publishUserId={ADM_UID}singleTab isActive={tab === "neighbor"} />
               </div>
             )}
             {visitedAutoTabs.has("engage") && (
               <div style={{ display: tab === "engage" ? "block" : "none" }}>
-                <NeighborPage theme={theme} userId={ADM_HISTORY_UID} plan="admin" initialTab="engage" singleTab isActive={tab === "engage"} />
+                <NeighborPage theme={theme} userId={ADM_HISTORY_UID} plan="admin" publishUserId={ADM_UID}initialTab="engage" singleTab isActive={tab === "engage"} />
               </div>
             )}
             {visitedAutoTabs.has("reply") && (
               <div style={{ display: tab === "reply" ? "block" : "none" }}>
-                <NeighborPage theme={theme} userId={ADM_HISTORY_UID} plan="admin" initialTab="reply" singleTab isActive={tab === "reply"} />
+                <NeighborPage theme={theme} userId={ADM_HISTORY_UID} plan="admin" publishUserId={ADM_UID}initialTab="reply" singleTab isActive={tab === "reply"} />
               </div>
             )}
             {visitedAutoTabs.has("pumasi") && (
               <div style={{ display: tab === "pumasi" ? "block" : "none" }}>
-                <NeighborPage theme={theme} userId={ADM_HISTORY_UID} plan="admin" initialTab="pumasi" singleTab isActive={tab === "pumasi"} />
+                <NeighborPage theme={theme} userId={ADM_HISTORY_UID} plan="admin" publishUserId={ADM_UID}initialTab="pumasi" singleTab isActive={tab === "pumasi"} />
               </div>
             )}
             {visitedAutoTabs.has("blogscore") && (
               <div style={{ display: tab === "blogscore" ? "block" : "none" }}>
-                <NeighborPage theme={theme} userId={ADM_HISTORY_UID} plan="admin" initialTab="score" singleTab isActive={tab === "blogscore"} />
+                <NeighborPage theme={theme} userId={ADM_HISTORY_UID} plan="admin" publishUserId={ADM_UID}initialTab="score" singleTab isActive={tab === "blogscore"} />
               </div>
             )}
 
