@@ -2112,6 +2112,14 @@ export async function getPostCare(userId: string, account: string): Promise<Post
   return (data as PostCare[]) || [];
 }
 
+// 🔗 계정연결 통일 마이그레이션 — 옛 accountId({tabKey}_acc_N)로 저장된 진료차트 이력을 새 안정키(네이버 아이디)로 이전.
+//   계정 통일로 세션 accountId 형식이 바뀌어도 과거 검사·순위 이력이 안 날아가게(데이터 보존 규약). 멱등: 옛 키 행이 없으면 no-op.
+export async function migratePostCareAccount(userId: string, fromAccount: string, toAccount: string): Promise<void> {
+  if (!userId || !fromAccount || !toAccount || fromAccount === toAccount) return;
+  const { error } = await supabase.from("publy_post_care").update({ account: toAccount }).eq("user_id", userId).eq("account", fromAccount);
+  if (error) console.warn("[post_care] 계정 이력 이전 실패:", error.message);
+}
+
 // 🩺 P4: 글별 조회수를 진료차트에 누적(같은 날 재수집이면 갱신). 이미 카르테가 있는 글(logNo 매칭)만 update.
 export async function savePostViews(
   userId: string, account: string,

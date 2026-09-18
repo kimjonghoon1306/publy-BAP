@@ -110,6 +110,22 @@ app.use((req, res, next) => {
         return next();
     res.status(401).json({ error: "Unauthorized" });
 });
+// 응답 종료가 아니라 실제 작업 finally에서 해제한다(클라이언트 연결 종료 후에도 작업 가능).
+let activeWork = 0;
+function beginWork() {
+    activeWork++;
+    reportActivity();
+    let finished = false;
+    return () => { if (!finished) {
+        finished = true;
+        activeWork--;
+        reportActivity();
+    } };
+}
+function reportActivity() {
+    if (process.connected && process.send)
+        process.send({ type: "publy-activity", busy: activeWork > 0 || running > 0 || waitQueue.length > 0 }, () => { });
+}
 /* ── 동시 발행 제한 큐 ── */
 const MAX_CONCURRENT = 3;
 let running = 0;
@@ -117,10 +133,12 @@ const waitQueue = [];
 async function acquireSlot() {
     if (running < MAX_CONCURRENT) {
         running++;
+        reportActivity();
         return;
     }
     return new Promise((resolve) => {
-        waitQueue.push(() => { running++; resolve(); });
+        waitQueue.push(() => { running++; reportActivity(); resolve(); });
+        reportActivity();
     });
 }
 function releaseSlot() {
@@ -128,45 +146,64 @@ function releaseSlot() {
     const next = waitQueue.shift();
     if (next)
         next();
+    reportActivity();
 }
 /* ── 헬스체크 ── */
 app.get("/health", (_req, res) => {
-    res.json({ ok: true, version: "2.0.0", running, queued: waitQueue.length });
+    res.json({ ok: true, version: "2.0.0", running, queued: waitQueue.length, busy: activeWork > 0 || running > 0 || waitQueue.length > 0 });
 });
 /* ── 세션 저장 (계정 연결) ── */
 app.post("/api/naver/save-session", async (req, res) => {
-    const { userId, id, pw } = req.body;
-    if (!userId || !id || !pw)
-        return res.status(400).json({ success: false, error: "userId, id, pw 필요" });
+    const finishWork = beginWork();
     try {
-        const result = await (0, naver_1.saveNaverSession)(userId, id, pw);
-        res.json({ success: true, blogId: result.blogId });
+        const { userId, id, pw } = req.body;
+        if (!userId || !id || !pw)
+            return res.status(400).json({ success: false, error: "userId, id, pw 필요" });
+        try {
+            const result = await (0, naver_1.saveNaverSession)(userId, id, pw);
+            res.json({ success: true, blogId: result.blogId });
+        }
+        catch (e) {
+            res.status(500).json({ success: false, error: e.message });
+        }
     }
-    catch (e) {
-        res.status(500).json({ success: false, error: e.message });
+    finally {
+        finishWork();
     }
 });
 app.post("/api/tistory/save-session", async (req, res) => {
-    const { userId, id, pw, blogName } = req.body;
-    if (!userId || !id || !pw || !blogName)
-        return res.status(400).json({ success: false, error: "userId, id, pw, blogName 필요" });
+    const finishWork = beginWork();
     try {
-        await (0, tistory_1.saveTistorySession)(userId, id, pw, blogName);
-        res.json({ success: true });
+        const { userId, id, pw, blogName } = req.body;
+        if (!userId || !id || !pw || !blogName)
+            return res.status(400).json({ success: false, error: "userId, id, pw, blogName 필요" });
+        try {
+            await (0, tistory_1.saveTistorySession)(userId, id, pw, blogName);
+            res.json({ success: true });
+        }
+        catch (e) {
+            res.status(500).json({ success: false, error: e.message });
+        }
     }
-    catch (e) {
-        res.status(500).json({ success: false, error: e.message });
+    finally {
+        finishWork();
     }
 });
 /* ── 네이버 카테고리 조회 ── */
 app.get("/api/naver/categories/:userId", async (req, res) => {
-    const { userId } = req.params;
+    const finishWork = beginWork();
     try {
-        const categories = await (0, naver_1.getNaverCategories)(userId);
-        res.json({ categories });
+        const { userId } = req.params;
+        try {
+            const categories = await (0, naver_1.getNaverCategories)(userId);
+            res.json({ categories });
+        }
+        catch (e) {
+            res.status(500).json({ error: e.message, categories: [] });
+        }
     }
-    catch (e) {
-        res.status(500).json({ error: e.message, categories: [] });
+    finally {
+        finishWork();
     }
 });
 /* ── Google 세션 상태 확인 ── */
@@ -175,24 +212,38 @@ app.get("/api/google/session-exists/:userId", (req, res) => {
 });
 /* ── Google 로그인 세션 저장 ── */
 app.post("/api/google/save-session", async (req, res) => {
-    const { userId, email, pw } = req.body;
-    if (!userId)
-        return res.status(400).json({ success: false, error: "userId 필요" });
+    const finishWork = beginWork();
     try {
-        await (0, naver_1.saveGoogleSession)(userId, email, pw);
-        res.json({ success: true });
+        const { userId, email, pw } = req.body;
+        if (!userId)
+            return res.status(400).json({ success: false, error: "userId 필요" });
+        try {
+            await (0, naver_1.saveGoogleSession)(userId, email, pw);
+            res.json({ success: true });
+        }
+        catch (e) {
+            res.status(500).json({ success: false, error: e.message });
+        }
     }
-    catch (e) {
-        res.status(500).json({ success: false, error: e.message });
+    finally {
+        finishWork();
     }
 });
 /* ── 세션 상태 확인 ── */
 app.get("/api/session-status/:userId", (req, res) => {
     const { userId } = req.params;
+    // 🔗 계정별 상태: ?naverIds=a,b,c 로 연결된 네이버 아이디들을 받아 각 계정 세션(naver_{userId}__{naverId})의 실측 존재여부를 함께 반환.
+    //   모든 탭이 이 하나의 세션을 공유하므로, 각 탭은 재로그인 없이 여기서 ✅연결됨/⚠️재연결필요만 실시간 확인한다.
+    const naverAccounts = {};
+    const raw = String(req.query.naverIds || "").trim();
+    if (raw)
+        for (const id of raw.split(",").map(s => s.trim()).filter(Boolean))
+            naverAccounts[id] = (0, naver_1.naverAccountInfo)(userId, id);
     res.json({
         naver: (0, naver_1.naverSessionExists)(userId),
         tistory: (0, tistory_1.tistorySessionExists)(userId),
         google: (0, naver_1.googleSessionExists)(userId),
+        naverAccounts,
     });
 });
 app.delete("/api/session/:platform/:userId", (req, res) => {
@@ -299,13 +350,10 @@ app.post("/api/publish-full", async (req, res) => {
         if (platform === "naver") {
             if (naverId) {
                 const ok = (0, naver_1.activateNaverAccount)(userId, naverId);
-                // 기존 일반 발행은 그대로 유지하고, 다른 계정의 이전 세션으로 원문을 덮을 위험이 있는 글 살리기만 fail-closed.
-                if (!ok && editLogNo)
-                    throw new Error(`선택한 네이버 계정(${naverId})의 로그인 세션을 찾지 못했어요. 계정 관리에서 다시 연결해주세요.`);
+                // 선택 계정이 없으면 다른 계정의 활성 세션으로 발행하지 않는다.
                 if (!ok)
-                    console.log(`[publish] 계정 세션 없음: ${naverId}`);
-                else
-                    console.log(`[publish] 계정 세션 활성화: ${naverId}${editBlogId ? ` (글 주인 blogId=${editBlogId})` : ""}`);
+                    throw new Error(`선택한 네이버 계정(${naverId})의 로그인 세션을 찾지 못했어요. 계정 관리에서 다시 연결해주세요.`);
+                console.log(`[publish] 계정 세션 활성화: ${naverId}${editBlogId ? ` (글 주인 blogId=${editBlogId})` : ""}`);
             }
             postUrl = await (0, naver_1.publishNaver)({ userId, title, content, pubScope, tags, imageUrl, categoryId, visibility, scheduleTime, blocks: finalBlocks, videoUrl, videoPosition, editLogNo, editBlogId, signal: publishAbort.signal });
         }
@@ -382,7 +430,7 @@ async function processJobs() {
                     if (p?.naverId) {
                         const ok = (0, naver_1.activateNaverAccount)(job.user_id, p.naverId);
                         if (!ok)
-                            console.log(`[publish] 계정 세션 없음: ${p.naverId}`);
+                            throw new Error(`선택한 네이버 계정(${p.naverId})의 세션이 없습니다. 다시 연결해주세요.`);
                     }
                     postUrl = p
                         ? await (0, naver_1.publishNaver)({ userId: job.user_id, title: p.title || job.title, content: p.content ?? job.content, pubScope: p.pubScope, tags: p.tags || job.tags, imageUrl: p.imageUrl, categoryId: p.categoryId ?? job.category_id, visibility: p.visibility, blocks: p.blocks, videoUrl: p.videoUrl, videoPosition: p.videoPosition, scheduleTime: schedFuture })
@@ -559,36 +607,45 @@ app.get("/api/flow/status", async (_req, res) => {
 });
 /* ── Google Flow 이미지 생성 (CDP 방식) ── */
 app.post("/api/flow-generate", async (req, res) => {
-    const { prompts, captions, cdpPort } = req.body;
-    if (!Array.isArray(prompts) || prompts.length === 0)
-        return res.status(400).json({ error: "prompts 배열 필요" });
-    // ★요청 받자마자 즉시 로그(테리 요청): 사용자가 버튼 누른 걸 인식했다는 신호를 바로 보여준다.
-    //   (봇의 상세 "생성 시작" 로그는 크롬 연결·세션 준비 후라 10~20초 뒤에야 나오므로, 그 전에 확인용.)
-    console.log(`\n━━━━━ 🎨 그림 만들기를 시작합니다! 총 ${prompts.length}장을 만들 거예요. 잠시만 기다려 주세요 😊 ━━━━━`);
+    const finishWork = beginWork();
     try {
-        const images = await (0, naver_1.generateFlowImagesCDP)({
-            prompts,
-            captions: Array.isArray(captions) ? captions : [],
-            cdpPort: (typeof cdpPort === "number" && cdpPort >= 9222 && cdpPort <= 9299) ? cdpPort : 9222, // 슬롯별 포트
-            onLog: (m) => console.log(m),
-        });
-        if (images.length === 0) {
-            return res.status(500).json({ error: "이미지가 생성되지 않았어요. Flow 로그인/크레딧을 확인하거나 잠시 후 다시 시도해주세요." });
+        const { prompts, captions, cdpPort } = req.body;
+        if (!Array.isArray(prompts) || prompts.length === 0)
+            return res.status(400).json({ error: "prompts 배열 필요" });
+        // ★요청 받자마자 즉시 로그(테리 요청): 사용자가 버튼 누른 걸 인식했다는 신호를 바로 보여준다.
+        //   (봇의 상세 "생성 시작" 로그는 크롬 연결·세션 준비 후라 10~20초 뒤에야 나오므로, 그 전에 확인용.)
+        console.log(`\n━━━━━ 🎨 그림 만들기를 시작합니다! 총 ${prompts.length}장을 만들 거예요. 잠시만 기다려 주세요 😊 ━━━━━`);
+        try {
+            const images = await (0, naver_1.generateFlowImagesCDP)({
+                prompts,
+                captions: Array.isArray(captions) ? captions : [],
+                cdpPort: (typeof cdpPort === "number" && cdpPort >= 9222 && cdpPort <= 9299) ? cdpPort : 9222, // 슬롯별 포트
+                onLog: (m) => console.log(m),
+            });
+            if (images.length === 0) {
+                return res.status(500).json({ error: "이미지가 생성되지 않았어요. Flow 로그인/크레딧을 확인하거나 잠시 후 다시 시도해주세요." });
+            }
+            const partial = images.length < prompts.length;
+            console.log(`[server] 🎉 다 됐어요! 그림 ${images.length}장을 퍼블리로 가져왔어요${partial ? ` (${prompts.length}장 중 ${images.length}장 성공)` : " (전부 성공)"}. 이제 글에 넣으면 돼요!`);
+            res.status(200).json({ images, partial, requested: prompts.length, received: images.length });
         }
-        const partial = images.length < prompts.length;
-        console.log(`[server] 🎉 다 됐어요! 그림 ${images.length}장을 퍼블리로 가져왔어요${partial ? ` (${prompts.length}장 중 ${images.length}장 성공)` : " (전부 성공)"}. 이제 글에 넣으면 돼요!`);
-        res.status(200).json({ images, partial, requested: prompts.length, received: images.length });
+        catch (e) {
+            const msg = e.message || "";
+            console.error(`[server] Flow 생성 핸들러 오류 (프로세스 유지): ${msg}`);
+            if (msg.includes("CDP_CONNECT_FAIL"))
+                return res.status(503).json({ error: "Flow 준비가 안 됐어요. 'Flow 준비' 버튼으로 크롬을 먼저 열어주세요.", code: "CDP_CONNECT_FAIL" });
+            if (msg.includes("FLOW_NOT_LOGGED_IN"))
+                return res.status(401).json({ error: "크롬에서 Google Flow에 먼저 로그인해주세요.", code: "FLOW_NOT_LOGGED_IN" });
+            if (msg.includes("FLOW_NO_CREDIT"))
+                return res.status(402).json({ error: "Flow 무료 크레딧이 부족해요 — Flow 계정을 바꾸거나 크레딧 충전 후 다시 해주세요.", code: "FLOW_NO_CREDIT" });
+            // ★2026-09-08 연속 정책거부(이 계정이 이미지를 못 만드는 상태)도 크레딧 소진과 동일하게 402 → 프론트가 다음 Flow 계정으로 전환.
+            if (msg.includes("FLOW_POLICY_STUCK"))
+                return res.status(402).json({ error: "이 Flow 계정이 지금 이미지를 못 만들어요 — 다음 계정으로 넘어갑니다.", code: "FLOW_NO_CREDIT" });
+            res.status(500).json({ error: msg });
+        }
     }
-    catch (e) {
-        const msg = e.message || "";
-        console.error(`[server] Flow 생성 핸들러 오류 (프로세스 유지): ${msg}`);
-        if (msg.includes("CDP_CONNECT_FAIL"))
-            return res.status(503).json({ error: "Flow 준비가 안 됐어요. 'Flow 준비' 버튼으로 크롬을 먼저 열어주세요.", code: "CDP_CONNECT_FAIL" });
-        if (msg.includes("FLOW_NOT_LOGGED_IN"))
-            return res.status(401).json({ error: "크롬에서 Google Flow에 먼저 로그인해주세요.", code: "FLOW_NOT_LOGGED_IN" });
-        if (msg.includes("FLOW_NO_CREDIT"))
-            return res.status(402).json({ error: "Flow 무료 크레딧이 부족해요 — Flow 계정을 바꾸거나 크레딧 충전 후 다시 해주세요.", code: "FLOW_NO_CREDIT" });
-        res.status(500).json({ error: msg });
+    finally {
+        finishWork();
     }
 });
 /* ── Replicate 이미지 생성 프록시 (브라우저 CORS 우회) ── */

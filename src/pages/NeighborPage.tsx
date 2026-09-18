@@ -1,8 +1,8 @@
-import React, { useState, useEffect, useRef, useCallback } from "react";
+import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { botFetch, BotEventStream } from "../lib/botApi";
 import { diagnoseAeo } from "../lib/aeo";
-import { getReplyDailyUsage, REPLY_DAILY_LIMIT, getBlogscoreDailyUsage, incrementBlogscoreQuota, BLOGSCORE_DAILY_LIMIT, REVIVE_DAILY_LIMIT, getReviveDailyUsage, PUMASI_ACCOUNT_LIMIT, PUMASI_POSTS_LIMIT, TAB_ACCOUNT_LIMIT, getPumasiDailyUsage, savePostCareChecks, markPrescribed, markTitleChanged, getPostCare, computeCareStatus, PostCare, OBSERVE_DAYS, INDEX_GRACE_DAYS, savePostViews, latestViews, reportError, pushLiveLog } from "../lib/supabase";
+import { getReplyDailyUsage, REPLY_DAILY_LIMIT, getBlogscoreDailyUsage, incrementBlogscoreQuota, BLOGSCORE_DAILY_LIMIT, REVIVE_DAILY_LIMIT, getReviveDailyUsage, PUMASI_ACCOUNT_LIMIT, PUMASI_POSTS_LIMIT, TAB_ACCOUNT_LIMIT, getPumasiDailyUsage, savePostCareChecks, markPrescribed, markTitleChanged, getPostCare, computeCareStatus, PostCare, OBSERVE_DAYS, INDEX_GRACE_DAYS, savePostViews, latestViews, reportError, pushLiveLog, migratePostCareAccount } from "../lib/supabase";
 import UsageGuide from "../components/UsageGuide";
 import dodoImg from "../assets/dodo.png";   // 🩺 블로그 주치의 캐릭터(검수자 도도)
 import boriImg from "../assets/bori.png";   // 🌱 응원단 보리
@@ -154,7 +154,12 @@ const DEFAULT_MULTI_MSGS = [
 interface EngageResult { keyword: string; blogId: string; postUrl: string; liked: boolean; commented: boolean; status: "success"|"fail"|"skip"|"pending"|"running"; message: string; }
 // 상단·사이드바 배지와 동일한 플랜별 하루 한도 (lib/supabase.ts의 NEIGHBOR/ENGAGE_DAILY_LIMIT와 일치)
 const DAILY_LIMIT_BY_PLAN: Record<string, number> = { free: 10, basic: 50, pro: 100, unlimited: 999999, admin: 9999 };
-interface Props { theme: "dark"|"light"; userId?: string; plan?: string; publishUserId?: string; initialTab?: "neighbor"|"engage"|"reply"|"score"|"pumasi"; singleTab?: boolean; isActive?: boolean; onEngageUsageChange?: (used:number)=>void; initialNeighborUsed?: number; initialEngageUsed?: number; onBusyChange?: (busy:boolean)=>void; }
+interface Props { theme: "dark"|"light"; userId?: string; plan?: string; publishUserId?: string; initialTab?: "neighbor"|"engage"|"reply"|"score"|"pumasi"; singleTab?: boolean; isActive?: boolean; onEngageUsageChange?: (used:number)=>void; initialNeighborUsed?: number; initialEngageUsed?: number; onBusyChange?: (busy:boolean)=>void;
+  // 🔗 계정연결 통일: 계정은 '계정 관리'에서 한 번만 연결하고, 모든 탭이 그 세션을 공유한다(재로그인 0 → 네이버 보호조치 방지).
+  connectedAccounts?: { naverId: string; blogName?: string }[];   // 계정 관리에서 연결된 네이버 계정(username=naverId)
+  naverAccountStatus?: Record<string, { ok: boolean; blogId?: string }>;  // 계정별 세션 실측(session-status) — ok=살아있음, blogId=봇 세션의 블로그주소
+  onGoAccounts?: () => void;   // '계정 관리' 탭으로 이동(로그인/재연결은 거기서만)
+}
 
 /* ── 내 이웃 키워드 분석 카드 (서이추·공감댓글 공용) ── */
 const KeywordAnalyzer = ({ keywords, loading, onAnalyze, onPick }: {
@@ -190,74 +195,45 @@ const KeywordAnalyzer = ({ keywords, loading, onAnalyze, onPick }: {
   );
 };
 
-/* ── 계정 카드 (외부 컴포넌트 — 렌더마다 재생성 방지) ── */
-const AccountCard = React.memo(({ accounts, onLogin, onAdd, onRemove, onChange, onConnectAll, connectingAll }: {
+/* ── 계정 카드 (읽기전용) — 🔗 계정연결 통일: 계정은 '계정 관리'에서 한 번만 연결하고 모든 탭이 그 세션을 공유한다.
+   여기선 연결된 계정과 세션 상태(✅연결됨/⚠️재연결 필요)를 보여주기만 하고, 로그인/재연결은 [계정 관리] 버튼으로 위임.
+   같은 계정을 탭마다 다시 로그인하지 않으므로 네이버 보호조치(짧은 시간 반복 로그인)를 피한다. ── */
+const AccountCard = React.memo(({ accounts, onGoAccounts }: {
   accounts: Account[];
-  onLogin: (id: string) => void;
-  onAdd: () => void;
-  onRemove: (id: string) => void;
-  onChange: (accountId: string, field: keyof Account, value: any) => void;
-  onConnectAll?: () => void;          // 있으면 '전체 연결' 버튼 표시(품앗이용)
-  connectingAll?: boolean;
+  onGoAccounts?: () => void;
 }) => {
-  const pendingCount = accounts.filter(a => a.id && a.pw && !a.sessionOk).length;
-  // ★전체 연결은 '아이디·비번이 입력된 계정'이 하나라도 있으면 언제든 활성화(연결됨 표시여도 세션이 풀릴 수 있어 재연결 필요).
-  const credCount = accounts.filter(a => a.id && a.pw).length;
-  const allDisabled = connectingAll || credCount === 0;
   return (
   <div className="card" style={{ padding: "18px 20px" }}>
-    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 14 }}>
+    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 12 }}>
       <div className="card-title" style={{ margin: 0, fontSize: 15 }}>👤 작업 계정</div>
-      {onConnectAll && accounts.length >= 2 && (
-        <button onClick={onConnectAll} disabled={allDisabled}
-          style={{ padding: "7px 14px", borderRadius: 9, border: "none", background: allDisabled ? "var(--card2)" : "linear-gradient(135deg,#ec4899,#a855f7)", color: allDisabled ? "var(--text3)" : "#fff", cursor: allDisabled ? "default" : "pointer", fontSize: 12, fontWeight: 800, fontFamily: "inherit", whiteSpace: "nowrap" }}
-          title={pendingCount ? `아직 연결 안 된 ${pendingCount}개 계정을 로그인해요` : "연결됨 상태여도 세션이 풀릴 수 있어요 — 눌러서 전체 재연결"}>
-          {connectingAll ? "🔄 연결 중..." : pendingCount ? `🔗 전체 연결 (${pendingCount})` : "🔗 전체 재연결"}
+      {onGoAccounts && (
+        <button onClick={onGoAccounts}
+          style={{ padding: "7px 14px", borderRadius: 9, border: "none", background: "linear-gradient(135deg,#ec4899,#a855f7)", color: "#fff", cursor: "pointer", fontSize: 12, fontWeight: 800, fontFamily: "inherit", whiteSpace: "nowrap" }}>
+          🔗 계정 관리에서 연결
         </button>
       )}
     </div>
-    {onConnectAll && accounts.length >= 2 && (
-      <div style={{ fontSize: 11.5, color: "var(--text2)", lineHeight: 1.55, marginBottom: 14, padding: "9px 12px", borderRadius: 9, background: "var(--card2)", border: "1px solid var(--border)" }}>
-        💡 계정마다 <b>아이디·비밀번호를 미리 입력</b>해두면, <b style={{ color: "#c026d3" }}>전체 연결</b> 버튼 하나로 <b>아직 연결 안 된 계정을 순서대로 한 번에 로그인</b>해요. 계정을 하나씩만 연결하려면 각 계정의 <b>계정 연결하기</b>를 누르세요. <span style={{ color: "var(--text3)" }}>(연결은 처음 한 번만 — 이후엔 저장된 로그인으로 봇이 자동 진행해요)</span>
+    <div style={{ fontSize: 11.5, color: "var(--text2)", lineHeight: 1.55, marginBottom: 14, padding: "9px 12px", borderRadius: 9, background: "var(--card2)", border: "1px solid var(--border)" }}>
+      💡 계정은 <b style={{ color: "#c026d3" }}>계정 관리</b>에서 <b>한 번만 연결</b>하면 <b>모든 탭이 자동으로 그 계정을 공유</b>해요. 여기선 <b>연결된 계정을 고르기만</b> 하면 되고, 같은 계정을 탭마다 다시 로그인하지 않아 <b>네이버 보호조치</b> 걱정이 없어요.
+    </div>
+    {accounts.length === 0 ? (
+      <div style={{ textAlign: "center", padding: "22px 14px", borderRadius: 12, border: "2px dashed var(--border)", background: "var(--bg)" }}>
+        <div style={{ fontSize: 13, color: "var(--text2)", fontWeight: 600, marginBottom: 12 }}>아직 연결된 네이버 계정이 없어요.</div>
+        {onGoAccounts && <button onClick={onGoAccounts} style={{ padding: "10px 18px", borderRadius: 10, border: "none", background: "var(--accent)", color: "#000", cursor: "pointer", fontSize: 13, fontWeight: 800, fontFamily: "inherit" }}>🔗 계정 관리에서 연결하기</button>}
       </div>
-    )}
-    {accounts.map((acc, i) => (
-      <div key={acc.accountId} style={{ marginBottom: 12, padding: "14px 16px", borderRadius: 14, border: `2px solid ${acc.sessionOk ? "rgba(0,214,143,.5)" : "var(--border)"}`, background: acc.sessionOk ? "rgba(0,214,143,.06)" : "var(--bg)", transition: "border .2s" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
-          <div style={{ width: 10, height: 10, borderRadius: "50%", background: acc.sessionOk ? "var(--success)" : "var(--border)", flexShrink: 0, boxShadow: acc.sessionOk ? "0 0 8px var(--success)" : "none", transition: "all .3s" }} />
+    ) : accounts.map((acc, i) => (
+      <div key={acc.accountId} style={{ marginBottom: 10, padding: "13px 16px", borderRadius: 14, border: `2px solid ${acc.sessionOk ? "rgba(0,214,143,.5)" : "rgba(255,140,0,.5)"}`, background: acc.sessionOk ? "rgba(0,214,143,.06)" : "rgba(255,140,0,.06)", transition: "border .2s" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <div style={{ width: 10, height: 10, borderRadius: "50%", background: acc.sessionOk ? "var(--success)" : "#ff8c00", flexShrink: 0, boxShadow: acc.sessionOk ? "0 0 8px var(--success)" : "none", transition: "all .3s" }} />
           <span style={{ fontSize: 13, fontWeight: 700, color: "var(--text2)" }}>계정 {i + 1}</span>
-          {acc.blogId && <span style={{ fontSize: 12, color: "var(--success)", fontWeight: 600 }}>• {acc.blogId}</span>}
-          {acc.sessionOk && <span style={{ fontSize: 11, color: "var(--success)", marginLeft: 2 }}>연결됨 ✓</span>}
-          <button onClick={() => { if (window.confirm("이 계정을 삭제할까요? (저장된 로그인도 함께 삭제됩니다)")) onRemove(acc.accountId); }}
-            style={{ marginLeft: "auto", padding: "4px 10px", borderRadius: 7, border: "1px solid rgba(255,71,87,.4)", background: "rgba(255,71,87,.08)", color: "var(--danger)", cursor: "pointer", fontSize: 12, fontWeight: 700, display: "flex", alignItems: "center", gap: 3 }}>
-            🗑 삭제
-          </button>
+          <span style={{ fontSize: 12.5, color: "var(--text)", fontWeight: 700 }}>{acc.blogId || acc.id}</span>
+          <span style={{ marginLeft: "auto", fontSize: 11.5, fontWeight: 800, color: acc.sessionOk ? "var(--success)" : "#ff8c00" }}>{acc.sessionOk ? "✅ 연결됨" : "⚠️ 재연결 필요"}</span>
         </div>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 10 }}>
-          <input className="inp" placeholder="네이버 아이디" value={acc.id}
-            onChange={e => onChange(acc.accountId, "id", e.target.value)}
-            onKeyDown={e => { if (e.key === "Enter" && acc.id && acc.pw && !acc.loginLoading) onLogin(acc.accountId); }}
-            style={{ fontSize: 13, padding: "10px 12px" }} />
-          <div style={{ position: "relative" }}>
-            <input className="inp" type={acc.showPw ? "text" : "password"} placeholder="비밀번호" value={acc.pw}
-              onChange={e => onChange(acc.accountId, "pw", e.target.value)}
-              onKeyDown={e => { if (e.key === "Enter" && acc.id && acc.pw && !acc.loginLoading) onLogin(acc.accountId); }}
-              style={{ fontSize: 13, padding: "10px 36px 10px 12px", width: "100%" }} />
-            <button onClick={() => onChange(acc.accountId, "showPw", !acc.showPw)}
-              style={{ position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)", background: "transparent", border: "none", cursor: "pointer", fontSize: 15, color: "var(--text3)", padding: 2 }}>
-              {acc.showPw ? "🙈" : "👁️"}
-            </button>
-          </div>
-        </div>
-        <button onClick={() => onLogin(acc.accountId)} disabled={acc.loginLoading || !acc.id || !acc.pw}
-          style={{ width: "100%", padding: "11px", borderRadius: 10, border: "none", background: acc.sessionOk ? "rgba(0,214,143,.18)" : "var(--accent)", color: acc.sessionOk ? "var(--success)" : "#000", cursor: acc.loginLoading || !acc.id || !acc.pw ? "not-allowed" : "pointer", fontSize: 13, fontWeight: 800, fontFamily: "inherit", transition: "all .2s", opacity: acc.loginLoading || !acc.id || !acc.pw ? 0.6 : 1 }}>
-          {acc.loginLoading ? "🔄 로그인 중..." : acc.sessionOk ? "✅ 연결됨 (재연결)" : "🔗 계정 연결하기"}
-        </button>
+        {!acc.sessionOk && onGoAccounts && (
+          <button onClick={onGoAccounts} style={{ marginTop: 10, width: "100%", padding: "9px", borderRadius: 9, border: "1px solid rgba(255,140,0,.5)", background: "rgba(255,140,0,.1)", color: "#ff8c00", cursor: "pointer", fontSize: 12.5, fontWeight: 800, fontFamily: "inherit" }}>🔗 계정 관리에서 재연결</button>
+        )}
       </div>
     ))}
-    <button onClick={onAdd} style={{ width: "100%", padding: "11px", borderRadius: 10, border: "2px dashed var(--border)", background: "transparent", color: "var(--text3)", cursor: "pointer", fontSize: 13, fontWeight: 700, fontFamily: "inherit", transition: "border-color .2s" }}>
-      + 계정 추가
-    </button>
   </div>
   );
 });
@@ -271,7 +247,7 @@ const AccountSelector = ({ accounts, selectedId, onSelect }: {
   return (
     <div className="card" style={{ padding: "14px 16px" }}>
       <div style={{ fontSize: 13, fontWeight: 800, color: "var(--text)", marginBottom: 3 }}>👤 이 작업에 쓸 계정</div>
-      <div style={{ fontSize: 11, color: "var(--text3)", marginBottom: 10, lineHeight: 1.5 }}>연결된 계정 중 <b>이번 작업에 사용할 계정</b>을 골라주세요. (탭마다 계정은 따로 관리돼요)</div>
+      <div style={{ fontSize: 11, color: "var(--text3)", marginBottom: 10, lineHeight: 1.5 }}>연결된 계정 중 <b>이번 작업에 사용할 계정</b>을 골라주세요. (계정 관리에서 연결한 계정을 모든 탭이 공유해요)</div>
       <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
         {connected.map(a => {
           const on = selectedId === a.accountId;
@@ -391,7 +367,7 @@ const GUIDE = {
     { step: "팁", title: "재사용", desc: "📂 리스트 불러오기로 저장해둔 CSV 파일을 불러올 수 있어요.\n'완료된 블로그 스킵' 켜두면 중복 신청이 방지됩니다." },
   ],
   engage: [
-    { step: "1", title: "계정 연결", desc: "이 탭(공감·댓글)에서 쓸 네이버 계정을 연결하세요. 탭마다 계정은 따로 관리돼요(서이추·답방과 별도)." },
+    { step: "1", title: "계정 연결", desc: "이 탭(공감·댓글)에서 쓸 네이버 계정을 연결하세요. 계정 관리에서 연결한 계정을 모든 탭이 공유해요(서이추·답방과 별도)." },
     { step: "2", title: "키워드 입력", desc: "공감·댓글을 남길 블로그를 찾을 키워드를 입력하세요.\n서이추 탭과 별도로 관리됩니다." },
     { step: "3", title: "기간 설정", desc: "최근 7일 / 14일 / 30일 / 직접 입력 중 선택하세요.\n선택한 기간 내에 작성된 글에만 공감·댓글을 달아줍니다." },
     { step: "4", title: "작업 종류 선택", desc: "❤️ 공감 / 💬 댓글 각각 켜고 끌 수 있어요.\n댓글을 켜면 아래에 내용 입력란이 나타납니다." },
@@ -399,7 +375,7 @@ const GUIDE = {
     { step: "6", title: "추출 후 작업", desc: "'🔍 추출 시작' → '🚀 작업 시작' 순서로 진행하거나\n'추출 완료 후 바로 작업 시작' 옵션을 켜면 자동으로 이어집니다." },
   ],
   reply: [
-    { step: "1", title: "계정 연결", desc: "답방할 내 네이버 블로그 계정을 이 탭에 연결하세요. 탭마다 계정은 따로 관리돼요." },
+    { step: "1", title: "계정 연결", desc: "답방할 내 네이버 블로그 계정을 이 탭에 연결하세요. 계정 관리에서 연결한 계정을 모든 탭이 공유해요." },
     { step: "2", title: "확인할 글 수 설정", desc: "내 블로그 최근 글 몇 개까지 댓글을 확인할지 정하세요.\n예) 10개 → 최근 글 10개에 달린 댓글을 훑어봅니다." },
     { step: "3", title: "답글 방식 선택", desc: "✨ AI 자동: 댓글 내용을 읽고 맞춤 답글을 매번 다르게 생성해요.\n✍️ 고정 답글: 미리 써둔 문구로 답합니다." },
     { step: "4", title: "미답변만 / 전체", desc: "'아직 답글 없는 댓글만' 켜면 이미 답한 댓글은 건너뛰어 중복 답글을 막아요." },
@@ -407,7 +383,7 @@ const GUIDE = {
     { step: "팁", title: "왜 답방이 중요한가요?", desc: "댓글에 답글을 달면 이웃과 소통이 활발해지고, 블로그 체류·재방문이 늘어 블로그 지수에 좋아요." },
   ],
   score: [
-    { step: "1", title: "계정 연결", desc: "진단할 내 네이버 블로그 계정을 이 탭에 연결하세요. 탭마다 계정은 따로 관리돼요." },
+    { step: "1", title: "계정 연결", desc: "진단할 내 네이버 블로그 계정을 이 탭에 연결하세요. 계정 관리에서 연결한 계정을 모든 탭이 공유해요." },
     { step: "2", title: "진단 시작", desc: "'📈 블로그 진단 시작'을 누르면 봇이 내 블로그의 실제 지표를 읽어와 건강 리포트를 만들어요.\n(등급에 따라 하루 진단 횟수가 정해져 있고, 자정에 초기화돼요.)" },
     { step: "3", title: "🔴 검색 노출 진단 (핵심)", desc: "내 최근 글 제목을 실제로 네이버에 검색해 '내 글이 뜨는지'를 확인해요.\n안 뜨는 글(누락)이 많으면 '저품질 의심'으로 알려드려요. 저품질 조기경보예요." },
     { step: "4", title: "✏️ 제목·키워드 살리기", desc: "두 갈래로 나뉘어요. ①미노출(100위 밖) 글은 '오래된 글 재발행'에서 살리고, ②이미 100위 안에 뜬 글은 '제목·키워드 솔루션'에서 더 위로 올려요. 서로 안 겹쳐요. (무료 Gemini 키 필요)" },
@@ -468,13 +444,11 @@ const REPUBLISH_BANDS: { k: string; label: string; min: number; max: number }[] 
 ];
 
 /* ── 메인 컴포넌트 ── */
-export default function NeighborPage({ theme, userId, plan = "free", publishUserId, initialTab, singleTab, isActive = true, onEngageUsageChange, initialNeighborUsed = 0, initialEngageUsed = 0, onBusyChange }: Props) {
+export default function NeighborPage({ theme, userId, plan = "free", publishUserId, initialTab, singleTab, isActive = true, onEngageUsageChange, initialNeighborUsed = 0, initialEngageUsed = 0, onBusyChange, connectedAccounts, naverAccountStatus, onGoAccounts }: Props) {
   const [tab, setTab] = useState<"neighbor"|"engage"|"reply"|"score"|"pumasi">(initialTab || "neighbor");
-  // ★탭별 계정·세션 완전 격리(2026-08-23): 서이추·공감댓글·답방·품앗이·지수가 각각 자기 계정 목록과 세션을 따로 갖는다.
-  //   한 탭에서 연결해도 다른 탭엔 공유되지 않음. accountId에 tabKey를 붙여 봇 세션(naver_{accountId})까지 자동 격리.
+  // 🔗 계정연결 통일(2026-09-18): 계정·세션을 더 이상 탭별 격리하지 않는다. '계정 관리'에서 연결한 세션 하나를
+  //   모든 탭이 공유(accountId=`{publishUserId}__{naverId}`=발행봇 세션과 동일 파일). 재로그인 0 → 네이버 보호조치 방지.
   const tabKey = initialTab || "neighbor";
-  const ACCTS_LS_KEY = `publy_accounts_${tabKey}`;
-  const mkAccId = () => `${tabKey}_acc_${Date.now()}`;
   // ── 답방(내 블로그 댓글에 대댓글) 상태 ──
   const [rTargetPosts, setRTargetPosts] = useState(10);   // '최근 개수' 방식일 때 글 수
   const [rSelectMode, setRSelectMode] = useState<"count"|"all"|"period">("count"); // 대상 글 선택 방식
@@ -737,24 +711,54 @@ export default function NeighborPage({ theme, userId, plan = "free", publishUser
   }, [userId, tab]);
   const [showGuide, setShowGuide] = useState(false);
 
-  /* 공통: 계정 */
-  const [accounts, setAccounts] = useState<Account[]>(() => {
-    // 저장된 계정 복원 (한 번 연결하면 매번 안 넣게)
-    try {
-      const saved = JSON.parse(localStorage.getItem(ACCTS_LS_KEY) || "null");
-      if (Array.isArray(saved) && saved.length) return saved.map((a: any) => ({ accountId: a.accountId, id: a.id || "", pw: a.pw || "", blogId: a.blogId || "", sessionOk: !!a.sessionOk, loginLoading: false, showPw: false }));
-    } catch {}
-    return [{ accountId: `${tabKey}_acc_1`, id: "", pw: "", blogId: "", sessionOk: false, loginLoading: false, showPw: false }];
-  });
+  /* 🔗 공통: 계정 — '계정 관리'에서 연결된 계정을 모든 탭이 공유(탭별 로그인 폐지, 2026-09-18).
+     accountId=`{publishUserId}__{naverId}` → 발행봇과 동일한 세션 파일(naver_{userId}__{naverId})을 neighbor-bot이 그대로 읽음 → 재로그인 0(네이버 보호조치 방지). */
+  const acctBase = (publishUserId || userId || "");
+  const accounts: Account[] = useMemo(() =>
+    (connectedAccounts || []).map(a => {
+      const st = (naverAccountStatus || {})[a.naverId];
+      return {
+        accountId: `${acctBase}__${String(a.naverId).replace(/[^a-zA-Z0-9_-]/g, "")}`,
+        id: a.naverId,
+        pw: "",
+        blogId: st?.blogId || a.blogName || "",
+        sessionOk: !!(st && st.ok),
+        loginLoading: false, showPw: false,
+      };
+    }),
+    [connectedAccounts, naverAccountStatus, acctBase]
+  );
   const [botOnline, setBotOnline] = useState(false);
   // ★단탭(서이추·공감댓글·답방·지수) 작업에 쓸 계정 선택. 여러 계정을 연결해두고 이 중 하나를 골라 작업한다.
   //   미선택/무효면 첫 연결 계정으로 폴백. 품앗이는 연결된 계정 전체를 쓰므로 이 선택과 무관.
   const [selectedAcctId, setSelectedAcctId] = useState<string>("");
-  const activeAccount = accounts.find(a => a.accountId === selectedAcctId && a.sessionOk) || accounts.find(a => a.sessionOk);
+  const activeAccount = accounts.find(a => a.accountId === selectedAcctId && a.sessionOk) || accounts.find(a => a.sessionOk) || accounts[0];
+  /* 🔗 실행 게이트(2026-09-18 계정연결 통일): 세션이 살아있는 계정이 있어야 실행한다.
+     activeAccount는 세션이 죽은 계정도 폴백(accounts[0])으로 잡으므로, 여기서 sessionOk까지 확인해야
+     "세션 없음" 반쪽 실행을 막는다. 없거나 만료면 '계정 관리'로 유도 팝업(부모 위임, publy-open-gate)만 띄우고
+     조용히 null 반환 — window.alert는 Electron에서 안 뜨므로 커스텀 게이트로 통일. 살아있으면 그 계정 반환. */
+  const requireSession = (title = "계정 연결이 필요해요"): Account | null => {
+    const acc = activeAccount;
+    if (acc && acc.sessionOk) return acc;
+    // force:true — NeighborPage는 '선택된 계정'의 세션 실측으로 이미 없음을 확정했으므로, 부모가 발행봇 활성세션 기준
+    //   collectPublishGate로 재필터링해 팝업을 삼키지 않도록 강제(다계정 중 선택 계정만 만료여도 반드시 안내).
+    window.dispatchEvent(new CustomEvent("publy-open-gate", { detail: { title, force: true } }));
+    return null;
+  };
+  // 🔗 옛 탭별 계정으로 저장된 진료차트 이력을 새 안정키(네이버 아이디)로 1회 이전 — 계정 통일해도 과거 이력 보존(규약).
+  useEffect(() => {
+    if (!userId) return;
+    for (const k of ["neighbor","engage","reply","score","pumasi"]) {
+      try {
+        const saved = JSON.parse(localStorage.getItem(`publy_accounts_${k}`) || "null");
+        if (Array.isArray(saved)) saved.forEach((a: any) => { if (a?.accountId && a?.id) void migratePostCareAccount(userId, a.accountId, a.id); });
+      } catch {}
+    }
+  }, [userId]);
   // 🩺 진료차트 로드(activeAccount 확정 후 정의) — 검사/개선안/수정 이력을 careMap에 담아 관찰중 표시에 사용
   const loadCare = async () => {
     if (!userId || !activeAccount) return;
-    try { const rows = await getPostCare(userId, activeAccount.accountId); const m: Record<string, PostCare> = {}; rows.forEach(r => { m[r.post_key] = r; }); setCareMap(m); } catch {}
+    try { const rows = await getPostCare(userId, activeAccount.id); const m: Record<string, PostCare> = {}; rows.forEach(r => { m[r.post_key] = r; }); setCareMap(m); } catch {}
   };
   // 🩺 AEO 형식 진단: 최근 글 본문을 실제로 읽어 도입요약·FAQ·구조화를 갖췄는지 체크(AI 호출 0, 무료). 최대 10개.
   const runAeoCheck = async () => {
@@ -807,7 +811,7 @@ export default function NeighborPage({ theme, userId, plan = "free", publishUser
         const cleanup=()=>{window.clearTimeout(timer);window.removeEventListener("publy-revive-succeeded",onSucceeded);window.removeEventListener("publy-revive-request-finished",onFinished);};
         window.addEventListener("publy-revive-succeeded",onSucceeded);
         window.addEventListener("publy-revive-request-finished",onFinished);
-        const accepted=window.dispatchEvent(new CustomEvent("publy-revive-post",{cancelable:true,detail:{requestId,logNo:item.logNo,title:item.title,blogId:activeAccount?.blogId,naverId:activeAccount?.id,careAccountId:activeAccount?.accountId,bulkIndex:i+1,bulkTotal:queue.length}}));
+        const accepted=window.dispatchEvent(new CustomEvent("publy-revive-post",{cancelable:true,detail:{requestId,logNo:item.logNo,title:item.title,blogId:activeAccount?.blogId,naverId:activeAccount?.id,careAccountId:activeAccount?.id,bulkIndex:i+1,bulkTotal:queue.length}}));
         if(!accepted){cleanup();resolve(false);}
       });
       if(ok)success++;else failed++;
@@ -822,7 +826,7 @@ export default function NeighborPage({ theme, userId, plan = "free", publishUser
   useEffect(() => {
     const onReviveTracked = (e: Event) => {
       const detail = (e as CustomEvent).detail || {};
-      if (String(detail.careAccountId || "") !== String(activeAccount?.accountId || "")) return;
+      if (String(detail.careAccountId || "") !== String(activeAccount?.id || "")) return;
       void loadCare();
       if (userId) void getReviveDailyUsage(userId).then(setReviveUsed).catch(() => {});
     };
@@ -859,7 +863,7 @@ export default function NeighborPage({ theme, userId, plan = "free", publishUser
   // 🆕 수정 추적: 그 글 하나만 실시간으로 현재 검색 순위 검사(exposure-check 단건). 결과를 카르테에도 누적.
   const checkOneRank = async (postKey: string) => {
     const acc = activeAccount;
-    if (!acc) { alert("먼저 계정을 연결하세요"); return; }
+    if (!acc || !acc.sessionOk) return;   // 🔗 백그라운드 순위체크 — 세션 없으면 조용히 skip(팝업 X)
     setRankChecking(postKey);
     try {
       const r = await botFetch(`${BOT}/api/exposure-check`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ accountId: acc.accountId, plan, logNos: [postKey] }) });
@@ -870,7 +874,7 @@ export default function NeighborPage({ theme, userId, plan = "free", publishUser
       // 카르테에 이 순위도 저장(회복 그래프·완치 감지에 반영)
       // ★발행일(date)도 같이 저장 → 색인 유예 판정에 필요(안 넣으면 published_at null → 하루된 글도 치료필요로 뜸)
       const careDate = scPosts.find(p => scLogNo(p.url) === postKey)?.date || careMap[postKey]?.published_at || undefined;
-      if (userId && chk) { try { const { newlyCured } = await savePostCareChecks(userId, acc.accountId, [{ logNo: postKey, title: chk.title || careMap[postKey]?.title || "", rank, exposed: chk.exposed ?? null, date: careDate }]); if (newlyCured.length) setCelebrate(newlyCured); await loadCare(); } catch {} }
+      if (userId && chk) { try { const { newlyCured } = await savePostCareChecks(userId, acc.id, [{ logNo: postKey, title: chk.title || careMap[postKey]?.title || "", rank, exposed: chk.exposed ?? null, date: careDate }]); if (newlyCured.length) setCelebrate(newlyCured); await loadCare(); } catch {} }
     } catch (e: any) {
       setLiveRanks(p => ({ ...p, [postKey]: { rank: null, at: Date.now() } }));
       addScLog(`🔴 순위 검사 실패 (글 ${postKey}): ${e?.message || e}`);
@@ -905,7 +909,7 @@ export default function NeighborPage({ theme, userId, plan = "free", publishUser
           const checks = (d.checks || []).map((c: any) => ({ logNo: c.logNo, title: c.title || careMap[c.logNo]?.title || "", rank: c.rank ?? null, exposed: c.exposed ?? null }));
           if (checks.length) {
             setLiveRanks(p => { const n = { ...p }; checks.forEach((c: any) => { if (c.logNo) n[c.logNo] = { rank: c.rank ?? null, at: Date.now() }; }); return n; });
-            const { newlyCured } = await savePostCareChecks(userId, acc.accountId, checks);
+            const { newlyCured } = await savePostCareChecks(userId, acc.id, checks);
             if (newlyCured.length) setCelebrate(newlyCured);   // 자동검사 중 완치 발견되면 축포도
           }
         } catch (e: any) {
@@ -938,7 +942,7 @@ export default function NeighborPage({ theme, userId, plan = "free", publishUser
         reportError({ userId, blogId: acc.blogId, stage: "조회수 수집(빈결과)", message: "rank_pv에서 0개 수집 — URL/셀렉터/세션 점검 필요" });
       } else {
         const matched = views.filter((v: any) => v.logNo).length;
-        await savePostViews(userId, acc.accountId, views.map((v: any) => ({ logNo: v.logNo, views: v.views })));
+        await savePostViews(userId, acc.id, views.map((v: any) => ({ logNo: v.logNo, views: v.views })));
         await loadCare();
         addScLog(`👁 조회수 자동 수집 완료: ${views.length}개(글번호 매칭 ${matched}개)`);
         if (matched === 0) {   // 조회수는 읽었는데 글번호(logNo)를 못 붙임 = 진료차트에 반영 안 됨
@@ -1125,11 +1129,8 @@ export default function NeighborPage({ theme, userId, plan = "free", publishUser
 
   /* 로그 스크롤: 자동 이동 없음(테리 요청). 새 로그가 와도 화면을 강제로 옮기지 않고,
      사용자가 스크롤한 위치에 그대로 멈춰 있게 둔다. 아래를 보려면 직접 내리면 됨. */
-  // 계정 목록 자동 저장 (id/pw/연결상태 유지 → 매번 재입력 불필요)
-  useEffect(() => {
-    try { localStorage.setItem(ACCTS_LS_KEY, JSON.stringify(accounts.map(a => ({ accountId: a.accountId, id: a.id, pw: a.pw, blogId: a.blogId, sessionOk: a.sessionOk })))); } catch {}
-  }, [accounts, ACCTS_LS_KEY]);
-
+  // 🔗 계정은 '계정 관리'에서 한 번만 연결 — NeighborPage는 연결된 계정을 표시·선택만 한다(로그인/추가/삭제 핸들러 폐지).
+  //   세션 상태는 naverAccountStatus(props, session-status 실측)로 실시간 반영되고, 연결/재연결은 onGoAccounts로 계정 관리에서.
   const addLog = useCallback((msg: string) => {
     const t = new Date().toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
     setLogs(p => { const next = [...p.slice(-200), `${t} :: ${msg}`]; if (userId) pushLiveLog(userId, { context: tabName, text: next.slice(-80).join("\n"), running: true }); return next; });
@@ -1140,103 +1141,16 @@ export default function NeighborPage({ theme, userId, plan = "free", publishUser
     setELogs(p => [...p.slice(-200), `${t} :: ${msg}`]);
   }, []);
 
-  /* 세션 상태 확인 + 오늘 서이추 안전 한도 현황 로드 */
+  /* 오늘 서이추 안전 한도 현황 로드(세션 상태는 naverAccountStatus props로 실측 반영) */
   useEffect(() => {
-    accounts.forEach(acc => {
-      if (!acc.id) return;
-      botFetch(`${BOT}/api/session/${acc.accountId}`).then(r => r.json())
-        // ★봇의 실제 세션 상태로 sessionOk를 정확히 맞춘다. 봇에 세션이 없으면(exists=false) '연결됨'을 내려
-        //   재연결을 유도한다. (예전엔 exists일 때만 true로 올리고 false로 안 내려서 "연결됨인데 봇엔 세션 없음"
-        //   → 시작해도 크롬이 안 뜨는 불일치가 있었음)
-        .then(d => setAccounts(p => p.map(a => a.accountId === acc.accountId ? { ...a, sessionOk: !!d.exists } : a)))
-        .catch(() => {});
-    });
-    // 상단·사이드바와 같은 원래 서이추 한도(플랜별)를 초기 로드 → 게이지 연동
     if (userId) botFetch(`${BOT}/api/quota/${userId}`).then(r => r.json())
       .then(d => { if (d.ok) { setQuotaUsed(d.used); setQuotaLimit(d.limit); } }).catch(() => {});
   }, []);
 
-  /* 계정 핸들러 */
-  //  silent=true면 개별 alert 없이 조용히(전체 연결에서 사용). 성공 여부를 boolean으로 반환.
-  const handleLogin = async (accountId: string, silent = false): Promise<boolean> => {
-    const acc = accounts.find(a => a.accountId === accountId);
-    if (!acc || !acc.id || !acc.pw) { if (!silent) alert("아이디와 비밀번호를 입력하세요"); return false; }
-    setAccounts(p => p.map(a => a.accountId === accountId ? { ...a, loginLoading: true } : a));
-    try {
-      const r = await botFetch(`${BOT}/api/login`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ accountId, id: acc.id, pw: acc.pw, publishUserId }) });
-      const d = await r.json();
-      if (d.success) {
-        setAccounts(p => p.map(a => a.accountId === accountId ? { ...a, sessionOk: true, blogId: d.blogId, loginLoading: false } : a));
-        addLog(`✅ [${acc.id}] 로그인 성공 (blogId: ${d.blogId})`);
-        if (d.publishSynced) addLog(`🔗 이 계정으로 발행·글살리기도 바로 됩니다 (계정 관리에 자동 연동)`);
-        addELog(`✅ [${acc.id}] 로그인 성공`);
-        return true;
-      } else throw new Error(d.error || "로그인 실패");
-    } catch (e: any) {
-      setAccounts(p => p.map(a => a.accountId === accountId ? { ...a, loginLoading: false } : a));
-      addLog(`❌ [${acc.id}] 로그인 오류: ${e.message}`);
-      if (!silent) alert(`로그인 오류: ${e.message}`);
-      return false;
-    } finally {
-      // 봇 로그인 브라우저가 닫히며 앱이 뒤로 숨는 현상 방지 — 앱을 다시 앞으로
-      try { (window as any).electron?.focusApp?.(); } catch {}
-    }
-  };
-
-  /* 전체 계정 연결: 아이디·비번 입력된 계정을 순서대로 자동 로그인(개별 연결과 별개, 둘 다 사용 가능) */
-  const [connectingAll, setConnectingAll] = useState(false);
-  const handleConnectAll = async () => {
-    const withCreds = accounts.filter(a => a.id && a.pw);
-    if (!withCreds.length) return alert("연결할 계정이 없어요. 먼저 아이디·비밀번호를 입력해 주세요.");
-    // 미연결이 있으면 그것만, 다 '연결됨'이면 전체 재연결(세션이 풀렸을 수 있어 언제든 재연결 가능)
-    const pending = withCreds.filter(a => !a.sessionOk);
-    const targets = pending.length ? pending : withCreds;
-    setConnectingAll(true);
-    addLog(`🔗 전체 연결 시작 — ${targets.length}개 계정을 순서대로 ${pending.length ? "로그인" : "재연결"}합니다`);
-    let ok = 0, fail = 0;
-    for (const a of targets) {
-      const success = await handleLogin(a.accountId, true);   // 조용히(개별 alert 없이)
-      if (success) ok++; else fail++;
-      await new Promise(res => setTimeout(res, 800));          // 계정 사이 약간 텀
-    }
-    setConnectingAll(false);
-    addLog(`🔗 전체 연결 완료 — 성공 ${ok} / 실패 ${fail}`);
-    alert(`전체 연결 완료!\n성공 ${ok}개${fail ? ` · 실패 ${fail}개(아이디·비번 확인)` : ""}`);
-  };
-
-  const handleAddAccount = useCallback(() => {
-    if (!isUnlimitedPlan && accounts.length >= accountLimit) {
-      alert(`${planLabel} 등급에서는 이 탭에 계정을 최대 ${accountLimit}개까지 연결할 수 있어요.\n더 많은 계정을 쓰려면 상위 등급이 필요해요.`);
-      return;
-    }
-    setAccounts(p => [...p, { accountId: mkAccId(), id: "", pw: "", blogId: "", sessionOk: false, loginLoading: false, showPw: false }]);
-  }, [tabKey, accountLimit, isUnlimitedPlan, planLabel, accounts.length]);
-
-  // 이 탭의 모든 계정 삭제(+봇 세션까지) — 품앗이 등에서 한 번에 정리
-  const handleRemoveAllAccounts = useCallback(() => {
-    if (!window.confirm("이 탭의 모든 계정을 삭제할까요?\n저장된 로그인(세션)도 함께 삭제됩니다.")) return;
-    accounts.forEach(a => { botFetch(`${BOT}/api/session/${encodeURIComponent(a.accountId)}`, { method: "DELETE" }).catch(() => {}); });
-    setAccounts([{ accountId: mkAccId(), id: "", pw: "", blogId: "", sessionOk: false, loginLoading: false, showPw: false }]);
-  }, [accounts, tabKey]);
-
-  const handleRemoveAccount = useCallback((id: string) => {
-    // 봇에 저장된 로그인 세션도 함께 삭제
-    botFetch(`${BOT}/api/session/${encodeURIComponent(id)}`, { method: "DELETE" }).catch(() => {});
-    setAccounts(p => {
-      const next = p.filter(a => a.accountId !== id);
-      return next.length ? next : [{ accountId: mkAccId(), id: "", pw: "", blogId: "", sessionOk: false, loginLoading: false, showPw: false }];
-    });
-  }
-  , [tabKey]);
-
-  const handleAccountChange = useCallback((accountId: string, field: keyof Account, value: any) =>
-    setAccounts(p => p.map(a => a.accountId === accountId ? { ...a, [field]: value, ...(field === "id" || field === "pw" ? { sessionOk: false } : {}) } : a))
-  , []);
-
   /* 내 이웃 키워드 분석 — 이웃들이 자주 쓰는 주제 TOP (서이추·공감댓글 공용) */
   const analyzeBuddyKeywords = async () => {
-    const acc = activeAccount;
-    if (!acc) return alert("먼저 계정을 연결하세요 (내 이웃 분석은 로그인 필요)");
+    const acc = requireSession("내 이웃 분석엔 계정 연결이 필요해요");
+    if (!acc) return;
     setBuddyKwLoading(true); setBuddyKw([]);
     try {
       const r = await botFetch(`${BOT}/api/buddy-keywords/${encodeURIComponent(acc.accountId)}`, { signal: AbortSignal.timeout(60000) } as any);
@@ -1287,8 +1201,8 @@ export default function NeighborPage({ theme, userId, plan = "free", publishUser
   const startWork = (targetList?: Target[]): Promise<"done" | "limit" | "error"> => {
     const list = targetList || targets;
     if (!list.length) { alert("수집된 블로그가 없습니다"); return Promise.resolve("error"); }
-    const acc = activeAccount;
-    if (!acc) { alert("먼저 계정을 연결하세요"); return Promise.resolve("error"); }
+    const acc = requireSession();
+    if (!acc) return Promise.resolve("error");
     setWorking(true); setDoneCnt(0); setFailCnt(0);
     jobIdRef.current = Date.now().toString();
     addLog(`🚀 작업 시작 — ${list.length}개 대상 / 한도 ${dailyLimit}개 / 딜레이 ${delayMin}~${delayMax}초`);
@@ -1318,9 +1232,7 @@ export default function NeighborPage({ theme, userId, plan = "free", publishUser
     if (spreadRunningRef.current) return;   // 이미 분산 실행 중이면 중복 시작 방지(로그 반복·다중 루프 차단)
     const list = targets;
     if (!list.length) return alert("수집된 블로그가 없습니다");
-    const acc = activeAccount;
-    // 세션이 살아있는 계정이 없음(연결 안 됨/만료) → 부모 통합 게이트 팝업(계정 관리로 이동 버튼)으로 안내.
-    if (!acc) { window.dispatchEvent(new CustomEvent("publy-open-gate",{detail:{title:"계정 연결이 필요해요"}})); return; }
+    if (!requireSession()) return;   // 🔗 세션 살아있는 계정 없으면 계정 관리로 유도(조용히 막음)
     const n = Math.max(2, Math.min(10, spreadBatches));
     const gapMs = Math.max(1, spreadGapMin) * 60 * 1000;
     // 대상을 n개 배치로 균등 분할
@@ -1379,8 +1291,8 @@ export default function NeighborPage({ theme, userId, plan = "free", publishUser
     let crawlUrl: string;
     if (eSource === "buddy") {
       // 내 이웃새글 모드 — 연결된 계정 세션으로 내 서로이웃 최근글 수집 (키워드 불필요)
-      const acc = activeAccount;
-      if (!acc) return alert("먼저 계정을 연결하세요 (내 이웃 목록을 불러오려면 로그인 필요)");
+      const acc = requireSession("내 이웃 목록을 불러오려면 계정 연결이 필요해요");
+      if (!acc) return;
       setECrawling(true); setETargets([]); setEResults([]); setEDoneCnt(0); setEFailCnt(0);
       addELog(`👥 내 이웃새글 수집 시작 — 최대 ${eCountPerKw}명`);
       crawlUrl = `${BOT}/api/engage-crawl?source=buddy&accountId=${encodeURIComponent(acc.accountId)}&countPerKeyword=${eCountPerKw}${userId ? `&userId=${userId}` : ""}`;
@@ -1411,9 +1323,8 @@ export default function NeighborPage({ theme, userId, plan = "free", publishUser
   const startEngageWork = async (targetList?: Target[]) => {
     const list = targetList || eTargets;
     if (!list.length) return alert("수집된 블로그가 없습니다");
-    const acc = activeAccount;
-    // 세션이 살아있는 계정이 없음(연결 안 됨/만료) → 부모 통합 게이트 팝업(계정 관리로 이동 버튼)으로 안내.
-    if (!acc) { window.dispatchEvent(new CustomEvent("publy-open-gate",{detail:{title:"계정 연결이 필요해요"}})); return; }
+    const acc = requireSession();
+    if (!acc) return;
     setEWorking(true); setEDoneCnt(0); setEFailCnt(0);
     eJobIdRef.current = Date.now().toString();
     const days = ePeriod === "custom" ? eCustomDays : ePeriod;
@@ -1453,8 +1364,8 @@ export default function NeighborPage({ theme, userId, plan = "free", publishUser
 
   /* 답방 1단계: 내 블로그 글 목록 불러오기(추출) */
   const handleLoadMyPosts = () => {
-    const acc = activeAccount;
-    if (!acc) return alert("먼저 내 블로그 계정을 연결하세요");
+    const acc = requireSession("답방할 내 블로그 계정을 연결해주세요");
+    if (!acc) return;
     setRLoadingPosts(true); setRMyPosts([]); addRLog("📥 내 블로그 글 불러오는 중...");
     const periodDays = rPeriod === "custom" ? rCustomDays : rPeriod;   // 직접설정이면 입력 일수 사용
     const q = new URLSearchParams({ accountId: acc.accountId, selectMode: rSelectMode, count: String(rTargetPosts), period: String(periodDays), ...(userId ? { userId } : {}) });
@@ -1470,8 +1381,8 @@ export default function NeighborPage({ theme, userId, plan = "free", publishUser
 
   /* 답방 2단계: 불러온 글의 댓글에 대댓글 실행 */
   const handleReplyStart = () => {
-    const acc = activeAccount;
-    if (!acc) return alert("먼저 답방할 내 블로그 계정을 연결하세요");
+    const acc = requireSession("답방할 내 블로그 계정을 연결해주세요");
+    if (!acc) return;
     if (!rMyPosts.length) return alert("먼저 '📥 내 글 불러오기'로 대상 글을 불러오세요");
     if (!isUnlimitedPlan && replyUsed >= replyLimit) return alert(`오늘 답방 한도(${replyLimit}건)를 모두 사용했어요. 자정에 초기화됩니다.`);
     if (rMode === "ai" && !(localStorage.getItem("publy_gemini_key") || "")) {
@@ -1506,7 +1417,9 @@ export default function NeighborPage({ theme, userId, plan = "free", publishUser
   /* 품앗이 실행: 연결된 계정들끼리 서로 공감·댓글 */
   const handlePumasiStart = () => {
     const connected = accounts.filter(a => a.sessionOk && a.blogId);
-    if (connected.length < 2) return alert("품앗이는 연결된(비번 확인된) 계정이 2개 이상 필요해요.\n계정을 추가하고 '계정 연결하기'로 먼저 연결해주세요.");
+    // 🔗 계정연결 통일: 로그인 폼 폐지 → 세션 없으면 계정 관리로 유도. 품앗이는 세션 살아있는 계정 2개 이상 필요.
+    if (!connected.length) { requireSession("품앗이하려면 계정 연결이 필요해요"); return; }
+    if (connected.length < 2) return alert("품앗이는 세션이 살아있는 계정이 2개 이상 필요해요. 계정 관리에서 네이버 계정을 더 연결해주세요.");
     if (pumDoComment && pumCommentMode === "ai" && !localStorage.getItem("publy_gemini_key")) {
       if (!confirm("AI 자동 댓글은 Gemini(무료) 키가 필요해요. 키가 없으면 댓글이 건너뛰어져요. 그래도 시작할까요?")) return;
     }
@@ -1575,8 +1488,8 @@ export default function NeighborPage({ theme, userId, plan = "free", publishUser
 
   /* 블로그 건강검진 실행 */
   const handleBlogDiagnose = () => {
-    const acc = activeAccount;
-    if (!acc) return alert("먼저 진단할 내 블로그 계정을 연결하세요");
+    const acc = requireSession("진단할 내 블로그 계정을 연결해주세요");
+    if (!acc) return;
     if (!isUnlimitedPlan && scUsed >= scLimit) return alert(`오늘 블로그 진단 횟수(${scLimit}회)를 모두 사용했어요. 자정에 초기화됩니다.`);
     setScLoading(true); setScResult(null); setScLogs([]); setScSolutions(null); addScLog("📈 블로그 지표를 수집하는 중...");
     if (userId) { incrementBlogscoreQuota(userId).catch(() => {}); setScUsed(u => u + 1); }  // 진단 시작 시 1회 차감
@@ -1678,7 +1591,7 @@ export default function NeighborPage({ theme, userId, plan = "free", publishUser
   /* 재발행 목록에서 '지금 바로' 개선안 받기 — 그 글 하나만 AI로 제목1·2 + 진단·키워드·본문팁 생성 →
      글 아래에 펼쳐 보여주고, 둘 중 골라 '제목 변경하러 가기'로 변경. (재발행 흐름 + 개선안 풍부함을 합침) */
   const handleRepublishOne = async (item: { title: string; logNo?: string; blogId?: string }) => {
-    if (!activeAccount) return alert("먼저 계정을 연결하세요");
+    if (!requireSession()) return;
     if (!item.logNo) return alert("이 글의 번호를 못 찾았어요. '검색노출 검사'를 다시 한 번 해주세요.");
     const key = localStorage.getItem("publy_gemini_key") || "";
     if (!key) return alert("AI 제목 추천은 무료 Gemini 키가 필요해요. 설정 → 글쓰기 AI에서 등록해주세요.");
@@ -1720,14 +1633,13 @@ export default function NeighborPage({ theme, userId, plan = "free", publishUser
     if (!sol) { addScLog("❌ 개선안 생성 실패 (잠시 후 다시 시도)"); return alert("개선안 생성에 실패했어요. 잠시 후 다시 시도해주세요."); }
     addScLog(`✅ "${item.title.slice(0, 16)}" 개선안 완성 — 제목 2개 제안`);
     setRpSolutions(prev => ({ ...prev, [item.logNo!]: sol }));   // 이 글 아래에 펼쳐 보여줌
-    if (userId && activeAccount) markPrescribed(userId, activeAccount.accountId, item.logNo!);   // 🩺 처방(개선안 받은 날) 기록 → 무한루프 차단
+    if (userId && activeAccount) markPrescribed(userId, activeAccount.id, item.logNo!);   // 🩺 처방(개선안 받은 날) 기록 → 무한루프 차단
   };
 
   /* 개선 제목 → 실제 글 제목 자동 변경(재발행) */
   const handleApplyTitle = async (originalTitle: string, newTitle: string, key: string, logNoArg?: string) => {
-    const acc = activeAccount;
-    // 세션이 살아있는 계정이 없음(연결 안 됨/만료) → 부모 통합 게이트 팝업(계정 관리로 이동 버튼)으로 안내.
-    if (!acc) { window.dispatchEvent(new CustomEvent("publy-open-gate",{detail:{title:"계정 연결이 필요해요"}})); return; }
+    const acc = requireSession("제목을 바꿀 수 없어요 — 계정 연결이 필요해요");
+    if (!acc) return;
     // logNo: 솔루션에 직접 붙여둔 값 우선, 없으면 원제목 매칭으로 폴백
     const match = (scResult?.exposureChecks || []).find(c => c.title === originalTitle);
     const logNo = logNoArg || match?.logNo || "";
@@ -1743,7 +1655,7 @@ export default function NeighborPage({ theme, userId, plan = "free", publishUser
       const d = JSON.parse(e.data);
       if (d.type === "log") addScLog(d.msg);
       if (d.type === "done") {
-        if (d.ok) { setTitleEditUsed(u => u + 1); addScLog(`✅ 제목 변경 완료!`); if (userId) markTitleChanged(userId, acc.accountId, logNo, newTitle); /* 🩺 수정한 날 기록 → 30일 관찰 시작(무한루프 차단) */ setTrackSol(null); loadCare(); alert(`✅ 제목을 변경했어요!\n"${newTitle}"\n\n검색 반영에는 시간이 걸릴 수 있어요.`); }
+        if (d.ok) { setTitleEditUsed(u => u + 1); addScLog(`✅ 제목 변경 완료!`); if (userId) markTitleChanged(userId, acc.id, logNo, newTitle); /* 🩺 수정한 날 기록 → 30일 관찰 시작(무한루프 차단) */ setTrackSol(null); loadCare(); alert(`✅ 제목을 변경했어요!\n"${newTitle}"\n\n검색 반영에는 시간이 걸릴 수 있어요.`); }
         else { addScLog(`❌ 제목 변경 실패: ${d.message || "알 수 없는 오류"}`); alert(`제목 변경 실패: ${d.message || "알 수 없는 오류"}`); }
         setTitleEditingKey(""); es.close();
       }
@@ -1782,7 +1694,7 @@ export default function NeighborPage({ theme, userId, plan = "free", publishUser
   // 제목 1개 변경(조용히 실행, Promise<성공여부>). 자동변경 실행 로직(update-title)은 불가침 — 그대로 호출.
   const applyTitleQuiet = (logNo: string, newTitle: string): Promise<boolean> => new Promise(resolve => {
     const acc = activeAccount;
-    if (!acc) return resolve(false);
+    if (!acc || !acc.sessionOk) return resolve(false);   // 🔗 조용한 일괄 제목수정 — 세션 없으면 skip(팝업 X)
     let done = false;
     const finish = (ok: boolean) => { if (done) return; done = true; try { es.close(); } catch {} resolve(ok); };
     const body = JSON.stringify({ accountId: acc.accountId, logNo, newTitle, ...(userId ? { userId } : {}) });
@@ -1793,7 +1705,7 @@ export default function NeighborPage({ theme, userId, plan = "free", publishUser
       const d = JSON.parse(e.data);
       if (d.type === "log") addScLog(d.msg);
       if (d.type === "done") {
-        if (d.ok && userId) markTitleChanged(userId, acc.accountId, logNo, newTitle);
+        if (d.ok && userId) markTitleChanged(userId, acc.id, logNo, newTitle);
         clearTimeout(to); finish(!!d.ok);
       }
     };
@@ -1803,7 +1715,7 @@ export default function NeighborPage({ theme, userId, plan = "free", publishUser
   // 🚀 지금 목록(list)의 미노출 글 전체를 자동으로: 관찰중 제외 → 개선안 → 제목1·2 랜덤 → 변경. 한도 걸리면 멈추고 업그레이드 팝업.
   const runBulkRetitle = async (targets: { title: string; logNo?: string; blogId?: string }[]) => {
     // 세션 살아있는 계정 없으면 부모 통합 게이트 팝업으로 안내(도중에 터지지 않게 진입 전 차단).
-    if (!activeAccount) { window.dispatchEvent(new CustomEvent("publy-open-gate",{detail:{title:"제목을 바꿀 수 없어요"}})); return; }
+    if (!requireSession("제목을 바꿀 수 없어요")) return;
     // 관찰중(이미 제목 바꿔 지켜보는) 글 제외 — 무한루프 차단
     const todo = targets.filter(t => t.logNo).filter(t => {
       const care = careMap[t.logNo!];
@@ -1860,8 +1772,8 @@ export default function NeighborPage({ theme, userId, plan = "free", publishUser
 
   /* 블로그 지수 1단계: 기간에 맞는 내 글 불러오기 */
   const handleLoadScorePosts = () => {
-    const acc = activeAccount;
-    if (!acc) return alert("먼저 검사할 내 블로그 계정을 연결하세요");
+    const acc = requireSession("검사할 내 블로그 계정을 연결해주세요");
+    if (!acc) return;
     setScPostsLoading(true); setScPosts([]); setScSelectedLogNos([]); setScSolutions(null);
     const periodDays = scPeriod === "custom" ? scCustomDays : scPeriod;
     const q = new URLSearchParams({ accountId: acc.accountId, selectMode: scPostMode, count: "100", period: String(periodDays) });
@@ -1883,8 +1795,8 @@ export default function NeighborPage({ theme, userId, plan = "free", publishUser
 
   /* 블로그 지수 2단계: 체크한 글만 검색 노출 검사 */
   const handleCheckSelectedExposure = async () => {
-    const acc = activeAccount;
-    if (!acc) return alert("먼저 검사할 내 블로그 계정을 연결하세요");
+    const acc = requireSession("검사할 내 블로그 계정을 연결해주세요");
+    if (!acc) return;
     if (!scResult) return alert("먼저 '블로그 진단 시작'으로 기본 건강 리포트를 만들어주세요");
     if (!scSelectedLogNos.length) return alert("검색노출을 확인할 글을 하나 이상 선택하세요");
     setScExposureLoading(true); setScSolutions(null);
@@ -1919,7 +1831,7 @@ export default function NeighborPage({ theme, userId, plan = "free", publishUser
       // 🩺 주치의: 검사 결과를 글별 진료차트(publy_post_care)에 기록 — 순위 누적 + 완치(100위 진입) 감지. 죽은 데이터를 살린다.
       if (userId) {
         try {
-          const { newlyCured } = await savePostCareChecks(userId, acc.accountId, checksWithDate);
+          const { newlyCured } = await savePostCareChecks(userId, acc.id, checksWithDate);
           if (newlyCured.length) { addScLog(`🎉 노출 성공(완치) ${newlyCured.length}개! 축하드려요`); setCelebrate(newlyCured); }
           await loadCare();   // 재발행 목록에 관찰중/처방 상태 즉시 반영
           // 🩺 검사 끝났으니 곧바로 조회수·(제목 바꾼 글)순위도 이어서 자동 수집 — useEffect 타이밍에 의존하지 않게 확실히 실행
@@ -2193,7 +2105,7 @@ export default function NeighborPage({ theme, userId, plan = "free", publishUser
               🔒 <b>{tabName}</b> 전용 계정 <b style={{ color: "#00c896" }}>{accounts.length}</b>/{isUnlimitedPlan ? "∞" : accountLimit}개 · 다른 탭과 <b>완전히 분리</b>돼요(한 곳에서 문제가 생겨도 다른 탭엔 영향 없어요).
             </div>
             <AccountAccordion accounts={accounts} open={acctOpen} setOpen={setAcctOpen} tabName={tabName} accountLimit={accountLimit} isUnlimited={isUnlimitedPlan}>
-              <AccountCard accounts={accounts} onLogin={handleLogin} onAdd={handleAddAccount} onRemove={handleRemoveAccount} onChange={handleAccountChange} onConnectAll={handleConnectAll} connectingAll={connectingAll} />
+              <AccountCard accounts={accounts} onGoAccounts={onGoAccounts} />
               <AccountSelector accounts={accounts} selectedId={selectedAcctId} onSelect={setSelectedAcctId} />
             </AccountAccordion>
 
@@ -2480,7 +2392,7 @@ export default function NeighborPage({ theme, userId, plan = "free", publishUser
               🔒 <b>{tabName}</b> 전용 계정 <b style={{ color: "#00c896" }}>{accounts.length}</b>/{isUnlimitedPlan ? "∞" : accountLimit}개 · 다른 탭과 <b>완전히 분리</b>돼요(한 곳에서 문제가 생겨도 다른 탭엔 영향 없어요).
             </div>
             <AccountAccordion accounts={accounts} open={acctOpen} setOpen={setAcctOpen} tabName={tabName} accountLimit={accountLimit} isUnlimited={isUnlimitedPlan}>
-              <AccountCard accounts={accounts} onLogin={handleLogin} onAdd={handleAddAccount} onRemove={handleRemoveAccount} onChange={handleAccountChange} onConnectAll={handleConnectAll} connectingAll={connectingAll} />
+              <AccountCard accounts={accounts} onGoAccounts={onGoAccounts} />
               <AccountSelector accounts={accounts} selectedId={selectedAcctId} onSelect={setSelectedAcctId} />
             </AccountAccordion>
 
@@ -2745,7 +2657,7 @@ export default function NeighborPage({ theme, userId, plan = "free", publishUser
               🔒 <b>{tabName}</b> 전용 계정 <b style={{ color: "#00c896" }}>{accounts.length}</b>/{isUnlimitedPlan ? "∞" : accountLimit}개 · 다른 탭과 <b>완전히 분리</b>돼요(한 곳에서 문제가 생겨도 다른 탭엔 영향 없어요).
             </div>
             <AccountAccordion accounts={accounts} open={acctOpen} setOpen={setAcctOpen} tabName={tabName} accountLimit={accountLimit} isUnlimited={isUnlimitedPlan}>
-              <AccountCard accounts={accounts} onLogin={handleLogin} onAdd={handleAddAccount} onRemove={handleRemoveAccount} onChange={handleAccountChange} onConnectAll={handleConnectAll} connectingAll={connectingAll} />
+              <AccountCard accounts={accounts} onGoAccounts={onGoAccounts} />
               <AccountSelector accounts={accounts} selectedId={selectedAcctId} onSelect={setSelectedAcctId} />
             </AccountAccordion>
 
@@ -2903,7 +2815,7 @@ export default function NeighborPage({ theme, userId, plan = "free", publishUser
               🔒 <b>{tabName}</b> 전용 계정 <b style={{ color: "#00c896" }}>{accounts.length}</b>/{isUnlimitedPlan ? "∞" : accountLimit}개 · 다른 탭과 <b>완전히 분리</b>돼요(한 곳에서 문제가 생겨도 다른 탭엔 영향 없어요).
             </div>
             <AccountAccordion accounts={accounts} open={acctOpen} setOpen={setAcctOpen} tabName={tabName} accountLimit={accountLimit} isUnlimited={isUnlimitedPlan}>
-              <AccountCard accounts={accounts} onLogin={handleLogin} onAdd={handleAddAccount} onRemove={handleRemoveAccount} onChange={handleAccountChange} onConnectAll={handleConnectAll} connectingAll={connectingAll} />
+              <AccountCard accounts={accounts} onGoAccounts={onGoAccounts} />
               <AccountSelector accounts={accounts} selectedId={selectedAcctId} onSelect={setSelectedAcctId} />
             </AccountAccordion>
             <div className="card" style={{ padding: "18px 20px" }}>
@@ -3415,7 +3327,7 @@ export default function NeighborPage({ theme, userId, plan = "free", publishUser
                                     if (!window.confirm(`"${r.title}"\n\n이 글을 AI가 좋은 품질로 새로 써서 그 글에 덮어쓸까요?\n(제목·본문·이미지가 모두 새로 교체돼요. 좋아요·주소는 유지)\n\n※ 새로 만든 품질이 낮으면 자동으로 덮어쓰기를 멈춰 원본을 지켜요.`)) return;
                                     // 블로그지수/제목수정에서 실제로 사용 중인 정확한 로그인 계정도 함께 넘긴다.
                                     // 네이버 로그인ID(bb9653)와 블로그ID(system-b)가 달라도 글살리기가 같은 계정 세션을 그대로 사용한다.
-                                    const accepted = window.dispatchEvent(new CustomEvent("publy-revive-post", { cancelable: true, detail: { logNo: r.logNo, title: r.title, blogId: activeAccount?.blogId, naverId: activeAccount?.id, careAccountId: activeAccount?.accountId } }));
+                                    const accepted = window.dispatchEvent(new CustomEvent("publy-revive-post", { cancelable: true, detail: { logNo: r.logNo, title: r.title, blogId: activeAccount?.blogId, naverId: activeAccount?.id, careAccountId: activeAccount?.id } }));
                                     if (accepted) alert("원터치 탭에서 '글 살리기'가 진행돼요. 창을 닫지 말고 기다려 주세요.");
                                   }}
                                   style={{ marginLeft: "auto", flexShrink: 0, fontSize: 11, fontWeight: 800, color: "#fff", background: !isUnlimitedPlan && reviveUsed >= reviveLimit ? "#8a8a99" : "linear-gradient(135deg,#7c3aed,#a855f7)", border: "none", cursor: !isUnlimitedPlan && reviveUsed >= reviveLimit ? "not-allowed" : "pointer", padding: "5px 11px", borderRadius: 8, fontFamily: "inherit", opacity: !isUnlimitedPlan && reviveUsed >= reviveLimit ? .65 : 1 }}>
@@ -3843,12 +3755,7 @@ export default function NeighborPage({ theme, userId, plan = "free", publishUser
             </div>
 
             <AccountAccordion accounts={accounts} open={acctOpen} setOpen={setAcctOpen} tabName="품앗이" accountLimit={accountLimit} isUnlimited={isUnlimitedPlan}>
-              <AccountCard accounts={accounts} onLogin={handleLogin} onAdd={handleAddAccount} onRemove={handleRemoveAccount} onChange={handleAccountChange} onConnectAll={handleConnectAll} connectingAll={connectingAll} />
-              {accounts.length > 1 && (
-                <button onClick={handleRemoveAllAccounts} style={{ width: "100%", padding: "10px", borderRadius: 10, border: "1.5px solid var(--danger)", background: "transparent", color: "var(--danger)", cursor: "pointer", fontSize: 12.5, fontWeight: 700, fontFamily: "inherit" }}>
-                  🗑 계정 전체 삭제 (저장된 로그인도 함께)
-                </button>
-              )}
+              <AccountCard accounts={accounts} onGoAccounts={onGoAccounts} />
             </AccountAccordion>
 
             {/* ★진행 현황 미리보기: 각 대상별 총 글 / 이미 댓글 단 글 / 남은 글(시작 전 확인) */}

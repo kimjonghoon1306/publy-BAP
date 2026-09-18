@@ -892,9 +892,15 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
   const [guideTab, setGuideTab] = useState(0);
   const [botOnline, setBotOnline] = useState(false);
   // 봇에 실제로 저장된 세션 상태(플랫폼별) — 계정관리 "연결됨"이 거짓말하지 않게. 관리자 세션은 ADM_UID로 저장하므로 그걸로 조회.
-  const [realSession, setRealSession] = useState<{naver?:boolean;tistory?:boolean;google?:boolean}>({});
+  // naverAccounts: 계정별(username) 세션 실측 — 모든 탭이 이 하나의 세션을 공유하므로 각 탭은 재로그인 없이 여기서 상태만 본다.
+  const [realSession, setRealSession] = useState<{naver?:boolean;tistory?:boolean;google?:boolean;naverAccounts?:Record<string,{ok:boolean;blogId?:string}>}>({});
+  const admAccsRef = useRef<PublyAccount[]>([]);   // refreshSessionStatus가 최신 계정 목록을 읽되 TDZ(선언 순서) 회피
   const refreshSessionStatus = useCallback(async()=>{
-    try{ const r=await botFetch(`${BOT}/api/session-status/${ADM_UID}`,{signal:AbortSignal.timeout(3000)} as any); if(r.ok) setRealSession(await r.json()); }catch{}
+    try{
+      const naverIds=[...new Set(admAccsRef.current.filter(a=>a.platform==="naver"&&a.is_connected).map(a=>a.username).filter(Boolean))];
+      const qs=naverIds.length?`?naverIds=${encodeURIComponent(naverIds.join(","))}`:"";
+      const r=await botFetch(`${BOT}/api/session-status/${ADM_UID}${qs}`,{signal:AbortSignal.timeout(3000)} as any); if(r.ok) setRealSession(await r.json());
+    }catch{}
   },[]);
   useEffect(()=>{ if(botOnline) refreshSessionStatus(); },[botOnline,refreshSessionStatus]);
   // 봇 온라인 동안 주기 갱신 — 발행/글살리기 직전에 세션이 죽어도(예: 시간 경과·다른 기능 접속) 게이트가 최신 상태로 막게.
@@ -902,6 +908,9 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
   const [gate, setGate] = useState<{title:string;issues:GateIssue[]}|null>(null);   // 계정/Flow 연결 게이트 팝업
   const [platform, setPlatform] = useState<"naver"|"tistory">("naver");
   const [admAccs, setAdmAccs] = useState<PublyAccount[]>([]);
+  useEffect(()=>{ admAccsRef.current=admAccs; },[admAccs]);   // 계정별 세션 실측(refreshSessionStatus)이 최신 계정 목록을 참조하게
+  // 🔗 서이추·공감·답방·품앗이·블로그지수 탭이 공유할 '연결된 네이버 계정'(관리자) — 계정 관리에서 연결한 것 그대로
+  const admNaverConnectedAccounts = admAccs.filter(a=>a.platform==="naver"&&a.is_connected).map(a=>({naverId:a.username, blogName:a.blog_name||""}));
 
   // 발행
   const [pubTitle, setPubTitle] = useState(""); const [pubContent, setPubContent] = useState(""); const [pubTags, setPubTags] = useState(""); const [pubImg, setPubImg] = useState(""); const [pubAccId, setPubAccId] = useState(""); const [publishing, setPublishing] = useState(false); const [pubMsg, setPubMsg] = useState("");
@@ -1165,7 +1174,10 @@ export default function AdminPage({onBack, onDashboard, theme, onThemeToggle}: P
   },[admAccs,platform,otImgMode,flowSlot,flowSlotReady,realSession,botOnline]);
   // 🔗 블로그지수 등 하위 화면(NeighborPage)에서 "제목수정 등 네이버 작업" 진입 시 세션/Flow 게이트를 이 통합 팝업으로 위임.
   useEffect(()=>{
-    const h=(e:any)=>{ const issues=collectPublishGate({needFlow:!!e.detail?.needFlow}); if(issues.length)setGate({title:e.detail?.title||"계정 연결이 필요해요",issues}); };
+    const h=(e:any)=>{ let issues=collectPublishGate({needFlow:!!e.detail?.needFlow});
+      // force=하위 화면(NeighborPage)이 '선택 계정' 세션 실측으로 이미 없음을 확정 → 발행봇 활성세션 기준 필터가 비어도 반드시 안내(다계정 중 선택 계정만 만료 케이스).
+      if(!issues.length && e.detail?.force) issues=[{msg:"선택한 네이버 계정의 세션이 만료됐어요. 계정 관리에서 다시 연결해주세요.",btnLabel:"계정 관리로 이동",go:()=>setTab("accounts")}];
+      if(issues.length)setGate({title:e.detail?.title||"계정 연결이 필요해요",issues}); };
     window.addEventListener("publy-open-gate",h as any);
     return ()=>window.removeEventListener("publy-open-gate",h as any);
   },[admAccs,realSession,botOnline,flowSlot,flowSlotReady]);
@@ -6055,27 +6067,27 @@ POST3: (제목)|(이유)
             {/* ───── 자동화 탭 keep-alive: 방문한 탭은 숨기기만(작업·데이터 유지) ───── */}
             {visitedAutoTabs.has("neighbor") && (
               <div style={{ display: tab === "neighbor" ? "block" : "none" }}>
-                <NeighborPage theme={theme} userId={ADM_HISTORY_UID} plan="admin" publishUserId={ADM_UID}singleTab isActive={tab === "neighbor"} />
+                <NeighborPage theme={theme} userId={ADM_HISTORY_UID} plan="admin" publishUserId={ADM_UID} connectedAccounts={admNaverConnectedAccounts} naverAccountStatus={realSession.naverAccounts||{}} onGoAccounts={()=>setTab("accounts")}singleTab isActive={tab === "neighbor"} />
               </div>
             )}
             {visitedAutoTabs.has("engage") && (
               <div style={{ display: tab === "engage" ? "block" : "none" }}>
-                <NeighborPage theme={theme} userId={ADM_HISTORY_UID} plan="admin" publishUserId={ADM_UID}initialTab="engage" singleTab isActive={tab === "engage"} />
+                <NeighborPage theme={theme} userId={ADM_HISTORY_UID} plan="admin" publishUserId={ADM_UID} connectedAccounts={admNaverConnectedAccounts} naverAccountStatus={realSession.naverAccounts||{}} onGoAccounts={()=>setTab("accounts")}initialTab="engage" singleTab isActive={tab === "engage"} />
               </div>
             )}
             {visitedAutoTabs.has("reply") && (
               <div style={{ display: tab === "reply" ? "block" : "none" }}>
-                <NeighborPage theme={theme} userId={ADM_HISTORY_UID} plan="admin" publishUserId={ADM_UID}initialTab="reply" singleTab isActive={tab === "reply"} />
+                <NeighborPage theme={theme} userId={ADM_HISTORY_UID} plan="admin" publishUserId={ADM_UID} connectedAccounts={admNaverConnectedAccounts} naverAccountStatus={realSession.naverAccounts||{}} onGoAccounts={()=>setTab("accounts")}initialTab="reply" singleTab isActive={tab === "reply"} />
               </div>
             )}
             {visitedAutoTabs.has("pumasi") && (
               <div style={{ display: tab === "pumasi" ? "block" : "none" }}>
-                <NeighborPage theme={theme} userId={ADM_HISTORY_UID} plan="admin" publishUserId={ADM_UID}initialTab="pumasi" singleTab isActive={tab === "pumasi"} />
+                <NeighborPage theme={theme} userId={ADM_HISTORY_UID} plan="admin" publishUserId={ADM_UID} connectedAccounts={admNaverConnectedAccounts} naverAccountStatus={realSession.naverAccounts||{}} onGoAccounts={()=>setTab("accounts")}initialTab="pumasi" singleTab isActive={tab === "pumasi"} />
               </div>
             )}
             {visitedAutoTabs.has("blogscore") && (
               <div style={{ display: tab === "blogscore" ? "block" : "none" }}>
-                <NeighborPage theme={theme} userId={ADM_HISTORY_UID} plan="admin" publishUserId={ADM_UID}initialTab="score" singleTab isActive={tab === "blogscore"} />
+                <NeighborPage theme={theme} userId={ADM_HISTORY_UID} plan="admin" publishUserId={ADM_UID} connectedAccounts={admNaverConnectedAccounts} naverAccountStatus={realSession.naverAccounts||{}} onGoAccounts={()=>setTab("accounts")}initialTab="score" singleTab isActive={tab === "blogscore"} />
               </div>
             )}
 

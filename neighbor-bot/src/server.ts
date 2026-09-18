@@ -1,6 +1,6 @@
 import express from "express";
 import cors from "cors";
-import { saveSession, copySessionForPublish, sessionExists, removeSession, crawlBlogIds, crawlBuddyPosts, analyzeBuddyKeywords, addNeighbors, NeighborResult, donePath, engageBlogs, EngageResult, engageDonePath, crawlMyPosts, crawlPublicPosts, replyToComments, crawlPlaceReviews, generatePlaceReviewReply, replyToPlaceReviews, crawlBlogStats, checkSelectedBlogExposure, pumasiEngage, crawlPumasiReport, pumasiPreview, updatePostTitle, checkProxy, analyzeBlogAuthenticity, fetchPostBody, crawlPostViews, sendWebmail, sendBlogComments, crawlPlaces, crawlPlaceBloggers, crawlPlaceDetail, crawlPlaceByUrl, suggestPlaceKeywords, parsePlaceUrl, resolvePlaceUrl, searchInflow, diagnosePlace, diagnoseStore, measurePlaceRank, measureBlogRank, collectPlaceReviews, InflowTarget } from "./naver";
+import { saveSession, sessionExists, removeSession, crawlBlogIds, crawlBuddyPosts, analyzeBuddyKeywords, addNeighbors, NeighborResult, donePath, engageBlogs, EngageResult, engageDonePath, crawlMyPosts, crawlPublicPosts, replyToComments, crawlPlaceReviews, generatePlaceReviewReply, replyToPlaceReviews, crawlBlogStats, checkSelectedBlogExposure, pumasiEngage, crawlPumasiReport, pumasiPreview, updatePostTitle, checkProxy, analyzeBlogAuthenticity, fetchPostBody, crawlPostViews, sendWebmail, sendBlogComments, crawlPlaces, crawlPlaceBloggers, crawlPlaceDetail, crawlPlaceByUrl, suggestPlaceKeywords, parsePlaceUrl, resolvePlaceUrl, searchInflow, diagnosePlace, diagnoseStore, measurePlaceRank, measureBlogRank, collectPlaceReviews, InflowTarget } from "./naver";
 import { checkNeighborQuota, incrementNeighborQuota, getNeighborDailyUsage, incrementEngageQuota, getEngageDailyUsage, getUserPlan, checkMembershipAccess, NEIGHBOR_DAILY_LIMIT, ENGAGE_DAILY_LIMIT, REPLY_DAILY_LIMIT, getReplyDailyUsage, incrementReplyQuota, PLACE_REPLY_DAILY_LIMIT, getPlaceReplyDailyUsage, incrementPlaceReplyQuota, addNeighborHistory, addReplyHistory, addPlaceReplyHistory, addBlogscoreHistory, incrementPumasiQuota, TITLE_EDIT_DAILY_LIMIT, getTitleEditDailyUsage, incrementTitleEditQuota, getProxyForAccount, supabase, getOutreachSender, getOutreachSentToday, addOutreachLog, checkPlaceDetailQuota, incrementPlaceDetailQuota, checkInflowQuota, incrementInflowQuota, incrementInflowStat, inflowReviewAllowed, verifyInflowSession, verifyAdminSession, consumeInflowQuota, INFLOW_DAILY_LIMIT } from "./supabase";
 import nodemailer from "nodemailer";
 import fs from "fs";
@@ -49,15 +49,14 @@ app.get("/api/buddy-keywords/:accountId", async (req, res) => {
 
 /* ── 로그인 (세션 저장) ── */
 app.post("/api/login", async (req, res) => {
-  const { accountId, id, pw, publishUserId } = req.body;
+  const { accountId, id, pw } = req.body;
   if (!accountId || !id || !pw)
     return res.status(400).json({ success: false, error: "accountId, id, pw 필요" });
   try {
+    // 🔗 계정연결 통일(2026-09-18): 서이추 계열은 계정관리에서 저장한 세션(naver_{userId}__{naverId})을 accountId로 그대로 공유하므로
+    //   블로그지수→발행봇 세션 복제(copySessionForPublish)는 폐지. 이 /api/login은 이제 플레이스·크롤링 계정 로그인만 쓴다.
     const result = await saveSession(accountId, id, pw);
-    // 🔗 세션 통일: 블로그지수에서 연결한 계정을 발행봇 세션(naver_{publishUserId})으로도 복제 → 발행/글살리기 바로 됨.
-    let publishSynced = false;
-    if (publishUserId) publishSynced = copySessionForPublish(accountId, String(publishUserId));
-    res.json({ success: true, blogId: result.blogId, publishSynced });
+    res.json({ success: true, blogId: result.blogId });
   } catch (e: any) {
     res.status(500).json({ success: false, error: e.message });
   }

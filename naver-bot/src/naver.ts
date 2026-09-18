@@ -96,6 +96,16 @@ async function resolveNaverBlogId(storedBlogId: string, cookies: any[], userId: 
 export function naverSessionExists(userId: string): boolean {
   return hasSession(naverSessionName(userId), LEGACY_SESSION_DIRS);
 }
+// 🔗 계정별 세션 실측 — 계정관리에서 연결한 계정(naver_{userId}__{naverId})의 세션이 실제로 살아있는지 + 그 계정의 blogId(주소).
+//   모든 탭(발행·서이추·공감·블로그지수…)이 이 하나의 세션을 공유하므로, 각 탭에서 재로그인 없이 상태·blogId만 확인한다.
+//   blogId는 계정관리(accounts) 테이블엔 없고 봇 세션에만 있으므로, 서이추/블로그지수가 쓰도록 여기서 함께 내려준다.
+export function naverAccountInfo(userId: string, naverId: string): { ok: boolean; blogId?: string } {
+  try {
+    if (!hasSession(naverAcctSessionName(userId, naverId), LEGACY_SESSION_DIRS)) return { ok: false };
+    const s = readSession<any>(naverAcctSessionName(userId, naverId), LEGACY_SESSION_DIRS);
+    return { ok: true, blogId: String(s?.blogId || "") };
+  } catch { return { ok: false }; }
+}
 export function deleteNaverSession(userId: string): void { deleteSessionFamily(naverSessionName(userId), LEGACY_SESSION_DIRS); }
 export function deleteGoogleSession(userId: string): void { deleteSession(googleSessionName(userId), LEGACY_SESSION_DIRS); }
 

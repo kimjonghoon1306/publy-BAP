@@ -867,9 +867,15 @@ export default function DashboardPage({user, onLogout, onAdminLogin, onThemeTogg
   const [guideTab, setGuideTab] = useState(0);
   const [botOnline, setBotOnline] = useState(false);
   // 봇에 실제로 저장된 세션 상태(플랫폼별) — 계정관리 "연결됨"이 거짓말하지 않게.
-  const [realSession, setRealSession] = useState<{naver?:boolean;tistory?:boolean;google?:boolean}>({});
+  // naverAccounts: 계정별(username) 세션 실측 — 모든 탭이 이 하나의 세션을 공유하므로 각 탭은 재로그인 없이 여기서 상태만 본다.
+  const [realSession, setRealSession] = useState<{naver?:boolean;tistory?:boolean;google?:boolean;naverAccounts?:Record<string,{ok:boolean;blogId?:string}>}>({});
+  const accountsRef = useRef<PublyAccount[]>([]);   // refreshSessionStatus가 최신 accounts를 읽되 TDZ(선언 순서) 회피
   const refreshSessionStatus = useCallback(async()=>{
-    try{ const r=await botFetch(`${BOT}/api/session-status/${user.id}`,{signal:AbortSignal.timeout(3000)}); if(r.ok) setRealSession(await r.json()); }catch{}
+    try{
+      const naverIds=[...new Set(accountsRef.current.filter(a=>a.platform==="naver"&&a.is_connected).map(a=>a.username).filter(Boolean))];
+      const qs=naverIds.length?`?naverIds=${encodeURIComponent(naverIds.join(","))}`:"";
+      const r=await botFetch(`${BOT}/api/session-status/${user.id}${qs}`,{signal:AbortSignal.timeout(3000)}); if(r.ok) setRealSession(await r.json());
+    }catch{}
   },[user.id]);
   useEffect(()=>{ if(botOnline) refreshSessionStatus(); },[botOnline,refreshSessionStatus]);
   // 봇 온라인 동안 주기 갱신 — 발행/글살리기 직전에 세션이 죽어도(예: 시간 경과·다른 기능 접속) 게이트가 최신 상태로 막게.
@@ -1011,6 +1017,9 @@ export default function DashboardPage({user, onLogout, onAdminLogin, onThemeTogg
     return new Promise((resolve)=>{ pwPromptResolve.current=resolve; setPwPrompt({acc,value:""}); });
   }
   const [accounts, setAccounts] = useState<PublyAccount[]>([]);
+  useEffect(()=>{ accountsRef.current=accounts; },[accounts]);   // 계정별 세션 실측(refreshSessionStatus)이 최신 계정 목록을 참조하게
+  // 🔗 서이추·공감·답방·품앗이·블로그지수 탭이 공유할 '연결된 네이버 계정' — 계정 관리에서 연결한 것 그대로(탭별 재로그인 폐지)
+  const naverConnectedAccounts = accounts.filter(a=>a.platform==="naver"&&a.is_connected).map(a=>({naverId:a.username, blogName:a.blog_name||""}));
   const [history, setHistory] = useState<PublyHistory[]>([]);
   const [historyError, setHistoryError] = useState("");
   const [weekly, setWeekly] = useState<WeeklyActivity[]>([]);   // 📈 컨트롤타워 활동 그래프(선택 기간)
@@ -3306,7 +3315,10 @@ POST3: (제목)|(이유)
   },[accounts,platform,botOnline,otImgMode,flowSlot,flowSlotReady,realSession]);
   // 🔗 블로그지수 등 하위 화면(NeighborPage)에서 "제목수정 등 네이버 작업" 진입 시 세션/Flow 게이트를 이 통합 팝업으로 위임.
   useEffect(()=>{
-    const h=(e:any)=>{ const issues=collectPublishGate({needFlow:!!e.detail?.needFlow}); if(issues.length)setGate({title:e.detail?.title||"계정 연결이 필요해요",issues}); };
+    const h=(e:any)=>{ let issues=collectPublishGate({needFlow:!!e.detail?.needFlow});
+      // force=하위 화면(NeighborPage)이 '선택 계정' 세션 실측으로 이미 없음을 확정 → 발행봇 활성세션 기준 필터가 비어도 반드시 안내(다계정 중 선택 계정만 만료 케이스).
+      if(!issues.length && e.detail?.force) issues=[{msg:"선택한 네이버 계정의 세션이 만료됐어요. 계정 관리에서 다시 연결해주세요.",btnLabel:"계정 관리로 이동",go:()=>setTab("accounts")}];
+      if(issues.length)setGate({title:e.detail?.title||"계정 연결이 필요해요",issues}); };
     window.addEventListener("publy-open-gate",h as any);
     return ()=>window.removeEventListener("publy-open-gate",h as any);
   },[accounts,realSession,botOnline,flowSlot,flowSlotReady]);
@@ -8305,17 +8317,17 @@ POST3: (제목)|(이유)
             {/* ★자동화 탭 keep-alive: 방문한 탭은 언마운트하지 않고 display로만 숨김 → 탭 이동해도 작업·데이터 유지 */}
             {visitedAutoTabs.has("neighbor") && (
               <div className="tab-neighbor" aria-hidden={tab!=="neighbor"} style={{ display: tab==="neighbor" ? "block" : "none", pointerEvents: tab==="neighbor" ? "auto" : "none" }}>
-                <NeighborPage theme={theme as "dark"|"light"} userId={user.id} plan={user.plan} publishUserId={user.id} singleTab isActive={tab==="neighbor"} initialNeighborUsed={neighborUsed} onBusyChange={setNeighborBusy} />
+                <NeighborPage theme={theme as "dark"|"light"} userId={user.id} plan={user.plan} publishUserId={user.id} connectedAccounts={naverConnectedAccounts} naverAccountStatus={realSession.naverAccounts||{}} onGoAccounts={()=>setTab("accounts")}singleTab isActive={tab==="neighbor"} initialNeighborUsed={neighborUsed} onBusyChange={setNeighborBusy} />
               </div>
             )}
             {visitedAutoTabs.has("engage") && (
               <div className="tab-engage" aria-hidden={tab!=="engage"} style={{ display: tab==="engage" ? "block" : "none", pointerEvents: tab==="engage" ? "auto" : "none" }}>
-                <NeighborPage theme={theme as "dark"|"light"} userId={user.id} plan={user.plan} publishUserId={user.id} initialTab="engage" singleTab isActive={tab==="engage"} onEngageUsageChange={setEngageUsed} initialEngageUsed={engageUsed} onBusyChange={setNeighborBusy} />
+                <NeighborPage theme={theme as "dark"|"light"} userId={user.id} plan={user.plan} publishUserId={user.id} connectedAccounts={naverConnectedAccounts} naverAccountStatus={realSession.naverAccounts||{}} onGoAccounts={()=>setTab("accounts")}initialTab="engage" singleTab isActive={tab==="engage"} onEngageUsageChange={setEngageUsed} initialEngageUsed={engageUsed} onBusyChange={setNeighborBusy} />
               </div>
             )}
             {visitedAutoTabs.has("reply") && (
               <div className="tab-reply" aria-hidden={tab!=="reply"} style={{ display: tab==="reply" ? "block" : "none", pointerEvents: tab==="reply" ? "auto" : "none" }}>
-                <NeighborPage theme={theme as "dark"|"light"} userId={user.id} plan={user.plan} publishUserId={user.id} initialTab="reply" singleTab isActive={tab==="reply"} onBusyChange={setNeighborBusy} />
+                <NeighborPage theme={theme as "dark"|"light"} userId={user.id} plan={user.plan} publishUserId={user.id} connectedAccounts={naverConnectedAccounts} naverAccountStatus={realSession.naverAccounts||{}} onGoAccounts={()=>setTab("accounts")}initialTab="reply" singleTab isActive={tab==="reply"} onBusyChange={setNeighborBusy} />
               </div>
             )}
             {visitedAutoTabs.has("crawl") && crawlEnabled && (
@@ -8332,12 +8344,12 @@ POST3: (제목)|(이유)
             )}
             {visitedAutoTabs.has("pumasi") && (
               <div className="tab-pumasi" aria-hidden={tab!=="pumasi"} style={{ display: tab==="pumasi" ? "block" : "none", pointerEvents: tab==="pumasi" ? "auto" : "none" }}>
-                <NeighborPage theme={theme as "dark"|"light"} userId={user.id} plan={user.plan} publishUserId={user.id} initialTab="pumasi" singleTab isActive={tab==="pumasi"} onBusyChange={setNeighborBusy} />
+                <NeighborPage theme={theme as "dark"|"light"} userId={user.id} plan={user.plan} publishUserId={user.id} connectedAccounts={naverConnectedAccounts} naverAccountStatus={realSession.naverAccounts||{}} onGoAccounts={()=>setTab("accounts")}initialTab="pumasi" singleTab isActive={tab==="pumasi"} onBusyChange={setNeighborBusy} />
               </div>
             )}
             {visitedAutoTabs.has("blogscore") && (
               <div className="tab-blogscore" aria-hidden={tab!=="blogscore"} style={{ display: tab==="blogscore" ? "block" : "none", pointerEvents: tab==="blogscore" ? "auto" : "none" }}>
-                <NeighborPage theme={theme as "dark"|"light"} userId={user.id} plan={user.plan} publishUserId={user.id} initialTab="score" singleTab isActive={tab==="blogscore"} onBusyChange={setNeighborBusy} />
+                <NeighborPage theme={theme as "dark"|"light"} userId={user.id} plan={user.plan} publishUserId={user.id} connectedAccounts={naverConnectedAccounts} naverAccountStatus={realSession.naverAccounts||{}} onGoAccounts={()=>setTab("accounts")}initialTab="score" singleTab isActive={tab==="blogscore"} onBusyChange={setNeighborBusy} />
               </div>
             )}
 

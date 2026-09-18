@@ -4,6 +4,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.naverSessionExists = naverSessionExists;
+exports.naverAccountInfo = naverAccountInfo;
 exports.deleteNaverSession = deleteNaverSession;
 exports.deleteGoogleSession = deleteGoogleSession;
 exports.activateNaverAccount = activateNaverAccount;
@@ -32,22 +33,74 @@ const googleSessionName = (userId) => `google_${userId}`;
 //   neighbor-bot의 '제목수정(updatePostTitle)'에서 실측·검증된 resolveBlogIdFast를 그대로 이식.
 //   저장된 blogId가 로그인ID로 잘못 박혀 있어도, 실행 시점에 GoBlogWrite 302 Location에서 진짜 blogId를 뽑아 교정한다.
 //   글 편집(PostWriteForm?...&Redirect=Update)은 정확한 blogId 아니면 글목록(PostList)으로 튕기므로 필수.
-const RESOLVE_INVALID = ["PostList", "BlogHome", "FeedList", "neighborPostList", "TagList", "GoBlogWrite", "RedirectWriteView", "PostWriteForm", "MyBlog", "section", "m", "manage", "admin", "GoMyblog", "Write", "fx"];
-async function resolveNaverBlogId(storedBlogId, cookies, userId, log = console.log) {
-    storedBlogId = (storedBlogId || "").split("@")[0].trim(); // 이메일이 blogId로 들어오면 아이디만
-    const pickFrom = (s) => {
-        const m = s.match(/[?&]blogId=([a-zA-Z0-9_-]+)/) || s.match(/blog\.naver\.com\/([a-zA-Z0-9_-]+)/);
-        return (m && m[1] && !RESOLVE_INVALID.includes(m[1])) ? m[1] : "";
-    };
+const RESOLVE_INVALID = new Set(["PostList", "BlogHome", "FeedList", "neighborPostList", "TagList", "GoBlogWrite", "RedirectWriteView", "PostWriteForm", "MyBlog", "section", "m", "manage", "admin", "GoMyblog", "Write", "fx", "Recommendation", "prologueList", "login", "nidlogin", "protect", "security"].map(v => v.toLowerCase()));
+function validBlogId(value) {
+    return /^[a-zA-Z0-9_-]+$/.test(value || "") && !RESOLVE_INVALID.has(value.toLowerCase());
+}
+function pickNaverBlogId(value, base = "https://blog.naver.com/") {
     try {
-        const cookieHeader = (cookies || []).map((c) => `${c.name}=${c.value}`).join("; ");
+        const url = new URL(value, base);
+        if (!/^https?:$/.test(url.protocol) || !["blog.naver.com", "m.blog.naver.com"].includes(url.hostname))
+            return "";
+        const parts = url.pathname.split("/").filter(Boolean);
+        const route = (parts[0] || "").replace(/\.naver$/i, "");
+        // 쿼리 blogId도 로그인/추천/보호 페이지에서 가져오지 않는다.
+        if (/^(recommendation|login|nidlogin|protect|security)$/i.test(route))
+            return "";
+        const query = url.searchParams.get("blogId") || "";
+        if (query && (!parts.length || /^(PostWriteForm|RedirectWriteView|PostList|GoBlogWrite)$/i.test(route)))
+            return validBlogId(query) ? query : "";
+        return validBlogId(parts[0] || "") ? parts[0] : "";
+    }
+    catch {
+        return "";
+    }
+}
+// 갱신은 작업 시작 계정에 귀속. 다른 작업이 활성 계정을 바꿨으면 그 슬롯을 덮지 않는다.
+function persistNaverSession(userId, session, activate = false) {
+    let current;
+    try {
+        current = (0, session_store_1.readSession)(naverSessionName(userId), LEGACY_SESSION_DIRS);
+    }
+    catch { }
+    const accountName = naverAcctSessionName(userId, session.loginId);
+    // 연결 해제 후 끝난 작업이 삭제된 세션을 되살리지 않는다.
+    if (!activate && current?.loginId !== session.loginId && !(0, session_store_1.hasSession)(accountName, LEGACY_SESSION_DIRS))
+        return;
+    if (!validBlogId(session.blogId))
+        session.blogId = "";
+    session.updatedAt = Date.now();
+    (0, session_store_1.writeSession)(accountName, session);
+    if (activate || current?.loginId === session.loginId)
+        (0, session_store_1.writeSession)(naverSessionName(userId), session);
+}
+function requireNaverLogin(url) {
+    const parsed = new URL(url);
+    if (parsed.hostname === "nid.naver.com" || /^\/(login|nidlogin|protect|security|recommendation)(?:\.naver)?(?:\/|$)/i.test(parsed.pathname)) {
+        throw new Error("네이버 로그인/보호조치 확인이 필요해요. 계정 관리에서 직접 확인해주세요.");
+    }
+}
+function naverCookieHeader(cookies, target) {
+    const url = new URL(target);
+    return (cookies || []).filter(c => {
+        const domain = String(c.domain || "");
+        const matches = domain.startsWith(".") ? url.hostname === domain.slice(1) || url.hostname.endsWith(domain) : url.hostname === domain;
+        const cookiePath = c.path || "/";
+        return matches && (url.pathname === cookiePath || url.pathname.startsWith(cookiePath.endsWith("/") ? cookiePath : cookiePath + "/")) && (!c.expires || c.expires === -1 || c.expires > Date.now() / 1000);
+    }).map(c => `${c.name}=${c.value}`).join("; ");
+}
+async function resolveNaverBlogId(storedBlogId, cookies, userId, log = console.log, session = (0, session_store_1.readSession)(naverSessionName(userId), LEGACY_SESSION_DIRS)) {
+    storedBlogId = validBlogId(storedBlogId) ? storedBlogId : "";
+    const pickFrom = pickNaverBlogId;
+    try {
+        const cookieHeader = naverCookieHeader(cookies, "https://blog.naver.com/GoBlogWrite.naver");
         if (!cookieHeader)
-            return storedBlogId;
+            throw new Error("네이버 로그인 쿠키 없음");
         const headers = { cookie: cookieHeader, "user-agent": UA };
         let real = "";
         // 1순위: GoBlogWrite 302 Location에서 blogId
         try {
-            const r = await fetch("https://blog.naver.com/GoBlogWrite.naver", { headers, redirect: "manual" });
+            const r = await fetch("https://blog.naver.com/GoBlogWrite.naver", { headers, redirect: "manual", signal: AbortSignal.timeout(10000) });
             const loc = r.headers.get("location") || "";
             real = pickFrom(loc);
             if (!real && r.status >= 200 && r.status < 300)
@@ -57,38 +110,57 @@ async function resolveNaverBlogId(storedBlogId, cookies, userId, log = console.l
         // 2순위: 모바일 내블로그 리다이렉트
         if (!real)
             try {
-                const r2 = await fetch("https://m.blog.naver.com/MyBlog.naver", { headers, redirect: "manual" });
+                const r2 = await fetch("https://m.blog.naver.com/MyBlog.naver", { headers: { ...headers, cookie: naverCookieHeader(cookies, "https://m.blog.naver.com/MyBlog.naver") }, redirect: "manual", signal: AbortSignal.timeout(10000) });
                 real = pickFrom(r2.headers.get("location") || "") || pickFrom(r2.url || "");
             }
             catch { }
         if (real && real !== storedBlogId) {
             log(`[naver] [blogId교정] '${storedBlogId}' → '${real}' (로그인ID와 블로그주소가 달라 자동으로 맞췄어요)`);
-            try {
-                const s = (0, session_store_1.readSession)(naverSessionName(userId), LEGACY_SESSION_DIRS);
-                if (s) {
-                    s.blogId = real;
-                    (0, session_store_1.writeSession)(naverSessionName(userId), s);
-                }
-            }
-            catch { }
+            session.blogId = real;
+            persistNaverSession(userId, session);
             return real;
         }
     }
     catch { }
+    if (!storedBlogId)
+        throw new Error("네이버 블로그 주소를 확인하지 못했어요. 계정 관리에서 다시 연결해주세요.");
     return storedBlogId;
 }
 function naverSessionExists(userId) {
     return (0, session_store_1.hasSession)(naverSessionName(userId), LEGACY_SESSION_DIRS);
 }
-function deleteNaverSession(userId) { (0, session_store_1.deleteSession)(naverSessionName(userId), LEGACY_SESSION_DIRS); }
+// 🔗 계정별 세션 실측 — 계정관리에서 연결한 계정(naver_{userId}__{naverId})의 세션이 실제로 살아있는지 + 그 계정의 blogId(주소).
+//   모든 탭(발행·서이추·공감·블로그지수…)이 이 하나의 세션을 공유하므로, 각 탭에서 재로그인 없이 상태·blogId만 확인한다.
+//   blogId는 계정관리(accounts) 테이블엔 없고 봇 세션에만 있으므로, 서이추/블로그지수가 쓰도록 여기서 함께 내려준다.
+function naverAccountInfo(userId, naverId) {
+    try {
+        if (!(0, session_store_1.hasSession)(naverAcctSessionName(userId, naverId), LEGACY_SESSION_DIRS))
+            return { ok: false };
+        const s = (0, session_store_1.readSession)(naverAcctSessionName(userId, naverId), LEGACY_SESSION_DIRS);
+        return { ok: true, blogId: String(s?.blogId || "") };
+    }
+    catch {
+        return { ok: false };
+    }
+}
+function deleteNaverSession(userId) { (0, session_store_1.deleteSessionFamily)(naverSessionName(userId), LEGACY_SESSION_DIRS); }
 function deleteGoogleSession(userId) { (0, session_store_1.deleteSession)(googleSessionName(userId), LEGACY_SESSION_DIRS); }
 function activateNaverAccount(userId, naverId) {
     try {
         const accountSessionName = naverAcctSessionName(userId, naverId);
         if (!(0, session_store_1.hasSession)(accountSessionName, LEGACY_SESSION_DIRS))
             return false;
-        const session = (0, session_store_1.readSession)(accountSessionName, LEGACY_SESSION_DIRS);
-        (0, session_store_1.writeSession)(naverSessionName(userId), session);
+        let session = (0, session_store_1.readSession)(accountSessionName, LEGACY_SESSION_DIRS);
+        // 이전 버전이 활성 슬롯에만 갱신한 쿠키도 첫 전환에서 보존한다.
+        try {
+            const active = (0, session_store_1.readSession)(naverSessionName(userId), LEGACY_SESSION_DIRS);
+            if (active.loginId === naverId && (!session.updatedAt || active.updatedAt > session.updatedAt))
+                session = active;
+        }
+        catch { }
+        if (session.loginId !== naverId)
+            return false;
+        persistNaverSession(userId, session, true);
         return true;
     }
     catch {
@@ -166,6 +238,34 @@ async function downloadImageToTemp(url) {
         return null;
     }
 }
+// 두 로그인 경로에서 동일하게 키보드로 입력한다. 값 직접 주입은 사용하지 않는다.
+async function typeNaverCredentials(page, id, pw) {
+    const randomDelay = (min, max) => min + Math.floor(Math.random() * (max - min + 1));
+    await page.waitForTimeout(randomDelay(600, 1000));
+    for (const [selector, value] of [["#id", id], ["#pw", pw]]) {
+        await page.waitForTimeout(randomDelay(100, 250));
+        try {
+            await page.click(selector, { timeout: 2000 });
+        }
+        catch {
+            // 기존 DOM focus 폴백 유지. 입력은 이 경로에서도 키보드로 수행한다.
+            await page.evaluate((sel) => {
+                const el = document.querySelector(sel);
+                if (!el)
+                    throw new Error(`로그인 입력 필드를 찾지 못했습니다: ${sel}`);
+                el.focus();
+                if (document.activeElement !== el)
+                    throw new Error(`로그인 입력 필드에 포커스할 수 없습니다: ${sel}`);
+            }, selector);
+        }
+        await page.press(selector, process.platform === "darwin" ? "Meta+A" : "Control+A");
+        await page.press(selector, "Backspace");
+        for (const character of value) {
+            await page.type(selector, character, { delay: randomDelay(80, 180) });
+        }
+        await page.waitForTimeout(randomDelay(300, selector === "#id" ? 550 : 800));
+    }
+}
 /* ── 네이버 로그인 + blogId 추출 ── */
 async function saveNaverSession(userId, id, pw) {
     const browser = await playwright_1.chromium.launch({ headless: false, args: LAUNCH_ARGS, slowMo: 50 });
@@ -178,25 +278,7 @@ async function saveNaverSession(userId, id, pw) {
     try {
         console.log("[naver] 로그인 페이지 진입...");
         await page.goto("https://nid.naver.com/nidlogin.login", { waitUntil: "domcontentloaded", timeout: 30000 });
-        await page.waitForTimeout(800);
-        await page.evaluate((v) => {
-            const el = document.querySelector("#id");
-            if (el) {
-                el.focus();
-                el.value = v;
-                el.dispatchEvent(new Event("input", { bubbles: true }));
-            }
-        }, id);
-        await page.waitForTimeout(400);
-        await page.evaluate((v) => {
-            const el = document.querySelector("#pw");
-            if (el) {
-                el.focus();
-                el.value = v;
-                el.dispatchEvent(new Event("input", { bubbles: true }));
-            }
-        }, pw);
-        await page.waitForTimeout(400);
+        await typeNaverCredentials(page, id, pw);
         // 로그인 버튼 클릭 (네이버 개편: #loginBtn_row/#loginBtn_column, class btn_done, type=button — 옛 .btn_login 사라짐)
         let _loginClicked = false;
         for (const _sel of ["#loginBtn_row", "#loginBtn_column"]) {
@@ -222,25 +304,20 @@ async function saveNaverSession(userId, id, pw) {
         }
         console.log("[naver] 로그인 대기 중... (캡차 있으면 직접 풀어주세요)");
         try {
-            await page.waitForFunction(() => !location.href.includes("nid.naver.com/nidlogin"), { timeout: 90000 });
+            await page.waitForFunction(() => !location.href.includes("nid.naver.com/nidlogin"), undefined, { timeout: 90000 });
         }
         catch {
             throw new Error("로그인 시간 초과 (90초)");
         }
         await page.waitForTimeout(2000);
-        if (page.url().includes("nidlogin"))
-            throw new Error("로그인 실패");
+        requireNaverLogin(page.url());
         console.log("[naver] ✅ 로그인 성공");
         // ★★근본해결(네이버ID≠블로그주소, 예: 네이버ID=bb9653 blogId=system-b):
         //   GoBlogWrite 리다이렉트 최종 URL은 `blog.naver.com/{blogId}?Redirect=Write`(경로형)이라
         //   기존 `?blogId=`만 찾는 정규식으론 못 뽑아 네이버ID로 잘못 저장됐다.
         //   → 경로형 `blog.naver.com/{blogId}` + 쿼리형 `?blogId=` 둘 다 파싱한다. 이후 모든 회원 자동 정상.
         let blogId = null;
-        const BAD_BLOG_IDS = ["PostList", "BlogHome", "FeedList", "neighborPostList", "TagList", "GoBlogWrite", "RedirectWriteView", "PostWriteForm", "MyBlog", "section", "m", "manage", "admin", "GoMyblog", "Write", "fx"];
-        const pickBlogId = (u) => {
-            const mm = u.match(/[?&]blogId=([a-zA-Z0-9_-]+)/) || u.match(/(?:m\.)?blog\.naver\.com\/([a-zA-Z0-9_-]+)/);
-            return (mm && mm[1] && !BAD_BLOG_IDS.includes(mm[1])) ? mm[1] : "";
-        };
+        const pickBlogId = pickNaverBlogId;
         try {
             await page.goto("https://blog.naver.com/GoBlogWrite.naver", { waitUntil: "domcontentloaded", timeout: 30000 });
             await page.waitForTimeout(3000);
@@ -249,16 +326,15 @@ async function saveNaverSession(userId, id, pw) {
         catch { }
         if (!blogId) {
             try {
-                await page.goto("https://m.blog.naver.com", { waitUntil: "domcontentloaded", timeout: 20000 });
+                await page.goto("https://m.blog.naver.com/MyBlog.naver", { waitUntil: "domcontentloaded", timeout: 20000 });
                 await page.waitForTimeout(2000);
                 blogId = pickBlogId(page.url());
             }
             catch { }
         }
-        if (!blogId) {
-            blogId = id;
-            console.log(`[naver] ⚠️ blogId 자동추출 실패 → 네이버ID(${id})로 임시저장(실행 시 resolveBlogIdFast가 자동 교정)`);
-        }
+        requireNaverLogin(page.url());
+        if (!blogId || !await isSessionAliveNaver(await context.cookies()))
+            throw new Error("로그인 또는 블로그 주소 확인 실패. 보호조치를 확인한 뒤 다시 연결해주세요.");
         console.log(`[naver] ✅ blogId: ${blogId}`);
         const cookies = await context.cookies();
         // ★비번 저장(자동 재로그인용, base64) — 재진입 시 세션 만료돼도 저장된 정보로 원터치 재연결.
@@ -268,8 +344,7 @@ async function saveNaverSession(userId, id, pw) {
             cookies,
             pw: Buffer.from(pw, "utf-8").toString("base64"),
         };
-        (0, session_store_1.writeSession)(naverAcctSessionName(userId, id), session);
-        (0, session_store_1.writeSession)(naverSessionName(userId), session);
+        persistNaverSession(userId, session, true);
         await browser.close();
         return { blogId };
     }
@@ -281,10 +356,9 @@ async function saveNaverSession(userId, id, pw) {
 /* ── 자동 재로그인 (세션 만료 시) ──
    visible=false: 창 없이 조용히. visible=true: 창 띄워 아이디·비번 자동입력 후 보안문자(캡차)만 사용자가.
    ★캡차 회피: 실제 브라우저 모드+기존 쿠키(기기 신뢰) 재주입+사람같은 타이핑. */
-async function reloginNaverSilent(userId, visible = false) {
+async function reloginNaverSilent(userId, visible = false, session = (0, session_store_1.readSession)(naverSessionName(userId), LEGACY_SESSION_DIRS)) {
     if (!naverSessionExists(userId))
         return false;
-    const session = (0, session_store_1.readSession)(naverSessionName(userId), LEGACY_SESSION_DIRS);
     const loginId = session.loginId;
     let pw = null;
     if (session.pw) {
@@ -310,31 +384,7 @@ async function reloginNaverSilent(userId, visible = false) {
         await page.bringToFront().catch(() => { });
     try {
         await page.goto("https://nid.naver.com/nidlogin.login", { waitUntil: "domcontentloaded", timeout: 20000 });
-        await page.waitForTimeout(600);
-        try {
-            await page.click("#id");
-            await page.type("#id", loginId, { delay: 60 });
-        }
-        catch {
-            await page.evaluate((v) => { const el = document.querySelector("#id"); if (el) {
-                el.focus();
-                el.value = v;
-                el.dispatchEvent(new Event("input", { bubbles: true }));
-            } }, loginId);
-        }
-        await page.waitForTimeout(250);
-        try {
-            await page.click("#pw");
-            await page.type("#pw", pw, { delay: 55 });
-        }
-        catch {
-            await page.evaluate((v) => { const el = document.querySelector("#pw"); if (el) {
-                el.focus();
-                el.value = v;
-                el.dispatchEvent(new Event("input", { bubbles: true }));
-            } }, pw);
-        }
-        await page.waitForTimeout(300);
+        await typeNaverCredentials(page, loginId, pw);
         {
             let _c = false;
             for (const _s of ["#loginBtn_row", "#loginBtn_column"]) {
@@ -368,67 +418,91 @@ async function reloginNaverSilent(userId, visible = false) {
         }
         const timeout = visible ? 120000 : 15000;
         try {
-            await page.waitForFunction(() => !location.href.includes("nid.naver.com/nidlogin"), { timeout });
+            await page.waitForFunction(() => !location.href.includes("nid.naver.com/nidlogin"), undefined, { timeout });
         }
         catch {
             await browser.close().catch(() => { });
             return false;
         }
         await page.waitForTimeout(1500);
-        if (page.url().includes("nidlogin")) {
-            await browser.close();
-            return false;
-        }
+        requireNaverLogin(page.url());
         const cookies = await context.cookies();
-        const old = (0, session_store_1.readSession)(naverSessionName(userId), LEGACY_SESSION_DIRS);
-        (0, session_store_1.writeSession)(naverSessionName(userId), { ...old, cookies }); // 비번 유지, 쿠키만 갱신
+        if (!await isSessionAliveNaver(cookies))
+            return false;
+        session.cookies = cookies;
+        persistNaverSession(userId, session);
         await browser.close();
         console.log(`[naver] ✅ 자동 재로그인 성공${visible ? " (창 모드)" : ""}`);
         return true;
     }
     catch {
-        await browser.close().catch(() => { });
         return false;
+    }
+    finally {
+        await browser.close().catch(() => { });
     }
 }
 /* ★쿠키로 로그인 유효성 확인(가벼운 fetch). 만료면 nidlogin으로 리다이렉트. */
 async function isSessionAliveNaver(cookies) {
     try {
-        const h = (cookies || []).map((c) => `${c.name}=${c.value}`).join("; ");
+        const h = naverCookieHeader(cookies, "https://blog.naver.com/GoBlogWrite.naver");
         if (!h)
             return false;
-        const r = await fetch("https://blog.naver.com/GoBlogWrite.naver", { headers: { cookie: h, "user-agent": UA }, redirect: "manual" });
+        const r = await fetch("https://blog.naver.com/GoBlogWrite.naver", { headers: { cookie: h, "user-agent": UA }, redirect: "manual", signal: AbortSignal.timeout(10000) });
         const loc = r.headers.get("location") || "";
-        if (/nidlogin|nid\.naver\.com|\/login/i.test(loc))
-            return false;
+        if (loc) {
+            const target = new URL(loc, "https://blog.naver.com/");
+            if (target.hostname === "nid.naver.com" && target.pathname === "/nidlogin.login")
+                return false;
+            requireNaverLogin(target.href);
+        }
+        if (r.status >= 400)
+            throw new Error(`네이버 세션 확인 응답 오류 (${r.status})`);
         if (/PostWriteForm|RedirectWriteView|blogId=|Redirect=Write|blog\.naver\.com\/[a-zA-Z0-9_-]+/i.test(loc))
             return true;
         return r.status >= 200 && r.status < 400;
     }
-    catch {
-        return true;
+    catch (error) {
+        throw new Error(`네이버 세션 확인 불가 — 자동 로그인을 중단합니다: ${error instanceof Error ? error.message : error}`);
     }
 }
-/* ★★세션 원터치 재연결: 살아있으면 그대로, 만료면 저장된 비번으로 자동 재로그인(조용히→캡차면 창 모드). */
-async function ensureLiveSessionNaver(userId, log = console.log) {
+/* 세션 유지: 명확한 만료에만 자동 로그인 1회. 실패/보호조치는 직접 연결로 안내. */
+async function ensureLiveSessionNaver(userId, log = console.log, session, softFail = false) {
     if (!naverSessionExists(userId)) {
         // 🔍 진단 첨부 — 폴더마다 세션 0개면 '계정 연결 안 함', 다른 이름 있으면 '경로/계정 불일치'
         const diag = (0, session_store_1.sessionDiagnosis)(naverSessionName(userId), LEGACY_SESSION_DIRS);
         log(`[세션] ❌ 세션 없음 — 계정=${userId} · 진단: ${diag}`);
         throw new Error(`네이버 세션 없음 — 계정 관리 탭에서 네이버 '연결하기'를 먼저 해주세요. [진단 userId=${userId} · ${diag}]`);
     }
-    const cookies = (0, session_store_1.readSession)(naverSessionName(userId), LEGACY_SESSION_DIRS).cookies;
+    session || (session = (0, session_store_1.readSession)(naverSessionName(userId), LEGACY_SESSION_DIRS));
+    const cookies = session.cookies;
     if (await isSessionAliveNaver(cookies))
         return cookies;
-    log("[세션] 로그인이 만료돼 저장된 정보로 자동 재연결을 시도해요...");
-    if (await reloginNaverSilent(userId, false)) {
-        log("[세션] ✅ 자동 재연결 성공");
-        return (0, session_store_1.readSession)(naverSessionName(userId), LEGACY_SESSION_DIRS).cookies;
+    let latestAttempt = session.lastAutoLoginAt || 0;
+    try {
+        latestAttempt = Math.max(latestAttempt, (0, session_store_1.readSession)(naverAcctSessionName(userId, session.loginId), LEGACY_SESSION_DIRS).lastAutoLoginAt || 0);
     }
-    log("[세션] 🔐 보안문자(캡차)가 필요해요. 로그인 창을 띄웠어요 — 아이디·비번은 자동으로 채웠으니 보안문자만 입력해주세요(최대 2분).");
-    if (await reloginNaverSilent(userId, true)) {
-        log("[세션] ✅ 재연결 성공");
-        return (0, session_store_1.readSession)(naverSessionName(userId), LEGACY_SESSION_DIRS).cookies;
+    catch { }
+    // ★softFail(발행): 여기서 죽이지 않는다. 발행 브라우저(보이는 창)가 로그인 화면을 만나면 그 창에서
+    //   사람처럼 1회 자동 로그인 복구를 하므로, throttle/재연결 실패여도 (오래된)쿠키를 반환해 발행을 진행시킨다.
+    //   → 예전 '창 뜨고 가만히 멈춤' 해결. 로그인 반복(보호조치)은 발행창 복구가 1회·세션갱신으로 억제.
+    if (Date.now() - latestAttempt < 30 * 60 * 1000) {
+        if (softFail) {
+            log("[세션] 최근 자동로그인 시도 이력 — 발행 창에서 필요 시 1회 복구합니다");
+            return cookies || [];
+        }
+        throw new Error("자동 로그인이 최근 시도됐어요. 반복 로그인 방지를 위해 계정 관리에서 직접 확인해주세요.");
+    }
+    session.lastAutoLoginAt = Date.now();
+    persistNaverSession(userId, session);
+    log("[세션] 로그인이 만료돼 저장된 정보로 자동 재연결을 시도해요...");
+    if (await reloginNaverSilent(userId, false, session)) {
+        log("[세션] ✅ 자동 재연결 성공");
+        return session.cookies;
+    }
+    if (softFail) {
+        log("[세션] 조용한 재연결 실패 — 발행 창에서 자동 로그인으로 복구를 시도합니다");
+        return session.cookies || cookies || [];
     }
     throw new Error("로그인 재연결에 실패했어요. 계정 관리에서 '연결하기'를 한 번 눌러 직접 로그인해주세요.");
 }
@@ -436,7 +510,9 @@ async function ensureLiveSessionNaver(userId, log = console.log) {
 async function getNaverCategories(userId) {
     if (!naverSessionExists(userId))
         throw new Error("네이버 세션 없음");
-    const { blogId, cookies } = (0, session_store_1.readSession)(naverSessionName(userId), LEGACY_SESSION_DIRS);
+    const session = (0, session_store_1.readSession)(naverSessionName(userId), LEGACY_SESSION_DIRS);
+    const cookies = await ensureLiveSessionNaver(userId, console.log, session);
+    const blogId = await resolveNaverBlogId(session.blogId, cookies, userId, console.log, session);
     const browser = await playwright_1.chromium.launch({ headless: true, args: LAUNCH_ARGS });
     const context = await browser.newContext({
         userAgent: UA, viewport: { width: 1280, height: 800 },
@@ -539,6 +615,89 @@ function cleanContent(text) {
         .replace(/\n{3,}/g, "\n\n") // 3줄 이상 공백 → 2줄로
         .trim();
 }
+/* ── 지금 페이지가 '네이버 로그인 화면'인지 확실히 판별 ──
+   URL(nidlogin/login.naver)뿐 아니라 실제 로그인 폼(#id·#pw)이 화면에 있는지도 본다.
+   ★윈도우 실측: 로그인 페이지가 nid URL이 아니어도 로그인폼만 뜨는 경우가 있어 URL만 보면 놓친다
+   → 편집기 찾기가 로그인 입력칸을 편집기로 오인해 '제목을 아이디 칸에 입력'하는 버그. 폼 존재로 확실히 잡는다. */
+async function isNaverLoginPage(page) {
+    try {
+        const u = page.url();
+        if (/nidlogin|login\.naver|nid\.naver\.com/.test(u))
+            return true;
+        // 페이지·프레임 어디든 로그인 아이디+비번 입력칸이 실제로 보이면 로그인 화면으로 간주
+        for (const frame of page.frames()) {
+            const hasId = await frame.locator("#id, input[name='id']").first().count().catch(() => 0);
+            const hasPw = await frame.locator("#pw, input[name='pw']").first().count().catch(() => 0);
+            if (hasId && hasPw)
+                return true;
+        }
+    }
+    catch { /* 판별 실패는 로그인 아님으로(기존 흐름 유지) */ }
+    return false;
+}
+/* ── 발행 중 로그인 화면 만나면 그 자리에서 1회 복구 ──
+   발행 브라우저(보이는 창)가 세션 만료로 로그인 페이지에 튕겼을 때, 별도 창/재로그인 반복 없이
+   "그 창에서 사람처럼 아이디·비번 입력 → 제출"로 복구한다. 반복 로그인(=네이버 보호조치 유발)을
+   피하려고 한 발행당 1회만. 발행은 프록시 없이 항상 같은 내 IP·기기라 이 1회 로그인은 안전.
+   성공하면 true(호출측이 글쓰기로 재진입), 실패면 false(호출측이 명확히 중단). */
+async function recoverLoginInPublishPage(page, session, userId, log) {
+    const loginId = session.loginId;
+    let pw = null;
+    if (session.pw) {
+        try {
+            pw = Buffer.from(session.pw, "base64").toString("utf-8");
+        }
+        catch { }
+    }
+    if (!loginId || !pw) {
+        log("[naver] 세션에 저장된 로그인 정보가 없어 자동 복구 불가 — 계정 관리에서 재연결 필요");
+        return false;
+    }
+    try {
+        log("[naver] 🔐 세션이 만료돼 이 창에서 자동 로그인으로 복구합니다(사람처럼 입력, 1회만)");
+        // 로그인 폼이 뜰 때까지 잠깐 대기
+        await page.waitForSelector("#id", { timeout: 8000 }).catch(() => { });
+        if (!(await page.$("#id"))) {
+            log("[naver] 로그인 입력칸(#id)을 못 찾음 — 보호조치 화면일 수 있어 중단");
+            return false;
+        }
+        await typeNaverCredentials(page, loginId, pw);
+        // 제출(로그인 버튼 여러 형태 대응)
+        let clicked = false;
+        for (const s of ["#loginBtn_row", "#loginBtn_column", ".btn_login", "button[type='submit']"]) {
+            try {
+                const e = await page.$(s);
+                if (e && await e.isVisible()) {
+                    await e.click();
+                    clicked = true;
+                    break;
+                }
+            }
+            catch { }
+        }
+        if (!clicked)
+            await page.keyboard.press("Enter");
+        // 로그인 페이지를 벗어나면 성공
+        await page.waitForFunction(() => !/nidlogin|login\.naver/.test(location.href), { timeout: 20000 }).catch(() => { });
+        const stillLogin = /nidlogin|login\.naver/.test(page.url());
+        if (stillLogin) {
+            log("[naver] 자동 로그인 후에도 로그인 화면 — 보안문자(캡차)/보호조치 가능. 계정 관리에서 직접 재연결 필요");
+            return false;
+        }
+        // 갱신된 쿠키 저장(다음 글은 재로그인 없이 이 세션 재사용 → 로그인 반복 방지)
+        try {
+            session.cookies = await page.context().cookies();
+            persistNaverSession(userId, session);
+        }
+        catch { }
+        log("[naver] ✅ 자동 로그인 복구 성공 — 발행을 계속합니다");
+        return true;
+    }
+    catch (e) {
+        log(`[naver] 자동 로그인 복구 실패: ${e?.message || e}`);
+        return false;
+    }
+}
 /* ── 네이버 블로그 자동발행 ── */
 async function publishNaver(params) {
     const { userId, title: rawTitle, content, pubScope = "full", tags, imageUrl, categoryId, visibility = "public", scheduleTime, blocks, videoUrl, videoPosition = "middle", editLogNo, editBlogId, signal } = params;
@@ -576,14 +735,15 @@ async function publishNaver(params) {
                 .replace(/\[관련글시작\][\s\S]*?\[관련글끝\]/g, "")
             : content;
     const cleanedContent = cleanContent(scopedContent);
-    const storedBlogId = (0, session_store_1.readSession)(naverSessionName(userId), LEGACY_SESSION_DIRS)?.blogId;
-    const cookies = await ensureLiveSessionNaver(userId); // ★세션 만료면 저장된 비번으로 자동 재연결(캡차면 창 모드)
+    const session = params.__naverSession || (0, session_store_1.readSession)(naverSessionName(userId), LEGACY_SESSION_DIRS);
+    const storedBlogId = session.blogId;
+    const cookies = await ensureLiveSessionNaver(userId, console.log, session, true); // softFail: 죽이지 말고 발행 창에서 1회 복구
     // ★실제 blogId 확정(로그인ID≠블로그주소 대응) — 제목수정에서 검증된 공용 로직 재사용.
     //   특히 글 살리기(편집)는 정확한 blogId 아니면 PostWriteForm이 글목록으로 튕기므로 반드시 교정.
-    const blogId = await resolveNaverBlogId(storedBlogId, cookies, userId, console.log);
+    const blogId = await resolveNaverBlogId(storedBlogId, cookies, userId, console.log, session);
     // ★작업 시작 요약 — 어떤 계정으로 어디로 보내는지(로그인 아이디·실제 블로그·대상 글 주소)를 맨 앞에 남긴다(테리 지시: 제대로 인식하는지 확인용).
     console.log(`[naver] ━━━━━ 작업 시작 ━━━━━`);
-    console.log(`[naver] 로그인 계정: ${storedBlogId || "(세션 없음)"}${blogId && blogId !== storedBlogId ? ` → 실제 블로그: ${blogId}` : ""}`);
+    console.log(`[naver] 로그인 계정: ${session.loginId || "(세션 없음)"}${blogId && blogId !== storedBlogId ? ` → 실제 블로그: ${blogId}` : ""}`);
     console.log(isEdit
         ? `[naver] 작업 종류: 글 살리기(덮어쓰기) · 대상 글 https://blog.naver.com/${blogId}/${editLogNo}`
         : `[naver] 작업 종류: 새 글 발행 · 블로그 https://blog.naver.com/${blogId}`);
@@ -690,8 +850,9 @@ async function publishNaver(params) {
                     console.log(`[naver] ⚠️ 편집 Update URL 이동 오류: ${e instanceof Error ? e.message : String(e)}`);
                 });
                 if (page.url().includes("nidlogin") || page.url().includes("login.naver")) {
-                    (0, session_store_1.deleteSession)(naverSessionName(userId), LEGACY_SESSION_DIRS);
-                    throw new Error("네이버 세션 만료. 재연결 필요");
+                    // 🔴 2026-09-12(테리): 자동 로그인(recover) 안 함 + 세션 보존(글쓰기 경로와 동일 이유).
+                    //   봇 자동 로그인=보호조치 유발, 세션 삭제(cookies=[])=재로그인 반복 악순환. 직접 재연결 안내 후 중단.
+                    throw new Error("네이버 로그인 확인이 필요해요(보안문자·보호조치 가능). 계정 관리에서 '연결하기'로 직접 로그인해 주세요. (기존 연결은 유지했어요)");
                 }
                 verifiedEditFrame = await waitForEditor(`Update URL 시도${u + 1}`, 20000);
                 if (!verifiedEditFrame)
@@ -750,11 +911,18 @@ async function publishNaver(params) {
             console.log(`[naver] 글쓰기 진입: ${writeUrl}`);
             assertPageOpen("글쓰기 페이지 이동 전");
             await page.goto(writeUrl, { waitUntil: "domcontentloaded", timeout: 60000 });
+            // 🔐 세션 만료로 로그인 화면에 튕기면 → 그 창에서 사람처럼 자동 로그인 1회 복구 후 글쓰기 재진입.
+            //   ★2026-09-09(테리, 윈도우 실측): 로그인 페이지 URL이 nidlogin/login.naver가 아닌 경우가 있어(그냥 blog.naver 도메인
+            //     안에서 로그인폼 노출) → URL만 보면 '로그인 아님'으로 통과 → 편집기 찾기가 로그인폼 입력칸을 편집기로 오인 →
+            //     '제목'을 아이디 칸에 입력하는 버그(사진 확인). 그래서 URL이 아니라 '실제 로그인 폼(#id·#pw) 존재'로 감지한다.
         }
-        if (page.url().includes("nidlogin") || page.url().includes("login.naver")) {
-            (0, session_store_1.deleteSession)(naverSessionName(userId), LEGACY_SESSION_DIRS);
-            throw new Error("네이버 세션 만료. 재연결 필요");
+        if (await isNaverLoginPage(page)) {
+            // 🔴 2026-09-12(테리): 발행 창에서 봇이 자동 로그인(recover)하면 네이버가 '봇 로그인'으로 감지해
+            //   보안문자도 안 띄우고 보호조치→튕김, 실패 시 세션까지 삭제(cookies=[])해 재로그인 반복→보호조치 악순환.
+            //   → 자동 로그인 시도 안 함 + 세션 보존. 사용자에게 직접 재연결을 안내하고 이 발행만 중단한다.
+            throw new Error("네이버 로그인 확인이 필요해요(보안문자·보호조치 가능). 계정 관리에서 '연결하기'로 직접 로그인해 주세요. (기존 연결은 유지했어요)");
         }
+        requireNaverLogin(page.url());
         console.log("[naver] SE4 로드 대기...");
         await page.waitForLoadState("networkidle", { timeout: 30000 }).catch(() => { });
         await page.waitForTimeout(5000);
@@ -1906,9 +2074,8 @@ async function publishNaver(params) {
         }
         // 쿠키 갱신
         const newCookies = await context.cookies();
-        const session = (0, session_store_1.readSession)(naverSessionName(userId), LEGACY_SESSION_DIRS);
         session.cookies = newCookies;
-        (0, session_store_1.writeSession)(naverSessionName(userId), session);
+        persistNaverSession(userId, session);
         closingExpected = true;
         signal?.removeEventListener("abort", abortPublish);
         await browser.close();
@@ -1933,7 +2100,7 @@ async function publishNaver(params) {
         const pageClosedError = unexpectedPageClose || /Target page, context or browser has been closed|page has been closed|browser has been closed/i.test(String(e?.message || e));
         if (isEdit && !signal?.aborted && pageClosedError && !params.__pageCloseRetry) {
             console.error(`[naver] 🔁 page closed 발행 전체 재시도 1/1 (직전 액션: ${lastPageAction})`);
-            return publishNaver({ ...params, __pageCloseRetry: true });
+            return publishNaver({ ...params, __pageCloseRetry: true, __naverSession: session });
         }
         throw e;
     }
@@ -2355,6 +2522,21 @@ async function generateFlowImages(params) {
         };
         const fetchToDataUrl = async (u) => {
             for (let attempt = 0; attempt < 3; attempt++) {
+                // ★2026-09-08 Flow가 이미지 주소를 https://flow-content.google/ (cross-origin)로 바꿈 → 페이지 내 fetch는 CORS로 막힘.
+                //   playwright request.get(쿠키공유·CORS무관)로 먼저 받고, 안 되면 페이지 내 fetch 폴백(blob: 대응).
+                if (u.startsWith("http")) {
+                    try {
+                        const resp = await page.request.get(u, { timeout: 15000 });
+                        if (resp.ok()) {
+                            const buf = await resp.body();
+                            if (buf && buf.length >= 500) {
+                                const ct = (resp.headers()["content-type"] || "image/png").split(";")[0];
+                                return `data:${ct};base64,${buf.toString("base64")}`;
+                            }
+                        }
+                    }
+                    catch { /* 폴백 */ }
+                }
                 const dataUrl = await page.evaluate(async (url) => {
                     try {
                         const res = await fetch(url, { credentials: "include" });
@@ -2875,6 +3057,11 @@ async function generateFlowImagesCDP(params) {
         const queue = prompts.map((_, i) => i);
         const attemptsById = {};
         const softened = {}; // 정책 거부로 프롬프트를 순화한 슬롯 표시
+        // ★2026-09-08(테리): "이미지를 생성할 수 없습니다"(정책거부)가 한 계정에서 연속으로 계속 나면 = 그 계정이 지금
+        //   이미지를 못 만드는 상태(주제 문제와 별개로 계정이 맛간 경우 포함). 크레딧 소진과 똑같이 '다음 Flow 계정으로
+        //   전환' 신호(FLOW_POLICY_STUCK)를 던져 프론트가 계정 전환하게 한다. 연속 성공하면 카운터 리셋.
+        let policyBlockStreak = 0;
+        const POLICY_STUCK_LIMIT = 3; // 연속 3장 정책거부(순화 포함)면 계정 전환
         // ── 부족분 자동 채우기 ──
         // 저작권/정책으로 원래 프롬프트가 막혀 목표 장수에 못 미치면(예: 5장 중 2장 거부),
         // 성공했던(=안전한) 프롬프트를 다시 그려 목표 장수를 채운다. 사용자가 다시 명령하지 않아도
@@ -2886,9 +3073,12 @@ async function generateFlowImagesCDP(params) {
         //   (1) 월클럭 데드라인 8분 — 넘으면 있는 이미지로(없으면 없는 대로) 즉시 빠져나와 글 발행으로 넘긴다.
         //   (2) 생성 제출 하드캡 — 감지가 놓쳐도 재타이핑 무한반복(한도 태우기) 불가.
         const flowStartedAt = Date.now();
-        const FLOW_MAX_MS = 8 * 60 * 1000;
+        // ★2026-09-08(테리): Nano Banana Pro가 장당 1~1.5분으로 느려짐 → 8분 고정이면 4장 중 3장에서 컷.
+        //   목표 장수에 비례(장당 3.5분)로 늘려 4장도 다 채우게. 단 무한대기 방지 상한 20분.
+        const FLOW_MAX_MS = Math.min(20 * 60 * 1000, Math.max(8, target * 3.5) * 60 * 1000);
         let genRuns = 0;
-        const genCap = target + 3; // 수확 방식이면 목표/4번이면 충분 → target+3은 넉넉한 안전상한
+        // ★2026-09-08: 그리드 수확으로 보통 목표/4번이면 되지만, 실패·재시도 대비 넉넉히(목표×2+4). 크레딧 폭주는 FLOW_MAX_MS로 막음.
+        const genCap = target * 2 + 4;
         while (results.length < target) {
             page = resolveLivePage(); // ★매 시도마다 살아있는 작업 탭으로 재확인(stale 핸들 방지)
             if (Date.now() - flowStartedAt > FLOW_MAX_MS) {
@@ -3201,10 +3391,12 @@ async function generateFlowImagesCDP(params) {
                     stableChecks = snap.fresh.length === previousCount ? stableChecks + 1 : 0;
                     previousCount = snap.fresh.length;
                     // 보통 4장 그리드가 순차 렌더되므로 4장이 모이면 생성 종료+안정을 확인해 종료한다.
-                    // UI가 4장보다 적게 내는 경우도 있어, 첫 후보 후 30초간 개수가 안정되고 생성 표시가 끝나면 종료한다.
-                    // 1장 출력으로 설정했다면 첫 이미지가 안정된 즉시 종료한다.
-                    const gridComplete = outputCountIsOne ? snap.fresh.length >= 1 : snap.fresh.length >= 4;
-                    const fallbackSettled = t - firstCandidateAt >= 10;
+                    // ★2026-09-08(테리): Nano Banana Pro가 느려 4장 그리드가 순차로 천천히 나옴. 첫 이미지 뜨자마자 빠져나오면
+                    //   1장만 수확→4장 채우려 재생성→8분 초과→3/4장. 부족분(need)만큼 후보가 모일 때까지 더 기다려 한 번에 수확한다.
+                    //   (need는 아래 수확부와 동일 계산. 남은 목표만큼 후보가 차면 즉시, 아니면 최대 90초까지 기다림.)
+                    const needNow = Math.max(1, target - results.length);
+                    const gridComplete = outputCountIsOne ? snap.fresh.length >= 1 : (snap.fresh.length >= Math.min(4, needNow));
+                    const fallbackSettled = t - firstCandidateAt >= 30; // 첫 후보 후 최대 90초(30틱)까지 그리드 채워지길 기다림
                     if (!snap.generating && stableChecks >= 2 && (gridComplete || fallbackSettled))
                         break;
                 }
@@ -3226,6 +3418,13 @@ async function generateFlowImagesCDP(params) {
             }, beforeSrcs);
             if (freshCandidates.length === 0) {
                 if (policyBlocked) {
+                    policyBlockStreak++; // 이 계정에서 연속 정책거부 카운트
+                    // ★연속 정책거부가 임계 넘으면 = 이 계정이 지금 이미지를 못 만드는 상태 → 크레딧 소진처럼 다음 Flow 계정으로 전환.
+                    //   (주제가 진짜 문제면 다음 계정에서도 거부돼 순화·건너뛰기로 처리됨. 계정만 맛간 거면 다음 계정서 성공.)
+                    if (policyBlockStreak >= POLICY_STUCK_LIMIT) {
+                        log(`[Flow] 🔄 이 계정에서 이미지 생성이 연속 ${policyBlockStreak}번 막혔어요 — 다음 Flow 계정으로 넘어갈게요`);
+                        throw new Error("FLOW_POLICY_STUCK: 이 계정이 이미지를 못 만드는 상태 — 다음 계정으로 전환");
+                    }
                     // 구글이 이 프롬프트를 정책 위반으로 거부함. 같은 프롬프트론 계속 거부되므로,
                     //   딱 한 번만 "안전하고 무난한 프롬프트"로 바꿔 다시 시도하고, 그래도 막히면 건너뛴다.
                     if (!softened[i]) {
@@ -3250,6 +3449,23 @@ async function generateFlowImagesCDP(params) {
             const need = Math.max(1, target - results.length);
             const dl = async (src) => {
                 for (let attempt = 0; attempt < 3; attempt++) {
+                    // ★2026-09-08 근본수정(테리 실측): Flow가 완성 이미지 주소를 blob: → https://flow-content.google/image/... 로 바꿈.
+                    //   이건 flow.google.com과 다른 도메인(cross-origin)이라 페이지 내 fetch가 CORS로 막혀 "Failed to fetch" → 0장 회수.
+                    //   playwright의 request.get은 브라우저 쿠키를 공유하면서 CORS 제약 없이 서버에서 직접 받는다(실측: 200·166KB 성공).
+                    if (src.startsWith("http")) {
+                        try {
+                            const resp = await page.request.get(src, { timeout: 15000 });
+                            if (resp.ok()) {
+                                const buf = await resp.body();
+                                if (buf && buf.length >= 500) {
+                                    const ct = (resp.headers()["content-type"] || "image/png").split(";")[0];
+                                    return `data:${ct};base64,${buf.toString("base64")}`;
+                                }
+                            }
+                        }
+                        catch { /* 아래 페이지 내 fetch 폴백 */ }
+                    }
+                    // 폴백: 페이지 내 fetch (blob: 등 same-origin 주소 대응 — 예전 방식)
                     const d = await page.evaluate(async (s) => {
                         try {
                             const res = await fetch(s, { credentials: "include" });
@@ -3290,6 +3506,7 @@ async function generateFlowImagesCDP(params) {
                 }
             }
             if (harvested > 0) {
+                policyBlockStreak = 0; // ★이미지 하나라도 성공하면 정책거부 연속 카운터 리셋(계정 정상)
                 log(`[Flow] ✅ 이번 생성에서 ${harvested}장 확보(그리드 재활용) — 총 ${results.length}/${target}장`);
             }
             else {

@@ -15,24 +15,8 @@ export function naverSessionExists(userId: string): boolean {
   return hasSession(sessionName(userId), LEGACY_SESSION_DIRS);
 }
 
-/* 🔗 세션 통일: 블로그지수(accountId)에서 연결한 세션을 발행봇이 쓰는 이름(naver_{publishUserId})으로도 복제.
-   두 봇이 같은 폴더(~/.publy/sessions)·같은 구조({loginId,blogId,cookies,pw})·같은 이름규칙(naver_{id})을 쓰므로
-   파일 하나 더 쓰면 발행/글살리기가 이 세션을 그대로 읽는다. → 블로그지수에서만 연결해도 발행됨. */
-export function copySessionForPublish(fromAccountId: string, toUserId: string, log: (m: string) => void = console.log): boolean {
-  try {
-    if (!toUserId || fromAccountId === toUserId) return false;
-    if (!naverSessionExists(fromAccountId)) return false;
-    const s = loadSession(fromAccountId);
-    if (!s || !s.cookies) return false;
-    const prev = hasSession(sessionName(toUserId), LEGACY_SESSION_DIRS) ? loadSession(toUserId) : null;
-    if (prev && prev.loginId && s.loginId && prev.loginId !== s.loginId) {
-      log(`[세션통일] 발행 계정을 '${prev.loginId}' → '${s.loginId}'(블로그지수에서 연결한 계정)으로 변경합니다`);
-    }
-    writeSession(sessionName(toUserId), { loginId: s.loginId, blogId: s.blogId, cookies: s.cookies, pw: s.pw });
-    log(`[세션통일] ✅ 블로그지수 연결 세션을 발행용(${toUserId})으로도 저장 — 이제 발행/글살리기도 바로 됩니다`);
-    return true;
-  } catch (e: any) { log(`[세션통일] 복제 실패(무시): ${e?.message || e}`); return false; }
-}
+/* 🔗 계정연결 통일(2026-09-18): copySessionForPublish(블로그지수→발행봇 세션 복제)는 폐지.
+   서이추·발행 모두 계정관리에서 저장한 세션(naver_{userId}__{naverId})을 accountId로 그대로 공유하므로 복제가 불필요. */
 
 /* ── 봇 탐지 우회 ── */
 const ANTI_DETECTION_SCRIPT = `

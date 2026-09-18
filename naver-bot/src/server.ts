@@ -2,7 +2,7 @@ import express from "express";
 import cors from "cors";
 import fs from "fs";
 import path from "path";
-import { saveNaverSession, publishNaver, activateNaverAccount, naverSessionExists, generateFlowImages, generateFlowImagesCDP, getNaverCategories, saveGoogleSession, googleSessionExists, deleteNaverSession, deleteGoogleSession } from "./naver";
+import { saveNaverSession, publishNaver, activateNaverAccount, naverSessionExists, naverAccountInfo, generateFlowImages, generateFlowImagesCDP, getNaverCategories, saveGoogleSession, googleSessionExists, deleteNaverSession, deleteGoogleSession } from "./naver";
 import { saveTistorySession, publishTistory, tistorySessionExists, deleteTistorySession } from "./tistory";
 import { fetchPendingJobs, updateJob, claimPendingJob, finishQueuedHistory, useQuota, refundQuota, checkPublishEntitlement, incrementDailyPublish } from "./supabase";
 import { acquireAccountLock } from "./account-lock";
@@ -168,10 +168,16 @@ app.post("/api/google/save-session", async (req, res) => {
 /* ── 세션 상태 확인 ── */
 app.get("/api/session-status/:userId", (req, res) => {
   const { userId } = req.params;
+  // 🔗 계정별 상태: ?naverIds=a,b,c 로 연결된 네이버 아이디들을 받아 각 계정 세션(naver_{userId}__{naverId})의 실측 존재여부를 함께 반환.
+  //   모든 탭이 이 하나의 세션을 공유하므로, 각 탭은 재로그인 없이 여기서 ✅연결됨/⚠️재연결필요만 실시간 확인한다.
+  const naverAccounts: Record<string, { ok: boolean; blogId?: string }> = {};
+  const raw = String(req.query.naverIds || "").trim();
+  if (raw) for (const id of raw.split(",").map(s => s.trim()).filter(Boolean)) naverAccounts[id] = naverAccountInfo(userId, id);
   res.json({
     naver: naverSessionExists(userId),
     tistory: tistorySessionExists(userId),
     google: googleSessionExists(userId),
+    naverAccounts,
   });
 });
 
