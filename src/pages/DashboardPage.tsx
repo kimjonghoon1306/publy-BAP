@@ -160,7 +160,9 @@ function getWarmup(connectedAt?: string){
   return {ageDays, stage:s.stage, label:s.label, emoji:s.emoji, neighbor:s.neighbor, engage:s.engage, color:s.color, progress, done:s.stage===5};
 }
 
-const NAV_GROUPS = [
+// ⚠️ 타입 annotation 사용(as const 아님): 메뉴에서 뺀 탭(crawl/place/place_reply/insta_dm)도 k:MainTab 유니온으로 유지해야
+//   그 탭들을 참조하는 렌더/게이팅 코드(프로그램)가 타입상 살아있다. 배열에 없으면 메뉴엔 안 뜨고 코드는 보존.
+const NAV_GROUPS: ReadonlyArray<{label:string;boxed?:boolean;tabs:ReadonlyArray<{k:MainTab;i:string;l:string;shine?:boolean}>}> = [
   {label:"",tabs:[
     {k:"control",i:"🎛️",l:"컨트롤타워"},
   ]},
@@ -168,18 +170,16 @@ const NAV_GROUPS = [
     {k:"keyword",i:"🔍",l:"키워드/제목"},{k:"write",i:"✍️",l:"글 생성"},{k:"image",i:"🖼️",l:"이미지 생성"},{k:"photo",i:"📷",l:"사진 글쓰기"},{k:"publish",i:"🚀",l:"발행하기"},{k:"onetouch",i:"⚡",l:"원터치 발행"},
   ]},
   {label:"블로그 운영",tabs:[
-    {k:"calendar",i:"📅",l:"콘텐츠 캘린더",shine:true},{k:"manage",i:"📋",l:"발행 관리"},{k:"blogscore",i:"📈",l:"블로그 지수"},{k:"crawl",i:"🔍",l:"크롤링"},
+    {k:"calendar",i:"📅",l:"콘텐츠 캘린더",shine:true},{k:"manage",i:"📋",l:"발행 관리"},{k:"blogscore",i:"📈",l:"블로그 지수"},
   ]},
-  {label:"플레이스",boxed:true,tabs:[
-    {k:"place",i:"🏪",l:"플레이스 365"},{k:"place_reply",i:"🗣️",l:"플레이스 리뷰답글"},
-  ]},
+  // 🙈 회원 메뉴에서 크롤링·플레이스365·플레이스 리뷰답글 카테고리 숨김(테리 2026-09-18). 프로그램/렌더/타입은 유지(다른 진입점·관리자에서 사용). 관리자(AdminPage)는 그대로 노출.
   {label:"관계·소통 자동화",tabs:[
-    {k:"neighbor",i:"🤝",l:"서이추"},{k:"engage",i:"❤️",l:"공감·댓글"},{k:"reply",i:"💬",l:"답방"},{k:"pumasi",i:"💞",l:"품앗이"},{k:"insta_dm",i:"📱",l:"인스타 DM"},
+    {k:"neighbor",i:"🤝",l:"서이추"},{k:"engage",i:"❤️",l:"공감·댓글"},{k:"reply",i:"💬",l:"답방"},{k:"pumasi",i:"💞",l:"품앗이"},
   ]},
   {label:"계정·설정",tabs:[
     {k:"accounts",i:"🔗",l:"계정 관리"},{k:"settings",i:"⚙️",l:"설정"},
   ]},
-] as const satisfies ReadonlyArray<{label:string;boxed?:boolean;tabs:ReadonlyArray<{k:MainTab;i:string;l:string;shine?:boolean}>}>;
+];
 const MAIN_TABS: ReadonlyArray<{k:MainTab;i:string;l:string}> = NAV_GROUPS.flatMap(group=>
   group.tabs as unknown as ReadonlyArray<{k:MainTab;i:string;l:string}>
 );
@@ -8519,8 +8519,7 @@ POST3: (제목)|(이유)
         </a>
 
         <div className="mob-bar">
-          {/* 모바일도 PC 사이드바와 동일한 전체 탭 노출(회원=관리자 동일 원칙). 크롤링·플레이스 365·캘린더·인스타DM·계정관리가 모바일에서 빠져 있던 것 복구.
-              잠금(crawl/place)·곧 출시(insta_dm) 게이팅은 데스크탑 사이드바와 동일하게 처리 */}
+          {/* 모바일도 PC 사이드바와 동일하게 MAIN_TABS(=NAV_GROUPS) 기반으로 노출 → 회원 메뉴에서 뺀 크롤링·플레이스365·플레이스 리뷰답글·인스타DM은 여기서도 자동 제거됨(테리 2026-09-18). 프로그램/게이팅 코드는 유지. */}
           {MAIN_TABS.map(t=>{
             const lbl:Record<string,string>={control:"홈",keyword:"키워드",write:"글쓰기",image:"이미지",photo:"사진글쓰기",publish:"발행",calendar:"캘린더",manage:"발행관리",blogscore:"지수",crawl:"크롤링",inflow:"트래픽유입",place:"플레이스",neighbor:"서이추",engage:"공감댓글",reply:"답방",pumasi:"품앗이",insta_dm:"인스타DM",accounts:"계정관리",settings:"설정"};
             const locked = (t.k==="crawl"&&!crawlEnabled)||(t.k==="place"&&!place360Enabled)||(t.k==="inflow"&&!inflowEnabled);
