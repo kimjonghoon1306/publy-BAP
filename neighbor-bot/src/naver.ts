@@ -5308,9 +5308,10 @@ const inflowInterruptibleWait = async (ms: number, shouldStop?: () => boolean): 
 
 // 체류시간(초) 결정 — 강도별 정해진 시간(빠르게20/보통60/꼼꼼히180)에서 방문마다 ±오차.
 //   customSec>0이면 강도 대신 사용자가 직접 지정한 시간을 쓴다(3분 이상도 자유). 오차로 봇 티를 줄인다.
-function decideDwellSec(baseSec: number, customSec: number): number {
+function decideDwellSec(baseSec: number, customSec: number, targetType: "place" | "blog" | "store" = "blog"): number {
   const target = customSec > 0 ? customSec : baseSec;
-  return Math.max(3, Math.round(target * inflowRnd(0.8, 1.2))); // ±20% 랜덤 오차
+  const floor = targetType === "blog" ? 60 : targetType === "place" ? 40 : 3;   // 블로그 60초·플레이스 40초 최소 보장(미만은 상위노출 역효과)
+  return Math.max(floor, Math.round(target * inflowRnd(0.8, 1.2))); // ±20% 랜덤 오차
 }
 
 // 🩺 실패 원인 정밀 진단 — 페이지 상태를 읽어 "왜 안 됐는지" 정확히 로그로.
@@ -5455,7 +5456,8 @@ async function inflowFindAndEnter(page: any, target: InflowTarget, log: (m: stri
 // 진입한 페이지에서 글 전체를 읽는 것처럼 체류(끝까지 스크롤).
 //   baseSec=강도별 기준시간(빠르게20/보통60/꼼꼼히180), customSec>0이면 직접지정 시간을 우선 사용.
 async function inflowDwellRead(page: any, log: (m: string) => void, shouldStop?: () => boolean, baseSec = 60, customSec = 0, targetType: "place" | "blog" | "store" = "blog"): Promise<void> {
-  const sec = decideDwellSec(baseSec, customSec);
+  const sec = decideDwellSec(baseSec, customSec, targetType);
+  if (targetType === "blog" && sec >= 60) log(`  ⏱️ 블로그는 60초 이상 머물러야 상위노출에 도움돼요 — 약 ${sec}초 정독합니다`);
   const dwellVerb = targetType === "place" ? "📖 플레이스 둘러보는 중…" : targetType === "store" ? "📖 상품 상세 보는 중…" : "📖 글 읽는 중…";
   log(`  ${dwellVerb} (약 ${sec}초 체류${customSec > 0 ? " · 직접지정" : ""})`);
   const steps = Math.max(6, Math.round(sec / inflowRnd(2, 4)));
@@ -5814,10 +5816,21 @@ const TRAFFIC_GATES: TrafficGate[] = [
   { key: "daum",   label: "다음 검색",   weight: 6,  external: true, referer: (kw) => `https://search.daum.net/search?q=${encodeURIComponent(kw)}` },
   { key: "sns",    label: "외부 공유(밴드/블로그/카톡)", weight: 6, external: true, referer: () => { const a = ["https://band.us/", "https://m.blog.naver.com/", "https://blog.naver.com/", "https://t.co/", "https://l.facebook.com/"]; return a[Math.floor(Math.random() * a.length)]; } },
 ];
-function pickTrafficGate(): TrafficGate {
-  const total = TRAFFIC_GATES.reduce((a, g) => a + g.weight, 0);
+// 🚪 대상별 외부 유입경로 비율(정돈 2026-09-27, 테리 지시):
+//   플레이스·스토어 = 순위가 목적 → 네이버 검색 100%(외부 0). 외부 직접진입은 검색 클릭(CTR) 신호가 없고,
+//     플레이스는 "네이버지도 앱 설치" 인터스티셜에 막혀 액션(길찾기·전화·저장) 신호까지 유실 → 순위엔 순수 손해.
+//   블로그 = 카톡·밴드·블로그 공유 같은 외부 인용유입이 자연스럽고 앱설치 함정도 없음 → 소폭(10%)만 다양화, 순위신호 90% 확보.
+function externalGateRatio(type: string): number {
+  if (type === "blog") return 0.10;
+  return 0; // place·store = 네이버 통합검색 100%
+}
+function pickTrafficGate(externalRatio: number): TrafficGate {
+  // externalRatio = 이 대상에서 외부 유입경로를 탈 확률(0~1). 나머지는 네이버 통합검색(순위 신호 유지).
+  if (externalRatio <= 0 || Math.random() >= externalRatio) return TRAFFIC_GATE_SEARCH;
+  const ext = TRAFFIC_GATES.filter(g => g.external);
+  const total = ext.reduce((a, g) => a + g.weight, 0);
   let r = Math.random() * total;
-  for (const g of TRAFFIC_GATES) { if ((r -= g.weight) < 0) return g; }
+  for (const g of ext) { if ((r -= g.weight) < 0) return g; }
   return TRAFFIC_GATE_SEARCH;
 }
 // 대상 페이지 직접 진입 URL(외부 게이트용). 특정 글/페이지가 없으면 null → 검색 게이트로 폴백.
@@ -5961,9 +5974,9 @@ export async function searchInflow(params: {
         } catch {}
       };
 
-      // 🚪 이번 방문 유입경로 게이트(네이버검색 70 : 외부 30). 외부는 대상 페이지 직접 진입(referer 세팅)으로 유입경로 다양화.
+      // 🚪 이번 방문 유입경로 게이트(대상별 외부비율: 플레이스·스토어=검색100 / 블로그=검색90:외부10). 외부는 대상 페이지 직접 진입(referer 세팅).
       const directUrl = buildTargetDirectUrl(curTarget, dev !== "pc");
-      let gate = pickTrafficGate();
+      let gate = pickTrafficGate(externalGateRatio(curTarget.type));
       if (gate.external && !directUrl) gate = TRAFFIC_GATE_SEARCH; // 직접URL 없음(블로그 logNo 없음/스토어) → 검색으로 폴백
       const gateLabel = gate.external ? gate.label : `네이버 통합검색(${dev === "pc" ? "PC" : "모바일"})`;
       gateCount[gateLabel] = (gateCount[gateLabel] || 0) + 1;
