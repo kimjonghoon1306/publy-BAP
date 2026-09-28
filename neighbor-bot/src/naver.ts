@@ -1610,6 +1610,66 @@ export async function crawlPlaceByUrl(params: {
   return crawlPlaceDetail({ accountId: "", placeId: parsed.placeId, domain: parsed.domain, ownerUserId: params.ownerUserId, onLog: log });
 }
 
+/* ── 🎯 플레이스 "작전지도" 후보 생성 ────────────────────────────────────────
+   로컬 플레이스는 '검색량'이 아니라 '지역 장악'으로 이긴다. 손님은 "돈까스"(14.9만)가
+   아니라 "횡성 맛집"·"횡성 산채정식"으로 검색한다. → 매장 상세(업종·주소→지역·메뉴·
+   방문자 대표키워드)로 지역앵커 키워드를 직접 만들고, 네이버 자동완성/연관검색으로 넓힌 뒤,
+   ★지역이 안 들어간 키워드(전국 카테고리어·타지역 맛집)는 전부 걸러낸다(상호는 예외). */
+const PLACE_INTENTS = ["맛집", "점심", "저녁", "저녁메뉴", "가족외식", "회식", "모임", "데이트", "혼밥", "포장", "근처맛집", "가볼만한곳", "맛집추천", "점심맛집", "저녁먹을곳"];
+
+// 주소에서 검색에 쓰이는 지역명들을 뽑는다(횡성군→횡성, 횡성읍 등). 첫 시/군/구의 '맨몸' 지명이 대표.
+export function extractRegions(address: string): { primary: string; all: string[] } {
+  const regions: string[] = [];
+  for (const m of String(address || "").matchAll(/([가-힣]{2,4}(?:시|군|구))/g)) regions.push(m[1]);
+  for (const m of String(address || "").matchAll(/([가-힣]{2,4}(?:동|읍|면|리))/g)) regions.push(m[1]);
+  const bare: string[] = [];
+  for (const r of regions) { const b = r.replace(/(시|군|구|동|읍|면|리)$/, ""); if (b.length >= 2) bare.push(b); }
+  const all = Array.from(new Set([...bare, ...regions]));
+  const primary = bare[0] || regions[0] || "";
+  return { primary, all };
+}
+
+export async function buildPlaceCandidates(params: {
+  detail: PlaceDetail;
+  onLog?: (m: string) => void;
+}): Promise<{ region: string; regions: string[]; candidates: { keyword: string; source: string }[] }> {
+  const log = params.onLog || (() => {});
+  const d = params.detail;
+  const name = String(d.name || "").trim();
+  const nameTight = name.replace(/\s+/g, "");
+  const { primary, all: regions } = extractRegions(String(d.address || ""));
+  const cats = String(d.category || "").split(/[,·/]/).map(s => s.trim()).filter(Boolean).slice(0, 3);
+  const foodish = /식|맛집|카페|음식|고기|한우|횟집|족발|치킨|국밥|분식|베이커리|디저트|술집|포차|호프|바|dining/i.test(String(d.category) + name);
+  const menus = (d.menus || []).map(m => String(m.name || "").trim()).filter(m => m && m.length <= 6).slice(0, 5);
+  const reviewKw = (d.keywords || []).map(k => String(k || "").trim()).filter(Boolean).slice(0, 8);
+
+  const map = new Map<string, string>();
+  const add = (kw: string, src: string) => { const t = String(kw || "").replace(/\s+/g, " ").trim(); if (t && t.length <= 25 && !map.has(t)) map.set(t, src); };
+
+  if (primary) {
+    if (foodish || !cats.length) add(`${primary}맛집`, "지역·헤드");
+    for (const c of cats) add(`${primary} ${c}`, "지역·업종");
+    for (const mn of menus) add(`${primary} ${mn}`, "지역·메뉴");
+    for (const it of PLACE_INTENTS) add(`${primary} ${it}`, "지역·의도");
+    if (nameTight) add(`${primary} ${name}`, "지역·상호");
+    for (const k of reviewKw) { const kt = k.replace(/\s+/g, ""); if (!kt.includes(primary)) add(`${primary} ${k}`, "리뷰·지역"); else add(k, "리뷰"); }
+  }
+  if (nameTight) add(name, "상호");
+
+  const acSeeds = [primary && (foodish ? `${primary}맛집` : `${primary} ${cats[0] || ""}`.trim()), name].filter(Boolean) as string[];
+  let ac: { keyword: string; source: string }[] = [];
+  try { ac = await suggestPlaceKeywords({ seeds: acSeeds, onLog: () => {} }); } catch { /* skip */ }
+  for (const a of ac) add(a.keyword, a.source === "기본" ? "자동완성" : a.source);
+
+  const hasRegion = (kw: string) => { const bare = kw.replace(/\s+/g, ""); return regions.some(r => bare.includes(r)); };
+  const isBrand = (kw: string) => { const bare = kw.replace(/\s+/g, ""); return !!nameTight && (bare.includes(nameTight) || nameTight.includes(bare)); };
+  const candidates = Array.from(map, ([keyword, source]) => ({ keyword, source }))
+    .filter(c => hasRegion(c.keyword) || isBrand(c.keyword));
+
+  log(`  ✅ 작전지도 후보 ${candidates.length}개 생성 (지역=${primary || "미상"}, 업종=${cats.join("·") || "미상"})`);
+  return { region: primary, regions, candidates: candidates.slice(0, 40) };
+}
+
 export async function crawlPlaces(params: {
   accountId: string;
   query: string;                    // "강남 맛집" 처럼 지역+업종을 이미 합친 검색어

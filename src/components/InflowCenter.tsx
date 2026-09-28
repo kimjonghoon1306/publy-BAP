@@ -229,6 +229,13 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
   // 🔎 키워드 발굴
   const [kwLoading, setKwLoading] = useState(false);
   const [kwSuggest, setKwSuggest] = useState<string[]>([]);
+  // 🎯 플레이스 작전지도 — 주소 하나로 매장 긁고 지역앵커 키워드를 4구간으로. 로컬은 '지역 장악'으로 이긴다.
+  type BmZone = "push" | "plant" | "wall" | "vantage";
+  type BmCand = { keyword: string; source: string; rank?: number | null; scanned?: number; topReview?: number; zone?: BmZone; measuring?: boolean; measured?: boolean };
+  const [bmStore, setBmStore] = useState<null | { name: string; category: string; region: string; visitorReviewCount: number; blogReviewCount: number; savedCount: number; placeUrl: string }>(null);
+  const [bmCands, setBmCands] = useState<BmCand[]>([]);
+  const [bmLoading, setBmLoading] = useState(false);
+  const bmEsRef = useRef<BotEventStream | null>(null);
   // 💬 리뷰 감정분석
   const [revLoading, setRevLoading] = useState(false);
   const [revResult, setRevResult] = useState<{ total: number; likes: { word: string; n: number }[]; dislikes: { word: string; n: number }[] } | null>(null);
@@ -549,6 +556,110 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
   const addSuggestedKeyword = (k: string) => {
     setKeywords(prev => { const list = prev.split(/[,\n]/).map(x=>x.trim()).filter(Boolean); if (list.includes(k)) return prev; return [...list, k].join(", "); });
     setKwSuggest(prev => prev.filter(x => x !== k));
+  };
+
+  // 🎯 플레이스 작전지도 실행 — 주소 하나 → 매장 긁기 → 지역앵커 후보 → 상위 8개 순위·경쟁 진단(SSE).
+  const runBattlemap = () => {
+    if (!placeUrl.trim()) { toast("먼저 플레이스 주소를 입력하세요 — 매장을 읽어 작전지도를 그려요", "error"); return; }
+    bmEsRef.current?.close();
+    setBmLoading(true); setBmStore(null); setBmCands([]);
+    pushLog(`━━━━━ 🎯 작전지도 분석 시작 ━━━━━`);
+    const es = new BotEventStream(`${BOT}/api/inflow/place-battlemap?userId=${encodeURIComponent(userId || "")}&placeUrl=${encodeURIComponent(placeUrl.trim())}`, { method: "GET" });
+    bmEsRef.current = es;
+    es.onmessage = (e: MessageEvent) => {
+      let d: any; try { d = JSON.parse(e.data); } catch { return; }
+      if (d.type === "log") pushLog(`  ${d.msg}`);
+      else if (d.type === "store") { setBmStore(d.store); pushLog(`🏪 ${d.store.name} · ${d.store.category || "업종미상"} · 지역 ${d.store.region || "미상"} · 리뷰 ${d.store.visitorReviewCount}`); }
+      else if (d.type === "candidates") { setBmCands((d.candidates || []).map((c: any) => ({ ...c }))); pushLog(`🗺️ 지역앵커 키워드 ${(d.candidates || []).length}개 생성 (지역=${d.region || "미상"}) — 상위 8개 순위 측정 중…`); }
+      else if (d.type === "rank") { setBmCands((prev) => prev.map((c) => c.keyword === d.keyword ? { ...c, rank: d.rank, scanned: d.scanned, topReview: d.topReview, zone: d.zone, measured: true, measuring: false } : c)); }
+      else if (d.type === "done") { pushLog(`✅ 작전지도 완성 — 자동 진단 ${d.auto}개 / 후보 ${d.total}개`); setBmLoading(false); es.close(); }
+      else if (d.type === "error") { pushLog(`❌ 작전지도 실패 — ${d.msg}`); toast(d.msg, "error"); setBmLoading(false); es.close(); }
+    };
+    es.onerror = () => { pushLog(`❌ 작전지도 연결 오류 — 봇 서버(3334)를 확인해주세요`); toast("작전지도 실패 — 봇 서버(3334) 확인", "error"); setBmLoading(false); es.close(); };
+  };
+  // 자동 진단(상위 8개) 밖의 키워드 온디맨드 측정.
+  const measureBmKeyword = async (kw: string) => {
+    if (!placeUrl.trim()) return;
+    setBmCands((prev) => prev.map((c) => c.keyword === kw ? { ...c, measuring: true } : c));
+    try {
+      const my = bmStore?.visitorReviewCount || 0;
+      const r = await botFetch(`${BOT}/api/inflow/place-keyword-rank?userId=${encodeURIComponent(userId || "")}&placeUrl=${encodeURIComponent(placeUrl.trim())}&keyword=${encodeURIComponent(kw)}&myReview=${my}`);
+      const j = await r.json();
+      if (!j.ok) { toast(j.error || "순위 측정 실패", "error"); setBmCands((prev) => prev.map((c) => c.keyword === kw ? { ...c, measuring: false } : c)); return; }
+      setBmCands((prev) => prev.map((c) => c.keyword === kw ? { ...c, rank: j.rank, scanned: j.scanned, topReview: j.topReview, zone: j.zone, measured: true, measuring: false } : c));
+    } catch { toast("순위 측정 실패 — 봇 서버 확인", "error"); setBmCands((prev) => prev.map((c) => c.keyword === kw ? { ...c, measuring: false } : c)); }
+  };
+  // 작전지도 칩 클릭 → 유입 키워드에 추가(맵 유지).
+  const addBmKeyword = (kw: string) => {
+    setKeywords((prev) => { const list = prev.split(/[,\n]/).map((x) => x.trim()).filter(Boolean); if (list.includes(kw)) return prev; return [...list, kw].join(", "); });
+    toast(`➕ "${kw}" 유입 키워드에 추가`, "success");
+  };
+  // 🎯 작전지도 렌더 (회원↔관리자 공용 InflowCenter라 한 번에 반영)
+  const renderBattlemap = () => {
+    if (!(targetType === "place" && (bmLoading || bmStore || bmCands.length > 0))) return null;
+    const ZONES: { key: BmZone; icon: string; label: string; color: string; bg: string; desc: string }[] = [
+      { key: "push", icon: "🔥", label: "밀면 뚫림", color: "#dc2626", bg: "rgba(220,38,38,.10)", desc: "지금 6~15위 — 트래픽 집중하면 상위 노출권. 최우선." },
+      { key: "plant", icon: "🌱", label: "무경쟁 밭", color: "#16a34a", bg: "rgba(22,163,74,.10)", desc: "경쟁 약한 롱테일 — 깔면 바로 1위. 여러 개 도배." },
+      { key: "vantage", icon: "✅", label: "이미 상위 · 방어", color: "#2563eb", bg: "rgba(37,99,235,.10)", desc: "이미 5위 안 — 유지·방어만. 트래픽 아껴요." },
+      { key: "wall", icon: "🧱", label: "벽 · 보류", color: "#6b7280", bg: "rgba(107,114,128,.10)", desc: "상위 업체 리뷰가 압도적 — 소량 트래픽으론 지금 어려워요." },
+    ];
+    const added = new Set(keywords.split(/[,\n]/).map((s) => s.trim()).filter(Boolean));
+    const rankBadge = (c: BmCand) => {
+      if (c.measuring) return <span style={{ fontSize: 10, color: C.sub, fontWeight: 700 }}>측정중…</span>;
+      if (!c.measured) return <span onClick={(e) => { e.stopPropagation(); measureBmKeyword(c.keyword); }} style={{ fontSize: 10, color: C.accent, fontWeight: 800, cursor: "pointer", textDecoration: "underline" }}>순위측정</span>;
+      if (c.rank == null) return <span style={{ fontSize: 10, color: C.sub, fontWeight: 700 }}>{c.scanned || 30}위 밖</span>;
+      return <span style={{ fontSize: 10.5, color: "#dc2626", fontWeight: 900 }}>현재 {c.rank}위</span>;
+    };
+    const chip = (c: BmCand) => {
+      const on = added.has(c.keyword);
+      return (
+        <button key={c.keyword} onClick={() => addBmKeyword(c.keyword)} title={`${c.source}${typeof c.topReview === "number" && c.topReview > 0 ? ` · 1위 업체 리뷰 ${c.topReview}개` : ""}`} style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "7px 10px", borderRadius: 9, border: `1.5px solid ${on ? C.accent : C.line2}`, background: on ? C.glow : C.panel, color: C.ink, fontSize: 12, fontWeight: 800, cursor: "pointer", fontFamily: "inherit" }}>
+          <span style={{ color: C.accent, fontWeight: 900 }}>{on ? "✓" : "＋"}</span>
+          <span>{c.keyword}</span>
+          {rankBadge(c)}
+        </button>
+      );
+    };
+    const unmeasured = bmCands.filter((c) => !c.measured && !c.measuring);
+    return (
+      <div style={{ marginTop: 10 }}>
+        {bmStore && (
+          <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8, padding: "9px 12px", background: `linear-gradient(135deg,${C.glow},${C.panel2})`, borderRadius: 10, marginBottom: 8, fontSize: 11.5, fontWeight: 800 }}>
+            <span style={{ fontSize: 13, fontWeight: 900, color: C.accent }}>🏪 {bmStore.name}</span>
+            {bmStore.category && <span style={{ color: C.sub }}>{bmStore.category}</span>}
+            {bmStore.region && <span style={{ padding: "2px 7px", background: C.panel, borderRadius: 6, color: C.ink }}>📍 {bmStore.region}</span>}
+            <span style={{ color: C.sub, fontWeight: 700 }}>방문자리뷰 {bmStore.visitorReviewCount} · 블로그 {bmStore.blogReviewCount}{bmStore.savedCount ? ` · 저장 ${bmStore.savedCount}` : ""}</span>
+          </div>
+        )}
+        <div style={{ fontSize: 10.5, color: C.sub, fontWeight: 700, marginBottom: 8, lineHeight: 1.55, padding: "8px 11px", background: C.panel2, borderRadius: 9 }}>
+          🎯 <b>작전지도</b> — 검색량이 아니라 <b>지역 적합 + 내 현재 순위 + 경쟁 강도</b>로 골랐어요. <b style={{ color: "#dc2626" }}>🔥 밀면 뚫림</b>(6~15위)부터 트래픽을 몰고, <b style={{ color: "#16a34a" }}>🌱 무경쟁 밭</b>은 여러 개 깔아 <b>{bmStore?.region || "지역"} 검색면을 도배</b>하세요. 칩을 누르면 유입 키워드에 추가돼요.
+        </div>
+        {ZONES.map((z) => {
+          const rows = bmCands.filter((c) => c.zone === z.key);
+          if (!rows.length) return null;
+          return (
+            <div key={z.key} style={{ marginBottom: 9 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 5, flexWrap: "wrap" }}>
+                <span style={{ fontSize: 12, fontWeight: 900, color: z.color }}>{z.icon} {z.label}</span>
+                <span style={{ fontSize: 9.5, fontWeight: 800, color: z.color, background: z.bg, padding: "1.5px 6px", borderRadius: 5 }}>{rows.length}</span>
+                <span style={{ fontSize: 10, color: C.sub, fontWeight: 600 }}>{z.desc}</span>
+              </div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>{rows.map(chip)}</div>
+            </div>
+          );
+        })}
+        {unmeasured.length > 0 && (
+          <div style={{ marginBottom: 4 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 5, flexWrap: "wrap" }}>
+              <span style={{ fontSize: 12, fontWeight: 900, color: C.sub }}>⏳ 측정 대기 {unmeasured.length}</span>
+              <span style={{ fontSize: 10, color: C.sub, fontWeight: 600 }}>바로 눌러 추가하거나, '순위측정'으로 어느 구간인지 확인하세요</span>
+            </div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>{unmeasured.map(chip)}</div>
+          </div>
+        )}
+        {bmLoading && <div style={{ fontSize: 10.5, color: C.sub, fontWeight: 700, marginTop: 4 }}>매장 읽고 순위 측정 중… (봇 창에서 진행)</div>}
+      </div>
+    );
   };
 
   // 🏪 현재 입력한 대상을 이름 붙여 저장 — 플레이스/블로그/스토어 각각 격리
@@ -1321,11 +1432,15 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
         <div>
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
             <label style={{ ...labelStyle, margin: 0 }}>검색 키워드 <span style={{ color: C.sub, fontWeight: 600 }}>(여러 개 — 돌아가며 검색)</span></label>
-            <button onClick={runKeywordSuggest} disabled={kwLoading} style={{ marginLeft: "auto", padding: "6px 12px", borderRadius: 8, border: `1.5px solid ${C.accent}`, background: C.panel2, color: C.accent, fontSize: 12.5, fontWeight: 800, cursor: kwLoading?"default":"pointer", fontFamily: "inherit", opacity: kwLoading?0.6:1 }}>{kwLoading ? "찾는 중…" : "🔎 키워드 추천"}</button>
+            {targetType === "place"
+              ? <button onClick={runBattlemap} disabled={bmLoading} title="플레이스 주소를 읽어 지역 키워드를 만들고, 내 순위·경쟁을 진단해 '어디를 공략할지' 지도로 그려줘요" style={{ marginLeft: "auto", padding: "6px 12px", borderRadius: 8, border: `1.5px solid ${C.accent}`, background: C.panel2, color: C.accent, fontSize: 12.5, fontWeight: 800, cursor: bmLoading?"default":"pointer", fontFamily: "inherit", opacity: bmLoading?0.6:1 }}>{bmLoading ? "분석 중…" : "🎯 작전지도 그리기"}</button>
+              : <button onClick={runKeywordSuggest} disabled={kwLoading} style={{ marginLeft: "auto", padding: "6px 12px", borderRadius: 8, border: `1.5px solid ${C.accent}`, background: C.panel2, color: C.accent, fontSize: 12.5, fontWeight: 800, cursor: kwLoading?"default":"pointer", fontFamily: "inherit", opacity: kwLoading?0.6:1 }}>{kwLoading ? "찾는 중…" : "🔎 키워드 추천"}</button>}
           </div>
           <textarea value={keywords} onChange={(e) => setKeywords(e.target.value)} placeholder={targetType === "store" ? "예) 홍삼 스틱, 산양삼 선물세트, 6년근 홍삼" : targetType === "blog" ? "예) 강남 맛집 후기, 부업 추천, 블로그 체험단" : "예) 강남 맛집, 강남역 삼겹살, 역삼동 고깃집"} rows={2} style={{ ...inputStyle, resize: "vertical", lineHeight: 1.6 }} />
-          <div style={{ fontSize: 11, fontWeight: 600, color: C.sub, marginTop: 4 }}>🔒 키워드는 {targetType === "store" ? "스마트스토어" : targetType === "blog" ? "블로그" : "플레이스"} 전용으로 따로 저장돼요 — 대상을 바꿔도 서로 섞이지 않아요.</div>
-          {kwSuggest.length > 0 && (
+          <div style={{ fontSize: 11, fontWeight: 600, color: C.sub, marginTop: 4 }}>{targetType === "place"
+            ? <>💡 <b style={{ color: C.accent }}>작전지도 그리기</b>를 누르면 매장을 읽어 <b>{bmStore?.region || "횡성"} 맛집·{bmStore?.region || "횡성"} 산채정식</b> 같은 지역 키워드를 만들고, <b>내가 지금 몇 위인지</b>까지 재서 <b>어디부터 공략할지</b> 지도로 그려줘요. (검색량이 아니라 <b>지역·내 순위</b>로 골라야 진짜 손님이 와요.)</>
+            : <>🔒 키워드는 {targetType === "store" ? "스마트스토어" : "블로그"} 전용으로 따로 저장돼요 — 대상을 바꿔도 서로 섞이지 않아요.</>}</div>
+          {targetType !== "place" && kwSuggest.length > 0 && (
             <div style={{ marginTop: 8, padding: 12, borderRadius: 12, background: C.panel2, border: `1px solid ${C.line}` }}>
               <div style={{ fontSize: 12, fontWeight: 800, color: C.sub, marginBottom: 8 }}>💡 이런 키워드도 있어요 (눌러서 추가)</div>
               <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
@@ -1335,6 +1450,7 @@ export default function InflowCenter({ showToast, theme: extTheme, userId, plan 
               </div>
             </div>
           )}
+          {renderBattlemap()}
         </div>
 
         <GroupHeader n="2" color="#7c3aed" title="어떻게 방문할까 (자연스럽게)" desc="접속 기기·방문 텀·횟수·체류시간·액션 확률 — 진짜 손님처럼" />

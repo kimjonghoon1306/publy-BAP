@@ -1,6 +1,6 @@
 import express from "express";
 import cors from "cors";
-import { saveSession, sessionExists, removeSession, crawlBlogIds, crawlBuddyPosts, analyzeBuddyKeywords, addNeighbors, NeighborResult, donePath, engageBlogs, EngageResult, engageDonePath, crawlMyPosts, crawlPublicPosts, replyToComments, crawlPlaceReviews, generatePlaceReviewReply, replyToPlaceReviews, crawlBlogStats, checkSelectedBlogExposure, pumasiEngage, crawlPumasiReport, pumasiPreview, updatePostTitle, checkProxy, analyzeBlogAuthenticity, fetchPostBody, crawlPostViews, sendWebmail, sendBlogComments, crawlPlaces, crawlPlaceBloggers, crawlPlaceDetail, crawlPlaceByUrl, suggestPlaceKeywords, parsePlaceUrl, resolvePlaceUrl, searchInflow, diagnosePlace, diagnoseStore, measurePlaceRank, measureBlogRank, collectPlaceReviews, InflowTarget } from "./naver";
+import { saveSession, sessionExists, removeSession, crawlBlogIds, crawlBuddyPosts, analyzeBuddyKeywords, addNeighbors, NeighborResult, donePath, engageBlogs, EngageResult, engageDonePath, crawlMyPosts, crawlPublicPosts, replyToComments, crawlPlaceReviews, generatePlaceReviewReply, replyToPlaceReviews, crawlBlogStats, checkSelectedBlogExposure, pumasiEngage, crawlPumasiReport, pumasiPreview, updatePostTitle, checkProxy, analyzeBlogAuthenticity, fetchPostBody, crawlPostViews, sendWebmail, sendBlogComments, crawlPlaces, crawlPlaceBloggers, crawlPlaceDetail, crawlPlaceByUrl, suggestPlaceKeywords, buildPlaceCandidates, extractRegions, parsePlaceUrl, resolvePlaceUrl, searchInflow, diagnosePlace, diagnoseStore, measurePlaceRank, measureBlogRank, collectPlaceReviews, InflowTarget } from "./naver";
 import { checkNeighborQuota, incrementNeighborQuota, getNeighborDailyUsage, incrementEngageQuota, getEngageDailyUsage, getUserPlan, checkMembershipAccess, NEIGHBOR_DAILY_LIMIT, ENGAGE_DAILY_LIMIT, REPLY_DAILY_LIMIT, getReplyDailyUsage, incrementReplyQuota, PLACE_REPLY_DAILY_LIMIT, getPlaceReplyDailyUsage, incrementPlaceReplyQuota, addNeighborHistory, addReplyHistory, addPlaceReplyHistory, addBlogscoreHistory, incrementPumasiQuota, TITLE_EDIT_DAILY_LIMIT, getTitleEditDailyUsage, incrementTitleEditQuota, getProxyForAccount, supabase, getOutreachSender, getOutreachSentToday, addOutreachLog, checkPlaceDetailQuota, incrementPlaceDetailQuota, checkInflowQuota, incrementInflowQuota, incrementInflowStat, inflowReviewAllowed, verifyInflowSession, verifyAdminSession, consumeInflowQuota, INFLOW_DAILY_LIMIT } from "./supabase";
 import nodemailer from "nodemailer";
 import fs from "fs";
@@ -278,6 +278,79 @@ app.get("/api/place/keywords", async (req, res) => {
   } catch (e: any) {
     res.status(500).json({ ok: false, error: e.message || "키워드 발굴 실패" });
   }
+});
+
+/* ── 🎯 플레이스 작전지도 (SSE) ─────────────────────────────────────────────
+   로컬 플레이스는 '검색량'이 아니라 '지역 장악'으로 이긴다.
+   주소 하나 → 매장 긁기 → 지역앵커 키워드 → 상위 후보 내순위·경쟁 진단 → 4구간 스트리밍. */
+function classifyZone(a: { rank: number | null; topReview: number; myReview: number }): "push" | "plant" | "wall" | "vantage" {
+  const strongWall = a.topReview > 0 && a.topReview > Math.max(50, a.myReview * 5);
+  if (a.rank != null && a.rank <= 5) return "vantage";
+  if (a.rank != null && a.rank <= 15) return "push";
+  if (strongWall) return "wall";
+  return "plant";
+}
+
+app.get("/api/inflow/place-battlemap", async (req, res) => {
+  const { userId, placeUrl } = req.query as Record<string, string>;
+  sseSetup(res);
+  try {
+    if (userId) {
+      const access = await checkMembershipAccess(userId, "place360");
+      if (!access.ok) { sseSend(res, { type: "error", msg: access.reason || "플레이스 360 이용권을 확인해주세요", membershipBlocked: true }); res.end(); return; }
+    }
+    if (!placeUrl?.trim()) { sseSend(res, { type: "error", msg: "플레이스 주소를 입력하세요" }); res.end(); return; }
+
+    sseSend(res, { type: "log", msg: "🗺️ 매장 정보를 읽는 중…" });
+    const detail = await crawlPlaceByUrl({ placeUrl: placeUrl.trim(), ownerUserId: userId || null, onLog: (m) => sseSend(res, { type: "log", msg: m }) });
+    const myId = String(detail.placeId || "");
+    const myReview = detail.visitorReviewCount || 0;
+    sseSend(res, { type: "store", store: {
+      placeId: myId, name: detail.name, category: detail.category || "", address: detail.address || "",
+      region: extractRegions(String(detail.address || "")).primary,
+      visitorReviewCount: myReview, blogReviewCount: detail.blogReviewCount || 0, savedCount: detail.savedCount || 0,
+      placeUrl: detail.placeUrl,
+    } });
+
+    const { region, candidates } = await buildPlaceCandidates({ detail, onLog: (m) => sseSend(res, { type: "log", msg: m }) });
+    if (!candidates.length) { sseSend(res, { type: "error", msg: "지역 키워드를 만들지 못했어요 — 주소에 시/군/구가 있는지 확인해주세요" }); res.end(); return; }
+    sseSend(res, { type: "candidates", region, candidates });
+
+    const AUTO = 8;
+    for (const c of candidates.slice(0, AUTO)) {
+      let rank: number | null = null, scanned = 0, topReview = 0;
+      try {
+        const list = await crawlPlaces({ accountId: "", query: c.keyword, count: 30, ownerUserId: userId || null });
+        scanned = list.length;
+        const idx = list.findIndex(p => String(p.placeId) === myId);
+        rank = idx >= 0 ? idx + 1 : null;
+        topReview = list[0]?.visitorReviewCount || 0;
+      } catch { /* 측정 실패 → rank null */ }
+      const zone = classifyZone({ rank, topReview, myReview });
+      sseSend(res, { type: "rank", keyword: c.keyword, rank, scanned, topReview, myReview, zone });
+    }
+    sseSend(res, { type: "done", auto: Math.min(AUTO, candidates.length), total: candidates.length });
+  } catch (e: any) {
+    sseSend(res, { type: "error", msg: e?.message || "작전지도 생성 실패" });
+  }
+  res.end();
+});
+
+/* ── 🎯 단일 키워드 진단 (온디맨드) ── */
+app.get("/api/inflow/place-keyword-rank", async (req, res) => {
+  const { userId, placeUrl, keyword } = req.query as Record<string, string>;
+  if (!placeUrl?.trim() || !keyword?.trim()) return res.status(400).json({ ok: false, error: "placeUrl·keyword 필요" });
+  try {
+    const parsed = parsePlaceUrl(placeUrl) || await resolvePlaceUrl(placeUrl);
+    const myId = String(parsed?.placeId || "");
+    const list = await crawlPlaces({ accountId: "", query: keyword.trim(), count: 30, ownerUserId: userId || null });
+    const idx = myId ? list.findIndex(p => String(p.placeId) === myId) : -1;
+    const rank = idx >= 0 ? idx + 1 : null;
+    const topReview = list[0]?.visitorReviewCount || 0;
+    const myReview = Number(req.query.myReview) || 0;
+    const zone = classifyZone({ rank, topReview, myReview });
+    res.json({ ok: true, keyword: keyword.trim(), rank, scanned: list.length, topReview, myReview, zone });
+  } catch (e: any) { res.status(500).json({ ok: false, error: e?.message || "순위 측정 실패" }); }
 });
 
 /* ── 🗺️ 플레이스 업체 → 블로그 리뷰어 역추적 (SSE) ── */
