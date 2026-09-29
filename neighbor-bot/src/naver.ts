@@ -5468,54 +5468,39 @@ async function inflowFindAndEnter(page: any, target: InflowTarget, log: (m: stri
   if (target.type === "place") {
     const dom = (target as any).domain || "place";
     const kw = (() => { try { return decodeURIComponent(new URL(page.url()).searchParams.get("query") || ""); } catch { return ""; } })();
+    // 현재 페이지를 스크롤하며 대상을 찾아 클릭. 대상 링크는 ①href에 placeId ②data 속성/텍스트로 찾는다(JS 렌더 목록 대응).
     const findAndClickInList = async (): Promise<any | null> => {
-      for (let s = 0; s < 16; s++) {
+      for (let s = 0; s < 18; s++) {
+        // 1) href에 placeId가 박힌 링크(pcmap 목록은 보통 박혀 있음)
         const h = await page.evaluateHandle((id: string) => {
           const as = Array.from(document.querySelectorAll("a")) as HTMLAnchorElement[];
-          return as.find(a => a.href.includes(id) && /place\.naver\.com|\/place\/|m\.place|pcmap/.test(a.href) && !/map\.naver\.com\/p\/search/.test(a.href)) || null;
+          // 지도(map.naver.com/p/search)·엉뚱한 링크 제외, placeId 포함 상세만
+          return as.find(a => a.href.includes("/" + id) && /place|pcmap/.test(a.href) && !/map\.naver\.com\/p\/search|\/review|\/photo|\/menu/.test(a.href))
+              || as.find(a => a.href.includes(id) && /place\.naver\.com|\/place\/|m\.place|pcmap/.test(a.href) && !/map\.naver\.com\/p\/search/.test(a.href)) || null;
         }, needle).catch(() => null);
         const el = h && h.asElement ? h.asElement() : null;
-        if (el) { log(`  🎯 플레이스 목록에서 대상 발견 → 클릭 진입(정상 검색 클릭 신호, 약 ${s + 1}스크롤)`); return await enterVia(el, s); }
+        if (el) { log(`  🎯 플레이스 목록에서 대상 발견 → 클릭 진입(정상 검색 클릭 신호, 약 ${s + 1}스크롤)`); const r = await enterVia(el, s); if (r) return r; }
+        // 2) 못 찾으면 더 스크롤(lazy 로드). 마지막까지 없으면 이 페이지엔 대상이 그 순위 밖.
         await page.mouse.wheel(0, inflowRndInt(900, 1500));
         await page.waitForTimeout(inflowRndInt(700, 1500));
       }
       return null;
     };
-    try {
-      // ★네이버 실제 버튼 텍스트(2026-09 확인) = "펼쳐서 더보기". 이걸 최우선으로, 스크롤로 화면에 올린 뒤 클릭.
-      const moreClicked = await page.evaluate(() => {
-        const nodes = Array.from(document.querySelectorAll("a,button,span,div")) as HTMLElement[];
-        const isMore = (t: string) => /펼쳐서\s*더보기|플레이스\s*더보기|장소\s*더보기|더보기\s*[▾⌄]|^더보기$|목록\s*보기/.test(t);
-        let cand = nodes.find(e => isMore((e.textContent || "").trim()) && (e.getBoundingClientRect().height > 0));
-        if (cand) {
-          const clickable = (cand.closest("a,button") as HTMLElement) || cand;
-          clickable.scrollIntoView({ block: "center" });
-          (clickable as HTMLElement).click();
-          return (cand.textContent || "").trim().slice(0, 20);
-        }
-        return "";
-      }).catch(() => "");
-      if (moreClicked) {
-        log(`  🔽 '${moreClicked}'를 눌러 전체 순위 목록을 펼칩니다`);
-        await page.waitForTimeout(inflowRndInt(1800, 3200));
-        const viaMore = await findAndClickInList();
-        if (viaMore) return viaMore;
-        log("  ↪ 더보기 펼침 후에도 인라인에서 못 찾음 — 플레이스 목록 페이지로 이동합니다");
-      } else {
-        log("  ↪ '펼쳐서 더보기' 버튼을 못 찾음 — 플레이스 목록 페이지로 바로 이동합니다");
-      }
-    } catch { /* 더보기 실패 시 목록 URL로 */ }
+    // ★통합검색 '더보기' 클릭은 네이버가 지도로 튕기거나 href에 placeId가 없어 불안정 → 순위측정(crawlPlaces)이 쓰는
+    //   플레이스 목록 페이지(pcmap/m.place list)로 바로 간다. 여기 링크엔 placeId가 확실히 박혀 있어 낮은 순위(7위 등)도 클릭 진입 가능.
+    //   list?query= 는 '검색결과 목록'이라 여기서 클릭 = 검색을 거친 정상 진입(순위 신호 유지)이다.
     if (kw) {
       for (const lu of [
-        `https://m.place.naver.com/${dom}/list?query=${encodeURIComponent(kw)}`,
         `https://pcmap.place.naver.com/${dom}/list?query=${encodeURIComponent(kw)}`,
+        `https://m.place.naver.com/${dom}/list?query=${encodeURIComponent(kw)}`,
       ]) {
         try {
-          log(`  🔎 '플레이스 목록'에서 대상 찾는 중… (통합검색 카드 밖 순위)`);
+          log(`  🔎 '플레이스 목록'에서 대상 찾는 중… (통합검색 카드 밖 순위까지 전부 노출)`);
           await page.goto(lu, { waitUntil: "domcontentloaded", timeout: 25000 });
-          await page.waitForTimeout(inflowRndInt(1500, 2800));
+          await page.waitForTimeout(inflowRndInt(1600, 2800));
           const found = await findAndClickInList();
           if (found) return found;
+          log(`  ↪ 이 목록에서 대상을 못 찾음(다음 목록 시도 또는 순위 밖)`);
         } catch { /* 다음 목록 URL */ }
       }
     }
