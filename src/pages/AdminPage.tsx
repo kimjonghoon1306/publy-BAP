@@ -3142,7 +3142,12 @@ POST3: (제목)|(이유)
         const total=Number(e.quota); if(!Number.isFinite(total)||total<0) throw new Error("한도는 0 이상의 숫자여야 합니다");
         quotaUpdate.total_quota=total; quotaUpdate.used_quota=Math.min(u.quota.used_quota,total);
       }
-      if(e.days!==undefined){
+      // 만료일 직접 지정(우선) — 날짜를 고르면 그 날짜로 세팅(더하기·빼기 모두 가능).
+      if(e.expireDate!==undefined && e.expireDate!==""){
+        if(!u.quota) throw new Error("만료일 저장 실패 — 회원의 publy_quotas 행이 없습니다");
+        const d=new Date(e.expireDate+"T00:00:00"); if(isNaN(d.getTime())) throw new Error("만료일 형식이 올바르지 않습니다");
+        quotaUpdate.reset_date=d.toISOString();
+      } else if(e.days!==undefined){
         if(!u.quota) throw new Error("만료일 저장 실패 — 회원의 publy_quotas 행이 없습니다");
         const days=Number(e.days); if(!Number.isFinite(days)) throw new Error("기간은 숫자여야 합니다");
         // ★연장 기준 = '현재 만료일'과 '오늘' 중 더 늦은 날(자정 기준). 이미 만료된(과거) 만료일에 더하면
@@ -5348,6 +5353,16 @@ POST3: (제목)|(이유)
                                     {(()=>{const cur=new Date(u.quota!.reset_date);cur.setHours(0,0,0,0);const today=new Date();today.setHours(0,0,0,0);return cur.getTime()<today.getTime()?<span style={{color:"var(--text3)",fontWeight:600}}> (이미 만료돼 오늘부터 계산)</span>:null;})()}
                                   </div>
                                 )}
+                              </div>
+                              <div className="detail-field"><span className="field-label">만료일 직접 지정 <span style={{fontWeight:500,color:"var(--text3)"}}>(날짜 선택 = 더하기·빼기 모두)</span></span>
+                                <input className="field-inp" type="date" value={editMap[u.id]?.expireDate??(u.quota?.reset_date?new Date(u.quota.reset_date).toLocaleDateString("sv-SE"):"")} onChange={e=>setEditMap(p=>({...p,[u.id]:{...p[u.id],expireDate:e.target.value}}))}/>
+                                {editMap[u.id]?.expireDate && (
+                                  <div style={{fontSize:11,color:"#8B5CF6",fontWeight:700,marginTop:5}}>
+                                    → {new Date(editMap[u.id].expireDate+"T00:00:00").toLocaleDateString("ko-KR")} 까지로 지정
+                                    {(()=>{const sel=new Date(editMap[u.id].expireDate+"T00:00:00");sel.setHours(0,0,0,0);const today=new Date();today.setHours(0,0,0,0);const dl=Math.round((sel.getTime()-today.getTime())/86400000);return <span style={{color:"var(--text3)",fontWeight:600}}> ({dl<0?"만료됨":dl===0?"오늘":"D-"+dl})</span>;})()}
+                                  </div>
+                                )}
+                                <div style={{fontSize:10.5,color:"var(--text3)",marginTop:5}}>연장(일)과 직접 지정을 함께 쓰면 <b>직접 지정이 우선</b> 적용돼요.</div>
                               </div>
                               <div className="detail-field"><span className="field-label">연락처</span>
                                 <input className="field-inp" value={editMap[u.id]?.phone??u.phone??""} onChange={e=>setEditMap(p=>({...p,[u.id]:{...p[u.id],phone:e.target.value}}))} placeholder="010-0000-0000"/>
