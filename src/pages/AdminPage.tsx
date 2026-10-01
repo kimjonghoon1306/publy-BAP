@@ -3155,8 +3155,16 @@ POST3: (제목)|(이유)
       if(Object.keys(quotaUpdate).length){
         const {data,error}=await supabase.from("publy_quotas").update(quotaUpdate).eq("user_id",u.id).select("user_id,total_quota,used_quota,reset_date");
         if(error) throw new Error(`한도/만료일 저장 실패: ${error.message}`);
-        const saved=data?.[0];
-        if(!saved || Object.entries(quotaUpdate).some(([k,v])=>(saved as Record<string,unknown>)[k]!==v)) throw new Error("한도/만료일 저장 실패 — 권한/RLS로 반영된 행이 없거나 값이 일치하지 않습니다");
+        const saved=data?.[0] as Record<string,unknown>|undefined;
+        // ★검증은 날짜/숫자 특성에 맞게 비교한다. reset_date는 보낸 ISO("...000Z")와 DB가 돌려주는
+        //   timestamptz 형식("+00:00")이 글자만 다르고 같은 시각 → 문자열 ===로 비교하면 저장됐는데도
+        //   '불일치' 오탐이 난다(2026-10-01 만료일 저장 실패 버그). 날짜는 getTime()으로, 그 외는 느슨 비교.
+        const mismatch = !saved || Object.entries(quotaUpdate).some(([k,v])=>{
+          const got=saved[k];
+          if(k==="reset_date") return new Date(got as string).getTime()!==new Date(v as string).getTime();
+          return String(got)!==String(v);
+        });
+        if(mismatch) throw new Error("한도/만료일 저장 실패 — 권한/RLS로 반영된 행이 없거나 값이 일치하지 않습니다");
       }
       await loadUsers(); setEditMap(p=>{const n={...p};delete n[u.id];return n;}); alert("저장됨");
     } catch(e:any) { alert("오류: "+e.message); }
